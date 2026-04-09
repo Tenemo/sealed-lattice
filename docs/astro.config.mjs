@@ -1,0 +1,61 @@
+import mdx from '@astrojs/mdx';
+import starlight from '@astrojs/starlight';
+import { defineConfig } from 'astro/config';
+
+export default defineConfig({
+    site: 'https://tenemo.github.io',
+    base: '/sealed-lattice',
+    integrations: [
+        starlight({
+            title: 'sealed-lattice',
+            description:
+                'Browser-native sealed-lattice documentation for the phase-one scaffold and future post-quantum voting research.',
+            social: [
+                {
+                    icon: 'github',
+                    label: 'GitHub',
+                    href: 'https://github.com/Tenemo/sealed-lattice',
+                },
+            ],
+            customCss: ['./src/styles/custom.css'],
+            editLink: {
+                baseUrl:
+                    'https://github.com/Tenemo/sealed-lattice/edit/master/docs/src/content/docs/',
+            },
+            sidebar: [
+                {
+                    label: 'Guides',
+                    items: [
+                        'guides/getting-started',
+                        'guides/runtime-and-compatibility',
+                        'guides/security-and-non-goals',
+                    ],
+                },
+                {
+                    label: 'Protocol spec',
+                    items: [
+                        'spec',
+                        'spec/library-invariants',
+                        'spec/api-contract',
+                    ],
+                },
+                {
+                    label: 'API reference',
+                    items: [
+                        'api',
+                        'api/root-package',
+                        'api/subpath-overview',
+                        {
+                            label: 'Generated reference',
+                            collapsed: true,
+                            autogenerate: {
+                                directory: 'api/reference',
+                            },
+                        },
+                    ],
+                },
+            ],
+        }),
+        mdx(),
+    ],
+});

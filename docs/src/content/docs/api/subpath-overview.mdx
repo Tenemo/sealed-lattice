@@ -1,0 +1,18 @@
+---
+title: Subpath overview
+description: Public subpaths exposed by sealed-lattice in phase one.
+---
+
+import { CardGrid, LinkCard } from '@astrojs/starlight/components';
+
+Only the root package and `./core` expose callable functionality in phase one. The remaining subpaths are intentionally empty placeholders that already resolve, build, and document correctly.
+
+<CardGrid>
+  <LinkCard title="core" href="/api/reference/core/" description="Exports `sha256Hex` and `UnsupportedRuntimeError`." />
+  <LinkCard title="proofs" href="/api/reference/proofs/" description="Reserved placeholder for later proof APIs." />
+  <LinkCard title="protocol" href="/api/reference/protocol/" description="Reserved placeholder for later protocol APIs." />
+  <LinkCard title="runtime" href="/api/reference/runtime/" description="Reserved placeholder for later runtime helpers." />
+  <LinkCard title="serialize" href="/api/reference/serialize/" description="Reserved placeholder for later serialization helpers." />
+  <LinkCard title="threshold" href="/api/reference/threshold/" description="Reserved placeholder for later threshold APIs." />
+  <LinkCard title="transport" href="/api/reference/transport/" description="Reserved placeholder for later transport APIs." />
+</CardGrid>

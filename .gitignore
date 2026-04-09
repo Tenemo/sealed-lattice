@@ -1,0 +1,24 @@
+# Package managers
+node_modules/
+*.tgz
+npm-debug.log
+pnpm-debug.log*
+.tmp/
+sh.exe.stackdump
+debug.log
+
+# Build
+dist/
+coverage/
+docs/.astro/
+docs/dist/
+docs/src/content/docs/api/reference/
+
+# Miscellaneous
+.DS_Store
+__pycache__/
+temp/
+temp.*
+
+# env
+.env
