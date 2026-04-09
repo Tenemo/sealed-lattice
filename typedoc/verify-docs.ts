@@ -27,7 +27,7 @@ const documentedPublicApi = publicApiDocs as readonly {
 const requiredApiEntryPages = [
     `${docsContentRoot}/api/index.mdx`,
     `${docsContentRoot}/api/root-package.mdx`,
-    `${docsContentRoot}/api/subpath-overview.mdx`,
+    `${docsContentRoot}/api/public-boundary.mdx`,
     ...documentedPublicApi.map((entry) => entry.apiIndexPage),
     apiNavigationJson,
 ] as const;

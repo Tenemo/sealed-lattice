@@ -9,9 +9,7 @@ or the protocol spec.
 
 ## Public module map
 
-- `sealed-lattice`: safe root package for the shipped `sha256Hex` helper
-- `core`: the same digest helper and runtime error class exposed on the root package
-- `proofs`, `protocol`, `runtime`, `serialize`, `threshold`, and `transport`: reserved placeholder modules for later milestones
+- `sealed-lattice`: safe root package for the shipped `sha256Hex` helper and `UnsupportedRuntimeError`
 
 ## How to read this reference
 

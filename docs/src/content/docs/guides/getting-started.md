@@ -1,6 +1,6 @@
 ---
 title: Get started
-description: The shortest safe path into the phase-one sealed-lattice scaffold.
+description: The shortest safe path into the current sealed-lattice package surface.
 sidebar:
   order: 1
 ---
@@ -23,14 +23,14 @@ const digest = await sha256Hex('sealed-lattice');
 console.log(digest);
 ```
 
-## What phase one includes
+## What the current surface includes
 
-- a real SHA-256 helper on the root package and `./core`
+- a real SHA-256 helper on the root package
 - a typed `UnsupportedRuntimeError` when Web Crypto hashing is unavailable
-- placeholder subpaths that already resolve and document correctly
 - repo, CI, docs, coverage, testing, and publish DX parity with the classical baseline
+- a public API that stays narrow while the future lattice-native module layout remains open
 
-## What phase one does not include
+## What the current surface does not include
 
 - lattice encryption
 - threshold key generation or decryption
@@ -38,5 +38,6 @@ console.log(digest);
 - proofs
 - protocol types
 - WASM kernels
+- frozen public subpaths for future PQ capabilities
 
-Use the current milestone to establish the project shell. Do not treat the placeholder subpaths as cryptographic implementations.
+Use the current milestone to establish the project shell. Do not assume that future capabilities will appear under any specific subpath until those contracts are stable enough to publish.

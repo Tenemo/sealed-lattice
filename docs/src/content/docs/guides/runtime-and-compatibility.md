@@ -1,6 +1,6 @@
 ---
 title: Runtime and compatibility
-description: Runtime expectations for the current sealed-lattice scaffold.
+description: Runtime expectations for the current sealed-lattice package surface.
 sidebar:
   order: 2
 ---

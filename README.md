@@ -16,22 +16,22 @@
 
 ---
 
-`sealed-lattice` is a browser-native TypeScript scaffold for post-quantum voting research prototypes.
+`sealed-lattice` is a browser-native TypeScript package for post-quantum voting research prototypes.
 
-Phase one ships:
+The current implementation ships:
 
-- a real `sha256Hex` helper on the safe root package and `./core`
+- a real `sha256Hex` helper on the safe root package
 - a typed `UnsupportedRuntimeError` for missing Web Crypto support
-- reserved public subpaths for `./proofs`, `./protocol`, `./runtime`, `./serialize`, `./threshold`, and `./transport`
 - the same repo, docs, testing, and publish workflow shape used by `threshold-elgamal`
+- a deliberately narrow public surface while the lattice-native architecture is still being proven
 
-This repository is a hardened research prototype scaffold. It is not audited production voting software.
+This repository is a hardened research prototype. It is not audited production voting software.
 
 ## Release status
 
-This repository currently tracks phase one of the `sealed-lattice` implementation.
+This repository currently tracks the initial public `sealed-lattice` surface.
 
-The public surface is intentionally narrow while the repo, CI, docs, tests, coverage, and packaging experience are brought up to parity with the existing classical baseline. Lattice cryptography, threshold flows, transport payloads, proofs, and protocol types are planned but not shipped yet.
+The public surface is intentionally narrow while the repo, CI, docs, tests, coverage, and packaging experience are brought up to parity with the existing classical baseline. Lattice cryptography, threshold flows, transport payloads, proofs, protocol types, and any future subpath structure are still being designed and are not frozen yet.
 
 ## Installation
 
@@ -57,18 +57,11 @@ console.log(digest);
 
 The root package currently exposes only `sha256Hex` and `UnsupportedRuntimeError`.
 
-## Public subpaths
+## Public package boundary
 
 - `sealed-lattice`
-- `sealed-lattice/core`
-- `sealed-lattice/proofs`
-- `sealed-lattice/protocol`
-- `sealed-lattice/runtime`
-- `sealed-lattice/serialize`
-- `sealed-lattice/threshold`
-- `sealed-lattice/transport`
 
-Only the root package and `./core` currently expose callable functionality. The other subpaths are phase-one placeholders that resolve, build, and document correctly while their real APIs are deferred to later milestones.
+No additional public subpaths are promised yet. Future capability areas such as runtime helpers, serialization, transport, threshold coordination, proofs, and protocol types remain internal design space until the post-quantum flow and misuse-resistant contracts are stable.
 
 ## Documentation
 
@@ -86,7 +79,7 @@ pnpm run vectors:core
 pnpm run ci
 ```
 
-For the phase-one digest microbenchmark, run:
+For the current digest microbenchmark, run:
 
 ```bash
 pnpm run bench:micro

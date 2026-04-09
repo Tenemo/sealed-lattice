@@ -1,0 +1,14 @@
+---
+title: Public boundary
+description: What is public today and what remains intentionally unfrozen.
+---
+
+The current public contract is intentionally minimal:
+
+- `sealed-lattice`
+
+Everything else is still internal design space.
+
+That means future areas such as runtime helpers, serialization, transport, threshold coordination, proofs, and protocol types are free to emerge under whatever module structure best matches the post-quantum flow once those boundaries are actually understood.
+
+The package is intentionally avoiding a fake parity layer with `threshold-elgamal`. Public entry points will be added only when they correspond to real, documented, misuse-resistant capabilities.

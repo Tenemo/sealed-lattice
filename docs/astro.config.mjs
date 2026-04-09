@@ -9,7 +9,7 @@ export default defineConfig({
         starlight({
             title: 'sealed-lattice',
             description:
-                'Browser-native sealed-lattice documentation for the phase-one scaffold and future post-quantum voting research.',
+                'Browser-native sealed-lattice documentation for the current public package surface and future post-quantum voting research.',
             social: [
                 {
                     icon: 'github',
@@ -44,7 +44,7 @@ export default defineConfig({
                     items: [
                         'api',
                         'api/root-package',
-                        'api/subpath-overview',
+                        'api/public-boundary',
                         {
                             label: 'Generated reference',
                             collapsed: true,

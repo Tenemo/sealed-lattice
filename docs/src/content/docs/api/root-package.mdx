@@ -1,6 +1,6 @@
 ---
 title: Root package
-description: The current safe root export for the phase-one scaffold.
+description: The current safe root export for the sealed-lattice package.
 ---
 
 The root package currently exposes exactly two symbols:
@@ -8,12 +8,12 @@ The root package currently exposes exactly two symbols:
 - `sha256Hex`
 - `UnsupportedRuntimeError`
 
-Use the root package when you want the supported digest helper without taking a dependency on future lower-level structure.
+Use the root package when you want the supported digest helper without taking a dependency on future lower-level structure that is still subject to change.
 
 ```typescript
 import { sha256Hex } from 'sealed-lattice';
 
-const digest = await sha256Hex('phase one');
+const digest = await sha256Hex('sealed-lattice');
 ```
 
 For the generated symbol reference, see the [`sealed-lattice` module page](/api/reference/sealed-lattice/).
