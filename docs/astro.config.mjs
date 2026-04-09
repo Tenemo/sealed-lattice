@@ -20,7 +20,7 @@ export default defineConfig({
             customCss: ['./src/styles/custom.css'],
             editLink: {
                 baseUrl:
-                    'https://github.com/Tenemo/sealed-lattice/edit/master/docs/src/content/docs/',
+                    'https://github.com/Tenemo/sealed-lattice/edit/master/docs/',
             },
             sidebar: [
                 {
