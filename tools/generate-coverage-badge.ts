@@ -116,7 +116,12 @@ const main = async (): Promise<void> => {
         await readFile(coverageSummaryPath, 'utf8'),
     ) as CoverageSummary;
     const summary = normalizeCoverageSummary(rawSummary);
-    const totalLines = summary.total.lines;
+    const total = summary.total;
+    if (total === undefined) {
+        throw new Error('Coverage summary is missing total metrics');
+    }
+
+    const totalLines = total.lines;
     if (totalLines === undefined) {
         throw new Error('Coverage summary is missing total.lines metrics');
     }
