@@ -11,6 +11,7 @@ env:
 
 jobs:
   workflow-lint:
+    name: workflow-lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6.0.2
@@ -18,6 +19,7 @@ jobs:
         run: docker run --rm -v "${GITHUB_WORKSPACE}:/repo" -w /repo rhysd/actionlint:1.7.12 -color
 
   node:
+    name: node
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6.0.2
@@ -38,6 +40,7 @@ jobs:
       - run: pnpm run package:smoke
 
   browser:
+    name: browser
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6.0.2
@@ -53,6 +56,7 @@ jobs:
       - run: pnpm run test:browser
 
   docs:
+    name: docs
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6.0.2

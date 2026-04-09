@@ -14,6 +14,8 @@ const requiredDocsOutputs = [
     'coverage-badge.json',
     'coverage-summary.json',
 ] as const;
+const coverageBadgeOutput = 'coverage-badge.json';
+const coverageSummaryOutput = 'coverage-summary.json';
 const windowsAbsolutePathPattern = /^[A-Za-z]:\//;
 
 const compareCoverageKeys = (leftKey: string, rightKey: string): number => {
@@ -37,20 +39,22 @@ const isAbsoluteCoverageKey = (key: string): boolean =>
 
 const main = async (): Promise<void> => {
     const failures: string[] = [];
+    const missingOutputs = new Set<string>();
 
     for (const relativePath of requiredDocsOutputs) {
         const absolutePath = path.resolve(docsDistRoot, relativePath);
         try {
             await access(absolutePath);
         } catch {
+            missingOutputs.add(relativePath);
             failures.push(
                 `Missing docs build output: docs/dist/${relativePath}`,
             );
         }
     }
 
-    const summaryPath = path.resolve(docsDistRoot, 'coverage-summary.json');
-    const badgePath = path.resolve(docsDistRoot, 'coverage-badge.json');
+    const summaryPath = path.resolve(docsDistRoot, coverageSummaryOutput);
+    const badgePath = path.resolve(docsDistRoot, coverageBadgeOutput);
 
     let summary: CoverageSummary | undefined;
     let badge: ShieldsBadge | undefined;
@@ -58,13 +62,7 @@ const main = async (): Promise<void> => {
     try {
         summary = await readJsonFile<CoverageSummary>(summaryPath);
     } catch (error) {
-        if (
-            failures.every(
-                (failure) =>
-                    failure !==
-                    'Missing docs build output: docs/dist/coverage-summary.json',
-            )
-        ) {
+        if (!missingOutputs.has(coverageSummaryOutput)) {
             const message =
                 error instanceof Error ? error.message : String(error);
             failures.push(
@@ -76,13 +74,7 @@ const main = async (): Promise<void> => {
     try {
         badge = await readJsonFile<ShieldsBadge>(badgePath);
     } catch (error) {
-        if (
-            failures.every(
-                (failure) =>
-                    failure !==
-                    'Missing docs build output: docs/dist/coverage-badge.json',
-            )
-        ) {
+        if (!missingOutputs.has(coverageBadgeOutput)) {
             const message =
                 error instanceof Error ? error.message : String(error);
             failures.push(

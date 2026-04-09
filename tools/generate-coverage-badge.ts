@@ -175,7 +175,7 @@ const main = async (): Promise<void> => {
 const scriptEntryPoint = process.argv[1];
 const isMainModule =
     scriptEntryPoint !== undefined &&
-    import.meta.url === pathToFileURL(scriptEntryPoint).href;
+    import.meta.url === pathToFileURL(path.resolve(scriptEntryPoint)).href;
 
 if (isMainModule) {
     void main();
