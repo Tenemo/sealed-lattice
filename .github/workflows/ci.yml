@@ -6,15 +6,27 @@ on:
       - master
   pull_request:
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
-  node:
+  workflow-lint:
+    name: workflow-lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v5
+      - uses: actions/checkout@v6.0.2
+      - name: lint workflows
+        run: docker run --rm -v "${GITHUB_WORKSPACE}:/repo" -w /repo rhysd/actionlint:1.7.12 -color
+
+  node:
+    name: node
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - uses: pnpm/action-setup@v5.0.0
         with:
           run_install: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6.3.0
         with:
           node-version-file: .nvmrc
           cache: pnpm
@@ -22,22 +34,45 @@ jobs:
       - run: pnpm run lint
       - run: pnpm run typecheck
       - run: pnpm run guard:no-math-random
+      - run: pnpm run verify:package-surface
       - run: pnpm run test:node
       - run: pnpm run build:skip
-      - run: pnpm run docs:api
-      - run: pnpm run verify:docs
+      - run: pnpm run package:smoke
 
   browser:
+    name: browser
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v5
+      - uses: actions/checkout@v6.0.2
+      - uses: pnpm/action-setup@v5.0.0
         with:
           run_install: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6.3.0
         with:
           node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm run test:browser
+
+  docs:
+    name: docs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - uses: pnpm/action-setup@v5.0.0
+        with:
+          run_install: false
+      - uses: actions/setup-node@v6.3.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run docs:ci
+      - name: upload docs dist
+        if: ${{ github.event_name == 'pull_request' && always() }}
+        uses: actions/upload-artifact@v7.0.0
+        with:
+          name: docs-dist
+          path: ./docs/dist
+          if-no-files-found: ignore
