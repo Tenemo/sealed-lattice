@@ -125,11 +125,13 @@ jobs:
             PRERELEASE=false
           fi
 
-          echo "previous_version=${CURRENT_VERSION}" >> "${GITHUB_OUTPUT}"
-          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
-          echo "tag=v${VERSION}" >> "${GITHUB_OUTPUT}"
-          echo "dist_tag=${DIST_TAG}" >> "${GITHUB_OUTPUT}"
-          echo "prerelease=${PRERELEASE}" >> "${GITHUB_OUTPUT}"
+          {
+            echo "previous_version=${CURRENT_VERSION}"
+            echo "version=${VERSION}"
+            echo "tag=v${VERSION}"
+            echo "dist_tag=${DIST_TAG}"
+            echo "prerelease=${PRERELEASE}"
+          } >> "${GITHUB_OUTPUT}"
 
       - run: pnpm install --frozen-lockfile
 

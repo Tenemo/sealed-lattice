@@ -1,14 +1,15 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 
-type CoverageMetric = {
+export type CoverageMetric = {
     covered: number;
     pct: number;
     skipped: number;
     total: number;
 };
 
-type CoverageEntry = {
+export type CoverageEntry = {
     branches?: CoverageMetric;
     branchesTrue?: CoverageMetric;
     functions?: CoverageMetric;
@@ -16,9 +17,9 @@ type CoverageEntry = {
     statements?: CoverageMetric;
 };
 
-type CoverageSummary = Record<string, CoverageEntry>;
+export type CoverageSummary = Record<string, CoverageEntry>;
 
-type ShieldsBadge = {
+export type ShieldsBadge = {
     color: string;
     label: string;
     message: string;
@@ -38,13 +39,10 @@ const summaryOutputPath = path.resolve(
     repoRoot,
     'docs/public/coverage-summary.json',
 );
-const repoRootPath = repoRoot.replace(/\\/g, '/');
-const repoRootPrefix = repoRootPath.endsWith('/')
-    ? repoRootPath
-    : `${repoRootPath}/`;
-const lowerRepoRootPrefix = repoRootPrefix.toLowerCase();
+const getRepoRootPrefix = (repoRootPath: string): string =>
+    repoRootPath.endsWith('/') ? repoRootPath : `${repoRootPath}/`;
 
-const colorForCoverage = (percent: number): string => {
+export const colorForCoverage = (percent: number): string => {
     if (percent >= 95) {
         return 'brightgreen';
     }
@@ -63,11 +61,17 @@ const colorForCoverage = (percent: number): string => {
     return 'red';
 };
 
-const normalizeCoverageKey = (key: string): string => {
+export const normalizeCoverageKey = (
+    key: string,
+    projectRoot: string,
+): string => {
     if (key === 'total') {
         return key;
     }
 
+    const repoRootPath = projectRoot.replace(/\\/g, '/');
+    const repoRootPrefix = getRepoRootPrefix(repoRootPath);
+    const lowerRepoRootPrefix = repoRootPrefix.toLowerCase();
     const normalizedKey = key.replace(/\\/g, '/');
     if (normalizedKey.startsWith(repoRootPrefix)) {
         return normalizedKey.slice(repoRootPrefix.length);
@@ -83,13 +87,14 @@ const normalizeCoverageKey = (key: string): string => {
     return normalizedKey;
 };
 
-const normalizeCoverageSummary = (
+export const normalizeCoverageSummary = (
     summary: CoverageSummary,
+    projectRoot: string,
 ): CoverageSummary => {
     const normalizedEntries: [string, CoverageEntry][] = [];
 
     for (const [key, value] of Object.entries(summary)) {
-        normalizedEntries.push([normalizeCoverageKey(key), value]);
+        normalizedEntries.push([normalizeCoverageKey(key, projectRoot), value]);
     }
 
     normalizedEntries.sort(([leftKey], [rightKey]) => {
@@ -111,11 +116,9 @@ const normalizeCoverageSummary = (
     return normalizedSummary;
 };
 
-const main = async (): Promise<void> => {
-    const rawSummary = JSON.parse(
-        await readFile(coverageSummaryPath, 'utf8'),
-    ) as CoverageSummary;
-    const summary = normalizeCoverageSummary(rawSummary);
+export const getTotalLinesMetric = (
+    summary: CoverageSummary,
+): CoverageMetric => {
     const total = summary.total;
     if (total === undefined) {
         throw new Error('Coverage summary is missing total metrics');
@@ -126,14 +129,39 @@ const main = async (): Promise<void> => {
         throw new Error('Coverage summary is missing total.lines metrics');
     }
 
+    return totalLines;
+};
+
+export const buildCoverageBadge = (summary: CoverageSummary): ShieldsBadge => {
+    const totalLines = getTotalLinesMetric(summary);
     const percent = Number(totalLines.pct.toFixed(1));
 
-    const badge: ShieldsBadge = {
+    return {
         schemaVersion: 1,
         label: 'coverage',
         message: `${percent}%`,
         color: colorForCoverage(percent),
     };
+};
+
+export const createCoverageArtifacts = (
+    rawSummary: CoverageSummary,
+    projectRoot: string,
+): {
+    badge: ShieldsBadge;
+    summary: CoverageSummary;
+} => {
+    const summary = normalizeCoverageSummary(rawSummary, projectRoot);
+    const badge = buildCoverageBadge(summary);
+
+    return { badge, summary };
+};
+
+const main = async (): Promise<void> => {
+    const rawSummary = JSON.parse(
+        await readFile(coverageSummaryPath, 'utf8'),
+    ) as CoverageSummary;
+    const { badge, summary } = createCoverageArtifacts(rawSummary, repoRoot);
 
     await mkdir(path.dirname(badgeOutputPath), { recursive: true });
     await writeFile(badgeOutputPath, `${JSON.stringify(badge, null, 2)}\n`);
@@ -144,4 +172,11 @@ const main = async (): Promise<void> => {
     );
 };
 
-void main();
+const scriptEntryPoint = process.argv[1];
+const isMainModule =
+    scriptEntryPoint !== undefined &&
+    import.meta.url === pathToFileURL(scriptEntryPoint).href;
+
+if (isMainModule) {
+    void main();
+}

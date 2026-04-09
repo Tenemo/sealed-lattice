@@ -32,10 +32,7 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm run docs:api
-      - run: pnpm run verify:docs
-      - run: pnpm run coverage:badge
-      - run: pnpm run docs:build:site
+      - run: pnpm run docs:ci
       - uses: actions/upload-pages-artifact@v4.0.0
         with:
           path: ./docs/dist

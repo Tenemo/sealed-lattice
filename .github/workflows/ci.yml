@@ -10,6 +10,13 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
+  workflow-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - name: lint workflows
+        run: docker run --rm -v "${GITHUB_WORKSPACE}:/repo" -w /repo rhysd/actionlint:1.7.12 -color
+
   node:
     runs-on: ubuntu-latest
     steps:
@@ -25,10 +32,10 @@ jobs:
       - run: pnpm run lint
       - run: pnpm run typecheck
       - run: pnpm run guard:no-math-random
+      - run: pnpm run verify:package-surface
       - run: pnpm run test:node
       - run: pnpm run build:skip
-      - run: pnpm run docs:api
-      - run: pnpm run verify:docs
+      - run: pnpm run package:smoke
 
   browser:
     runs-on: ubuntu-latest
@@ -44,3 +51,24 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm run test:browser
+
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - uses: pnpm/action-setup@v5.0.0
+        with:
+          run_install: false
+      - uses: actions/setup-node@v6.3.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run docs:ci
+      - name: upload docs dist
+        if: ${{ github.event_name == 'pull_request' && always() }}
+        uses: actions/upload-artifact@v7.0.0
+        with:
+          name: docs-dist
+          path: ./docs/dist
+          if-no-files-found: ignore
