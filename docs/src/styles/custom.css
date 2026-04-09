@@ -1,174 +1,182 @@
 @import '@fontsource/ibm-plex-sans/400.css';
 @import '@fontsource/ibm-plex-sans/500.css';
 @import '@fontsource/ibm-plex-sans/600.css';
-@import '@fontsource/space-grotesk/500.css';
-@import '@fontsource/space-grotesk/700.css';
 @import '@fontsource/jetbrains-mono/400.css';
 @import '@fontsource/jetbrains-mono/600.css';
 
 @layer starlight.base, starlight.core, starlight.utils;
 
 @layer starlight.base {
-    :root,
-    :root[data-theme='dark'],
-    [data-theme='dark'] ::backdrop {
+    :root {
         --sl-font: 'IBM Plex Sans';
         --sl-font-mono: 'JetBrains Mono';
-        --sl-color-gray-1: hsl(192, 20%, 92%);
-        --sl-color-gray-2: hsl(193, 14%, 74%);
-        --sl-color-gray-3: hsl(194, 12%, 56%);
-        --sl-color-gray-4: hsl(194, 10%, 36%);
-        --sl-color-gray-5: hsl(195, 15%, 20%);
-        --sl-color-gray-6: hsl(198, 22%, 13%);
-        --sl-color-black: hsl(210, 24%, 8%);
-        --sl-color-accent-low: hsl(191, 69%, 14%);
-        --sl-color-accent: hsl(191, 100%, 64%);
-        --sl-color-accent-high: hsl(187, 92%, 83%);
-        --sl-color-green-low: hsl(157, 62%, 14%);
-        --sl-color-green: hsl(157, 78%, 52%);
-        --sl-color-green-high: hsl(156, 76%, 78%);
-        --sl-color-bg: hsl(210, 24%, 8%);
-        --sl-color-bg-nav: hsla(204, 29%, 10%, 0.84);
-        --sl-color-bg-sidebar: hsla(205, 24%, 10%, 0.96);
-        --sl-color-bg-inline-code: hsl(196, 20%, 16%);
-        --sl-color-hairline-light: hsla(190, 60%, 70%, 0.2);
-        --sl-color-hairline: hsla(200, 22%, 20%, 0.9);
-        --sl-color-hairline-shade: hsl(210, 24%, 6%);
-        --sl-color-text-accent: var(--sl-color-accent);
-        --sl-shadow-sm: 0 10px 30px hsla(210, 50%, 3%, 0.28);
-        --sl-shadow-md: 0 18px 44px hsla(210, 50%, 3%, 0.32);
-        --sl-shadow-lg: 0 28px 72px hsla(210, 50%, 2%, 0.46);
         --sl-content-width: 51rem;
-        --sl-sidebar-width: 19rem;
-        --sl-text-5xl: 3rem;
-        --sl-text-6xl: 4.6rem;
+        --sl-sidebar-width: 18.5rem;
+        --sl-menu-button-size: 2.5rem;
+        --sl-text-5xl: 2.75rem;
+        --sl-text-6xl: 4rem;
+        --docs-heading-letter-spacing: -0.015em;
+        --docs-link-decoration-thickness: 0.08em;
+        --docs-link-underline-offset: 0.18em;
+    }
+
+    :root[data-theme='dark'],
+    [data-theme='dark'] ::backdrop {
+        --docs-accent-low: hsl(191, 69%, 14%);
+        --docs-accent: hsl(191, 100%, 64%);
+        --docs-accent-high: hsl(187, 92%, 83%);
+        --docs-green-low: hsl(157, 62%, 14%);
+        --docs-green: hsl(157, 78%, 52%);
+        --docs-green-high: hsl(156, 76%, 78%);
+        --docs-bg: hsl(210, 24%, 8%);
+        --docs-bg-nav: hsla(204, 29%, 10%, 0.92);
+        --docs-bg-sidebar: hsl(205, 24%, 10%);
+        --docs-bg-inline-code: hsl(196, 20%, 16%);
+        --docs-hairline-light: hsla(190, 60%, 70%, 0.2);
+        --docs-hairline: hsla(200, 22%, 20%, 0.9);
+        --docs-hairline-shade: hsl(210, 24%, 6%);
+        --docs-shadow-sm: 0 8px 24px hsla(210, 50%, 3%, 0.14);
+        --docs-shadow-md: 0 14px 34px hsla(210, 50%, 3%, 0.16);
+        --docs-shadow-lg: 0 20px 48px hsla(210, 50%, 2%, 0.22);
+        --docs-page-background:
+            radial-gradient(circle at top, hsla(188, 92%, 54%, 0.12), transparent 34%),
+            radial-gradient(circle at 85% 12%, hsla(157, 72%, 46%, 0.08), transparent 28%),
+            linear-gradient(180deg, hsl(208, 27%, 10%) 0%, hsl(210, 24%, 8%) 100%);
+        --docs-surface-hero:
+            linear-gradient(180deg, hsla(203, 22%, 13%, 0.96), hsla(210, 24%, 10%, 0.98));
+        --docs-surface-card: hsla(203, 24%, 14%, 0.95);
+        --docs-surface-card-hover: hsla(203, 24%, 17%, 0.98);
+        --docs-surface-muted: hsla(191, 100%, 64%, 0.08);
+        --docs-focus-ring: hsla(191, 100%, 64%, 0.7);
     }
 
     :root[data-theme='light'],
     [data-theme='light'] ::backdrop {
-        --sl-font: 'IBM Plex Sans';
-        --sl-font-mono: 'JetBrains Mono';
-        --sl-color-accent-low: hsl(191, 92%, 92%);
-        --sl-color-accent: hsl(191, 84%, 42%);
-        --sl-color-accent-high: hsl(193, 70%, 21%);
-        --sl-color-green-low: hsl(156, 72%, 90%);
-        --sl-color-green: hsl(157, 76%, 38%);
-        --sl-color-green-high: hsl(160, 82%, 18%);
-        --sl-color-text-accent: var(--sl-color-accent);
-        --sl-color-bg-nav: hsla(0, 0%, 100%, 0.9);
-        --sl-color-bg-sidebar: hsl(210, 18%, 97%);
-        --sl-shadow-sm: 0 10px 24px hsla(210, 30%, 12%, 0.06);
-        --sl-shadow-md: 0 14px 38px hsla(210, 30%, 12%, 0.08);
-        --sl-shadow-lg: 0 22px 56px hsla(210, 30%, 12%, 0.14);
+        --docs-accent-low: hsl(194, 64%, 92%);
+        --docs-accent: hsl(194, 90%, 30%);
+        --docs-accent-high: hsl(194, 78%, 22%);
+        --docs-green-low: hsl(152, 55%, 91%);
+        --docs-green: hsl(155, 70%, 28%);
+        --docs-green-high: hsl(160, 72%, 20%);
+        --docs-bg: hsl(210, 22%, 98%);
+        --docs-bg-nav: hsla(0, 0%, 100%, 0.92);
+        --docs-bg-sidebar: hsl(210, 18%, 97%);
+        --docs-bg-inline-code: hsl(210, 25%, 95%);
+        --docs-hairline-light: hsl(210, 20%, 88%);
+        --docs-hairline: hsl(210, 18%, 82%);
+        --docs-hairline-shade: hsl(210, 18%, 88%);
+        --docs-shadow-sm: 0 4px 14px hsla(210, 20%, 15%, 0.04);
+        --docs-shadow-md: 0 8px 24px hsla(210, 20%, 15%, 0.06);
+        --docs-shadow-lg: 0 16px 36px hsla(210, 20%, 15%, 0.08);
+        --docs-page-background:
+            radial-gradient(circle at top, hsla(194, 90%, 42%, 0.08), transparent 36%),
+            radial-gradient(circle at 85% 10%, hsla(155, 70%, 28%, 0.06), transparent 24%),
+            linear-gradient(180deg, hsl(210, 33%, 99%) 0%, hsl(210, 25%, 97%) 100%);
+        --docs-surface-hero:
+            linear-gradient(180deg, hsla(0, 0%, 100%, 0.96), hsla(210, 20%, 98%, 0.98));
+        --docs-surface-card: hsla(0, 0%, 100%, 0.94);
+        --docs-surface-card-hover: hsl(210, 20%, 96%);
+        --docs-surface-muted: hsla(194, 90%, 30%, 0.08);
+        --docs-focus-ring: hsla(194, 90%, 30%, 0.45);
     }
 
     html {
-        background:
-            radial-gradient(circle at top, hsla(188, 92%, 54%, 0.12), transparent 34%),
-            radial-gradient(circle at 85% 12%, hsla(157, 72%, 46%, 0.08), transparent 28%),
-            linear-gradient(180deg, hsl(208, 27%, 10%) 0%, hsl(210, 24%, 8%) 100%);
+        background: var(--docs-page-background);
     }
 
     body {
         font-family: var(--sl-font), var(--sl-font-system);
+        background: transparent;
+        --sl-color-accent-low: var(--docs-accent-low);
+        --sl-color-accent: var(--docs-accent);
+        --sl-color-accent-high: var(--docs-accent-high);
+        --sl-color-green-low: var(--docs-green-low);
+        --sl-color-green: var(--docs-green);
+        --sl-color-green-high: var(--docs-green-high);
+        --sl-color-bg: var(--docs-bg);
+        --sl-color-bg-nav: var(--docs-bg-nav);
+        --sl-color-bg-sidebar: var(--docs-bg-sidebar);
+        --sl-color-bg-inline-code: var(--docs-bg-inline-code);
+        --sl-color-hairline-light: var(--docs-hairline-light);
+        --sl-color-hairline: var(--docs-hairline);
+        --sl-color-hairline-shade: var(--docs-hairline-shade);
+        --sl-color-text-accent: var(--docs-accent);
+        --sl-shadow-sm: var(--docs-shadow-sm);
+        --sl-shadow-md: var(--docs-shadow-md);
+        --sl-shadow-lg: var(--docs-shadow-lg);
     }
 
-    h1,
-    h2,
-    h3,
-    h4,
-    h5,
-    .site-title,
-    [data-page-title] {
-        font-family: 'Space Grotesk', var(--sl-font-system);
-        letter-spacing: -0.025em;
+    :is(h1, h2, h3, h4, h5, h6, .site-title, [data-page-title]) {
+        font-family: var(--sl-font), var(--sl-font-system);
+        letter-spacing: var(--docs-heading-letter-spacing);
     }
 
-    code,
-    pre,
-    kbd,
-    samp {
+    :is(code, pre, kbd, samp) {
         font-family: 'JetBrains Mono', var(--sl-font-system-mono);
     }
 }
 
 @layer starlight.core {
+    :is(a, button, summary, select, input, textarea):focus-visible {
+        outline: 3px solid var(--docs-focus-ring);
+        outline-offset: 3px;
+    }
+
     header {
-        backdrop-filter: blur(18px);
+        backdrop-filter: blur(12px);
     }
 
-    html[data-has-hero] main {
-        position: relative;
-    }
-
-    html[data-has-hero] main::before {
-        content: '';
-        position: absolute;
-        inset: 0 auto auto 0;
-        width: 100%;
-        height: 24rem;
-        background:
-            radial-gradient(circle at 14% 14%, hsla(191, 100%, 62%, 0.16), transparent 34%),
-            radial-gradient(circle at 86% 0%, hsla(157, 100%, 47%, 0.12), transparent 24%);
-        pointer-events: none;
-        z-index: 0;
-    }
-
-    html[data-has-hero] main > * {
-        position: relative;
-        z-index: 1;
+    starlight-menu-button button,
+    site-search button[data-open-modal] {
+        min-inline-size: 2.5rem;
+        min-block-size: 2.5rem;
     }
 
     .hero {
-        padding: clamp(1.75rem, 3vw, 3rem);
+        padding: clamp(1.5rem, 4vw, 2.5rem);
         border: 1px solid var(--sl-color-hairline-light);
-        border-radius: 1.5rem;
-        background:
-            linear-gradient(135deg, hsla(196, 33%, 12%, 0.98), hsla(205, 22%, 10%, 0.96)),
-            linear-gradient(180deg, transparent, hsla(191, 100%, 64%, 0.06));
-        box-shadow: var(--sl-shadow-lg);
-        overflow: hidden;
+        border-radius: 1rem;
+        background: var(--docs-surface-hero);
+        box-shadow: var(--sl-shadow-sm);
     }
 
     .hero::before {
-        content: '';
-        position: absolute;
-        inset: 0;
-        background:
-            linear-gradient(120deg, transparent 0%, hsla(191, 100%, 64%, 0.06) 42%, transparent 65%),
-            radial-gradient(circle at top right, hsla(157, 100%, 48%, 0.12), transparent 30%);
-        pointer-events: none;
+        content: none;
     }
 
     .hero .tagline {
-        max-width: 34rem;
+        max-width: 38rem;
     }
 
     .sl-link-card {
         min-height: 100%;
-        border-radius: 1rem;
-        background:
-            linear-gradient(180deg, hsla(199, 24%, 15%, 0.95), hsla(206, 22%, 11%, 0.96));
+        border-radius: 0.875rem;
+        background: var(--docs-surface-card);
         border-color: var(--sl-color-hairline-light);
+        box-shadow: none;
         transition:
-            transform 160ms ease,
-            border-color 160ms ease,
-            box-shadow 160ms ease,
-            background 160ms ease;
-        box-shadow: var(--sl-shadow-md);
+            background-color 160ms ease,
+            border-color 160ms ease;
     }
 
-    .sl-link-card:hover {
-        transform: translateY(-3px);
-        border-color: hsla(191, 100%, 64%, 0.42);
-        background:
-            linear-gradient(180deg, hsla(196, 26%, 17%, 0.98), hsla(205, 22%, 12%, 0.98));
+    .sl-link-card:hover,
+    .sl-link-card:focus-within {
+        transform: none;
+        border-color: var(--sl-color-accent);
+        background: var(--docs-surface-card-hover);
+        box-shadow: none;
     }
 
     .sl-markdown-content blockquote {
-        border-inline-start-color: var(--sl-color-accent);
-        background: linear-gradient(90deg, hsla(191, 100%, 64%, 0.08), transparent);
+        border-inline-start: 3px solid var(--sl-color-accent);
+        background: var(--docs-surface-muted);
         border-radius: 0 0.75rem 0.75rem 0;
+        padding-block: 0.75rem;
+        padding-inline-end: 1rem;
+    }
+
+    .sl-markdown-content :is(pre, code) {
+        border-radius: 0.5rem;
     }
 
     .sl-markdown-content :is(h2, h3) {
@@ -176,7 +184,15 @@
     }
 
     .sl-markdown-content a {
-        text-decoration-thickness: 0.08em;
-        text-underline-offset: 0.18em;
+        text-decoration-thickness: var(--docs-link-decoration-thickness);
+        text-underline-offset: var(--docs-link-underline-offset);
+    }
+
+    .sl-markdown-content a:hover {
+        color: var(--sl-color-accent-high);
+    }
+
+    .right-sidebar-panel :where(a) {
+        line-height: 1.45;
     }
 }
