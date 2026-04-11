@@ -1,9 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
-import { expandCoreVectorInput } from '../../test-vectors/core';
-import coreVectors from '../../test-vectors/core.json';
-
 import { sha256Hex } from '#root';
+import { expandCoreVectorInput } from '#test-vectors/core';
+import coreVectors from '#test-vectors/core.json';
 
 type CoreVector = {
     expected: string;

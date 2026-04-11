@@ -1,12 +1,11 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
+import { sha256Hex } from '#root';
 import {
     coreVectorDefinitions,
     expandCoreVectorInput,
-} from '../test-vectors/core';
-
-import { sha256Hex } from '#root';
+} from '#test-vectors/core';
 
 const repoRoot = process.cwd();
 const outputPath = path.resolve(repoRoot, 'test-vectors/core.json');

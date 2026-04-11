@@ -1,9 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { expandCoreVectorInput } from '../../../test-vectors/core';
-import coreVectors from '../../../test-vectors/core.json';
-
 import { UnsupportedRuntimeError, sha256Hex } from '#root';
+import { expandCoreVectorInput } from '#test-vectors/core';
+import coreVectors from '#test-vectors/core.json';
 
 type CoreVector = {
     expected: string;

@@ -7,11 +7,17 @@
 @layer starlight.base, starlight.core, starlight.utils;
 
 @layer starlight.base {
-    :root,
-    :root[data-theme='dark'],
-    [data-theme='dark'] ::backdrop {
+    :root {
         --sl-font: 'IBM Plex Sans';
         --sl-font-mono: 'JetBrains Mono';
+        --sl-content-width: 51rem;
+        --sl-sidebar-width: 19rem;
+        --sl-text-5xl: 3rem;
+        --sl-text-6xl: 4rem;
+    }
+
+    :root[data-theme='dark'],
+    [data-theme='dark'] ::backdrop {
         --sl-color-gray-1: hsl(0, 0%, 96%);
         --sl-color-gray-2: hsl(0, 0%, 78%);
         --sl-color-gray-3: hsl(0, 0%, 60%);
@@ -36,22 +42,37 @@
         --sl-shadow-sm: 0 12px 28px hsla(0, 0%, 0%, 0.16);
         --sl-shadow-md: 0 18px 40px hsla(0, 0%, 0%, 0.22);
         --sl-shadow-lg: 0 26px 56px hsla(0, 0%, 0%, 0.28);
-        --sl-content-width: 51rem;
-        --sl-sidebar-width: 19rem;
-        --sl-text-5xl: 3rem;
-        --sl-text-6xl: 4rem;
+        --docs-link-card-bg: linear-gradient(
+            180deg,
+            hsla(0, 0%, 100%, 0.04),
+            hsla(0, 0%, 100%, 0.02)
+        );
+        --docs-link-card-bg-hover: linear-gradient(
+            180deg,
+            hsla(0, 0%, 100%, 0.06),
+            hsla(0, 0%, 100%, 0.03)
+        );
+        --docs-link-card-border-hover: hsla(0, 0%, 100%, 0.24);
     }
 
+    :root:not([data-theme]),
     :root[data-theme='light'],
     [data-theme='light'] ::backdrop {
-        --sl-font: 'IBM Plex Sans';
-        --sl-font-mono: 'JetBrains Mono';
+        --sl-color-gray-1: hsl(0, 0%, 12%);
+        --sl-color-gray-2: hsl(0, 0%, 24%);
+        --sl-color-gray-3: hsl(0, 0%, 40%);
+        --sl-color-gray-4: hsl(0, 0%, 56%);
+        --sl-color-gray-5: hsl(0, 0%, 78%);
+        --sl-color-gray-6: hsl(0, 0%, 92%);
+        --sl-color-gray-7: hsl(0, 0%, 97%);
+        --sl-color-black: hsl(0, 0%, 100%);
         --sl-color-accent-low: hsl(0, 0%, 92%);
         --sl-color-accent: hsl(0, 0%, 12%);
         --sl-color-accent-high: hsl(0, 0%, 5%);
         --sl-color-green-low: hsl(0, 0%, 92%);
         --sl-color-green: hsl(0, 0%, 16%);
         --sl-color-green-high: hsl(0, 0%, 6%);
+        --sl-color-bg: hsl(0, 0%, 100%);
         --sl-color-text-accent: var(--sl-color-accent);
         --sl-color-bg-nav: hsla(0, 0%, 100%, 0.96);
         --sl-color-bg-sidebar: hsl(0, 0%, 98%);
@@ -62,6 +83,17 @@
         --sl-shadow-sm: 0 10px 24px hsla(0, 0%, 0%, 0.04);
         --sl-shadow-md: 0 14px 34px hsla(0, 0%, 0%, 0.06);
         --sl-shadow-lg: 0 20px 48px hsla(0, 0%, 0%, 0.08);
+        --docs-link-card-bg: linear-gradient(
+            180deg,
+            hsla(0, 0%, 100%, 0.98),
+            hsla(0, 0%, 96%, 0.94)
+        );
+        --docs-link-card-bg-hover: linear-gradient(
+            180deg,
+            hsla(0, 0%, 100%, 1),
+            hsla(0, 0%, 95%, 0.96)
+        );
+        --docs-link-card-border-hover: hsla(0, 0%, 0%, 0.18);
     }
 
     html {
@@ -112,11 +144,7 @@
         min-height: 100%;
         border-radius: 1rem;
         border-color: var(--sl-color-hairline);
-        background: linear-gradient(
-            180deg,
-            hsla(0, 0%, 100%, 0.04),
-            hsla(0, 0%, 100%, 0.02)
-        );
+        background: var(--docs-link-card-bg);
         transition:
             transform 160ms ease,
             border-color 160ms ease,
@@ -124,14 +152,10 @@
         box-shadow: none;
     }
 
-    .sl-link-card:hover {
+    .sl-link-card:is(:hover, :focus-within) {
         transform: translateY(-2px);
-        border-color: hsla(0, 0%, 100%, 0.24);
-        background: linear-gradient(
-            180deg,
-            hsla(0, 0%, 100%, 0.06),
-            hsla(0, 0%, 100%, 0.03)
-        );
+        border-color: var(--docs-link-card-border-hover);
+        background: var(--docs-link-card-bg-hover);
     }
 
     .sl-markdown-content blockquote {

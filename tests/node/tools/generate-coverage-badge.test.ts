@@ -5,7 +5,7 @@ import {
     getTotalLinesMetric,
     normalizeCoverageSummary,
     type CoverageSummary,
-} from '../../../tools/generate-coverage-badge';
+} from '#tools/generate-coverage-badge';
 
 describe('coverage badge generation helpers', () => {
     it('throws a clear error when total metrics are missing', () => {

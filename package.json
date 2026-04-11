@@ -7,7 +7,9 @@
     "main": "dist/index.js",
     "types": "dist/index.d.ts",
     "imports": {
-        "#root": "./src/index.ts"
+        "#root": "./src/index.ts",
+        "#test-vectors/*": "./test-vectors/*",
+        "#tools/*": "./tools/*"
     },
     "exports": {
         ".": {
