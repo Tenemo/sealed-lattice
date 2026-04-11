@@ -9,15 +9,16 @@ on:
         description: Version bump to apply
         required: true
         type: choice
+        default: patch
         options:
-          - beta next
-          - promote beta to stable
-          - beta from patch
-          - beta from minor
-          - beta from major
           - patch
           - minor
           - major
+          - promote beta to stable
+          - beta next
+          - beta from patch
+          - beta from minor
+          - beta from major
 
 permissions:
   contents: write
