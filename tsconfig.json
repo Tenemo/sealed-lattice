@@ -3,8 +3,7 @@
         "baseUrl": ".",
         "ignoreDeprecations": "6.0",
         "paths": {
-            "#root": ["./src/index.ts"],
-            "#core": ["./src/core/index.ts"]
+            "#root": ["./src/index.ts"]
         },
         "target": "ES2020",
         "module": "ESNext",
