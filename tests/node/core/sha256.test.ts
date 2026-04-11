@@ -1,45 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import coreVectors from '../../../test-vectors/core.json';
-
-import { UnsupportedRuntimeError, sha256Hex as sha256HexFromCore } from '#core';
-import { sha256Hex } from '#root';
-
-type TextVectorInput = {
-    kind: 'text';
-    value: string;
-};
-
-type HexVectorInput = {
-    kind: 'hex';
-    value: string;
-};
-
-type RepeatTextVectorInput = {
-    count: number;
-    kind: 'repeat-text';
-    value: string;
-};
+import { UnsupportedRuntimeError, sha256Hex } from '#root';
+import { expandCoreVectorInput } from '#test-vectors/core';
+import coreVectors from '#test-vectors/core.json';
 
 type CoreVector = {
     expected: string;
     id: string;
-    input: TextVectorInput | HexVectorInput | RepeatTextVectorInput;
-};
-
-const expandInput = (input: CoreVector['input']): string | Uint8Array => {
-    switch (input.kind) {
-        case 'text':
-            return input.value;
-        case 'hex':
-            return Uint8Array.from(
-                input.value
-                    .match(/.{1,2}/g)
-                    ?.map((chunk) => Number.parseInt(chunk, 16)) ?? [],
-            );
-        case 'repeat-text':
-            return input.value.repeat(input.count);
-    }
+    input: Parameters<typeof expandCoreVectorInput>[0];
 };
 
 describe('sha256Hex', () => {
@@ -50,12 +18,9 @@ describe('sha256Hex', () => {
     it.each(coreVectors.vectors as readonly CoreVector[])(
         'matches the generated vector for $id',
         async (vector) => {
-            const input = expandInput(vector.input);
-
-            await expect(sha256Hex(input)).resolves.toBe(vector.expected);
-            await expect(sha256HexFromCore(input)).resolves.toBe(
-                vector.expected,
-            );
+            await expect(
+                sha256Hex(expandCoreVectorInput(vector.input)),
+            ).resolves.toBe(vector.expected);
         },
     );
 

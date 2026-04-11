@@ -18,16 +18,7 @@ type NavigationItem = {
 };
 
 const moduleOrder = new Map(
-    [
-        'sealed-lattice',
-        'core',
-        'proofs',
-        'protocol',
-        'runtime',
-        'serialize',
-        'threshold',
-        'transport',
-    ].map((moduleName, index) => [moduleName, index + 1]),
+    publicApiDocs.map((entry, index) => [entry.moduleName, index + 1]),
 );
 
 const internalLinkPattern = /(!?\[[^\]]*])\(([^)#\s]+)(#[^)]+)?\)/g;

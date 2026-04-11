@@ -4,7 +4,8 @@
         "ignoreDeprecations": "6.0",
         "paths": {
             "#root": ["./src/index.ts"],
-            "#core": ["./src/core/index.ts"]
+            "#test-vectors/*": ["./test-vectors/*"],
+            "#tools/*": ["./tools/*"]
         },
         "target": "ES2020",
         "module": "ESNext",
