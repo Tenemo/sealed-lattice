@@ -1,0 +1,33 @@
+@layer starlight.core {
+    html:not([data-has-sidebar])[data-has-hero] {
+        --sl-content-width: 51rem;
+    }
+
+    html[data-has-hero] main .sl-container {
+        max-width: var(--sl-content-width) !important;
+        margin-inline: auto !important;
+    }
+
+    html[data-has-hero] .hero {
+        max-width: 44rem !important;
+        margin-inline: auto !important;
+    }
+
+    @media (min-width: 72rem) {
+        html[data-has-sidebar][data-has-toc] .right-sidebar-container {
+            width: var(--sl-sidebar-width) !important;
+        }
+
+        html[data-has-sidebar][data-has-toc] .right-sidebar {
+            width: var(--sl-sidebar-width) !important;
+        }
+
+        html[data-has-sidebar][data-has-toc] .main-pane {
+            width: calc(100% - var(--sl-sidebar-width)) !important;
+        }
+
+        html[data-has-sidebar][data-has-toc] main .sl-container {
+            margin-inline: auto !important;
+        }
+    }
+}
