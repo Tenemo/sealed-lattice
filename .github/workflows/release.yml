@@ -137,9 +137,11 @@ jobs:
       - run: pnpm exec playwright install --with-deps chromium firefox webkit
 
       - run: pnpm run build
+      - run: pnpm run coverage:node
       - run: pnpm run verify:docs
       - run: pnpm run docs:build:site
       - run: pnpm run smoke:pack
+      - run: pnpm run smoke:pack:npm
 
       - name: commit release metadata
         run: |
