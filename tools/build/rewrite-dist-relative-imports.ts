@@ -1,5 +1,6 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const repoRoot = process.cwd();
 const distRoot = path.resolve(repoRoot, 'dist');
@@ -7,7 +8,9 @@ const outputExtensions = new Set(['.js', '.d.ts']);
 const specifierPattern =
     /((?:\bimport\s*['"])|(?:\bimport\(\s*['"])|(?:\bfrom\s*['"]))(\.{1,2}\/[^'"()]+)(['"])/g;
 
-const collectOutputFiles = async (directory: string): Promise<string[]> => {
+export const collectOutputFiles = async (
+    directory: string,
+): Promise<string[]> => {
     const files: string[] = [];
     const pending = [directory];
 
@@ -39,7 +42,7 @@ const collectOutputFiles = async (directory: string): Promise<string[]> => {
     return files.sort();
 };
 
-const resolveRuntimeSpecifier = async (
+export const resolveRuntimeSpecifier = async (
     filePath: string,
     specifier: string,
 ): Promise<string> => {
@@ -69,7 +72,7 @@ const resolveRuntimeSpecifier = async (
     }
 };
 
-const rewriteFile = async (filePath: string): Promise<number> => {
+export const rewriteFile = async (filePath: string): Promise<number> => {
     const source = await fs.readFile(filePath, 'utf8');
     let replacements = 0;
     let rewritten = '';
@@ -121,4 +124,6 @@ const main = async (): Promise<void> => {
     );
 };
 
-void main();
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+    void main();
+}

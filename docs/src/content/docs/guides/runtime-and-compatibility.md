@@ -19,7 +19,7 @@ Phase one is ESM-only and requires Web Crypto hashing.
 - `TextEncoder` must be available for UTF-8 conversion.
 - CI verifies digest parity in Chromium, Firefox, and WebKit on desktop, plus Chromium and WebKit mobile emulation through Vitest browser mode and Playwright.
 
-See [Browser and worker usage](/guides/browser-and-worker-usage/) for the supported in-browser calling patterns.
+See [Browser and worker usage](../browser-and-worker-usage/) for the supported in-browser calling patterns.
 
 ## Current compatibility boundary
 

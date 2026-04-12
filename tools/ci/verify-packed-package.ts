@@ -21,6 +21,12 @@ type PackageManagerRunner = {
     kind: PackageManager;
 };
 
+type SpawnCommand = {
+    args: readonly string[];
+    command: string;
+    description: string;
+};
+
 const supportedPackageManagers = new Set<PackageManager>(['npm', 'pnpm']);
 
 export const parsePackageManagerOverride = (
@@ -106,40 +112,50 @@ export const createInstallArguments = (
         : ['add', '--ignore-scripts', '--silent', tarballPath];
 };
 
+export const createPackageManagerSpawnCommand = (
+    runner: PackageManagerRunner,
+    args: readonly string[],
+    commandShell: string = process.env.ComSpec ?? 'cmd.exe',
+): SpawnCommand => {
+    const commandArgs = [...runner.commandArgsPrefix, ...args];
+    const description = [runner.command, ...commandArgs].join(' ');
+
+    if (runner.command.endsWith('.cmd')) {
+        return {
+            command: commandShell,
+            args: ['/d', '/s', '/c', runner.command, ...commandArgs],
+            description,
+        };
+    }
+
+    return {
+        command: runner.command,
+        args: commandArgs,
+        description,
+    };
+};
+
 const runPackageManager = (
     runner: PackageManagerRunner,
     args: readonly string[],
     cwd: string,
 ): void => {
-    const commandArgs = [...runner.commandArgsPrefix, ...args];
-    const isWindowsCommandShim = runner.command.endsWith('.cmd');
-    const commandDescription = [runner.command, ...commandArgs].join(' ');
-    const result = isWindowsCommandShim
-        ? spawnSync(
-              process.env.ComSpec ?? 'cmd.exe',
-              ['/d', '/s', '/c', commandDescription],
-              {
-                  cwd,
-                  env: process.env,
-                  encoding: 'utf8',
-                  maxBuffer: 100 * 1024 * 1024,
-              },
-          )
-        : spawnSync(runner.command, commandArgs, {
-              cwd,
-              env: process.env,
-              encoding: 'utf8',
-              maxBuffer: 100 * 1024 * 1024,
-          });
+    const spawnCommand = createPackageManagerSpawnCommand(runner, args);
+    const result = spawnSync(spawnCommand.command, spawnCommand.args, {
+        cwd,
+        env: process.env,
+        encoding: 'utf8',
+        maxBuffer: 100 * 1024 * 1024,
+    });
 
     if (result.error !== undefined) {
         throw new Error(
-            `Failed to start command: ${commandDescription}: ${result.error.message}`,
+            `Failed to start command: ${spawnCommand.description}: ${result.error.message}`,
         );
     }
     if (result.signal !== null) {
         throw new Error(
-            `Command terminated by signal ${result.signal}: ${commandDescription}`,
+            `Command terminated by signal ${result.signal}: ${spawnCommand.description}`,
         );
     }
     if (result.status !== 0) {
@@ -151,7 +167,7 @@ const runPackageManager = (
                 : '';
 
         throw new Error(
-            `Command exited with status ${result.status ?? 'null'}: ${commandDescription}${formattedOutput}`,
+            `Command exited with status ${result.status ?? 'null'}: ${spawnCommand.description}${formattedOutput}`,
         );
     }
 };

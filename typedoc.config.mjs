@@ -7,12 +7,12 @@ const generatedReferenceIntro = readFileSync(
     generatedReferenceIntroPath,
     'utf8',
 );
-const relativeMarkdownLinkPattern =
+const nonExternalMarkdownLinkPattern =
     /!?\[[^\]]*]\((?!https?:|mailto:|#|\/\/)([^)]+)\)/g;
 
-if (relativeMarkdownLinkPattern.test(generatedReferenceIntro)) {
+if (nonExternalMarkdownLinkPattern.test(generatedReferenceIntro)) {
     throw new Error(
-        `${generatedReferenceIntroPath} must not contain relative markdown links. typedoc-plugin-markdown copies them as media and can recurse into generated output.`,
+        `${generatedReferenceIntroPath} must not contain non-external markdown links. typedoc-plugin-markdown copies them as media and can recurse into generated output.`,
     );
 }
 

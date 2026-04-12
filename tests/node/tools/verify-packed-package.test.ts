@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+    createPackageManagerSpawnCommand,
     createInstallArguments,
     createPackArguments,
     detectPackageManager,
@@ -65,6 +66,33 @@ describe('packed package smoke helpers', () => {
             '--silent',
             '/tmp/pkg.tgz',
         ]);
+    });
+
+    it('builds a Windows-safe spawn command for package manager shims', () => {
+        expect(
+            createPackageManagerSpawnCommand(
+                {
+                    command: 'npm.cmd',
+                    commandArgsPrefix: [],
+                    kind: 'npm',
+                },
+                ['install', '--silent', 'C:\\Temp\\with space\\pkg.tgz'],
+                'C:\\Windows\\System32\\cmd.exe',
+            ),
+        ).toEqual({
+            command: 'C:\\Windows\\System32\\cmd.exe',
+            args: [
+                '/d',
+                '/s',
+                '/c',
+                'npm.cmd',
+                'install',
+                '--silent',
+                'C:\\Temp\\with space\\pkg.tgz',
+            ],
+            description:
+                'npm.cmd install --silent C:\\Temp\\with space\\pkg.tgz',
+        });
     });
 
     it('resolves the default invoking package manager runner', () => {
