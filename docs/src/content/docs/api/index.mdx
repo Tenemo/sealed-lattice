@@ -1,26 +1,27 @@
 ---
-title: API reference
-description: Curated overview of the current sealed-lattice package surface.
+title: API docs
+description: Curated entry points into the shipped public surface, with the generated symbol reference underneath.
+editUrl: false
 ---
 
 import { CardGrid, LinkCard } from '@astrojs/starlight/components';
 
-Start with the curated pages below, then use the generated reference for exact exported signatures.
+Start here before diving into the generated symbol pages. The goal is to help readers choose the correct surface, not to browse a raw module dump first.
 
 <CardGrid>
   <LinkCard
     title="Root package"
-    href="/api/root-package/"
-    description="See the current safe root export and its exact scope."
-  />
-  <LinkCard
-    title="Public boundary"
-    href="/api/public-boundary/"
-    description="See what is public now and why future module boundaries are still intentionally open."
+    href="./root-package/"
+    description="Use the root package as the only supported import surface for the shipped digest helper."
   />
   <LinkCard
     title="Generated reference"
-    href="/api/reference/sealed-lattice/"
+    href="./reference/sealed-lattice/"
     description="Read the exact generated symbol reference for the current exports."
+  />
+  <LinkCard
+    title="Get started"
+    href="../guides/getting-started/"
+    description="Follow the supported installation and runtime path first, then use the generated reference for exact contracts."
   />
 </CardGrid>

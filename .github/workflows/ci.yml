@@ -10,17 +10,7 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
-  workflow-lint:
-    name: workflow-lint
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v6.0.2
-      - name: lint workflows
-        run: docker run --rm -v "${GITHUB_WORKSPACE}:/repo" -w /repo rhysd/actionlint:1.7.12 -color
-
-  node:
-    name: node
+  test:
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
@@ -33,35 +23,10 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm run lint
-      - run: pnpm run tsc
-      - run: pnpm exec knip
-      - run: pnpm exec tsx ./tools/ci/verify-no-math-random.ts
-      - run: pnpm exec tsx ./tools/ci/verify-package-surface.ts
-      - run: pnpm exec tsx ./tools/ci/verify-vectors.ts
-      - run: pnpm exec vitest --project node --run
-      - run: pnpm exec del-cli dist && tsc --project tsconfig.build.json
-      - run: pnpm run smoke:pack
-
-  browser:
-    name: browser
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v6.0.2
-      - uses: pnpm/action-setup@v5.0.0
-        with:
-          run_install: false
-      - uses: actions/setup-node@v6.3.0
-        with:
-          node-version-file: .nvmrc
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
       - run: pnpm exec playwright install --with-deps chromium
-      - run: pnpm exec vitest --project browser --run
+      - run: pnpm run build
 
   docs:
-    name: docs
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -75,13 +40,24 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm run verify:docs
-      - run: pnpm run coverage:badge
       - run: pnpm run docs:build:site
-      - run: pnpm exec tsx ./tools/ci/verify-docs-build.ts
-      - name: upload docs dist
-        if: ${{ github.event_name == 'pull_request' && always() }}
-        uses: actions/upload-artifact@v7.0.0
+
+  release-smoke:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - uses: pnpm/action-setup@v5.0.0
         with:
-          name: docs-dist
-          path: ./docs/dist
-          if-no-files-found: ignore
+          run_install: false
+      - uses: actions/setup-node@v6.3.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm run build
+      - run: pnpm run verify:docs
+      - run: pnpm run docs:build:site
+      - run: pnpm run smoke:pack

@@ -2,41 +2,61 @@
 title: 'sealed-lattice documentation'
 description: 'Browser-native sealed-lattice documentation for the current public package surface and future post-quantum voting research.'
 template: splash
+editUrl: false
 hero:
   title: 'sealed-lattice'
   tagline: 'The current surface ships one honest cryptographic helper, keeps the public API narrow, and leaves room for the lattice-native architecture to settle before more exports are frozen.'
   actions:
     - text: Get started
-      link: /guides/getting-started/
+      link: ./guides/getting-started/
       icon: right-arrow
-    - text: View API reference
-      link: /api/
+      variant: primary
+    - text: Security and non-goals
+      link: ./guides/security-and-non-goals/
       variant: secondary
+    - text: Browse the API
+      link: ./api/
+      variant: minimal
 ---
 
 import { CardGrid, LinkCard } from '@astrojs/starlight/components';
 
-`sealed-lattice` currently prioritizes developer experience, documentation, and verification around one real digest helper. The surface stays intentionally narrow so the lattice-native flow can settle before more module boundaries are frozen.
+## Start here
 
-<CardGrid>
+<CardGrid stagger>
   <LinkCard
     title="Get started"
-    href="/guides/getting-started/"
+    href="./guides/getting-started/"
     description="Install the package, call the shipped `sha256Hex` helper, and understand what the current surface does and does not ship."
   />
   <LinkCard
     title="Runtime and compatibility"
-    href="/guides/runtime-and-compatibility/"
+    href="./guides/runtime-and-compatibility/"
     description="Review the Node, browser, and Web Crypto expectations for the current package surface."
   />
   <LinkCard
     title="Security and non-goals"
-    href="/guides/security-and-non-goals/"
+    href="./guides/security-and-non-goals/"
     description="See the hardened research-prototype boundary and the explicit omissions in the current package surface."
   />
   <LinkCard
-    title="API reference"
-    href="/api/"
+    title="API docs"
+    href="./api/"
     description="Read the curated overview first, then use the generated reference for exact symbol contracts."
   />
 </CardGrid>
+
+## What this package is for
+
+`sealed-lattice` is a browser-native TypeScript package for post-quantum voting research prototypes.
+
+The current public milestone ships:
+
+- a real `sha256Hex` helper
+- a typed `UnsupportedRuntimeError`
+- one root-only public import surface
+- a hardened documentation, testing, and packaging workflow around that narrow API
+
+## What it does not try to do
+
+This is a hardened research prototype, not audited production voting software. Lattice cryptography, threshold flows, transport payloads, proofs, and future public subpaths are intentionally not frozen yet.

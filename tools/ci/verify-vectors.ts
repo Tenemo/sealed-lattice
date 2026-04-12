@@ -4,17 +4,24 @@ import { fileURLToPath } from 'node:url';
 
 const repoRootUrl = new URL('../../', import.meta.url);
 const packageManagerEntrypoint = process.env.npm_execpath;
-
-if (packageManagerEntrypoint === undefined) {
-    throw new Error('npm_execpath is required to run package manager commands');
-}
+const packageManagerCommand =
+    packageManagerEntrypoint === undefined
+        ? process.platform === 'win32'
+            ? 'pnpm.cmd'
+            : 'pnpm'
+        : process.execPath;
 
 const vectorFile = 'test-vectors/core.json';
 
 const runPackageManager = (args: readonly string[]): void => {
-    const commandArgs = [packageManagerEntrypoint, ...args];
-    const commandDescription = [process.execPath, ...commandArgs].join(' ');
-    const result = spawnSync(process.execPath, commandArgs, {
+    const commandArgs =
+        packageManagerEntrypoint === undefined
+            ? [...args]
+            : [packageManagerEntrypoint, ...args];
+    const commandDescription = [packageManagerCommand, ...commandArgs].join(
+        ' ',
+    );
+    const result = spawnSync(packageManagerCommand, commandArgs, {
         cwd: fileURLToPath(repoRootUrl),
         stdio: 'inherit',
         env: process.env,
@@ -37,6 +44,9 @@ const runPackageManager = (args: readonly string[]): void => {
     }
 };
 
+const normalizeJson = (content: string): string =>
+    JSON.stringify(JSON.parse(content));
+
 const main = async (): Promise<void> => {
     const originalContent = await readFile(
         new URL(vectorFile, repoRootUrl),
@@ -50,7 +60,7 @@ const main = async (): Promise<void> => {
             new URL(vectorFile, repoRootUrl),
             'utf8',
         );
-        if (currentContent !== originalContent) {
+        if (normalizeJson(currentContent) !== normalizeJson(originalContent)) {
             throw new Error(
                 `Generated vectors drifted from the committed fixture: ${vectorFile}`,
             );

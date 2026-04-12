@@ -81,21 +81,6 @@ pnpm run test
 pnpm run build
 ```
 
-For the full packaging and docs verification path, run:
-
-```bash
-pnpm run smoke:pack
-pnpm run verify:docs
-pnpm run docs:build:site
-pnpm exec tsx ./tools/ci/verify-docs-build.ts
-```
-
-For the current digest microbenchmark, run:
-
-```bash
-pnpm run bench:micro
-```
-
 ## License
 
 This project is licensed under MPL-2.0. See [LICENSE](LICENSE).

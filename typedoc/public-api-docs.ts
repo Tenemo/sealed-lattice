@@ -1,15 +1,16 @@
-export type PublicApiDocEntry = {
+type PublicApiDocEntry = {
     apiIndexPage: string;
     entryPoint: string;
     exportKey: string;
     moduleName: string;
 };
 
+const rootModuleName = 'sealed-lattice';
+
 export const docsContentRoot = 'docs/src/content/docs';
-export const apiDocsRoot = `${docsContentRoot}/api`;
+const apiDocsRoot = `${docsContentRoot}/api`;
 export const apiReferenceRoot = `${apiDocsRoot}/reference`;
 export const apiNavigationJson = `${apiReferenceRoot}/navigation.json`;
-const rootModuleName = 'sealed-lattice';
 
 export const publicApiDocs: readonly PublicApiDocEntry[] = [
     {

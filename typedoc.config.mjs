@@ -1,11 +1,27 @@
+import { readFileSync } from 'node:fs';
+
 import { typedocEntryPoints } from './typedoc/public-api-docs';
+
+const generatedReferenceIntroPath = 'typedoc/generated-reference-intro.md';
+const generatedReferenceIntro = readFileSync(
+    generatedReferenceIntroPath,
+    'utf8',
+);
+const relativeMarkdownLinkPattern =
+    /!?\[[^\]]*]\((?!https?:|mailto:|#|\/\/)([^)]+)\)/g;
+
+if (relativeMarkdownLinkPattern.test(generatedReferenceIntro)) {
+    throw new Error(
+        `${generatedReferenceIntroPath} must not contain relative markdown links. typedoc-plugin-markdown copies them as media and can recurse into generated output.`,
+    );
+}
 
 /** @type {import('typedoc').TypeDocOptions} */
 const config = {
     entryPoints: typedocEntryPoints,
     entryPointStrategy: 'resolve',
     alwaysCreateEntryPointModule: true,
-    plugin: ['typedoc-plugin-markdown', './typedoc/sentence-case-plugin.ts'],
+    plugin: ['typedoc-plugin-markdown'],
     out: 'docs/src/content/docs/api/reference',
     router: 'member',
     readme: 'typedoc/generated-reference-intro.md',

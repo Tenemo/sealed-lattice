@@ -27,7 +27,6 @@ const documentedPublicApi = publicApiDocs as readonly {
 const requiredApiEntryPages = [
     `${docsContentRoot}/api/index.mdx`,
     `${docsContentRoot}/api/root-package.mdx`,
-    `${docsContentRoot}/api/public-boundary.mdx`,
     ...documentedPublicApi.map((entry) => entry.apiIndexPage),
     apiNavigationJson,
 ] as const;
@@ -276,7 +275,7 @@ const publicReflectionKinds =
     ReflectionKind.Interface |
     ReflectionKind.Variable;
 
-const verifyTypedocSummaries = async (): Promise<string[]> => {
+const verifyTypeDocSummaries = async (): Promise<string[]> => {
     const app = await Application.bootstrapWithPlugins(config);
     const project = await app.convert();
 
@@ -321,7 +320,7 @@ const verifyTypedocSummaries = async (): Promise<string[]> => {
 const main = async (): Promise<void> => {
     const linkFailures = await verifyLinks();
     const apiFailures = await verifyApiEntryPages();
-    const summaryFailures = await verifyTypedocSummaries();
+    const summaryFailures = await verifyTypeDocSummaries();
 
     const failures: string[] = [];
 

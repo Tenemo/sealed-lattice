@@ -41,7 +41,6 @@ export default defineConfig({
                     items: [
                         'api',
                         'api/root-package',
-                        'api/public-boundary',
                         {
                             label: 'Generated reference',
                             collapsed: true,
