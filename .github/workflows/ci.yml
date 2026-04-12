@@ -23,8 +23,23 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: pnpm run build:ci
+
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - uses: pnpm/action-setup@v5.0.0
+        with:
+          run_install: false
+      - uses: actions/setup-node@v6.3.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
       - run: pnpm exec playwright install --with-deps chromium firefox webkit
-      - run: pnpm run build
+      - run: pnpm run test:browser
 
   coverage:
     runs-on: ubuntu-latest
@@ -71,8 +86,7 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm exec playwright install --with-deps chromium firefox webkit
-      - run: pnpm run build
+      - run: pnpm run build:ci
       - run: pnpm run verify:docs
       - run: pnpm run docs:build:site
       - run: pnpm run smoke:pack
