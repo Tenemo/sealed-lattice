@@ -10,17 +10,9 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
-  workflow-lint:
-    name: workflow-lint
+  test:
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6.0.2
-      - name: lint workflows
-        run: docker run --rm -v "${GITHUB_WORKSPACE}:/repo" -w /repo rhysd/actionlint:1.7.12 -color
-
-  node:
-    name: node
-    runs-on: ubuntu-latest
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v6.0.2
       - uses: pnpm/action-setup@v5.0.0
@@ -31,17 +23,11 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm run lint
-      - run: pnpm run typecheck
-      - run: pnpm run guard:no-math-random
-      - run: pnpm run verify:package-surface
-      - run: pnpm run test:node
-      - run: pnpm run build:skip
-      - run: pnpm run package:smoke
+      - run: pnpm run build:ci
 
   browser:
-    name: browser
     runs-on: ubuntu-latest
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v6.0.2
       - uses: pnpm/action-setup@v5.0.0
@@ -52,12 +38,12 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm exec playwright install --with-deps chromium firefox webkit
       - run: pnpm run test:browser
 
-  docs:
-    name: docs
+  coverage:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6.0.2
       - uses: pnpm/action-setup@v5.0.0
@@ -68,11 +54,40 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm run docs:ci
-      - name: upload docs dist
-        if: ${{ github.event_name == 'pull_request' && always() }}
-        uses: actions/upload-artifact@v7.0.0
+      - run: pnpm run coverage:node
+
+  docs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - uses: pnpm/action-setup@v5.0.0
         with:
-          name: docs-dist
-          path: ./docs/dist
-          if-no-files-found: ignore
+          run_install: false
+      - uses: actions/setup-node@v6.3.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run verify:docs
+      - run: pnpm run docs:build:site
+
+  release-smoke:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - uses: pnpm/action-setup@v5.0.0
+        with:
+          run_install: false
+      - uses: actions/setup-node@v6.3.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build:ci
+      - run: pnpm run verify:docs
+      - run: pnpm run docs:build:site
+      - run: pnpm run smoke:pack
+      - run: pnpm run smoke:pack:npm

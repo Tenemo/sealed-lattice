@@ -1,1 +1,4 @@
-pnpm run check && pnpm run build:skip
+pnpm run build || exit 1
+pnpm run verify:docs || exit 1
+pnpm run docs:build:site || exit 1
+pnpm run smoke:pack || exit 1

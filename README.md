@@ -22,7 +22,7 @@ The current implementation ships:
 
 - a real `sha256Hex` helper on the safe root package
 - a typed `UnsupportedRuntimeError` for missing Web Crypto support
-- the same repo, docs, testing, and publish workflow shape used by `threshold-elgamal`
+- a hardened repo, docs, testing, and publish workflow around that narrow surface
 - a deliberately narrow public surface while the lattice-native architecture is still being proven
 
 This repository is a hardened research prototype. It is not audited production voting software.
@@ -31,7 +31,7 @@ This repository is a hardened research prototype. It is not audited production v
 
 This repository currently tracks the initial public `sealed-lattice` surface.
 
-The public surface is intentionally narrow while the repo, CI, docs, tests, coverage, and packaging experience are brought up to parity with the existing classical baseline. Lattice cryptography, threshold flows, transport payloads, proofs, protocol types, and any future subpath structure are still being designed and are not frozen yet.
+The public surface is intentionally narrow while the repo, CI, docs, tests, coverage, and packaging experience are stabilized. Lattice cryptography, threshold flows, transport payloads, proofs, protocol types, and any future subpath structure are still being designed and are not frozen yet.
 
 ## Installation
 
@@ -43,6 +43,7 @@ pnpm add sealed-lattice
 
 - Use ESM imports such as `import { sha256Hex } from 'sealed-lattice'`. The published package does not expose CommonJS `require()` entry points.
 - Browsers need `globalThis.crypto.subtle` and `TextEncoder`.
+- CI validates Chromium, Firefox, and WebKit on desktop, plus Chromium and WebKit in mobile emulation.
 - Node requires version `24.14.1` or newer with `globalThis.crypto`.
 
 ## Safe quickstart
@@ -67,6 +68,7 @@ No additional public subpaths are promised yet. Future capability areas such as 
 
 - Hosted documentation site: [tenemo.github.io/sealed-lattice](https://tenemo.github.io/sealed-lattice/)
 - Get started: [tenemo.github.io/sealed-lattice/guides/getting-started](https://tenemo.github.io/sealed-lattice/guides/getting-started/)
+- Browser and worker usage: [tenemo.github.io/sealed-lattice/guides/browser-and-worker-usage](https://tenemo.github.io/sealed-lattice/guides/browser-and-worker-usage/)
 - Runtime and compatibility: [tenemo.github.io/sealed-lattice/guides/runtime-and-compatibility](https://tenemo.github.io/sealed-lattice/guides/runtime-and-compatibility/)
 - Security and non-goals: [tenemo.github.io/sealed-lattice/guides/security-and-non-goals](https://tenemo.github.io/sealed-lattice/guides/security-and-non-goals/)
 - API reference: [tenemo.github.io/sealed-lattice/api](https://tenemo.github.io/sealed-lattice/api/)
@@ -74,15 +76,11 @@ No additional public subpaths are promised yet. Future capability areas such as 
 ## Development
 
 ```bash
-pnpm install --frozen-lockfile
-pnpm run vectors:core
-pnpm run ci
-```
-
-For the current digest microbenchmark, run:
-
-```bash
-pnpm run bench:micro
+pnpm install
+pnpm run lint
+pnpm run tsc
+pnpm run test
+pnpm run build
 ```
 
 ## License

@@ -17,7 +17,9 @@ Phase one is ESM-only and requires Web Crypto hashing.
 
 - `globalThis.crypto.subtle.digest` must be available.
 - `TextEncoder` must be available for UTF-8 conversion.
-- The browser test suite currently verifies digest parity in Chromium through Vitest browser mode and Playwright.
+- CI verifies digest parity in Chromium, Firefox, and WebKit on desktop, plus Chromium and WebKit mobile emulation through Vitest browser mode and Playwright.
+
+See [Browser and worker usage](../browser-and-worker-usage/) for the supported in-browser calling patterns.
 
 ## Current compatibility boundary
 

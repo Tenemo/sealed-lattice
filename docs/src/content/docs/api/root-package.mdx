@@ -1,19 +1,34 @@
 ---
 title: Root package
-description: The current safe root export for the sealed-lattice package.
+description: The supported public import surface for the current package.
+sidebar:
+  order: 1
 ---
 
-The root package currently exposes exactly two symbols:
+Use the root package for all supported public imports. The package does not ship supported public subpath entrypoints.
+
+## What lives here
 
 - `sha256Hex`
 - `UnsupportedRuntimeError`
 
-Use the root package when you want the supported digest helper without taking a dependency on future lower-level structure that is still subject to change.
+## Typical import style
 
 ```typescript
-import { sha256Hex } from 'sealed-lattice';
+import { sha256Hex, UnsupportedRuntimeError } from 'sealed-lattice';
 
 const digest = await sha256Hex('sealed-lattice');
 ```
 
-For the generated symbol reference, see the [`sealed-lattice` module page](/api/reference/sealed-lattice/).
+## Use the root package when
+
+- you want the supported digest helper
+- you want the typed runtime failure for missing Web Crypto digest support
+- you want the current stable surface without depending on future internal structure
+
+## Explore the generated reference when
+
+- you need exact signatures, types, and return shapes
+- you are wiring the current helper into a larger application and want contract-level detail
+
+For the generated symbol reference, see the [`sealed-lattice` module page](../reference/sealed-lattice/).

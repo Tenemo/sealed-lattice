@@ -1,6 +1,6 @@
 import { performance } from 'node:perf_hooks';
 
-import { sha256Hex } from '#root';
+import { sha256Hex } from '#core';
 
 type BenchmarkCase = {
     input: string | Uint8Array;

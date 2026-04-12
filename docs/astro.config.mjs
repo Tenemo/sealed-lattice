@@ -1,15 +1,16 @@
 import mdx from '@astrojs/mdx';
-import starlight from '@astrojs/starlight';
+import StarlightIntegration from '@astrojs/starlight';
 import { defineConfig } from 'astro/config';
 
 export default defineConfig({
     site: 'https://tenemo.github.io',
     base: '/sealed-lattice',
     integrations: [
-        starlight({
+        StarlightIntegration({
             title: 'sealed-lattice',
             description:
                 'Browser-native sealed-lattice documentation for the current public package surface and future post-quantum voting research.',
+            disable404Route: true,
             social: [
                 {
                     icon: 'github',
@@ -17,11 +18,7 @@ export default defineConfig({
                     href: 'https://github.com/Tenemo/sealed-lattice',
                 },
             ],
-            editLink: {
-                baseUrl:
-                    'https://github.com/Tenemo/sealed-lattice/edit/master/docs/',
-            },
-            customCss: ['./src/styles/custom.css', './src/styles/layout.css'],
+            customCss: ['./src/styles/custom.css'],
             sidebar: [
                 {
                     label: 'Guides',
@@ -44,7 +41,6 @@ export default defineConfig({
                     items: [
                         'api',
                         'api/root-package',
-                        'api/public-boundary',
                         {
                             label: 'Generated reference',
                             collapsed: true,

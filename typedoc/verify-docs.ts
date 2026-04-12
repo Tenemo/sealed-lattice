@@ -8,7 +8,7 @@ import {
     type DeclarationReflection,
 } from 'typedoc';
 
-import typedocConfig from '../typedoc.config.mjs';
+import config from '../typedoc.config.mjs';
 
 import {
     apiNavigationJson,
@@ -27,7 +27,6 @@ const documentedPublicApi = publicApiDocs as readonly {
 const requiredApiEntryPages = [
     `${docsContentRoot}/api/index.mdx`,
     `${docsContentRoot}/api/root-package.mdx`,
-    `${docsContentRoot}/api/public-boundary.mdx`,
     ...documentedPublicApi.map((entry) => entry.apiIndexPage),
     apiNavigationJson,
 ] as const;
@@ -51,6 +50,108 @@ const normalizeLinkTarget = (rawTarget: string): string => {
 
 const toRepoRelativePath = (absolutePath: string): string =>
     path.relative(repoRoot, absolutePath).replace(/\\/g, '/');
+
+const isWithinDirectory = (directory: string, candidate: string): boolean => {
+    const relativePath = path.relative(directory, candidate);
+
+    return (
+        relativePath === '' ||
+        (!relativePath.startsWith('..') && !path.isAbsolute(relativePath))
+    );
+};
+
+const isDocsContentFile = (candidate: string): boolean =>
+    isWithinDirectory(docsRoot, candidate);
+
+const isDocsRouteLink = (
+    fromFile: string,
+    normalizedTarget: string,
+): boolean => {
+    const isAbsoluteDocsRoute =
+        normalizedTarget === '/' ||
+        normalizedTarget.startsWith('/guides/') ||
+        normalizedTarget.startsWith('/spec/') ||
+        normalizedTarget.startsWith('/api/');
+    if (normalizedTarget.startsWith('/')) {
+        return isAbsoluteDocsRoute;
+    }
+
+    if (!isDocsContentFile(fromFile)) {
+        return false;
+    }
+
+    const extension = path.extname(normalizedTarget).toLowerCase();
+
+    return (
+        normalizedTarget.endsWith('/') ||
+        extension === '' ||
+        extension === '.md' ||
+        extension === '.mdx'
+    );
+};
+
+const toDocsRoutePath = (absolutePath: string): string => {
+    const relativePath = path
+        .relative(docsRoot, absolutePath)
+        .replace(/\\/g, '/');
+    const extension = path.extname(relativePath);
+    const fileName = path.basename(relativePath, extension);
+    const directorySegments = path
+        .dirname(relativePath)
+        .split(path.sep)
+        .join('/')
+        .split('/')
+        .filter(Boolean)
+        .map((segment) => segment.toLowerCase());
+    const routeSegments =
+        fileName === 'index'
+            ? directorySegments
+            : [...directorySegments, fileName.toLowerCase()];
+
+    return routeSegments.length === 0 ? '/' : `/${routeSegments.join('/')}/`;
+};
+
+const stripMarkdownRouteExtension = (target: string): string => {
+    if (target.endsWith('.md') || target.endsWith('.mdx')) {
+        return target.slice(0, -path.extname(target).length);
+    }
+
+    return target;
+};
+
+const normalizeDocsRouteTarget = (target: string): string => {
+    const withoutExtension = stripMarkdownRouteExtension(target);
+    const withoutIndex = withoutExtension.endsWith('/index')
+        ? withoutExtension.slice(0, -'/index'.length)
+        : withoutExtension;
+
+    if (withoutIndex === '/') {
+        return '/';
+    }
+
+    return `${withoutIndex.replace(/\/+$/u, '')}/`;
+};
+
+const resolveDocsRouteTarget = (
+    fromFile: string,
+    normalizedTarget: string,
+): string | undefined => {
+    if (!isDocsRouteLink(fromFile, normalizedTarget)) {
+        return undefined;
+    }
+
+    if (normalizedTarget.startsWith('/')) {
+        return normalizeDocsRouteTarget(normalizedTarget);
+    }
+
+    const routeBase = toDocsRoutePath(fromFile);
+    const absoluteRoute = path.posix.resolve(
+        routeBase,
+        stripMarkdownRouteExtension(normalizedTarget),
+    );
+
+    return normalizeDocsRouteTarget(absoluteRoute);
+};
 
 const fileExists = async (candidate: string): Promise<boolean> => {
     try {
@@ -158,6 +259,11 @@ const verifyLinks = async (): Promise<string[]> => {
             markdownRoots.map((entry) => collectMarkdownFiles(entry)),
         )
     ).flat();
+    const docsRoutes = new Set(
+        markdownFiles
+            .filter(isDocsContentFile)
+            .map((file) => toDocsRoutePath(file)),
+    );
     const failures: string[] = [];
 
     for (const file of markdownFiles) {
@@ -165,6 +271,19 @@ const verifyLinks = async (): Promise<string[]> => {
         for (const match of content.matchAll(markdownLinkPattern)) {
             const normalizedTarget = normalizeLinkTarget(match[1]);
             if (normalizedTarget === '' || isExternalLink(normalizedTarget)) {
+                continue;
+            }
+
+            const docsRouteTarget = resolveDocsRouteTarget(
+                file,
+                normalizedTarget,
+            );
+            if (docsRouteTarget !== undefined) {
+                if (!docsRoutes.has(docsRouteTarget)) {
+                    failures.push(
+                        `${toRepoRelativePath(file)} -> ${normalizedTarget}`,
+                    );
+                }
                 continue;
             }
 
@@ -276,8 +395,8 @@ const publicReflectionKinds =
     ReflectionKind.Interface |
     ReflectionKind.Variable;
 
-const verifyTypedocSummaries = async (): Promise<string[]> => {
-    const app = await Application.bootstrapWithPlugins(typedocConfig);
+const verifyTypeDocSummaries = async (): Promise<string[]> => {
+    const app = await Application.bootstrapWithPlugins(config);
     const project = await app.convert();
 
     if (project === undefined) {
@@ -321,7 +440,7 @@ const verifyTypedocSummaries = async (): Promise<string[]> => {
 const main = async (): Promise<void> => {
     const linkFailures = await verifyLinks();
     const apiFailures = await verifyApiEntryPages();
-    const summaryFailures = await verifyTypedocSummaries();
+    const summaryFailures = await verifyTypeDocSummaries();
 
     const failures: string[] = [];
 

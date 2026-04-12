@@ -28,6 +28,36 @@ const leadingHeadingPattern = /^# .+\r?\n\r?\n/;
 const toReferenceRelativePath = (absolutePath: string): string =>
     path.relative(referenceRoot, absolutePath).replace(/\\/g, '/');
 
+const toRoutePath = (absolutePath: string): string => {
+    const relativePath = toReferenceRelativePath(absolutePath);
+    const extension = path.extname(relativePath);
+    const fileName = path.basename(relativePath, extension);
+    const directorySegments = path
+        .dirname(relativePath)
+        .split(path.sep)
+        .join('/')
+        .split('/')
+        .filter(Boolean)
+        .map((segment) => segment.toLowerCase());
+    const routeSegments =
+        fileName === 'index'
+            ? directorySegments
+            : [...directorySegments, fileName.toLowerCase()];
+
+    return routeSegments.length === 0 ? '/' : `/${routeSegments.join('/')}/`;
+};
+
+const toRelativeRouteTarget = (fromFile: string, rawTarget: string): string => {
+    const absoluteTarget = path.resolve(path.dirname(fromFile), rawTarget);
+    const fromRoute = toRoutePath(fromFile);
+    const targetRoute = toRoutePath(absoluteTarget);
+    const fromSegments = fromRoute.slice(1, -1);
+    const targetSegments = targetRoute.slice(1, -1);
+    const relativeTarget = path.posix.relative(fromSegments, targetSegments);
+
+    return relativeTarget === '' ? './' : `${relativeTarget}/`;
+};
+
 const collectMarkdownFiles = async (directory: string): Promise<string[]> => {
     const files: string[] = [];
     const pending = [directory];
@@ -74,7 +104,7 @@ const deriveSidebarOrder = (relativePath: string): number | undefined => {
     return moduleOrder.get(moduleName);
 };
 
-const rewriteMarkdownLinks = (content: string): string =>
+const rewriteMarkdownLinks = (content: string, fromFile: string): string =>
     content.replace(
         internalLinkPattern,
         (fullMatch, label, rawTarget: string, hash = ''): string => {
@@ -88,10 +118,7 @@ const rewriteMarkdownLinks = (content: string): string =>
                 return fullMatch;
             }
 
-            const withoutExtension = rawTarget.slice(0, -'.md'.length);
-            const rewrittenTarget = withoutExtension.endsWith('/index')
-                ? `${withoutExtension.slice(0, -'/index'.length) || '.'}/`
-                : `${withoutExtension}/`;
+            const rewrittenTarget = toRelativeRouteTarget(fromFile, rawTarget);
 
             return `${label}(${rewrittenTarget}${hash})`;
         },
@@ -143,7 +170,7 @@ const main = async (): Promise<void> => {
         let content = await fs.readFile(file, 'utf8');
         content = content.replace(breadcrumbPattern, '');
         content = content.replace(leadingHeadingPattern, '');
-        content = rewriteMarkdownLinks(content);
+        content = rewriteMarkdownLinks(content, file);
 
         const frontmatterLines = [
             '---',

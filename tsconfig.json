@@ -3,9 +3,9 @@
         "baseUrl": ".",
         "ignoreDeprecations": "6.0",
         "paths": {
+            "sealed-lattice": ["./src/index.ts"],
             "#root": ["./src/index.ts"],
-            "#test-vectors/*": ["./test-vectors/*"],
-            "#tools/*": ["./tools/*"]
+            "#core": ["./src/core/index.ts"]
         },
         "target": "ES2020",
         "module": "ESNext",

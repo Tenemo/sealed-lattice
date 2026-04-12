@@ -8,17 +8,22 @@ import { CardGrid, LinkCard } from '@astrojs/starlight/components';
 <CardGrid>
   <LinkCard
     title="Get started"
-    href="/guides/getting-started/"
+    href="./getting-started/"
     description="Install the package, hash your first input, and understand the current package scope."
   />
   <LinkCard
     title="Runtime and compatibility"
-    href="/guides/runtime-and-compatibility/"
+    href="./runtime-and-compatibility/"
     description="Review Web Crypto, ESM, Node, and browser expectations."
   />
   <LinkCard
+    title="Browser and worker usage"
+    href="./browser-and-worker-usage/"
+    description="Run the shipped helper in browsers and workers without relying on hidden fallbacks."
+  />
+  <LinkCard
     title="Security and non-goals"
-    href="/guides/security-and-non-goals/"
+    href="./security-and-non-goals/"
     description="See the current security boundary and the capabilities intentionally deferred."
   />
 </CardGrid>
