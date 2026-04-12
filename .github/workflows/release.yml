@@ -397,12 +397,14 @@ jobs:
         run: |
           if [[ "${{ needs.prepare-release.outputs.prerelease }}" == "true" ]]; then
             gh release create "${{ needs.prepare-release.outputs.tag }}" \
+              --repo "${{ github.repository }}" \
               --verify-tag \
               --title "${{ needs.prepare-release.outputs.tag }}" \
               --generate-notes \
               --prerelease
           else
             gh release create "${{ needs.prepare-release.outputs.tag }}" \
+              --repo "${{ github.repository }}" \
               --verify-tag \
               --title "${{ needs.prepare-release.outputs.tag }}" \
               --generate-notes
