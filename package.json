@@ -1,6 +1,6 @@
 {
     "name": "sealed-lattice",
-    "version": "0.0.7",
+    "version": "0.0.8",
     "description": "A browser-native TypeScript package for sealed-lattice research prototypes, currently shipping a narrow SHA-256 helper while the post-quantum architecture remains intentionally unfrozen.",
     "author": "Piotr Piech <piotr@piech.dev>",
     "license": "MPL-2.0",
