@@ -8,7 +8,7 @@ const config = {
     plugin: ['typedoc-plugin-markdown', './typedoc/sentence-case-plugin.ts'],
     out: 'docs/src/content/docs/api/reference',
     router: 'member',
-    readme: 'typedoc.readme.md',
+    readme: 'typedoc/generated-reference-intro.md',
     entryFileName: 'index.md',
     navigationJson: 'docs/src/content/docs/api/reference/navigation.json',
     cleanOutputDir: true,
@@ -19,6 +19,9 @@ const config = {
     excludePrivate: true,
     excludeProtected: true,
     excludeInternal: true,
+    validation: {
+        notExported: false,
+    },
     classPropertiesFormat: 'table',
     interfacePropertiesFormat: 'table',
     indexFormat: 'table',

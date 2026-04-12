@@ -18,11 +18,7 @@ export default defineConfig({
                     href: 'https://github.com/Tenemo/sealed-lattice',
                 },
             ],
-            editLink: {
-                baseUrl:
-                    'https://github.com/Tenemo/sealed-lattice/edit/master/docs/',
-            },
-            customCss: ['./src/styles/custom.css', './src/styles/layout.css'],
+            customCss: ['./src/styles/custom.css'],
             sidebar: [
                 {
                     label: 'Guides',

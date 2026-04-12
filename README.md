@@ -22,7 +22,7 @@ The current implementation ships:
 
 - a real `sha256Hex` helper on the safe root package
 - a typed `UnsupportedRuntimeError` for missing Web Crypto support
-- the same repo, docs, testing, and publish workflow shape used by `threshold-elgamal`
+- a hardened repo, docs, testing, and publish workflow around that narrow surface
 - a deliberately narrow public surface while the lattice-native architecture is still being proven
 
 This repository is a hardened research prototype. It is not audited production voting software.
@@ -31,7 +31,7 @@ This repository is a hardened research prototype. It is not audited production v
 
 This repository currently tracks the initial public `sealed-lattice` surface.
 
-The public surface is intentionally narrow while the repo, CI, docs, tests, coverage, and packaging experience are brought up to parity with the existing classical baseline. Lattice cryptography, threshold flows, transport payloads, proofs, protocol types, and any future subpath structure are still being designed and are not frozen yet.
+The public surface is intentionally narrow while the repo, CI, docs, tests, coverage, and packaging experience are stabilized. Lattice cryptography, threshold flows, transport payloads, proofs, protocol types, and any future subpath structure are still being designed and are not frozen yet.
 
 ## Installation
 
@@ -74,12 +74,16 @@ No additional public subpaths are promised yet. Future capability areas such as 
 ## Development
 
 ```bash
-pnpm install --frozen-lockfile
+pnpm install
 pnpm run lint
 pnpm run tsc
-pnpm exec knip
 pnpm run test
 pnpm run build
+```
+
+For the full packaging and docs verification path, run:
+
+```bash
 pnpm run smoke:pack
 pnpm run verify:docs
 pnpm run docs:build:site

@@ -36,7 +36,7 @@ jobs:
       - run: pnpm run lint
       - run: pnpm run tsc
       - run: pnpm exec knip
-      - run: pnpm exec tsx ./tests/guards/check-no-math-random.ts
+      - run: pnpm exec tsx ./tools/ci/verify-no-math-random.ts
       - run: pnpm exec tsx ./tools/ci/verify-package-surface.ts
       - run: pnpm exec tsx ./tools/ci/verify-vectors.ts
       - run: pnpm exec vitest --project node --run

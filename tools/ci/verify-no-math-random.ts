@@ -1,9 +1,9 @@
 import { readdir, readFile } from 'node:fs/promises';
-import * as path from 'node:path';
+import path from 'node:path';
 import { exit } from 'node:process';
 import { fileURLToPath } from 'node:url';
 
-const rootDir = path.resolve(
+const repoRoot = path.resolve(
     path.dirname(fileURLToPath(import.meta.url)),
     '..',
     '..',
@@ -34,13 +34,13 @@ const walk = async (directory: string): Promise<void> => {
 
         const contents = await readFile(entryPath, 'utf8');
         if (contents.includes('Math.random')) {
-            offenders.push(path.relative(rootDir, entryPath));
+            offenders.push(path.relative(repoRoot, entryPath));
         }
     }
 };
 
 for (const relativeDirectory of sourceDirectories) {
-    await walk(path.join(rootDir, relativeDirectory));
+    await walk(path.join(repoRoot, relativeDirectory));
 }
 
 if (offenders.length > 0) {

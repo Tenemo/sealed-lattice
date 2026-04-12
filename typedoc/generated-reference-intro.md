@@ -14,6 +14,6 @@ or the protocol spec.
 ## How to read this reference
 
 - Start with the curated [API reference](/api/) unless you already know which
-  subpath you need.
+  module you need.
 - Use the generated module pages when you need exact types, signatures, and
   symbol-level details.
