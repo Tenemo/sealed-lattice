@@ -9,6 +9,7 @@ type ExportEntry = {
 
 type PackageManifest = {
     exports: Record<string, ExportEntry>;
+    files?: string[];
     name: string;
 };
 
@@ -16,7 +17,6 @@ type ModuleNamespace = Record<string, unknown>;
 
 const repoRoot = process.cwd();
 const packagePath = path.resolve(repoRoot, 'package.json');
-const npmignorePath = path.resolve(repoRoot, '.npmignore');
 const expectedRootExports = ['UnsupportedRuntimeError', 'sha256Hex'] as const;
 
 const assertFileExists = async (relativePath: string): Promise<void> => {
@@ -42,6 +42,11 @@ const main = async (): Promise<void> => {
         failures.push(
             `Package name must be "sealed-lattice", received "${manifest.name}".`,
         );
+    }
+
+    const files = manifest.files ?? [];
+    if (JSON.stringify(files) !== JSON.stringify(['dist'])) {
+        failures.push('Package files must be exactly ["dist"].');
     }
 
     const exportKeys = Object.keys(manifest.exports).sort();
@@ -76,15 +81,6 @@ const main = async (): Promise<void> => {
         } catch {
             failures.push(`Missing Typedoc entrypoint ${typedocEntryPoint}.`);
         }
-    }
-
-    const npmignore = (await readFile(npmignorePath, 'utf8'))
-        .replace(/\r\n/g, '\n')
-        .trim();
-    if (npmignore !== '*\n!dist/**') {
-        failures.push(
-            '.npmignore must preserve the dist-only tarball policy via "*" and "!dist/**".',
-        );
     }
 
     const rootModule = await importModuleAt('src/index.ts');

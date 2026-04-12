@@ -13,6 +13,7 @@ jobs:
   workflow-lint:
     name: workflow-lint
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6.0.2
       - name: lint workflows
@@ -21,6 +22,7 @@ jobs:
   node:
     name: node
     runs-on: ubuntu-latest
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v6.0.2
       - uses: pnpm/action-setup@v5.0.0
@@ -33,15 +35,18 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm run lint
       - run: pnpm run typecheck
+      - run: pnpm run knip
       - run: pnpm run guard:no-math-random
       - run: pnpm run verify:package-surface
+      - run: pnpm run verify:vectors
       - run: pnpm run test:node
       - run: pnpm run build:skip
-      - run: pnpm run package:smoke
+      - run: pnpm run smoke:pack
 
   browser:
     name: browser
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6.0.2
       - uses: pnpm/action-setup@v5.0.0
@@ -58,6 +63,7 @@ jobs:
   docs:
     name: docs
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v6.0.2
       - uses: pnpm/action-setup@v5.0.0
@@ -68,7 +74,10 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm run docs:ci
+      - run: pnpm run verify:docs
+      - run: pnpm run coverage:badge
+      - run: pnpm run docs:build:site
+      - run: pnpm run verify:docs:build
       - name: upload docs dist
         if: ${{ github.event_name == 'pull_request' && always() }}
         uses: actions/upload-artifact@v7.0.0

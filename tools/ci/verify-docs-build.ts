@@ -5,7 +5,7 @@ import {
     createCoverageArtifacts,
     type CoverageSummary,
     type ShieldsBadge,
-} from './generate-coverage-badge';
+} from '../generate-coverage-badge';
 
 const repoRoot = process.cwd();
 const docsDistRoot = path.resolve(repoRoot, 'docs/dist');

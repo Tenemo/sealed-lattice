@@ -35,6 +35,7 @@ jobs:
   release:
     name: release
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     defaults:
       run:
         shell: bash
@@ -139,7 +140,12 @@ jobs:
 
       - run: pnpm exec playwright install --with-deps chromium
 
-      - run: pnpm run ci
+      - run: pnpm run build
+      - run: pnpm run smoke:pack
+      - run: pnpm run test:browser
+      - run: pnpm run verify:docs
+      - run: pnpm run docs:build:site
+      - run: pnpm run verify:docs:build
 
       - name: commit release metadata
         run: |

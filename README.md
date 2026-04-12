@@ -75,8 +75,13 @@ No additional public subpaths are promised yet. Future capability areas such as 
 
 ```bash
 pnpm install --frozen-lockfile
-pnpm run vectors:core
-pnpm run ci
+pnpm run lint
+pnpm run tsc
+pnpm run knip
+pnpm run test
+pnpm run build
+pnpm run smoke:pack
+pnpm run docs:ci
 ```
 
 For the current digest microbenchmark, run:
