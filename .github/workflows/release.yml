@@ -134,7 +134,7 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm exec playwright install --with-deps chromium firefox webkit
 
       - run: pnpm run build
       - run: pnpm run verify:docs
