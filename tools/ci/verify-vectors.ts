@@ -3,26 +3,20 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
 const repoRootUrl = new URL('../../', import.meta.url);
+const repoRoot = fileURLToPath(repoRootUrl);
+
 const packageManagerEntrypoint = process.env.npm_execpath;
-const packageManagerCommand =
-    packageManagerEntrypoint === undefined
-        ? process.platform === 'win32'
-            ? 'pnpm.cmd'
-            : 'pnpm'
-        : process.execPath;
+if (packageManagerEntrypoint === undefined) {
+    throw new Error('npm_execpath is required to run package manager commands');
+}
 
 const vectorFile = 'test-vectors/core.json';
 
 const runPackageManager = (args: readonly string[]): void => {
-    const commandArgs =
-        packageManagerEntrypoint === undefined
-            ? [...args]
-            : [packageManagerEntrypoint, ...args];
-    const commandDescription = [packageManagerCommand, ...commandArgs].join(
-        ' ',
-    );
-    const result = spawnSync(packageManagerCommand, commandArgs, {
-        cwd: fileURLToPath(repoRootUrl),
+    const commandArgs = [packageManagerEntrypoint, ...args];
+    const commandDescription = [process.execPath, ...commandArgs].join(' ');
+    const result = spawnSync(process.execPath, commandArgs, {
+        cwd: repoRoot,
         stdio: 'inherit',
         env: process.env,
     });
@@ -44,9 +38,6 @@ const runPackageManager = (args: readonly string[]): void => {
     }
 };
 
-const normalizeJson = (content: string): string =>
-    JSON.stringify(JSON.parse(content));
-
 const main = async (): Promise<void> => {
     const originalContent = await readFile(
         new URL(vectorFile, repoRootUrl),
@@ -54,13 +45,13 @@ const main = async (): Promise<void> => {
     );
 
     try {
-        runPackageManager(['exec', 'tsx', './tools/generate-core-vectors.ts']);
+        runPackageManager(['run', 'vectors:core']);
 
         const currentContent = await readFile(
             new URL(vectorFile, repoRootUrl),
             'utf8',
         );
-        if (normalizeJson(currentContent) !== normalizeJson(originalContent)) {
+        if (currentContent !== originalContent) {
             throw new Error(
                 `Generated vectors drifted from the committed fixture: ${vectorFile}`,
             );

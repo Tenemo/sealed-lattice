@@ -7,6 +7,7 @@ export class UnsupportedRuntimeError extends Error {
         message = 'sealed-lattice requires globalThis.crypto.subtle.digest.',
     ) {
         super(message);
-        this.name = 'UnsupportedRuntimeError';
+        this.name = new.target.name;
+        Object.setPrototypeOf(this, new.target.prototype);
     }
 }

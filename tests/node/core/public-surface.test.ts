@@ -9,4 +9,10 @@ describe('public package surface', () => {
             'sha256Hex',
         ]);
     });
+
+    it('keeps internal core helpers out of the root export', () => {
+        expect(publicApi).not.toHaveProperty('bytesToHex');
+        expect(publicApi).not.toHaveProperty('getWebCrypto');
+        expect(publicApi).not.toHaveProperty('normalizeInputToBytes');
+    });
 });

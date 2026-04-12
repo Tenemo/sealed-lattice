@@ -67,6 +67,7 @@ No additional public subpaths are promised yet. Future capability areas such as 
 
 - Hosted documentation site: [tenemo.github.io/sealed-lattice](https://tenemo.github.io/sealed-lattice/)
 - Get started: [tenemo.github.io/sealed-lattice/guides/getting-started](https://tenemo.github.io/sealed-lattice/guides/getting-started/)
+- Browser and worker usage: [tenemo.github.io/sealed-lattice/guides/browser-and-worker-usage](https://tenemo.github.io/sealed-lattice/guides/browser-and-worker-usage/)
 - Runtime and compatibility: [tenemo.github.io/sealed-lattice/guides/runtime-and-compatibility](https://tenemo.github.io/sealed-lattice/guides/runtime-and-compatibility/)
 - Security and non-goals: [tenemo.github.io/sealed-lattice/guides/security-and-non-goals](https://tenemo.github.io/sealed-lattice/guides/security-and-non-goals/)
 - API reference: [tenemo.github.io/sealed-lattice/api](https://tenemo.github.io/sealed-lattice/api/)

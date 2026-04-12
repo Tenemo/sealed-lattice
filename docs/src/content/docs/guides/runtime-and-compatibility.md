@@ -19,6 +19,8 @@ Phase one is ESM-only and requires Web Crypto hashing.
 - `TextEncoder` must be available for UTF-8 conversion.
 - The browser test suite currently verifies digest parity in Chromium through Vitest browser mode and Playwright.
 
+See [Browser and worker usage](/guides/browser-and-worker-usage/) for the supported in-browser calling patterns.
+
 ## Current compatibility boundary
 
 - The shipped helper uses SHA-256 only.
