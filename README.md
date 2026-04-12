@@ -43,6 +43,7 @@ pnpm add sealed-lattice
 
 - Use ESM imports such as `import { sha256Hex } from 'sealed-lattice'`. The published package does not expose CommonJS `require()` entry points.
 - Browsers need `globalThis.crypto.subtle` and `TextEncoder`.
+- CI validates Chromium, Firefox, and WebKit on desktop, plus Chromium and WebKit in mobile emulation.
 - Node requires version `24.14.1` or newer with `globalThis.crypto`.
 
 ## Safe quickstart
