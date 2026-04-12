@@ -77,11 +77,13 @@ No additional public subpaths are promised yet. Future capability areas such as 
 pnpm install --frozen-lockfile
 pnpm run lint
 pnpm run tsc
-pnpm run knip
+pnpm exec knip
 pnpm run test
 pnpm run build
 pnpm run smoke:pack
-pnpm run docs:ci
+pnpm run verify:docs
+pnpm run docs:build:site
+pnpm exec tsx ./tools/ci/verify-docs-build.ts
 ```
 
 For the current digest microbenchmark, run:

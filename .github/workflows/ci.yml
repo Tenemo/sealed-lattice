@@ -34,13 +34,13 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm run lint
-      - run: pnpm run typecheck
-      - run: pnpm run knip
-      - run: pnpm run guard:no-math-random
-      - run: pnpm run verify:package-surface
-      - run: pnpm run verify:vectors
-      - run: pnpm run test:node
-      - run: pnpm run build:skip
+      - run: pnpm run tsc
+      - run: pnpm exec knip
+      - run: pnpm exec tsx ./tests/guards/check-no-math-random.ts
+      - run: pnpm exec tsx ./tools/ci/verify-package-surface.ts
+      - run: pnpm exec tsx ./tools/ci/verify-vectors.ts
+      - run: pnpm exec vitest --project node --run
+      - run: pnpm exec del-cli dist && tsc --project tsconfig.build.json
       - run: pnpm run smoke:pack
 
   browser:
@@ -58,7 +58,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec playwright install --with-deps chromium
-      - run: pnpm run test:browser
+      - run: pnpm exec vitest --project browser --run
 
   docs:
     name: docs
@@ -77,7 +77,7 @@ jobs:
       - run: pnpm run verify:docs
       - run: pnpm run coverage:badge
       - run: pnpm run docs:build:site
-      - run: pnpm run verify:docs:build
+      - run: pnpm exec tsx ./tools/ci/verify-docs-build.ts
       - name: upload docs dist
         if: ${{ github.event_name == 'pull_request' && always() }}
         uses: actions/upload-artifact@v7.0.0

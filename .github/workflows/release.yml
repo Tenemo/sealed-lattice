@@ -142,10 +142,9 @@ jobs:
 
       - run: pnpm run build
       - run: pnpm run smoke:pack
-      - run: pnpm run test:browser
       - run: pnpm run verify:docs
       - run: pnpm run docs:build:site
-      - run: pnpm run verify:docs:build
+      - run: pnpm exec tsx ./tools/ci/verify-docs-build.ts
 
       - name: commit release metadata
         run: |
