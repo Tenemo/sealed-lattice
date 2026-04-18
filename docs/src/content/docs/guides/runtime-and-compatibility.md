@@ -27,11 +27,11 @@ The browser path is intentionally simple:
 
 - use modern browsers with native Web Crypto digest support
 - require `TextEncoder`
-- validate your target environments with `pnpm run verify:browser-compat`
+- validate your target environments with `pnpm run test:browser`
 
-The local compatibility probe runs the targets supported on your current
-platform. CI verifies digest parity in Chromium, Firefox, and WebKit on
-desktop, plus Chromium and WebKit in mobile emulation on macOS.
+CI verifies digest parity in Chromium, Firefox, and WebKit on desktop, plus
+Chromium and WebKit in mobile emulation on macOS through the browser Vitest
+projects.
 
 ## Application-owned runtime concerns
 
@@ -53,4 +53,4 @@ workers itself.
 - Output is always a lowercase hexadecimal string.
 - Missing native digest support raises `UnsupportedRuntimeError`.
 
-The [API docs](../../api/) list the exact function contract.
+The [API reference](../../api/) lists the exact function contract.

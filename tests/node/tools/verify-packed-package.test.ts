@@ -117,7 +117,7 @@ describe('packed package smoke helpers', () => {
     });
 
     it('requires npm_execpath when no override is provided', () => {
-        const originalPackageManagerEntrypoint = process.env.npm_execpath;
+        const originalPackageManagerEntryPointPath = process.env.npm_execpath;
 
         delete process.env.npm_execpath;
 
@@ -126,10 +126,10 @@ describe('packed package smoke helpers', () => {
                 'npm_execpath is required to run package manager commands when --package-manager is not provided',
             );
         } finally {
-            if (originalPackageManagerEntrypoint === undefined) {
+            if (originalPackageManagerEntryPointPath === undefined) {
                 delete process.env.npm_execpath;
             } else {
-                process.env.npm_execpath = originalPackageManagerEntrypoint;
+                process.env.npm_execpath = originalPackageManagerEntryPointPath;
             }
         }
     });

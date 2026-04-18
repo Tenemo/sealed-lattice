@@ -30,14 +30,15 @@ type SpawnCommand = {
 const supportedPackageManagers = new Set<PackageManager>(['npm', 'pnpm']);
 
 export const parsePackageManagerOverride = (
-    argv: readonly string[],
+    commandLineArguments: readonly string[],
 ): PackageManager | undefined => {
-    const packageManagerIndex = argv.indexOf('--package-manager');
+    const packageManagerIndex =
+        commandLineArguments.indexOf('--package-manager');
     if (packageManagerIndex === -1) {
         return undefined;
     }
 
-    const packageManager = argv[packageManagerIndex + 1];
+    const packageManager = commandLineArguments[packageManagerIndex + 1];
     if (packageManager === undefined) {
         throw new Error('--package-manager requires a value');
     }
@@ -51,18 +52,18 @@ export const parsePackageManagerOverride = (
 };
 
 export const detectPackageManager = (
-    packageManagerEntrypoint: string,
+    packageManagerEntryPointPath: string,
 ): PackageManager => {
-    const normalizedEntrypoint = packageManagerEntrypoint.toLowerCase();
-    if (normalizedEntrypoint.includes('pnpm')) {
+    const normalizedEntryPointPath = packageManagerEntryPointPath.toLowerCase();
+    if (normalizedEntryPointPath.includes('pnpm')) {
         return 'pnpm';
     }
-    if (normalizedEntrypoint.includes('npm')) {
+    if (normalizedEntryPointPath.includes('npm')) {
         return 'npm';
     }
 
     throw new Error(
-        `Unsupported package manager entrypoint: ${packageManagerEntrypoint}`,
+        `Unsupported package manager entry point: ${packageManagerEntryPointPath}`,
     );
 };
 
@@ -74,10 +75,11 @@ export const getPackageManagerExecutableName = (
 };
 
 export const resolvePackageManagerRunner = (
-    argv: readonly string[],
-    packageManagerEntrypoint = process.env.npm_execpath,
+    commandLineArguments: readonly string[],
+    packageManagerEntryPointPath = process.env.npm_execpath,
 ): PackageManagerRunner => {
-    const packageManagerOverride = parsePackageManagerOverride(argv);
+    const packageManagerOverride =
+        parsePackageManagerOverride(commandLineArguments);
     if (packageManagerOverride !== undefined) {
         return {
             command: getPackageManagerExecutableName(packageManagerOverride),
@@ -86,7 +88,7 @@ export const resolvePackageManagerRunner = (
         };
     }
 
-    if (packageManagerEntrypoint === undefined) {
+    if (packageManagerEntryPointPath === undefined) {
         throw new Error(
             'npm_execpath is required to run package manager commands when --package-manager is not provided',
         );
@@ -94,8 +96,8 @@ export const resolvePackageManagerRunner = (
 
     return {
         command: process.execPath,
-        commandArgsPrefix: [packageManagerEntrypoint],
-        kind: detectPackageManager(packageManagerEntrypoint),
+        commandArgsPrefix: [packageManagerEntryPointPath],
+        kind: detectPackageManager(packageManagerEntryPointPath),
     };
 };
 
@@ -114,10 +116,10 @@ export const createInstallArguments = (
 
 export const createPackageManagerSpawnCommand = (
     runner: PackageManagerRunner,
-    args: readonly string[],
+    commandArguments: readonly string[],
     commandShell: string = process.env.ComSpec ?? 'cmd.exe',
 ): SpawnCommand => {
-    const commandArgs = [...runner.commandArgsPrefix, ...args];
+    const commandArgs = [...runner.commandArgsPrefix, ...commandArguments];
     const description = [runner.command, ...commandArgs].join(' ');
 
     if (runner.command.endsWith('.cmd')) {
@@ -137,10 +139,13 @@ export const createPackageManagerSpawnCommand = (
 
 const runPackageManager = (
     runner: PackageManagerRunner,
-    args: readonly string[],
+    commandArguments: readonly string[],
     cwd: string,
 ): void => {
-    const spawnCommand = createPackageManagerSpawnCommand(runner, args);
+    const spawnCommand = createPackageManagerSpawnCommand(
+        runner,
+        commandArguments,
+    );
     const result = spawnSync(spawnCommand.command, spawnCommand.args, {
         cwd,
         env: process.env,
@@ -235,12 +240,12 @@ const main = async (): Promise<void> => {
         });
         if (result.error !== undefined) {
             throw new Error(
-                `Failed to start smoke entrypoint: ${commandDescription}: ${result.error.message}`,
+                `Failed to start smoke entry point: ${commandDescription}: ${result.error.message}`,
             );
         }
         if (result.signal !== null) {
             throw new Error(
-                `Smoke entrypoint terminated by signal ${result.signal}: ${commandDescription}`,
+                `Smoke entry point terminated by signal ${result.signal}: ${commandDescription}`,
             );
         }
         if (result.status !== 0) {
@@ -252,7 +257,7 @@ const main = async (): Promise<void> => {
                     : '';
 
             throw new Error(
-                `Smoke entrypoint exited with status ${result.status ?? 'null'}: ${commandDescription}${formattedOutput}`,
+                `Smoke entry point exited with status ${result.status ?? 'null'}: ${commandDescription}${formattedOutput}`,
             );
         }
 

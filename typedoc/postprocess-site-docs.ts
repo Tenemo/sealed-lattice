@@ -2,14 +2,14 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
 import {
-    apiNavigationJson,
+    apiNavigationPath,
     apiReferenceRoot,
-    publicApiDocs,
-} from './public-api-docs';
+    publicApiReferenceEntries,
+} from './public-api-reference';
 
 const repoRoot = process.cwd();
 const referenceRoot = path.resolve(repoRoot, apiReferenceRoot);
-const navigationPath = path.resolve(repoRoot, apiNavigationJson);
+const navigationPath = path.resolve(repoRoot, apiNavigationPath);
 
 type NavigationItem = {
     children?: NavigationItem[];
@@ -18,7 +18,10 @@ type NavigationItem = {
 };
 
 const moduleOrder = new Map(
-    publicApiDocs.map((entry, index) => [entry.moduleName, index + 1]),
+    publicApiReferenceEntries.map((entry, index) => [
+        entry.moduleName,
+        index + 1,
+    ]),
 );
 
 const internalLinkPattern = /(!?\[[^\]]*])\(([^)#\s]+)(#[^)]+)?\)/g;
@@ -201,7 +204,7 @@ const main = async (): Promise<void> => {
 
     const markdownFiles = await collectMarkdownFiles(referenceRoot);
     const publicModules = new Set(
-        publicApiDocs.map((entry) => entry.moduleName),
+        publicApiReferenceEntries.map((entry) => entry.moduleName),
     );
 
     for (const file of markdownFiles) {
@@ -216,7 +219,7 @@ const main = async (): Promise<void> => {
             : undefined;
         const generatedModuleSummary =
             moduleName !== undefined && publicModules.has(moduleName)
-                ? `Generated reference page for the \`${moduleName}\` export surface.`
+                ? `Generated reference page for the \`${moduleName}\` public API surface.`
                 : undefined;
 
         let content = await fs.readFile(file, 'utf8');

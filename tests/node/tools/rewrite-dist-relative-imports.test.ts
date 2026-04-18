@@ -47,7 +47,7 @@ describe('rewrite dist relative imports', () => {
     it('leaves specifiers with explicit extensions unchanged', async () => {
         const filePath = path.join(
             await createTempDirectory(),
-            'entrypoint.js',
+            'entry-point.js',
         );
 
         await expect(
@@ -57,7 +57,7 @@ describe('rewrite dist relative imports', () => {
 
     it('resolves extensionless specifiers to emitted files', async () => {
         const root = await createTempDirectory();
-        const filePath = path.join(root, 'entrypoint.js');
+        const filePath = path.join(root, 'entry-point.js');
 
         await writeFile(filePath, '', 'utf8');
         await writeFile(path.join(root, 'dep.js'), '', 'utf8');
@@ -69,7 +69,7 @@ describe('rewrite dist relative imports', () => {
 
     it('resolves extensionless specifiers to emitted index files', async () => {
         const root = await createTempDirectory();
-        const filePath = path.join(root, 'entrypoint.js');
+        const filePath = path.join(root, 'entry-point.js');
 
         await mkdir(path.join(root, 'nested'), { recursive: true });
         await writeFile(filePath, '', 'utf8');
@@ -82,7 +82,7 @@ describe('rewrite dist relative imports', () => {
 
     it('rewrites static, re-exported, and dynamic import specifiers', async () => {
         const root = await createTempDirectory();
-        const filePath = path.join(root, 'entrypoint.js');
+        const filePath = path.join(root, 'entry-point.js');
 
         await mkdir(path.join(root, 'nested'), { recursive: true });
         await mkdir(path.join(root, 'dynamic'), { recursive: true });
@@ -111,7 +111,7 @@ describe('rewrite dist relative imports', () => {
 
     it('does not rewrite files that already point to emitted targets', async () => {
         const root = await createTempDirectory();
-        const filePath = path.join(root, 'entrypoint.d.ts');
+        const filePath = path.join(root, 'entry-point.d.ts');
 
         await writeFile(
             filePath,
@@ -127,7 +127,7 @@ describe('rewrite dist relative imports', () => {
 
     it('throws when an emitted runtime target cannot be resolved', async () => {
         const root = await createTempDirectory();
-        const filePath = path.join(root, 'entrypoint.js');
+        const filePath = path.join(root, 'entry-point.js');
 
         await writeFile(filePath, "import './missing';", 'utf8');
 

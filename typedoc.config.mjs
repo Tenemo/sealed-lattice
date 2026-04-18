@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 
-import { typedocEntryPoints } from './typedoc/public-api-docs';
+import { typeDocEntryPoints } from './typedoc/public-api-reference';
 
 const generatedReferenceIntroPath = 'typedoc/generated-reference-intro.md';
 const generatedReferenceIntro = readFileSync(
@@ -18,7 +18,7 @@ if (nonExternalMarkdownLinkPattern.test(generatedReferenceIntro)) {
 
 /** @type {import('typedoc').TypeDocOptions} */
 const config = {
-    entryPoints: typedocEntryPoints,
+    entryPoints: typeDocEntryPoints,
     entryPointStrategy: 'resolve',
     alwaysCreateEntryPointModule: true,
     plugin: ['typedoc-plugin-markdown'],

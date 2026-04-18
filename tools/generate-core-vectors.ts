@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import { sha256Hex } from '#core';
+import { sha256Hex } from '#root';
 
 type TextVectorInput = {
     kind: 'text';
@@ -49,7 +49,7 @@ const coreVectorDefinitions = [
         },
     },
     {
-        id: 'raw-bytes',
+        id: 'hex-encoded-bytes',
         input: {
             kind: 'hex',
             value: '00ff1020aabbccdd',
@@ -81,7 +81,7 @@ const expandCoreVectorInput = (input: CoreVectorInput): string | Uint8Array => {
 };
 
 const repoRoot = process.cwd();
-const outputPath = path.resolve(repoRoot, 'test-vectors/core.json');
+const vectorOutputPath = path.resolve(repoRoot, 'test-vectors/core.json');
 type CoreVector = {
     expected: string;
 } & (typeof coreVectorDefinitions)[number];
@@ -98,9 +98,9 @@ const main = async (): Promise<void> => {
         });
     }
 
-    await mkdir(path.dirname(outputPath), { recursive: true });
+    await mkdir(path.dirname(vectorOutputPath), { recursive: true });
     await writeFile(
-        outputPath,
+        vectorOutputPath,
         `${JSON.stringify(
             {
                 algorithm: 'SHA-256',
@@ -112,7 +112,7 @@ const main = async (): Promise<void> => {
     );
 
     console.log(
-        `Core vectors written to ${path.relative(repoRoot, outputPath)}`,
+        `Core vectors written to ${path.relative(repoRoot, vectorOutputPath)}`,
     );
 };
 

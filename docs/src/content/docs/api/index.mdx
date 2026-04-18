@@ -1,24 +1,66 @@
 ---
-title: API docs
-description: Public API entry points and generated symbol reference for the current package surface.
+title: API reference
+description: The current public API surface and generated symbol reference for the root package.
 editUrl: false
 ---
 
 import { CardGrid, LinkCard } from "@astrojs/starlight/components";
 
-These entry points cover the root package, the generated symbol reference, and
-the guide pages that define how the current surface should be used.
+Use the root package for the full supported public API surface. The package does
+not ship committed public subpath entry points at this stage.
+
+## What lives here
+
+- `sha256Hex`
+- `UnsupportedRuntimeError`
+
+## Common starting points
+
+- digest text or bytes: `sha256Hex`
+- fail closed on missing native support: `UnsupportedRuntimeError`
+
+## Typical import style
+
+```typescript
+import { UnsupportedRuntimeError, sha256Hex } from "sealed-lattice";
+
+const digest = await sha256Hex("sealed-lattice");
+```
+
+## Use the root package when
+
+- you want the supported SHA-256 helper
+- you want the typed runtime failure for missing Web Crypto digest support
+- you want the stable public API surface without depending on future internal structure
+
+## What stays intentionally internal
+
+- lattice encryption and threshold flows
+- serialization and transport boundaries
+- proof systems
+- protocol types
+- any future public subpath layout
+
+## Related workflows
+
+- [Get started](../guides/getting-started/) for the supported rules and quickstart
+- [Runtime and compatibility](../guides/runtime-and-compatibility/) for browser, Node, ESM, and Web Crypto requirements
+- [Browser and worker usage](../guides/browser-and-worker-usage/) for main-thread and worker integration patterns
+- [Security and non-goals](../guides/security-and-non-goals/) for the explicit boundary of the current milestone
+
+## Generated reference coverage
+
+- exact signatures, types, and return shapes for the exported surface
+- contract-level detail for the shipped helper and runtime error type
+- symbol-level detail for the current milestone without implying future public submodules
+
+## Generated reference
 
 <CardGrid>
     <LinkCard
-        title="Root package"
-        href="./root-package/"
-        description="Use the root package as the complete supported import surface for the current milestone."
-    />
-    <LinkCard
         title="Generated reference"
         href="./reference/"
-        description="Browse the exact exports, types, and signatures of the current public surface."
+        description="Browse the exact exports, types, and signatures of the current public API surface."
     />
     <LinkCard
         title="Get started"
