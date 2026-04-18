@@ -1,6 +1,11 @@
 import { fileURLToPath } from 'node:url';
 
-import type { BrowserContextOptions } from 'playwright';
+import type {
+    Browser,
+    BrowserContext,
+    BrowserContextOptions,
+    Page,
+} from 'playwright';
 import { chromium, firefox, webkit } from 'playwright';
 import { createServer } from 'vite';
 
@@ -140,18 +145,22 @@ const runTarget = async (
     baseUrl: string,
     target: BrowserCompatibilityTarget,
 ): Promise<void> => {
-    const browser = await browserTypes[target.browser].launch({
-        headless: true,
-    });
-    const context = await browser.newContext(createContextOptions(target));
-    const page = await context.newPage();
+    let browser: Browser | undefined;
+    let context: BrowserContext | undefined;
+    let page: Page | undefined;
     const pageErrors: string[] = [];
 
-    page.on('pageerror', (error) => {
-        pageErrors.push(error.message);
-    });
-
     try {
+        browser = await browserTypes[target.browser].launch({
+            headless: true,
+        });
+        context = await browser.newContext(createContextOptions(target));
+        page = await context.newPage();
+
+        page.on('pageerror', (error) => {
+            pageErrors.push(error.message);
+        });
+
         await page.goto(new URL(compatibilityPagePath, baseUrl).toString(), {
             waitUntil: 'networkidle',
         });
@@ -182,9 +191,12 @@ const runTarget = async (
 
         console.log(`[${target.name}] ${JSON.stringify(report)}`);
     } catch (error) {
-        const userAgent = await page
-            .evaluate(() => navigator.userAgent)
-            .catch(() => 'unknown user agent');
+        const userAgent =
+            page === undefined
+                ? 'unknown user agent'
+                : await page
+                      .evaluate(() => navigator.userAgent)
+                      .catch(() => 'unknown user agent');
 
         const wrappedError = new Error(
             `[${target.name}] browser compatibility probe failed for ${userAgent}: ${formatError(error)}`,
@@ -195,8 +207,16 @@ const runTarget = async (
         wrappedError.cause = error;
         throw wrappedError;
     } finally {
-        await context.close();
-        await browser.close();
+        const cleanupTasks: Promise<void>[] = [];
+
+        if (context !== undefined) {
+            cleanupTasks.push(context.close());
+        }
+        if (browser !== undefined) {
+            cleanupTasks.push(browser.close());
+        }
+
+        await Promise.allSettled(cleanupTasks);
     }
 };
 

@@ -36,11 +36,8 @@ const requiredApiModules = new Set(
 
 const markdownLinkPattern = /!?\[[^\]]*]\(([^)]+)\)/g;
 const linkTargetPattern = /^([^\s]+)(?:\s+["'][^"']*["'])?$/;
-const baseUnsafePatterns = [
-    /\]\((\/(?!\/)[^)]+)\)/g,
-    /href="(\/(?!\/)[^"]+)"/g,
-    /\blink:\s*(\/(?!\/)\S*)/g,
-] as const;
+const htmlHrefPattern = /\bhref=(["'])(.*?)\1/g;
+const frontmatterLinkPattern = /\blink:\s*("[^"]+"|'[^']+'|[^\s]+)/g;
 
 const isExternalLink = (target: string): boolean =>
     target.startsWith('#') ||
@@ -49,9 +46,20 @@ const isExternalLink = (target: string): boolean =>
 
 const normalizeLinkTarget = (rawTarget: string): string => {
     const trimmed = rawTarget.trim().replace(/^<|>$/g, '');
-    const match = linkTargetPattern.exec(trimmed);
-    return (match?.[1] ?? trimmed).split('#', 1)[0].split('?', 1)[0];
+    const withoutWrappingQuotes =
+        (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+        (trimmed.startsWith("'") && trimmed.endsWith("'"))
+            ? trimmed.slice(1, -1)
+            : trimmed;
+    const match = linkTargetPattern.exec(withoutWrappingQuotes);
+
+    return (match?.[1] ?? withoutWrappingQuotes)
+        .split('#', 1)[0]
+        .split('?', 1)[0];
 };
+
+const isBaseUnsafeLinkTarget = (target: string): boolean =>
+    target.startsWith('/') && !target.startsWith('//');
 
 const toRepoRelativePath = (absolutePath: string): string =>
     path.relative(repoRoot, absolutePath).replace(/\\/g, '/');
@@ -321,10 +329,29 @@ const verifyBaseAwareLinks = async (): Promise<string[]> => {
         const lines = content.split(/\r?\n/u);
 
         lines.forEach((line, index) => {
-            for (const pattern of baseUnsafePatterns) {
-                for (const match of line.matchAll(pattern)) {
+            for (const match of line.matchAll(markdownLinkPattern)) {
+                const normalizedTarget = normalizeLinkTarget(match[1]);
+                if (isBaseUnsafeLinkTarget(normalizedTarget)) {
                     failures.push(
-                        `${toRepoRelativePath(file)}:${index + 1} -> ${match[1]}`,
+                        `${toRepoRelativePath(file)}:${index + 1} -> ${normalizedTarget}`,
+                    );
+                }
+            }
+
+            for (const match of line.matchAll(htmlHrefPattern)) {
+                const normalizedTarget = normalizeLinkTarget(match[2]);
+                if (isBaseUnsafeLinkTarget(normalizedTarget)) {
+                    failures.push(
+                        `${toRepoRelativePath(file)}:${index + 1} -> ${normalizedTarget}`,
+                    );
+                }
+            }
+
+            for (const match of line.matchAll(frontmatterLinkPattern)) {
+                const normalizedTarget = normalizeLinkTarget(match[1]);
+                if (isBaseUnsafeLinkTarget(normalizedTarget)) {
+                    failures.push(
+                        `${toRepoRelativePath(file)}:${index + 1} -> ${normalizedTarget}`,
                     );
                 }
             }
