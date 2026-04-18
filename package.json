@@ -47,10 +47,11 @@
         "build:ci": "pnpm run check:node && pnpm run build:dist",
         "build": "pnpm run build:dist",
         "vectors:core": "tsx ./tools/generate-core-vectors.ts",
+        "verify:browser-compat": "tsx ./tools/ci/verify-browser-compat.ts",
         "docs:api": "pnpm exec del-cli docs/src/content/docs/api/reference && tsx ./node_modules/typedoc/bin/typedoc --options typedoc.config.mjs && tsx ./typedoc/postprocess-site-docs.ts",
         "docs:dev": "pnpm run docs:api && astro dev --root docs",
-        "docs:build:site": "pnpm exec del-cli docs/dist && astro build --root docs --silent",
-        "docs:preview": "pnpm run docs:api && pnpm run docs:build:site && astro preview --root docs",
+        "docs:build:site": "pnpm run docs:api && pnpm exec del-cli docs/dist && astro build --root docs --silent",
+        "docs:preview": "pnpm run docs:build:site && astro preview --root docs",
         "verify:docs": "pnpm run docs:api && tsx ./typedoc/verify-docs.ts",
         "bench:micro": "tsx ./tools/benchmarks/microbench.ts",
         "prepare": "husky"

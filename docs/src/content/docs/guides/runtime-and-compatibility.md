@@ -27,10 +27,11 @@ The browser path is intentionally simple:
 
 - use modern browsers with native Web Crypto digest support
 - require `TextEncoder`
-- validate your target environments with the browser test matrix already enforced in CI
+- validate your target environments with `pnpm run verify:browser-compat`
 
-CI verifies digest parity in Chromium, Firefox, and WebKit on desktop, plus
-Chromium and WebKit in mobile emulation.
+The local compatibility probe runs the targets supported on your current
+platform. CI verifies digest parity in Chromium, Firefox, and WebKit on
+desktop, plus Chromium and WebKit in mobile emulation on macOS.
 
 ## Application-owned runtime concerns
 

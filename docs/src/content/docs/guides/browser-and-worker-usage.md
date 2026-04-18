@@ -43,6 +43,8 @@ self.onmessage = async (event) => {
 Keep the worker responsible for any surrounding message protocol, retries, and
 storage. The package only owns hashing and the typed runtime error boundary.
 
+For local browser target validation, run `pnpm run verify:browser-compat`.
+
 ## What stays outside the package
 
 The package does not manage:
