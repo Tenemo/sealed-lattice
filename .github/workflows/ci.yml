@@ -1,93 +1,66 @@
 name: ci
 
 on:
-  push:
-    branches:
-      - master
-  pull_request:
+    push:
+        branches:
+            - master
+    pull_request:
 
 env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
-  test:
-    runs-on: ubuntu-latest
-    timeout-minutes: 35
-    steps:
-      - uses: actions/checkout@v6.0.2
-      - uses: pnpm/action-setup@v5.0.0
-        with:
-          run_install: false
-      - uses: actions/setup-node@v6.3.0
-        with:
-          node-version-file: .nvmrc
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm run build:ci
+    verify:
+        name: verify
+        runs-on: ubuntu-latest
+        timeout-minutes: 35
+        steps:
+            - uses: actions/checkout@v6.0.2
+            - uses: ./.github/actions/bootstrap-pnpm
+            - run: pnpm run check
+            - run: pnpm run test:node
+            - run: pnpm run build:dist
 
-  browser:
-    runs-on: ubuntu-latest
-    timeout-minutes: 35
-    steps:
-      - uses: actions/checkout@v6.0.2
-      - uses: pnpm/action-setup@v5.0.0
-        with:
-          run_install: false
-      - uses: actions/setup-node@v6.3.0
-        with:
-          node-version-file: .nvmrc
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm exec playwright install --with-deps chromium firefox webkit
-      - run: pnpm run test:browser
+    coverage:
+        name: coverage
+        runs-on: ubuntu-latest
+        timeout-minutes: 25
+        steps:
+            - uses: actions/checkout@v6.0.2
+            - uses: ./.github/actions/bootstrap-pnpm
+            - run: pnpm run coverage:node
 
-  coverage:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v6.0.2
-      - uses: pnpm/action-setup@v5.0.0
-        with:
-          run_install: false
-      - uses: actions/setup-node@v6.3.0
-        with:
-          node-version-file: .nvmrc
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm run coverage:node
+    browser:
+        name: browser
+        runs-on: macos-latest
+        timeout-minutes: 45
+        steps:
+            - uses: actions/checkout@v6.0.2
+            - uses: ./.github/actions/bootstrap-pnpm
+            - run: pnpm exec playwright install --with-deps chromium firefox webkit
+            - run: pnpm run test:browser
 
-  docs:
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
-    steps:
-      - uses: actions/checkout@v6.0.2
-      - uses: pnpm/action-setup@v5.0.0
-        with:
-          run_install: false
-      - uses: actions/setup-node@v6.3.0
-        with:
-          node-version-file: .nvmrc
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm run verify:docs
-      - run: pnpm run docs:build:site
+    docs:
+        name: docs
+        runs-on: ubuntu-latest
+        timeout-minutes: 25
+        steps:
+            - uses: actions/checkout@v6.0.2
+            - uses: ./.github/actions/bootstrap-pnpm
+            - run: pnpm run verify:docs
+            - run: pnpm run docs:build:site
 
-  release-smoke:
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@v6.0.2
-      - uses: pnpm/action-setup@v5.0.0
-        with:
-          run_install: false
-      - uses: actions/setup-node@v6.3.0
-        with:
-          node-version-file: .nvmrc
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm run build:ci
-      - run: pnpm run verify:docs
-      - run: pnpm run docs:build:site
-      - run: pnpm run smoke:pack
-      - run: pnpm run smoke:pack:npm
+    release-smoke:
+        name: release smoke
+        if: github.event_name == 'pull_request'
+        runs-on: ubuntu-latest
+        timeout-minutes: 60
+        steps:
+            - uses: actions/checkout@v6.0.2
+            - uses: ./.github/actions/bootstrap-pnpm
+            - run: pnpm run build:dist
+            - run: pnpm run verify:docs
+            - run: pnpm run docs:build:site
+            - run: pnpm run smoke:pack
+            - run: pnpm run smoke:pack:npm
+            - run: npm pack --dry-run --ignore-scripts

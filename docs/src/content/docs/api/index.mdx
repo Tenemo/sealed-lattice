@@ -1,27 +1,28 @@
 ---
 title: API docs
-description: Curated entry points into the shipped public surface, with the generated symbol reference underneath.
+description: Public API entry points and generated symbol reference for the current package surface.
 editUrl: false
 ---
 
-import { CardGrid, LinkCard } from '@astrojs/starlight/components';
+import { CardGrid, LinkCard } from "@astrojs/starlight/components";
 
-Start here before diving into the generated symbol pages. The goal is to help readers choose the correct surface, not to browse a raw module dump first.
+These entry points cover the root package, the generated symbol reference, and
+the guide pages that define how the current surface should be used.
 
 <CardGrid>
-  <LinkCard
-    title="Root package"
-    href="./root-package/"
-    description="Use the root package as the only supported import surface for the shipped digest helper."
-  />
-  <LinkCard
-    title="Generated reference"
-    href="./reference/sealed-lattice/"
-    description="Read the exact generated symbol reference for the current exports."
-  />
-  <LinkCard
-    title="Get started"
-    href="../guides/getting-started/"
-    description="Follow the supported installation and runtime path first, then use the generated reference for exact contracts."
-  />
+    <LinkCard
+        title="Root package"
+        href="./root-package/"
+        description="Use the root package as the complete supported import surface for the current milestone."
+    />
+    <LinkCard
+        title="Generated reference"
+        href="./reference/"
+        description="Browse the exact exports, types, and signatures of the current public surface."
+    />
+    <LinkCard
+        title="Get started"
+        href="../guides/getting-started/"
+        description="Start with the supported rules and quickstart before diving into symbol-level reference pages."
+    />
 </CardGrid>

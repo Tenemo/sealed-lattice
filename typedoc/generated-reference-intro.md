@@ -1,19 +1,13 @@
 # Generated reference
 
-This section is the export-driven symbol reference for the current package
-surface.
-
-Use these generated pages as a type-and-contract reference after reading the
-manual guides and curated API pages. They are not meant to replace the guides
-or the protocol spec.
+This section lists the exported symbols on the current public package
+entrypoint.
 
 ## Public module map
 
-- `sealed-lattice`: safe root package for the shipped `sha256Hex` helper and `UnsupportedRuntimeError`
+- `sealed-lattice`: root package for the shipped `sha256Hex` helper and `UnsupportedRuntimeError`
 
-## How to read this reference
+## What this section contains
 
-- Start with the curated API reference page that sits one level above this
-  generated section.
-- Use the generated module pages when you need exact types, signatures, and
-  symbol-level details.
+- exact exported names, types, signatures, and return shapes for the current public surface
+- symbol-level detail for the root package without implying future public submodules

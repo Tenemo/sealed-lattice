@@ -1,51 +1,62 @@
 ---
 title: Browser and worker usage
-description: Running the current sealed-lattice package safely in browsers and Web Workers.
+description: Browser-native usage of the current sealed-lattice root package on the main thread and inside Web Workers.
 sidebar:
-  order: 2
+    order: 3
 ---
 
-`sealed-lattice` currently ships one real cryptographic helper: `sha256Hex`. The runtime requirement is intentionally small, which makes the browser and worker story straightforward.
+The current milestone is browser-native. Use the root package directly inside
+the browser or inside Web Workers for the supported hashing flow.
 
-## Browser main thread
-
-Use the root package and rely on the platform Web Crypto implementation.
+## Browser flow
 
 ```typescript
-import { sha256Hex } from 'sealed-lattice';
+import { sha256Hex } from "sealed-lattice";
 
-const digest = await sha256Hex('sealed-lattice');
+const textDigest = await sha256Hex("sealed-lattice");
+const byteDigest = await sha256Hex(new Uint8Array([0x00, 0xff, 0x10, 0x20]));
 
-console.log(digest);
+console.log(textDigest);
+console.log(byteDigest);
 ```
 
-What the runtime must provide:
+This covers the browser-native pieces most callers need first:
 
-- `globalThis.crypto.subtle.digest`
-- `TextEncoder`
-- ESM support
+- text hashing through UTF-8 conversion
+- raw byte hashing
+- one stable root import surface
 
-## Web Workers
+## Keeping hashing inside a worker
 
-The same helper works inside a dedicated worker as long as the worker runtime exposes the same Web Crypto surface.
+The package can be imported inside a worker directly:
 
 ```typescript
-import { sha256Hex } from 'sealed-lattice';
+import { sha256Hex } from "sealed-lattice";
 
-self.addEventListener('message', async (event) => {
+self.onmessage = async (event) => {
     const digest = await sha256Hex(event.data);
+
     self.postMessage(digest);
-});
+};
 ```
 
-## Input rules
+Keep the worker responsible for any surrounding message protocol, retries, and
+storage. The package only owns hashing and the typed runtime error boundary.
 
-- strings are encoded as UTF-8 before hashing
-- `Uint8Array` inputs are copied before hashing
-- output is always lowercase hexadecimal
+## What stays outside the package
+
+The package does not manage:
+
+- worker lifecycle
+- retries and reconnects
+- persistence
+- bulletin-board posting
+- future PQ orchestration that is not public yet
 
 ## Failure mode
 
-If the runtime does not expose `globalThis.crypto.subtle.digest`, the helper throws `UnsupportedRuntimeError` instead of silently falling back to a weaker or inconsistent path.
+If the runtime does not expose `globalThis.crypto.subtle.digest`, the helper
+throws `UnsupportedRuntimeError` instead of silently falling back to a weaker or
+inconsistent path.
 
-Use this package only in runtimes where the native Web Crypto surface is part of your supported deployment contract.
+For exact runtime constraints, read [Runtime and compatibility](../runtime-and-compatibility/).

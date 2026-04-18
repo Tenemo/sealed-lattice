@@ -71,6 +71,7 @@ No additional public subpaths are promised yet. Future capability areas such as 
 - Browser and worker usage: [tenemo.github.io/sealed-lattice/guides/browser-and-worker-usage](https://tenemo.github.io/sealed-lattice/guides/browser-and-worker-usage/)
 - Runtime and compatibility: [tenemo.github.io/sealed-lattice/guides/runtime-and-compatibility](https://tenemo.github.io/sealed-lattice/guides/runtime-and-compatibility/)
 - Security and non-goals: [tenemo.github.io/sealed-lattice/guides/security-and-non-goals](https://tenemo.github.io/sealed-lattice/guides/security-and-non-goals/)
+- Protocol spec: [tenemo.github.io/sealed-lattice/spec](https://tenemo.github.io/sealed-lattice/spec/)
 - API reference: [tenemo.github.io/sealed-lattice/api](https://tenemo.github.io/sealed-lattice/api/)
 
 ## Development
@@ -80,6 +81,10 @@ pnpm install
 pnpm run lint
 pnpm run tsc
 pnpm run test
+pnpm run verify:docs
+pnpm run docs:build:site
+pnpm run smoke:pack
+pnpm run smoke:pack:npm
 pnpm run build
 ```
 

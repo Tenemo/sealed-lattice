@@ -1,29 +1,55 @@
 ---
 title: Runtime and compatibility
-description: Runtime expectations for the current sealed-lattice package surface.
+description: Browser, Node, ESM, and Web Crypto expectations for the current sealed-lattice milestone.
 sidebar:
-  order: 2
+    order: 2
 ---
 
-Phase one is ESM-only and requires Web Crypto hashing.
+The current workflow is intentionally small and assumes:
 
-## Node
+- ESM imports
+- native Web Crypto digest support through `crypto.subtle.digest`
+- `TextEncoder` for UTF-8 conversion
 
-- Use Node `24.14.1` or newer.
-- `globalThis.crypto.subtle.digest` must be available.
-- The package does not expose CommonJS entry points.
+For a concrete browser integration example, read
+[Browser and worker usage](../browser-and-worker-usage/).
 
-## Browsers
+## Supported environments
 
-- `globalThis.crypto.subtle.digest` must be available.
-- `TextEncoder` must be available for UTF-8 conversion.
-- CI verifies digest parity in Chromium, Firefox, and WebKit on desktop, plus Chromium and WebKit mobile emulation through Vitest browser mode and Playwright.
+- Modern browsers must expose `globalThis.crypto.subtle.digest`
+- Browsers must expose `TextEncoder`
+- Node must satisfy the package `engines.node` requirement and expose `globalThis.crypto`
+- The package does not expose CommonJS entry points
 
-See [Browser and worker usage](../browser-and-worker-usage/) for the supported in-browser calling patterns.
+## Browser requirements
 
-## Current compatibility boundary
+The browser path is intentionally simple:
+
+- use modern browsers with native Web Crypto digest support
+- require `TextEncoder`
+- validate your target environments with the browser test matrix already enforced in CI
+
+CI verifies digest parity in Chromium, Firefox, and WebKit on desktop, plus
+Chromium and WebKit in mobile emulation.
+
+## Application-owned runtime concerns
+
+Keep these concerns outside the package:
+
+- worker orchestration
+- retries and reconnects
+- storage and persistence
+- transport and bulletin-board delivery
+- any future PQ flow coordination that is not public yet
+
+The package can be imported inside workers, but it does not create or manage
+workers itself.
+
+## Current helper boundary
 
 - The shipped helper uses SHA-256 only.
-- Inputs are either UTF-8 strings or raw `Uint8Array` values.
-- The output is always a lowercase hexadecimal string.
-- If the runtime is missing the required Web Crypto surface, `UnsupportedRuntimeError` is thrown.
+- Inputs are UTF-8 strings or raw `Uint8Array` values.
+- Output is always a lowercase hexadecimal string.
+- Missing native digest support raises `UnsupportedRuntimeError`.
+
+The [API docs](../../api/) list the exact function contract.
