@@ -178,7 +178,7 @@
         box-shadow: none;
     }
 
-    .sl-link-card:hover {
+    .sl-link-card:is(:hover, :focus-within) {
         transform: translateY(-2px);
         border-color: hsla(0, 0%, 100%, 0.24);
         background: linear-gradient(
