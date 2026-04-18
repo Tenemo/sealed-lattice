@@ -192,6 +192,14 @@ export default [
     }),
     {
         ignores: [
+            '.tmp',
+            '.tmp/**',
+            '.tmp-*',
+            '.tmp-*/**',
+            '.tmp_*',
+            '.tmp_*/**',
+            '.tmp.*',
+            '.tmp.*/**',
             'node_modules',
             'node_modules/**',
             'dist',

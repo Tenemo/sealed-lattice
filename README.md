@@ -1,18 +1,18 @@
 # sealed-lattice
 
-[![npm version](https://badge.fury.io/js/sealed-lattice.svg)](https://badge.fury.io/js/sealed-lattice)
-[![npm downloads](https://img.shields.io/npm/dm/sealed-lattice)](https://www.npmjs.com/package/sealed-lattice)
+[![npm version](https://img.shields.io/npm/v/sealed-lattice?color=5FA04E)](https://www.npmjs.com/package/sealed-lattice)
+[![npm downloads](https://img.shields.io/npm/dm/sealed-lattice?color=5FA04E)](https://www.npmjs.com/package/sealed-lattice)
 
 ---
 
-[![CI](https://img.shields.io/github/actions/workflow/status/Tenemo/sealed-lattice/ci.yml?branch=master&label=passing%20tests)](https://github.com/Tenemo/sealed-lattice/actions/workflows/ci.yml)
+[![CI](https://img.shields.io/github/actions/workflow/status/Tenemo/sealed-lattice/ci.yml?branch=master&label=passing%20tests&color=5FA04E)](https://github.com/Tenemo/sealed-lattice/actions/workflows/ci.yml)
 [![Tests coverage](https://img.shields.io/endpoint?url=https://tenemo.github.io/sealed-lattice/coverage-badge.json)](https://tenemo.github.io/sealed-lattice/coverage-summary.json)
-[![Documentation build](https://img.shields.io/github/actions/workflow/status/Tenemo/sealed-lattice/pages.yml?branch=master&label=docs)](https://github.com/Tenemo/sealed-lattice/actions/workflows/pages.yml)
+[![Documentation build](https://img.shields.io/github/actions/workflow/status/Tenemo/sealed-lattice/pages.yml?branch=master&label=docs&color=5FA04E)](https://github.com/Tenemo/sealed-lattice/actions/workflows/pages.yml)
 
 ---
 
 [![Node version](https://img.shields.io/badge/node-%E2%89%A524.14.1-5FA04E?logo=node.js&logoColor=white)](https://nodejs.org/)
-[![License](https://img.shields.io/github/license/Tenemo/sealed-lattice)](LICENSE)
+[![License](https://img.shields.io/github/license/Tenemo/sealed-lattice?color=5FA04E)](LICENSE)
 
 ---
 
@@ -42,9 +42,16 @@ pnpm add sealed-lattice
 ## Runtime requirements
 
 - Use ESM imports such as `import { sha256Hex } from 'sealed-lattice'`. The published package does not expose CommonJS `require()` entry points.
-- Browsers need `globalThis.crypto.subtle` and `TextEncoder`.
+- Browsers need `globalThis.crypto.subtle.digest` and `TextEncoder`.
 - CI validates Chromium, Firefox, and WebKit on desktop, plus Chromium and WebKit in mobile emulation.
 - Node requires version `24.14.1` or newer with `globalThis.crypto`.
+
+## Browser support
+
+- Use modern browsers that expose `globalThis.crypto.subtle.digest` and `TextEncoder`.
+- Install local browser runtimes with `pnpm exec playwright install chromium firefox webkit`.
+- Validate the current browser matrix with `pnpm run verify:browser-compat`.
+- The local compatibility probe runs the targets supported on your current platform. CI runs the full desktop and mobile-emulation matrix on macOS.
 
 ## Safe quickstart
 
@@ -71,6 +78,7 @@ No additional public subpaths are promised yet. Future capability areas such as 
 - Browser and worker usage: [tenemo.github.io/sealed-lattice/guides/browser-and-worker-usage](https://tenemo.github.io/sealed-lattice/guides/browser-and-worker-usage/)
 - Runtime and compatibility: [tenemo.github.io/sealed-lattice/guides/runtime-and-compatibility](https://tenemo.github.io/sealed-lattice/guides/runtime-and-compatibility/)
 - Security and non-goals: [tenemo.github.io/sealed-lattice/guides/security-and-non-goals](https://tenemo.github.io/sealed-lattice/guides/security-and-non-goals/)
+- Protocol spec: [tenemo.github.io/sealed-lattice/spec](https://tenemo.github.io/sealed-lattice/spec/)
 - API reference: [tenemo.github.io/sealed-lattice/api](https://tenemo.github.io/sealed-lattice/api/)
 
 ## Development
@@ -79,7 +87,13 @@ No additional public subpaths are promised yet. Future capability areas such as 
 pnpm install
 pnpm run lint
 pnpm run tsc
+pnpm exec playwright install chromium firefox webkit
 pnpm run test
+pnpm run verify:browser-compat
+pnpm run verify:docs
+pnpm run docs:build:site
+pnpm run smoke:pack
+pnpm run smoke:pack:npm
 pnpm run build
 ```
 

@@ -1,29 +1,33 @@
 ---
 title: Guides
-description: Manual guides for the current sealed-lattice package surface.
+description: Task-oriented documentation for the current sealed-lattice milestone.
+editUrl: false
 ---
 
-import { CardGrid, LinkCard } from '@astrojs/starlight/components';
+import { CardGrid, LinkCard } from "@astrojs/starlight/components";
+
+These pages cover setup, runtime expectations, browser and worker usage, and
+the explicit security boundary of the current public surface.
 
 <CardGrid>
-  <LinkCard
-    title="Get started"
-    href="./getting-started/"
-    description="Install the package, hash your first input, and understand the current package scope."
-  />
-  <LinkCard
-    title="Runtime and compatibility"
-    href="./runtime-and-compatibility/"
-    description="Review Web Crypto, ESM, Node, and browser expectations."
-  />
-  <LinkCard
-    title="Browser and worker usage"
-    href="./browser-and-worker-usage/"
-    description="Run the shipped helper in browsers and workers without relying on hidden fallbacks."
-  />
-  <LinkCard
-    title="Security and non-goals"
-    href="./security-and-non-goals/"
-    description="See the current security boundary and the capabilities intentionally deferred."
-  />
+    <LinkCard
+        title="Get started"
+        href="./getting-started/"
+        description="Start with the root package, the supported inputs, and the current milestone rules."
+    />
+    <LinkCard
+        title="Runtime and compatibility"
+        href="./runtime-and-compatibility/"
+        description="Check browser, Node, ESM, and Web Crypto expectations before deployment."
+    />
+    <LinkCard
+        title="Browser and worker usage"
+        href="./browser-and-worker-usage/"
+        description="Use the shipped helper on the main thread or inside workers without hidden fallbacks."
+    />
+    <LinkCard
+        title="Security and non-goals"
+        href="./security-and-non-goals/"
+        description="Read the intended boundary before assuming unpublished PQ modules are stable."
+    />
 </CardGrid>

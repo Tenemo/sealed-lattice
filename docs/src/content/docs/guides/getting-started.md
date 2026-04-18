@@ -1,36 +1,39 @@
 ---
 title: Get started
-description: The shortest safe path into the current sealed-lattice package surface.
+description: The shortest safe path into the root package and the current sealed-lattice milestone.
 sidebar:
-  order: 1
+    order: 1
 ---
 
-Use the safe root package. The current public surface is intentionally small and centered on one real helper: `sha256Hex`.
+Start with the root package. The current public surface is intentionally small
+and centered on one real helper: `sha256Hex`.
 
-## Installation
+## Start with these rules
 
-```bash
-pnpm add sealed-lattice
-```
+- The only committed public entry point is `sealed-lattice`.
+- The current root package exposes `sha256Hex` and `UnsupportedRuntimeError`.
+- `sha256Hex` accepts `string | Uint8Array`.
+- The output is always lowercase hexadecimal.
+- If native Web Crypto digest support is missing, the package throws `UnsupportedRuntimeError`.
 
 ## Safe quickstart
 
 ```typescript
-import { sha256Hex } from 'sealed-lattice';
+import { sha256Hex } from "sealed-lattice";
 
-const digest = await sha256Hex('sealed-lattice');
+const digest = await sha256Hex("sealed-lattice");
 
 console.log(digest);
 ```
 
-## What the current surface includes
+## What this milestone includes
 
 - a real SHA-256 helper on the root package
 - a typed `UnsupportedRuntimeError` when Web Crypto hashing is unavailable
-- repo, CI, docs, coverage, testing, and publish DX parity with the classical baseline
-- a public API that stays narrow while the future lattice-native module layout remains open
+- hardened docs, testing, browser coverage, tarball checks, and publish workflow around that narrow API
+- an intentionally narrow public surface while the future lattice-native architecture remains open
 
-## What the current surface does not include
+## What it still does not freeze
 
 - lattice encryption
 - threshold key generation or decryption
@@ -40,4 +43,9 @@ console.log(digest);
 - WASM kernels
 - frozen public subpaths for future PQ capabilities
 
-Use the current milestone to establish the project shell. Do not assume that future capabilities will appear under any specific subpath until those contracts are stable enough to publish.
+## Related pages
+
+- For runtime prerequisites, read [Runtime and compatibility](../runtime-and-compatibility/).
+- For browser and worker calling patterns, read [Browser and worker usage](../browser-and-worker-usage/).
+- For the current security boundary, read [Security and non-goals](../security-and-non-goals/).
+- The [API docs](../../api/) list the exact public contract.

@@ -36,6 +36,8 @@ const requiredApiModules = new Set(
 
 const markdownLinkPattern = /!?\[[^\]]*]\(([^)]+)\)/g;
 const linkTargetPattern = /^([^\s]+)(?:\s+["'][^"']*["'])?$/;
+const htmlHrefPattern = /\bhref=(["'])(.*?)\1/g;
+const frontmatterLinkPattern = /\blink:\s*("[^"]+"|'[^']+'|[^\s]+)/g;
 
 const isExternalLink = (target: string): boolean =>
     target.startsWith('#') ||
@@ -44,9 +46,20 @@ const isExternalLink = (target: string): boolean =>
 
 const normalizeLinkTarget = (rawTarget: string): string => {
     const trimmed = rawTarget.trim().replace(/^<|>$/g, '');
-    const match = linkTargetPattern.exec(trimmed);
-    return (match?.[1] ?? trimmed).split('#', 1)[0].split('?', 1)[0];
+    const withoutWrappingQuotes =
+        (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+        (trimmed.startsWith("'") && trimmed.endsWith("'"))
+            ? trimmed.slice(1, -1)
+            : trimmed;
+    const match = linkTargetPattern.exec(withoutWrappingQuotes);
+
+    return (match?.[1] ?? withoutWrappingQuotes)
+        .split('#', 1)[0]
+        .split('?', 1)[0];
 };
+
+const isBaseUnsafeLinkTarget = (target: string): boolean =>
+    target.startsWith('/') && !target.startsWith('//');
 
 const toRepoRelativePath = (absolutePath: string): string =>
     path.relative(repoRoot, absolutePath).replace(/\\/g, '/');
@@ -307,6 +320,47 @@ const verifyLinks = async (): Promise<string[]> => {
     return failures;
 };
 
+const verifyBaseAwareLinks = async (): Promise<string[]> => {
+    const markdownFiles = await collectMarkdownFiles(docsContentRoot);
+    const failures: string[] = [];
+
+    for (const file of markdownFiles) {
+        const content = await fs.readFile(file, 'utf8');
+        const lines = content.split(/\r?\n/u);
+
+        lines.forEach((line, index) => {
+            for (const match of line.matchAll(markdownLinkPattern)) {
+                const normalizedTarget = normalizeLinkTarget(match[1]);
+                if (isBaseUnsafeLinkTarget(normalizedTarget)) {
+                    failures.push(
+                        `${toRepoRelativePath(file)}:${index + 1} -> ${normalizedTarget}`,
+                    );
+                }
+            }
+
+            for (const match of line.matchAll(htmlHrefPattern)) {
+                const normalizedTarget = normalizeLinkTarget(match[2]);
+                if (isBaseUnsafeLinkTarget(normalizedTarget)) {
+                    failures.push(
+                        `${toRepoRelativePath(file)}:${index + 1} -> ${normalizedTarget}`,
+                    );
+                }
+            }
+
+            for (const match of line.matchAll(frontmatterLinkPattern)) {
+                const normalizedTarget = normalizeLinkTarget(match[1]);
+                if (isBaseUnsafeLinkTarget(normalizedTarget)) {
+                    failures.push(
+                        `${toRepoRelativePath(file)}:${index + 1} -> ${normalizedTarget}`,
+                    );
+                }
+            }
+        });
+    }
+
+    return failures;
+};
+
 const verifyApiEntryPages = async (): Promise<string[]> => {
     const failures: string[] = [];
 
@@ -439,6 +493,7 @@ const verifyTypeDocSummaries = async (): Promise<string[]> => {
 
 const main = async (): Promise<void> => {
     const linkFailures = await verifyLinks();
+    const baseAwareFailures = await verifyBaseAwareLinks();
     const apiFailures = await verifyApiEntryPages();
     const summaryFailures = await verifyTypeDocSummaries();
 
@@ -447,6 +502,11 @@ const main = async (): Promise<void> => {
     if (linkFailures.length > 0) {
         failures.push('Broken relative links:');
         failures.push(...linkFailures.map((failure) => `- ${failure}`));
+    }
+
+    if (baseAwareFailures.length > 0) {
+        failures.push('Base-unsafe internal docs links:');
+        failures.push(...baseAwareFailures.map((failure) => `- ${failure}`));
     }
 
     if (apiFailures.length > 0) {

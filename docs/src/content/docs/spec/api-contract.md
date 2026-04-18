@@ -1,13 +1,23 @@
 ---
 title: API contract
-description: Exact public contract for the current sealed-lattice milestone.
+description: The hard boundary between what sealed-lattice commits to today and what remains outside the current milestone.
+sidebar:
+    order: 2
 ---
 
-The current package commits to the following contract:
+The package draws a hard boundary between the current public surface and the
+future post-quantum design space.
 
-## Root package
+## Package responsibilities
 
-- `sha256Hex(input: string | Uint8Array): Promise<string>`
-- `UnsupportedRuntimeError`
+- Expose `sha256Hex(input: string | Uint8Array): Promise<string>`
+- Expose `UnsupportedRuntimeError`
+- Use native Web Crypto digest support instead of hidden fallback implementations
+- Keep the current public surface documented, tested, and packaging-verified
 
-No additional public subpaths are committed yet. Future capability areas such as serialization, transport, threshold coordination, proofs, protocol types, or runtime helpers may eventually become public, but their module boundaries are intentionally not frozen at this stage.
+## Caller responsibilities
+
+- Choose runtimes that expose the required Web Crypto surface
+- Handle wider transport, protocol, threshold, and proof concerns outside the current package
+- Avoid depending on future public subpath names before they are explicitly published
+- Treat the current milestone as a stable shell around a deliberately narrow feature set
