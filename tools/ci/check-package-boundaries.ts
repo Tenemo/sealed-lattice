@@ -16,7 +16,6 @@ export type WorkspacePackage = {
 
 export type ImportObservation = {
     filePath: string;
-    packageDirectoryPath: string;
     packageName: string;
     specifier: string;
 };
@@ -330,7 +329,6 @@ const collectImportObservations = async (
             for (const specifier of extractImportSpecifiers(sourceText)) {
                 importObservations.push({
                     filePath,
-                    packageDirectoryPath: workspacePackage.directoryPath,
                     packageName: workspacePackage.name,
                     specifier,
                 });

@@ -21,6 +21,7 @@ const config = {
     entryPoints: typeDocEntryPoints,
     entryPointStrategy: 'resolve',
     alwaysCreateEntryPointModule: true,
+    tsconfig: 'typedoc/tsconfig.json',
     plugin: ['typedoc-plugin-markdown'],
     out: 'docs/src/content/docs/api/reference',
     router: 'member',

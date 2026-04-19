@@ -185,7 +185,25 @@ export const loadVectorManifest = async (
 };
 
 /* v8 ignore start */
-const main = async (): Promise<void> => {
+const main = async (
+    commandLineArguments: readonly string[] = process.argv.slice(2),
+): Promise<void> => {
+    if (commandLineArguments.includes('--generate')) {
+        const manifest = await buildVectorManifestFromDirectory(
+            vectorsRootDirectoryPath,
+        );
+        await fs.writeFile(
+            vectorManifestPath,
+            `${JSON.stringify(manifest, null, 2)}\n`,
+            'utf8',
+        );
+
+        console.log(
+            `Vector manifest written to ${path.relative(process.cwd(), vectorManifestPath)}`,
+        );
+        return;
+    }
+
     const manifest = await loadVectorManifest();
     const actualManifest = await buildVectorManifestFromDirectory(
         vectorsRootDirectoryPath,

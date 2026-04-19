@@ -16,7 +16,7 @@
     "boundary": "tsx ./tools/run-turbo.ts boundary:workspace",
     "vectors:workspace": "tsx ./tools/ci/verify-test-vectors.ts",
     "vectors": "tsx ./tools/run-turbo.ts vectors:workspace",
-    "vectors:generate:workspace": "tsx ./tools/generate-test-vector-manifest.ts",
+    "vectors:generate:workspace": "tsx ./tools/ci/verify-test-vectors.ts --generate",
     "vectors:generate": "tsx ./tools/run-turbo.ts vectors:generate:workspace",
     "knip:workspace": "knip",
     "check:workspace": "pnpm run lint:workspace && pnpm run tsc:workspace && pnpm run boundary:workspace && pnpm run vectors:workspace && pnpm run knip:workspace",

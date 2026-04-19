@@ -14,10 +14,6 @@
   },
   "scripts": {
     "check": "tsc --project tsconfig.json --pretty false --noEmit",
-    "build": "pnpm exec del-cli dist && tsc --project tsconfig.build.json",
-    "test:node": "vitest --project node --run tests/node/**/*.test.ts"
-  },
-  "devDependencies": {
-    "vitest": "^4.1.4"
+    "build": "pnpm exec del-cli dist && tsc --project tsconfig.json"
   }
 }

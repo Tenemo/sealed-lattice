@@ -19,7 +19,27 @@
         "docs/src/env.d.ts"
       ]
     },
-    "packages/*": {
+    "packages/sdk": {
+      "project": [
+        "src/**/*.ts"
+      ]
+    },
+    "packages/protocol": {
+      "project": [
+        "src/**/*.ts"
+      ]
+    },
+    "packages/crypto": {
+      "project": [
+        "src/**/*.ts"
+      ]
+    },
+    "packages/testkit": {
+      "project": [
+        "src/**/*.ts"
+      ]
+    },
+    "packages/wasm": {
       "entry": [
         "tests/**/*.ts"
       ],

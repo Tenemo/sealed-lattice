@@ -30,19 +30,31 @@
     },
     "//#test:node:workspace": {
       "dependsOn": [
-        "@sealed-lattice/wasm#build:wasm"
+        "sealed-lattice#build",
+        "@sealed-lattice/protocol#build",
+        "@sealed-lattice/crypto#build",
+        "@sealed-lattice/wasm#build",
+        "@sealed-lattice/testkit#build"
       ],
       "outputs": []
     },
     "//#test:browser:workspace": {
       "dependsOn": [
-        "@sealed-lattice/wasm#build:wasm"
+        "sealed-lattice#build",
+        "@sealed-lattice/protocol#build",
+        "@sealed-lattice/crypto#build",
+        "@sealed-lattice/wasm#build",
+        "@sealed-lattice/testkit#build"
       ],
       "outputs": []
     },
     "//#coverage:node:workspace": {
       "dependsOn": [
-        "@sealed-lattice/wasm#build:wasm"
+        "sealed-lattice#build",
+        "@sealed-lattice/protocol#build",
+        "@sealed-lattice/crypto#build",
+        "@sealed-lattice/wasm#build",
+        "@sealed-lattice/testkit#build"
       ],
       "outputs": [
         "coverage/**"
@@ -58,6 +70,13 @@
       ]
     },
     "//#docs:api:workspace": {
+      "dependsOn": [
+        "sealed-lattice#build",
+        "@sealed-lattice/protocol#build",
+        "@sealed-lattice/crypto#build",
+        "@sealed-lattice/wasm#build",
+        "@sealed-lattice/testkit#build"
+      ],
       "outputs": [
         "docs/src/content/docs/api/reference/**"
       ]
