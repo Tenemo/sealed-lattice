@@ -11,6 +11,9 @@ debug.log
 # Build
 dist/
 coverage/
+target/
+.turbo/
+*.tsbuildinfo
 docs/.astro/
 docs/dist/
 docs/public/coverage-badge.json

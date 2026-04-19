@@ -1,51 +1,47 @@
 ---
 title: Get started
-description: The shortest safe path into the root package and the current sealed-lattice milestone.
+description: The shortest path to the current sealed-lattice public boundary and workspace contract.
 sidebar:
     order: 1
 ---
 
-Start with the root package. The current public API surface is intentionally small
-and centered on one real helper: `sha256Hex`.
+Start with the public package name and the current rule: `sealed-lattice`
+exists, but its runtime facade is intentionally empty.
 
-## Start with these rules
+## Public package rules
 
-- The only committed public entry point is `sealed-lattice`.
-- The current root package exposes `sha256Hex` and `UnsupportedRuntimeError`.
-- `sha256Hex` accepts `string | Uint8Array`.
-- The output is always lowercase hexadecimal.
-- If native Web Crypto digest support is missing, the package throws `UnsupportedRuntimeError`.
+- The only committed public package name is `sealed-lattice`.
+- The public runtime facade currently exports nothing.
+- No public subpaths are promised yet.
+- The current release freezes packaging, docs, smoke checks, and the workspace shape.
 
-## Safe quickstart
+## Consumer posture
 
 ```typescript
-import { sha256Hex } from "sealed-lattice";
-
-const digest = await sha256Hex("sealed-lattice");
-
-console.log(digest);
+import "sealed-lattice";
 ```
 
-## What this milestone includes
+The import is valid. There is intentionally nothing to call yet.
 
-- a real SHA-256 helper on the root package
-- a typed `UnsupportedRuntimeError` when Web Crypto hashing is unavailable
-- hardened docs, testing, browser coverage, tarball checks, and publish workflow around that narrow API
-- an intentionally narrow public API surface while the future lattice-native architecture remains open
+## What the current release includes
 
-## What it still does not freeze
+- the private Turborepo workspace layout
+- the published `sealed-lattice` package identity
+- private protocol, crypto, wasm, and testkit shells
+- a Rust placeholder crate plus an internal WASM loader
+- docs, TypeDoc, pack smoke, vector manifest verification, and CI verification
 
-- lattice encryption
-- threshold key generation or decryption
-- transport payloads
-- proofs
-- protocol types
-- WASM kernels
-- frozen public subpaths for future PQ capabilities
+## What is not published yet
 
-## Related pages
+- protocol lifecycle helpers
+- transcript or manifest types
+- ballot or tally APIs
+- proof systems
+- public crypto provider wrappers
+- public WASM or native arithmetic entry points
 
-- For runtime prerequisites, read [Runtime and compatibility](../runtime-and-compatibility/).
-- For browser and worker calling patterns, read [Browser and worker usage](../browser-and-worker-usage/).
-- For the current security boundary, read [Security and non-goals](../security-and-non-goals/).
-- The [API reference](../../api/) lists the exact public contract.
+## Next reads
+
+- [Workspace layout](../workspace-layout/) for package ownership and dependency direction
+- [Development workflow](../development-workflow/) for the actual build and verification path
+- [Security and non-goals](../security-and-non-goals/) for the current claim boundary

@@ -1,10 +1,12 @@
 /**
- * Safe root export for the current public API surface.
+ * Public package facade for the current release boundary.
  *
- * This module intentionally exposes only one real cryptographic primitive and
- * one typed runtime error while the broader lattice-native API is still under
- * construction.
+ * The published package exists so packaging, documentation, smoke tests, and
+ * release workflow can stabilize before the broader protocol-facing API is
+ * introduced.
  *
  * @packageDocumentation
  */
-export * from '../../src/index.js';
+import '../../packages/sdk/src/index.js';
+
+export {};

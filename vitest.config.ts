@@ -1,6 +1,13 @@
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import { playwright } from '@vitest/browser-playwright';
 import { defineConfig } from 'vitest/config';
 import type { BrowserInstanceOption } from 'vitest/node';
+
+const repoRoot = path.dirname(fileURLToPath(import.meta.url));
+const resolveFromRepoRoot = (...segments: string[]): string =>
+    path.resolve(repoRoot, ...segments);
 
 const nodeTestTimeoutMs = 60_000;
 const nodeHookTimeoutMs = 240_000;
@@ -68,13 +75,54 @@ const mobileBrowserInstances: BrowserInstanceOption[] = [
 ];
 
 export default defineConfig({
+    resolve: {
+        alias: {
+            'sealed-lattice': resolveFromRepoRoot(
+                'packages',
+                'sdk',
+                'src',
+                'index.ts',
+            ),
+            '@sealed-lattice/protocol': resolveFromRepoRoot(
+                'packages',
+                'protocol',
+                'src',
+                'index.ts',
+            ),
+            '@sealed-lattice/crypto': resolveFromRepoRoot(
+                'packages',
+                'crypto',
+                'src',
+                'index.ts',
+            ),
+            '@sealed-lattice/wasm': resolveFromRepoRoot(
+                'packages',
+                'wasm',
+                'src',
+                'index.ts',
+            ),
+            '@sealed-lattice/testkit': resolveFromRepoRoot(
+                'packages',
+                'testkit',
+                'src',
+                'index.ts',
+            ),
+        },
+    },
     test: {
         coverage: {
             provider: 'v8',
             reporter: ['text', 'json-summary', 'lcov'],
             reportsDirectory: './coverage',
-            include: ['src/**/*.ts'],
-            exclude: ['src/**/*.d.ts'],
+            include: [
+                'packages/wasm/src/**/*.ts',
+                'tools/generate-coverage-badge.ts',
+                'tools/ci/check-package-boundaries.ts',
+            ],
+            exclude: [
+                'packages/*/src/**/*.d.ts',
+                'tools/ci/build-wasm-placeholder.ts',
+            ],
             thresholds: {
                 statements: 100,
                 branches: 100,
@@ -86,14 +134,17 @@ export default defineConfig({
             {
                 test: {
                     name: 'node',
-                    include: ['tests/node/**/*.test.ts'],
+                    include: [
+                        'packages/*/tests/node/**/*.test.ts',
+                        'tests/node/**/*.test.ts',
+                    ],
                     ...nodeProject,
                 },
             },
             {
                 test: {
                     name: 'browser-desktop',
-                    include: ['tests/browser/**/*.browser.test.ts'],
+                    include: ['packages/*/tests/browser/**/*.browser.test.ts'],
                     browser: {
                         enabled: true,
                         provider: playwright(),
@@ -105,7 +156,7 @@ export default defineConfig({
             {
                 test: {
                     name: 'browser-mobile',
-                    include: ['tests/browser/**/*.browser.test.ts'],
+                    include: ['packages/*/tests/browser/**/*.browser.test.ts'],
                     browser: {
                         enabled: true,
                         provider: playwright(),

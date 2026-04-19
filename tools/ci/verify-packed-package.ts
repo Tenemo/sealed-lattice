@@ -8,7 +8,7 @@ import {
     writeFile,
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import path, { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
@@ -28,6 +28,10 @@ type SpawnCommand = {
 };
 
 const supportedPackageManagers = new Set<PackageManager>(['npm', 'pnpm']);
+
+export const getPublicPackageDirectory = (
+    projectRoot: string = repoRoot,
+): string => path.resolve(projectRoot, 'packages', 'sdk');
 
 export const parsePackageManagerOverride = (
     commandLineArguments: readonly string[],
@@ -181,6 +185,7 @@ const main = async (): Promise<void> => {
     const packageManagerRunner = resolvePackageManagerRunner(
         process.argv.slice(2),
     );
+    const packageDirectory = getPublicPackageDirectory();
     const tempRoot = await mkdtemp(join(tmpdir(), 'sealed-lattice-packed-'));
     const packDirectory = join(tempRoot, 'pack');
     const consumerDirectory = join(tempRoot, 'consumer');
@@ -192,7 +197,7 @@ const main = async (): Promise<void> => {
         runPackageManager(
             packageManagerRunner,
             createPackArguments(packDirectory),
-            repoRoot,
+            packageDirectory,
         );
 
         const tarballs = (await readdir(packDirectory)).filter((entry) =>
@@ -220,7 +225,7 @@ const main = async (): Promise<void> => {
             'utf8',
         );
         await copyFile(
-            join(repoRoot, 'tools/ci/packed-package-smoke.mjs'),
+            path.join(repoRoot, 'tools', 'ci', 'packed-package-smoke.mjs'),
             join(consumerDirectory, 'smoke.mjs'),
         );
 

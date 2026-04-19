@@ -29,6 +29,7 @@ concurrency:
 
 env:
     FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    SEALED_LATTICE_TURBO_CACHE: 'local:,remote:'
 
 jobs:
     validate-dispatch:
@@ -57,9 +58,12 @@ jobs:
               with:
                   persist-credentials: false
             - uses: ./.github/actions/bootstrap-pnpm
+            - uses: dtolnay/rust-toolchain@stable
+              with:
+                  targets: wasm32-unknown-unknown
             - run: pnpm run check
             - run: pnpm run test:node
-            - run: pnpm run build:dist
+            - run: pnpm run build
 
     coverage:
         name: coverage
@@ -72,6 +76,9 @@ jobs:
               with:
                   persist-credentials: false
             - uses: ./.github/actions/bootstrap-pnpm
+            - uses: dtolnay/rust-toolchain@stable
+              with:
+                  targets: wasm32-unknown-unknown
             - run: pnpm run coverage:node
 
     browser:
@@ -85,6 +92,9 @@ jobs:
               with:
                   persist-credentials: false
             - uses: ./.github/actions/bootstrap-pnpm
+            - uses: dtolnay/rust-toolchain@stable
+              with:
+                  targets: wasm32-unknown-unknown
             - run: pnpm exec playwright install --with-deps chromium firefox webkit
             - run: pnpm run test:browser
 
@@ -113,12 +123,15 @@ jobs:
               with:
                   persist-credentials: false
             - uses: ./.github/actions/bootstrap-pnpm
-            - run: pnpm run build:dist
+            - uses: dtolnay/rust-toolchain@stable
+              with:
+                  targets: wasm32-unknown-unknown
+            - run: pnpm run build
             - run: pnpm run verify:docs
             - run: pnpm run docs:build:site
             - run: pnpm run smoke:pack
             - run: pnpm run smoke:pack:npm
-            - run: npm pack --dry-run --ignore-scripts
+            - run: cd packages/sdk && npm pack --dry-run --ignore-scripts
 
     prepare-release:
         needs:
@@ -151,12 +164,17 @@ jobs:
               run: echo "sha=$(git rev-parse HEAD)" >> "${GITHUB_OUTPUT}"
 
             - uses: ./.github/actions/bootstrap-pnpm
+            - uses: dtolnay/rust-toolchain@stable
+              with:
+                  targets: wasm32-unknown-unknown
 
             - name: bump release version
               id: metadata
               run: |
-                  CURRENT_VERSION=$(node -e "console.log(JSON.parse(require('fs').readFileSync('package.json', 'utf8')).version)")
+                  CURRENT_VERSION=$(node -e "console.log(JSON.parse(require('fs').readFileSync('packages/sdk/package.json', 'utf8')).version)")
                   RELEASE_TYPE="${{ inputs.release_type }}"
+
+                  pushd packages/sdk >/dev/null
 
                   case "${RELEASE_TYPE}" in
                     "beta next")
@@ -191,7 +209,9 @@ jobs:
                       ;;
                   esac
 
-                  VERSION=$(node -e "console.log(JSON.parse(require('fs').readFileSync('package.json', 'utf8')).version)")
+                  popd >/dev/null
+
+                  VERSION=$(node -e "console.log(JSON.parse(require('fs').readFileSync('packages/sdk/package.json', 'utf8')).version)")
 
                   if [[ "${VERSION}" == "${CURRENT_VERSION}" ]]; then
                     echo "Release version did not change." >&2
@@ -213,12 +233,12 @@ jobs:
                   echo "dist_tag=${DIST_TAG}" >> "${GITHUB_OUTPUT}"
                   echo "prerelease=${PRERELEASE}" >> "${GITHUB_OUTPUT}"
 
-            - run: pnpm run build:dist
+            - run: pnpm run build
             - run: pnpm run verify:docs
             - run: pnpm run docs:build:site
             - run: pnpm run smoke:pack
             - run: pnpm run smoke:pack:npm
-            - run: npm publish --dry-run --ignore-scripts
+            - run: cd packages/sdk && npm publish --dry-run --ignore-scripts
 
             - uses: actions/upload-artifact@v7.0.1
               with:
@@ -226,9 +246,8 @@ jobs:
                   name: release-package
                   retention-days: 1
                   path: |
-                      package.json
-                      pnpm-lock.yaml
-                      dist
+                      packages/sdk/package.json
+                      packages/sdk/dist
 
     push-release:
         needs:
@@ -269,7 +288,7 @@ jobs:
                   git config user.name "github-actions[bot]"
                   git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-                  git add package.json pnpm-lock.yaml
+                  git add packages/sdk/package.json pnpm-lock.yaml
 
                   if git diff --cached --quiet; then
                     echo "No release metadata changes were staged." >&2
@@ -333,8 +352,9 @@ jobs:
                   path: .
 
             - name: publish to npm
-              # Trusted publishing uses OIDC for auth and generates provenance automatically.
               run: |
+                  cd packages/sdk
+
                   if [[ "${{ needs.prepare-release.outputs.dist_tag }}" == "latest" ]]; then
                     npm publish --ignore-scripts
                   else

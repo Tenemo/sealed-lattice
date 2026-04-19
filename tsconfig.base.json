@@ -1,0 +1,41 @@
+{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "ignoreDeprecations": "6.0",
+    "paths": {
+      "sealed-lattice": [
+        "./packages/sdk/src/index.ts"
+      ],
+      "@sealed-lattice/protocol": [
+        "./packages/protocol/src/index.ts"
+      ],
+      "@sealed-lattice/crypto": [
+        "./packages/crypto/src/index.ts"
+      ],
+      "@sealed-lattice/wasm": [
+        "./packages/wasm/src/index.ts"
+      ],
+      "@sealed-lattice/testkit": [
+        "./packages/testkit/src/index.ts"
+      ]
+    },
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "removeComments": true,
+    "allowSyntheticDefaultImports": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "types": [
+      "node"
+    ],
+    "strict": true,
+    "sourceMap": true,
+    "allowJs": true,
+    "esModuleInterop": true,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+    "noUnusedParameters": true,
+    "noUnusedLocals": true
+  }
+}

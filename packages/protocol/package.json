@@ -1,0 +1,23 @@
+{
+  "name": "@sealed-lattice/protocol",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Internal protocol package for deterministic election and transcript logic.",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "check": "tsc --project tsconfig.json --pretty false --noEmit",
+    "build": "pnpm exec del-cli dist && tsc --project tsconfig.build.json",
+    "test:node": "vitest --project node --run tests/node/**/*.test.ts"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.4"
+  }
+}

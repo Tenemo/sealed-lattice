@@ -1,3 +1,5 @@
+import path from 'node:path';
+
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -6,11 +8,18 @@ import {
     createPackArguments,
     detectPackageManager,
     getPackageManagerExecutableName,
+    getPublicPackageDirectory,
     parsePackageManagerOverride,
     resolvePackageManagerRunner,
 } from '../../../tools/ci/verify-packed-package';
 
 describe('packed package smoke helpers', () => {
+    it('resolves the public package directory', () => {
+        expect(getPublicPackageDirectory('/repo/root')).toBe(
+            path.resolve('/repo/root', 'packages', 'sdk'),
+        );
+    });
+
     it('parses explicit package manager overrides', () => {
         expect(parsePackageManagerOverride(['--package-manager', 'npm'])).toBe(
             'npm',

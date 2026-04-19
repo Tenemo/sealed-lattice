@@ -1,0 +1,34 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "noEmit": true
+  },
+  "include": [
+    "packages/*/tests/**/*.ts",
+    "tools/**/*.ts",
+    "tools/**/*.mjs",
+    "typedoc/**/*.ts",
+    "tests/**/*.ts",
+    "vitest.config.ts",
+    "eslint.config.js",
+    "typedoc.config.mjs"
+  ],
+  "references": [
+    {
+      "path": "./packages/sdk"
+    },
+    {
+      "path": "./packages/protocol"
+    },
+    {
+      "path": "./packages/crypto"
+    },
+    {
+      "path": "./packages/wasm"
+    },
+    {
+      "path": "./packages/testkit"
+    }
+  ]
+}

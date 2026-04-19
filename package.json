@@ -1,107 +1,103 @@
 {
-    "name": "sealed-lattice",
-    "version": "0.0.9",
-    "description": "A browser-native TypeScript package for sealed-lattice research prototypes, currently shipping a narrow SHA-256 helper while the post-quantum architecture remains intentionally unfrozen.",
-    "author": "Piotr Piech <piotr@piech.dev>",
-    "license": "MPL-2.0",
-    "main": "dist/index.js",
-    "types": "dist/index.d.ts",
-    "files": [
-        "dist"
-    ],
-    "imports": {
-        "#root": "./src/index.ts"
-    },
-    "exports": {
-        ".": {
-            "types": "./dist/index.d.ts",
-            "import": "./dist/index.js"
-        }
-    },
-    "repository": {
-        "type": "git",
-        "url": "git+https://github.com/Tenemo/sealed-lattice.git"
-    },
-    "bugs": {
-        "url": "https://github.com/Tenemo/sealed-lattice/issues"
-    },
-    "homepage": "https://tenemo.github.io/sealed-lattice/",
-    "packageManager": "pnpm@10.33.0",
-    "scripts": {
-        "lint": "eslint . -c eslint.config.js",
-        "eslint:fix": "eslint . --fix -c eslint.config.js",
-        "check": "pnpm run lint && pnpm run tsc && knip && tsx ./tools/ci/verify-vectors.ts",
-        "tsc": "tsc",
-        "test:node": "vitest --project node --run",
-        "test:browser": "vitest --project browser-desktop --project browser-mobile --run",
-        "test": "pnpm run test:node && pnpm run test:browser",
-        "test:watch": "vitest --project node --watch",
-        "coverage:node": "vitest --project node --run --coverage",
-        "coverage:badge": "pnpm run coverage:node && tsx ./tools/generate-coverage-badge.ts",
-        "smoke:pack": "tsx ./tools/ci/verify-packed-package.ts",
-        "smoke:pack:npm": "tsx ./tools/ci/verify-packed-package.ts --package-manager npm",
-        "prebuild": "pnpm run check && pnpm run test",
-        "build:dist": "pnpm exec del-cli dist && tsc --project tsconfig.build.json",
-        "build": "pnpm run build:dist",
-        "vectors:core": "tsx ./tools/generate-core-vectors.ts",
-        "docs:api": "pnpm exec del-cli docs/src/content/docs/api/reference && tsx ./node_modules/typedoc/bin/typedoc --options typedoc.config.mjs && tsx ./typedoc/postprocess-site-docs.ts",
-        "docs:dev": "pnpm run docs:api && astro dev --root docs",
-        "docs:build:site": "pnpm run docs:api && pnpm exec del-cli docs/dist && astro build --root docs --silent",
-        "docs:preview": "pnpm run docs:build:site && astro preview --root docs",
-        "verify:docs": "pnpm run docs:api && tsx ./typedoc/verify-docs.ts",
-        "prepare": "husky"
-    },
-    "devDependencies": {
-        "@astrojs/mdx": "^5.0.3",
-        "@astrojs/starlight": "^0.38.3",
-        "@eslint/eslintrc": "^3.3.5",
-        "@eslint/js": "^10.0.1",
-        "@fontsource/ibm-plex-sans": "^5.2.8",
-        "@fontsource/jetbrains-mono": "^5.2.8",
-        "@types/node": "^25.6.0",
-        "@typescript-eslint/eslint-plugin": "^8.58.2",
-        "@typescript-eslint/parser": "^8.58.2",
-        "@vitest/browser-playwright": "^4.1.4",
-        "@vitest/coverage-v8": "^4.1.4",
-        "astro": "^6.1.7",
-        "del-cli": "^7.0.0",
-        "eslint": "^10.2.0",
-        "eslint-config-prettier": "^10.1.8",
-        "eslint-plugin-import-x": "^4.16.2",
-        "eslint-plugin-only-error": "^1.0.2",
-        "eslint-plugin-prettier": "^5.5.5",
-        "globals": "^17.5.0",
-        "husky": "^9.1.7",
-        "knip": "^6.4.1",
-        "playwright": "^1.59.1",
-        "prettier": "^3.8.3",
-        "tsx": "^4.21.0",
-        "typedoc": "^0.28.19",
-        "typedoc-plugin-markdown": "^4.11.0",
-        "typescript": "^6.0.2",
-        "vite": "^8.0.8",
-        "vitest": "^4.1.4"
-    },
-    "engines": {
-        "node": ">=24.14.1"
-    },
-    "pnpm": {
-        "onlyBuiltDependencies": [
-            "esbuild",
-            "unrs-resolver"
-        ]
-    },
-    "type": "module",
-    "keywords": [
-        "cryptography",
-        "security",
-        "post-quantum",
-        "lattice",
-        "threshold-encryption",
-        "research-prototype",
-        "webcrypto",
-        "typescript-cryptography",
-        "data-protection",
-        "privacy"
+  "name": "sealed-lattice-workspace",
+  "private": true,
+  "description": "Private Turborepo workspace for the sealed-lattice library.",
+  "author": "Piotr Piech <piotr@piech.dev>",
+  "license": "MPL-2.0",
+  "packageManager": "pnpm@10.33.0",
+  "scripts": {
+    "lint:workspace": "eslint . -c eslint.config.js",
+    "lint": "tsx ./tools/run-turbo.ts lint:workspace",
+    "eslint:fix:workspace": "eslint . --fix -c eslint.config.js",
+    "eslint:fix": "tsx ./tools/run-turbo.ts eslint:fix:workspace",
+    "tsc:workspace": "tsc --build --pretty false",
+    "tsc": "tsx ./tools/run-turbo.ts tsc:workspace",
+    "boundary:workspace": "tsx ./tools/ci/check-package-boundaries.ts",
+    "boundary": "tsx ./tools/run-turbo.ts boundary:workspace",
+    "vectors:workspace": "tsx ./tools/ci/verify-test-vectors.ts",
+    "vectors": "tsx ./tools/run-turbo.ts vectors:workspace",
+    "vectors:generate:workspace": "tsx ./tools/generate-test-vector-manifest.ts",
+    "vectors:generate": "tsx ./tools/run-turbo.ts vectors:generate:workspace",
+    "knip:workspace": "knip",
+    "check:workspace": "pnpm run lint:workspace && pnpm run tsc:workspace && pnpm run boundary:workspace && pnpm run vectors:workspace && pnpm run knip:workspace",
+    "check": "tsx ./tools/run-turbo.ts check check:workspace",
+    "build:wasm": "tsx ./tools/run-turbo.ts build:wasm --filter=@sealed-lattice/wasm",
+    "test:node:workspace": "vitest --project node --run",
+    "test:node": "tsx ./tools/run-turbo.ts test:node:workspace",
+    "test:browser:workspace": "vitest --project browser-desktop --project browser-mobile --run",
+    "test:browser": "tsx ./tools/run-turbo.ts test:browser:workspace",
+    "test": "tsx ./tools/run-turbo.ts test:node:workspace test:browser:workspace",
+    "coverage:node:workspace": "vitest --project node --run --coverage",
+    "coverage:node": "tsx ./tools/run-turbo.ts coverage:node:workspace",
+    "coverage:badge:workspace": "tsx ./tools/generate-coverage-badge.ts",
+    "coverage:badge": "tsx ./tools/run-turbo.ts coverage:badge:workspace",
+    "build": "tsx ./tools/run-turbo.ts build",
+    "docs:api:workspace": "pnpm exec del-cli docs/src/content/docs/api/reference && tsx ./node_modules/typedoc/bin/typedoc --options typedoc.config.mjs && tsx ./typedoc/postprocess-site-docs.ts",
+    "docs:api": "tsx ./tools/run-turbo.ts docs:api:workspace",
+    "docs:dev:workspace": "astro dev --root docs",
+    "docs:dev": "tsx ./tools/run-turbo.ts docs:dev:workspace",
+    "docs:build:site:workspace": "pnpm exec del-cli docs/dist && astro build --root docs --silent",
+    "docs:build:site": "tsx ./tools/run-turbo.ts docs:build:site:workspace",
+    "docs:preview:workspace": "astro preview --root docs",
+    "docs:preview": "tsx ./tools/run-turbo.ts docs:preview:workspace",
+    "docs": "tsx ./tools/run-turbo.ts docs:build:site:workspace",
+    "verify:docs:workspace": "tsx ./typedoc/verify-docs.ts",
+    "verify:docs": "tsx ./tools/run-turbo.ts verify:docs:workspace",
+    "smoke:pack:workspace": "tsx ./tools/ci/verify-packed-package.ts",
+    "smoke:pack": "tsx ./tools/run-turbo.ts smoke:pack:workspace",
+    "smoke:pack:npm:workspace": "tsx ./tools/ci/verify-packed-package.ts --package-manager npm",
+    "smoke:pack:npm": "tsx ./tools/run-turbo.ts smoke:pack:npm:workspace",
+    "prepare": "husky"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Tenemo/sealed-lattice.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Tenemo/sealed-lattice/issues"
+  },
+  "homepage": "https://tenemo.github.io/sealed-lattice/",
+  "devDependencies": {
+    "@astrojs/mdx": "^5.0.3",
+    "@astrojs/starlight": "^0.38.3",
+    "@eslint/eslintrc": "^3.3.5",
+    "@eslint/js": "^10.0.1",
+    "@fontsource/ibm-plex-sans": "^5.2.8",
+    "@fontsource/jetbrains-mono": "^5.2.8",
+    "@types/node": "^25.6.0",
+    "@typescript-eslint/eslint-plugin": "^8.58.2",
+    "@typescript-eslint/parser": "^8.58.2",
+    "@vitest/browser-playwright": "^4.1.4",
+    "@vitest/coverage-v8": "^4.1.4",
+    "astro": "^6.1.7",
+    "del-cli": "^7.0.0",
+    "eslint": "^10.2.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-import-resolver-typescript": "^4.4.4",
+    "eslint-plugin-import-x": "^4.16.2",
+    "eslint-plugin-only-error": "^1.0.2",
+    "eslint-plugin-prettier": "^5.5.5",
+    "globals": "^17.5.0",
+    "husky": "^9.1.7",
+    "knip": "^6.4.1",
+    "playwright": "^1.59.1",
+    "prettier": "^3.8.3",
+    "tsx": "^4.21.0",
+    "turbo": "^2.5.5",
+    "typedoc": "^0.28.19",
+    "typedoc-plugin-markdown": "^4.11.0",
+    "typescript": "^6.0.2",
+    "vite": "^8.0.8",
+    "vitest": "^4.1.4"
+  },
+  "engines": {
+    "node": ">=24.14.1"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "unrs-resolver"
     ]
+  },
+  "type": "module"
 }

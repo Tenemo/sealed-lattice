@@ -1,6 +1,6 @@
 ---
 title: sealed-lattice
-description: Browser-native documentation for sealed-lattice, a post-quantum voting research package with a deliberately narrow public API surface.
+description: Documentation for the sealed-lattice workspace and its intentionally empty public facade.
 template: splash
 editUrl: false
 head:
@@ -8,40 +8,40 @@ head:
       content: sealed-lattice
 hero:
     title: sealed-lattice
-    tagline: Browser-native post-quantum voting research starts here with one safe helper, one root package, and a hardened project shell around a deliberately narrow surface.
+    tagline: Workspace first, public API later. The package boundary, verification shell, and Rust/WASM proof path are stable while the public runtime surface remains intentionally empty.
     image:
         html: |
             <div class="landing-hero-panel">
               <div class="landing-hero-panel__card">
-                <p class="landing-hero-panel__eyebrow">Current milestone</p>
-                <p class="landing-hero-panel__title">One safe public API surface</p>
+                <p class="landing-hero-panel__eyebrow">Current boundary</p>
+                <p class="landing-hero-panel__title">Workspace first, API later</p>
                 <ol class="landing-hero-panel__list">
-                  <li>Install the root package and stay on ESM imports.</li>
-                  <li>Hash UTF-8 strings or raw bytes with <code>sha256Hex</code>.</li>
-                  <li>Fail closed when Web Crypto digest support is missing.</li>
-                  <li>Treat future post-quantum modules as intentionally unfrozen.</li>
+                  <li>Use <code>sealed-lattice</code> as the only public package name.</li>
+                  <li>Treat the current public facade as intentionally empty.</li>
+                  <li>Develop inside the private workspace packages.</li>
+                  <li>Verify the Rust/WASM placeholder path before real arithmetic lands.</li>
                 </ol>
               </div>
               <div class="landing-hero-panel__facts">
                 <div class="landing-hero-panel__fact">
-                  <span class="landing-hero-panel__label">Surface</span>
-                  <strong>Root package only</strong>
+                  <span class="landing-hero-panel__label">Published package</span>
+                  <strong>One public name</strong>
                   <small><code>sealed-lattice</code></small>
                 </div>
                 <div class="landing-hero-panel__fact">
-                  <span class="landing-hero-panel__label">Runtime</span>
-                  <strong>Native Web Crypto</strong>
-                  <small><code>crypto.subtle.digest</code> and <code>TextEncoder</code></small>
+                  <span class="landing-hero-panel__label">Runtime surface</span>
+                  <strong>Zero exports</strong>
+                  <small>Intentionally empty for now</small>
                 </div>
                 <div class="landing-hero-panel__fact">
-                  <span class="landing-hero-panel__label">Shipped today</span>
-                  <strong>SHA-256 helper</strong>
-                  <small><code>sha256Hex</code> plus <code>UnsupportedRuntimeError</code></small>
+                  <span class="landing-hero-panel__label">Internal packages</span>
+                  <strong>Four private shells</strong>
+                  <small>Protocol, crypto, wasm, and testkit</small>
                 </div>
                 <div class="landing-hero-panel__fact">
-                  <span class="landing-hero-panel__label">Roadmap</span>
-                  <strong>Design space stays open</strong>
-                  <small>Future PQ subpaths remain intentionally unfrozen</small>
+                  <span class="landing-hero-panel__label">Native proof path</span>
+                  <strong>Rust crate plus WASM loader</strong>
+                  <small>Placeholder function only</small>
                 </div>
               </div>
             </div>
@@ -50,8 +50,8 @@ hero:
           link: ./guides/getting-started/
           icon: right-arrow
           variant: primary
-        - text: Security and non-goals
-          link: ./guides/security-and-non-goals/
+        - text: Workspace layout
+          link: ./guides/workspace-layout/
           variant: secondary
         - text: Browse the API reference
           link: ./api/
@@ -62,55 +62,48 @@ import { Card, CardGrid, LinkCard, Steps } from "@astrojs/starlight/components";
 
 <section class="landing-section not-content">
   <div class="landing-section__header">
-    <h2>What this package does</h2>
+    <h2>What ships today</h2>
     <p>
-      It gives the project one real cryptographic capability now, while the
-      broader post-quantum architecture, protocol boundaries, and future module
-      layout are still being proven.
+      The repo is a private workspace with one published package, four private
+      internal packages, and one Rust crate that proves the WASM path.
     </p>
   </div>
 
   <div class="landing-split-grid">
-    <Card title="In plain terms">
+    <Card title="Public boundary">
       <div class="landing-card-copy">
         <p>
-          <code>sealed-lattice</code> is the stable shell around the next phase
-          of the research. Today it gives you one trusted hashing helper and a
-          clear boundary for what is and is not public yet.
+          <code>sealed-lattice</code> remains the only public npm name, but its
+          current runtime facade is intentionally empty.
         </p>
         <p>
-          The point of the current release is not feature breadth. It is to
-          lock down packaging, docs, testing, browser coverage, and failure
-          behavior before more post-quantum functionality is frozen.
+          That keeps packaging, docs, release flow, and smoke checks stable
+          without freezing premature protocol or cryptographic APIs.
         </p>
       </div>
     </Card>
 
-    <Card title="Technical details">
+    <Card title="Internal workspace">
       <div class="landing-card-copy">
         <p>
-          The current root export exposes <code>sha256Hex</code> for
-          <code>string</code> and <code>Uint8Array</code> inputs together with a
-          typed <code>UnsupportedRuntimeError</code> when native Web Crypto
-          digest support is missing.
+          The private workspace shells are split by responsibility: protocol,
+          crypto, wasm, and testkit.
         </p>
         <p>
-          CI, coverage, docs generation, tarball smoke tests, and browser
-          parity checks are already hardened so the public API surface does not
-          drift silently as the lattice-native design evolves.
+          The Rust placeholder crate and the internal WASM loader prove the
+          browser and Node build path before real arithmetic lands.
         </p>
       </div>
     </Card>
-
   </div>
 </section>
 
 <section class="landing-section not-content">
   <div class="landing-section__header">
-    <h2>Quick start links</h2>
+    <h2>Read the current contract</h2>
     <p>
-      Use these entry points to reach the supported setup, runtime rules, and
-      exact public contract directly.
+      Start with the current public boundary, then move into the workspace and
+      development guides.
     </p>
   </div>
 
@@ -118,91 +111,85 @@ import { Card, CardGrid, LinkCard, Steps } from "@astrojs/starlight/components";
     <LinkCard
       title="Get started"
       href="./guides/getting-started/"
-      description="Start with the root package, the supported inputs, and the current milestone rules."
+      description="See what the public package does today and what it intentionally does not expose yet."
     />
     <LinkCard
-      title="Runtime and compatibility"
-      href="./guides/runtime-and-compatibility/"
-      description="Check browser, Node, ESM, and Web Crypto expectations before deployment."
+      title="Workspace layout"
+      href="./guides/workspace-layout/"
+      description="Read the package split, ownership boundaries, and current dependency rules."
     />
     <LinkCard
-      title="Browser and worker usage"
-      href="./guides/browser-and-worker-usage/"
-      description="Use the helper on the main thread or inside a worker without hidden fallbacks."
+      title="Development workflow"
+      href="./guides/development-workflow/"
+      description="Run the workspace checks, browser matrix, docs generation, smoke checks, vector verification, and Rust/WASM build path."
     />
     <LinkCard
       title="Security and non-goals"
       href="./guides/security-and-non-goals/"
-      description="Read the explicit security boundary before assuming future PQ capabilities are public."
+      description="Keep the current claim boundary explicit before protocol and crypto APIs are added."
     />
     <LinkCard
       title="API reference"
       href="./api/"
-      description="Browse the curated API overview and the generated symbol reference."
+      description="Confirm that the published runtime facade is intentionally empty."
     />
     <LinkCard
       title="Protocol spec"
       href="./spec/"
-      description="Read the stable invariants and responsibility boundaries of the current milestone."
+      description="Read the stable package and process rules for the current release boundary."
     />
   </CardGrid>
 </section>
 
 <section class="landing-section not-content">
   <div class="landing-section__header">
-    <h2>Follow the current milestone</h2>
+    <h2>Follow the current boundary</h2>
     <p>
-      The package is intentionally narrow. The supported path is short, explicit,
-      and designed to keep the future architecture flexible.
+      The supported path is short and explicit while the real protocol work is
+      still ahead.
     </p>
   </div>
 
   <div class="landing-steps-shell">
     <Steps>
-      1. **Install the root package.**
-         Use `sealed-lattice` as the only committed public entry point.
-      2. **Hash strings or bytes.**
-         Call `sha256Hex(...)` with UTF-8 text or `Uint8Array` input and expect
-         lowercase hexadecimal output.
-      3. **Handle missing runtime support explicitly.**
-         If native digest support is unavailable, the package throws
-         `UnsupportedRuntimeError` instead of silently falling back.
-      4. **Treat future PQ capabilities as internal for now.**
-         Serialization, transport, threshold flows, proofs, and wider lattice
-         modules stay unpublished until their misuse-resistant boundaries are
-         stable enough to freeze.
+      1. **Install the public package name.**
+         Use `sealed-lattice` as the only supported public import path.
+      2. **Treat the runtime facade as intentionally empty.**
+         The package exists today to stabilize packaging, docs, and release flow.
+      3. **Develop inside the workspace packages.**
+         Use the private packages for protocol, crypto, wasm, and testkit work.
+      4. **Keep the Rust/WASM path verified.**
+         The placeholder kernel must continue to build natively and load in Node and browsers.
     </Steps>
   </div>
 </section>
 
 <section class="landing-section not-content">
   <div class="landing-section__header">
-    <h2>Keep the boundary explicit</h2>
+    <h2>Boundary summary</h2>
     <p>
-      This repository is meant to stabilize the project shell first. These
-      boundaries define what the current public API surface supports and what
-      still remains outside it.
+      The workspace shell is stable without pretending that the wider
+      protocol-facing API already exists.
     </p>
   </div>
 
   <div class="landing-split-grid">
-    <Card title="Built for">
+    <Card title="Guaranteed now">
       <ul>
-        <li>Browser-native TypeScript research prototypes.</li>
-        <li>One safe hashing helper with typed runtime failure behavior.</li>
-        <li>Verified packaging, docs generation, coverage, and browser parity.</li>
-        <li>Keeping the future post-quantum architecture intentionally flexible.</li>
+        <li>Private workspace packages with explicit ownership boundaries.</li>
+        <li>Package-boundary checks against deep imports and illegal internal dependencies.</li>
+        <li>Node, browser, docs, vector, pack smoke, and release verification.</li>
+        <li>Rust placeholder build plus internal WASM loading path.</li>
       </ul>
     </Card>
 
-    <Card title="Not promised">
+    <Card title="Not published yet">
       <ul>
-        <li>Frozen public subpaths for future PQ capability areas.</li>
-        <li>Lattice encryption, threshold decryption, proofs, or transport APIs today.</li>
-        <li>Audited production voting guarantees.</li>
-        <li>Fallback runtimes that bypass native Web Crypto digest support.</li>
+        <li>Protocol lifecycle helpers.</li>
+        <li>Transcript, manifest, or ballot types.</li>
+        <li>Crypto provider wrappers or proof APIs.</li>
+        <li>Any public subpaths beyond the root package name.</li>
       </ul>
     </Card>
-
   </div>
 </section>

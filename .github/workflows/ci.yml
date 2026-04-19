@@ -8,6 +8,7 @@ on:
 
 env:
     FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    SEALED_LATTICE_TURBO_CACHE: 'local:,remote:'
 
 jobs:
     verify:
@@ -17,9 +18,12 @@ jobs:
         steps:
             - uses: actions/checkout@v6.0.2
             - uses: ./.github/actions/bootstrap-pnpm
+            - uses: dtolnay/rust-toolchain@stable
+              with:
+                  targets: wasm32-unknown-unknown
             - run: pnpm run check
             - run: pnpm run test:node
-            - run: pnpm run build:dist
+            - run: pnpm run build
 
     coverage:
         name: coverage
@@ -28,6 +32,9 @@ jobs:
         steps:
             - uses: actions/checkout@v6.0.2
             - uses: ./.github/actions/bootstrap-pnpm
+            - uses: dtolnay/rust-toolchain@stable
+              with:
+                  targets: wasm32-unknown-unknown
             - run: pnpm run coverage:node
 
     browser:
@@ -37,6 +44,9 @@ jobs:
         steps:
             - uses: actions/checkout@v6.0.2
             - uses: ./.github/actions/bootstrap-pnpm
+            - uses: dtolnay/rust-toolchain@stable
+              with:
+                  targets: wasm32-unknown-unknown
             - run: pnpm exec playwright install --with-deps chromium firefox webkit
             - run: pnpm run test:browser
 
@@ -58,9 +68,12 @@ jobs:
         steps:
             - uses: actions/checkout@v6.0.2
             - uses: ./.github/actions/bootstrap-pnpm
-            - run: pnpm run build:dist
+            - uses: dtolnay/rust-toolchain@stable
+              with:
+                  targets: wasm32-unknown-unknown
+            - run: pnpm run build
             - run: pnpm run verify:docs
             - run: pnpm run docs:build:site
             - run: pnpm run smoke:pack
             - run: pnpm run smoke:pack:npm
-            - run: npm pack --dry-run --ignore-scripts
+            - run: cd packages/sdk && npm pack --dry-run --ignore-scripts
