@@ -1,6 +1,6 @@
 ---
 title: sealed-lattice
-description: Browser-native documentation for sealed-lattice, a post-quantum voting research package with a deliberately narrow public surface.
+description: Browser-native documentation for sealed-lattice, a post-quantum voting research package with a deliberately narrow public API surface.
 template: splash
 editUrl: false
 head:
@@ -14,7 +14,7 @@ hero:
             <div class="landing-hero-panel">
               <div class="landing-hero-panel__card">
                 <p class="landing-hero-panel__eyebrow">Current milestone</p>
-                <p class="landing-hero-panel__title">One safe public surface</p>
+                <p class="landing-hero-panel__title">One safe public API surface</p>
                 <ol class="landing-hero-panel__list">
                   <li>Install the root package and stay on ESM imports.</li>
                   <li>Hash UTF-8 strings or raw bytes with <code>sha256Hex</code>.</li>
@@ -53,7 +53,7 @@ hero:
         - text: Security and non-goals
           link: ./guides/security-and-non-goals/
           variant: secondary
-        - text: Browse the API
+        - text: Browse the API reference
           link: ./api/
           variant: minimal
 ---
@@ -96,7 +96,7 @@ import { Card, CardGrid, LinkCard, Steps } from "@astrojs/starlight/components";
         </p>
         <p>
           CI, coverage, docs generation, tarball smoke tests, and browser
-          parity checks are already hardened so the package boundary does not
+          parity checks are already hardened so the public API surface does not
           drift silently as the lattice-native design evolves.
         </p>
       </div>
@@ -136,7 +136,7 @@ import { Card, CardGrid, LinkCard, Steps } from "@astrojs/starlight/components";
       description="Read the explicit security boundary before assuming future PQ capabilities are public."
     />
     <LinkCard
-      title="API docs"
+      title="API reference"
       href="./api/"
       description="Browse the curated API overview and the generated symbol reference."
     />
@@ -180,8 +180,8 @@ import { Card, CardGrid, LinkCard, Steps } from "@astrojs/starlight/components";
     <h2>Keep the boundary explicit</h2>
     <p>
       This repository is meant to stabilize the project shell first. These
-      boundaries define what the current public surface supports and what still
-      remains outside it.
+      boundaries define what the current public API surface supports and what
+      still remains outside it.
     </p>
   </div>
 

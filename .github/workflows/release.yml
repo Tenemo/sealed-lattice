@@ -87,7 +87,6 @@ jobs:
             - uses: ./.github/actions/bootstrap-pnpm
             - run: pnpm exec playwright install --with-deps chromium firefox webkit
             - run: pnpm run test:browser
-            - run: pnpm run verify:browser-compat
 
     docs:
         name: docs

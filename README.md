@@ -23,15 +23,15 @@ The current implementation ships:
 - a real `sha256Hex` helper on the safe root package
 - a typed `UnsupportedRuntimeError` for missing Web Crypto support
 - a hardened repo, docs, testing, and publish workflow around that narrow surface
-- a deliberately narrow public surface while the lattice-native architecture is still being proven
+- a deliberately narrow public API surface while the lattice-native architecture is still being proven
 
 This repository is a hardened research prototype. It is not audited production voting software.
 
 ## Release status
 
-This repository currently tracks the initial public `sealed-lattice` surface.
+This repository currently tracks the initial public `sealed-lattice` API surface.
 
-The public surface is intentionally narrow while the repo, CI, docs, tests, coverage, and packaging experience are stabilized. Lattice cryptography, threshold flows, transport payloads, proofs, protocol types, and any future subpath structure are still being designed and are not frozen yet.
+The public API surface is intentionally narrow while the repo, CI, docs, tests, coverage, and packaging experience are stabilized. Lattice cryptography, threshold flows, transport payloads, proofs, protocol types, and any future subpath structure are still being designed and are not frozen yet.
 
 ## Installation
 
@@ -50,8 +50,8 @@ pnpm add sealed-lattice
 
 - Use modern browsers that expose `globalThis.crypto.subtle.digest` and `TextEncoder`.
 - Install local browser runtimes with `pnpm exec playwright install chromium firefox webkit`.
-- Validate the current browser matrix with `pnpm run verify:browser-compat`.
-- The local compatibility probe runs the targets supported on your current platform. CI runs the full desktop and mobile-emulation matrix on macOS.
+- Validate the current browser matrix with `pnpm run test:browser`.
+- CI runs the full desktop and mobile-emulation matrix on macOS through the browser Vitest projects.
 
 ## Safe quickstart
 
@@ -65,7 +65,7 @@ console.log(digest);
 
 The root package currently exposes only `sha256Hex` and `UnsupportedRuntimeError`.
 
-## Public package boundary
+## Public API surface
 
 - `sealed-lattice`
 
@@ -89,7 +89,6 @@ pnpm run lint
 pnpm run tsc
 pnpm exec playwright install chromium firefox webkit
 pnpm run test
-pnpm run verify:browser-compat
 pnpm run verify:docs
 pnpm run docs:build:site
 pnpm run smoke:pack

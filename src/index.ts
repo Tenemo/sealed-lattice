@@ -1,1 +1,1 @@
-export { UnsupportedRuntimeError, sha256Hex } from './core/index.js';
+export { UnsupportedRuntimeError, sha256Hex } from './core/crypto.js';

@@ -25,7 +25,7 @@ export default defineConfig({
         StarlightIntegration({
             title: 'sealed-lattice',
             description:
-                'Browser-native documentation for sealed-lattice, a post-quantum voting research package with a deliberately narrow public surface.',
+                'Browser-native documentation for sealed-lattice, a post-quantum voting research package with a deliberately narrow public API surface.',
             disable404Route: true,
             social: [
                 {
@@ -47,17 +47,12 @@ export default defineConfig({
                 },
                 {
                     label: 'Protocol spec',
-                    items: [
-                        'spec',
-                        'spec/library-invariants',
-                        'spec/api-contract',
-                    ],
+                    items: ['spec'],
                 },
                 {
                     label: 'API reference',
                     items: [
                         'api',
-                        'api/root-package',
                         {
                             label: 'Generated reference',
                             collapsed: true,

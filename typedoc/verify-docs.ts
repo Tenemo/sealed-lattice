@@ -11,27 +11,26 @@ import {
 import config from '../typedoc.config.mjs';
 
 import {
-    apiNavigationJson,
+    apiNavigationPath,
     docsContentRoot,
-    publicApiDocs,
-} from './public-api-docs';
+    publicApiReferenceEntries,
+} from './public-api-reference';
 
 const repoRoot = process.cwd();
 const docsRoot = path.resolve(repoRoot, docsContentRoot);
 const publicRoot = path.resolve(repoRoot, 'docs/public');
 const markdownRoots = ['README.md', docsContentRoot];
-const documentedPublicApi = publicApiDocs as readonly {
-    apiIndexPage: string;
+const documentedPublicApiEntries = publicApiReferenceEntries as readonly {
+    apiReferenceIndexPath: string;
     moduleName: string;
 }[];
 const requiredApiEntryPages = [
     `${docsContentRoot}/api/index.mdx`,
-    `${docsContentRoot}/api/root-package.mdx`,
-    ...documentedPublicApi.map((entry) => entry.apiIndexPage),
-    apiNavigationJson,
+    ...documentedPublicApiEntries.map((entry) => entry.apiReferenceIndexPath),
+    apiNavigationPath,
 ] as const;
 const requiredApiModules = new Set(
-    documentedPublicApi.map((entry) => entry.moduleName),
+    documentedPublicApiEntries.map((entry) => entry.moduleName),
 );
 
 const markdownLinkPattern = /!?\[[^\]]*]\(([^)]+)\)/g;
@@ -371,7 +370,7 @@ const verifyApiEntryPages = async (): Promise<string[]> => {
         }
     }
 
-    const navigationPath = path.resolve(repoRoot, apiNavigationJson);
+    const navigationPath = path.resolve(repoRoot, apiNavigationPath);
     if (!(await fileExists(navigationPath))) {
         return failures;
     }

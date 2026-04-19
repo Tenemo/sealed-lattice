@@ -5,7 +5,7 @@ sidebar:
     order: 1
 ---
 
-Start with the root package. The current public surface is intentionally small
+Start with the root package. The current public API surface is intentionally small
 and centered on one real helper: `sha256Hex`.
 
 ## Start with these rules
@@ -31,7 +31,7 @@ console.log(digest);
 - a real SHA-256 helper on the root package
 - a typed `UnsupportedRuntimeError` when Web Crypto hashing is unavailable
 - hardened docs, testing, browser coverage, tarball checks, and publish workflow around that narrow API
-- an intentionally narrow public surface while the future lattice-native architecture remains open
+- an intentionally narrow public API surface while the future lattice-native architecture remains open
 
 ## What it still does not freeze
 
@@ -48,4 +48,4 @@ console.log(digest);
 - For runtime prerequisites, read [Runtime and compatibility](../runtime-and-compatibility/).
 - For browser and worker calling patterns, read [Browser and worker usage](../browser-and-worker-usage/).
 - For the current security boundary, read [Security and non-goals](../security-and-non-goals/).
-- The [API docs](../../api/) list the exact public contract.
+- The [API reference](../../api/) lists the exact public contract.

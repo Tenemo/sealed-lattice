@@ -1,14 +1,40 @@
-import { bytesToHex, normalizeInputToBytes } from './bytes.js';
-import { UnsupportedRuntimeError } from './errors.js';
-
 type SupportedCrypto = Crypto & {
     subtle: SubtleCrypto;
 };
 
+const textEncoder = new TextEncoder();
+
 const hasDigest = (value: Crypto | undefined): value is SupportedCrypto =>
     typeof value?.subtle?.digest === 'function';
 
-export const getWebCrypto = (): SupportedCrypto => {
+const normalizeInputToBytes = (
+    input: string | Uint8Array,
+): Uint8Array<ArrayBuffer> => {
+    if (typeof input === 'string') {
+        return Uint8Array.from(textEncoder.encode(input));
+    }
+
+    return Uint8Array.from(input);
+};
+
+const bytesToHex = (bytes: Uint8Array): string =>
+    Array.from(bytes, (value) => value.toString(16).padStart(2, '0')).join('');
+
+/**
+ * Error thrown when the current runtime does not provide the Web Crypto API
+ * features required by the public API surface.
+ */
+export class UnsupportedRuntimeError extends Error {
+    public constructor(
+        message = 'sealed-lattice requires globalThis.crypto.subtle.digest.',
+    ) {
+        super(message);
+        this.name = new.target.name;
+        Object.setPrototypeOf(this, new.target.prototype);
+    }
+}
+
+const getWebCrypto = (): SupportedCrypto => {
     const cryptoApi = globalThis.crypto;
     if (!hasDigest(cryptoApi)) {
         throw new UnsupportedRuntimeError();

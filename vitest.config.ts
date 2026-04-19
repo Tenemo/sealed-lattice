@@ -2,8 +2,6 @@ import { playwright } from '@vitest/browser-playwright';
 import { defineConfig } from 'vitest/config';
 import type { BrowserInstanceOption } from 'vitest/node';
 
-import { getMobileContextOptions } from './tools/ci/browser-compat/mobile-context-options';
-
 const nodeTestTimeoutMs = 60_000;
 const nodeHookTimeoutMs = 240_000;
 
@@ -11,6 +9,39 @@ const nodeProject = {
     environment: 'node',
     testTimeout: nodeTestTimeoutMs,
     hookTimeout: nodeHookTimeoutMs,
+} as const;
+
+const mobileContextOptions = {
+    'Pixel 5': {
+        userAgent:
+            'Mozilla/5.0 (Linux; Android 11; Pixel 5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.7727.15 Mobile Safari/537.36',
+        viewport: {
+            width: 393,
+            height: 727,
+        },
+        screen: {
+            width: 393,
+            height: 851,
+        },
+        deviceScaleFactor: 2.75,
+        isMobile: true,
+        hasTouch: true,
+    },
+    'iPhone 12': {
+        userAgent:
+            'Mozilla/5.0 (iPhone; CPU iPhone OS 14_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.4 Mobile/15E148 Safari/604.1',
+        viewport: {
+            width: 390,
+            height: 664,
+        },
+        screen: {
+            width: 390,
+            height: 844,
+        },
+        deviceScaleFactor: 3,
+        isMobile: true,
+        hasTouch: true,
+    },
 } as const;
 
 const desktopBrowserInstances: BrowserInstanceOption[] = [
@@ -24,14 +55,14 @@ const mobileBrowserInstances: BrowserInstanceOption[] = [
         browser: 'chromium',
         name: 'chromium-mobile',
         provider: playwright({
-            contextOptions: getMobileContextOptions('Pixel 5'),
+            contextOptions: mobileContextOptions['Pixel 5'],
         }),
     },
     {
         browser: 'webkit',
         name: 'webkit-mobile',
         provider: playwright({
-            contextOptions: getMobileContextOptions('iPhone 12'),
+            contextOptions: mobileContextOptions['iPhone 12'],
         }),
     },
 ];
@@ -62,7 +93,6 @@ export default defineConfig({
             {
                 test: {
                     name: 'browser-desktop',
-                    exclude: ['tests/browser/mobile.browser.test.ts'],
                     include: ['tests/browser/**/*.browser.test.ts'],
                     browser: {
                         enabled: true,

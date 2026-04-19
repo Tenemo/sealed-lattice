@@ -1,12 +1,12 @@
 ---
 title: Security and non-goals
-description: The intended security boundary of the current sealed-lattice package surface.
+description: The intended security boundary of the current sealed-lattice public API surface.
 sidebar:
     order: 4
 ---
 
 `sealed-lattice` is a hardened research prototype for browser-native
-post-quantum voting work. The current package surface is intentionally narrow
+post-quantum voting work. The current public API surface is intentionally narrow
 and it is not audited production voting software.
 
 ## What the package tries to guarantee
@@ -14,7 +14,7 @@ and it is not audited production voting software.
 - The root package exposes a narrow, documented API.
 - Hashing fails closed when the required Web Crypto surface is absent.
 - Deterministic vectors and browser parity tests verify the shipped helper.
-- Packaging, docs generation, and tarball checks verify that the public surface does not drift silently.
+- Packaging, docs generation, and tarball checks verify that the public API surface does not drift silently.
 
 ## What the package does not guarantee by itself
 
@@ -34,8 +34,8 @@ and it is not audited production voting software.
 ## Scope boundary
 
 The current milestone stabilizes the repo, docs, tests, coverage, packaging,
-and the narrow public surface before wider post-quantum capability areas are
-frozen.
+and the narrow public API surface before wider post-quantum capability areas
+are frozen.
 
 Future PQ modules remain intentionally unpublished until their misuse-resistant
 boundaries are clear enough to commit publicly.

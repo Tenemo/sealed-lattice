@@ -2,13 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import coreVectors from '../../../test-vectors/core.json';
 
-import {
-    bytesToHex,
-    getWebCrypto,
-    normalizeInputToBytes,
-    sha256Hex,
-} from '#core';
-import { UnsupportedRuntimeError } from '#root';
+import * as rootPackageExports from '#root';
+import { UnsupportedRuntimeError, sha256Hex } from '#root';
 
 type CoreVector = {
     expected: string;
@@ -37,9 +32,19 @@ const expandCoreVectorInput = (
     }
 };
 
-describe('core crypto helpers', () => {
+describe('node public API', () => {
     afterEach(() => {
         vi.unstubAllGlobals();
+    });
+
+    it('keeps the root export intentionally narrow', () => {
+        expect(Object.keys(rootPackageExports).sort()).toEqual([
+            'UnsupportedRuntimeError',
+            'sha256Hex',
+        ]);
+        expect(rootPackageExports).not.toHaveProperty('bytesToHex');
+        expect(rootPackageExports).not.toHaveProperty('getWebCrypto');
+        expect(rootPackageExports).not.toHaveProperty('normalizeInputToBytes');
     });
 
     it.each(coreVectors.vectors as readonly CoreVector[])(
@@ -56,35 +61,6 @@ describe('core crypto helpers', () => {
 
         expect(digest).toMatch(/^[0-9a-f]{64}$/u);
         expect(digest).toBe(digest.toLowerCase());
-    });
-
-    it('clones byte input before hashing helpers consume it', () => {
-        const original = new Uint8Array([0x00, 0x01, 0x02, 0xff]);
-        const normalized = normalizeInputToBytes(original);
-
-        original[0] = 0xaa;
-
-        expect(normalized).toEqual(new Uint8Array([0x00, 0x01, 0x02, 0xff]));
-        expect(normalized).not.toBe(original);
-    });
-
-    it('encodes bytes as lowercase hex with leading zeroes preserved', () => {
-        expect(bytesToHex(new Uint8Array([0x00, 0x0f, 0xa0, 0xff]))).toBe(
-            '000fa0ff',
-        );
-    });
-
-    it('returns the supported crypto implementation when digest is available', () => {
-        const digest = vi.fn();
-        const cryptoApi = {
-            subtle: {
-                digest,
-            },
-        } as unknown as Crypto;
-
-        vi.stubGlobal('crypto', cryptoApi);
-
-        expect(getWebCrypto()).toBe(cryptoApi);
     });
 
     it('throws a typed runtime error when subtle.digest is unavailable', async () => {

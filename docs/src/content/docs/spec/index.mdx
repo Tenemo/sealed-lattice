@@ -1,23 +1,42 @@
 ---
 title: Protocol spec
-description: Normative rules for the current public surface.
+description: Normative rules, invariants, and caller boundaries for the current public API surface.
 editUrl: false
 ---
 
-import { CardGrid, LinkCard } from "@astrojs/starlight/components";
+This page collects the stable invariants and responsibility boundaries for the
+current `sealed-lattice` milestone.
 
-This section collects the stable invariants and responsibility boundaries for
-the current `sealed-lattice` milestone.
+## Package surface
 
-<CardGrid>
-    <LinkCard
-        title="Library invariants"
-        href="./library-invariants/"
-        description="Stable rules for the package surface, runtime behavior, and process guardrails."
-    />
-    <LinkCard
-        title="API contract"
-        href="./api-contract/"
-        description="The hard boundary between what the package commits to today and what remains application or future-design space."
-    />
-</CardGrid>
+- The package is ESM-only.
+- The only committed public entry point is `sealed-lattice`.
+- The root export remains intentionally tiny and safe.
+- No public subpaths are promised yet.
+
+## Runtime behavior
+
+- `sha256Hex` accepts `string | Uint8Array`.
+- Strings are encoded as UTF-8 before hashing.
+- Output is always lowercase hexadecimal.
+- Missing Web Crypto hashing support throws `UnsupportedRuntimeError`.
+
+## Package responsibilities
+
+- Expose `sha256Hex(input: string | Uint8Array): Promise<string>`.
+- Expose `UnsupportedRuntimeError`.
+- Use native Web Crypto digest support instead of hidden fallback implementations.
+- Keep the current public API surface documented, tested, and packaging-verified.
+
+## Caller responsibilities
+
+- Choose runtimes that expose the required Web Crypto surface.
+- Handle wider transport, protocol, threshold, and proof concerns outside the current package.
+- Avoid depending on future public subpath names before they are explicitly published.
+- Treat the current milestone as a stable shell around a deliberately narrow feature set.
+
+## Process guardrails
+
+- Docs, TypeDoc, tests, coverage, CI, and tarball policy must continue to pass before the public API surface expands.
+- Deterministic vectors remain the source of truth for shipped digest behavior.
+- Future capability boundaries remain intentionally unfrozen until the lattice-native flow is stable enough to publish safely.
