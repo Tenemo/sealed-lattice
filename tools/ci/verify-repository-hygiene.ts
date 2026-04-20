@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 
@@ -137,7 +137,12 @@ const main = (): void => {
     );
 };
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+const scriptEntryPoint = process.argv[1];
+const isMainModule =
+    scriptEntryPoint !== undefined &&
+    import.meta.url === pathToFileURL(scriptEntryPoint).href;
+
+if (isMainModule) {
     main();
 }
 /* v8 ignore stop */

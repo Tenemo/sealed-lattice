@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
     loadByteBufferKernel,
     roundTripBytesThroughKernel,
-} from '@sealed-lattice/wasm';
+} from '../../src/index';
 
 describe('byte-buffer kernel in browsers', () => {
     it('loads the byte-buffer module and exposes the expected exports', async () => {

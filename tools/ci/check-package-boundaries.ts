@@ -1,6 +1,6 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const packagesRoot = path.resolve(repoRoot, 'packages');
@@ -358,7 +358,12 @@ const main = async (): Promise<void> => {
     console.log('Package boundary verification passed.');
 };
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+const scriptEntryPoint = process.argv[1];
+const isMainModule =
+    scriptEntryPoint !== undefined &&
+    import.meta.url === pathToFileURL(scriptEntryPoint).href;
+
+if (isMainModule) {
     void main();
 }
 /* v8 ignore stop */

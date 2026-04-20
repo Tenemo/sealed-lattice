@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 export const vectorsRootDirectoryPath = path.resolve(repoRoot, 'test-vectors');
@@ -217,7 +217,12 @@ const main = async (
     console.log('Test vectors manifest verification passed.');
 };
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+const scriptEntryPoint = process.argv[1];
+const isMainModule =
+    scriptEntryPoint !== undefined &&
+    import.meta.url === pathToFileURL(scriptEntryPoint).href;
+
+if (isMainModule) {
     void main();
 }
 /* v8 ignore stop */
