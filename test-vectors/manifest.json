@@ -1,4 +1,9 @@
 {
   "schemaVersion": 1,
-  "entries": []
+  "entries": [
+    {
+      "path": "foundation/m01-byte-buffer-roundtrip.json",
+      "sha256": "57761b7ca40e35ad7fa3444e30c1592cd00c97a2726e8bc8d9746c33ede60e24"
+    }
+  ]
 }

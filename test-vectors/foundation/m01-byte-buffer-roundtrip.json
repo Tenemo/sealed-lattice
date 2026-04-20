@@ -1,0 +1,5 @@
+{
+  "contractVersion": "sealed-lattice-m01-byte-buffer-roundtrip-v1",
+  "inputBytes": [0, 1, 2, 127, 128, 255],
+  "expectedOutputBytes": [0, 1, 2, 127, 128, 255]
+}

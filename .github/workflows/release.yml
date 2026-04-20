@@ -47,6 +47,34 @@ jobs:
                     exit 1
                   fi
 
+    rust-foundation:
+        name: rust foundation
+        needs:
+            - validate-dispatch
+        runs-on: ubuntu-latest
+        timeout-minutes: 20
+        steps:
+            - uses: actions/checkout@v6.0.2
+              with:
+                  persist-credentials: false
+            - uses: dtolnay/rust-toolchain@stable
+            - run: cargo fmt --check
+            - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+            - run: cargo test --workspace
+
+    wasm-foundation:
+        name: wasm foundation
+        needs:
+            - validate-dispatch
+        runs-on: ubuntu-latest
+        timeout-minutes: 20
+        steps:
+            - uses: actions/checkout@v6.0.2
+              with:
+                  persist-credentials: false
+            - uses: dtolnay/rust-toolchain@stable
+            - run: cargo build --workspace --lib --target wasm32-unknown-unknown --release
+
     verify:
         name: verify
         needs:
@@ -59,8 +87,6 @@ jobs:
                   persist-credentials: false
             - uses: ./.github/actions/bootstrap-pnpm
             - uses: dtolnay/rust-toolchain@stable
-              with:
-                  targets: wasm32-unknown-unknown
             - run: pnpm run check
             - run: pnpm run test:node
             - run: pnpm run build
@@ -77,8 +103,6 @@ jobs:
                   persist-credentials: false
             - uses: ./.github/actions/bootstrap-pnpm
             - uses: dtolnay/rust-toolchain@stable
-              with:
-                  targets: wasm32-unknown-unknown
             - run: pnpm run coverage:node
 
     browser:
@@ -93,8 +117,6 @@ jobs:
                   persist-credentials: false
             - uses: ./.github/actions/bootstrap-pnpm
             - uses: dtolnay/rust-toolchain@stable
-              with:
-                  targets: wasm32-unknown-unknown
             - run: pnpm exec playwright install --with-deps chromium firefox webkit
             - run: pnpm run test:browser
 
@@ -110,8 +132,6 @@ jobs:
                   persist-credentials: false
             - uses: ./.github/actions/bootstrap-pnpm
             - uses: dtolnay/rust-toolchain@stable
-              with:
-                  targets: wasm32-unknown-unknown
             - run: pnpm run verify:docs
             - run: pnpm run docs:build:site
 
@@ -127,8 +147,6 @@ jobs:
                   persist-credentials: false
             - uses: ./.github/actions/bootstrap-pnpm
             - uses: dtolnay/rust-toolchain@stable
-              with:
-                  targets: wasm32-unknown-unknown
             - run: pnpm run build
             - run: pnpm run verify:docs
             - run: pnpm run docs:build:site
@@ -139,6 +157,8 @@ jobs:
     prepare-release:
         needs:
             - validate-dispatch
+            - rust-foundation
+            - wasm-foundation
             - verify
             - coverage
             - browser
@@ -168,8 +188,6 @@ jobs:
 
             - uses: ./.github/actions/bootstrap-pnpm
             - uses: dtolnay/rust-toolchain@stable
-              with:
-                  targets: wasm32-unknown-unknown
 
             - name: bump release version
               id: metadata

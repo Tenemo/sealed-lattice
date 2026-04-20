@@ -4,24 +4,27 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
-const crateDirectory = path.resolve(
-    repoRoot,
-    'crates',
-    'sealed-lattice-kernel',
-);
 const cargoTargetDirectory = path.resolve(repoRoot, 'target');
 const outputDirectory = path.resolve(repoRoot, 'packages', 'wasm', 'dist');
 const outputFilePath = path.resolve(
     outputDirectory,
-    'sealed-lattice-kernel-placeholder.wasm',
+    'sealed-lattice-kernel.wasm',
 );
 
 const runCargoBuild = (): void => {
     const result = spawnSync(
         'cargo',
-        ['build', '--target', 'wasm32-unknown-unknown', '--release'],
+        [
+            'build',
+            '--package',
+            'sealed-lattice-kernel',
+            '--lib',
+            '--target',
+            'wasm32-unknown-unknown',
+            '--release',
+        ],
         {
-            cwd: crateDirectory,
+            cwd: repoRoot,
             env: {
                 ...process.env,
                 CARGO_TARGET_DIR: cargoTargetDirectory,
@@ -65,7 +68,7 @@ const main = async (): Promise<void> => {
     await copyFile(resolveSourceFilePath(), outputFilePath);
 
     console.log(
-        `Placeholder kernel copied to ${path.relative(repoRoot, outputFilePath)}`,
+        `Byte-buffer kernel copied to ${path.relative(repoRoot, outputFilePath)}`,
     );
 };
 

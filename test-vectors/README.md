@@ -20,4 +20,5 @@ pnpm run vectors:generate
 `pnpm run vectors:generate` rewrites the manifest from the current contents of
 the directory.
 
-The manifest can be empty while the vector registry is being established.
+The repository now includes one tracked M01 foundation artifact so the manifest
+always exercises real file hashing and verification.

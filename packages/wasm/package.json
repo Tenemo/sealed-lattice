@@ -14,7 +14,7 @@
   },
   "scripts": {
     "check": "tsc --project tsconfig.json --pretty false --noEmit",
-    "build:wasm": "tsx ../../tools/ci/build-wasm-placeholder.ts",
+    "build:wasm": "tsx ../../tools/ci/build-wasm-kernel.ts",
     "build": "pnpm exec del-cli dist && tsc --project tsconfig.json && pnpm run build:wasm",
     "test:node": "vitest --project node --run tests/node/**/*.test.ts",
     "test:browser": "vitest --project browser-desktop --project browser-mobile --run tests/browser/**/*.browser.test.ts"

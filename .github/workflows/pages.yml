@@ -27,8 +27,6 @@ jobs:
             - uses: actions/configure-pages@v6.0.0
             - uses: ./.github/actions/bootstrap-pnpm
             - uses: dtolnay/rust-toolchain@stable
-              with:
-                  targets: wasm32-unknown-unknown
             - run: pnpm run coverage:badge
             - run: pnpm run verify:docs
             - run: pnpm run docs:build:site

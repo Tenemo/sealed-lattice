@@ -63,7 +63,7 @@ describe('package boundary helpers', () => {
     it('extracts static, side-effect, and dynamic import specifiers', () => {
         const sourceText = `
             import 'sealed-lattice';
-            import { loadPlaceholderKernel } from '@sealed-lattice/wasm';
+            import { loadByteBufferKernel } from '@sealed-lattice/wasm';
             export { something } from '@sealed-lattice/crypto';
             const moduleName = await import('@sealed-lattice/testkit');
         `;

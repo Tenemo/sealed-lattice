@@ -121,7 +121,7 @@ export default defineConfig({
             ],
             exclude: [
                 'packages/*/src/**/*.d.ts',
-                'tools/ci/build-wasm-placeholder.ts',
+                'tools/ci/build-wasm-kernel.ts',
             ],
             thresholds: {
                 statements: 100,
