@@ -3,14 +3,17 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import {
+    createDryRunPackArguments,
     createPackageManagerSpawnCommand,
     createInstallArguments,
     createPackArguments,
     detectPackageManager,
     getPackageManagerExecutableName,
     getPublicPackageDirectory,
+    parsePackDryRunFilePaths,
     parsePackageManagerOverride,
     resolvePackageManagerRunner,
+    validatePublishedPackageFilePaths,
 } from '../../../tools/ci/verify-packed-package';
 
 describe('packed package smoke helpers', () => {
@@ -62,6 +65,12 @@ describe('packed package smoke helpers', () => {
             'pack',
             '--pack-destination',
             '/tmp/pack',
+        ]);
+        expect(createDryRunPackArguments()).toEqual([
+            'pack',
+            '--dry-run',
+            '--json',
+            '--ignore-scripts',
         ]);
         expect(createInstallArguments('pnpm', '/tmp/pkg.tgz')).toEqual([
             'add',
@@ -141,5 +150,53 @@ describe('packed package smoke helpers', () => {
                 process.env.npm_execpath = originalPackageManagerEntryPointPath;
             }
         }
+    });
+
+    it('parses npm dry-run metadata into published file paths', () => {
+        expect(
+            parsePackDryRunFilePaths(
+                JSON.stringify([
+                    {
+                        files: [
+                            { path: 'dist/index.js' },
+                            { path: 'LICENSE' },
+                            { path: 'README.md' },
+                        ],
+                    },
+                ]),
+            ),
+        ).toEqual(['dist/index.js', 'LICENSE', 'README.md']);
+    });
+
+    it('rejects invalid npm dry-run metadata', () => {
+        expect(() => parsePackDryRunFilePaths('{}')).toThrow(
+            'npm pack --dry-run --json returned an unexpected shape',
+        );
+    });
+
+    it('flags missing license text and leaked TypeScript build metadata', () => {
+        expect(
+            validatePublishedPackageFilePaths([
+                'README.md',
+                'dist/index.js',
+                'dist/tsconfig.tsbuildinfo',
+            ]),
+        ).toEqual([
+            'Published package is missing LICENSE',
+            'Published package must not include TypeScript build metadata: dist/tsconfig.tsbuildinfo',
+        ]);
+    });
+
+    it('accepts the intended published package file layout', () => {
+        expect(
+            validatePublishedPackageFilePaths([
+                'LICENSE',
+                'README.md',
+                'dist/index.d.ts',
+                'dist/index.js',
+                'dist/index.js.map',
+                'package.json',
+            ]),
+        ).toEqual([]);
     });
 });
