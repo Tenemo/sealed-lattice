@@ -1,33 +1,33 @@
 ---
 title: Guides
-description: Task-oriented documentation for the current sealed-lattice milestone.
+description: Task-oriented documentation for the sealed-lattice workspace.
 editUrl: false
 ---
 
 import { CardGrid, LinkCard } from "@astrojs/starlight/components";
 
-These pages cover setup, runtime expectations, browser and worker usage, and
-the explicit security boundary of the current public API surface.
+These guides explain the current public boundary, the private workspace split,
+the verification workflow, and the current non-goals.
 
 <CardGrid>
     <LinkCard
         title="Get started"
         href="./getting-started/"
-        description="Start with the root package, the supported inputs, and the current milestone rules."
+        description="See the current public package contract and what intentionally remains unpublished."
     />
     <LinkCard
-        title="Runtime and compatibility"
-        href="./runtime-and-compatibility/"
-        description="Check browser, Node, ESM, and Web Crypto expectations before deployment."
+        title="Workspace layout"
+        href="./workspace-layout/"
+        description="Read the package split, ownership boundaries, and dependency direction."
     />
     <LinkCard
-        title="Browser and worker usage"
-        href="./browser-and-worker-usage/"
-        description="Use the shipped helper on the main thread or inside workers without hidden fallbacks."
+        title="Development workflow"
+        href="./development-workflow/"
+        description="Run the workspace checks, browser matrix, docs generation, smoke checks, vector verification, and Rust/WASM proof path."
     />
     <LinkCard
         title="Security and non-goals"
         href="./security-and-non-goals/"
-        description="Read the intended boundary before assuming unpublished PQ modules are stable."
+        description="Keep the current claim boundary explicit while the protocol-facing API is still ahead."
     />
 </CardGrid>

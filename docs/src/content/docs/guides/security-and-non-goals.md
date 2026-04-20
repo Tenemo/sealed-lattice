@@ -1,41 +1,31 @@
 ---
 title: Security and non-goals
-description: The intended security boundary of the current sealed-lattice public API surface.
+description: The current claim boundary of the sealed-lattice workspace.
 sidebar:
     order: 4
 ---
 
-`sealed-lattice` is a hardened research prototype for browser-native
-post-quantum voting work. The current public API surface is intentionally narrow
-and it is not audited production voting software.
+`sealed-lattice` currently ships a stable package boundary and verification
+shell, not a published voting API.
 
-## What the package tries to guarantee
+## What the current release guarantees
 
-- The root package exposes a narrow, documented API.
-- Hashing fails closed when the required Web Crypto surface is absent.
-- Deterministic vectors and browser parity tests verify the shipped helper.
-- Packaging, docs generation, and tarball checks verify that the public API surface does not drift silently.
+- the workspace layout is explicit and package-boundary checked
+- the published package identity is stable
+- the public runtime facade is intentionally empty and documented as such
+- the Rust placeholder crate builds and the internal WASM loader path works in Node and browsers
+- docs, smoke checks, browser coverage, vector manifest verification, and release workflow continue to verify the current boundary
 
-## What the package does not guarantee by itself
+## What it does not guarantee yet
 
-- It does not provide lattice encryption yet.
-- It does not provide threshold key generation or decryption yet.
-- It does not provide transport authenticity or protocol orchestration yet.
-- It does not provide proof systems or public protocol payload boundaries yet.
-- It does not make broader production-readiness or audit claims.
+- no threshold voting workflow is published yet
+- no transcript, manifest, ballot, tally, or proof API is public yet
+- no cryptographic correctness or secrecy claim is added by the placeholder Rust/WASM path
+- no caller should rely on private package names or future public subpaths becoming stable
 
-## What callers still need to do
+## Caller responsibilities
 
-- Treat the current package as a stable shell, not as a finished PQ voting stack.
-- Pin supported runtimes that expose native Web Crypto digest support.
-- Keep future transport, threshold, proof, and protocol expectations out of production assumptions until those contracts are actually published.
-- Verify broader application security properties outside this package.
-
-## Scope boundary
-
-The current milestone stabilizes the repo, docs, tests, coverage, packaging,
-and the narrow public API surface before wider post-quantum capability areas
-are frozen.
-
-Future PQ modules remain intentionally unpublished until their misuse-resistant
-boundaries are clear enough to commit publicly.
+- treat the current public package as a stable shell, not as a usable protocol library yet
+- keep application logic off unpublished internal package names
+- do not assume the current internal package split implies frozen future public APIs
+- do not build protocol, proof, or transport assumptions around unpublished APIs

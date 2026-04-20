@@ -3,6 +3,7 @@ import { fileURLToPath } from 'url';
 
 import { FlatCompat } from '@eslint/eslintrc';
 import eslintJs from '@eslint/js';
+import { createTypeScriptImportResolver } from 'eslint-import-resolver-typescript';
 import { createNodeResolver } from 'eslint-plugin-import-x';
 import errorOnlyPlugin from 'eslint-plugin-only-error';
 import prettierPluginRecommended from 'eslint-plugin-prettier/recommended';
@@ -18,7 +19,14 @@ const compat = new FlatCompat({
     baseDirectory: __dirname,
 });
 
-export default [
+const projectPaths = [
+    './tsconfig.tools.json',
+    './packages/*/tsconfig.json',
+    './docs/tsconfig.json',
+];
+
+/** @type {import('eslint').Linter.FlatConfig[]} */
+const config = [
     ...compat.config({
         extends: ['plugin:import-x/errors', 'plugin:import-x/warnings'],
         parser: '@typescript-eslint/parser',
@@ -28,7 +36,8 @@ export default [
             ecmaFeatures: {
                 jsx: true,
             },
-            project: ['./tsconfig.json', './docs/tsconfig.json'],
+            project: projectPaths,
+            noWarnOnMultipleProjects: true,
             ecmaVersion: 2021,
         },
         plugins: ['only-error'],
@@ -36,8 +45,11 @@ export default [
             react: {
                 version: 'detect',
             },
-            'import-x/core-modules': ['sealed-lattice'],
             'import-x/resolver-next': [
+                createTypeScriptImportResolver({
+                    alwaysTryTypes: true,
+                    project: projectPaths,
+                }),
                 createNodeResolver({
                     extensions: [
                         '.ts',
@@ -97,9 +109,7 @@ export default [
                         'Use the project crypto-backed randomness helpers instead.',
                 },
             ],
-            'no-shadow': OFF, // duplicated by @typescript-eslint/no-shadow
-
-            // @typescript-eslint/eslint-plugin
+            'no-shadow': OFF,
             '@typescript-eslint/no-use-before-define': ERROR,
             '@typescript-eslint/no-shadow': ERROR,
             '@typescript-eslint/explicit-module-boundary-types': ERROR,
@@ -112,8 +122,6 @@ export default [
                 },
             ],
             '@typescript-eslint/consistent-type-definitions': ['error', 'type'],
-
-            // eslint-plugin-prettier
             'prettier/prettier': [
                 ERROR,
                 {
@@ -126,8 +134,6 @@ export default [
                     endOfLine: 'lf',
                 },
             ],
-
-            // eslint-plugin-import-x
             'import-x/no-extraneous-dependencies': [
                 ERROR,
                 { devDependencies: true },
@@ -144,7 +150,7 @@ export default [
                 },
             ],
             'import-x/order': [
-                'error',
+                ERROR,
                 {
                     'newlines-between': 'always',
                     alphabetize: { order: 'asc', caseInsensitive: true },
@@ -175,7 +181,7 @@ export default [
     },
     ...compat.config({
         extends: [
-            'plugin:@typescript-eslint/recommended-requiring-type-checking', // adds @typescript-eslint plugin
+            'plugin:@typescript-eslint/recommended-requiring-type-checking',
             'plugin:@typescript-eslint/stylistic-type-checked',
             'plugin:import-x/typescript',
         ],
@@ -204,8 +210,12 @@ export default [
             'node_modules/**',
             'dist',
             'dist/**',
+            '**/dist',
+            '**/dist/**',
             'coverage',
             'coverage/**',
+            'target',
+            'target/**',
             'docs/.astro',
             'docs/.astro/**',
             'docs/dist',
@@ -214,9 +224,16 @@ export default [
     },
     {
         files: ['tools/ci/*.mjs'],
+        languageOptions: {
+            parserOptions: {
+                project: './tsconfig.tools.json',
+            },
+        },
         rules: {
             '@typescript-eslint/explicit-function-return-type': OFF,
             '@typescript-eslint/no-unsafe-argument': OFF,
         },
     },
 ];
+
+export default config;

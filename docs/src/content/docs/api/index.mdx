@@ -1,58 +1,39 @@
 ---
 title: API reference
-description: The current public API surface and generated symbol reference for the root package.
+description: The current public package surface and generated reference for the sealed-lattice facade.
 editUrl: false
 ---
 
 import { CardGrid, LinkCard } from "@astrojs/starlight/components";
 
-Use the root package for the full supported public API surface. The package does
-not ship committed public subpath entry points at this stage.
+Use the root package name for the full supported public surface. The package
+does not expose any runtime exports yet.
 
 ## What lives here
 
-- `sha256Hex`
-- `UnsupportedRuntimeError`
-
-## Common starting points
-
-- digest text or bytes: `sha256Hex`
-- fail closed on missing native support: `UnsupportedRuntimeError`
+- `sealed-lattice` as the only public package name
+- an intentionally empty runtime facade
+- generated reference pages that confirm the current public surface stays empty
 
 ## Typical import style
 
 ```typescript
-import { UnsupportedRuntimeError, sha256Hex } from "sealed-lattice";
-
-const digest = await sha256Hex("sealed-lattice");
+import "sealed-lattice";
 ```
 
 ## Use the root package when
 
-- you want the supported SHA-256 helper
-- you want the typed runtime failure for missing Web Crypto digest support
-- you want the stable public API surface without depending on future internal structure
+- you need the stable published package identity
+- you want to verify the current public boundary before wider APIs are added
+- you want to follow the documented path without depending on private workspace packages
 
 ## What stays intentionally internal
 
-- lattice encryption and threshold flows
-- serialization and transport boundaries
-- proof systems
-- protocol types
+- protocol lifecycle and transcript logic
+- crypto provider wrappers
+- the Rust/WASM placeholder loader
+- testkit utilities
 - any future public subpath layout
-
-## Related workflows
-
-- [Get started](../guides/getting-started/) for the supported rules and quickstart
-- [Runtime and compatibility](../guides/runtime-and-compatibility/) for browser, Node, ESM, and Web Crypto requirements
-- [Browser and worker usage](../guides/browser-and-worker-usage/) for main-thread and worker integration patterns
-- [Security and non-goals](../guides/security-and-non-goals/) for the explicit boundary of the current milestone
-
-## Generated reference coverage
-
-- exact signatures, types, and return shapes for the exported surface
-- contract-level detail for the shipped helper and runtime error type
-- symbol-level detail for the current milestone without implying future public submodules
 
 ## Generated reference
 
@@ -60,11 +41,11 @@ const digest = await sha256Hex("sealed-lattice");
     <LinkCard
         title="Generated reference"
         href="./reference/"
-        description="Browse the exact exports, types, and signatures of the current public API surface."
+        description="Browse the generated page that proves the public runtime facade is still empty."
     />
     <LinkCard
-        title="Get started"
-        href="../guides/getting-started/"
-        description="Start with the supported rules and quickstart before diving into symbol-level reference pages."
+        title="Workspace layout"
+        href="../guides/workspace-layout/"
+        description="Read the private package split and dependency rules behind the current facade."
     />
 </CardGrid>

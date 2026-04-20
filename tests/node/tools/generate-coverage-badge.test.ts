@@ -48,6 +48,12 @@ describe('coverage badge generator', () => {
         ).toBe('src/crypto.ts');
         expect(
             normalizeCoverageKey(
+                '/repo/sealed-lattice/src/crypto.ts',
+                '/repo/sealed-lattice/',
+            ),
+        ).toBe('src/crypto.ts');
+        expect(
+            normalizeCoverageKey(
                 'c:/repo/sealed-lattice/tests/file.test.ts',
                 'C:\\Repo\\sealed-lattice',
             ),

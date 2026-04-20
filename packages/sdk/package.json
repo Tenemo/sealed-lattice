@@ -1,0 +1,44 @@
+{
+  "name": "sealed-lattice",
+  "version": "0.0.9",
+  "description": "Published npm facade for the sealed-lattice library.",
+  "author": "Piotr Piech <piotr@piech.dev>",
+  "license": "MPL-2.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Tenemo/sealed-lattice.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Tenemo/sealed-lattice/issues"
+  },
+  "homepage": "https://tenemo.github.io/sealed-lattice/",
+  "engines": {
+    "node": ">=24.14.1"
+  },
+  "scripts": {
+    "check": "tsc --project tsconfig.json --pretty false --noEmit",
+    "build": "pnpm exec del-cli dist tsconfig.tsbuildinfo && tsc --project tsconfig.json"
+  },
+  "keywords": [
+    "cryptography",
+    "security",
+    "post-quantum",
+    "lattice",
+    "threshold-encryption",
+    "voting"
+  ]
+}

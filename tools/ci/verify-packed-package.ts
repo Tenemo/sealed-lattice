@@ -8,7 +8,7 @@ import {
     writeFile,
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import path, { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
@@ -27,7 +27,19 @@ type SpawnCommand = {
     description: string;
 };
 
+type PackedFileMetadata = {
+    path: string;
+};
+
+type PackDryRunMetadataEntry = {
+    files: readonly PackedFileMetadata[];
+};
+
 const supportedPackageManagers = new Set<PackageManager>(['npm', 'pnpm']);
+
+export const getPublicPackageDirectory = (
+    projectRoot: string = repoRoot,
+): string => path.resolve(projectRoot, 'packages', 'sdk');
 
 export const parsePackageManagerOverride = (
     commandLineArguments: readonly string[],
@@ -105,6 +117,13 @@ export const createPackArguments = (
     packDirectory: string,
 ): readonly string[] => ['pack', '--pack-destination', packDirectory];
 
+export const createDryRunPackArguments = (): readonly string[] => [
+    'pack',
+    '--dry-run',
+    '--json',
+    '--ignore-scripts',
+];
+
 export const createInstallArguments = (
     packageManager: PackageManager,
     tarballPath: string,
@@ -137,11 +156,11 @@ export const createPackageManagerSpawnCommand = (
     };
 };
 
-const runPackageManager = (
+const runPackageManagerAndCaptureOutput = (
     runner: PackageManagerRunner,
     commandArguments: readonly string[],
     cwd: string,
-): void => {
+): string => {
     const spawnCommand = createPackageManagerSpawnCommand(
         runner,
         commandArguments,
@@ -175,12 +194,101 @@ const runPackageManager = (
             `Command exited with status ${result.status ?? 'null'}: ${spawnCommand.description}${formattedOutput}`,
         );
     }
+
+    return result.stdout ?? '';
+};
+
+const runPackageManager = (
+    runner: PackageManagerRunner,
+    commandArguments: readonly string[],
+    cwd: string,
+): void => {
+    runPackageManagerAndCaptureOutput(runner, commandArguments, cwd);
+};
+
+const isPackedFileMetadata = (value: unknown): value is PackedFileMetadata => {
+    if (typeof value !== 'object' || value === null) {
+        return false;
+    }
+
+    const packedFileMetadata = value as { path?: unknown };
+
+    return typeof packedFileMetadata.path === 'string';
+};
+
+const isPackDryRunMetadataEntry = (
+    value: unknown,
+): value is PackDryRunMetadataEntry => {
+    if (typeof value !== 'object' || value === null) {
+        return false;
+    }
+
+    const packDryRunMetadataEntry = value as {
+        files?: unknown;
+    };
+
+    return (
+        Array.isArray(packDryRunMetadataEntry.files) &&
+        packDryRunMetadataEntry.files.every(isPackedFileMetadata)
+    );
+};
+
+export const parsePackDryRunFilePaths = (
+    packDryRunOutput: string,
+): string[] => {
+    const parsedMetadata = JSON.parse(packDryRunOutput) as unknown;
+
+    if (!Array.isArray(parsedMetadata)) {
+        throw new Error(
+            'npm pack --dry-run --json returned an unexpected shape',
+        );
+    }
+
+    const parsedMetadataEntries = parsedMetadata as readonly unknown[];
+    const metadataEntry = parsedMetadataEntries[0];
+
+    if (!isPackDryRunMetadataEntry(metadataEntry)) {
+        throw new Error(
+            'npm pack --dry-run --json returned an unexpected shape',
+        );
+    }
+
+    return metadataEntry.files
+        .map((fileMetadata) => fileMetadata.path)
+        .sort((left, right) => left.localeCompare(right));
+};
+
+export const validatePublishedPackageFilePaths = (
+    publishedPackageFilePaths: readonly string[],
+): string[] => {
+    const failures: string[] = [];
+
+    if (!publishedPackageFilePaths.includes('LICENSE')) {
+        failures.push('Published package is missing LICENSE');
+    }
+
+    const typeScriptBuildInfoPaths = publishedPackageFilePaths.filter(
+        (filePath) => filePath.endsWith('.tsbuildinfo'),
+    );
+    for (const typeScriptBuildInfoPath of typeScriptBuildInfoPaths) {
+        failures.push(
+            `Published package must not include TypeScript build metadata: ${typeScriptBuildInfoPath}`,
+        );
+    }
+
+    return failures;
 };
 
 const main = async (): Promise<void> => {
     const packageManagerRunner = resolvePackageManagerRunner(
         process.argv.slice(2),
     );
+    const packageDirectory = getPublicPackageDirectory();
+    const npmPackRunner: PackageManagerRunner = {
+        command: getPackageManagerExecutableName('npm'),
+        commandArgsPrefix: [],
+        kind: 'npm',
+    };
     const tempRoot = await mkdtemp(join(tmpdir(), 'sealed-lattice-packed-'));
     const packDirectory = join(tempRoot, 'pack');
     const consumerDirectory = join(tempRoot, 'consumer');
@@ -189,10 +297,23 @@ const main = async (): Promise<void> => {
         await mkdir(packDirectory, { recursive: true });
         await mkdir(consumerDirectory, { recursive: true });
 
+        const publishedPackageFilePaths = parsePackDryRunFilePaths(
+            runPackageManagerAndCaptureOutput(
+                npmPackRunner,
+                createDryRunPackArguments(),
+                packageDirectory,
+            ),
+        );
+        const publishedPackageValidationFailures =
+            validatePublishedPackageFilePaths(publishedPackageFilePaths);
+        if (publishedPackageValidationFailures.length > 0) {
+            throw new Error(publishedPackageValidationFailures.join('\n'));
+        }
+
         runPackageManager(
             packageManagerRunner,
             createPackArguments(packDirectory),
-            repoRoot,
+            packageDirectory,
         );
 
         const tarballs = (await readdir(packDirectory)).filter((entry) =>
@@ -220,7 +341,7 @@ const main = async (): Promise<void> => {
             'utf8',
         );
         await copyFile(
-            join(repoRoot, 'tools/ci/packed-package-smoke.mjs'),
+            path.join(repoRoot, 'tools', 'ci', 'packed-package-smoke.mjs'),
             join(consumerDirectory, 'smoke.mjs'),
         );
 

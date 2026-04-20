@@ -1,42 +1,34 @@
 ---
 title: Protocol spec
-description: Normative rules, invariants, and caller boundaries for the current public API surface.
+description: Stable package and process rules for the sealed-lattice workspace.
 editUrl: false
 ---
 
-This page collects the stable invariants and responsibility boundaries for the
-current `sealed-lattice` milestone.
+This page collects the stable rules of the current `sealed-lattice` release
+boundary.
 
-## Package surface
+## Public package surface
 
-- The package is ESM-only.
-- The only committed public entry point is `sealed-lattice`.
-- The root export remains intentionally tiny and safe.
+- The only committed public package name is `sealed-lattice`.
+- The current public runtime facade is intentionally empty.
 - No public subpaths are promised yet.
+- The published package exists to stabilize packaging, docs, smoke checks, and release flow before wider APIs are introduced.
 
-## Runtime behavior
+## Private workspace surface
 
-- `sha256Hex` accepts `string | Uint8Array`.
-- Strings are encoded as UTF-8 before hashing.
-- Output is always lowercase hexadecimal.
-- Missing Web Crypto hashing support throws `UnsupportedRuntimeError`.
+- `@sealed-lattice/protocol`, `@sealed-lattice/crypto`, `@sealed-lattice/wasm`, and `@sealed-lattice/testkit` are workspace-internal only.
+- `crates/sealed-lattice-kernel` is workspace-internal only.
+- No private package may leak through the public package facade.
 
-## Package responsibilities
+## Dependency and import rules
 
-- Expose `sha256Hex(input: string | Uint8Array): Promise<string>`.
-- Expose `UnsupportedRuntimeError`.
-- Use native Web Crypto digest support instead of hidden fallback implementations.
-- Keep the current public API surface documented, tested, and packaging-verified.
+- Deep imports into another package's internals are forbidden.
+- Relative imports that cross package boundaries are forbidden.
+- No private package may depend on `sealed-lattice` unless it is `@sealed-lattice/testkit`.
+- Package-boundary checks must stay green before wider functionality is published.
 
-## Caller responsibilities
+## Verification rules
 
-- Choose runtimes that expose the required Web Crypto surface.
-- Handle wider transport, protocol, threshold, and proof concerns outside the current package.
-- Avoid depending on future public subpath names before they are explicitly published.
-- Treat the current milestone as a stable shell around a deliberately narrow feature set.
-
-## Process guardrails
-
-- Docs, TypeDoc, tests, coverage, CI, and tarball policy must continue to pass before the public API surface expands.
-- Deterministic vectors remain the source of truth for shipped digest behavior.
-- Future capability boundaries remain intentionally unfrozen until the lattice-native flow is stable enough to publish safely.
+- Node tests, browser tests, vector manifest verification, docs verification, pack smoke checks, and release-smoke checks must all continue to pass.
+- The Rust placeholder crate must keep building for native tests and `wasm32-unknown-unknown`.
+- The internal WASM loader must keep loading the placeholder artifact in both Node and browser tests.

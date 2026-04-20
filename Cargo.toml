@@ -1,0 +1,3 @@
+[workspace]
+members = ["crates/sealed-lattice-kernel"]
+resolver = "3"

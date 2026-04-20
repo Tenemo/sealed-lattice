@@ -4,9 +4,10 @@ This section lists the exported symbols on the current public API surface.
 
 ## Public module map
 
-- `sealed-lattice`: root package for the shipped `sha256Hex` helper and `UnsupportedRuntimeError`
+- `sealed-lattice`: published package facade with an intentionally empty runtime surface
 
 ## What this section contains
 
-- exact exported names, types, signatures, and return shapes for the current public API surface
-- symbol-level detail for the root package without implying future public submodules
+- the generated module page for the public package
+- confirmation that the current public runtime facade does not export any symbols
+- symbol-level evidence that future public subpaths remain intentionally unfrozen

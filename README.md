@@ -16,22 +16,53 @@
 
 ---
 
-`sealed-lattice` is a browser-native TypeScript package for post-quantum voting research prototypes.
+`sealed-lattice` is a browser-first, mobile-first, post-quantum threshold
+homomorphic voting library workspace.
 
-The current implementation ships:
+The repository uses a private Turborepo workspace with one published package
+and four private internal packages:
 
-- a real `sha256Hex` helper on the safe root package
-- a typed `UnsupportedRuntimeError` for missing Web Crypto support
-- a hardened repo, docs, testing, and publish workflow around that narrow surface
-- a deliberately narrow public API surface while the lattice-native architecture is still being proven
+- `sealed-lattice`
+- `@sealed-lattice/protocol`
+- `@sealed-lattice/crypto`
+- `@sealed-lattice/wasm`
+- `@sealed-lattice/testkit`
 
-This repository is a hardened research prototype. It is not audited production voting software.
+The workspace also contains `crates/sealed-lattice-kernel`, a Rust placeholder
+crate used to prove the native-test and WASM-loading path.
 
-## Release status
+## Current public boundary
 
-This repository currently tracks the initial public `sealed-lattice` API surface.
+The published `sealed-lattice` package currently imports successfully but
+exposes no runtime API.
 
-The public API surface is intentionally narrow while the repo, CI, docs, tests, coverage, and packaging experience are stabilized. Lattice cryptography, threshold flows, transport payloads, proofs, protocol types, and any future subpath structure are still being designed and are not frozen yet.
+This keeps packaging, documentation, smoke checks, and release flow stable
+while the broader public API is still being built.
+
+- workspace layout and package boundaries
+- packaging and tarball smoke checks
+- TypeScript, ESLint, browser, and Node verification
+- Astro documentation and TypeDoc generation
+- generic test vector manifest verification
+- the Rust-to-WASM placeholder toolchain
+
+## Workspace layout
+
+```text
+sealed-lattice/
+  docs/
+  implementation-documentation/
+  packages/
+    sdk/
+    protocol/
+    crypto/
+    wasm/
+    testkit/
+  crates/
+    sealed-lattice-kernel/
+  tools/
+  typedoc/
+```
 
 ## Installation
 
@@ -39,54 +70,14 @@ The public API surface is intentionally narrow while the repo, CI, docs, tests, 
 pnpm add sealed-lattice
 ```
 
-## Runtime requirements
-
-- Use ESM imports such as `import { sha256Hex } from 'sealed-lattice'`. The published package does not expose CommonJS `require()` entry points.
-- Browsers need `globalThis.crypto.subtle.digest` and `TextEncoder`.
-- CI validates Chromium, Firefox, and WebKit on desktop, plus Chromium and WebKit in mobile emulation.
-- Node requires version `24.14.1` or newer with `globalThis.crypto`.
-
-## Browser support
-
-- Use modern browsers that expose `globalThis.crypto.subtle.digest` and `TextEncoder`.
-- Install local browser runtimes with `pnpm exec playwright install chromium firefox webkit`.
-- Validate the current browser matrix with `pnpm run test:browser`.
-- CI runs the full desktop and mobile-emulation matrix on macOS through the browser Vitest projects.
-
-## Safe quickstart
-
-```typescript
-import { sha256Hex } from "sealed-lattice";
-
-const digest = await sha256Hex("sealed-lattice");
-
-console.log(digest);
-```
-
-The root package currently exposes only `sha256Hex` and `UnsupportedRuntimeError`.
-
-## Public API surface
-
-- `sealed-lattice`
-
-No additional public subpaths are promised yet. Future capability areas such as runtime helpers, serialization, transport, threshold coordination, proofs, and protocol types remain internal design space until the post-quantum flow and misuse-resistant contracts are stable.
-
-## Documentation
-
-- Hosted documentation site: [tenemo.github.io/sealed-lattice](https://tenemo.github.io/sealed-lattice/)
-- Get started: [tenemo.github.io/sealed-lattice/guides/getting-started](https://tenemo.github.io/sealed-lattice/guides/getting-started/)
-- Browser and worker usage: [tenemo.github.io/sealed-lattice/guides/browser-and-worker-usage](https://tenemo.github.io/sealed-lattice/guides/browser-and-worker-usage/)
-- Runtime and compatibility: [tenemo.github.io/sealed-lattice/guides/runtime-and-compatibility](https://tenemo.github.io/sealed-lattice/guides/runtime-and-compatibility/)
-- Security and non-goals: [tenemo.github.io/sealed-lattice/guides/security-and-non-goals](https://tenemo.github.io/sealed-lattice/guides/security-and-non-goals/)
-- Protocol spec: [tenemo.github.io/sealed-lattice/spec](https://tenemo.github.io/sealed-lattice/spec/)
-- API reference: [tenemo.github.io/sealed-lattice/api](https://tenemo.github.io/sealed-lattice/api/)
+The package imports successfully, but it intentionally exports no runtime API.
 
 ## Development
 
 ```bash
 pnpm install
-pnpm run lint
-pnpm run tsc
+pnpm run check
+pnpm run vectors
 pnpm exec playwright install chromium firefox webkit
 pnpm run test
 pnpm run verify:docs
@@ -95,6 +86,20 @@ pnpm run smoke:pack
 pnpm run smoke:pack:npm
 pnpm run build
 ```
+
+## Documentation
+
+- Hosted documentation site: [tenemo.github.io/sealed-lattice](https://tenemo.github.io/sealed-lattice/)
+- Guides index: [tenemo.github.io/sealed-lattice/guides](https://tenemo.github.io/sealed-lattice/guides/)
+- Protocol spec: [tenemo.github.io/sealed-lattice/spec](https://tenemo.github.io/sealed-lattice/spec/)
+- API reference: [tenemo.github.io/sealed-lattice/api](https://tenemo.github.io/sealed-lattice/api/)
+
+## Status
+
+This repository currently ships a stable package boundary, explicit internal
+package ownership, verification tooling, documentation generation, package
+smoke checks, and a Rust/WASM placeholder path. The public runtime facade is
+still intentionally empty.
 
 ## License
 

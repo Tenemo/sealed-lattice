@@ -1,7 +1,6 @@
 type PublicApiReferenceEntry = {
-    apiReferenceIndexPath: string;
+    apiReferencePagePath: string;
     entryPoint: string;
-    exportPath: string;
     moduleName: string;
 };
 
@@ -14,10 +13,9 @@ export const apiNavigationPath = `${apiReferenceRoot}/navigation.json`;
 
 export const publicApiReferenceEntries: readonly PublicApiReferenceEntry[] = [
     {
-        exportPath: '.',
         moduleName: rootModuleName,
         entryPoint: `typedoc/entry-points/${rootModuleName}.ts`,
-        apiReferenceIndexPath: `${apiReferenceRoot}/${rootModuleName}/index.md`,
+        apiReferencePagePath: `${apiReferenceRoot}/${rootModuleName}.md`,
     },
 ];
 

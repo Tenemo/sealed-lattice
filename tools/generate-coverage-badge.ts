@@ -157,6 +157,7 @@ export const createCoverageArtifacts = (
     return { badge, summary };
 };
 
+/* v8 ignore start */
 const main = async (): Promise<void> => {
     const rawSummary = JSON.parse(
         await readFile(coverageSummaryPath, 'utf8'),
@@ -180,3 +181,4 @@ const isMainModule =
 if (isMainModule) {
     void main();
 }
+/* v8 ignore stop */

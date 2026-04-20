@@ -12,7 +12,6 @@ const normalizeBase = (value: string | undefined): string => {
     return `/${trimmed.replace(/^\/+|\/+$/g, '')}`;
 };
 
-// Serve docs from the repo subpath on GitHub Pages, but keep local runs at root.
 const docsBase = normalizeBase(
     process.env.DOCS_BASE_PATH ??
         (process.env.GITHUB_ACTIONS === 'true' ? '/sealed-lattice' : '/'),
@@ -25,7 +24,7 @@ export default defineConfig({
         StarlightIntegration({
             title: 'sealed-lattice',
             description:
-                'Browser-native documentation for sealed-lattice, a post-quantum voting research package with a deliberately narrow public API surface.',
+                'Documentation for the sealed-lattice workspace, package boundaries, and current public facade.',
             disable404Route: true,
             social: [
                 {
@@ -40,8 +39,8 @@ export default defineConfig({
                     label: 'Guides',
                     items: [
                         'guides/getting-started',
-                        'guides/runtime-and-compatibility',
-                        'guides/browser-and-worker-usage',
+                        'guides/workspace-layout',
+                        'guides/development-workflow',
                         'guides/security-and-non-goals',
                     ],
                 },

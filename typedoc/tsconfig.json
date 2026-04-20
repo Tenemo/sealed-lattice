@@ -1,0 +1,11 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true
+  },
+  "include": [
+    "./entry-points/**/*.ts",
+    "./public-api-reference.ts",
+    "../packages/sdk/src/**/*.ts"
+  ]
+}

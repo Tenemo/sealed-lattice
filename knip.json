@@ -1,24 +1,59 @@
 {
-    "$schema": "https://unpkg.com/knip@5/schema.json",
-    "entry": [
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "workspaces": {
+    ".": {
+      "entry": [
         "tests/**/*.ts",
         "tools/**/*.ts",
         "typedoc/**/*.ts",
         "docs/astro.config.ts",
         "docs/src/content.config.ts"
-    ],
-    "project": [
-        "src/**/*.ts",
+      ],
+      "project": [
         "tests/**/*.ts",
         "tools/**/*.ts",
         "typedoc/**/*.ts",
         "docs/src/**/*.ts"
-    ],
-    "ignore": ["docs/src/env.d.ts"],
-    "ignoreDependencies": [
-        "@fontsource/ibm-plex-sans",
-        "@fontsource/jetbrains-mono",
-        "@typescript-eslint/eslint-plugin",
-        "@typescript-eslint/parser"
-    ]
+      ],
+      "ignore": [
+        "docs/src/env.d.ts"
+      ]
+    },
+    "packages/sdk": {
+      "project": [
+        "src/**/*.ts"
+      ]
+    },
+    "packages/protocol": {
+      "project": [
+        "src/**/*.ts"
+      ]
+    },
+    "packages/crypto": {
+      "project": [
+        "src/**/*.ts"
+      ]
+    },
+    "packages/testkit": {
+      "project": [
+        "src/**/*.ts"
+      ]
+    },
+    "packages/wasm": {
+      "entry": [
+        "tests/**/*.ts"
+      ],
+      "project": [
+        "src/**/*.ts",
+        "tests/**/*.ts"
+      ]
+    }
+  },
+  "ignoreDependencies": [
+    "@fontsource/ibm-plex-sans",
+    "@fontsource/jetbrains-mono",
+    "@typescript-eslint/eslint-plugin",
+    "@typescript-eslint/parser",
+    "turbo"
+  ]
 }
