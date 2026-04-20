@@ -57,6 +57,9 @@ jobs:
         steps:
             - uses: actions/checkout@v6.0.2
             - uses: ./.github/actions/bootstrap-pnpm
+            - uses: dtolnay/rust-toolchain@stable
+              with:
+                  targets: wasm32-unknown-unknown
             - run: pnpm run verify:docs
             - run: pnpm run docs:build:site
 
