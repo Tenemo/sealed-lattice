@@ -42,7 +42,7 @@ describe('Turbo runner helper', () => {
     it('appends the configured cache override', () => {
         expect(
             buildTurboInvocation(
-                ['check', 'check:workspace'],
+                ['build', 'check'],
                 'local:,remote:',
                 'win32',
                 'C:\\Windows\\System32\\cmd.exe',
@@ -57,8 +57,8 @@ describe('Turbo runner helper', () => {
                 'exec',
                 'turbo',
                 'run',
+                'build',
                 'check',
-                'check:workspace',
                 '--cache=local:,remote:',
             ],
         });

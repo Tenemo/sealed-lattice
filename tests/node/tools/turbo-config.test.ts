@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 type TurboTask = {
     readonly dependsOn?: readonly string[];
+    readonly outputs?: readonly string[];
 };
 
 type TurboConfig = {
@@ -14,31 +15,27 @@ const turboConfig = JSON.parse(
     readFileSync('turbo.json', 'utf8'),
 ) as TurboConfig;
 
-const requiredPackageBuildDependencies = [
-    'sealed-lattice#build',
-    '@sealed-lattice/protocol#build',
-    '@sealed-lattice/crypto#build',
-    '@sealed-lattice/wasm#build',
-    '@sealed-lattice/testkit#build',
-] as const;
-
-const taskNamesThatRequireBuiltPackages = [
-    '//#test:node:workspace',
-    '//#test:browser:workspace',
-    '//#coverage:node:workspace',
-    '//#docs:api:workspace',
-] as const;
-
 describe('Turbo task graph', () => {
-    it.each(taskNamesThatRequireBuiltPackages)(
-        '%s builds package entry points before consuming them',
-        (taskName) => {
-            const task = turboConfig.tasks[taskName];
+    it('uses a single package build task graph', () => {
+        expect(turboConfig.tasks.build).toEqual({
+            dependsOn: ['^build'],
+            outputs: ['dist/**'],
+        });
+    });
 
-            expect(task).toBeDefined();
-            expect(task.dependsOn).toEqual(
-                expect.arrayContaining([...requiredPackageBuildDependencies]),
-            );
-        },
-    );
+    it('uses a single package check task graph', () => {
+        expect(turboConfig.tasks.check).toEqual({
+            dependsOn: ['^check'],
+            outputs: [],
+        });
+    });
+
+    it('does not keep duplicate root task aliases', () => {
+        expect(Object.keys(turboConfig.tasks)).toEqual(['build', 'check']);
+        expect(
+            Object.keys(turboConfig.tasks).some((taskName) =>
+                taskName.startsWith('//#'),
+            ),
+        ).toBe(false);
+    });
 });
