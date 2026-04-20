@@ -1,5 +1,5 @@
 type PublicApiReferenceEntry = {
-    apiReferenceIndexPath: string;
+    apiReferencePagePath: string;
     entryPoint: string;
     moduleName: string;
 };
@@ -15,7 +15,7 @@ export const publicApiReferenceEntries: readonly PublicApiReferenceEntry[] = [
     {
         moduleName: rootModuleName,
         entryPoint: `typedoc/entry-points/${rootModuleName}.ts`,
-        apiReferenceIndexPath: `${apiReferenceRoot}/${rootModuleName}/index.md`,
+        apiReferencePagePath: `${apiReferenceRoot}/${rootModuleName}.md`,
     },
 ];
 
