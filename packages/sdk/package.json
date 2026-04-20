@@ -31,7 +31,7 @@
   },
   "scripts": {
     "check": "tsc --project tsconfig.json --pretty false --noEmit",
-    "build": "pnpm exec del-cli dist && tsc --project tsconfig.json"
+    "build": "pnpm exec del-cli dist tsconfig.tsbuildinfo && tsc --project tsconfig.json"
   },
   "keywords": [
     "cryptography",
