@@ -94,6 +94,17 @@ describe('byte-buffer kernel in Node', () => {
         ).resolves.toEqual(Uint8Array.from([9, 8, 7, 6, 5]));
     });
 
+    it('deallocates aliased input and output pointers only once', async () => {
+        const { deallocate } = createMockKernelExports();
+        const kernel = await loadByteBufferKernel();
+
+        expect(
+            Array.from(kernel.roundTripBytes(Uint8Array.from([2, 4, 6, 8]))),
+        ).toEqual([2, 4, 6, 8]);
+        expect(deallocate).toHaveBeenCalledTimes(1);
+        expect(deallocate).toHaveBeenCalledWith(12, 4);
+    });
+
     it('rejects null pointers for non-empty allocations', async () => {
         createMockKernelExports({
             allocationPointer: 0,

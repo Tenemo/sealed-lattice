@@ -33,10 +33,26 @@ describe('Turbo runner helper', () => {
     });
 
     it('builds a Turbo invocation without a cache override', () => {
-        expect(buildTurboInvocation(['build'], undefined, 'linux')).toEqual({
-            command: 'pnpm',
-            args: ['exec', 'turbo', 'run', 'build'],
-        });
+        const originalCacheOverride =
+            process.env[cacheOverrideEnvironmentVariableName];
+
+        delete process.env[cacheOverrideEnvironmentVariableName];
+
+        try {
+            expect(buildTurboInvocation(['build'], undefined, 'linux')).toEqual(
+                {
+                    command: 'pnpm',
+                    args: ['exec', 'turbo', 'run', 'build'],
+                },
+            );
+        } finally {
+            if (originalCacheOverride === undefined) {
+                delete process.env[cacheOverrideEnvironmentVariableName];
+            } else {
+                process.env[cacheOverrideEnvironmentVariableName] =
+                    originalCacheOverride;
+            }
+        }
     });
 
     it('appends the configured cache override', () => {
@@ -62,6 +78,35 @@ describe('Turbo runner helper', () => {
                 '--cache=local:,remote:',
             ],
         });
+    });
+
+    it('uses the environment cache override when no explicit override is provided', () => {
+        const originalCacheOverride =
+            process.env[cacheOverrideEnvironmentVariableName];
+
+        process.env[cacheOverrideEnvironmentVariableName] = 'local:,remote:';
+
+        try {
+            expect(buildTurboInvocation(['build'], undefined, 'linux')).toEqual(
+                {
+                    command: 'pnpm',
+                    args: [
+                        'exec',
+                        'turbo',
+                        'run',
+                        'build',
+                        '--cache=local:,remote:',
+                    ],
+                },
+            );
+        } finally {
+            if (originalCacheOverride === undefined) {
+                delete process.env[cacheOverrideEnvironmentVariableName];
+            } else {
+                process.env[cacheOverrideEnvironmentVariableName] =
+                    originalCacheOverride;
+            }
+        }
     });
 
     it('uses the documented cache override environment variable name', () => {

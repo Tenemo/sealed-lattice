@@ -157,7 +157,7 @@ export const loadByteBufferKernel = async (): Promise<ByteBufferKernel> => {
                 if (outputPointer !== 0) {
                     deallocate(outputPointer, normalizedInput.length);
                 }
-                if (inputPointer !== 0) {
+                if (inputPointer !== 0 && inputPointer !== outputPointer) {
                     deallocate(inputPointer, normalizedInput.length);
                 }
             }
