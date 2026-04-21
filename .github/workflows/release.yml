@@ -326,7 +326,7 @@ jobs:
             - uses: actions/download-artifact@v8.0.1
               with:
                   name: release-package
-                  path: .
+                  path: packages/sdk
 
             - name: commit release metadata
               run: |
@@ -394,7 +394,7 @@ jobs:
             - uses: actions/download-artifact@v8.0.1
               with:
                   name: release-package
-                  path: .
+                  path: packages/sdk
 
             - name: publish to npm
               run: |
