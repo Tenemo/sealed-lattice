@@ -1,6 +1,6 @@
 {
   "name": "sealed-lattice",
-  "version": "0.0.9",
+  "version": "0.0.10",
   "description": "Published npm facade for the sealed-lattice library.",
   "author": "Piotr Piech <piotr@piech.dev>",
   "license": "MPL-2.0",
