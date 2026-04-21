@@ -1,5 +1,9 @@
 # sealed-lattice
 
+WORK IN PROGRESS - all versions below 1.0.0 are considered inherently unsafe, unfinished and not ready for usage, even for research purposes. Full release coming soon, work is actively in progress.
+
+---
+
 [![npm version](https://img.shields.io/npm/v/sealed-lattice?color=5FA04E)](https://www.npmjs.com/package/sealed-lattice)
 [![npm downloads](https://img.shields.io/npm/dm/sealed-lattice?color=5FA04E)](https://www.npmjs.com/package/sealed-lattice)
 
