@@ -11,7 +11,7 @@
     "tsc": "tsc --build --pretty false",
     "vectors": "tsx ./tools/ci/verify-test-vectors.ts",
     "vectors:generate": "tsx ./tools/ci/verify-test-vectors.ts --generate",
-    "check": "tsx ./tools/run-turbo.ts check && pnpm run lint && pnpm run tsc && cargo fmt --check && cargo clippy --workspace --all-targets --all-features -- -D warnings && cargo test --workspace && tsx ./tools/ci/check-package-boundaries.ts && pnpm run vectors && tsx ./tools/ci/verify-repository-hygiene.ts && knip",
+    "check": "tsx ./tools/run-turbo.ts check && pnpm run lint && pnpm run tsc && cargo fmt --check && cargo clippy --workspace --all-targets --all-features -- -D warnings && cargo test --workspace && tsx ./tools/ci/check-package-boundaries.ts && pnpm run vectors && tsx ./tools/ci/verify-repository-hygiene.ts && pnpm run verify:release-workflow && knip",
     "build": "tsx ./tools/run-turbo.ts build",
     "test:node": "pnpm run build && vitest --project node --run",
     "test:browser": "pnpm run build && vitest --project browser-desktop --project browser-mobile --run",
@@ -24,6 +24,7 @@
     "docs:preview": "pnpm run docs:build:site && astro preview --root docs",
     "docs": "pnpm run docs:build:site",
     "verify:docs": "pnpm run docs:api && tsx ./typedoc/verify-docs.ts",
+    "verify:release-workflow": "tsx ./tools/ci/verify-release-workflow.ts",
     "smoke:pack": "pnpm --filter sealed-lattice run build && tsx ./tools/ci/verify-packed-package.ts",
     "smoke:pack:npm": "pnpm --filter sealed-lattice run build && tsx ./tools/ci/verify-packed-package.ts --package-manager npm",
     "prepare": "husky"

@@ -328,6 +328,21 @@ jobs:
                   name: release-package
                   path: packages/sdk
 
+            - name: verify downloaded release artifact
+              run: |
+                  EXPECTED_VERSION="${{ needs.prepare-release.outputs.version }}"
+                  ACTUAL_VERSION=$(node -e "console.log(JSON.parse(require('fs').readFileSync('packages/sdk/package.json', 'utf8')).version)")
+
+                  if [[ "${ACTUAL_VERSION}" != "${EXPECTED_VERSION}" ]]; then
+                    echo "Downloaded release package metadata version mismatch: expected ${EXPECTED_VERSION}, received ${ACTUAL_VERSION}." >&2
+                    exit 1
+                  fi
+
+                  if [[ ! -f packages/sdk/dist/index.js ]]; then
+                    echo "Downloaded release artifact is missing packages/sdk/dist/index.js." >&2
+                    exit 1
+                  fi
+
             - name: commit release metadata
               run: |
                   git config user.name "github-actions[bot]"
@@ -395,6 +410,21 @@ jobs:
               with:
                   name: release-package
                   path: packages/sdk
+
+            - name: verify downloaded release artifact
+              run: |
+                  EXPECTED_VERSION="${{ needs.prepare-release.outputs.version }}"
+                  ACTUAL_VERSION=$(node -e "console.log(JSON.parse(require('fs').readFileSync('packages/sdk/package.json', 'utf8')).version)")
+
+                  if [[ "${ACTUAL_VERSION}" != "${EXPECTED_VERSION}" ]]; then
+                    echo "Downloaded release package metadata version mismatch: expected ${EXPECTED_VERSION}, received ${ACTUAL_VERSION}." >&2
+                    exit 1
+                  fi
+
+                  if [[ ! -f packages/sdk/dist/index.js ]]; then
+                    echo "Downloaded release artifact is missing packages/sdk/dist/index.js." >&2
+                    exit 1
+                  fi
 
             - name: publish to npm
               run: |
