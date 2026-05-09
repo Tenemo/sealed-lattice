@@ -11,6 +11,9 @@ const resolveFromRepoRoot = (...segments: string[]): string =>
 
 const nodeTestTimeoutMs = 60_000;
 const nodeHookTimeoutMs = 240_000;
+const browserApiHost = '127.0.0.1';
+const desktopBrowserApiPort = 64_115;
+const mobileBrowserApiPort = 64_116;
 
 const nodeProject = {
     environment: 'node',
@@ -147,6 +150,11 @@ export default defineConfig({
                     include: ['packages/*/tests/browser/**/*.browser.test.ts'],
                     browser: {
                         enabled: true,
+                        api: {
+                            host: browserApiHost,
+                            port: desktopBrowserApiPort,
+                            strictPort: true,
+                        },
                         provider: playwright(),
                         headless: true,
                         instances: desktopBrowserInstances,
@@ -159,6 +167,11 @@ export default defineConfig({
                     include: ['packages/*/tests/browser/**/*.browser.test.ts'],
                     browser: {
                         enabled: true,
+                        api: {
+                            host: browserApiHost,
+                            port: mobileBrowserApiPort,
+                            strictPort: true,
+                        },
                         provider: playwright(),
                         headless: true,
                         instances: mobileBrowserInstances,

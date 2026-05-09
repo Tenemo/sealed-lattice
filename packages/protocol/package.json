@@ -15,5 +15,8 @@
   "scripts": {
     "check": "tsc --project tsconfig.json --pretty false --noEmit",
     "build": "pnpm exec del-cli dist && tsc --project tsconfig.json"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.4"
   }
 }

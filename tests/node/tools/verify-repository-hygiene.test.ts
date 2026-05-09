@@ -51,7 +51,7 @@ describe('repository hygiene helpers', () => {
                 'package.json',
                 'packages/wasm/src/index.ts',
                 'docs/src/content/docs/guides/overview.mdx',
-                'test-vectors/foundation/m01-byte-buffer-roundtrip.json',
+                'test-vectors/foundation/byte-buffer-roundtrip.json',
             ]),
         ).toEqual([]);
     });

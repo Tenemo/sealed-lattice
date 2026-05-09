@@ -1,7 +1,6 @@
 /**
  * Internal crypto package boundary.
  *
- * The package is intentionally empty while provider wrappers and capability
- * checks are still being built.
+ * Provider wrappers and capability checks are future implementation.
  */
 export {};

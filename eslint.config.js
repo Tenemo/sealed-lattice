@@ -48,6 +48,7 @@ const config = [
             'import-x/resolver-next': [
                 createTypeScriptImportResolver({
                     alwaysTryTypes: true,
+                    noWarnOnMultipleProjects: true,
                     project: projectPaths,
                 }),
                 createNodeResolver({

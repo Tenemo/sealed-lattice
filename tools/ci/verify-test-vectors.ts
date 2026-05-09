@@ -32,6 +32,20 @@ export const isTrackedVectorRelativePath = (relativePath: string): boolean => {
     );
 };
 
+export const isVectorRelativePathInsideRoot = (
+    relativePath: string,
+): boolean => {
+    const normalizedPath = normalizeVectorRelativePath(relativePath);
+    const pathSegments = normalizedPath.split('/').filter(Boolean);
+
+    return (
+        normalizedPath !== '' &&
+        !path.isAbsolute(relativePath) &&
+        !path.posix.isAbsolute(normalizedPath) &&
+        !pathSegments.includes('..')
+    );
+};
+
 export const hashVectorFile = async (filePath: string): Promise<string> => {
     const fileBuffer = await fs.readFile(filePath);
 
@@ -126,7 +140,7 @@ export const validateVectorManifest = (
         if (!isTrackedVectorRelativePath(normalizedPath)) {
             failures.push(`Vector manifest path is reserved: ${entry.path}`);
         }
-        if (entry.path.startsWith('../') || path.isAbsolute(entry.path)) {
+        if (!isVectorRelativePathInsideRoot(entry.path)) {
             failures.push(
                 `Vector manifest path must stay within test-vectors: ${entry.path}`,
             );

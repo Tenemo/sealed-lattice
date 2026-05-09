@@ -1,6 +1,19 @@
-use sealed_lattice_kernel::{BYTE_BUFFER_CONTRACT_VERSION, verifier};
+use sealed_lattice_kernel::{TRANSCRIPT_CORE_COMMAND_CONTRACT_VERSION, fixtures, verifier};
 
 fn main() {
-    println!("sealed-lattice kernel verifier placeholder ({BYTE_BUFFER_CONTRACT_VERSION})");
-    println!("{}", verifier::placeholder_summary());
+    if std::env::args().any(|argument| argument == "--emit-transcript-core-fixtures") {
+        let fixtures = fixtures::canonical_fixture_set()
+            .expect("canonical transcript-core fixtures should build");
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&fixtures)
+                .expect("canonical transcript-core fixtures should serialize")
+        );
+        return;
+    }
+
+    println!(
+        "sealed-lattice kernel verifier future implementation ({TRANSCRIPT_CORE_COMMAND_CONTRACT_VERSION})"
+    );
+    println!("{}", verifier::future_implementation_summary());
 }

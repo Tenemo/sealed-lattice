@@ -28,7 +28,7 @@ export const allowedInternalDependencyMap = {
     ],
     '@sealed-lattice/protocol': [],
     '@sealed-lattice/crypto': [],
-    '@sealed-lattice/wasm': [],
+    '@sealed-lattice/wasm': ['@sealed-lattice/protocol'],
     '@sealed-lattice/testkit': [
         'sealed-lattice',
         '@sealed-lattice/protocol',

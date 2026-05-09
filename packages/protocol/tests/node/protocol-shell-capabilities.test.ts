@@ -1,0 +1,216 @@
+import { describe, expect, it } from 'vitest';
+
+import {
+    deriveThresholdProfile,
+    evaluateActionCapability,
+} from '../../src/protocol-shell/index';
+import type { CapabilityContext } from '../../src/protocol-shell/index';
+
+const thresholdProfile = deriveThresholdProfile({ n: 20 });
+
+const createContext = (
+    overrides: Partial<CapabilityContext> = {},
+): CapabilityContext => ({
+    lifecycleState: 'DraftPoll',
+    thresholdProfile,
+    pollSpecValid: true,
+    browserSupported: true,
+    ...overrides,
+});
+
+describe('protocol-shell capability evaluator', () => {
+    it('refuses aggregate contribution before voting is closed', () => {
+        expect(
+            evaluateActionCapability(
+                'DeriveAggregateContribution',
+                createContext({ lifecycleState: 'VotingOpen' }),
+            ),
+        ).toEqual({
+            allowed: false,
+            action: 'DeriveAggregateContribution',
+            reason: 'InvalidLifecycleState',
+        });
+    });
+
+    it('refuses aggregate contribution before setup and turnout thresholds', () => {
+        expect(
+            evaluateActionCapability(
+                'DeriveAggregateContribution',
+                createContext({
+                    lifecycleState: 'VotingClosed',
+                    setupCompleteCount: 19,
+                    turnoutCount: thresholdProfile.qRelease,
+                }),
+            ),
+        ).toMatchObject({ reason: 'SetupIncomplete' });
+        expect(
+            evaluateActionCapability(
+                'DeriveAggregateContribution',
+                createContext({
+                    lifecycleState: 'VotingClosed',
+                    setupCompleteCount: thresholdProfile.qSetupComplete,
+                    turnoutCount: thresholdProfile.qRelease - 1,
+                }),
+            ),
+        ).toMatchObject({ reason: 'TurnoutBelowReleaseFloor' });
+    });
+
+    it('allows aggregate contribution once structural gates pass', () => {
+        expect(
+            evaluateActionCapability(
+                'DeriveAggregateContribution',
+                createContext({
+                    lifecycleState: 'AwaitingAggregateContributors',
+                    setupCompleteCount: thresholdProfile.qSetupComplete,
+                    turnoutCount: thresholdProfile.qRelease,
+                }),
+            ),
+        ).toEqual({
+            allowed: true,
+            action: 'DeriveAggregateContribution',
+        });
+    });
+
+    it('refuses replay and attestation without target finality', () => {
+        expect(
+            evaluateActionCapability(
+                'ReplayEvaluation',
+                createContext({ lifecycleState: 'TopKEvaluated' }),
+            ),
+        ).toMatchObject({ reason: 'TargetFinalityCheckpointMissing' });
+        expect(
+            evaluateActionCapability(
+                'AttestReplay',
+                createContext({
+                    lifecycleState: 'EvaluationReplayOpen',
+                    localReplaySucceeded: true,
+                }),
+            ),
+        ).toMatchObject({ reason: 'TargetFinalityCheckpointMissing' });
+    });
+
+    it('refuses replay attestation without local replay success', () => {
+        expect(
+            evaluateActionCapability(
+                'AttestReplay',
+                createContext({
+                    lifecycleState: 'EvaluationReplayOpen',
+                    targetFinalityAccepted: true,
+                }),
+            ),
+        ).toMatchObject({ reason: 'EvaluationReplayThresholdNotReached' });
+    });
+
+    it('enforces target acceptance attestation threshold or optional proof', () => {
+        expect(
+            evaluateActionCapability(
+                'AcceptTarget',
+                createContext({
+                    lifecycleState: 'EvaluationReplayOpen',
+                    targetFinalityAccepted: true,
+                    replayAttestationCount: thresholdProfile.qEval - 1,
+                }),
+            ),
+        ).toMatchObject({ reason: 'EvaluationReplayThresholdNotReached' });
+        expect(
+            evaluateActionCapability(
+                'AcceptTarget',
+                createContext({
+                    lifecycleState: 'EvaluationReplayOpen',
+                    targetFinalityAccepted: true,
+                    replayAttestationCount: thresholdProfile.qEval,
+                }),
+            ),
+        ).toEqual({ allowed: true, action: 'AcceptTarget' });
+        expect(
+            evaluateActionCapability(
+                'AcceptTarget',
+                createContext({
+                    lifecycleState: 'OptionalEvaluationProofVerified',
+                    targetFinalityAccepted: true,
+                    optionalEvaluationProofVerified: true,
+                }),
+            ),
+        ).toEqual({ allowed: true, action: 'AcceptTarget' });
+    });
+
+    it('refuses decryption-share capability before target acceptance or finality', () => {
+        expect(
+            evaluateActionCapability(
+                'CreateTargetBoundDecryptionShare',
+                createContext({ lifecycleState: 'EvaluationReplayAttested' }),
+            ),
+        ).toMatchObject({ reason: 'InvalidLifecycleState' });
+        expect(
+            evaluateActionCapability(
+                'CreateTargetBoundDecryptionShare',
+                createContext({ lifecycleState: 'TargetAccepted' }),
+            ),
+        ).toMatchObject({ reason: 'TargetFinalityCheckpointMissing' });
+    });
+
+    it.each([
+        ['Ambiguous', 'AmbiguousRecoveryState'],
+        ['MissingRecoveryMaterial', 'AmbiguousRecoveryState'],
+        ['StaleEpoch', 'StaleRecoveryEpoch'],
+        ['ClonedDeviceSuspected', 'ClonedDeviceState'],
+    ] as const)(
+        'refuses decryption-share capability for %s recovery state',
+        (recoveryState, reason) => {
+            expect(
+                evaluateActionCapability(
+                    'CreateTargetBoundDecryptionShare',
+                    createContext({
+                        lifecycleState: 'TargetAccepted',
+                        targetFinalityAccepted: true,
+                        recoveryState,
+                    }),
+                ),
+            ).toMatchObject({ reason });
+        },
+    );
+
+    it('refuses recombination until the first threshold shares are reached', () => {
+        expect(
+            evaluateActionCapability(
+                'RecombineAcceptedTarget',
+                createContext({
+                    lifecycleState: 'AwaitingFirstDecryptionShares',
+                    targetAccepted: true,
+                    decryptionShareCount: thresholdProfile.qDec - 1,
+                }),
+            ),
+        ).toMatchObject({ reason: 'FirstThresholdSharesNotReached' });
+    });
+
+    it('keeps unsafe micro-rosters out of claim-bearing capabilities', () => {
+        const unsafeThresholdProfile = deriveThresholdProfile({
+            n: 19,
+            unsafeMicroRosterAcknowledged: true,
+        });
+
+        expect(
+            evaluateActionCapability(
+                'AcceptTarget',
+                createContext({
+                    lifecycleState: 'EvaluationReplayOpen',
+                    thresholdProfile: unsafeThresholdProfile,
+                    targetFinalityAccepted: true,
+                    replayAttestationCount: unsafeThresholdProfile.qEval,
+                }),
+            ),
+        ).toMatchObject({ reason: 'UnsafeMicroRosterNotClaimBearing' });
+    });
+
+    it('leaves verified top-k decoding unimplemented in protocol shell', () => {
+        expect(
+            evaluateActionCapability(
+                'DecodeVerifiedTopK',
+                createContext({
+                    lifecycleState: 'FullyVerifiedResult',
+                    decryptionShareCount: thresholdProfile.qDec,
+                }),
+            ),
+        ).toMatchObject({ reason: 'NotImplementedUntilLaterMilestone' });
+    });
+});

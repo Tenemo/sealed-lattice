@@ -25,7 +25,7 @@ describe('Turbo task graph', () => {
 
     it('uses a single package check task graph', () => {
         expect(turboConfig.tasks.check).toEqual({
-            dependsOn: ['^check'],
+            dependsOn: ['^build', '^check'],
             outputs: [],
         });
     });

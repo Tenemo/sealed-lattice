@@ -6,7 +6,7 @@ sidebar:
 ---
 
 The workspace is only in a good state when the checks, docs, smoke tests, and
-Rust/WASM proof path all pass together.
+Rust/WASM transcript-core path all pass together.
 
 ## Prerequisites
 
@@ -34,10 +34,10 @@ pnpm run build
 
 - `pnpm run check`: package shell typechecks, repo lint, package-boundary checks, vector manifest verification, and dead-code analysis
 - `pnpm run vectors`: committed test vector files match `test-vectors/manifest.json`
-- `pnpm run test`: Node tests, browser tests, and the internal WASM placeholder loader path
+- `pnpm run test`: Node tests, browser tests, and the internal WASM transcript-core loader path
 - `pnpm run verify:docs`: generated API pages and docs link structure stay consistent
-- `pnpm run smoke:pack` and `pnpm run smoke:pack:npm`: the published package tarball installs cleanly and still exposes an empty runtime facade
-- `pnpm run build`: every package shell builds and the WASM placeholder artifact is copied into the internal loader package
+- `pnpm run smoke:pack` and `pnpm run smoke:pack:npm`: the published package tarball installs cleanly and exposes the transcript-core fixture verifier
+- `pnpm run build`: every package shell builds and the WASM transcript-core artifact is copied into the internal loader package
 
 ## Release-facing rule
 

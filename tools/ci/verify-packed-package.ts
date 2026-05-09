@@ -266,6 +266,11 @@ export const validatePublishedPackageFilePaths = (
     if (!publishedPackageFilePaths.includes('LICENSE')) {
         failures.push('Published package is missing LICENSE');
     }
+    if (
+        !publishedPackageFilePaths.includes('dist/sealed-lattice-kernel.wasm')
+    ) {
+        failures.push('Published package is missing transcript-core WASM');
+    }
 
     const typeScriptBuildInfoPaths = publishedPackageFilePaths.filter(
         (filePath) => filePath.endsWith('.tsbuildinfo'),

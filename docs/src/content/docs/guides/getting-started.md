@@ -6,35 +6,42 @@ sidebar:
 ---
 
 Start with the public package name and the current rule: `sealed-lattice`
-exists, but its runtime facade is intentionally empty.
+exposes only the safe transcript-core fixture verifier and protocol shell.
 
 ## Public package rules
 
 - The only committed public package name is `sealed-lattice`.
-- The public runtime facade currently exports nothing.
+- The public runtime facade currently exports transcript-core fixture verification plus threshold, lifecycle, poll-spec, and capability helpers.
 - No public subpaths are promised yet.
-- The current release freezes packaging, docs, smoke checks, and the workspace shape.
+- The current release freezes packaging, docs, smoke checks, transcript-core fixtures, protocol-shell vectors, and the workspace shape.
 
 ## Consumer posture
 
 ```typescript
-import "sealed-lattice";
+import {
+    deriveThresholdProfile,
+    validatePollSpec,
+    verifyTranscriptCoreFixture,
+} from "sealed-lattice";
 ```
 
-The import is valid. There is intentionally nothing to call yet.
+The verifier accepts transcript-core fixture objects and returns deterministic
+verification or rejection labels. The protocol-shell helpers validate public poll shape,
+derive threshold profiles, check lifecycle transitions, derive status labels,
+and refuse premature protocol actions. They do not implement voting.
 
 ## What the current release includes
 
 - the private Turborepo workspace layout
 - the published `sealed-lattice` package identity
 - private protocol, crypto, wasm, and testkit shells
-- a Rust placeholder crate plus an internal WASM loader
+- a Rust transcript core plus an internal WASM loader
+- a deterministic threshold, lifecycle, poll-spec, and capability shell
 - docs, TypeDoc, pack smoke, vector manifest verification, and CI verification
 
 ## What is not published yet
 
-- protocol lifecycle helpers
-- transcript or manifest types
+- manifest types
 - ballot or tally APIs
 - proof systems
 - public crypto provider wrappers

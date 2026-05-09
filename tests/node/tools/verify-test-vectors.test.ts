@@ -8,6 +8,7 @@ import {
     buildVectorManifestFromDirectory,
     collectTrackedVectorRelativePaths,
     isTrackedVectorRelativePath,
+    isVectorRelativePathInsideRoot,
     normalizeVectorRelativePath,
     validateVectorManifest,
 } from '../../../tools/ci/verify-test-vectors';
@@ -41,6 +42,17 @@ describe('test vector helpers', () => {
         expect(isTrackedVectorRelativePath('README.md')).toBe(false);
         expect(isTrackedVectorRelativePath('manifest.json')).toBe(false);
         expect(isTrackedVectorRelativePath('crypto/example.json')).toBe(true);
+    });
+
+    it('rejects vector paths that escape the vector root', () => {
+        expect(isVectorRelativePathInsideRoot('crypto/example.json')).toBe(
+            true,
+        );
+        expect(isVectorRelativePathInsideRoot('../outside.json')).toBe(false);
+        expect(
+            isVectorRelativePathInsideRoot('nested/../../outside.json'),
+        ).toBe(false);
+        expect(isVectorRelativePathInsideRoot('')).toBe(false);
     });
 
     it('collects tracked vector paths and ignores reserved files', async () => {
@@ -114,6 +126,10 @@ describe('test vector helpers', () => {
                     path: 'missing.json',
                     sha256: '1'.repeat(64),
                 },
+                {
+                    path: 'nested/../../outside.json',
+                    sha256: '2'.repeat(64),
+                },
             ],
         };
 
@@ -122,6 +138,7 @@ describe('test vector helpers', () => {
                 'Vector manifest path is duplicated: crypto/example.json',
                 'Vector digest drift detected for crypto/example.json: expected 0000000000000000000000000000000000000000000000000000000000000000, received 3a37782e8974c48eebf2a0517c866ad15641c53b3d31993188796b56aeb79624',
                 'Vector manifest entry is missing on disk: missing.json',
+                'Vector manifest path must stay within test-vectors: nested/../../outside.json',
             ]),
         );
     });
