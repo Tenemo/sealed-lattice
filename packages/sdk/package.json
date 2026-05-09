@@ -35,6 +35,9 @@
         "build:bridge": "tsx ../../tools/ci/build-sdk-bridge.ts",
         "build": "pnpm exec del-cli dist tsconfig.tsbuildinfo && tsc --project tsconfig.json && pnpm run build:bridge && pnpm run build:wasm"
     },
+    "devDependencies": {
+        "vitest": "^4.1.4"
+    },
     "keywords": [
         "cryptography",
         "security",

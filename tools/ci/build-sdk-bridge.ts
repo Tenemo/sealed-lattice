@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -26,8 +26,26 @@ const bridgeOutputPath = path.resolve(
     'internal',
     'transcript-core-bridge.js',
 );
+const protocolShellSourceDirectoryPath = path.resolve(
+    repoRoot,
+    'packages',
+    'protocol',
+    'src',
+    'protocol-shell',
+);
+const protocolShellOutputDirectoryPath = path.resolve(
+    repoRoot,
+    'packages',
+    'sdk',
+    'dist',
+    'internal',
+    'protocol-shell',
+);
 
-export const transpileBridgeSource = (sourceText: string): string => {
+export const transpileSdkInternalSource = (
+    sourceText: string,
+    sourcePath: string,
+): string => {
     const result = transpileModule(sourceText, {
         compilerOptions: {
             target: ScriptTarget.ES2020,
@@ -35,7 +53,7 @@ export const transpileBridgeSource = (sourceText: string): string => {
             removeComments: true,
             sourceMap: false,
         },
-        fileName: bridgeSourcePath,
+        fileName: sourcePath,
         reportDiagnostics: true,
     });
     const diagnostics = result.diagnostics ?? [];
@@ -56,6 +74,9 @@ export const transpileBridgeSource = (sourceText: string): string => {
     return result.outputText;
 };
 
+export const transpileBridgeSource = (sourceText: string): string =>
+    transpileSdkInternalSource(sourceText, bridgeSourcePath);
+
 export const buildSdkBridge = async (): Promise<void> => {
     const sourceText = await readFile(bridgeSourcePath, 'utf8');
     const outputText = transpileBridgeSource(sourceText);
@@ -64,11 +85,48 @@ export const buildSdkBridge = async (): Promise<void> => {
     await writeFile(bridgeOutputPath, outputText, 'utf8');
 };
 
+export const buildSdkProtocolShellRuntime = async (): Promise<void> => {
+    const sourceFileNames = (await readdir(protocolShellSourceDirectoryPath))
+        .filter((sourceFileName) => sourceFileName.endsWith('.ts'))
+        .sort();
+
+    await rm(protocolShellOutputDirectoryPath, {
+        recursive: true,
+        force: true,
+    });
+    await mkdir(protocolShellOutputDirectoryPath, { recursive: true });
+
+    await Promise.all(
+        sourceFileNames.map(async (sourceFileName) => {
+            const sourcePath = path.join(
+                protocolShellSourceDirectoryPath,
+                sourceFileName,
+            );
+            const outputPath = path.join(
+                protocolShellOutputDirectoryPath,
+                sourceFileName.replace(/\.ts$/u, '.js'),
+            );
+            const sourceText = await readFile(sourcePath, 'utf8');
+            const outputText = transpileSdkInternalSource(
+                sourceText,
+                sourcePath,
+            );
+
+            await writeFile(outputPath, outputText, 'utf8');
+        }),
+    );
+};
+
+export const buildSdkInternalRuntime = async (): Promise<void> => {
+    await buildSdkBridge();
+    await buildSdkProtocolShellRuntime();
+};
+
 const scriptEntryPoint = process.argv[1];
 const isMainModule =
     scriptEntryPoint !== undefined &&
     import.meta.url === pathToFileURL(scriptEntryPoint).href;
 
 if (isMainModule) {
-    await buildSdkBridge();
+    await buildSdkInternalRuntime();
 }

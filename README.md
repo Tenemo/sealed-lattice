@@ -37,8 +37,9 @@ core used by the native-test and WASM-loading path.
 
 ## Current public boundary
 
-The published `sealed-lattice` package currently exposes a safe
-transcript-core fixture verifier.
+The published `sealed-lattice` package currently exposes a safe transcript-core
+fixture verifier plus the threshold, lifecycle, poll-spec, and capability
+shell.
 
 This keeps packaging, documentation, smoke checks, transcript fixtures, and
 release flow stable while the broader voting API remains future implementation.
@@ -74,7 +75,8 @@ sealed-lattice/
 pnpm add sealed-lattice
 ```
 
-The package exports the current transcript-core fixture verifier.
+The package exports the current transcript-core fixture verifier and safe
+protocol-shell helpers. It is not a usable voting library yet.
 
 ## Development
 
@@ -102,8 +104,9 @@ pnpm run build
 
 This repository currently ships a stable package boundary, explicit internal
 package ownership, verification tooling, documentation generation, package
-smoke checks, and a Rust/WASM transcript-core path. Wider voting APIs remain
-future implementation.
+smoke checks, a Rust/WASM transcript-core path, and a deterministic protocol
+shell. Ballots, signatures, board proofs, PVSS, BFV, MHE setup, replay, target
+acceptance, and decryption remain future implementation.
 
 ## License
 

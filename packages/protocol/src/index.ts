@@ -2,7 +2,9 @@ export type BaseClaimProfile =
     | 'ResultComputedAuditable'
     | 'FullyVerifiedResult';
 
-export type MheSecurityStage = 'PassiveMhePrototype' | 'ActiveMalicious';
+export type TranscriptCoreMheSecurityStage =
+    | 'PassiveMhePrototype'
+    | 'ActiveMalicious';
 
 export type TranscriptCoreStatusLabel = 'TranscriptCoreVerified';
 
@@ -47,7 +49,7 @@ export type GoldenTranscriptCoreFixture = {
     readonly objectType: 'TranscriptCore';
     readonly objectVersion: 1;
     readonly baseClaimProfile: BaseClaimProfile;
-    readonly mheSecurityStage: MheSecurityStage;
+    readonly mheSecurityStage: TranscriptCoreMheSecurityStage;
     readonly baseClaimProfileId: string;
     readonly mheSecurityProfileId: string;
     readonly heSetupProofProfileId: string;
@@ -83,7 +85,7 @@ export type TranscriptCoreAnalysis = {
     readonly objectType: 'TranscriptCore';
     readonly objectVersion: 1;
     readonly baseClaimProfile: BaseClaimProfile;
-    readonly mheSecurityStage: MheSecurityStage;
+    readonly mheSecurityStage: TranscriptCoreMheSecurityStage;
     readonly baseClaimProfileId: string;
     readonly mheSecurityProfileId: string;
     readonly heSetupProofProfileId: string;
@@ -128,3 +130,5 @@ export type TranscriptCoreVerificationResult = {
         readonly code: CanonicalErrorCode;
     };
 };
+
+export * from './protocol-shell/index.js';

@@ -283,102 +283,116 @@ const runKernelCommand = <T>(
 export const createTranscriptCoreKernelLoader = (
     transcriptCoreKernelUrl: URL,
 ): (() => Promise<TranscriptCoreKernel>) => {
+    let kernelPromise: Promise<TranscriptCoreKernel> | undefined;
+
     return async (): Promise<TranscriptCoreKernel> => {
-        const bytes = await resolveKernelBytes(transcriptCoreKernelUrl);
-        const instantiatedSource = await WebAssembly.instantiate(bytes, {});
-        const exports = instantiatedSource.instance
-            .exports as TranscriptCoreKernelExports;
-        const memory = resolveMemory(exports);
-        const allocate = resolveNumberExport(
-            exports,
-            'sealed_lattice_allocate',
-        ) as (length: number) => number;
-        const deallocate = resolveNumberExport(
-            exports,
-            'sealed_lattice_deallocate',
-        ) as (pointer: number, length: number) => void;
-        const lastOutputLength = resolveNumberExport(
-            exports,
-            'sealed_lattice_last_output_length',
-        ) as () => number;
-        const transcriptCoreCommand = resolveNumberExport(
-            exports,
-            'sealed_lattice_transcript_core_command',
-        ) as (pointer: number, length: number) => number;
-        const roundtrip = resolveNumberExport(
-            exports,
-            'sealed_lattice_roundtrip',
-        ) as (pointer: number, length: number) => number;
-        const exportedFunctionNames = WebAssembly.Module.exports(
-            instantiatedSource.module,
-        )
-            .map((entry) => entry.name)
-            .sort();
-        const executeCommand = <T>(request: TranscriptCoreKernelCommand): T =>
-            runKernelCommand<T>(
-                memory,
-                allocate,
-                deallocate,
-                transcriptCoreCommand,
-                lastOutputLength,
-                request,
-            );
+        kernelPromise ??= (async (): Promise<TranscriptCoreKernel> => {
+            const bytes = await resolveKernelBytes(transcriptCoreKernelUrl);
+            const instantiatedSource = await WebAssembly.instantiate(bytes, {});
+            const exports = instantiatedSource.instance
+                .exports as TranscriptCoreKernelExports;
+            const memory = resolveMemory(exports);
+            const allocate = resolveNumberExport(
+                exports,
+                'sealed_lattice_allocate',
+            ) as (length: number) => number;
+            const deallocate = resolveNumberExport(
+                exports,
+                'sealed_lattice_deallocate',
+            ) as (pointer: number, length: number) => void;
+            const lastOutputLength = resolveNumberExport(
+                exports,
+                'sealed_lattice_last_output_length',
+            ) as () => number;
+            const transcriptCoreCommand = resolveNumberExport(
+                exports,
+                'sealed_lattice_transcript_core_command',
+            ) as (pointer: number, length: number) => number;
+            const roundtrip = resolveNumberExport(
+                exports,
+                'sealed_lattice_roundtrip',
+            ) as (pointer: number, length: number) => number;
+            const exportedFunctionNames = WebAssembly.Module.exports(
+                instantiatedSource.module,
+            )
+                .map((entry) => entry.name)
+                .sort();
+            const executeCommand = <T>(
+                request: TranscriptCoreKernelCommand,
+            ): T =>
+                runKernelCommand<T>(
+                    memory,
+                    allocate,
+                    deallocate,
+                    transcriptCoreCommand,
+                    lastOutputLength,
+                    request,
+                );
 
-        return {
-            exportedFunctionNames,
-            analyzeCanonicalObject: (input): TranscriptCoreAnalysis =>
-                executeCommand<TranscriptCoreAnalysis>({
-                    command: 'AnalyzeCanonicalObject',
-                    canonicalBytesHex: input.canonicalBytesHex,
-                    chunkSize: input.chunkSize,
-                }),
-            computeChunkRoot: (input): string =>
-                executeCommand<{ readonly chunkRoot: string }>({
-                    command: 'ComputeChunkRoot',
-                    inputHex: input.inputHex,
-                    chunkSize: input.chunkSize,
-                }).chunkRoot,
-            hashRaw: (inputHex): string =>
-                executeCommand<{ readonly hash512: string }>({
-                    command: 'HashRaw',
-                    inputHex,
-                }).hash512,
-            roundTripBytes: (input: Uint8Array): Uint8Array => {
-                const normalizedInput = Uint8Array.from(input);
-                let inputPointer = 0;
-                let outputPointer = 0;
+            return {
+                exportedFunctionNames,
+                analyzeCanonicalObject: (input): TranscriptCoreAnalysis =>
+                    executeCommand<TranscriptCoreAnalysis>({
+                        command: 'AnalyzeCanonicalObject',
+                        canonicalBytesHex: input.canonicalBytesHex,
+                        chunkSize: input.chunkSize,
+                    }),
+                computeChunkRoot: (input): string =>
+                    executeCommand<{ readonly chunkRoot: string }>({
+                        command: 'ComputeChunkRoot',
+                        inputHex: input.inputHex,
+                        chunkSize: input.chunkSize,
+                    }).chunkRoot,
+                hashRaw: (inputHex): string =>
+                    executeCommand<{ readonly hash512: string }>({
+                        command: 'HashRaw',
+                        inputHex,
+                    }).hash512,
+                roundTripBytes: (input: Uint8Array): Uint8Array => {
+                    const normalizedInput = Uint8Array.from(input);
+                    let inputPointer = 0;
+                    let outputPointer = 0;
 
-                try {
-                    inputPointer = copyIntoKernelMemory(
-                        memory,
-                        allocate,
-                        normalizedInput,
-                    );
-                    outputPointer = roundtrip(
-                        inputPointer,
-                        normalizedInput.length,
-                    );
+                    try {
+                        inputPointer = copyIntoKernelMemory(
+                            memory,
+                            allocate,
+                            normalizedInput,
+                        );
+                        outputPointer = roundtrip(
+                            inputPointer,
+                            normalizedInput.length,
+                        );
 
-                    return copyFromKernelMemory(
-                        memory,
-                        outputPointer,
-                        normalizedInput.length,
-                        'round-trip',
-                    );
-                } finally {
-                    if (outputPointer !== 0) {
-                        deallocate(outputPointer, normalizedInput.length);
+                        return copyFromKernelMemory(
+                            memory,
+                            outputPointer,
+                            normalizedInput.length,
+                            'round-trip',
+                        );
+                    } finally {
+                        if (outputPointer !== 0) {
+                            deallocate(outputPointer, normalizedInput.length);
+                        }
+                        if (
+                            inputPointer !== 0 &&
+                            inputPointer !== outputPointer
+                        ) {
+                            deallocate(inputPointer, normalizedInput.length);
+                        }
                     }
-                    if (inputPointer !== 0 && inputPointer !== outputPointer) {
-                        deallocate(inputPointer, normalizedInput.length);
-                    }
-                }
-            },
-            verifyFixture: (fixture): TranscriptCoreFixtureVerification =>
-                executeCommand<TranscriptCoreFixtureVerification>({
-                    command: 'VerifyFixture',
-                    fixture,
-                }),
-        };
+                },
+                verifyFixture: (fixture): TranscriptCoreFixtureVerification =>
+                    executeCommand<TranscriptCoreFixtureVerification>({
+                        command: 'VerifyFixture',
+                        fixture,
+                    }),
+            };
+        })().catch((error: unknown) => {
+            kernelPromise = undefined;
+            throw error;
+        });
+
+        return kernelPromise;
     };
 };

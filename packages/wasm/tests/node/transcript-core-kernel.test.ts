@@ -1,3 +1,7 @@
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+
 import type {
     GoldenTranscriptCoreFixture,
     MalformedObjectFixture,
@@ -7,9 +11,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import goldenTranscriptCoreFixturesJson from '../../../../test-vectors/transcript-core/golden-transcript-core.json';
 import malformedObjectFixturesJson from '../../../../test-vectors/transcript-core/malformed-objects.json';
 import {
+    createTranscriptCoreKernelLoader,
     loadTranscriptCoreKernel,
     TranscriptCoreKernelCommandError,
     roundTripBytesThroughKernel,
+    type TranscriptCoreKernel,
+    verifyTranscriptCoreFixture,
 } from '../../src/index';
 
 type NamedFixture = {
@@ -68,21 +75,26 @@ const invalidEnumFixture = findFixture(malformedObjectFixtures, 'invalid-enum');
 const createMockKernelExports = ({
     allocationPointer = 12,
     commandPointer = 128,
+    commandResponse = {
+        success: true,
+        value: {
+            chunkRoot: 'abc123',
+            hash512: 'feedface',
+        },
+    },
     roundTripPointer = allocationPointer,
 }: {
     readonly allocationPointer?: number;
     readonly commandPointer?: number;
+    readonly commandResponse?: unknown;
     readonly roundTripPointer?: number;
 } = {}): {
     readonly deallocate: ReturnType<typeof vi.fn>;
     readonly encodedCommandResponseLength: number;
+    readonly getInstantiateCallCount: () => number;
+    readonly loadMockKernel: () => Promise<TranscriptCoreKernel>;
+    readonly rejectNextInstantiation: (error: Error) => void;
 } => {
-    const commandResponse = {
-        success: true,
-        value: {
-            chunkRoot: 'abc123',
-        },
-    };
     const encodedCommandResponse = new TextEncoder().encode(
         JSON.stringify(commandResponse),
     );
@@ -118,10 +130,10 @@ const createMockKernelExports = ({
         module: fakeModule,
     };
 
-    vi.spyOn(
-        webAssemblyWithByteSourceInstantiate,
-        'instantiate',
-    ).mockResolvedValue(instantiatedSource);
+    vi.mocked(readFile).mockResolvedValue(Buffer.from([0]));
+    const instantiate = vi
+        .spyOn(webAssemblyWithByteSourceInstantiate, 'instantiate')
+        .mockResolvedValue(instantiatedSource);
     vi.spyOn(WebAssembly.Module, 'exports').mockReturnValue([
         { kind: 'memory', name: 'memory' },
         { kind: 'function', name: 'sealed_lattice_allocate' },
@@ -134,8 +146,24 @@ const createMockKernelExports = ({
     return {
         deallocate,
         encodedCommandResponseLength: encodedCommandResponse.length,
+        getInstantiateCallCount: () => instantiate.mock.calls.length,
+        loadMockKernel: createTranscriptCoreKernelLoader(
+            pathToFileURL(path.resolve('mock-sealed-lattice-kernel.wasm')),
+        ),
+        rejectNextInstantiation: (error: Error): void => {
+            instantiate.mockRejectedValueOnce(error);
+        },
     };
 };
+
+vi.mock('node:fs/promises', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('node:fs/promises')>();
+
+    return {
+        ...actual,
+        readFile: vi.fn(actual.readFile),
+    };
+});
 
 afterEach(() => {
     vi.restoreAllMocks();
@@ -261,10 +289,28 @@ describe('transcript-core kernel in Node', () => {
         ).resolves.toEqual(Uint8Array.from([9, 8, 7, 6, 5]));
     });
 
-    it('deallocates command inputs and outputs', async () => {
-        const { deallocate, encodedCommandResponseLength } =
-            createMockKernelExports();
+    it('verifies fixtures through the public WASM wrapper', async () => {
+        await expect(
+            verifyTranscriptCoreFixture(resultComputedPassiveFixture),
+        ).resolves.toEqual({
+            verified: true,
+            caseName: 'result-computed-passive-mhe-transcript-core',
+            objectHash512: resultComputedPassiveFixture.expectedObjectHash512,
+            chunkRoot: resultComputedPassiveFixture.expectedChunkRoot,
+            statusLabels: resultComputedPassiveFixture.expectedStatusLabels,
+        });
+    });
+
+    it('computes internal hash smoke outputs through the command bridge', async () => {
         const kernel = await loadTranscriptCoreKernel();
+
+        expect(kernel.hashRaw('00')).toMatch(/^[a-f0-9]{128}$/u);
+    });
+
+    it('deallocates command inputs and outputs', async () => {
+        const { deallocate, encodedCommandResponseLength, loadMockKernel } =
+            createMockKernelExports();
+        const kernel = await loadMockKernel();
 
         expect(
             kernel.computeChunkRoot({
@@ -279,9 +325,29 @@ describe('transcript-core kernel in Node', () => {
         expect(deallocate).toHaveBeenCalledWith(12, expect.any(Number));
     });
 
+    it('deallocates aliased command pointers only once', async () => {
+        const { deallocate, encodedCommandResponseLength, loadMockKernel } =
+            createMockKernelExports({
+                commandPointer: 12,
+            });
+        const kernel = await loadMockKernel();
+
+        expect(
+            kernel.computeChunkRoot({
+                inputHex: '00ff',
+                chunkSize: 2,
+            }),
+        ).toBe('abc123');
+        expect(deallocate).toHaveBeenCalledTimes(1);
+        expect(deallocate).toHaveBeenCalledWith(
+            12,
+            encodedCommandResponseLength,
+        );
+    });
+
     it('deallocates aliased round-trip pointers only once', async () => {
-        const { deallocate } = createMockKernelExports();
-        const kernel = await loadTranscriptCoreKernel();
+        const { deallocate, loadMockKernel } = createMockKernelExports();
+        const kernel = await loadMockKernel();
 
         expect(
             Array.from(kernel.roundTripBytes(Uint8Array.from([2, 4, 6, 8]))),
@@ -290,14 +356,83 @@ describe('transcript-core kernel in Node', () => {
         expect(deallocate).toHaveBeenCalledWith(12, 4);
     });
 
+    it('handles empty round-trip inputs without allocating input bytes', async () => {
+        const { deallocate, loadMockKernel } = createMockKernelExports();
+        const kernel = await loadMockKernel();
+
+        expect(Array.from(kernel.roundTripBytes(new Uint8Array()))).toEqual([]);
+        expect(deallocate).toHaveBeenCalledWith(12, 0);
+    });
+
     it('rejects null pointers for non-empty allocations', async () => {
-        createMockKernelExports({
+        const { loadMockKernel } = createMockKernelExports({
             allocationPointer: 0,
         });
-        const kernel = await loadTranscriptCoreKernel();
+        const kernel = await loadMockKernel();
 
         expect(() => kernel.roundTripBytes(Uint8Array.from([1]))).toThrow(
             'The transcript-core kernel returned a null pointer for a non-empty allocation.',
         );
+    });
+
+    it('rejects null command output pointers for non-empty outputs', async () => {
+        const { loadMockKernel } = createMockKernelExports({
+            commandPointer: 0,
+        });
+        const kernel = await loadMockKernel();
+
+        expect(() =>
+            kernel.computeChunkRoot({
+                inputHex: '00ff',
+                chunkSize: 2,
+            }),
+        ).toThrow(
+            'The transcript-core kernel returned a null pointer for a non-empty transcript-core command result.',
+        );
+    });
+
+    it('rejects invalid command response shapes', async () => {
+        const { loadMockKernel } = createMockKernelExports({
+            commandResponse: {
+                success: true,
+            },
+        });
+        const kernel = await loadMockKernel();
+
+        expect(() =>
+            kernel.computeChunkRoot({
+                inputHex: '00ff',
+                chunkSize: 2,
+            }),
+        ).toThrow(
+            'The transcript-core kernel returned an invalid command response.',
+        );
+    });
+
+    it('memoizes the loaded kernel promise', async () => {
+        const { getInstantiateCallCount, loadMockKernel } =
+            createMockKernelExports();
+        const [leftKernel, rightKernel] = await Promise.all([
+            loadMockKernel(),
+            loadMockKernel(),
+        ]);
+
+        expect(leftKernel).toBe(rightKernel);
+        expect(getInstantiateCallCount()).toBe(1);
+    });
+
+    it('retries loading after a failed kernel instantiation', async () => {
+        const {
+            getInstantiateCallCount,
+            loadMockKernel,
+            rejectNextInstantiation,
+        } = createMockKernelExports();
+        rejectNextInstantiation(new Error('first load failed'));
+
+        await expect(loadMockKernel()).rejects.toThrow('first load failed');
+        const kernel = await loadMockKernel();
+
+        expect(kernel.exportedFunctionNames).toContain('memory');
+        expect(getInstantiateCallCount()).toBe(2);
     });
 });

@@ -1,3 +1,5 @@
+import process from 'node:process';
+
 import { verifyTranscriptCoreFixture } from 'sealed-lattice';
 import { describe, expect, it } from 'vitest';
 
@@ -13,6 +15,19 @@ describe('transcript-core fixtures', () => {
             4,
         );
         await expect(loadMalformedObjectFixtures()).resolves.toHaveLength(21);
+    });
+
+    it('loads transcript-core fixtures independently of process cwd', async () => {
+        const originalWorkingDirectory = process.cwd();
+
+        try {
+            process.chdir('packages/testkit');
+            await expect(
+                loadGoldenTranscriptCoreFixtures(),
+            ).resolves.toHaveLength(4);
+        } finally {
+            process.chdir(originalWorkingDirectory);
+        }
     });
 
     it('verifies the replay fixture through the public package API', async () => {

@@ -6,23 +6,29 @@ sidebar:
 ---
 
 Start with the public package name and the current rule: `sealed-lattice`
-exposes only the safe transcript-core fixture verifier.
+exposes only the safe transcript-core fixture verifier and protocol shell.
 
 ## Public package rules
 
 - The only committed public package name is `sealed-lattice`.
-- The public runtime facade currently exports `verifyTranscriptCoreFixture`.
+- The public runtime facade currently exports transcript-core fixture verification plus threshold, lifecycle, poll-spec, and capability helpers.
 - No public subpaths are promised yet.
-- The current release freezes packaging, docs, smoke checks, transcript-core fixtures, and the workspace shape.
+- The current release freezes packaging, docs, smoke checks, transcript-core fixtures, protocol-shell vectors, and the workspace shape.
 
 ## Consumer posture
 
 ```typescript
-import { verifyTranscriptCoreFixture } from "sealed-lattice";
+import {
+    deriveThresholdProfile,
+    validatePollSpec,
+    verifyTranscriptCoreFixture,
+} from "sealed-lattice";
 ```
 
 The verifier accepts transcript-core fixture objects and returns deterministic
-verification or rejection labels.
+verification or rejection labels. The protocol-shell helpers validate public poll shape,
+derive threshold profiles, check lifecycle transitions, derive status labels,
+and refuse premature protocol actions. They do not implement voting.
 
 ## What the current release includes
 
@@ -30,11 +36,11 @@ verification or rejection labels.
 - the published `sealed-lattice` package identity
 - private protocol, crypto, wasm, and testkit shells
 - a Rust transcript core plus an internal WASM loader
+- a deterministic threshold, lifecycle, poll-spec, and capability shell
 - docs, TypeDoc, pack smoke, vector manifest verification, and CI verification
 
 ## What is not published yet
 
-- protocol lifecycle helpers
 - manifest types
 - ballot or tally APIs
 - proof systems
