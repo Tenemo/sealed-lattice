@@ -17,7 +17,7 @@ const expectErrorCodes = (
     input: unknown,
     expectedCodes: readonly string[],
 ): void => {
-    const validation = validatePollSpec(input as PollSpecInput);
+    const validation = validatePollSpec(input);
 
     expect(validation.ok).toBe(false);
     if (!validation.ok) {
@@ -106,22 +106,21 @@ describe('protocol-shell poll-spec validation', () => {
     });
 
     it('returns structured errors for malformed JavaScript input', () => {
-        expectErrorCodes({} as unknown, [
+        const decodedPollSpec: unknown = {
+            ceremonyId: 'ceremony',
+            question: 'Question',
+            options: ['A', 42, 'B'],
+            kTop: 2,
+        };
+
+        expectErrorCodes({}, [
             'EmptyCeremonyId',
             'EmptyQuestion',
             'InvalidOptionCount',
             'InvalidKTop',
         ]);
 
-        expectErrorCodes(
-            {
-                ceremonyId: 'ceremony',
-                question: 'Question',
-                options: ['A', 42, 'B'],
-                kTop: 2,
-            },
-            ['EmptyOptionLabel'],
-        );
+        expectErrorCodes(decodedPollSpec, ['EmptyOptionLabel']);
     });
 
     it('rejects too many options and kTop larger than the option count', () => {

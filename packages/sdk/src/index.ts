@@ -12,7 +12,6 @@ import type {
     LifecycleLabelInput,
     LifecycleLabels,
     LifecycleTransition,
-    PollSpecInput,
     PollSpecValidation,
     ProtocolAction,
     ThresholdProfile,
@@ -67,7 +66,7 @@ export const deriveThresholdProfile = (
     input: ThresholdProfileInput,
 ): ThresholdProfile => deriveThresholdProfileInternal(input);
 
-export const validatePollSpec = (input: PollSpecInput): PollSpecValidation =>
+export const validatePollSpec = (input: unknown): PollSpecValidation =>
     validatePollSpecInternal(input);
 
 export const isValidLifecycleTransition = (

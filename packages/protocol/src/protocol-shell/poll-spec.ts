@@ -6,7 +6,6 @@ import {
 import type {
     DuplicateBallotPolicy,
     PollSpec,
-    PollSpecInput,
     PollSpecValidation,
     PollSpecValidationError,
     ScoreDomain,
@@ -42,7 +41,7 @@ const normalizeDuplicateBallotPolicy = (
 const normalizeTiePolicy = (tiePolicy: TiePolicy | undefined): TiePolicy =>
     tiePolicy ?? defaultTiePolicy;
 
-export const validatePollSpec = (input: PollSpecInput): PollSpecValidation => {
+export const validatePollSpec = (input: unknown): PollSpecValidation => {
     const errors: PollSpecValidationError[] = [];
     const optionLabels = new Set<string>();
     const inputRecord: Readonly<Record<string, unknown>> = isRecord(input)
