@@ -50,7 +50,7 @@ const transitionMap = {
         'Unresolved',
         'ForkedElection',
     ],
-    ResultComputedAuditable: [],
+    ResultComputedAuditable: ['FullyVerifiedResult'],
     FullyVerifiedResult: [],
     Unresolved: [],
     ForkedElection: [],

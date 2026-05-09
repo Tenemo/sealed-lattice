@@ -40,8 +40,8 @@ export const isVectorRelativePathInsideRoot = (
 
     return (
         normalizedPath !== '' &&
-        !path.isAbsolute(relativePath) &&
         !path.posix.isAbsolute(normalizedPath) &&
+        !path.win32.isAbsolute(normalizedPath) &&
         !pathSegments.includes('..')
     );
 };

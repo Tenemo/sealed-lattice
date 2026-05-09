@@ -27,6 +27,7 @@ export type {
     LifecycleLabels,
     LifecycleState,
     LifecycleTransition,
+    ModeStatusLabel,
     MheSecurityStage,
     PollSpec,
     PollSpecInput,

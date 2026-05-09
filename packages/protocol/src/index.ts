@@ -3,7 +3,7 @@ export type BaseClaimProfile =
     | 'FullyVerifiedResult';
 
 export type TranscriptCoreMheSecurityStage =
-    | 'PassiveMhePrototype'
+    | 'PassiveMHEPrototype'
     | 'ActiveMalicious';
 
 export type TranscriptCoreStatusLabel = 'TranscriptCoreVerified';

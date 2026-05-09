@@ -52,6 +52,9 @@ describe('test vector helpers', () => {
         expect(
             isVectorRelativePathInsideRoot('nested/../../outside.json'),
         ).toBe(false);
+        expect(isVectorRelativePathInsideRoot('/outside.json')).toBe(false);
+        expect(isVectorRelativePathInsideRoot('C:/outside.json')).toBe(false);
+        expect(isVectorRelativePathInsideRoot('C:\\outside.json')).toBe(false);
         expect(isVectorRelativePathInsideRoot('')).toBe(false);
     });
 
@@ -130,6 +133,10 @@ describe('test vector helpers', () => {
                     path: 'nested/../../outside.json',
                     sha256: '2'.repeat(64),
                 },
+                {
+                    path: 'C:/outside.json',
+                    sha256: '3'.repeat(64),
+                },
             ],
         };
 
@@ -139,6 +146,7 @@ describe('test vector helpers', () => {
                 'Vector digest drift detected for crypto/example.json: expected 0000000000000000000000000000000000000000000000000000000000000000, received 3a37782e8974c48eebf2a0517c866ad15641c53b3d31993188796b56aeb79624',
                 'Vector manifest entry is missing on disk: missing.json',
                 'Vector manifest path must stay within test-vectors: nested/../../outside.json',
+                'Vector manifest path must stay within test-vectors: C:/outside.json',
             ]),
         );
     });

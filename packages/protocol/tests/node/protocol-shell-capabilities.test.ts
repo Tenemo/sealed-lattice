@@ -98,7 +98,16 @@ describe('protocol-shell capability evaluator', () => {
                     targetFinalityAccepted: true,
                 }),
             ),
-        ).toMatchObject({ reason: 'EvaluationReplayThresholdNotReached' });
+        ).toMatchObject({ reason: 'LocalReplayNotVerified' });
+    });
+
+    it('refuses create poll when the poll spec is invalid', () => {
+        expect(
+            evaluateActionCapability(
+                'CreatePoll',
+                createContext({ pollSpecValid: false }),
+            ),
+        ).toMatchObject({ reason: 'PollSpecInvalid' });
     });
 
     it('enforces target acceptance attestation threshold or optional proof', () => {
@@ -147,6 +156,15 @@ describe('protocol-shell capability evaluator', () => {
                 createContext({ lifecycleState: 'TargetAccepted' }),
             ),
         ).toMatchObject({ reason: 'TargetFinalityCheckpointMissing' });
+        expect(
+            evaluateActionCapability(
+                'CreateTargetBoundDecryptionShare',
+                createContext({
+                    lifecycleState: 'TargetAccepted',
+                    targetFinalityAccepted: true,
+                }),
+            ),
+        ).toMatchObject({ reason: 'TargetNotAccepted' });
     });
 
     it.each([
@@ -163,12 +181,25 @@ describe('protocol-shell capability evaluator', () => {
                     createContext({
                         lifecycleState: 'TargetAccepted',
                         targetFinalityAccepted: true,
+                        targetAccepted: true,
                         recoveryState,
                     }),
                 ),
             ).toMatchObject({ reason });
         },
     );
+
+    it('requires accepted target evidence before recombination', () => {
+        expect(
+            evaluateActionCapability(
+                'RecombineAcceptedTarget',
+                createContext({
+                    lifecycleState: 'AwaitingFirstDecryptionShares',
+                    decryptionShareCount: thresholdProfile.qDec,
+                }),
+            ),
+        ).toMatchObject({ reason: 'TargetNotAccepted' });
+    });
 
     it('refuses recombination until the first threshold shares are reached', () => {
         expect(

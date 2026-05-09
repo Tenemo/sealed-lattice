@@ -50,6 +50,15 @@ describe('protocol-shell lifecycle shell', () => {
         ]);
     });
 
+    it('accepts a late optional-proof upgrade after auditable results', () => {
+        expect(
+            isValidLifecycleTransition({
+                from: 'ResultComputedAuditable',
+                to: 'FullyVerifiedResult',
+            }),
+        ).toBe(true);
+    });
+
     it.each([
         ['VotingOpen', 'TargetAccepted'],
         ['AggregateInputsReady', 'ResultComputedAuditable'],
@@ -87,8 +96,44 @@ describe('protocol-shell lifecycle shell', () => {
             'ResultComputedAuditable',
         );
         expect(unsafeLabels.primary).toEqual(['Unresolved']);
-        expect(unsafeLabels.failures).toContain('UnsafeMicroRoster');
+        expect(unsafeLabels.modes).toContain('UnsafeMicroRoster');
         expect(unsafeLabels.resultClaimLabel).toBeUndefined();
+    });
+
+    it('requires local verification context for user-specific labels', () => {
+        const profile = deriveThresholdProfile({ n: 20 });
+
+        expect(
+            deriveLifecycleLabels({
+                lifecycleState: 'VotingClosed',
+                thresholdProfile: profile,
+            }).primary,
+        ).not.toEqual(
+            expect.arrayContaining(['RosterAudited', 'BallotIncluded']),
+        );
+
+        expect(
+            deriveLifecycleLabels({
+                lifecycleState: 'EvaluationReplayOpen',
+                thresholdProfile: profile,
+            }).primary,
+        ).not.toContain('EvaluationLocallyReplayed');
+
+        expect(
+            deriveLifecycleLabels({
+                lifecycleState: 'EvaluationReplayOpen',
+                thresholdProfile: profile,
+                rosterAudited: true,
+                ownBallotIncluded: true,
+                evaluationLocallyReplayed: true,
+            }).primary,
+        ).toEqual(
+            expect.arrayContaining([
+                'RosterAudited',
+                'BallotIncluded',
+                'EvaluationLocallyReplayed',
+            ]),
+        );
     });
 
     it('marks passive MHE prototype and optional proof status explicitly', () => {
@@ -104,7 +149,7 @@ describe('protocol-shell lifecycle shell', () => {
                 'FullyVerifiedResult',
             ]),
         );
-        expect(labels.failures).toContain('PassiveMHEPrototype');
+        expect(labels.modes).toContain('PassiveMHEPrototype');
         expect(labels.evaluationProofMode).toBe(
             'OptionalEvaluationProofVerified',
         );

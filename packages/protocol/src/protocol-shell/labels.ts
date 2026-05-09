@@ -4,6 +4,7 @@ import type {
     LifecycleLabelInput,
     LifecycleLabels,
     LifecycleState,
+    ModeStatusLabel,
     PrimaryStatusLabel,
     ResultClaimLabel,
 } from './types.js';
@@ -13,66 +14,32 @@ const primaryLabelsByState = {
     RegistrationOpen: [],
     TrusteeSetupOpen: [],
     RegistrationClosed: [],
-    RosterFrozen: ['RosterAudited'],
-    VotingOpen: ['RosterAudited'],
-    VotingClosed: ['RosterAudited', 'BallotIncluded'],
-    AwaitingAggregateContributors: ['RosterAudited', 'BallotIncluded'],
-    AggregateInputsReady: [
-        'RosterAudited',
-        'BallotIncluded',
-        'AggregateInputsReady',
-    ],
-    AwaitingMobileEvaluation: [
-        'RosterAudited',
-        'BallotIncluded',
-        'AggregateInputsReady',
-    ],
-    TopKEvaluated: [
-        'RosterAudited',
-        'BallotIncluded',
-        'AggregateInputsReady',
-        'TopKEvaluated',
-    ],
-    EvaluationReplayOpen: [
-        'RosterAudited',
-        'BallotIncluded',
-        'AggregateInputsReady',
-        'TopKEvaluated',
-        'EvaluationLocallyReplayed',
-    ],
+    RosterFrozen: [],
+    VotingOpen: [],
+    VotingClosed: [],
+    AwaitingAggregateContributors: [],
+    AggregateInputsReady: ['AggregateInputsReady'],
+    AwaitingMobileEvaluation: ['AggregateInputsReady'],
+    TopKEvaluated: ['AggregateInputsReady', 'TopKEvaluated'],
+    EvaluationReplayOpen: ['AggregateInputsReady', 'TopKEvaluated'],
     EvaluationReplayAttested: [
-        'RosterAudited',
-        'BallotIncluded',
         'AggregateInputsReady',
         'TopKEvaluated',
-        'EvaluationLocallyReplayed',
         'EvaluationReplayAttested',
     ],
     OptionalEvaluationProofVerified: [
-        'RosterAudited',
-        'BallotIncluded',
         'AggregateInputsReady',
         'TopKEvaluated',
         'OptionalEvaluationProofVerified',
     ],
     EvaluationRejected: [],
-    TargetAccepted: [
-        'RosterAudited',
-        'BallotIncluded',
-        'AggregateInputsReady',
-        'TopKEvaluated',
-        'TargetAccepted',
-    ],
+    TargetAccepted: ['AggregateInputsReady', 'TopKEvaluated', 'TargetAccepted'],
     AwaitingFirstDecryptionShares: [
-        'RosterAudited',
-        'BallotIncluded',
         'AggregateInputsReady',
         'TopKEvaluated',
         'TargetAccepted',
     ],
     ResultComputedAuditable: [
-        'RosterAudited',
-        'BallotIncluded',
         'AggregateInputsReady',
         'TopKEvaluated',
         'TargetAccepted',
@@ -80,8 +47,6 @@ const primaryLabelsByState = {
         'ResultComputedAuditable',
     ],
     FullyVerifiedResult: [
-        'RosterAudited',
-        'BallotIncluded',
         'AggregateInputsReady',
         'TopKEvaluated',
         'OptionalEvaluationProofVerified',
@@ -154,25 +119,47 @@ const deriveResultClaimLabel = (
     return undefined;
 };
 
+const deriveLocalPrimaryLabels = (
+    input: LifecycleLabelInput,
+): PrimaryStatusLabel[] => {
+    const labels: PrimaryStatusLabel[] = [];
+
+    if (input.rosterAudited === true) {
+        labels.push('RosterAudited');
+    }
+    if (input.ownBallotIncluded === true) {
+        labels.push('BallotIncluded');
+    }
+    if (input.evaluationLocallyReplayed === true) {
+        labels.push('EvaluationLocallyReplayed');
+    }
+
+    return labels;
+};
+
 export const deriveLifecycleLabels = (
     input: LifecycleLabelInput,
 ): LifecycleLabels => {
     const failures: FailureStatusLabel[] = [
         ...failureLabelsByState[input.lifecycleState],
     ];
+    const modes: ModeStatusLabel[] = [];
     const evaluationProofMode = deriveEvaluationProofMode(input);
-    let primary: PrimaryStatusLabel[] = [
-        ...primaryLabelsByState[input.lifecycleState],
-    ];
+    let primary: PrimaryStatusLabel[] = Array.from(
+        new Set([
+            ...deriveLocalPrimaryLabels(input),
+            ...primaryLabelsByState[input.lifecycleState],
+        ]),
+    );
 
     if (input.thresholdProfile.rosterProfileKind === 'UnsafeMicroRoster') {
-        failures.push('UnsafeMicroRoster');
+        modes.push('UnsafeMicroRoster');
     }
     if (
         (input.mheSecurityStage ?? 'PassiveMHEPrototype') ===
         'PassiveMHEPrototype'
     ) {
-        failures.push('PassiveMHEPrototype');
+        modes.push('PassiveMHEPrototype');
     }
     if (
         !input.thresholdProfile.claimBearing &&
@@ -190,6 +177,7 @@ export const deriveLifecycleLabels = (
     return {
         primary,
         failures,
+        modes,
         resultClaimLabel,
         evaluationProofMode,
     };

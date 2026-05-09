@@ -29,7 +29,7 @@ internal packages.
 
 The goal of the current release is to freeze packaging and package boundaries
 before the full voting API is real enough to publish safely. Shipping only the
-safe transcript-core fixture verifier is deliberate.
+safe transcript core fixture verifier is deliberate.
 
 ## Enforcement
 

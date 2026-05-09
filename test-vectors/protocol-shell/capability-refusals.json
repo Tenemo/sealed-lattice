@@ -50,12 +50,27 @@
         "lifecycleState": "TargetAccepted",
         "pollSpecValid": true,
         "targetFinalityAccepted": true,
+        "targetAccepted": true,
         "recoveryState": "Ambiguous"
       },
       "expected": {
         "allowed": false,
         "action": "CreateTargetBoundDecryptionShare",
         "reason": "AmbiguousRecoveryState"
+      }
+    },
+    {
+      "caseName": "decryption-share-target-not-locally-accepted",
+      "action": "CreateTargetBoundDecryptionShare",
+      "context": {
+        "lifecycleState": "TargetAccepted",
+        "pollSpecValid": true,
+        "targetFinalityAccepted": true
+      },
+      "expected": {
+        "allowed": false,
+        "action": "CreateTargetBoundDecryptionShare",
+        "reason": "TargetNotAccepted"
       }
     },
     {

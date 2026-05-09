@@ -81,6 +81,17 @@
       "expectedErrorCodes": [
         "DuplicateOptionLabel"
       ]
+    },
+    {
+      "caseName": "malformed-empty-object",
+      "input": {},
+      "expectedOk": false,
+      "expectedErrorCodes": [
+        "EmptyCeremonyId",
+        "EmptyQuestion",
+        "InvalidOptionCount",
+        "InvalidKTop"
+      ]
     }
   ]
 }

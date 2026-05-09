@@ -20,11 +20,13 @@ const addError = (
     errors.push(error);
 };
 
-const isSupportedScoreDomain = (
-    scoreDomain: ScoreDomain | undefined,
-): boolean =>
+const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
+    typeof value === 'object' && value !== null;
+
+const isSupportedScoreDomain = (scoreDomain: unknown): boolean =>
     scoreDomain === undefined ||
-    (scoreDomain.min === 1 &&
+    (isRecord(scoreDomain) &&
+        scoreDomain.min === 1 &&
         scoreDomain.max === 10 &&
         scoreDomain.skippedOptionScore === 1);
 
@@ -43,36 +45,61 @@ const normalizeTiePolicy = (tiePolicy: TiePolicy | undefined): TiePolicy =>
 export const validatePollSpec = (input: PollSpecInput): PollSpecValidation => {
     const errors: PollSpecValidationError[] = [];
     const optionLabels = new Set<string>();
+    const inputRecord: Readonly<Record<string, unknown>> = isRecord(input)
+        ? input
+        : {};
+    const ceremonyId =
+        typeof inputRecord.ceremonyId === 'string'
+            ? inputRecord.ceremonyId
+            : undefined;
+    const question =
+        typeof inputRecord.question === 'string'
+            ? inputRecord.question
+            : undefined;
+    const rawOptions = inputRecord.options;
+    const options: readonly unknown[] = Array.isArray(rawOptions)
+        ? rawOptions
+        : [];
+    const kTop = inputRecord.kTop;
+    const scoreDomain = inputRecord.scoreDomain;
+    const duplicateBallotPolicy = inputRecord.duplicateBallotPolicy;
+    const tiePolicy = inputRecord.tiePolicy;
+    const normalizedOptions: string[] = [];
 
-    if (input.ceremonyId.length === 0) {
+    if (ceremonyId === undefined || ceremonyId.length === 0) {
         addError(errors, {
             code: 'EmptyCeremonyId',
             field: 'ceremonyId',
-            message: 'ceremonyId must be nonempty.',
+            message: 'ceremonyId must be a nonempty string.',
         });
     }
-    if (input.question.length === 0) {
+    if (question === undefined || question.length === 0) {
         addError(errors, {
             code: 'EmptyQuestion',
             field: 'question',
-            message: 'question must be nonempty.',
+            message: 'question must be a nonempty string.',
         });
     }
-    if (input.options.length < 1 || input.options.length > 20) {
+    if (
+        !Array.isArray(rawOptions) ||
+        options.length < 1 ||
+        options.length > 20
+    ) {
         addError(errors, {
             code: 'InvalidOptionCount',
             field: 'options',
-            message: 'options must contain between 1 and 20 labels.',
+            message: 'options must be an array with between 1 and 20 labels.',
         });
     }
 
-    input.options.forEach((optionLabel, optionIndex) => {
-        if (optionLabel.length === 0) {
+    options.forEach((optionLabel, optionIndex) => {
+        if (typeof optionLabel !== 'string' || optionLabel.length === 0) {
             addError(errors, {
                 code: 'EmptyOptionLabel',
                 field: `options[${optionIndex}]`,
-                message: 'option labels must be nonempty.',
+                message: 'option labels must be nonempty strings.',
             });
+            return;
         }
         if (optionLabels.has(optionLabel)) {
             addError(errors, {
@@ -83,12 +110,14 @@ export const validatePollSpec = (input: PollSpecInput): PollSpecValidation => {
         }
 
         optionLabels.add(optionLabel);
+        normalizedOptions.push(optionLabel);
     });
 
     if (
-        !Number.isInteger(input.kTop) ||
-        input.kTop < 1 ||
-        input.kTop > input.options.length
+        !Number.isInteger(kTop) ||
+        typeof kTop !== 'number' ||
+        kTop < 1 ||
+        kTop > options.length
     ) {
         addError(errors, {
             code: 'InvalidKTop',
@@ -96,7 +125,7 @@ export const validatePollSpec = (input: PollSpecInput): PollSpecValidation => {
             message: 'kTop must be between 1 and options.length.',
         });
     }
-    if (!isSupportedScoreDomain(input.scoreDomain)) {
+    if (!isSupportedScoreDomain(scoreDomain)) {
         addError(errors, {
             code: 'UnsupportedScoreDomain',
             field: 'scoreDomain',
@@ -104,8 +133,8 @@ export const validatePollSpec = (input: PollSpecInput): PollSpecValidation => {
         });
     }
     if (
-        input.duplicateBallotPolicy !== undefined &&
-        input.duplicateBallotPolicy !== defaultDuplicateBallotPolicy
+        duplicateBallotPolicy !== undefined &&
+        duplicateBallotPolicy !== defaultDuplicateBallotPolicy
     ) {
         addError(errors, {
             code: 'UnsupportedDuplicateBallotPolicy',
@@ -114,7 +143,7 @@ export const validatePollSpec = (input: PollSpecInput): PollSpecValidation => {
                 'duplicateBallotPolicy must be LastValidBeforeVotingClosedCounts.',
         });
     }
-    if (input.tiePolicy !== undefined && input.tiePolicy !== defaultTiePolicy) {
+    if (tiePolicy !== undefined && tiePolicy !== defaultTiePolicy) {
         addError(errors, {
             code: 'UnsupportedTiePolicy',
             field: 'tiePolicy',
@@ -132,15 +161,17 @@ export const validatePollSpec = (input: PollSpecInput): PollSpecValidation => {
     return {
         ok: true,
         normalized: {
-            ceremonyId: input.ceremonyId,
-            question: input.question,
-            options: [...input.options],
-            kTop: input.kTop,
-            scoreDomain: normalizeScoreDomain(input.scoreDomain),
-            duplicateBallotPolicy: normalizeDuplicateBallotPolicy(
-                input.duplicateBallotPolicy,
+            ceremonyId: ceremonyId ?? '',
+            question: question ?? '',
+            options: normalizedOptions,
+            kTop: typeof kTop === 'number' ? kTop : 0,
+            scoreDomain: normalizeScoreDomain(
+                scoreDomain as ScoreDomain | undefined,
             ),
-            tiePolicy: normalizeTiePolicy(input.tiePolicy),
+            duplicateBallotPolicy: normalizeDuplicateBallotPolicy(
+                duplicateBallotPolicy as DuplicateBallotPolicy | undefined,
+            ),
+            tiePolicy: normalizeTiePolicy(tiePolicy as TiePolicy | undefined),
         } satisfies PollSpec,
     };
 };

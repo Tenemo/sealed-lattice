@@ -28,6 +28,10 @@
     {
       "from": "AwaitingFirstDecryptionShares",
       "to": "FullyVerifiedResult"
+    },
+    {
+      "from": "ResultComputedAuditable",
+      "to": "FullyVerifiedResult"
     }
   ],
   "invalidTransitions": [

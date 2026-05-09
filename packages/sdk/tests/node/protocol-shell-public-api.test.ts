@@ -64,13 +64,14 @@ describe('protocol-shell public package API in Node', () => {
                 to: 'VotingClosed',
             }),
         ).toBe(true);
-        expect(
-            publicApi.deriveLifecycleLabels({
-                lifecycleState: 'ResultComputedAuditable',
-                thresholdProfile,
-                mheSecurityStage: 'ActiveMalicious',
-            }).resultClaimLabel,
-        ).toBe('ResultComputedAuditable');
+        const labels = publicApi.deriveLifecycleLabels({
+            lifecycleState: 'ResultComputedAuditable',
+            thresholdProfile,
+            mheSecurityStage: 'ActiveMalicious',
+        });
+
+        expect(labels.resultClaimLabel).toBe('ResultComputedAuditable');
+        expect(labels.modes).toEqual([]);
         expect(
             publicApi.evaluateActionCapability('AcceptTarget', {
                 lifecycleState: 'EvaluationReplayOpen',

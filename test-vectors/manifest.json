@@ -3,15 +3,15 @@
   "entries": [
     {
       "path": "protocol-shell/capability-refusals.json",
-      "sha256": "ac3e7e5f282d6150bd1d3dbb202c1105d0ec9aa715bff5dc3ba8ff53b9ab032d"
+      "sha256": "b27d27494237ca3b983d7059013b34ed97637fc483766782c3b85bcb118cf403"
     },
     {
       "path": "protocol-shell/lifecycle-transitions.json",
-      "sha256": "52e9d633e88871b65b5b99b88bbb4f979be992713a8187c81cf3cfba4add0e94"
+      "sha256": "c869885305100267445bd80ccd287757e45e8c5f6bd8dead21e47d577c39d2d8"
     },
     {
       "path": "protocol-shell/poll-specs.json",
-      "sha256": "0845587a4b105812a3e0f475b4177b78d17c290ac6854b877f49427c19904c12"
+      "sha256": "440226c8baa30791fda721dc5f3874e3eefc08dda1a258f76f65944c5baa3047"
     },
     {
       "path": "protocol-shell/threshold-profiles.json",
@@ -19,15 +19,15 @@
     },
     {
       "path": "transcript-core/golden-transcript-core.json",
-      "sha256": "2e0883c07f79321092f2d413921e67cba793b0a038cc4ef5af307b3585729be0"
+      "sha256": "10998026b126aa1e044a31888ecea48a2e2c4cb02dd86e767f3917d0b5d5a55e"
     },
     {
       "path": "transcript-core/malformed-objects.json",
-      "sha256": "ca5fa0a7a2c32db51d57afc55558a26881a0acbd1cfbba495f418f3ad820a699"
+      "sha256": "fb439a4d32ac53599f7f47c7dbabc30b53853bc094415582e667bc00245e9406"
     },
     {
       "path": "transcript-core/transcript-core-replay.json",
-      "sha256": "572f771fb0cc18df5815b7deeea193d3f296e42edff63a4b465a4b053962522f"
+      "sha256": "7d6e6a57bb2c76b5774a7c9ca87f16cc968bba1dbcc0884ed725c65a310d6249"
     }
   ]
 }

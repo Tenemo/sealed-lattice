@@ -1,6 +1,9 @@
 import process from 'node:process';
 
-import { verifyTranscriptCoreFixture } from 'sealed-lattice';
+import {
+    deriveThresholdProfile,
+    verifyTranscriptCoreFixture,
+} from 'sealed-lattice';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -42,6 +45,10 @@ describe('transcript-core fixtures', () => {
             chunkRoot: replayFixture.fixture.expectedChunkRoot,
             statusLabels: replayFixture.expectedStatusLabels,
         });
+    });
+
+    it('resolves protocol shell helpers through the public package import', () => {
+        expect(deriveThresholdProfile({ n: 20 }).qRelease).toBe(14);
     });
 
     it('reports deterministic rejection labels through the public package API', async () => {

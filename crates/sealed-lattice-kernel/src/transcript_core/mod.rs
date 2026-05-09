@@ -89,7 +89,7 @@ impl MheSecurityStage {
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::PassiveMhePrototype => "PassiveMhePrototype",
+            Self::PassiveMhePrototype => "PassiveMHEPrototype",
             Self::ActiveMalicious => "ActiveMalicious",
         }
     }

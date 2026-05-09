@@ -20,9 +20,6 @@ const claimBearingActions = new Set<ProtocolAction>([
     'DecodeVerifiedTopK',
 ]);
 
-const requiresValidPollSpec = (action: ProtocolAction): boolean =>
-    action !== 'CreatePoll';
-
 const countAtLeast = (actual: number | undefined, required: number): boolean =>
     actual !== undefined && actual >= required;
 
@@ -118,7 +115,7 @@ const evaluateReplayAttestation = (
         return refuseAction(action, 'TargetFinalityCheckpointMissing');
     }
     if (context.localReplaySucceeded !== true) {
-        return refuseAction(action, 'EvaluationReplayThresholdNotReached');
+        return refuseAction(action, 'LocalReplayNotVerified');
     }
 
     return allowAction(action);
@@ -161,7 +158,7 @@ const evaluateDecryptionShare = (
     if (context.targetFinalityAccepted !== true) {
         return refuseAction(action, 'TargetFinalityCheckpointMissing');
     }
-    if (context.targetAccepted === false) {
+    if (context.targetAccepted !== true) {
         return refuseAction(action, 'TargetNotAccepted');
     }
 
@@ -184,7 +181,7 @@ const evaluateRecombination = (
     ) {
         return refuseAction(action, 'InvalidLifecycleState');
     }
-    if (context.targetAccepted === false) {
+    if (context.targetAccepted !== true) {
         return refuseAction(action, 'TargetNotAccepted');
     }
     if (
@@ -206,7 +203,7 @@ export const evaluateActionCapability = (
     if (context.browserSupported === false) {
         return refuseAction(action, 'UnsupportedBrowserContext');
     }
-    if (requiresValidPollSpec(action) && !context.pollSpecValid) {
+    if (!context.pollSpecValid) {
         return refuseAction(action, 'PollSpecInvalid');
     }
     if (

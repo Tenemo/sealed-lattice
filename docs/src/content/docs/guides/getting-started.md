@@ -6,14 +6,14 @@ sidebar:
 ---
 
 Start with the public package name and the current rule: `sealed-lattice`
-exposes only the safe transcript-core fixture verifier and protocol shell.
+exposes the safe transcript core fixture verifier and protocol shell.
 
 ## Public package rules
 
 - The only committed public package name is `sealed-lattice`.
-- The public runtime facade currently exports transcript-core fixture verification plus threshold, lifecycle, poll-spec, and capability helpers.
+- The public runtime facade currently exports transcript core fixture verification plus threshold, lifecycle, poll-spec, and capability helpers.
 - No public subpaths are promised yet.
-- The current release freezes packaging, docs, smoke checks, transcript-core fixtures, protocol-shell vectors, and the workspace shape.
+- The current release freezes packaging, docs, smoke checks, transcript core fixtures, protocol shell vectors, and the workspace shape.
 
 ## Consumer posture
 
@@ -25,8 +25,8 @@ import {
 } from "sealed-lattice";
 ```
 
-The verifier accepts transcript-core fixture objects and returns deterministic
-verification or rejection labels. The protocol-shell helpers validate public poll shape,
+The verifier accepts transcript core fixture objects and returns deterministic
+verification or rejection labels. The protocol shell helpers validate public poll shape,
 derive threshold profiles, check lifecycle transitions, derive status labels,
 and refuse premature protocol actions. They do not implement voting.
 

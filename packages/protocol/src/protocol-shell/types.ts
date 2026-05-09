@@ -33,7 +33,6 @@ export type RosterProfileKind =
 export type ThresholdWarning =
     | 'UnsafeMicroRoster'
     | 'CertificateGatedProfile'
-    | 'UnsupportedRosterSize'
     | 'BackendCertificateRequired'
     | 'BackendCorruptionBoundTooHigh';
 
@@ -167,9 +166,9 @@ export type FailureStatusLabel =
     | 'CPADProfileRejected'
     | 'AnyTDecryptionProfileRejected'
     | 'EvaluationKeySizeProfileRejected'
-    | 'MobileReplayProfileRejected'
-    | 'UnsafeMicroRoster'
-    | 'PassiveMHEPrototype';
+    | 'MobileReplayProfileRejected';
+
+export type ModeStatusLabel = 'UnsafeMicroRoster' | 'PassiveMHEPrototype';
 
 export type LifecycleTransition = {
     readonly from: LifecycleState;
@@ -181,11 +180,15 @@ export type LifecycleLabelInput = {
     readonly thresholdProfile: ThresholdProfile;
     readonly mheSecurityStage?: MheSecurityStage;
     readonly evaluationProofMode?: EvaluationProofMode;
+    readonly rosterAudited?: boolean;
+    readonly ownBallotIncluded?: boolean;
+    readonly evaluationLocallyReplayed?: boolean;
 };
 
 export type LifecycleLabels = {
     readonly primary: readonly PrimaryStatusLabel[];
     readonly failures: readonly FailureStatusLabel[];
+    readonly modes: readonly ModeStatusLabel[];
     readonly resultClaimLabel?: ResultClaimLabel;
     readonly evaluationProofMode: EvaluationProofMode;
 };
@@ -245,6 +248,7 @@ export type RefusalReason =
     | 'TurnoutBelowReleaseFloor'
     | 'AggregateThresholdNotReached'
     | 'EvaluationReplayThresholdNotReached'
+    | 'LocalReplayNotVerified'
     | 'TargetFinalityCheckpointMissing'
     | 'TargetNotAccepted'
     | 'FirstThresholdSharesNotReached'

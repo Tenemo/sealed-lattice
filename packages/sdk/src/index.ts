@@ -37,6 +37,7 @@ export type {
     LifecycleState,
     LifecycleTransition,
     MalformedObjectFixture,
+    ModeStatusLabel,
     MheSecurityStage,
     PollSpec,
     PollSpecInput,
