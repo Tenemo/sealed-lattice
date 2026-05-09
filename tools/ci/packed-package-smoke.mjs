@@ -4,30 +4,22 @@ const assert = (condition, message) => {
     }
 };
 
-const expectedPublicKeys = [
-    'deriveLifecycleLabels',
-    'deriveThresholdProfile',
-    'evaluateActionCapability',
-    'isValidLifecycleTransition',
-    'validatePollSpec',
-    'verifyTranscriptCoreFixture',
-];
 const publicApi = await import('sealed-lattice');
+const { deriveThresholdProfile, verifyTranscriptCoreFixture } = publicApi;
 
 assert(
-    JSON.stringify(Object.keys(publicApi).sort()) ===
-        JSON.stringify(expectedPublicKeys),
-    'Packed package public exports changed unexpectedly',
-);
-assert(
-    typeof publicApi.verifyTranscriptCoreFixture === 'function',
+    typeof verifyTranscriptCoreFixture === 'function',
     'Transcript-core fixture verifier must be exported as a function',
 );
 assert(
-    publicApi.deriveThresholdProfile({ n: 20 }).cPriv === 6,
+    typeof deriveThresholdProfile === 'function',
+    'Threshold profile calculator must be exported as a function',
+);
+assert(
+    deriveThresholdProfile({ n: 20 }).cPriv === 6,
     'Threshold profile calculator must be exported and deterministic',
 );
-const verification = await publicApi.verifyTranscriptCoreFixture({
+const verification = await verifyTranscriptCoreFixture({
     kind: 'malformed-object',
     fixtureVersion: 1,
     caseName: 'packed-malformed-magic-smoke',

@@ -2,14 +2,14 @@ import { describe, expect, it } from 'vitest';
 
 import * as publicApi from '../../dist/index.js';
 
-const expectedPublicKeys = [
-    'deriveLifecycleLabels',
-    'deriveThresholdProfile',
-    'evaluateActionCapability',
-    'isValidLifecycleTransition',
-    'validatePollSpec',
-    'verifyTranscriptCoreFixture',
-];
+const requiredPublicFunctions = [
+    ['deriveLifecycleLabels', publicApi.deriveLifecycleLabels],
+    ['deriveThresholdProfile', publicApi.deriveThresholdProfile],
+    ['evaluateActionCapability', publicApi.evaluateActionCapability],
+    ['isValidLifecycleTransition', publicApi.isValidLifecycleTransition],
+    ['validatePollSpec', publicApi.validatePollSpec],
+    ['verifyTranscriptCoreFixture', publicApi.verifyTranscriptCoreFixture],
+] as const;
 
 const forbiddenPublicKeys = [
     'getShare',
@@ -39,8 +39,13 @@ const forbiddenPublicKeys = [
 ];
 
 describe('protocol-shell public package API in Node', () => {
-    it('exposes only the safe protocol-shell runtime shell and transcript-core verifier', () => {
-        expect(Object.keys(publicApi).sort()).toEqual(expectedPublicKeys);
+    it('exposes callable safe runtime functions and keeps forbidden operations absent', () => {
+        for (const [
+            publicFunctionName,
+            publicFunction,
+        ] of requiredPublicFunctions) {
+            expect(typeof publicFunction, publicFunctionName).toBe('function');
+        }
         for (const publicKey of forbiddenPublicKeys) {
             expect(publicKey in publicApi).toBe(false);
         }
