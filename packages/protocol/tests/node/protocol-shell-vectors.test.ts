@@ -57,6 +57,7 @@ type CapabilityVector = {
     readonly action: ProtocolAction;
     readonly context: Omit<CapabilityContext, 'thresholdProfile'>;
     readonly expected: ReturnType<typeof evaluateActionCapability>;
+    readonly thresholdProfileInput?: ThresholdProfileInput;
 };
 
 type CapabilityVectors = {
@@ -102,10 +103,12 @@ describe('protocol-shell test vectors', () => {
         }
     });
 
-    it('matches capability refusal vectors against the mandatory n=20 profile', () => {
-        const thresholdProfile = deriveThresholdProfile({ n: 20 });
-
+    it('matches capability refusal vectors against their threshold profiles', () => {
         for (const vector of capabilityRefusals.cases) {
+            const thresholdProfile = deriveThresholdProfile(
+                vector.thresholdProfileInput ?? { n: 20 },
+            );
+
             expect(
                 evaluateActionCapability(vector.action, {
                     ...vector.context,

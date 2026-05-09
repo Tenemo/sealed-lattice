@@ -210,7 +210,7 @@ export const evaluateActionCapability = (
         claimBearingActions.has(action) &&
         !context.thresholdProfile.claimBearing
     ) {
-        return refuseAction(action, 'UnsafeMicroRosterNotClaimBearing');
+        return refuseAction(action, 'ProfileNotClaimBearing');
     }
 
     switch (action) {

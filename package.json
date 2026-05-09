@@ -24,7 +24,6 @@
         "docs:preview": "pnpm run docs:build:site && astro preview --root docs",
         "docs": "pnpm run docs:build:site",
         "verify:docs": "pnpm run docs:api && tsx ./typedoc/verify-docs.ts",
-        "verify:release-workflow": "tsx ./tools/ci/verify-release-workflow.ts",
         "smoke:pack": "pnpm --filter sealed-lattice run build && tsx ./tools/ci/verify-packed-package.ts",
         "smoke:pack:npm": "pnpm --filter sealed-lattice run build && tsx ./tools/ci/verify-packed-package.ts --package-manager npm",
         "prepare": "husky"
@@ -68,8 +67,7 @@
         "typedoc-plugin-markdown": "^4.11.0",
         "typescript": "^6.0.2",
         "vite": "^8.0.8",
-        "vitest": "^4.1.4",
-        "yaml": "^2.8.3"
+        "vitest": "^4.1.4"
     },
     "engines": {
         "node": ">=24.14.1"

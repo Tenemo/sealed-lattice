@@ -243,7 +243,7 @@ export type RefusalReason =
     | 'NotImplementedUntilLaterMilestone'
     | 'InvalidLifecycleState'
     | 'PollSpecInvalid'
-    | 'UnsafeMicroRosterNotClaimBearing'
+    | 'ProfileNotClaimBearing'
     | 'SetupIncomplete'
     | 'TurnoutBelowReleaseFloor'
     | 'AggregateThresholdNotReached'

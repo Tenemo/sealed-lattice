@@ -32,7 +32,7 @@ pnpm run build
 
 ## What each command proves
 
-- `pnpm run check`: package shell typechecks, repo lint, package-boundary checks, SDK surface drift checks, vector manifest verification, and dead-code analysis
+- `pnpm run check`: package shell typechecks, repo lint, Rust checks, package-boundary checks, vector manifest verification, and dead-code analysis
 - `pnpm run vectors`: committed test vector files match `test-vectors/manifest.json`
 - `pnpm run test`: Node tests, browser tests, and the internal WASM transcript core loader path
 - `pnpm run verify:docs`: generated API pages and docs link structure stay consistent

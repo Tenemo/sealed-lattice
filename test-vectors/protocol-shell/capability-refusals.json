@@ -86,6 +86,24 @@
         "action": "DecodeVerifiedTopK",
         "reason": "NotImplementedUntilLaterMilestone"
       }
+    },
+    {
+      "caseName": "accept-target-certificate-gated-profile-not-claim-bearing",
+      "action": "AcceptTarget",
+      "thresholdProfileInput": {
+        "n": 21
+      },
+      "context": {
+        "lifecycleState": "EvaluationReplayOpen",
+        "pollSpecValid": true,
+        "targetFinalityAccepted": true,
+        "replayAttestationCount": 5
+      },
+      "expected": {
+        "allowed": false,
+        "action": "AcceptTarget",
+        "reason": "ProfileNotClaimBearing"
+      }
     }
   ]
 }

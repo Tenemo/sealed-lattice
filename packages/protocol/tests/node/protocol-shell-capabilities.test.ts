@@ -214,10 +214,13 @@ describe('protocol-shell capability evaluator', () => {
         ).toMatchObject({ reason: 'FirstThresholdSharesNotReached' });
     });
 
-    it('keeps unsafe micro-rosters out of claim-bearing capabilities', () => {
+    it('keeps non-claim-bearing profiles out of claim-bearing capabilities', () => {
         const unsafeThresholdProfile = deriveThresholdProfile({
             n: 19,
             unsafeMicroRosterAcknowledged: true,
+        });
+        const certificateGatedThresholdProfile = deriveThresholdProfile({
+            n: 21,
         });
 
         expect(
@@ -230,7 +233,19 @@ describe('protocol-shell capability evaluator', () => {
                     replayAttestationCount: unsafeThresholdProfile.qEval,
                 }),
             ),
-        ).toMatchObject({ reason: 'UnsafeMicroRosterNotClaimBearing' });
+        ).toMatchObject({ reason: 'ProfileNotClaimBearing' });
+        expect(
+            evaluateActionCapability(
+                'AcceptTarget',
+                createContext({
+                    lifecycleState: 'EvaluationReplayOpen',
+                    thresholdProfile: certificateGatedThresholdProfile,
+                    targetFinalityAccepted: true,
+                    replayAttestationCount:
+                        certificateGatedThresholdProfile.qEval,
+                }),
+            ),
+        ).toMatchObject({ reason: 'ProfileNotClaimBearing' });
     });
 
     it('leaves verified top-k decoding unimplemented in protocol shell', () => {
