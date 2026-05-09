@@ -183,6 +183,7 @@ describe('packed package smoke helpers', () => {
             ]),
         ).toEqual([
             'Published package is missing LICENSE',
+            'Published package is missing transcript-core WASM',
             'Published package must not include TypeScript build metadata: dist/tsconfig.tsbuildinfo',
         ]);
     });
@@ -195,6 +196,7 @@ describe('packed package smoke helpers', () => {
                 'dist/index.d.ts',
                 'dist/index.js',
                 'dist/index.js.map',
+                'dist/sealed-lattice-kernel.wasm',
                 'package.json',
             ]),
         ).toEqual([]);

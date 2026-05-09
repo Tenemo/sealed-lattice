@@ -5,11 +5,28 @@ import { fileURLToPath } from 'node:url';
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const cargoTargetDirectory = path.resolve(repoRoot, 'target');
-const outputDirectory = path.resolve(repoRoot, 'packages', 'wasm', 'dist');
-const outputFilePath = path.resolve(
-    outputDirectory,
-    'sealed-lattice-kernel.wasm',
-);
+
+const resolveOutputFilePath = (
+    commandLineArguments: readonly string[],
+): string => {
+    const outputIndex = commandLineArguments.indexOf('--out');
+    if (outputIndex === -1) {
+        return path.resolve(
+            repoRoot,
+            'packages',
+            'wasm',
+            'dist',
+            'sealed-lattice-kernel.wasm',
+        );
+    }
+
+    const outputPath = commandLineArguments[outputIndex + 1];
+    if (outputPath === undefined) {
+        throw new Error('--out requires a repository-relative output path');
+    }
+
+    return path.resolve(repoRoot, outputPath);
+};
 
 const runCargoBuild = (): void => {
     const result = spawnSync(
@@ -63,12 +80,15 @@ const resolveSourceFilePath = (): string =>
     );
 
 const main = async (): Promise<void> => {
+    const outputFilePath = resolveOutputFilePath(process.argv.slice(2));
+    const outputDirectory = path.dirname(outputFilePath);
+
     runCargoBuild();
     await mkdir(outputDirectory, { recursive: true });
     await copyFile(resolveSourceFilePath(), outputFilePath);
 
     console.log(
-        `Byte-buffer kernel copied to ${path.relative(repoRoot, outputFilePath)}`,
+        `transcript-core kernel copied to ${path.relative(repoRoot, outputFilePath)}`,
     );
 };
 

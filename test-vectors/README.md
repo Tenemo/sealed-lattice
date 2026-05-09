@@ -20,5 +20,6 @@ pnpm run vectors:generate
 `pnpm run vectors:generate` rewrites the manifest from the current contents of
 the directory.
 
-The repository now includes one tracked M01 foundation artifact so the manifest
-always exercises real file hashing and verification.
+The repository includes tracked transcript-core golden, malformed-object, and
+transcript replay fixtures so the manifest always exercises real file hashing
+and verification.

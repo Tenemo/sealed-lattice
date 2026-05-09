@@ -2,8 +2,16 @@
   "schemaVersion": 1,
   "entries": [
     {
-      "path": "foundation/m01-byte-buffer-roundtrip.json",
-      "sha256": "57761b7ca40e35ad7fa3444e30c1592cd00c97a2726e8bc8d9746c33ede60e24"
+      "path": "transcript-core/golden-transcript-core.json",
+      "sha256": "3f0a2a28051104facac779de9eb171241314fd392dd35ceab58f1ea79e3b6b8f"
+    },
+    {
+      "path": "transcript-core/malformed-objects.json",
+      "sha256": "95241899ce330aecba30442eb4fba7afbecf34ea8442b52ba773a1b743a3f6c3"
+    },
+    {
+      "path": "transcript-core/transcript-core-replay.json",
+      "sha256": "2e4fcf93d7266784c517826e2f6a645acb61ccb9c3836994e34a2b3df54a4262"
     }
   ]
 }

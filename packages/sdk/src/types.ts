@@ -71,43 +71,19 @@ export type TranscriptCoreReplayFixture = {
     readonly expectedStatusLabels: readonly TranscriptCoreStatusLabel[];
 };
 
-export type TranscriptCoreAnalysis = {
-    readonly canonicalBytesHex: string;
-    readonly objectType: 'TranscriptCore';
-    readonly objectVersion: 1;
-    readonly securityProfile: SecurityProfile;
-    readonly proofProfileId: string;
-    readonly heSetupProofProfileId: string;
-    readonly evaluationProofProfileId: string;
-    readonly decryptionProofProfileId: string;
-    readonly objectHash512: string;
-    readonly chunkRoot: string;
-    readonly chunkSize: number;
-    readonly statusLabels: readonly TranscriptCoreStatusLabel[];
-    readonly title: string;
-    readonly sequence: number;
-    readonly payloadHex: string;
-    readonly tags: readonly string[];
-    readonly checkpoints: readonly number[];
-};
-
-export type GoldenTranscriptCoreFixtureVerification = {
-    readonly verified: true;
-    readonly caseName: string;
-    readonly objectHash512: string;
-    readonly chunkRoot: string;
-    readonly statusLabels: readonly TranscriptCoreStatusLabel[];
-};
-
-export type MalformedObjectFixtureVerification = {
-    readonly verified: true;
-    readonly caseName: string;
-    readonly expectedErrorCode: CanonicalErrorCode;
-};
-
 export type TranscriptCoreFixtureVerification =
-    | GoldenTranscriptCoreFixtureVerification
-    | MalformedObjectFixtureVerification;
+    | {
+          readonly verified: true;
+          readonly caseName: string;
+          readonly objectHash512: string;
+          readonly chunkRoot: string;
+          readonly statusLabels: readonly TranscriptCoreStatusLabel[];
+      }
+    | {
+          readonly verified: true;
+          readonly caseName: string;
+          readonly expectedErrorCode: CanonicalErrorCode;
+      };
 
 export type TranscriptCoreVerificationResult = {
     readonly caseName: string;

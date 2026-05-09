@@ -3,45 +3,12 @@ import type {
     CanonicalErrorCode,
     TranscriptCoreFixture,
     TranscriptCoreFixtureVerification,
-    TranscriptCoreAnalysis,
-} from '@sealed-lattice/protocol';
+} from './types.js';
 
-export type TranscriptCoreKernel = {
-    readonly exportedFunctionNames: readonly string[];
-    analyzeCanonicalObject(input: {
-        readonly canonicalBytesHex: string;
-        readonly chunkSize: number;
-    }): TranscriptCoreAnalysis;
-    computeChunkRoot(input: {
-        readonly inputHex: string;
-        readonly chunkSize: number;
-    }): string;
-    hashRaw(inputHex: string): string;
-    roundTripBytes(input: Uint8Array): Uint8Array;
-    verifyFixture(
-        fixture: TranscriptCoreFixture,
-    ): TranscriptCoreFixtureVerification;
+type TranscriptCoreKernelCommand = {
+    readonly command: 'VerifyFixture';
+    readonly fixture: TranscriptCoreFixture;
 };
-
-type TranscriptCoreKernelCommand =
-    | {
-          readonly command: 'AnalyzeCanonicalObject';
-          readonly canonicalBytesHex: string;
-          readonly chunkSize: number;
-      }
-    | {
-          readonly command: 'ComputeChunkRoot';
-          readonly inputHex: string;
-          readonly chunkSize: number;
-      }
-    | {
-          readonly command: 'HashRaw';
-          readonly inputHex: string;
-      }
-    | {
-          readonly command: 'VerifyFixture';
-          readonly fixture: TranscriptCoreFixture;
-      };
 
 type TranscriptCoreKernelExports = WebAssembly.Exports & {
     memory?: WebAssembly.Memory;
@@ -52,7 +19,6 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
         pointer: number,
         length: number,
     ) => number;
-    sealed_lattice_roundtrip?: (pointer: number, length: number) => number;
 };
 
 type KernelSuccessResponse<T> = {
@@ -63,6 +29,12 @@ type KernelSuccessResponse<T> = {
 type KernelFailureResponse = {
     readonly success: false;
     readonly error: CanonicalError;
+};
+
+type TranscriptCoreKernel = {
+    verifyFixture(
+        fixture: TranscriptCoreFixture,
+    ): TranscriptCoreFixtureVerification;
 };
 
 const canonicalErrorCodes = new Set<string>([
@@ -93,11 +65,11 @@ const textDecoder = new TextDecoder();
 const textEncoder = new TextEncoder();
 
 const transcriptCoreKernelUrl = new URL(
-    '../dist/sealed-lattice-kernel.wasm',
+    './sealed-lattice-kernel.wasm',
     import.meta.url,
 );
 
-export class TranscriptCoreKernelCommandError extends Error {
+class TranscriptCoreKernelCommandError extends Error {
     readonly code: CanonicalErrorCode;
 
     constructor(error: CanonicalError) {
@@ -168,8 +140,7 @@ const resolveNumberExport = (
         | 'sealed_lattice_allocate'
         | 'sealed_lattice_deallocate'
         | 'sealed_lattice_last_output_length'
-        | 'sealed_lattice_transcript_core_command'
-        | 'sealed_lattice_roundtrip',
+        | 'sealed_lattice_transcript_core_command',
 ): ((...values: number[]) => number | void) => {
     const exportValue = exports[exportName];
     /* v8 ignore next 3 */
@@ -207,14 +178,13 @@ const copyFromKernelMemory = (
     memory: WebAssembly.Memory,
     pointer: number,
     length: number,
-    operationName: string,
 ): Uint8Array => {
     if (length === 0) {
         return new Uint8Array();
     }
     if (pointer === 0) {
         throw new Error(
-            `The transcript-core kernel returned a null pointer for a non-empty ${operationName} result.`,
+            'The transcript-core kernel returned a null pointer for a non-empty transcript-core command result.',
         );
     }
 
@@ -257,7 +227,6 @@ const runKernelCommand = <T>(
             memory,
             outputPointer,
             outputLength,
-            'transcript-core command',
         );
 
         return parseKernelResponse<T>(outputBytes);
@@ -294,15 +263,6 @@ export const loadTranscriptCoreKernel =
             exports,
             'sealed_lattice_transcript_core_command',
         ) as (pointer: number, length: number) => number;
-        const roundtrip = resolveNumberExport(
-            exports,
-            'sealed_lattice_roundtrip',
-        ) as (pointer: number, length: number) => number;
-        const exportedFunctionNames = WebAssembly.Module.exports(
-            instantiatedSource.module,
-        )
-            .map((entry) => entry.name)
-            .sort();
         const executeCommand = <T>(request: TranscriptCoreKernelCommand): T =>
             runKernelCommand<T>(
                 memory,
@@ -314,55 +274,6 @@ export const loadTranscriptCoreKernel =
             );
 
         return {
-            exportedFunctionNames,
-            analyzeCanonicalObject: (input): TranscriptCoreAnalysis =>
-                executeCommand<TranscriptCoreAnalysis>({
-                    command: 'AnalyzeCanonicalObject',
-                    canonicalBytesHex: input.canonicalBytesHex,
-                    chunkSize: input.chunkSize,
-                }),
-            computeChunkRoot: (input): string =>
-                executeCommand<{ readonly chunkRoot: string }>({
-                    command: 'ComputeChunkRoot',
-                    inputHex: input.inputHex,
-                    chunkSize: input.chunkSize,
-                }).chunkRoot,
-            hashRaw: (inputHex): string =>
-                executeCommand<{ readonly hash512: string }>({
-                    command: 'HashRaw',
-                    inputHex,
-                }).hash512,
-            roundTripBytes: (input: Uint8Array): Uint8Array => {
-                const normalizedInput = Uint8Array.from(input);
-                let inputPointer = 0;
-                let outputPointer = 0;
-
-                try {
-                    inputPointer = copyIntoKernelMemory(
-                        memory,
-                        allocate,
-                        normalizedInput,
-                    );
-                    outputPointer = roundtrip(
-                        inputPointer,
-                        normalizedInput.length,
-                    );
-
-                    return copyFromKernelMemory(
-                        memory,
-                        outputPointer,
-                        normalizedInput.length,
-                        'round-trip',
-                    );
-                } finally {
-                    if (outputPointer !== 0) {
-                        deallocate(outputPointer, normalizedInput.length);
-                    }
-                    if (inputPointer !== 0 && inputPointer !== outputPointer) {
-                        deallocate(inputPointer, normalizedInput.length);
-                    }
-                }
-            },
             verifyFixture: (fixture): TranscriptCoreFixtureVerification =>
                 executeCommand<TranscriptCoreFixtureVerification>({
                     command: 'VerifyFixture',
@@ -370,19 +281,3 @@ export const loadTranscriptCoreKernel =
                 }),
         };
     };
-
-export const verifyTranscriptCoreFixture = async (
-    fixture: TranscriptCoreFixture,
-): Promise<TranscriptCoreFixtureVerification> => {
-    const kernel = await loadTranscriptCoreKernel();
-
-    return kernel.verifyFixture(fixture);
-};
-
-export const roundTripBytesThroughKernel = async (
-    input: Uint8Array,
-): Promise<Uint8Array> => {
-    const kernel = await loadTranscriptCoreKernel();
-
-    return kernel.roundTripBytes(input);
-};

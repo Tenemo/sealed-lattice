@@ -1,19 +1,14 @@
 {
-  "$schema": "https://turbo.build/schema.json",
-  "tasks": {
-    "build": {
-      "dependsOn": [
-        "^build"
-      ],
-      "outputs": [
-        "dist/**"
-      ]
-    },
-    "check": {
-      "dependsOn": [
-        "^check"
-      ],
-      "outputs": []
+    "$schema": "https://turbo.build/schema.json",
+    "globalDependencies": ["Cargo.lock", "Cargo.toml", "crates/**"],
+    "tasks": {
+        "build": {
+            "dependsOn": ["^build"],
+            "outputs": ["dist/**"]
+        },
+        "check": {
+            "dependsOn": ["^check"],
+            "outputs": []
+        }
     }
-  }
 }

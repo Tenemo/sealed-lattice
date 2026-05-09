@@ -1,6 +1,6 @@
 ---
 title: sealed-lattice
-description: Documentation for the sealed-lattice workspace and its intentionally empty public facade.
+description: Documentation for the sealed-lattice workspace and current transcript-core verifier.
 template: splash
 editUrl: false
 head:
@@ -8,18 +8,18 @@ head:
       content: sealed-lattice
 hero:
     title: sealed-lattice
-    tagline: Workspace first, public API later. The package boundary, verification shell, and Rust/WASM proof path are stable while the public runtime surface remains intentionally empty.
+    tagline: Transcript core first. The package boundary, verification shell, and Rust/WASM transcript-core path are stable while the wider voting API remains future implementation.
     image:
         html: |
             <div class="landing-hero-panel">
               <div class="landing-hero-panel__card">
                 <p class="landing-hero-panel__eyebrow">Current boundary</p>
-                <p class="landing-hero-panel__title">Workspace first, API later</p>
+                <p class="landing-hero-panel__title">Transcript core first</p>
                 <ol class="landing-hero-panel__list">
                   <li>Use <code>sealed-lattice</code> as the only public package name.</li>
-                  <li>Treat the current public facade as intentionally empty.</li>
+                  <li>Use the public transcript-core fixture verifier.</li>
                   <li>Develop inside the private workspace packages.</li>
-                  <li>Verify the Rust/WASM placeholder path before real arithmetic lands.</li>
+                  <li>Verify the Rust/WASM transcript-core path before later protocol layers land.</li>
                 </ol>
               </div>
               <div class="landing-hero-panel__facts">
@@ -30,8 +30,8 @@ hero:
                 </div>
                 <div class="landing-hero-panel__fact">
                   <span class="landing-hero-panel__label">Runtime surface</span>
-                  <strong>Zero exports</strong>
-                  <small>Intentionally empty for now</small>
+                  <strong>Transcript-core verifier</strong>
+                  <small>Safe fixture verification only</small>
                 </div>
                 <div class="landing-hero-panel__fact">
                   <span class="landing-hero-panel__label">Internal packages</span>
@@ -41,7 +41,7 @@ hero:
                 <div class="landing-hero-panel__fact">
                   <span class="landing-hero-panel__label">Native proof path</span>
                   <strong>Rust crate plus WASM loader</strong>
-                  <small>Placeholder function only</small>
+                  <small>Transcript-core command path</small>
                 </div>
               </div>
             </div>
@@ -73,8 +73,8 @@ import { Card, CardGrid, LinkCard, Steps } from "@astrojs/starlight/components";
     <Card title="Public boundary">
       <div class="landing-card-copy">
         <p>
-          <code>sealed-lattice</code> remains the only public npm name, but its
-          current runtime facade is intentionally empty.
+          <code>sealed-lattice</code> remains the only public npm name, and its
+          current runtime facade exposes the transcript-core fixture verifier.
         </p>
         <p>
           That keeps packaging, docs, release flow, and smoke checks stable
@@ -90,8 +90,8 @@ import { Card, CardGrid, LinkCard, Steps } from "@astrojs/starlight/components";
           crypto, wasm, and testkit.
         </p>
         <p>
-          The Rust placeholder crate and the internal WASM loader prove the
-          browser and Node build path before real arithmetic lands.
+          The Rust transcript core and the internal WASM loader prove the
+          browser and Node build path before later arithmetic lands.
         </p>
       </div>
     </Card>
@@ -131,7 +131,7 @@ import { Card, CardGrid, LinkCard, Steps } from "@astrojs/starlight/components";
     <LinkCard
       title="API reference"
       href="./api/"
-      description="Confirm that the published runtime facade is intentionally empty."
+      description="Confirm the current transcript-core verifier surface."
     />
     <LinkCard
       title="Protocol spec"
@@ -154,12 +154,12 @@ import { Card, CardGrid, LinkCard, Steps } from "@astrojs/starlight/components";
     <Steps>
       1. **Install the public package name.**
          Use `sealed-lattice` as the only supported public import path.
-      2. **Treat the runtime facade as intentionally empty.**
-         The package exists today to stabilize packaging, docs, and release flow.
+      2. **Use the transcript-core verifier only.**
+         The package exposes safe fixture verification while wider voting APIs remain future implementation.
       3. **Develop inside the workspace packages.**
          Use the private packages for protocol, crypto, wasm, and testkit work.
       4. **Keep the Rust/WASM path verified.**
-         The byte-buffer foundation kernel must continue to build natively and load in Node and browsers.
+         The transcript-core kernel must continue to build natively and load in Node and browsers.
     </Steps>
   </div>
 </section>
@@ -179,14 +179,14 @@ import { Card, CardGrid, LinkCard, Steps } from "@astrojs/starlight/components";
         <li>Private workspace packages with explicit ownership boundaries.</li>
         <li>Package-boundary checks against deep imports and illegal internal dependencies.</li>
         <li>Node, browser, docs, vector, pack smoke, and release verification.</li>
-        <li>Rust placeholder build plus internal WASM loading path.</li>
+        <li>Rust transcript-core build plus internal WASM loading path.</li>
       </ul>
     </Card>
 
     <Card title="Not published yet">
       <ul>
         <li>Protocol lifecycle helpers.</li>
-        <li>Transcript, manifest, or ballot types.</li>
+        <li>Manifest or ballot types.</li>
         <li>Crypto provider wrappers or proof APIs.</li>
         <li>Any public subpaths beyond the root package name.</li>
       </ul>

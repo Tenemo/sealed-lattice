@@ -1,0 +1,26 @@
+{
+    "schemaVersion":  1,
+    "caseName":  "stage-p-transcript-core-replay",
+    "fixture":  {
+                    "kind":  "golden-transcript-core",
+                    "fixtureVersion":  1,
+                    "caseName":  "stage-p-transcript-core",
+                    "canonicalBytesHex":  "534c424501010101287472616e7363726970742d636f72652d73746167652d702d70726f6f662d70726f66696c652d7631247472616e7363726970742d636f72652d6e6f2d68652d73657475702d70726f6f662d7631267472616e7363726970742d636f72652d6e6f2d6576616c756174696f6e2d70726f6f662d7631267472616e7363726970742d636f72652d6e6f2d64656372797074696f6e2d70726f6f662d76310601175472616e73637269707420636f72652073746167652070022a030693ce674efbe4040105030963616e6f6e6963616c0773746167652d700b7761736d2d7061726974790605010305080d",
+                    "objectType":  "TranscriptCore",
+                    "objectVersion":  1,
+                    "securityProfile":  "StageP",
+                    "proofProfileId":  "transcript-core-stage-p-proof-profile-v1",
+                    "heSetupProofProfileId":  "transcript-core-no-he-setup-proof-v1",
+                    "evaluationProofProfileId":  "transcript-core-no-evaluation-proof-v1",
+                    "decryptionProofProfileId":  "transcript-core-no-decryption-proof-v1",
+                    "expectedObjectHash512":  "d14ef95a2a07e0813e2dccfdfd73fa38de7d59eba656e111991f5790666ee671f83f0d24f69de666c3cc455d3c0327be84a400f30b600df98ef53b5113f974b9",
+                    "expectedChunkRoot":  "9602910474e9bf91809c3737c66cd937f7b391b4ce760d8f189519afe139b0092d34eb8932fc79dafc7eaedb6783dfbdeb2a14e540581ef55ffe788c51f6d36b",
+                    "chunkSize":  8,
+                    "expectedStatusLabels":  [
+                                                 "TranscriptCoreVerified"
+                                             ]
+                },
+    "expectedStatusLabels":  [
+                                 "TranscriptCoreVerified"
+                             ]
+}

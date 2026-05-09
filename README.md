@@ -32,23 +32,23 @@ and four private internal packages:
 - `@sealed-lattice/wasm`
 - `@sealed-lattice/testkit`
 
-The workspace also contains `crates/sealed-lattice-kernel`, a Rust placeholder
-crate used to prove the native-test and WASM-loading path.
+The workspace also contains `crates/sealed-lattice-kernel`, the Rust transcript
+core used by the native-test and WASM-loading path.
 
 ## Current public boundary
 
-The published `sealed-lattice` package currently imports successfully but
-exposes no runtime API.
+The published `sealed-lattice` package currently exposes a safe
+transcript-core fixture verifier.
 
-This keeps packaging, documentation, smoke checks, and release flow stable
-while the broader public API is still being built.
+This keeps packaging, documentation, smoke checks, transcript fixtures, and
+release flow stable while the broader voting API remains future implementation.
 
 - workspace layout and package boundaries
 - packaging and tarball smoke checks
 - TypeScript, ESLint, browser, and Node verification
 - Astro documentation and TypeDoc generation
-- generic test vector manifest verification
-- the Rust-to-WASM placeholder toolchain
+- transcript-core test vector manifest verification
+- the Rust-to-WASM transcript-core toolchain
 
 ## Workspace layout
 
@@ -74,7 +74,7 @@ sealed-lattice/
 pnpm add sealed-lattice
 ```
 
-The package imports successfully, but it intentionally exports no runtime API.
+The package exports the current transcript-core fixture verifier.
 
 ## Development
 
@@ -102,8 +102,8 @@ pnpm run build
 
 This repository currently ships a stable package boundary, explicit internal
 package ownership, verification tooling, documentation generation, package
-smoke checks, and a Rust/WASM placeholder path. The public runtime facade is
-still intentionally empty.
+smoke checks, and a Rust/WASM transcript-core path. Wider voting APIs remain
+future implementation.
 
 ## License
 

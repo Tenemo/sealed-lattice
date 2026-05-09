@@ -1,3 +1,3 @@
-pub fn placeholder_summary() -> &'static str {
-    "verifier placeholder ready"
+pub fn future_implementation_summary() -> &'static str {
+    "verifier future implementation pending"
 }

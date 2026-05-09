@@ -13,9 +13,9 @@ internal packages.
 - `packages/sdk`: the only published package directory, with the public package name `sealed-lattice`
 - `packages/protocol`: deterministic election model and transcript package shell
 - `packages/crypto`: provider and capability package shell
-- `packages/wasm`: typed Rust/WASM loader and placeholder proof path
+- `packages/wasm`: typed Rust/WASM loader and transcript-core command path
 - `packages/testkit`: deterministic integration scaffolding package shell
-- `crates/sealed-lattice-kernel`: Rust placeholder crate that exports one trivial WASM function
+- `crates/sealed-lattice-kernel`: Rust transcript-core crate that exports the WASM command path
 
 ## Dependency direction
 
@@ -25,11 +25,11 @@ internal packages.
 - Deep imports like `@sealed-lattice/crypto/src/...` are forbidden.
 - Relative imports that cross from one package directory into another package directory are forbidden.
 
-## Why the public facade stays empty
+## Why the public facade stays narrow
 
 The goal of the current release is to freeze packaging and package boundaries
-before the protocol-facing API is real enough to publish safely. Shipping an
-empty public runtime facade is deliberate.
+before the full voting API is real enough to publish safely. Shipping only the
+safe transcript-core fixture verifier is deliberate.
 
 ## Enforcement
 

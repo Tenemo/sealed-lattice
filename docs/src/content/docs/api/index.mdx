@@ -7,31 +7,31 @@ editUrl: false
 import { CardGrid, LinkCard } from "@astrojs/starlight/components";
 
 Use the root package name for the full supported public surface. The package
-does not expose any runtime exports yet.
+currently exposes the safe transcript-core fixture verifier.
 
 ## What lives here
 
 - `sealed-lattice` as the only public package name
-- an intentionally empty runtime facade
-- generated reference pages that confirm the current public surface stays empty
+- `verifyTranscriptCoreFixture` as the current runtime export
+- generated reference pages that confirm the current public surface stays narrow
 
 ## Typical import style
 
 ```typescript
-import "sealed-lattice";
+import { verifyTranscriptCoreFixture } from "sealed-lattice";
 ```
 
 ## Use the root package when
 
 - you need the stable published package identity
-- you want to verify the current public boundary before wider APIs are added
+- you want to verify transcript-core fixtures before wider APIs are added
 - you want to follow the documented path without depending on private workspace packages
 
 ## What stays intentionally internal
 
-- protocol lifecycle and transcript logic
+- protocol lifecycle logic
 - crypto provider wrappers
-- the Rust/WASM placeholder loader
+- the Rust/WASM loader internals
 - testkit utilities
 - any future public subpath layout
 
@@ -41,7 +41,7 @@ import "sealed-lattice";
     <LinkCard
         title="Generated reference"
         href="./reference/"
-        description="Browse the generated page that proves the public runtime facade is still empty."
+        description="Browse the generated page for the current transcript-core verifier surface."
     />
     <LinkCard
         title="Workspace layout"
