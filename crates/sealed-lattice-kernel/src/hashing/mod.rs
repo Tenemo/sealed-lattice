@@ -8,18 +8,33 @@ use crate::encoding::{
 };
 
 pub const MODULE_MARKER: &str = "hashing";
+pub const HASH512_PREIMAGE_PREFIX: &[u8] = b"sealed.vote/v1/hash512";
 
+pub const MANIFEST_DIGEST_NAMESPACE: &str = "sealed-lattice-root/manifest-digest-v1";
+pub const ROSTER_DIGEST_NAMESPACE: &str = "sealed-lattice-root/roster-digest-v1";
+pub const BOARD_HEAD_HASH_NAMESPACE: &str = "sealed-lattice-root/board-head-hash-v1";
+pub const RECOVERY_EPOCH_UPDATE_DIGEST_NAMESPACE: &str =
+    "sealed-lattice-root/recovery-epoch-update-digest-v1";
+pub const ACTION_CONTEXT_DIGEST_NAMESPACE: &str = "sealed-lattice-root/action-context-digest-v1";
+pub const CANONICAL_BALLOT_SET_DIGEST_NAMESPACE: &str =
+    "sealed-lattice-root/canonical-ballot-set-digest-v1";
 pub const HE_PARAM_DIGEST_NAMESPACE: &str = "sealed-lattice-root/he-param-digest-v1";
 pub const CIPHERTEXT_ROOT_NAMESPACE: &str = "sealed-lattice-root/ciphertext-root-v1";
 pub const PLAINTEXT_ROOT_NAMESPACE: &str = "sealed-lattice-root/plaintext-root-v1";
 pub const EVAL_KEY_ROOT_NAMESPACE: &str = "sealed-lattice-root/eval-key-root-v1";
 pub const TOP_K_CIRCUIT_DIGEST_NAMESPACE: &str = "sealed-lattice-root/top-k-circuit-digest-v1";
+pub const AGGREGATE_CONTRIBUTION_DIGEST_NAMESPACE: &str =
+    "sealed-lattice-root/aggregate-contribution-digest-v1";
 pub const AGGREGATE_READY_RECORD_DIGEST_NAMESPACE: &str =
     "sealed-lattice-root/aggregate-ready-record-digest-v1";
 pub const EVALUATION_CONTEXT_DIGEST_NAMESPACE: &str =
     "sealed-lattice-root/evaluation-context-digest-v1";
 pub const TOP_K_EVALUATION_RECORD_DIGEST_NAMESPACE: &str =
     "sealed-lattice-root/top-k-evaluation-record-digest-v1";
+pub const ROT_SET_DIGEST_NAMESPACE: &str = "sealed-lattice-root/rot-set-digest-v1";
+pub const TARGET_LAYOUT_DIGEST_NAMESPACE: &str = "sealed-lattice-root/target-layout-digest-v1";
+pub const PUBLIC_SLOT_MASK_DIGEST_NAMESPACE: &str =
+    "sealed-lattice-root/public-slot-mask-digest-v1";
 pub const TARGET_FINALITY_RECORD_NAMESPACE: &str = "sealed-lattice-root/target-finality-record-v1";
 pub const ACCEPTED_TARGET_FINALITY_CHECKPOINT_DIGEST_NAMESPACE: &str =
     "sealed-lattice-root/accepted-target-finality-checkpoint-digest-v1";
@@ -28,22 +43,46 @@ pub const EVALUATION_REPLAY_ATTESTATION_DIGEST_NAMESPACE: &str =
 pub const TARGET_ACCEPTED_RECORD_DIGEST_NAMESPACE: &str =
     "sealed-lattice-root/target-accepted-record-digest-v1";
 pub const TARGET_PREIMAGE_DIGEST_NAMESPACE: &str = "sealed-lattice-root/target-preimage-digest-v1";
+pub const CPAD_PROFILE_DIGEST_NAMESPACE: &str = "sealed-lattice-root/cpad-profile-digest-v1";
+pub const THRESHOLD_DECRYPTION_PROFILE_DIGEST_NAMESPACE: &str =
+    "sealed-lattice-root/threshold-decryption-profile-digest-v1";
+pub const TOP_K_DECRYPTION_SHARE_DIGEST_NAMESPACE: &str =
+    "sealed-lattice-root/top-k-decryption-share-digest-v1";
+pub const VERIFIED_TOP_K_RESULT_DIGEST_NAMESPACE: &str =
+    "sealed-lattice-root/verified-top-k-result-digest-v1";
+pub const ENCRYPTED_ENVELOPE_ROOT_NAMESPACE: &str =
+    "sealed-lattice-root/encrypted-envelope-root-v1";
 pub const EVALUATION_PROOF_ROOT_NAMESPACE: &str = "sealed-lattice-root/evaluation-proof-root-v1";
 
-pub const RESERVED_ROOT_NAMESPACES: [&str; 14] = [
+pub const RESERVED_ROOT_NAMESPACES: [&str; 29] = [
+    MANIFEST_DIGEST_NAMESPACE,
+    ROSTER_DIGEST_NAMESPACE,
+    BOARD_HEAD_HASH_NAMESPACE,
+    RECOVERY_EPOCH_UPDATE_DIGEST_NAMESPACE,
+    ACTION_CONTEXT_DIGEST_NAMESPACE,
+    CANONICAL_BALLOT_SET_DIGEST_NAMESPACE,
     HE_PARAM_DIGEST_NAMESPACE,
     CIPHERTEXT_ROOT_NAMESPACE,
     PLAINTEXT_ROOT_NAMESPACE,
     EVAL_KEY_ROOT_NAMESPACE,
     TOP_K_CIRCUIT_DIGEST_NAMESPACE,
+    AGGREGATE_CONTRIBUTION_DIGEST_NAMESPACE,
     AGGREGATE_READY_RECORD_DIGEST_NAMESPACE,
     EVALUATION_CONTEXT_DIGEST_NAMESPACE,
     TOP_K_EVALUATION_RECORD_DIGEST_NAMESPACE,
+    ROT_SET_DIGEST_NAMESPACE,
+    TARGET_LAYOUT_DIGEST_NAMESPACE,
+    PUBLIC_SLOT_MASK_DIGEST_NAMESPACE,
     TARGET_FINALITY_RECORD_NAMESPACE,
     ACCEPTED_TARGET_FINALITY_CHECKPOINT_DIGEST_NAMESPACE,
     EVALUATION_REPLAY_ATTESTATION_DIGEST_NAMESPACE,
     TARGET_ACCEPTED_RECORD_DIGEST_NAMESPACE,
     TARGET_PREIMAGE_DIGEST_NAMESPACE,
+    CPAD_PROFILE_DIGEST_NAMESPACE,
+    THRESHOLD_DECRYPTION_PROFILE_DIGEST_NAMESPACE,
+    TOP_K_DECRYPTION_SHARE_DIGEST_NAMESPACE,
+    VERIFIED_TOP_K_RESULT_DIGEST_NAMESPACE,
+    ENCRYPTED_ENVELOPE_ROOT_NAMESPACE,
     EVALUATION_PROOF_ROOT_NAMESPACE,
 ];
 
@@ -60,9 +99,14 @@ pub fn to_hex(bytes: &[u8]) -> String {
 ///
 /// The `Hash512` name describes the output length. Security is bounded by
 /// SHAKE256, not by a generic 512-bit random-oracle claim.
+///
+/// This helper frames the `sealed.vote/v1/hash512` prefix, a caller-supplied
+/// protocol step domain, and each supplied part. Claim-bearing protocol objects
+/// must pass the frozen ceremony, statement, and encoded object material as
+/// explicit framed parts rather than using an informal parallel convention.
 pub fn hash512(domain: &str, parts: &[&[u8]]) -> [u8; 64] {
     let mut preimage = Vec::new();
-    preimage.extend(b"sealed-lattice-hash512-v1");
+    preimage.extend(HASH512_PREIMAGE_PREFIX);
     append_bytes(&mut preimage, domain.as_bytes());
     append_varuint(&mut preimage, parts.len() as u64);
     for part in parts {

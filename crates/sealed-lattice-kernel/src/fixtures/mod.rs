@@ -4,18 +4,22 @@ use serde_json::{Value, json};
 use crate::{
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
     transcript_core::{
-        SecurityProfile, analyze_canonical_object, canonical_transcript_core_object, decode_hex,
-        encode_hex, mutate_duplicate_field_fixture,
-        mutate_evaluation_proof_missing_evaluation_profile_fixture, mutate_field_order_fixture,
-        mutate_invalid_enum_fixture, mutate_invalid_profile_fixture, mutate_invalid_utf8_fixture,
+        FULLY_VERIFIED_ACTIVE_MALICIOUS_PROFILE, FULLY_VERIFIED_PASSIVE_MHE_PROFILE,
+        RESULT_COMPUTED_ACTIVE_MALICIOUS_PROFILE, RESULT_COMPUTED_PASSIVE_MHE_PROFILE,
+        TranscriptCoreProfile, analyze_canonical_object, canonical_transcript_core_object,
+        decode_hex, encode_hex, mutate_base_claim_profile_mismatch_fixture,
+        mutate_duplicate_field_fixture, mutate_field_order_fixture,
+        mutate_fully_verified_missing_evaluation_profile_fixture, mutate_invalid_enum_fixture,
+        mutate_invalid_profile_fixture, mutate_invalid_utf8_fixture,
         mutate_malformed_length_fixture, mutate_malformed_magic_fixture,
-        mutate_missing_field_fixture, mutate_non_canonical_varuint_fixture,
-        mutate_passive_audit_optional_evaluation_profile_fixture,
-        mutate_proof_profile_mismatch_fixture, mutate_trailing_bytes_fixture,
-        mutate_unknown_evaluation_profile_fixture, mutate_unknown_field_fixture,
-        mutate_unknown_security_profile_fixture, mutate_unsupported_envelope_version_fixture,
-        mutate_unsupported_object_type_fixture, mutate_unsupported_object_version_fixture,
-        parse_transcript_core_object, serialize_transcript_core_object,
+        mutate_mhe_security_profile_mismatch_fixture, mutate_missing_field_fixture,
+        mutate_non_canonical_varuint_fixture,
+        mutate_result_computed_optional_evaluation_profile_fixture, mutate_trailing_bytes_fixture,
+        mutate_unknown_base_claim_profile_fixture, mutate_unknown_evaluation_profile_fixture,
+        mutate_unknown_field_fixture, mutate_unknown_mhe_security_stage_fixture,
+        mutate_unsupported_envelope_version_fixture, mutate_unsupported_object_type_fixture,
+        mutate_unsupported_object_version_fixture, parse_transcript_core_object,
+        serialize_transcript_core_object,
     },
 };
 
@@ -42,10 +46,14 @@ pub struct GoldenTranscriptCoreFixture {
     pub object_type: String,
     #[serde(rename = "objectVersion")]
     pub object_version: u64,
-    #[serde(rename = "securityProfile")]
-    pub security_profile: String,
-    #[serde(rename = "proofProfileId")]
-    pub proof_profile_id: String,
+    #[serde(rename = "baseClaimProfile")]
+    pub base_claim_profile: String,
+    #[serde(rename = "mheSecurityStage")]
+    pub mhe_security_stage: String,
+    #[serde(rename = "baseClaimProfileId")]
+    pub base_claim_profile_id: String,
+    #[serde(rename = "mheSecurityProfileId")]
+    pub mhe_security_profile_id: String,
     #[serde(rename = "heSetupProofProfileId")]
     pub he_setup_proof_profile_id: String,
     #[serde(rename = "evaluationProofProfileId")]
@@ -88,16 +96,20 @@ pub fn verify_fixture(fixture: &TranscriptCoreFixture) -> CanonicalResult<Value>
 pub fn canonical_fixture_set() -> CanonicalResult<Vec<TranscriptCoreFixture>> {
     Ok(vec![
         TranscriptCoreFixture::GoldenTranscriptCore(Box::new(build_golden_fixture(
-            "passive-audit-transcript-core",
-            SecurityProfile::PassiveAudit,
+            "result-computed-passive-mhe-transcript-core",
+            RESULT_COMPUTED_PASSIVE_MHE_PROFILE,
         )?)),
         TranscriptCoreFixture::GoldenTranscriptCore(Box::new(build_golden_fixture(
-            "evaluation-proof-transcript-core",
-            SecurityProfile::EvaluationProof,
+            "fully-verified-passive-mhe-transcript-core",
+            FULLY_VERIFIED_PASSIVE_MHE_PROFILE,
         )?)),
         TranscriptCoreFixture::GoldenTranscriptCore(Box::new(build_golden_fixture(
-            "active-security-transcript-core",
-            SecurityProfile::ActiveSecurity,
+            "result-computed-active-malicious-transcript-core",
+            RESULT_COMPUTED_ACTIVE_MALICIOUS_PROFILE,
+        )?)),
+        TranscriptCoreFixture::GoldenTranscriptCore(Box::new(build_golden_fixture(
+            "fully-verified-active-malicious-transcript-core",
+            FULLY_VERIFIED_ACTIVE_MALICIOUS_PROFILE,
         )?)),
         TranscriptCoreFixture::MalformedObject(build_malformed_fixture(
             "duplicate-field",
@@ -152,7 +164,7 @@ pub fn canonical_fixture_set() -> CanonicalResult<Vec<TranscriptCoreFixture>> {
         TranscriptCoreFixture::MalformedObject(build_malformed_fixture(
             "unsupported-envelope-version",
             mutate_unsupported_envelope_version_fixture(),
-            CanonicalErrorCode::UnsupportedEnvelopeVersion,
+            CanonicalErrorCode::UnsupportedCanonicalEnvelopeVersion,
         )),
         TranscriptCoreFixture::MalformedObject(build_malformed_fixture(
             "unsupported-object-type",
@@ -165,24 +177,34 @@ pub fn canonical_fixture_set() -> CanonicalResult<Vec<TranscriptCoreFixture>> {
             CanonicalErrorCode::UnsupportedObjectVersion,
         )),
         TranscriptCoreFixture::MalformedObject(build_malformed_fixture(
-            "unknown-security-profile",
-            mutate_unknown_security_profile_fixture(),
-            CanonicalErrorCode::UnknownSecurityProfile,
+            "unknown-base-claim-profile",
+            mutate_unknown_base_claim_profile_fixture(),
+            CanonicalErrorCode::UnknownBaseClaimProfile,
         )),
         TranscriptCoreFixture::MalformedObject(build_malformed_fixture(
-            "proof-profile-mismatch",
-            mutate_proof_profile_mismatch_fixture(),
-            CanonicalErrorCode::ProofProfileMismatch,
+            "unknown-mhe-security-stage",
+            mutate_unknown_mhe_security_stage_fixture(),
+            CanonicalErrorCode::UnknownMheSecurityStage,
         )),
         TranscriptCoreFixture::MalformedObject(build_malformed_fixture(
-            "passive-audit-optional-evaluation-profile",
-            mutate_passive_audit_optional_evaluation_profile_fixture(),
-            CanonicalErrorCode::ProofProfileMismatch,
+            "base-claim-profile-mismatch",
+            mutate_base_claim_profile_mismatch_fixture(),
+            CanonicalErrorCode::ProfileComponentMismatch,
         )),
         TranscriptCoreFixture::MalformedObject(build_malformed_fixture(
-            "evaluation-proof-missing-evaluation-profile",
-            mutate_evaluation_proof_missing_evaluation_profile_fixture(),
-            CanonicalErrorCode::ProofProfileMismatch,
+            "mhe-security-profile-mismatch",
+            mutate_mhe_security_profile_mismatch_fixture(),
+            CanonicalErrorCode::ProfileComponentMismatch,
+        )),
+        TranscriptCoreFixture::MalformedObject(build_malformed_fixture(
+            "result-computed-optional-evaluation-profile",
+            mutate_result_computed_optional_evaluation_profile_fixture(),
+            CanonicalErrorCode::ProfileComponentMismatch,
+        )),
+        TranscriptCoreFixture::MalformedObject(build_malformed_fixture(
+            "fully-verified-missing-evaluation-profile",
+            mutate_fully_verified_missing_evaluation_profile_fixture(),
+            CanonicalErrorCode::ProfileComponentMismatch,
         )),
         TranscriptCoreFixture::MalformedObject(build_malformed_fixture(
             "missing-field",
@@ -223,14 +245,24 @@ fn verify_golden_fixture(fixture: &GoldenTranscriptCoreFixture) -> CanonicalResu
         analysis.object_version,
     )?;
     compare_fixture_value(
-        "securityProfile",
-        fixture.security_profile.as_str(),
-        analysis.security_profile,
+        "baseClaimProfile",
+        fixture.base_claim_profile.as_str(),
+        analysis.base_claim_profile,
     )?;
     compare_fixture_value(
-        "proofProfileId",
-        fixture.proof_profile_id.as_str(),
-        analysis.proof_profile_id.as_str(),
+        "mheSecurityStage",
+        fixture.mhe_security_stage.as_str(),
+        analysis.mhe_security_stage,
+    )?;
+    compare_fixture_value(
+        "baseClaimProfileId",
+        fixture.base_claim_profile_id.as_str(),
+        analysis.base_claim_profile_id.as_str(),
+    )?;
+    compare_fixture_value(
+        "mheSecurityProfileId",
+        fixture.mhe_security_profile_id.as_str(),
+        analysis.mhe_security_profile_id.as_str(),
     )?;
     compare_fixture_value(
         "heSetupProofProfileId",
@@ -309,9 +341,9 @@ fn verify_malformed_fixture(fixture: &MalformedObjectFixture) -> CanonicalResult
 
 fn build_golden_fixture(
     case_name: &str,
-    security_profile: SecurityProfile,
+    profile: TranscriptCoreProfile,
 ) -> CanonicalResult<GoldenTranscriptCoreFixture> {
-    let object = canonical_transcript_core_object(security_profile);
+    let object = canonical_transcript_core_object(profile);
     let canonical_bytes = serialize_transcript_core_object(&object);
     let analysis = analyze_canonical_object(&canonical_bytes, 8)?;
 
@@ -321,8 +353,10 @@ fn build_golden_fixture(
         canonical_bytes_hex: encode_hex(&canonical_bytes),
         object_type: analysis.object_type.to_string(),
         object_version: analysis.object_version,
-        security_profile: analysis.security_profile.to_string(),
-        proof_profile_id: analysis.proof_profile_id,
+        base_claim_profile: analysis.base_claim_profile.to_string(),
+        mhe_security_stage: analysis.mhe_security_stage.to_string(),
+        base_claim_profile_id: analysis.base_claim_profile_id,
+        mhe_security_profile_id: analysis.mhe_security_profile_id,
         he_setup_proof_profile_id: analysis.he_setup_proof_profile_id,
         evaluation_proof_profile_id: analysis.evaluation_proof_profile_id,
         decryption_proof_profile_id: analysis.decryption_proof_profile_id,

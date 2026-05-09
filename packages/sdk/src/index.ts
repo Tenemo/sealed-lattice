@@ -7,9 +7,10 @@ import type {
 export type {
     CanonicalError,
     CanonicalErrorCode,
+    BaseClaimProfile,
     GoldenTranscriptCoreFixture,
     MalformedObjectFixture,
-    SecurityProfile,
+    MheSecurityStage,
     TranscriptCoreFixture,
     TranscriptCoreReplayFixture,
     TranscriptCoreStatusLabel,

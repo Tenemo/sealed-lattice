@@ -10,9 +10,9 @@ import {
 describe('transcript-core fixtures', () => {
     it('loads transcript-core fixture groups from test vectors', async () => {
         await expect(loadGoldenTranscriptCoreFixtures()).resolves.toHaveLength(
-            3,
+            4,
         );
-        await expect(loadMalformedObjectFixtures()).resolves.toHaveLength(19);
+        await expect(loadMalformedObjectFixtures()).resolves.toHaveLength(21);
     });
 
     it('verifies the replay fixture through the public package API', async () => {
@@ -21,7 +21,7 @@ describe('transcript-core fixtures', () => {
         await expect(
             verifyTranscriptCoreFixture(replayFixture.fixture),
         ).resolves.toEqual({
-            caseName: 'passive-audit-transcript-core',
+            caseName: 'result-computed-passive-mhe-transcript-core',
             label: 'TranscriptCoreVerified',
             objectHash512: replayFixture.fixture.expectedObjectHash512,
             chunkRoot: replayFixture.fixture.expectedChunkRoot,

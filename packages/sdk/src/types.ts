@@ -1,7 +1,8 @@
-export type SecurityProfile =
-    | 'PassiveAudit'
-    | 'EvaluationProof'
-    | 'ActiveSecurity';
+export type BaseClaimProfile =
+    | 'ResultComputedAuditable'
+    | 'FullyVerifiedResult';
+
+export type MheSecurityStage = 'PassiveMhePrototype' | 'ActiveMalicious';
 
 export type TranscriptCoreStatusLabel = 'TranscriptCoreVerified';
 
@@ -23,12 +24,13 @@ export type CanonicalErrorCode =
     | 'MalformedVarUint'
     | 'MissingField'
     | 'NonCanonicalVarUint'
-    | 'ProofProfileMismatch'
+    | 'ProfileComponentMismatch'
     | 'TrailingBytes'
+    | 'UnknownBaseClaimProfile'
     | 'UnknownField'
+    | 'UnknownMheSecurityStage'
     | 'UnknownProofProfile'
-    | 'UnknownSecurityProfile'
-    | 'UnsupportedEnvelopeVersion'
+    | 'UnsupportedCanonicalEnvelopeVersion'
     | 'UnsupportedObjectType'
     | 'UnsupportedObjectVersion';
 
@@ -44,8 +46,10 @@ export type GoldenTranscriptCoreFixture = {
     readonly canonicalBytesHex: string;
     readonly objectType: 'TranscriptCore';
     readonly objectVersion: 1;
-    readonly securityProfile: SecurityProfile;
-    readonly proofProfileId: string;
+    readonly baseClaimProfile: BaseClaimProfile;
+    readonly mheSecurityStage: MheSecurityStage;
+    readonly baseClaimProfileId: string;
+    readonly mheSecurityProfileId: string;
     readonly heSetupProofProfileId: string;
     readonly evaluationProofProfileId: string;
     readonly decryptionProofProfileId: string;

@@ -47,17 +47,21 @@ const findFixture = <Fixture extends NamedFixture>(
     return fixture;
 };
 
-const passiveAuditFixture = findFixture(
+const resultComputedPassiveFixture = findFixture(
     goldenTranscriptCoreFixtures,
-    'passive-audit-transcript-core',
+    'result-computed-passive-mhe-transcript-core',
 );
-const evaluationProofFixture = findFixture(
+const fullyVerifiedPassiveFixture = findFixture(
     goldenTranscriptCoreFixtures,
-    'evaluation-proof-transcript-core',
+    'fully-verified-passive-mhe-transcript-core',
 );
-const activeSecurityFixture = findFixture(
+const resultComputedActiveFixture = findFixture(
     goldenTranscriptCoreFixtures,
-    'active-security-transcript-core',
+    'result-computed-active-malicious-transcript-core',
+);
+const fullyVerifiedActiveFixture = findFixture(
+    goldenTranscriptCoreFixtures,
+    'fully-verified-active-malicious-transcript-core',
 );
 const invalidEnumFixture = findFixture(malformedObjectFixtures, 'invalid-enum');
 
@@ -156,53 +160,70 @@ describe('transcript-core kernel in Node', () => {
     it('analyzes golden transcript-core fixtures through WASM', async () => {
         const kernel = await loadTranscriptCoreKernel();
 
-        const passiveAuditAnalysis = kernel.analyzeCanonicalObject({
-            canonicalBytesHex: passiveAuditFixture.canonicalBytesHex,
-            chunkSize: passiveAuditFixture.chunkSize,
+        const resultComputedPassiveAnalysis = kernel.analyzeCanonicalObject({
+            canonicalBytesHex: resultComputedPassiveFixture.canonicalBytesHex,
+            chunkSize: resultComputedPassiveFixture.chunkSize,
         });
-        const activeSecurityAnalysis = kernel.analyzeCanonicalObject({
-            canonicalBytesHex: activeSecurityFixture.canonicalBytesHex,
-            chunkSize: activeSecurityFixture.chunkSize,
+        const resultComputedActiveAnalysis = kernel.analyzeCanonicalObject({
+            canonicalBytesHex: resultComputedActiveFixture.canonicalBytesHex,
+            chunkSize: resultComputedActiveFixture.chunkSize,
         });
-        const evaluationProofAnalysis = kernel.analyzeCanonicalObject({
-            canonicalBytesHex: evaluationProofFixture.canonicalBytesHex,
-            chunkSize: evaluationProofFixture.chunkSize,
+        const fullyVerifiedPassiveAnalysis = kernel.analyzeCanonicalObject({
+            canonicalBytesHex: fullyVerifiedPassiveFixture.canonicalBytesHex,
+            chunkSize: fullyVerifiedPassiveFixture.chunkSize,
+        });
+        const fullyVerifiedActiveAnalysis = kernel.analyzeCanonicalObject({
+            canonicalBytesHex: fullyVerifiedActiveFixture.canonicalBytesHex,
+            chunkSize: fullyVerifiedActiveFixture.chunkSize,
         });
 
-        expect(passiveAuditAnalysis.objectHash512).toBe(
-            passiveAuditFixture.expectedObjectHash512,
+        expect(resultComputedPassiveAnalysis.objectHash512).toBe(
+            resultComputedPassiveFixture.expectedObjectHash512,
         );
-        expect(passiveAuditAnalysis.chunkRoot).toBe(
-            passiveAuditFixture.expectedChunkRoot,
+        expect(resultComputedPassiveAnalysis.chunkRoot).toBe(
+            resultComputedPassiveFixture.expectedChunkRoot,
         );
-        expect(passiveAuditAnalysis.statusLabels).toEqual(
-            passiveAuditFixture.expectedStatusLabels,
+        expect(resultComputedPassiveAnalysis.statusLabels).toEqual(
+            resultComputedPassiveFixture.expectedStatusLabels,
         );
-        expect(activeSecurityAnalysis.securityProfile).toBe('ActiveSecurity');
-        expect(activeSecurityAnalysis.objectHash512).toBe(
-            activeSecurityFixture.expectedObjectHash512,
+        expect(resultComputedActiveAnalysis.baseClaimProfile).toBe(
+            'ResultComputedAuditable',
         );
-        expect(evaluationProofAnalysis.securityProfile).toBe('EvaluationProof');
-        expect(evaluationProofAnalysis.evaluationProofProfileId).toBe(
+        expect(resultComputedActiveAnalysis.mheSecurityStage).toBe(
+            'ActiveMalicious',
+        );
+        expect(resultComputedActiveAnalysis.objectHash512).toBe(
+            resultComputedActiveFixture.expectedObjectHash512,
+        );
+        expect(fullyVerifiedPassiveAnalysis.baseClaimProfile).toBe(
+            'FullyVerifiedResult',
+        );
+        expect(fullyVerifiedPassiveAnalysis.evaluationProofProfileId).toBe(
             'transcript-core-optional-evaluation-proof-profile-v1',
         );
-        expect(activeSecurityAnalysis.objectHash512).not.toBe(
-            passiveAuditAnalysis.objectHash512,
+        expect(fullyVerifiedActiveAnalysis.mheSecurityStage).toBe(
+            'ActiveMalicious',
         );
-        expect(evaluationProofAnalysis.objectHash512).not.toBe(
-            passiveAuditAnalysis.objectHash512,
+        expect(fullyVerifiedActiveAnalysis.evaluationProofProfileId).toBe(
+            'transcript-core-optional-evaluation-proof-profile-v1',
+        );
+        expect(resultComputedActiveAnalysis.objectHash512).not.toBe(
+            resultComputedPassiveAnalysis.objectHash512,
+        );
+        expect(fullyVerifiedPassiveAnalysis.objectHash512).not.toBe(
+            resultComputedPassiveAnalysis.objectHash512,
         );
     });
 
     it('verifies golden and malformed fixtures with stable outputs', async () => {
         const kernel = await loadTranscriptCoreKernel();
 
-        expect(kernel.verifyFixture(passiveAuditFixture)).toEqual({
+        expect(kernel.verifyFixture(resultComputedPassiveFixture)).toEqual({
             verified: true,
-            caseName: 'passive-audit-transcript-core',
-            objectHash512: passiveAuditFixture.expectedObjectHash512,
-            chunkRoot: passiveAuditFixture.expectedChunkRoot,
-            statusLabels: passiveAuditFixture.expectedStatusLabels,
+            caseName: 'result-computed-passive-mhe-transcript-core',
+            objectHash512: resultComputedPassiveFixture.expectedObjectHash512,
+            chunkRoot: resultComputedPassiveFixture.expectedChunkRoot,
+            statusLabels: resultComputedPassiveFixture.expectedStatusLabels,
         });
         expect(kernel.verifyFixture(invalidEnumFixture)).toEqual({
             verified: true,

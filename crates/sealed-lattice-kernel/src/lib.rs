@@ -1,4 +1,4 @@
-pub mod bgv;
+pub mod bfv_hps_rns;
 pub mod close;
 pub mod encoding;
 pub mod fixtures;
@@ -99,8 +99,8 @@ pub unsafe extern "C" fn sealed_lattice_transcript_core_command(
 #[cfg(test)]
 mod tests {
     use super::{
-        TRANSCRIPT_CORE_COMMAND_CONTRACT_VERSION, bgv, close, encoding, fixtures, hashing, proofs,
-        ring, setup, transcript_core, verifier,
+        TRANSCRIPT_CORE_COMMAND_CONTRACT_VERSION, bfv_hps_rns, close, encoding, fixtures, hashing,
+        proofs, ring, setup, transcript_core, verifier,
     };
 
     #[test]
@@ -114,7 +114,7 @@ mod tests {
         assert_eq!(transcript_core::MODULE_MARKER, "transcript-core");
         assert_eq!(fixtures::MODULE_MARKER, "fixtures");
         assert_eq!(ring::MODULE_MARKER, "ring");
-        assert_eq!(bgv::MODULE_MARKER, "bgv");
+        assert_eq!(bfv_hps_rns::MODULE_MARKER, "bfv-hps-rns");
         assert_eq!(proofs::MODULE_MARKER, "proofs");
         assert_eq!(setup::MODULE_MARKER, "setup");
         assert_eq!(close::MODULE_MARKER, "close");

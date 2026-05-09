@@ -1,6 +1,6 @@
 # sealed-lattice
 
-WORK IN PROGRESS - all versions below 1.0.0 are considered inherently unsafe, unfinished and not ready for usage, even for research purposes. Full release coming soon, work is actively in progress.
+WORK IN PROGRESS - protocol-facing APIs remain under implementation. Versions below 1.0.0 are not suitable for production or real elections.
 
 ---
 

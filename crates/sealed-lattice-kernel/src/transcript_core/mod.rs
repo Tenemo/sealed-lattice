@@ -31,10 +31,13 @@ const REQUIRED_FIELDS: [u64; 6] = [
     FIELD_CHECKPOINTS,
 ];
 
-pub const PASSIVE_AUDIT_PROOF_PROFILE_ID: &str = "transcript-core-passive-audit-proof-profile-v1";
-pub const EVALUATION_PROOF_PROFILE_ID: &str = "transcript-core-evaluation-proof-profile-v1";
-pub const ACTIVE_SECURITY_PROOF_PROFILE_ID: &str =
-    "transcript-core-active-security-proof-profile-v1";
+pub const RESULT_COMPUTED_AUDITABLE_PROFILE_ID: &str =
+    "transcript-core-result-computed-auditable-profile-v1";
+pub const FULLY_VERIFIED_RESULT_PROFILE_ID: &str =
+    "transcript-core-fully-verified-result-profile-v1";
+pub const PASSIVE_MHE_PROTOTYPE_PROFILE_ID: &str =
+    "transcript-core-passive-mhe-prototype-profile-v1";
+pub const ACTIVE_MALICIOUS_MHE_PROFILE_ID: &str = "transcript-core-active-malicious-mhe-profile-v1";
 pub const NO_HE_SETUP_PROOF_PROFILE_ID: &str = "transcript-core-no-he-setup-proof-v1";
 pub const NO_EVALUATION_PROOF_PROFILE_ID: &str = "transcript-core-no-evaluation-proof-v1";
 pub const OPTIONAL_EVALUATION_PROOF_PROFILE_ID: &str =
@@ -42,37 +45,107 @@ pub const OPTIONAL_EVALUATION_PROOF_PROFILE_ID: &str =
 pub const NO_DECRYPTION_PROOF_PROFILE_ID: &str = "transcript-core-no-decryption-proof-v1";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-pub enum SecurityProfile {
-    PassiveAudit,
-    EvaluationProof,
-    ActiveSecurity,
+pub enum BaseClaimProfile {
+    ResultComputedAuditable,
+    FullyVerifiedResult,
 }
 
-impl SecurityProfile {
+impl BaseClaimProfile {
     pub fn code(self) -> u64 {
         match self {
-            Self::PassiveAudit => 1,
-            Self::EvaluationProof => 3,
-            Self::ActiveSecurity => 2,
+            Self::ResultComputedAuditable => 1,
+            Self::FullyVerifiedResult => 2,
         }
     }
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::PassiveAudit => "PassiveAudit",
-            Self::EvaluationProof => "EvaluationProof",
-            Self::ActiveSecurity => "ActiveSecurity",
+            Self::ResultComputedAuditable => "ResultComputedAuditable",
+            Self::FullyVerifiedResult => "FullyVerifiedResult",
         }
     }
 
-    pub fn expected_proof_profile_id(self) -> &'static str {
+    pub fn expected_profile_id(self) -> &'static str {
         match self {
-            Self::PassiveAudit => PASSIVE_AUDIT_PROOF_PROFILE_ID,
-            Self::EvaluationProof => EVALUATION_PROOF_PROFILE_ID,
-            Self::ActiveSecurity => ACTIVE_SECURITY_PROOF_PROFILE_ID,
+            Self::ResultComputedAuditable => RESULT_COMPUTED_AUDITABLE_PROFILE_ID,
+            Self::FullyVerifiedResult => FULLY_VERIFIED_RESULT_PROFILE_ID,
         }
     }
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum MheSecurityStage {
+    PassiveMhePrototype,
+    ActiveMalicious,
+}
+
+impl MheSecurityStage {
+    pub fn code(self) -> u64 {
+        match self {
+            Self::PassiveMhePrototype => 1,
+            Self::ActiveMalicious => 2,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::PassiveMhePrototype => "PassiveMhePrototype",
+            Self::ActiveMalicious => "ActiveMalicious",
+        }
+    }
+
+    pub fn expected_profile_id(self) -> &'static str {
+        match self {
+            Self::PassiveMhePrototype => PASSIVE_MHE_PROTOTYPE_PROFILE_ID,
+            Self::ActiveMalicious => ACTIVE_MALICIOUS_MHE_PROFILE_ID,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TranscriptCoreProfile {
+    pub base_claim_profile: BaseClaimProfile,
+    pub mhe_security_stage: MheSecurityStage,
+}
+
+impl TranscriptCoreProfile {
+    pub const fn new(
+        base_claim_profile: BaseClaimProfile,
+        mhe_security_stage: MheSecurityStage,
+    ) -> Self {
+        Self {
+            base_claim_profile,
+            mhe_security_stage,
+        }
+    }
+
+    fn seed_label(self) -> String {
+        format!(
+            "{}:{}",
+            self.base_claim_profile.label(),
+            self.mhe_security_stage.label()
+        )
+    }
+}
+
+pub const RESULT_COMPUTED_PASSIVE_MHE_PROFILE: TranscriptCoreProfile = TranscriptCoreProfile::new(
+    BaseClaimProfile::ResultComputedAuditable,
+    MheSecurityStage::PassiveMhePrototype,
+);
+pub const FULLY_VERIFIED_PASSIVE_MHE_PROFILE: TranscriptCoreProfile = TranscriptCoreProfile::new(
+    BaseClaimProfile::FullyVerifiedResult,
+    MheSecurityStage::PassiveMhePrototype,
+);
+pub const RESULT_COMPUTED_ACTIVE_MALICIOUS_PROFILE: TranscriptCoreProfile =
+    TranscriptCoreProfile::new(
+        BaseClaimProfile::ResultComputedAuditable,
+        MheSecurityStage::ActiveMalicious,
+    );
+pub const FULLY_VERIFIED_ACTIVE_MALICIOUS_PROFILE: TranscriptCoreProfile =
+    TranscriptCoreProfile::new(
+        BaseClaimProfile::FullyVerifiedResult,
+        MheSecurityStage::ActiveMalicious,
+    );
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum TranscriptCoreStatus {
@@ -95,8 +168,10 @@ impl TranscriptCoreStatus {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TranscriptCoreObject {
-    pub security_profile: SecurityProfile,
-    pub proof_profile_id: String,
+    pub base_claim_profile: BaseClaimProfile,
+    pub mhe_security_stage: MheSecurityStage,
+    pub base_claim_profile_id: String,
+    pub mhe_security_profile_id: String,
     pub he_setup_proof_profile_id: String,
     pub evaluation_proof_profile_id: String,
     pub decryption_proof_profile_id: String,
@@ -178,10 +253,14 @@ pub struct TranscriptCoreAnalysis {
     pub object_type: &'static str,
     #[serde(rename = "objectVersion")]
     pub object_version: u64,
-    #[serde(rename = "securityProfile")]
-    pub security_profile: &'static str,
-    #[serde(rename = "proofProfileId")]
-    pub proof_profile_id: String,
+    #[serde(rename = "baseClaimProfile")]
+    pub base_claim_profile: &'static str,
+    #[serde(rename = "mheSecurityStage")]
+    pub mhe_security_stage: &'static str,
+    #[serde(rename = "baseClaimProfileId")]
+    pub base_claim_profile_id: String,
+    #[serde(rename = "mheSecurityProfileId")]
+    pub mhe_security_profile_id: String,
     #[serde(rename = "heSetupProofProfileId")]
     pub he_setup_proof_profile_id: String,
     #[serde(rename = "evaluationProofProfileId")]
@@ -250,53 +329,90 @@ pub fn decode_hex(hex: &str) -> CanonicalResult<Vec<u8>> {
     Ok(bytes)
 }
 
-pub fn canonical_transcript_core_object(security_profile: SecurityProfile) -> TranscriptCoreObject {
-    let mut fixture_rng = DeterministicFixtureRng::new(security_profile.label());
+pub fn canonical_transcript_core_object(profile: TranscriptCoreProfile) -> TranscriptCoreObject {
+    let mut fixture_rng = DeterministicFixtureRng::new(&profile.seed_label());
+    let base_claim_profile = profile.base_claim_profile;
+    let mhe_security_stage = profile.mhe_security_stage;
+    let uses_optional_evaluation_proof =
+        base_claim_profile == BaseClaimProfile::FullyVerifiedResult;
 
     TranscriptCoreObject {
-        security_profile,
-        proof_profile_id: security_profile.expected_proof_profile_id().to_string(),
+        base_claim_profile,
+        mhe_security_stage,
+        base_claim_profile_id: base_claim_profile.expected_profile_id().to_string(),
+        mhe_security_profile_id: mhe_security_stage.expected_profile_id().to_string(),
         he_setup_proof_profile_id: NO_HE_SETUP_PROOF_PROFILE_ID.to_string(),
-        evaluation_proof_profile_id: match security_profile {
-            SecurityProfile::EvaluationProof => OPTIONAL_EVALUATION_PROOF_PROFILE_ID.to_string(),
-            SecurityProfile::PassiveAudit | SecurityProfile::ActiveSecurity => {
-                NO_EVALUATION_PROOF_PROFILE_ID.to_string()
-            }
+        evaluation_proof_profile_id: if uses_optional_evaluation_proof {
+            OPTIONAL_EVALUATION_PROOF_PROFILE_ID.to_string()
+        } else {
+            NO_EVALUATION_PROOF_PROFILE_ID.to_string()
         },
         decryption_proof_profile_id: NO_DECRYPTION_PROOF_PROFILE_ID.to_string(),
-        title: match security_profile {
-            SecurityProfile::PassiveAudit => "Transcript core passive audit".to_string(),
-            SecurityProfile::EvaluationProof => "Transcript core evaluation proof".to_string(),
-            SecurityProfile::ActiveSecurity => "Transcript core active security".to_string(),
+        title: match (base_claim_profile, mhe_security_stage) {
+            (BaseClaimProfile::ResultComputedAuditable, MheSecurityStage::PassiveMhePrototype) => {
+                "Transcript core result-computed passive MHE".to_string()
+            }
+            (BaseClaimProfile::FullyVerifiedResult, MheSecurityStage::PassiveMhePrototype) => {
+                "Transcript core fully verified passive MHE".to_string()
+            }
+            (BaseClaimProfile::ResultComputedAuditable, MheSecurityStage::ActiveMalicious) => {
+                "Transcript core result-computed active malicious".to_string()
+            }
+            (BaseClaimProfile::FullyVerifiedResult, MheSecurityStage::ActiveMalicious) => {
+                "Transcript core fully verified active malicious".to_string()
+            }
         },
-        sequence: match security_profile {
-            SecurityProfile::PassiveAudit => 42,
-            SecurityProfile::EvaluationProof => 44,
-            SecurityProfile::ActiveSecurity => 43,
+        sequence: match (base_claim_profile, mhe_security_stage) {
+            (BaseClaimProfile::ResultComputedAuditable, MheSecurityStage::PassiveMhePrototype) => {
+                42
+            }
+            (BaseClaimProfile::FullyVerifiedResult, MheSecurityStage::PassiveMhePrototype) => 44,
+            (BaseClaimProfile::ResultComputedAuditable, MheSecurityStage::ActiveMalicious) => 43,
+            (BaseClaimProfile::FullyVerifiedResult, MheSecurityStage::ActiveMalicious) => 45,
         },
         payload: fixture_rng.next_bytes(6),
         status: TranscriptCoreStatus::TranscriptCoreVerified,
-        tags: match security_profile {
-            SecurityProfile::PassiveAudit => vec![
+        tags: match (base_claim_profile, mhe_security_stage) {
+            (BaseClaimProfile::ResultComputedAuditable, MheSecurityStage::PassiveMhePrototype) => {
+                vec![
+                    "canonical".to_string(),
+                    "result-computed-auditable".to_string(),
+                    "passive-mhe-prototype".to_string(),
+                    "wasm-parity".to_string(),
+                ]
+            }
+            (BaseClaimProfile::FullyVerifiedResult, MheSecurityStage::PassiveMhePrototype) => vec![
                 "canonical".to_string(),
-                "passive-audit".to_string(),
-                "wasm-parity".to_string(),
-            ],
-            SecurityProfile::EvaluationProof => vec![
-                "canonical".to_string(),
-                "evaluation-proof".to_string(),
+                "fully-verified-result".to_string(),
+                "passive-mhe-prototype".to_string(),
                 "optional-proof-reserved".to_string(),
             ],
-            SecurityProfile::ActiveSecurity => vec![
+            (BaseClaimProfile::ResultComputedAuditable, MheSecurityStage::ActiveMalicious) => vec![
                 "canonical".to_string(),
-                "active-security".to_string(),
-                "profile-reserved".to_string(),
+                "result-computed-auditable".to_string(),
+                "active-malicious".to_string(),
+                "active-proof-reserved".to_string(),
+            ],
+            (BaseClaimProfile::FullyVerifiedResult, MheSecurityStage::ActiveMalicious) => vec![
+                "canonical".to_string(),
+                "fully-verified-result".to_string(),
+                "active-malicious".to_string(),
+                "optional-proof-reserved".to_string(),
             ],
         },
-        checkpoints: match security_profile {
-            SecurityProfile::PassiveAudit => vec![1, 3, 5, 8, 13],
-            SecurityProfile::EvaluationProof => vec![3, 6, 9, 12, 15],
-            SecurityProfile::ActiveSecurity => vec![2, 4, 8, 16, 32],
+        checkpoints: match (base_claim_profile, mhe_security_stage) {
+            (BaseClaimProfile::ResultComputedAuditable, MheSecurityStage::PassiveMhePrototype) => {
+                vec![1, 3, 5, 8, 13]
+            }
+            (BaseClaimProfile::FullyVerifiedResult, MheSecurityStage::PassiveMhePrototype) => {
+                vec![3, 6, 9, 12, 15]
+            }
+            (BaseClaimProfile::ResultComputedAuditable, MheSecurityStage::ActiveMalicious) => {
+                vec![2, 4, 8, 16, 32]
+            }
+            (BaseClaimProfile::FullyVerifiedResult, MheSecurityStage::ActiveMalicious) => {
+                vec![5, 10, 15, 20, 25]
+            }
         },
     }
 }
@@ -307,8 +423,10 @@ pub fn serialize_transcript_core_object(object: &TranscriptCoreObject) -> Vec<u8
     append_varuint(&mut output, ENVELOPE_VERSION);
     append_varuint(&mut output, TRANSCRIPT_CORE_OBJECT_TYPE);
     append_varuint(&mut output, TRANSCRIPT_CORE_OBJECT_VERSION);
-    append_varuint(&mut output, object.security_profile.code());
-    append_string(&mut output, &object.proof_profile_id);
+    append_varuint(&mut output, object.base_claim_profile.code());
+    append_varuint(&mut output, object.mhe_security_stage.code());
+    append_string(&mut output, &object.base_claim_profile_id);
+    append_string(&mut output, &object.mhe_security_profile_id);
     append_string(&mut output, &object.he_setup_proof_profile_id);
     append_string(&mut output, &object.evaluation_proof_profile_id);
     append_string(&mut output, &object.decryption_proof_profile_id);
@@ -348,8 +466,8 @@ pub fn parse_transcript_core_object(bytes: &[u8]) -> CanonicalResult<TranscriptC
     let envelope_version = reader.read_varuint()?;
     if envelope_version != ENVELOPE_VERSION {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::UnsupportedEnvelopeVersion,
-            "unsupported envelope version",
+            CanonicalErrorCode::UnsupportedCanonicalEnvelopeVersion,
+            "unsupported canonical object envelope version",
         ));
     }
 
@@ -369,14 +487,18 @@ pub fn parse_transcript_core_object(bytes: &[u8]) -> CanonicalResult<TranscriptC
         ));
     }
 
-    let security_profile = parse_security_profile(reader.read_varuint()?)?;
-    let proof_profile_id = reader.read_string()?;
+    let base_claim_profile = parse_base_claim_profile(reader.read_varuint()?)?;
+    let mhe_security_stage = parse_mhe_security_stage(reader.read_varuint()?)?;
+    let base_claim_profile_id = reader.read_string()?;
+    let mhe_security_profile_id = reader.read_string()?;
     let he_setup_proof_profile_id = reader.read_string()?;
     let evaluation_proof_profile_id = reader.read_string()?;
     let decryption_proof_profile_id = reader.read_string()?;
     validate_profiles(
-        security_profile,
-        &proof_profile_id,
+        base_claim_profile,
+        mhe_security_stage,
+        &base_claim_profile_id,
+        &mhe_security_profile_id,
         &he_setup_proof_profile_id,
         &evaluation_proof_profile_id,
         &decryption_proof_profile_id,
@@ -432,8 +554,10 @@ pub fn parse_transcript_core_object(bytes: &[u8]) -> CanonicalResult<TranscriptC
     }
 
     let object = TranscriptCoreObject {
-        security_profile,
-        proof_profile_id,
+        base_claim_profile,
+        mhe_security_stage,
+        base_claim_profile_id,
+        mhe_security_profile_id,
         he_setup_proof_profile_id,
         evaluation_proof_profile_id,
         decryption_proof_profile_id,
@@ -471,8 +595,10 @@ pub fn analyze_canonical_object(
         canonical_bytes_hex: encode_hex(bytes),
         object_type: "TranscriptCore",
         object_version: TRANSCRIPT_CORE_OBJECT_VERSION,
-        security_profile: object.security_profile.label(),
-        proof_profile_id: object.proof_profile_id,
+        base_claim_profile: object.base_claim_profile.label(),
+        mhe_security_stage: object.mhe_security_stage.label(),
+        base_claim_profile_id: object.base_claim_profile_id,
+        mhe_security_profile_id: object.mhe_security_profile_id,
         he_setup_proof_profile_id: object.he_setup_proof_profile_id,
         evaluation_proof_profile_id: object.evaluation_proof_profile_id,
         decryption_proof_profile_id: object.decryption_proof_profile_id,
@@ -497,14 +623,24 @@ pub fn analyze_canonical_object_hex(
     analyze_canonical_object(&bytes, chunk_size)?.to_json_value()
 }
 
-fn parse_security_profile(value: u64) -> CanonicalResult<SecurityProfile> {
+fn parse_base_claim_profile(value: u64) -> CanonicalResult<BaseClaimProfile> {
     match value {
-        1 => Ok(SecurityProfile::PassiveAudit),
-        3 => Ok(SecurityProfile::EvaluationProof),
-        2 => Ok(SecurityProfile::ActiveSecurity),
+        1 => Ok(BaseClaimProfile::ResultComputedAuditable),
+        2 => Ok(BaseClaimProfile::FullyVerifiedResult),
         _ => Err(CanonicalError::new(
-            CanonicalErrorCode::UnknownSecurityProfile,
-            "security profile is not supported",
+            CanonicalErrorCode::UnknownBaseClaimProfile,
+            "base claim profile is not supported",
+        )),
+    }
+}
+
+fn parse_mhe_security_stage(value: u64) -> CanonicalResult<MheSecurityStage> {
+    match value {
+        1 => Ok(MheSecurityStage::PassiveMhePrototype),
+        2 => Ok(MheSecurityStage::ActiveMalicious),
+        _ => Err(CanonicalError::new(
+            CanonicalErrorCode::UnknownMheSecurityStage,
+            "MHE security stage is not supported",
         )),
     }
 }
@@ -520,27 +656,44 @@ fn parse_status(value: u64) -> CanonicalResult<TranscriptCoreStatus> {
 }
 
 fn validate_profiles(
-    security_profile: SecurityProfile,
-    proof_profile_id: &str,
+    base_claim_profile: BaseClaimProfile,
+    mhe_security_stage: MheSecurityStage,
+    base_claim_profile_id: &str,
+    mhe_security_profile_id: &str,
     he_setup_proof_profile_id: &str,
     evaluation_proof_profile_id: &str,
     decryption_proof_profile_id: &str,
 ) -> CanonicalResult<()> {
-    if proof_profile_id != security_profile.expected_proof_profile_id() {
+    if base_claim_profile_id != base_claim_profile.expected_profile_id() {
         let allowed = [
-            PASSIVE_AUDIT_PROOF_PROFILE_ID,
-            EVALUATION_PROOF_PROFILE_ID,
-            ACTIVE_SECURITY_PROOF_PROFILE_ID,
+            RESULT_COMPUTED_AUDITABLE_PROFILE_ID,
+            FULLY_VERIFIED_RESULT_PROFILE_ID,
         ];
-        if !allowed.contains(&proof_profile_id) {
+        if !allowed.contains(&base_claim_profile_id) {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::UnknownProofProfile,
-                "proof profile ID is not supported",
+                "base claim profile ID is not supported",
             ));
         }
         return Err(CanonicalError::new(
-            CanonicalErrorCode::ProofProfileMismatch,
-            "proof profile ID does not match security profile",
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "base claim profile ID does not match base claim profile",
+        ));
+    }
+    if mhe_security_profile_id != mhe_security_stage.expected_profile_id() {
+        let allowed = [
+            PASSIVE_MHE_PROTOTYPE_PROFILE_ID,
+            ACTIVE_MALICIOUS_MHE_PROFILE_ID,
+        ];
+        if !allowed.contains(&mhe_security_profile_id) {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::UnknownProofProfile,
+                "MHE security profile ID is not supported",
+            ));
+        }
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "MHE security profile ID does not match MHE security stage",
         ));
     }
     if he_setup_proof_profile_id != NO_HE_SETUP_PROOF_PROFILE_ID
@@ -553,18 +706,18 @@ fn validate_profiles(
     }
     match evaluation_proof_profile_id {
         NO_EVALUATION_PROOF_PROFILE_ID => {
-            if security_profile == SecurityProfile::EvaluationProof {
+            if base_claim_profile == BaseClaimProfile::FullyVerifiedResult {
                 return Err(CanonicalError::new(
-                    CanonicalErrorCode::ProofProfileMismatch,
-                    "EvaluationProof requires the reserved optional evaluation-proof profile",
+                    CanonicalErrorCode::ProfileComponentMismatch,
+                    "FullyVerifiedResult requires the reserved optional evaluation-proof profile",
                 ));
             }
         }
         OPTIONAL_EVALUATION_PROOF_PROFILE_ID => {
-            if security_profile != SecurityProfile::EvaluationProof {
+            if base_claim_profile != BaseClaimProfile::FullyVerifiedResult {
                 return Err(CanonicalError::new(
-                    CanonicalErrorCode::ProofProfileMismatch,
-                    "optional evaluation-proof profile does not match security profile",
+                    CanonicalErrorCode::ProfileComponentMismatch,
+                    "optional evaluation-proof profile requires FullyVerifiedResult",
                 ));
             }
         }
@@ -617,17 +770,9 @@ fn missing_field(field_name: &str) -> CanonicalError {
 }
 
 pub fn mutate_field_order_fixture() -> String {
-    let object = canonical_transcript_core_object(SecurityProfile::PassiveAudit);
+    let object = canonical_transcript_core_object(RESULT_COMPUTED_PASSIVE_MHE_PROFILE);
     let mut bytes = Vec::new();
-    bytes.extend(MAGIC);
-    append_varuint(&mut bytes, ENVELOPE_VERSION);
-    append_varuint(&mut bytes, TRANSCRIPT_CORE_OBJECT_TYPE);
-    append_varuint(&mut bytes, TRANSCRIPT_CORE_OBJECT_VERSION);
-    append_varuint(&mut bytes, object.security_profile.code());
-    append_string(&mut bytes, &object.proof_profile_id);
-    append_string(&mut bytes, &object.he_setup_proof_profile_id);
-    append_string(&mut bytes, &object.evaluation_proof_profile_id);
-    append_string(&mut bytes, &object.decryption_proof_profile_id);
+    append_transcript_core_header(&mut bytes, &object);
     append_varuint(&mut bytes, 2);
     append_varuint(&mut bytes, FIELD_SEQUENCE);
     append_varuint(&mut bytes, object.sequence);
@@ -638,17 +783,9 @@ pub fn mutate_field_order_fixture() -> String {
 }
 
 pub fn mutate_duplicate_field_fixture() -> String {
-    let object = canonical_transcript_core_object(SecurityProfile::PassiveAudit);
+    let object = canonical_transcript_core_object(RESULT_COMPUTED_PASSIVE_MHE_PROFILE);
     let mut bytes = Vec::new();
-    bytes.extend(MAGIC);
-    append_varuint(&mut bytes, ENVELOPE_VERSION);
-    append_varuint(&mut bytes, TRANSCRIPT_CORE_OBJECT_TYPE);
-    append_varuint(&mut bytes, TRANSCRIPT_CORE_OBJECT_VERSION);
-    append_varuint(&mut bytes, object.security_profile.code());
-    append_string(&mut bytes, &object.proof_profile_id);
-    append_string(&mut bytes, &object.he_setup_proof_profile_id);
-    append_string(&mut bytes, &object.evaluation_proof_profile_id);
-    append_string(&mut bytes, &object.decryption_proof_profile_id);
+    append_transcript_core_header(&mut bytes, &object);
     append_varuint(&mut bytes, 2);
     append_varuint(&mut bytes, FIELD_TITLE);
     append_string(&mut bytes, &object.title);
@@ -659,7 +796,7 @@ pub fn mutate_duplicate_field_fixture() -> String {
 }
 
 pub fn mutate_unknown_field_fixture() -> String {
-    let mut object = canonical_transcript_core_object(SecurityProfile::PassiveAudit);
+    let mut object = canonical_transcript_core_object(RESULT_COMPUTED_PASSIVE_MHE_PROFILE);
     object.tags.clear();
     let mut bytes = serialize_transcript_core_object(&object);
     let field_count_offset = header_length_before_field_count(&object);
@@ -671,17 +808,9 @@ pub fn mutate_unknown_field_fixture() -> String {
 }
 
 pub fn mutate_invalid_enum_fixture() -> String {
-    let object = canonical_transcript_core_object(SecurityProfile::PassiveAudit);
+    let object = canonical_transcript_core_object(RESULT_COMPUTED_PASSIVE_MHE_PROFILE);
     let mut bytes = Vec::new();
-    bytes.extend(MAGIC);
-    append_varuint(&mut bytes, ENVELOPE_VERSION);
-    append_varuint(&mut bytes, TRANSCRIPT_CORE_OBJECT_TYPE);
-    append_varuint(&mut bytes, TRANSCRIPT_CORE_OBJECT_VERSION);
-    append_varuint(&mut bytes, object.security_profile.code());
-    append_string(&mut bytes, &object.proof_profile_id);
-    append_string(&mut bytes, &object.he_setup_proof_profile_id);
-    append_string(&mut bytes, &object.evaluation_proof_profile_id);
-    append_string(&mut bytes, &object.decryption_proof_profile_id);
+    append_transcript_core_header(&mut bytes, &object);
     append_varuint(&mut bytes, 1);
     append_varuint(&mut bytes, FIELD_STATUS);
     append_varuint(&mut bytes, 99);
@@ -690,14 +819,16 @@ pub fn mutate_invalid_enum_fixture() -> String {
 }
 
 pub fn mutate_non_canonical_varuint_fixture() -> String {
-    let object = canonical_transcript_core_object(SecurityProfile::PassiveAudit);
+    let object = canonical_transcript_core_object(RESULT_COMPUTED_PASSIVE_MHE_PROFILE);
     let mut bytes = Vec::new();
     bytes.extend(MAGIC);
     bytes.extend([0x81, 0x00]);
     append_varuint(&mut bytes, TRANSCRIPT_CORE_OBJECT_TYPE);
     append_varuint(&mut bytes, TRANSCRIPT_CORE_OBJECT_VERSION);
-    append_varuint(&mut bytes, object.security_profile.code());
-    append_string(&mut bytes, &object.proof_profile_id);
+    append_varuint(&mut bytes, object.base_claim_profile.code());
+    append_varuint(&mut bytes, object.mhe_security_stage.code());
+    append_string(&mut bytes, &object.base_claim_profile_id);
+    append_string(&mut bytes, &object.mhe_security_profile_id);
     append_string(&mut bytes, &object.he_setup_proof_profile_id);
     append_string(&mut bytes, &object.evaluation_proof_profile_id);
     append_string(&mut bytes, &object.decryption_proof_profile_id);
@@ -707,13 +838,14 @@ pub fn mutate_non_canonical_varuint_fixture() -> String {
 }
 
 pub fn mutate_malformed_length_fixture() -> String {
-    let object = canonical_transcript_core_object(SecurityProfile::PassiveAudit);
+    let object = canonical_transcript_core_object(RESULT_COMPUTED_PASSIVE_MHE_PROFILE);
     let mut bytes = Vec::new();
     bytes.extend(MAGIC);
     append_varuint(&mut bytes, ENVELOPE_VERSION);
     append_varuint(&mut bytes, TRANSCRIPT_CORE_OBJECT_TYPE);
     append_varuint(&mut bytes, TRANSCRIPT_CORE_OBJECT_VERSION);
-    append_varuint(&mut bytes, object.security_profile.code());
+    append_varuint(&mut bytes, object.base_claim_profile.code());
+    append_varuint(&mut bytes, object.mhe_security_stage.code());
     append_varuint(&mut bytes, 10);
     bytes.extend(b"short");
 
@@ -721,7 +853,7 @@ pub fn mutate_malformed_length_fixture() -> String {
 }
 
 pub fn mutate_trailing_bytes_fixture() -> String {
-    let object = canonical_transcript_core_object(SecurityProfile::PassiveAudit);
+    let object = canonical_transcript_core_object(RESULT_COMPUTED_PASSIVE_MHE_PROFILE);
     let mut bytes = serialize_transcript_core_object(&object);
     bytes.push(0);
 
@@ -729,14 +861,14 @@ pub fn mutate_trailing_bytes_fixture() -> String {
 }
 
 pub fn mutate_invalid_profile_fixture() -> String {
-    let mut object = canonical_transcript_core_object(SecurityProfile::PassiveAudit);
-    object.proof_profile_id = "transcript-core-unknown-proof-profile".to_string();
+    let mut object = canonical_transcript_core_object(RESULT_COMPUTED_PASSIVE_MHE_PROFILE);
+    object.base_claim_profile_id = "transcript-core-unknown-base-claim-profile".to_string();
 
     encode_hex(&serialize_transcript_core_object(&object))
 }
 
 pub fn mutate_unknown_evaluation_profile_fixture() -> String {
-    let mut object = canonical_transcript_core_object(SecurityProfile::PassiveAudit);
+    let mut object = canonical_transcript_core_object(RESULT_COMPUTED_PASSIVE_MHE_PROFILE);
     object.evaluation_proof_profile_id =
         "transcript-core-unknown-evaluation-proof-profile".to_string();
 
@@ -774,7 +906,7 @@ pub fn mutate_unsupported_object_version_fixture() -> String {
     encode_hex(&bytes)
 }
 
-pub fn mutate_unknown_security_profile_fixture() -> String {
+pub fn mutate_unknown_base_claim_profile_fixture() -> String {
     let mut bytes = Vec::new();
     bytes.extend(MAGIC);
     append_varuint(&mut bytes, ENVELOPE_VERSION);
@@ -785,29 +917,48 @@ pub fn mutate_unknown_security_profile_fixture() -> String {
     encode_hex(&bytes)
 }
 
-pub fn mutate_proof_profile_mismatch_fixture() -> String {
-    let mut object = canonical_transcript_core_object(SecurityProfile::PassiveAudit);
-    object.proof_profile_id = ACTIVE_SECURITY_PROOF_PROFILE_ID.to_string();
+pub fn mutate_unknown_mhe_security_stage_fixture() -> String {
+    let mut bytes = Vec::new();
+    bytes.extend(MAGIC);
+    append_varuint(&mut bytes, ENVELOPE_VERSION);
+    append_varuint(&mut bytes, TRANSCRIPT_CORE_OBJECT_TYPE);
+    append_varuint(&mut bytes, TRANSCRIPT_CORE_OBJECT_VERSION);
+    append_varuint(&mut bytes, BaseClaimProfile::ResultComputedAuditable.code());
+    append_varuint(&mut bytes, 99);
+
+    encode_hex(&bytes)
+}
+
+pub fn mutate_base_claim_profile_mismatch_fixture() -> String {
+    let mut object = canonical_transcript_core_object(RESULT_COMPUTED_PASSIVE_MHE_PROFILE);
+    object.base_claim_profile_id = FULLY_VERIFIED_RESULT_PROFILE_ID.to_string();
 
     encode_hex(&serialize_transcript_core_object(&object))
 }
 
-pub fn mutate_passive_audit_optional_evaluation_profile_fixture() -> String {
-    let mut object = canonical_transcript_core_object(SecurityProfile::PassiveAudit);
+pub fn mutate_mhe_security_profile_mismatch_fixture() -> String {
+    let mut object = canonical_transcript_core_object(RESULT_COMPUTED_PASSIVE_MHE_PROFILE);
+    object.mhe_security_profile_id = ACTIVE_MALICIOUS_MHE_PROFILE_ID.to_string();
+
+    encode_hex(&serialize_transcript_core_object(&object))
+}
+
+pub fn mutate_result_computed_optional_evaluation_profile_fixture() -> String {
+    let mut object = canonical_transcript_core_object(RESULT_COMPUTED_PASSIVE_MHE_PROFILE);
     object.evaluation_proof_profile_id = OPTIONAL_EVALUATION_PROOF_PROFILE_ID.to_string();
 
     encode_hex(&serialize_transcript_core_object(&object))
 }
 
-pub fn mutate_evaluation_proof_missing_evaluation_profile_fixture() -> String {
-    let mut object = canonical_transcript_core_object(SecurityProfile::EvaluationProof);
+pub fn mutate_fully_verified_missing_evaluation_profile_fixture() -> String {
+    let mut object = canonical_transcript_core_object(FULLY_VERIFIED_PASSIVE_MHE_PROFILE);
     object.evaluation_proof_profile_id = NO_EVALUATION_PROOF_PROFILE_ID.to_string();
 
     encode_hex(&serialize_transcript_core_object(&object))
 }
 
 pub fn mutate_missing_field_fixture() -> String {
-    let object = canonical_transcript_core_object(SecurityProfile::PassiveAudit);
+    let object = canonical_transcript_core_object(RESULT_COMPUTED_PASSIVE_MHE_PROFILE);
     let mut bytes = Vec::new();
     append_transcript_core_header(&mut bytes, &object);
     append_varuint(&mut bytes, 0);
@@ -816,7 +967,7 @@ pub fn mutate_missing_field_fixture() -> String {
 }
 
 pub fn mutate_invalid_utf8_fixture() -> String {
-    let object = canonical_transcript_core_object(SecurityProfile::PassiveAudit);
+    let object = canonical_transcript_core_object(RESULT_COMPUTED_PASSIVE_MHE_PROFILE);
     let mut bytes = Vec::new();
     append_transcript_core_header(&mut bytes, &object);
     append_varuint(&mut bytes, 1);
@@ -832,8 +983,10 @@ fn append_transcript_core_header(output: &mut Vec<u8>, object: &TranscriptCoreOb
     append_varuint(output, ENVELOPE_VERSION);
     append_varuint(output, TRANSCRIPT_CORE_OBJECT_TYPE);
     append_varuint(output, TRANSCRIPT_CORE_OBJECT_VERSION);
-    append_varuint(output, object.security_profile.code());
-    append_string(output, &object.proof_profile_id);
+    append_varuint(output, object.base_claim_profile.code());
+    append_varuint(output, object.mhe_security_stage.code());
+    append_string(output, &object.base_claim_profile_id);
+    append_string(output, &object.mhe_security_profile_id);
     append_string(output, &object.he_setup_proof_profile_id);
     append_string(output, &object.evaluation_proof_profile_id);
     append_string(output, &object.decryption_proof_profile_id);
@@ -849,23 +1002,27 @@ fn header_length_before_field_count(object: &TranscriptCoreObject) -> usize {
 #[cfg(test)]
 mod tests {
     use super::{
-        CanonicalErrorCode, DeterministicFixtureRng, SecurityProfile, analyze_canonical_object,
-        canonical_transcript_core_object, mutate_duplicate_field_fixture,
-        mutate_evaluation_proof_missing_evaluation_profile_fixture, mutate_field_order_fixture,
-        mutate_invalid_enum_fixture, mutate_invalid_profile_fixture, mutate_invalid_utf8_fixture,
+        CanonicalErrorCode, DeterministicFixtureRng, FULLY_VERIFIED_ACTIVE_MALICIOUS_PROFILE,
+        FULLY_VERIFIED_PASSIVE_MHE_PROFILE, RESULT_COMPUTED_ACTIVE_MALICIOUS_PROFILE,
+        RESULT_COMPUTED_PASSIVE_MHE_PROFILE, analyze_canonical_object,
+        canonical_transcript_core_object, mutate_base_claim_profile_mismatch_fixture,
+        mutate_duplicate_field_fixture, mutate_field_order_fixture,
+        mutate_fully_verified_missing_evaluation_profile_fixture, mutate_invalid_enum_fixture,
+        mutate_invalid_profile_fixture, mutate_invalid_utf8_fixture,
         mutate_malformed_length_fixture, mutate_malformed_magic_fixture,
-        mutate_missing_field_fixture, mutate_non_canonical_varuint_fixture,
-        mutate_passive_audit_optional_evaluation_profile_fixture,
-        mutate_proof_profile_mismatch_fixture, mutate_trailing_bytes_fixture,
-        mutate_unknown_evaluation_profile_fixture, mutate_unknown_field_fixture,
-        mutate_unknown_security_profile_fixture, mutate_unsupported_envelope_version_fixture,
-        mutate_unsupported_object_type_fixture, mutate_unsupported_object_version_fixture,
-        parse_transcript_core_object, serialize_transcript_core_object,
+        mutate_mhe_security_profile_mismatch_fixture, mutate_missing_field_fixture,
+        mutate_non_canonical_varuint_fixture,
+        mutate_result_computed_optional_evaluation_profile_fixture, mutate_trailing_bytes_fixture,
+        mutate_unknown_base_claim_profile_fixture, mutate_unknown_evaluation_profile_fixture,
+        mutate_unknown_field_fixture, mutate_unknown_mhe_security_stage_fixture,
+        mutate_unsupported_envelope_version_fixture, mutate_unsupported_object_type_fixture,
+        mutate_unsupported_object_version_fixture, parse_transcript_core_object,
+        serialize_transcript_core_object,
     };
 
     #[test]
     fn canonical_object_round_trips_byte_identically() {
-        let object = canonical_transcript_core_object(SecurityProfile::PassiveAudit);
+        let object = canonical_transcript_core_object(RESULT_COMPUTED_PASSIVE_MHE_PROFILE);
         let canonical_bytes = serialize_transcript_core_object(&object);
         let parsed = parse_transcript_core_object(&canonical_bytes).expect("object should parse");
 
@@ -873,57 +1030,66 @@ mod tests {
     }
 
     #[test]
-    fn security_profiles_keep_the_same_shape_but_distinct_roots() {
-        let passive_audit_bytes = serialize_transcript_core_object(
-            &canonical_transcript_core_object(SecurityProfile::PassiveAudit),
+    fn profile_components_keep_the_same_shape_but_distinct_roots() {
+        let result_computed_passive_bytes = serialize_transcript_core_object(
+            &canonical_transcript_core_object(RESULT_COMPUTED_PASSIVE_MHE_PROFILE),
         );
-        let evaluation_proof_bytes = serialize_transcript_core_object(
-            &canonical_transcript_core_object(SecurityProfile::EvaluationProof),
+        let fully_verified_passive_bytes = serialize_transcript_core_object(
+            &canonical_transcript_core_object(FULLY_VERIFIED_PASSIVE_MHE_PROFILE),
         );
-        let active_security_bytes = serialize_transcript_core_object(
-            &canonical_transcript_core_object(SecurityProfile::ActiveSecurity),
+        let result_computed_active_bytes = serialize_transcript_core_object(
+            &canonical_transcript_core_object(RESULT_COMPUTED_ACTIVE_MALICIOUS_PROFILE),
         );
-        let passive_audit = analyze_canonical_object(&passive_audit_bytes, 8)
-            .expect("passive audit profile should analyze");
-        let evaluation_proof = analyze_canonical_object(&evaluation_proof_bytes, 8)
-            .expect("evaluation proof profile should analyze");
-        let active_security = analyze_canonical_object(&active_security_bytes, 8)
-            .expect("active security profile should analyze");
+        let fully_verified_active_bytes = serialize_transcript_core_object(
+            &canonical_transcript_core_object(FULLY_VERIFIED_ACTIVE_MALICIOUS_PROFILE),
+        );
+        let result_computed_passive = analyze_canonical_object(&result_computed_passive_bytes, 8)
+            .expect("result-computed passive profile should analyze");
+        let fully_verified_passive = analyze_canonical_object(&fully_verified_passive_bytes, 8)
+            .expect("fully verified passive profile should analyze");
+        let result_computed_active = analyze_canonical_object(&result_computed_active_bytes, 8)
+            .expect("result-computed active profile should analyze");
+        let fully_verified_active = analyze_canonical_object(&fully_verified_active_bytes, 8)
+            .expect("fully verified active profile should analyze");
 
-        assert_eq!(passive_audit.object_type, evaluation_proof.object_type);
-        assert_eq!(passive_audit.object_type, active_security.object_type);
         assert_eq!(
-            passive_audit.object_version,
-            evaluation_proof.object_version
-        );
-        assert_eq!(passive_audit.object_version, active_security.object_version);
-        assert_ne!(
-            passive_audit.security_profile,
-            evaluation_proof.security_profile
-        );
-        assert_ne!(
-            passive_audit.security_profile,
-            active_security.security_profile
-        );
-        assert_ne!(
-            evaluation_proof.security_profile,
-            active_security.security_profile
-        );
-        assert_ne!(
-            passive_audit.object_hash512,
-            evaluation_proof.object_hash512
-        );
-        assert_ne!(passive_audit.object_hash512, active_security.object_hash512);
-        assert_ne!(
-            evaluation_proof.object_hash512,
-            active_security.object_hash512
+            result_computed_passive.object_type,
+            fully_verified_passive.object_type
         );
         assert_eq!(
-            passive_audit.evaluation_proof_profile_id,
+            result_computed_passive.object_type,
+            result_computed_active.object_type
+        );
+        assert_eq!(
+            result_computed_passive.object_version,
+            fully_verified_active.object_version
+        );
+        assert_ne!(
+            result_computed_passive.base_claim_profile,
+            fully_verified_passive.base_claim_profile
+        );
+        assert_ne!(
+            result_computed_passive.mhe_security_stage,
+            result_computed_active.mhe_security_stage
+        );
+        assert_ne!(
+            result_computed_passive.object_hash512,
+            fully_verified_passive.object_hash512
+        );
+        assert_ne!(
+            result_computed_passive.object_hash512,
+            result_computed_active.object_hash512
+        );
+        assert_ne!(
+            fully_verified_passive.object_hash512,
+            fully_verified_active.object_hash512
+        );
+        assert_eq!(
+            result_computed_active.evaluation_proof_profile_id,
             super::NO_EVALUATION_PROOF_PROFILE_ID,
         );
         assert_eq!(
-            evaluation_proof.evaluation_proof_profile_id,
+            fully_verified_active.evaluation_proof_profile_id,
             super::OPTIONAL_EVALUATION_PROOF_PROFILE_ID,
         );
     }
@@ -998,7 +1164,7 @@ mod tests {
             ),
             (
                 mutate_unsupported_envelope_version_fixture(),
-                CanonicalErrorCode::UnsupportedEnvelopeVersion,
+                CanonicalErrorCode::UnsupportedCanonicalEnvelopeVersion,
             ),
             (
                 mutate_unsupported_object_type_fixture(),
@@ -1009,20 +1175,28 @@ mod tests {
                 CanonicalErrorCode::UnsupportedObjectVersion,
             ),
             (
-                mutate_unknown_security_profile_fixture(),
-                CanonicalErrorCode::UnknownSecurityProfile,
+                mutate_unknown_base_claim_profile_fixture(),
+                CanonicalErrorCode::UnknownBaseClaimProfile,
             ),
             (
-                mutate_proof_profile_mismatch_fixture(),
-                CanonicalErrorCode::ProofProfileMismatch,
+                mutate_unknown_mhe_security_stage_fixture(),
+                CanonicalErrorCode::UnknownMheSecurityStage,
             ),
             (
-                mutate_passive_audit_optional_evaluation_profile_fixture(),
-                CanonicalErrorCode::ProofProfileMismatch,
+                mutate_base_claim_profile_mismatch_fixture(),
+                CanonicalErrorCode::ProfileComponentMismatch,
             ),
             (
-                mutate_evaluation_proof_missing_evaluation_profile_fixture(),
-                CanonicalErrorCode::ProofProfileMismatch,
+                mutate_mhe_security_profile_mismatch_fixture(),
+                CanonicalErrorCode::ProfileComponentMismatch,
+            ),
+            (
+                mutate_result_computed_optional_evaluation_profile_fixture(),
+                CanonicalErrorCode::ProfileComponentMismatch,
+            ),
+            (
+                mutate_fully_verified_missing_evaluation_profile_fixture(),
+                CanonicalErrorCode::ProfileComponentMismatch,
             ),
             (
                 mutate_missing_field_fixture(),
