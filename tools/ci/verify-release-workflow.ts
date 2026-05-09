@@ -2,6 +2,8 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+import { parse } from 'yaml';
+
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const releaseArtifactName = 'release-package';
 const expectedReleaseArtifactPaths = [
@@ -9,13 +11,24 @@ const expectedReleaseArtifactPaths = [
     'packages/sdk/dist',
 ] as const;
 
-const getLeadingSpaceCount = (line: string): number => {
-    const leadingSpaces = /^ */.exec(line)?.[0] ?? '';
-
-    return leadingSpaces.length;
+type WorkflowStep = {
+    uses?: unknown;
+    with?: Record<string, unknown>;
 };
 
-const splitTextIntoLines = (text: string): string[] => text.split(/\r?\n/);
+type WorkflowJob = {
+    steps?: unknown;
+};
+
+type ReleaseWorkflow = {
+    jobs?: Record<string, WorkflowJob>;
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+    typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const isWorkflowStep = (value: unknown): value is WorkflowStep =>
+    isRecord(value);
 
 const stripWrappingQuotes = (value: string): string => {
     if (
@@ -26,6 +39,23 @@ const stripWrappingQuotes = (value: string): string => {
     }
 
     return value;
+};
+
+export const parseReleaseWorkflow = (workflowText: string): ReleaseWorkflow => {
+    const parsedWorkflow = parse(workflowText) as unknown;
+
+    if (!isRecord(parsedWorkflow)) {
+        throw new Error('Release workflow YAML must parse to an object.');
+    }
+
+    const jobs = parsedWorkflow.jobs;
+    if (!isRecord(jobs)) {
+        throw new Error('Release workflow is missing a jobs object.');
+    }
+
+    return {
+        jobs: jobs as Record<string, WorkflowJob>,
+    };
 };
 
 export const normalizeWorkflowPath = (workflowPath: string): string => {
@@ -43,193 +73,80 @@ const splitNormalizedPathIntoSegments = (normalizedPath: string): string[] => {
         : normalizedPath.split('/').filter(Boolean);
 };
 
-const extractIndentedBlockLines = (
-    text: string,
-    headerLineText: string,
-): string[] => {
-    const lines = splitTextIntoLines(text);
-    const headerLineIndex = lines.findIndex(
-        (line) => line.trim() === headerLineText,
-    );
-
-    if (headerLineIndex === -1) {
-        return [];
-    }
-
-    const headerIndent = getLeadingSpaceCount(lines[headerLineIndex]);
-    const blockLines: string[] = [];
-
-    for (
-        let lineIndex = headerLineIndex + 1;
-        lineIndex < lines.length;
-        lineIndex += 1
-    ) {
-        const line = lines[lineIndex];
-        const trimmedLine = line.trim();
-
-        if (trimmedLine !== '' && getLeadingSpaceCount(line) <= headerIndent) {
-            break;
-        }
-
-        blockLines.push(line);
-    }
-
-    return blockLines;
-};
-
-export const getReleaseWorkflowPath = (
-    projectRoot: string = repoRoot,
-): string => path.resolve(projectRoot, '.github', 'workflows', 'release.yml');
-
-export const extractWorkflowJobBlock = (
-    workflowText: string,
+export const getWorkflowJob = (
+    workflow: ReleaseWorkflow,
     jobName: string,
-): string => {
-    const lines = splitTextIntoLines(workflowText);
-    const jobLineText = `    ${jobName}:`;
-    const jobLineIndex = lines.findIndex((line) => line === jobLineText);
+): WorkflowJob => {
+    const job = workflow.jobs?.[jobName];
 
-    if (jobLineIndex === -1) {
+    if (!isRecord(job)) {
         throw new Error(`Release workflow is missing job ${jobName}.`);
     }
 
-    let jobEndLineIndex = lines.length;
-
-    for (
-        let lineIndex = jobLineIndex + 1;
-        lineIndex < lines.length;
-        lineIndex += 1
-    ) {
-        const line = lines[lineIndex];
-        const trimmedLine = line.trim();
-
-        if (
-            trimmedLine !== '' &&
-            getLeadingSpaceCount(line) === 4 &&
-            /^[A-Za-z0-9_-]+:$/.test(trimmedLine)
-        ) {
-            jobEndLineIndex = lineIndex;
-            break;
-        }
-    }
-
-    return lines.slice(jobLineIndex, jobEndLineIndex).join('\n');
+    return job;
 };
 
-export const extractStepBlocks = (jobBlock: string): string[] => {
-    const stepLines = extractIndentedBlockLines(jobBlock, 'steps:');
-    const candidateStepStartIndexes = stepLines
-        .map((line, index) => ({
-            index,
-            indent: getLeadingSpaceCount(line),
-            isStepStart: line.trim().startsWith('- '),
-        }))
-        .filter((candidate) => candidate.isStepStart);
+export const getWorkflowJobSteps = (
+    workflow: ReleaseWorkflow,
+    jobName: string,
+): WorkflowStep[] => {
+    const job = getWorkflowJob(workflow, jobName);
 
-    if (candidateStepStartIndexes.length === 0) {
+    if (!Array.isArray(job.steps)) {
         return [];
     }
 
-    const stepIndent = Math.min(
-        ...candidateStepStartIndexes.map((candidate) => candidate.indent),
-    );
-    const stepStartIndexes = candidateStepStartIndexes
-        .filter((candidate) => candidate.indent === stepIndent)
-        .map((candidate) => candidate.index);
-
-    return stepStartIndexes.map((startIndex, index) => {
-        const endIndex =
-            index === stepStartIndexes.length - 1
-                ? stepLines.length
-                : stepStartIndexes[index + 1];
-
-        return stepLines.slice(startIndex, endIndex).join('\n');
-    });
+    return job.steps.filter(isWorkflowStep);
 };
 
 export const extractWithScalarValue = (
-    stepBlock: string,
+    step: WorkflowStep,
     key: string,
 ): string | undefined => {
-    const withLines = extractIndentedBlockLines(stepBlock, 'with:');
+    const withValue = step.with?.[key];
 
-    for (const line of withLines) {
-        const trimmedLine = line.trim();
-
-        if (!trimmedLine.startsWith(`${key}:`)) {
-            continue;
-        }
-
-        const value = trimmedLine.slice(key.length + 1).trim();
-
-        if (value === '' || value === '|') {
-            return undefined;
-        }
-
-        return stripWrappingQuotes(value);
+    if (typeof withValue !== 'string') {
+        return undefined;
     }
 
-    return undefined;
+    const trimmedValue = withValue.trim();
+
+    return trimmedValue === '' ? undefined : stripWrappingQuotes(trimmedValue);
 };
 
 export const extractWithListValues = (
-    stepBlock: string,
+    step: WorkflowStep,
     key: string,
 ): string[] => {
-    const withLines = extractIndentedBlockLines(stepBlock, 'with:');
+    const withValue = step.with?.[key];
 
-    for (let lineIndex = 0; lineIndex < withLines.length; lineIndex += 1) {
-        const line = withLines[lineIndex];
-        const trimmedLine = line.trim();
-
-        if (!trimmedLine.startsWith(`${key}:`)) {
-            continue;
-        }
-
-        const keyIndent = getLeadingSpaceCount(line);
-        const keyValue = trimmedLine.slice(key.length + 1).trim();
-
-        if (keyValue !== '|') {
-            return keyValue === '' ? [] : [stripWrappingQuotes(keyValue)];
-        }
-
-        const listValues: string[] = [];
-
-        for (
-            let valueLineIndex = lineIndex + 1;
-            valueLineIndex < withLines.length;
-            valueLineIndex += 1
-        ) {
-            const valueLine = withLines[valueLineIndex];
-            const trimmedValueLine = valueLine.trim();
-            const valueIndent = getLeadingSpaceCount(valueLine);
-
-            if (trimmedValueLine !== '' && valueIndent <= keyIndent) {
-                break;
-            }
-
-            if (trimmedValueLine === '') {
-                continue;
-            }
-
-            listValues.push(stripWrappingQuotes(trimmedValueLine));
-        }
-
-        return listValues;
+    if (Array.isArray(withValue)) {
+        return withValue
+            .filter((value): value is string => typeof value === 'string')
+            .map((value) => stripWrappingQuotes(value.trim()))
+            .filter((value) => value !== '');
     }
 
-    return [];
+    if (typeof withValue !== 'string') {
+        return [];
+    }
+
+    return withValue
+        .split(/\r?\n/u)
+        .map((line) => stripWrappingQuotes(line.trim()))
+        .filter((line) => line !== '');
 };
 
-export const findArtifactStepBlock = (
-    jobBlock: string,
+export const findArtifactStep = (
+    workflow: ReleaseWorkflow,
+    jobName: string,
     usesReference: string,
     artifactName: string,
-): string | undefined => {
-    return extractStepBlocks(jobBlock).find((stepBlock) => {
+): WorkflowStep | undefined => {
+    return getWorkflowJobSteps(workflow, jobName).find((step) => {
         return (
-            stepBlock.includes(`uses: ${usesReference}`) &&
-            extractWithScalarValue(stepBlock, 'name') === artifactName
+            step.uses === usesReference &&
+            extractWithScalarValue(step, 'name') === artifactName
         );
     });
 };
@@ -299,25 +216,29 @@ export const findReleaseWorkflowContractFailures = (
     const failures: string[] = [];
     const expectedArtifactPaths = [...expectedReleaseArtifactPaths];
     let artifactUploadPaths: string[] = [];
+    let workflow: ReleaseWorkflow;
 
     try {
-        const prepareReleaseJobBlock = extractWorkflowJobBlock(
-            workflowText,
+        workflow = parseReleaseWorkflow(workflowText);
+    } catch (error) {
+        return [error instanceof Error ? error.message : String(error)];
+    }
+
+    try {
+        const uploadArtifactStep = findArtifactStep(
+            workflow,
             'prepare-release',
-        );
-        const uploadArtifactStepBlock = findArtifactStepBlock(
-            prepareReleaseJobBlock,
             'actions/upload-artifact@v7.0.1',
             releaseArtifactName,
         );
 
-        if (uploadArtifactStepBlock === undefined) {
+        if (uploadArtifactStep === undefined) {
             failures.push(
                 `prepare-release is missing an upload-artifact step for ${releaseArtifactName}.`,
             );
         } else {
             artifactUploadPaths = extractWithListValues(
-                uploadArtifactStepBlock,
+                uploadArtifactStep,
                 'path',
             ).map(normalizeWorkflowPath);
 
@@ -343,14 +264,14 @@ export const findReleaseWorkflowContractFailures = (
 
     for (const jobName of ['push-release', 'publish-npm']) {
         try {
-            const jobBlock = extractWorkflowJobBlock(workflowText, jobName);
-            const downloadArtifactStepBlock = findArtifactStepBlock(
-                jobBlock,
+            const downloadArtifactStep = findArtifactStep(
+                workflow,
+                jobName,
                 'actions/download-artifact@v8.0.1',
                 releaseArtifactName,
             );
 
-            if (downloadArtifactStepBlock === undefined) {
+            if (downloadArtifactStep === undefined) {
                 failures.push(
                     `${jobName} is missing a download-artifact step for ${releaseArtifactName}.`,
                 );
@@ -358,7 +279,7 @@ export const findReleaseWorkflowContractFailures = (
             }
 
             const downloadPath = extractWithScalarValue(
-                downloadArtifactStepBlock,
+                downloadArtifactStep,
                 'path',
             );
 
@@ -396,6 +317,10 @@ export const findReleaseWorkflowContractFailures = (
 
     return failures;
 };
+
+export const getReleaseWorkflowPath = (
+    projectRoot: string = repoRoot,
+): string => path.resolve(projectRoot, '.github', 'workflows', 'release.yml');
 
 const loadReleaseWorkflowText = (): string =>
     readFileSync(getReleaseWorkflowPath(), 'utf8');

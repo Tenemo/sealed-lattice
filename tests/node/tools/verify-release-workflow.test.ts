@@ -6,11 +6,11 @@ import {
     deriveArtifactArchiveRelativePaths,
     extractWithListValues,
     extractWithScalarValue,
-    extractWorkflowJobBlock,
-    findArtifactStepBlock,
+    findArtifactStep,
     findReleaseWorkflowContractFailures,
     getReleaseWorkflowPath,
     normalizeWorkflowPath,
+    parseReleaseWorkflow,
     simulateDownloadedArtifactPaths,
 } from '../../../tools/ci/verify-release-workflow';
 
@@ -72,23 +72,22 @@ describe('release workflow helpers', () => {
             'packages/sdk',
             'packages/sdk',
         );
-        const prepareReleaseJobBlock = extractWorkflowJobBlock(
-            workflowText,
+        const workflow = parseReleaseWorkflow(workflowText);
+        const uploadArtifactStep = findArtifactStep(
+            workflow,
             'prepare-release',
-        );
-        const uploadArtifactStepBlock = findArtifactStepBlock(
-            prepareReleaseJobBlock,
             'actions/upload-artifact@v7.0.1',
             'release-package',
         );
 
-        expect(uploadArtifactStepBlock).toBeDefined();
-        expect(extractWithScalarValue(uploadArtifactStepBlock!, 'name')).toBe(
+        expect(uploadArtifactStep).toBeDefined();
+        expect(extractWithScalarValue(uploadArtifactStep!, 'name')).toBe(
             'release-package',
         );
-        expect(extractWithListValues(uploadArtifactStepBlock!, 'path')).toEqual(
-            ['packages/sdk/package.json', 'packages/sdk/dist'],
-        );
+        expect(extractWithListValues(uploadArtifactStep!, 'path')).toEqual([
+            'packages/sdk/package.json',
+            'packages/sdk/dist',
+        ]);
     });
 
     it('flags release artifact downloads that would flatten package paths', () => {

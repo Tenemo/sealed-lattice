@@ -1,0 +1,89 @@
+@layer starlight.core {
+    header {
+        border-bottom: 1px solid var(--sl-color-hairline);
+        backdrop-filter: blur(18px);
+    }
+
+    .sl-markdown-content blockquote {
+        border-inline-start-color: var(--sl-color-gray-3);
+        border-radius: 0 0.75rem 0.75rem 0;
+        background: linear-gradient(
+            90deg,
+            hsla(0, 0%, 100%, 0.05),
+            transparent
+        );
+    }
+
+    .sl-markdown-content :is(h2, h3) {
+        scroll-margin-top: calc(var(--sl-nav-height) + 1rem);
+    }
+
+    .sl-markdown-content a {
+        text-decoration-thickness: 0.08em;
+        text-underline-offset: 0.18em;
+    }
+
+    @media (min-width: 72rem) {
+        html[data-has-sidebar][data-has-toc] {
+            --sl-docs-main-column-width: calc(
+                var(--sl-content-width) + 2 * var(--sl-content-pad-x)
+            );
+            --sl-docs-shell-width: calc(
+                2 * var(--sl-sidebar-width) + var(--sl-docs-main-column-width) +
+                    2 * var(--sl-docs-rail-gap)
+            );
+        }
+
+        html[data-has-sidebar][data-has-toc] .sidebar-pane {
+            inset-inline-start: max(
+                0px,
+                calc((100vw - var(--sl-docs-shell-width)) / 2)
+            );
+        }
+
+        html[data-has-sidebar][data-has-toc] .main-frame > .lg\:sl-flex {
+            display: grid;
+            grid-template-columns:
+                minmax(
+                    0,
+                    calc(var(--sl-content-width) + 2 * var(--sl-content-pad-x))
+                )
+                var(--sl-sidebar-width);
+            column-gap: var(--sl-docs-rail-gap);
+            justify-content: center;
+            align-items: start;
+        }
+
+        html[data-has-sidebar][data-has-toc] .main-pane {
+            grid-column: 1;
+            width: auto;
+            min-width: 0;
+        }
+
+        html[data-has-sidebar][data-has-toc] .right-sidebar-container {
+            grid-column: 2;
+            position: relative;
+            width: auto;
+            min-width: 0;
+        }
+
+        html[data-has-sidebar][data-has-toc] .right-sidebar {
+            position: sticky;
+            top: 0;
+            width: var(--sl-sidebar-width);
+            height: 100vh;
+            padding-top: var(--sl-nav-height);
+            border-inline-start: 1px solid var(--sl-color-hairline);
+            overflow-y: auto;
+            scrollbar-gutter: stable;
+        }
+
+        html[data-has-sidebar][data-has-toc] .right-sidebar-panel {
+            padding-inline: 0.75rem var(--sl-sidebar-pad-x);
+        }
+
+        html[data-has-sidebar][data-has-toc] .content-panel .sl-container {
+            margin-inline: 0;
+        }
+    }
+}

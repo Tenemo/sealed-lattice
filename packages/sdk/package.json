@@ -32,7 +32,8 @@
     "scripts": {
         "check": "tsc --project tsconfig.json --pretty false --noEmit",
         "build:wasm": "tsx ../../tools/ci/build-wasm-kernel.ts --out packages/sdk/dist/sealed-lattice-kernel.wasm",
-        "build": "pnpm exec del-cli dist tsconfig.tsbuildinfo && tsc --project tsconfig.json && pnpm run build:wasm"
+        "build:bridge": "tsx ../../tools/ci/build-sdk-bridge.ts",
+        "build": "pnpm exec del-cli dist tsconfig.tsbuildinfo && tsc --project tsconfig.json && pnpm run build:bridge && pnpm run build:wasm"
     },
     "keywords": [
         "cryptography",

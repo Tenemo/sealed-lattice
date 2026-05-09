@@ -47,17 +47,17 @@ const findFixture = <Fixture extends NamedFixture>(
     return fixture;
 };
 
-const stagePFixture = findFixture(
+const passiveAuditFixture = findFixture(
     goldenTranscriptCoreFixtures,
-    'stage-p-transcript-core',
+    'passive-audit-transcript-core',
 );
-const stageXFixture = findFixture(
+const evaluationProofFixture = findFixture(
     goldenTranscriptCoreFixtures,
-    'stage-x-transcript-core',
+    'evaluation-proof-transcript-core',
 );
-const stageAFixture = findFixture(
+const activeSecurityFixture = findFixture(
     goldenTranscriptCoreFixtures,
-    'stage-a-transcript-core',
+    'active-security-transcript-core',
 );
 const invalidEnumFixture = findFixture(malformedObjectFixtures, 'invalid-enum');
 
@@ -156,51 +156,53 @@ describe('transcript-core kernel in Node', () => {
     it('analyzes golden transcript-core fixtures through WASM', async () => {
         const kernel = await loadTranscriptCoreKernel();
 
-        const stagePAnalysis = kernel.analyzeCanonicalObject({
-            canonicalBytesHex: stagePFixture.canonicalBytesHex,
-            chunkSize: stagePFixture.chunkSize,
+        const passiveAuditAnalysis = kernel.analyzeCanonicalObject({
+            canonicalBytesHex: passiveAuditFixture.canonicalBytesHex,
+            chunkSize: passiveAuditFixture.chunkSize,
         });
-        const stageAAnalysis = kernel.analyzeCanonicalObject({
-            canonicalBytesHex: stageAFixture.canonicalBytesHex,
-            chunkSize: stageAFixture.chunkSize,
+        const activeSecurityAnalysis = kernel.analyzeCanonicalObject({
+            canonicalBytesHex: activeSecurityFixture.canonicalBytesHex,
+            chunkSize: activeSecurityFixture.chunkSize,
         });
-        const stageXAnalysis = kernel.analyzeCanonicalObject({
-            canonicalBytesHex: stageXFixture.canonicalBytesHex,
-            chunkSize: stageXFixture.chunkSize,
+        const evaluationProofAnalysis = kernel.analyzeCanonicalObject({
+            canonicalBytesHex: evaluationProofFixture.canonicalBytesHex,
+            chunkSize: evaluationProofFixture.chunkSize,
         });
 
-        expect(stagePAnalysis.objectHash512).toBe(
-            stagePFixture.expectedObjectHash512,
+        expect(passiveAuditAnalysis.objectHash512).toBe(
+            passiveAuditFixture.expectedObjectHash512,
         );
-        expect(stagePAnalysis.chunkRoot).toBe(stagePFixture.expectedChunkRoot);
-        expect(stagePAnalysis.statusLabels).toEqual(
-            stagePFixture.expectedStatusLabels,
+        expect(passiveAuditAnalysis.chunkRoot).toBe(
+            passiveAuditFixture.expectedChunkRoot,
         );
-        expect(stageAAnalysis.securityProfile).toBe('StageA');
-        expect(stageAAnalysis.objectHash512).toBe(
-            stageAFixture.expectedObjectHash512,
+        expect(passiveAuditAnalysis.statusLabels).toEqual(
+            passiveAuditFixture.expectedStatusLabels,
         );
-        expect(stageXAnalysis.securityProfile).toBe('StageX');
-        expect(stageXAnalysis.evaluationProofProfileId).toBe(
+        expect(activeSecurityAnalysis.securityProfile).toBe('ActiveSecurity');
+        expect(activeSecurityAnalysis.objectHash512).toBe(
+            activeSecurityFixture.expectedObjectHash512,
+        );
+        expect(evaluationProofAnalysis.securityProfile).toBe('EvaluationProof');
+        expect(evaluationProofAnalysis.evaluationProofProfileId).toBe(
             'transcript-core-optional-evaluation-proof-profile-v1',
         );
-        expect(stageAAnalysis.objectHash512).not.toBe(
-            stagePAnalysis.objectHash512,
+        expect(activeSecurityAnalysis.objectHash512).not.toBe(
+            passiveAuditAnalysis.objectHash512,
         );
-        expect(stageXAnalysis.objectHash512).not.toBe(
-            stagePAnalysis.objectHash512,
+        expect(evaluationProofAnalysis.objectHash512).not.toBe(
+            passiveAuditAnalysis.objectHash512,
         );
     });
 
     it('verifies golden and malformed fixtures with stable outputs', async () => {
         const kernel = await loadTranscriptCoreKernel();
 
-        expect(kernel.verifyFixture(stagePFixture)).toEqual({
+        expect(kernel.verifyFixture(passiveAuditFixture)).toEqual({
             verified: true,
-            caseName: 'stage-p-transcript-core',
-            objectHash512: stagePFixture.expectedObjectHash512,
-            chunkRoot: stagePFixture.expectedChunkRoot,
-            statusLabels: stagePFixture.expectedStatusLabels,
+            caseName: 'passive-audit-transcript-core',
+            objectHash512: passiveAuditFixture.expectedObjectHash512,
+            chunkRoot: passiveAuditFixture.expectedChunkRoot,
+            statusLabels: passiveAuditFixture.expectedStatusLabels,
         });
         expect(kernel.verifyFixture(invalidEnumFixture)).toEqual({
             verified: true,

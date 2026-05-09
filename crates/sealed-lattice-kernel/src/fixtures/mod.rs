@@ -5,12 +5,13 @@ use crate::{
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
     transcript_core::{
         SecurityProfile, analyze_canonical_object, canonical_transcript_core_object, decode_hex,
-        encode_hex, mutate_duplicate_field_fixture, mutate_field_order_fixture,
+        encode_hex, mutate_duplicate_field_fixture,
+        mutate_evaluation_proof_missing_evaluation_profile_fixture, mutate_field_order_fixture,
         mutate_invalid_enum_fixture, mutate_invalid_profile_fixture, mutate_invalid_utf8_fixture,
         mutate_malformed_length_fixture, mutate_malformed_magic_fixture,
         mutate_missing_field_fixture, mutate_non_canonical_varuint_fixture,
-        mutate_proof_profile_mismatch_fixture, mutate_stage_p_optional_evaluation_profile_fixture,
-        mutate_stage_x_missing_evaluation_profile_fixture, mutate_trailing_bytes_fixture,
+        mutate_passive_audit_optional_evaluation_profile_fixture,
+        mutate_proof_profile_mismatch_fixture, mutate_trailing_bytes_fixture,
         mutate_unknown_evaluation_profile_fixture, mutate_unknown_field_fixture,
         mutate_unknown_security_profile_fixture, mutate_unsupported_envelope_version_fixture,
         mutate_unsupported_object_type_fixture, mutate_unsupported_object_version_fixture,
@@ -87,16 +88,16 @@ pub fn verify_fixture(fixture: &TranscriptCoreFixture) -> CanonicalResult<Value>
 pub fn canonical_fixture_set() -> CanonicalResult<Vec<TranscriptCoreFixture>> {
     Ok(vec![
         TranscriptCoreFixture::GoldenTranscriptCore(Box::new(build_golden_fixture(
-            "stage-p-transcript-core",
-            SecurityProfile::StageP,
+            "passive-audit-transcript-core",
+            SecurityProfile::PassiveAudit,
         )?)),
         TranscriptCoreFixture::GoldenTranscriptCore(Box::new(build_golden_fixture(
-            "stage-x-transcript-core",
-            SecurityProfile::StageX,
+            "evaluation-proof-transcript-core",
+            SecurityProfile::EvaluationProof,
         )?)),
         TranscriptCoreFixture::GoldenTranscriptCore(Box::new(build_golden_fixture(
-            "stage-a-transcript-core",
-            SecurityProfile::StageA,
+            "active-security-transcript-core",
+            SecurityProfile::ActiveSecurity,
         )?)),
         TranscriptCoreFixture::MalformedObject(build_malformed_fixture(
             "duplicate-field",
@@ -174,13 +175,13 @@ pub fn canonical_fixture_set() -> CanonicalResult<Vec<TranscriptCoreFixture>> {
             CanonicalErrorCode::ProofProfileMismatch,
         )),
         TranscriptCoreFixture::MalformedObject(build_malformed_fixture(
-            "stage-p-optional-evaluation-profile",
-            mutate_stage_p_optional_evaluation_profile_fixture(),
+            "passive-audit-optional-evaluation-profile",
+            mutate_passive_audit_optional_evaluation_profile_fixture(),
             CanonicalErrorCode::ProofProfileMismatch,
         )),
         TranscriptCoreFixture::MalformedObject(build_malformed_fixture(
-            "stage-x-missing-evaluation-profile",
-            mutate_stage_x_missing_evaluation_profile_fixture(),
+            "evaluation-proof-missing-evaluation-profile",
+            mutate_evaluation_proof_missing_evaluation_profile_fixture(),
             CanonicalErrorCode::ProofProfileMismatch,
         )),
         TranscriptCoreFixture::MalformedObject(build_malformed_fixture(

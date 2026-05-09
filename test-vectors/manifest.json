@@ -3,15 +3,15 @@
   "entries": [
     {
       "path": "transcript-core/golden-transcript-core.json",
-      "sha256": "3f0a2a28051104facac779de9eb171241314fd392dd35ceab58f1ea79e3b6b8f"
+      "sha256": "f6925b001740cc6e32ad44660ff155511d7fa886cf962072b33e28444d24a85b"
     },
     {
       "path": "transcript-core/malformed-objects.json",
-      "sha256": "95241899ce330aecba30442eb4fba7afbecf34ea8442b52ba773a1b743a3f6c3"
+      "sha256": "cad7c532ef9cbc46cdea1ffb16b9aeb2365a11513b52f0c12e8ba94b99b6add0"
     },
     {
       "path": "transcript-core/transcript-core-replay.json",
-      "sha256": "2e4fcf93d7266784c517826e2f6a645acb61ccb9c3836994e34a2b3df54a4262"
+      "sha256": "d389e7d1694cca8d2c09ecf45e6a2fc8fb85d798ce2eb0d9fca37d8b469ad60f"
     }
   ]
 }

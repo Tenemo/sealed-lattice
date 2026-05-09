@@ -31,9 +31,10 @@ const REQUIRED_FIELDS: [u64; 6] = [
     FIELD_CHECKPOINTS,
 ];
 
-pub const STAGE_P_PROOF_PROFILE_ID: &str = "transcript-core-stage-p-proof-profile-v1";
-pub const STAGE_X_PROOF_PROFILE_ID: &str = "transcript-core-stage-x-proof-profile-v1";
-pub const STAGE_A_PROOF_PROFILE_ID: &str = "transcript-core-stage-a-proof-profile-v1";
+pub const PASSIVE_AUDIT_PROOF_PROFILE_ID: &str = "transcript-core-passive-audit-proof-profile-v1";
+pub const EVALUATION_PROOF_PROFILE_ID: &str = "transcript-core-evaluation-proof-profile-v1";
+pub const ACTIVE_SECURITY_PROOF_PROFILE_ID: &str =
+    "transcript-core-active-security-proof-profile-v1";
 pub const NO_HE_SETUP_PROOF_PROFILE_ID: &str = "transcript-core-no-he-setup-proof-v1";
 pub const NO_EVALUATION_PROOF_PROFILE_ID: &str = "transcript-core-no-evaluation-proof-v1";
 pub const OPTIONAL_EVALUATION_PROOF_PROFILE_ID: &str =
@@ -42,33 +43,33 @@ pub const NO_DECRYPTION_PROOF_PROFILE_ID: &str = "transcript-core-no-decryption-
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum SecurityProfile {
-    StageP,
-    StageX,
-    StageA,
+    PassiveAudit,
+    EvaluationProof,
+    ActiveSecurity,
 }
 
 impl SecurityProfile {
     pub fn code(self) -> u64 {
         match self {
-            Self::StageP => 1,
-            Self::StageX => 3,
-            Self::StageA => 2,
+            Self::PassiveAudit => 1,
+            Self::EvaluationProof => 3,
+            Self::ActiveSecurity => 2,
         }
     }
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::StageP => "StageP",
-            Self::StageX => "StageX",
-            Self::StageA => "StageA",
+            Self::PassiveAudit => "PassiveAudit",
+            Self::EvaluationProof => "EvaluationProof",
+            Self::ActiveSecurity => "ActiveSecurity",
         }
     }
 
     pub fn expected_proof_profile_id(self) -> &'static str {
         match self {
-            Self::StageP => STAGE_P_PROOF_PROFILE_ID,
-            Self::StageX => STAGE_X_PROOF_PROFILE_ID,
-            Self::StageA => STAGE_A_PROOF_PROFILE_ID,
+            Self::PassiveAudit => PASSIVE_AUDIT_PROOF_PROFILE_ID,
+            Self::EvaluationProof => EVALUATION_PROOF_PROFILE_ID,
+            Self::ActiveSecurity => ACTIVE_SECURITY_PROOF_PROFILE_ID,
         }
     }
 }
@@ -257,45 +258,45 @@ pub fn canonical_transcript_core_object(security_profile: SecurityProfile) -> Tr
         proof_profile_id: security_profile.expected_proof_profile_id().to_string(),
         he_setup_proof_profile_id: NO_HE_SETUP_PROOF_PROFILE_ID.to_string(),
         evaluation_proof_profile_id: match security_profile {
-            SecurityProfile::StageX => OPTIONAL_EVALUATION_PROOF_PROFILE_ID.to_string(),
-            SecurityProfile::StageP | SecurityProfile::StageA => {
+            SecurityProfile::EvaluationProof => OPTIONAL_EVALUATION_PROOF_PROFILE_ID.to_string(),
+            SecurityProfile::PassiveAudit | SecurityProfile::ActiveSecurity => {
                 NO_EVALUATION_PROOF_PROFILE_ID.to_string()
             }
         },
         decryption_proof_profile_id: NO_DECRYPTION_PROOF_PROFILE_ID.to_string(),
         title: match security_profile {
-            SecurityProfile::StageP => "Transcript core stage p".to_string(),
-            SecurityProfile::StageX => "Transcript core stage x".to_string(),
-            SecurityProfile::StageA => "Transcript core stage a".to_string(),
+            SecurityProfile::PassiveAudit => "Transcript core passive audit".to_string(),
+            SecurityProfile::EvaluationProof => "Transcript core evaluation proof".to_string(),
+            SecurityProfile::ActiveSecurity => "Transcript core active security".to_string(),
         },
         sequence: match security_profile {
-            SecurityProfile::StageP => 42,
-            SecurityProfile::StageX => 44,
-            SecurityProfile::StageA => 43,
+            SecurityProfile::PassiveAudit => 42,
+            SecurityProfile::EvaluationProof => 44,
+            SecurityProfile::ActiveSecurity => 43,
         },
         payload: fixture_rng.next_bytes(6),
         status: TranscriptCoreStatus::TranscriptCoreVerified,
         tags: match security_profile {
-            SecurityProfile::StageP => vec![
+            SecurityProfile::PassiveAudit => vec![
                 "canonical".to_string(),
-                "stage-p".to_string(),
+                "passive-audit".to_string(),
                 "wasm-parity".to_string(),
             ],
-            SecurityProfile::StageX => vec![
+            SecurityProfile::EvaluationProof => vec![
                 "canonical".to_string(),
-                "stage-x".to_string(),
+                "evaluation-proof".to_string(),
                 "optional-proof-reserved".to_string(),
             ],
-            SecurityProfile::StageA => vec![
+            SecurityProfile::ActiveSecurity => vec![
                 "canonical".to_string(),
-                "stage-a".to_string(),
+                "active-security".to_string(),
                 "profile-reserved".to_string(),
             ],
         },
         checkpoints: match security_profile {
-            SecurityProfile::StageP => vec![1, 3, 5, 8, 13],
-            SecurityProfile::StageX => vec![3, 6, 9, 12, 15],
-            SecurityProfile::StageA => vec![2, 4, 8, 16, 32],
+            SecurityProfile::PassiveAudit => vec![1, 3, 5, 8, 13],
+            SecurityProfile::EvaluationProof => vec![3, 6, 9, 12, 15],
+            SecurityProfile::ActiveSecurity => vec![2, 4, 8, 16, 32],
         },
     }
 }
@@ -498,9 +499,9 @@ pub fn analyze_canonical_object_hex(
 
 fn parse_security_profile(value: u64) -> CanonicalResult<SecurityProfile> {
     match value {
-        1 => Ok(SecurityProfile::StageP),
-        3 => Ok(SecurityProfile::StageX),
-        2 => Ok(SecurityProfile::StageA),
+        1 => Ok(SecurityProfile::PassiveAudit),
+        3 => Ok(SecurityProfile::EvaluationProof),
+        2 => Ok(SecurityProfile::ActiveSecurity),
         _ => Err(CanonicalError::new(
             CanonicalErrorCode::UnknownSecurityProfile,
             "security profile is not supported",
@@ -527,9 +528,9 @@ fn validate_profiles(
 ) -> CanonicalResult<()> {
     if proof_profile_id != security_profile.expected_proof_profile_id() {
         let allowed = [
-            STAGE_P_PROOF_PROFILE_ID,
-            STAGE_X_PROOF_PROFILE_ID,
-            STAGE_A_PROOF_PROFILE_ID,
+            PASSIVE_AUDIT_PROOF_PROFILE_ID,
+            EVALUATION_PROOF_PROFILE_ID,
+            ACTIVE_SECURITY_PROOF_PROFILE_ID,
         ];
         if !allowed.contains(&proof_profile_id) {
             return Err(CanonicalError::new(
@@ -552,15 +553,15 @@ fn validate_profiles(
     }
     match evaluation_proof_profile_id {
         NO_EVALUATION_PROOF_PROFILE_ID => {
-            if security_profile == SecurityProfile::StageX {
+            if security_profile == SecurityProfile::EvaluationProof {
                 return Err(CanonicalError::new(
                     CanonicalErrorCode::ProofProfileMismatch,
-                    "StageX requires the reserved optional evaluation-proof profile",
+                    "EvaluationProof requires the reserved optional evaluation-proof profile",
                 ));
             }
         }
         OPTIONAL_EVALUATION_PROOF_PROFILE_ID => {
-            if security_profile != SecurityProfile::StageX {
+            if security_profile != SecurityProfile::EvaluationProof {
                 return Err(CanonicalError::new(
                     CanonicalErrorCode::ProofProfileMismatch,
                     "optional evaluation-proof profile does not match security profile",
@@ -616,7 +617,7 @@ fn missing_field(field_name: &str) -> CanonicalError {
 }
 
 pub fn mutate_field_order_fixture() -> String {
-    let object = canonical_transcript_core_object(SecurityProfile::StageP);
+    let object = canonical_transcript_core_object(SecurityProfile::PassiveAudit);
     let mut bytes = Vec::new();
     bytes.extend(MAGIC);
     append_varuint(&mut bytes, ENVELOPE_VERSION);
@@ -637,7 +638,7 @@ pub fn mutate_field_order_fixture() -> String {
 }
 
 pub fn mutate_duplicate_field_fixture() -> String {
-    let object = canonical_transcript_core_object(SecurityProfile::StageP);
+    let object = canonical_transcript_core_object(SecurityProfile::PassiveAudit);
     let mut bytes = Vec::new();
     bytes.extend(MAGIC);
     append_varuint(&mut bytes, ENVELOPE_VERSION);
@@ -658,7 +659,7 @@ pub fn mutate_duplicate_field_fixture() -> String {
 }
 
 pub fn mutate_unknown_field_fixture() -> String {
-    let mut object = canonical_transcript_core_object(SecurityProfile::StageP);
+    let mut object = canonical_transcript_core_object(SecurityProfile::PassiveAudit);
     object.tags.clear();
     let mut bytes = serialize_transcript_core_object(&object);
     let field_count_offset = header_length_before_field_count(&object);
@@ -670,7 +671,7 @@ pub fn mutate_unknown_field_fixture() -> String {
 }
 
 pub fn mutate_invalid_enum_fixture() -> String {
-    let object = canonical_transcript_core_object(SecurityProfile::StageP);
+    let object = canonical_transcript_core_object(SecurityProfile::PassiveAudit);
     let mut bytes = Vec::new();
     bytes.extend(MAGIC);
     append_varuint(&mut bytes, ENVELOPE_VERSION);
@@ -689,7 +690,7 @@ pub fn mutate_invalid_enum_fixture() -> String {
 }
 
 pub fn mutate_non_canonical_varuint_fixture() -> String {
-    let object = canonical_transcript_core_object(SecurityProfile::StageP);
+    let object = canonical_transcript_core_object(SecurityProfile::PassiveAudit);
     let mut bytes = Vec::new();
     bytes.extend(MAGIC);
     bytes.extend([0x81, 0x00]);
@@ -706,7 +707,7 @@ pub fn mutate_non_canonical_varuint_fixture() -> String {
 }
 
 pub fn mutate_malformed_length_fixture() -> String {
-    let object = canonical_transcript_core_object(SecurityProfile::StageP);
+    let object = canonical_transcript_core_object(SecurityProfile::PassiveAudit);
     let mut bytes = Vec::new();
     bytes.extend(MAGIC);
     append_varuint(&mut bytes, ENVELOPE_VERSION);
@@ -720,7 +721,7 @@ pub fn mutate_malformed_length_fixture() -> String {
 }
 
 pub fn mutate_trailing_bytes_fixture() -> String {
-    let object = canonical_transcript_core_object(SecurityProfile::StageP);
+    let object = canonical_transcript_core_object(SecurityProfile::PassiveAudit);
     let mut bytes = serialize_transcript_core_object(&object);
     bytes.push(0);
 
@@ -728,14 +729,14 @@ pub fn mutate_trailing_bytes_fixture() -> String {
 }
 
 pub fn mutate_invalid_profile_fixture() -> String {
-    let mut object = canonical_transcript_core_object(SecurityProfile::StageP);
+    let mut object = canonical_transcript_core_object(SecurityProfile::PassiveAudit);
     object.proof_profile_id = "transcript-core-unknown-proof-profile".to_string();
 
     encode_hex(&serialize_transcript_core_object(&object))
 }
 
 pub fn mutate_unknown_evaluation_profile_fixture() -> String {
-    let mut object = canonical_transcript_core_object(SecurityProfile::StageP);
+    let mut object = canonical_transcript_core_object(SecurityProfile::PassiveAudit);
     object.evaluation_proof_profile_id =
         "transcript-core-unknown-evaluation-proof-profile".to_string();
 
@@ -785,28 +786,28 @@ pub fn mutate_unknown_security_profile_fixture() -> String {
 }
 
 pub fn mutate_proof_profile_mismatch_fixture() -> String {
-    let mut object = canonical_transcript_core_object(SecurityProfile::StageP);
-    object.proof_profile_id = STAGE_A_PROOF_PROFILE_ID.to_string();
+    let mut object = canonical_transcript_core_object(SecurityProfile::PassiveAudit);
+    object.proof_profile_id = ACTIVE_SECURITY_PROOF_PROFILE_ID.to_string();
 
     encode_hex(&serialize_transcript_core_object(&object))
 }
 
-pub fn mutate_stage_p_optional_evaluation_profile_fixture() -> String {
-    let mut object = canonical_transcript_core_object(SecurityProfile::StageP);
+pub fn mutate_passive_audit_optional_evaluation_profile_fixture() -> String {
+    let mut object = canonical_transcript_core_object(SecurityProfile::PassiveAudit);
     object.evaluation_proof_profile_id = OPTIONAL_EVALUATION_PROOF_PROFILE_ID.to_string();
 
     encode_hex(&serialize_transcript_core_object(&object))
 }
 
-pub fn mutate_stage_x_missing_evaluation_profile_fixture() -> String {
-    let mut object = canonical_transcript_core_object(SecurityProfile::StageX);
+pub fn mutate_evaluation_proof_missing_evaluation_profile_fixture() -> String {
+    let mut object = canonical_transcript_core_object(SecurityProfile::EvaluationProof);
     object.evaluation_proof_profile_id = NO_EVALUATION_PROOF_PROFILE_ID.to_string();
 
     encode_hex(&serialize_transcript_core_object(&object))
 }
 
 pub fn mutate_missing_field_fixture() -> String {
-    let object = canonical_transcript_core_object(SecurityProfile::StageP);
+    let object = canonical_transcript_core_object(SecurityProfile::PassiveAudit);
     let mut bytes = Vec::new();
     append_transcript_core_header(&mut bytes, &object);
     append_varuint(&mut bytes, 0);
@@ -815,7 +816,7 @@ pub fn mutate_missing_field_fixture() -> String {
 }
 
 pub fn mutate_invalid_utf8_fixture() -> String {
-    let object = canonical_transcript_core_object(SecurityProfile::StageP);
+    let object = canonical_transcript_core_object(SecurityProfile::PassiveAudit);
     let mut bytes = Vec::new();
     append_transcript_core_header(&mut bytes, &object);
     append_varuint(&mut bytes, 1);
@@ -850,12 +851,12 @@ mod tests {
     use super::{
         CanonicalErrorCode, DeterministicFixtureRng, SecurityProfile, analyze_canonical_object,
         canonical_transcript_core_object, mutate_duplicate_field_fixture,
-        mutate_field_order_fixture, mutate_invalid_enum_fixture, mutate_invalid_profile_fixture,
-        mutate_invalid_utf8_fixture, mutate_malformed_length_fixture,
-        mutate_malformed_magic_fixture, mutate_missing_field_fixture,
-        mutate_non_canonical_varuint_fixture, mutate_proof_profile_mismatch_fixture,
-        mutate_stage_p_optional_evaluation_profile_fixture,
-        mutate_stage_x_missing_evaluation_profile_fixture, mutate_trailing_bytes_fixture,
+        mutate_evaluation_proof_missing_evaluation_profile_fixture, mutate_field_order_fixture,
+        mutate_invalid_enum_fixture, mutate_invalid_profile_fixture, mutate_invalid_utf8_fixture,
+        mutate_malformed_length_fixture, mutate_malformed_magic_fixture,
+        mutate_missing_field_fixture, mutate_non_canonical_varuint_fixture,
+        mutate_passive_audit_optional_evaluation_profile_fixture,
+        mutate_proof_profile_mismatch_fixture, mutate_trailing_bytes_fixture,
         mutate_unknown_evaluation_profile_fixture, mutate_unknown_field_fixture,
         mutate_unknown_security_profile_fixture, mutate_unsupported_envelope_version_fixture,
         mutate_unsupported_object_type_fixture, mutate_unsupported_object_version_fixture,
@@ -864,7 +865,7 @@ mod tests {
 
     #[test]
     fn canonical_object_round_trips_byte_identically() {
-        let object = canonical_transcript_core_object(SecurityProfile::StageP);
+        let object = canonical_transcript_core_object(SecurityProfile::PassiveAudit);
         let canonical_bytes = serialize_transcript_core_object(&object);
         let parsed = parse_transcript_core_object(&canonical_bytes).expect("object should parse");
 
@@ -872,36 +873,57 @@ mod tests {
     }
 
     #[test]
-    fn stage_profiles_keep_the_same_shape_but_distinct_roots() {
-        let stage_p_bytes = serialize_transcript_core_object(&canonical_transcript_core_object(
-            SecurityProfile::StageP,
-        ));
-        let stage_x_bytes = serialize_transcript_core_object(&canonical_transcript_core_object(
-            SecurityProfile::StageX,
-        ));
-        let stage_a_bytes = serialize_transcript_core_object(&canonical_transcript_core_object(
-            SecurityProfile::StageA,
-        ));
-        let stage_p = analyze_canonical_object(&stage_p_bytes, 8).expect("stage p should analyze");
-        let stage_x = analyze_canonical_object(&stage_x_bytes, 8).expect("stage x should analyze");
-        let stage_a = analyze_canonical_object(&stage_a_bytes, 8).expect("stage a should analyze");
+    fn security_profiles_keep_the_same_shape_but_distinct_roots() {
+        let passive_audit_bytes = serialize_transcript_core_object(
+            &canonical_transcript_core_object(SecurityProfile::PassiveAudit),
+        );
+        let evaluation_proof_bytes = serialize_transcript_core_object(
+            &canonical_transcript_core_object(SecurityProfile::EvaluationProof),
+        );
+        let active_security_bytes = serialize_transcript_core_object(
+            &canonical_transcript_core_object(SecurityProfile::ActiveSecurity),
+        );
+        let passive_audit = analyze_canonical_object(&passive_audit_bytes, 8)
+            .expect("passive audit profile should analyze");
+        let evaluation_proof = analyze_canonical_object(&evaluation_proof_bytes, 8)
+            .expect("evaluation proof profile should analyze");
+        let active_security = analyze_canonical_object(&active_security_bytes, 8)
+            .expect("active security profile should analyze");
 
-        assert_eq!(stage_p.object_type, stage_x.object_type);
-        assert_eq!(stage_p.object_type, stage_a.object_type);
-        assert_eq!(stage_p.object_version, stage_x.object_version);
-        assert_eq!(stage_p.object_version, stage_a.object_version);
-        assert_ne!(stage_p.security_profile, stage_x.security_profile);
-        assert_ne!(stage_p.security_profile, stage_a.security_profile);
-        assert_ne!(stage_x.security_profile, stage_a.security_profile);
-        assert_ne!(stage_p.object_hash512, stage_x.object_hash512);
-        assert_ne!(stage_p.object_hash512, stage_a.object_hash512);
-        assert_ne!(stage_x.object_hash512, stage_a.object_hash512);
+        assert_eq!(passive_audit.object_type, evaluation_proof.object_type);
+        assert_eq!(passive_audit.object_type, active_security.object_type);
         assert_eq!(
-            stage_p.evaluation_proof_profile_id,
+            passive_audit.object_version,
+            evaluation_proof.object_version
+        );
+        assert_eq!(passive_audit.object_version, active_security.object_version);
+        assert_ne!(
+            passive_audit.security_profile,
+            evaluation_proof.security_profile
+        );
+        assert_ne!(
+            passive_audit.security_profile,
+            active_security.security_profile
+        );
+        assert_ne!(
+            evaluation_proof.security_profile,
+            active_security.security_profile
+        );
+        assert_ne!(
+            passive_audit.object_hash512,
+            evaluation_proof.object_hash512
+        );
+        assert_ne!(passive_audit.object_hash512, active_security.object_hash512);
+        assert_ne!(
+            evaluation_proof.object_hash512,
+            active_security.object_hash512
+        );
+        assert_eq!(
+            passive_audit.evaluation_proof_profile_id,
             super::NO_EVALUATION_PROOF_PROFILE_ID,
         );
         assert_eq!(
-            stage_x.evaluation_proof_profile_id,
+            evaluation_proof.evaluation_proof_profile_id,
             super::OPTIONAL_EVALUATION_PROOF_PROFILE_ID,
         );
     }
@@ -995,11 +1017,11 @@ mod tests {
                 CanonicalErrorCode::ProofProfileMismatch,
             ),
             (
-                mutate_stage_p_optional_evaluation_profile_fixture(),
+                mutate_passive_audit_optional_evaluation_profile_fixture(),
                 CanonicalErrorCode::ProofProfileMismatch,
             ),
             (
-                mutate_stage_x_missing_evaluation_profile_fixture(),
+                mutate_evaluation_proof_missing_evaluation_profile_fixture(),
                 CanonicalErrorCode::ProofProfileMismatch,
             ),
             (

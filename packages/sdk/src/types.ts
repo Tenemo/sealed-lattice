@@ -1,4 +1,7 @@
-export type SecurityProfile = 'StageP' | 'StageX' | 'StageA';
+export type SecurityProfile =
+    | 'PassiveAudit'
+    | 'EvaluationProof'
+    | 'ActiveSecurity';
 
 export type TranscriptCoreStatusLabel = 'TranscriptCoreVerified';
 

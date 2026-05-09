@@ -34,9 +34,9 @@ const findFixture = <Fixture extends NamedFixture>(
     return fixture;
 };
 
-const stagePFixture = findFixture(
+const passiveAuditFixture = findFixture(
     goldenTranscriptCoreFixtures,
-    'stage-p-transcript-core',
+    'passive-audit-transcript-core',
 );
 const invalidEnumFixture = findFixture(malformedObjectFixtures, 'invalid-enum');
 
@@ -58,12 +58,12 @@ describe('transcript-core kernel in browsers', () => {
     it('verifies the golden transcript-core fixture', async () => {
         const kernel = await loadTranscriptCoreKernel();
 
-        expect(kernel.verifyFixture(stagePFixture)).toEqual({
+        expect(kernel.verifyFixture(passiveAuditFixture)).toEqual({
             verified: true,
-            caseName: 'stage-p-transcript-core',
-            objectHash512: stagePFixture.expectedObjectHash512,
-            chunkRoot: stagePFixture.expectedChunkRoot,
-            statusLabels: stagePFixture.expectedStatusLabels,
+            caseName: 'passive-audit-transcript-core',
+            objectHash512: passiveAuditFixture.expectedObjectHash512,
+            chunkRoot: passiveAuditFixture.expectedChunkRoot,
+            statusLabels: passiveAuditFixture.expectedStatusLabels,
         });
     });
 

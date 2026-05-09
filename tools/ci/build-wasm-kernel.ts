@@ -1,31 +1,51 @@
 import { spawnSync } from 'node:child_process';
 import { copyFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const cargoTargetDirectory = path.resolve(repoRoot, 'target');
 
-const resolveOutputFilePath = (
+const isWithinDirectory = (
+    directoryPath: string,
+    candidatePath: string,
+): boolean => {
+    const relativePath = path.relative(directoryPath, candidatePath);
+
+    return (
+        relativePath === '' ||
+        (!relativePath.startsWith('..') && !path.isAbsolute(relativePath))
+    );
+};
+
+export const resolveOutputFilePath = (
     commandLineArguments: readonly string[],
+    projectRoot: string = repoRoot,
 ): string => {
     const outputIndex = commandLineArguments.indexOf('--out');
-    if (outputIndex === -1) {
-        return path.resolve(
-            repoRoot,
-            'packages',
-            'wasm',
-            'dist',
-            'sealed-lattice-kernel.wasm',
-        );
-    }
+    const outputPath =
+        outputIndex === -1
+            ? path.join(
+                  'packages',
+                  'wasm',
+                  'dist',
+                  'sealed-lattice-kernel.wasm',
+              )
+            : commandLineArguments[outputIndex + 1];
 
-    const outputPath = commandLineArguments[outputIndex + 1];
     if (outputPath === undefined) {
         throw new Error('--out requires a repository-relative output path');
     }
+    if (path.isAbsolute(outputPath)) {
+        throw new Error('--out must be repository-relative');
+    }
 
-    return path.resolve(repoRoot, outputPath);
+    const resolvedOutputPath = path.resolve(projectRoot, outputPath);
+    if (!isWithinDirectory(projectRoot, resolvedOutputPath)) {
+        throw new Error('--out must resolve inside the repository');
+    }
+
+    return resolvedOutputPath;
 };
 
 const runCargoBuild = (): void => {
@@ -79,7 +99,7 @@ const resolveSourceFilePath = (): string =>
         'sealed_lattice_kernel.wasm',
     );
 
-const main = async (): Promise<void> => {
+export const buildWasmKernel = async (): Promise<void> => {
     const outputFilePath = resolveOutputFilePath(process.argv.slice(2));
     const outputDirectory = path.dirname(outputFilePath);
 
@@ -92,4 +112,11 @@ const main = async (): Promise<void> => {
     );
 };
 
-void main();
+const scriptEntryPoint = process.argv[1];
+const isMainModule =
+    scriptEntryPoint !== undefined &&
+    import.meta.url === pathToFileURL(scriptEntryPoint).href;
+
+if (isMainModule) {
+    void buildWasmKernel();
+}
