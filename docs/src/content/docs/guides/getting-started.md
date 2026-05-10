@@ -34,7 +34,7 @@ and refuse premature protocol actions. They do not implement voting.
 
 - the private Turborepo workspace layout
 - the published `sealed-lattice` package identity
-- private protocol, crypto, wasm, and testkit shells
+- private types, protocol, crypto, wasm, and testkit shells
 - a Rust transcript core plus an internal WASM loader
 - a deterministic threshold, lifecycle, poll-spec, and capability shell
 - docs, TypeDoc, pack smoke, vector manifest verification, and CI verification

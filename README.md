@@ -24,9 +24,10 @@ WORK IN PROGRESS - protocol-facing APIs remain under implementation. Versions be
 homomorphic voting library workspace.
 
 The repository uses a private Turborepo workspace with one published package
-and four private internal packages:
+and five private internal packages:
 
 - `sealed-lattice`
+- `@sealed-lattice/types`
 - `@sealed-lattice/protocol`
 - `@sealed-lattice/crypto`
 - `@sealed-lattice/wasm`

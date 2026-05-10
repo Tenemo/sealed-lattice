@@ -21,7 +21,7 @@ jobs:
               with:
                   components: clippy, rustfmt
                   targets: wasm32-unknown-unknown
-            - uses: Swatinem/rust-cache@v2.7.10
+            - uses: Swatinem/rust-cache@v2.7.8
             - run: cargo fmt --check
             - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
             - run: cargo test --workspace
@@ -36,7 +36,7 @@ jobs:
               with:
                   components: clippy, rustfmt
                   targets: wasm32-unknown-unknown
-            - uses: Swatinem/rust-cache@v2.7.10
+            - uses: Swatinem/rust-cache@v2.7.8
             - run: cargo build --workspace --lib --target wasm32-unknown-unknown --release
 
     verify:
@@ -50,7 +50,7 @@ jobs:
               with:
                   components: clippy, rustfmt
                   targets: wasm32-unknown-unknown
-            - uses: Swatinem/rust-cache@v2.7.10
+            - uses: Swatinem/rust-cache@v2.7.8
             - run: pnpm run check
             - run: pnpm run test:node
             - run: pnpm run build
@@ -66,7 +66,7 @@ jobs:
               with:
                   components: clippy, rustfmt
                   targets: wasm32-unknown-unknown
-            - uses: Swatinem/rust-cache@v2.7.10
+            - uses: Swatinem/rust-cache@v2.7.8
             - run: pnpm run coverage:node
 
     browser:
@@ -80,7 +80,7 @@ jobs:
               with:
                   components: clippy, rustfmt
                   targets: wasm32-unknown-unknown
-            - uses: Swatinem/rust-cache@v2.7.10
+            - uses: Swatinem/rust-cache@v2.7.8
             - run: pnpm exec playwright install --with-deps chromium firefox webkit
             - run: pnpm run test:browser
 
@@ -95,7 +95,7 @@ jobs:
               with:
                   components: clippy, rustfmt
                   targets: wasm32-unknown-unknown
-            - uses: Swatinem/rust-cache@v2.7.10
+            - uses: Swatinem/rust-cache@v2.7.8
             - run: pnpm run verify:docs
             - run: pnpm run docs:build:site
 
@@ -111,7 +111,7 @@ jobs:
               with:
                   components: clippy, rustfmt
                   targets: wasm32-unknown-unknown
-            - uses: Swatinem/rust-cache@v2.7.10
+            - uses: Swatinem/rust-cache@v2.7.8
             - run: pnpm run build
             - run: pnpm run verify:docs
             - run: pnpm run docs:build:site

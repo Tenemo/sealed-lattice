@@ -35,8 +35,8 @@ hero:
                 </div>
                 <div class="landing-hero-panel__fact">
                   <span class="landing-hero-panel__label">Internal packages</span>
-                  <strong>Four private shells</strong>
-                  <small>Protocol, crypto, wasm, and testkit</small>
+                  <strong>Five private shells</strong>
+                  <small>types, protocol, crypto, wasm, and testkit</small>
                 </div>
                 <div class="landing-hero-panel__fact">
                   <span class="landing-hero-panel__label">Native transcript core path</span>
@@ -64,7 +64,7 @@ import { Card, CardGrid, LinkCard, Steps } from "@astrojs/starlight/components";
   <div class="landing-section__header">
     <h2>What ships today</h2>
     <p>
-      The repo is a private workspace with one published package, four private
+      The repo is a private workspace with one published package, five private
       internal packages, and one Rust crate that proves the WASM path.
     </p>
   </div>
@@ -87,8 +87,8 @@ import { Card, CardGrid, LinkCard, Steps } from "@astrojs/starlight/components";
     <Card title="Internal workspace">
       <div class="landing-card-copy">
         <p>
-          The private workspace shells are split by responsibility: protocol,
-          crypto, wasm, and testkit.
+          The private workspace shells are split by responsibility: shared
+          types, protocol, crypto, wasm, and testkit.
         </p>
         <p>
           The Rust transcript core and the internal WASM loader prove the
@@ -159,7 +159,7 @@ import { Card, CardGrid, LinkCard, Steps } from "@astrojs/starlight/components";
       2. **Use the safe public helpers.**
          The package exposes safe fixture verification and protocol shell helpers while wider voting APIs remain future implementation.
       3. **Develop inside the workspace packages.**
-         Use the private packages for protocol, crypto, wasm, and testkit work.
+         Use the private packages for shared types, protocol, crypto, wasm, and testkit work.
       4. **Keep the Rust/WASM path verified.**
          The transcript core kernel must continue to build natively and load in Node and browsers.
     </Steps>
