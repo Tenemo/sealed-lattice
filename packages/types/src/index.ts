@@ -183,6 +183,7 @@ export type ThresholdProfile = {
     readonly privacyCorruptionBound: number;
     readonly decryptionCorruptionBound: number;
     readonly activeFaultBound: number;
+    readonly replayBadCorruptionBound: number;
     readonly pvssThreshold: number;
     readonly decryptionThreshold: number;
     readonly releaseQuorum: number;
@@ -278,7 +279,10 @@ export type LifecycleState =
 export type PrimaryStatusLabel =
     | 'RosterAudited'
     | 'BallotIncluded'
+    | 'BridgeProofPending'
+    | 'BridgeProofLocallyVerified'
     | 'AggregateInputsReady'
+    | 'AggregateInputsBridgeVerified'
     | 'TopKEvaluated'
     | 'EvaluationLocallyReplayed'
     | 'EvaluationReplayAttested'
@@ -294,12 +298,31 @@ export type FailureStatusLabel =
     | 'BoardEvidencePublished'
     | 'ForkedElection'
     | 'SetupIncomplete'
+    | 'TurnoutBelowReleaseFloor'
     | 'AggregateThresholdNotReached'
     | 'EvaluationReplayThresholdNotReached'
     | 'MobileEvaluationPending'
-    | 'EvaluationRejected';
+    | 'BridgeProofRejected'
+    | 'OptionalEvaluationProofRejected'
+    | 'EvaluationRejected'
+    | 'TargetRejected'
+    | 'CPADProfileRejected'
+    | 'AnyTDecryptionProfileRejected'
+    | 'BrakerskiBackendProfileRejected'
+    | 'EvaluationKeySizeProfileRejected'
+    | 'MobileReplayProfileRejected'
+    | 'BridgeMobileCertRejected'
+    | 'UnsupportedLowResourceDevice';
 
-export type ModeStatusLabel = 'UnsafeMicroRoster' | 'PassiveMHEPrototype';
+export type ModeStatusLabel =
+    | 'UnsafeMicroRoster'
+    | 'PassiveMHEPrototype'
+    | 'MobileFlagshipProfile'
+    | 'ForegroundProofGenerationRequired'
+    | 'ForegroundProofVerificationRequired'
+    | 'ProofCheckpointRestored'
+    | 'ProofCheckpointRejected'
+    | 'LongRunningCryptographicCheck';
 
 export type LifecycleTransition = {
     readonly from: LifecycleState;
@@ -314,6 +337,17 @@ export type LifecycleLabelInput = {
     readonly rosterAudited?: boolean;
     readonly ownBallotIncluded?: boolean;
     readonly evaluationLocallyReplayed?: boolean;
+    readonly bridgeProofPending?: boolean;
+    readonly bridgeProofLocallyVerified?: boolean;
+    readonly aggregateInputsBridgeVerified?: boolean;
+    readonly bridgeProofRejected?: boolean;
+    readonly brakerskiBackendProfileRejected?: boolean;
+    readonly bridgeMobileCertRejected?: boolean;
+    readonly unsupportedLowResourceDevice?: boolean;
+    readonly mobileFlagshipProfile?: boolean;
+    readonly foregroundProofGenerationRequired?: boolean;
+    readonly foregroundProofVerificationRequired?: boolean;
+    readonly mobileClaimGatePassed?: boolean;
 };
 
 export type LifecycleLabels = {

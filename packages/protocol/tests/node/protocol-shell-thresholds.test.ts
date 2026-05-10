@@ -19,6 +19,10 @@ const expectFeasibleThresholds = (rosterSize: number): void => {
     );
     expect(profile.aggregateContributionQuorum).toBe(profile.pvssThreshold);
     expect(profile.decryptionShareQuorum).toBe(profile.decryptionThreshold);
+    expect(profile.replayBadCorruptionBound).toBe(profile.activeFaultBound);
+    expect(profile.evaluationReplayQuorum).toBe(
+        profile.replayBadCorruptionBound + 1,
+    );
     expect(profile.maximumRaceShares).toBe(rosterSize);
     expect(profile.setupCompletionQuorum).toBe(rosterSize);
 };
@@ -73,6 +77,7 @@ describe('protocol-shell threshold profiles', () => {
                 rosterSize,
                 privacyCorruptionBound,
                 decryptionCorruptionBound: privacyCorruptionBound,
+                replayBadCorruptionBound: activeFaultBound,
                 pvssThreshold: threshold,
                 decryptionThreshold: threshold,
                 activeFaultBound,

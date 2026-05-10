@@ -80,6 +80,7 @@ describe('protocol-shell public package API in Node', () => {
             lifecycleState: 'ResultComputedAuditable',
             thresholdProfile,
             mheSecurityStage: 'ActiveMalicious',
+            mobileClaimGatePassed: true,
         });
 
         expect(labels.resultClaimLabel).toBe('ResultComputedAuditable');

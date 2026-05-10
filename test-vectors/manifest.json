@@ -15,7 +15,7 @@
     },
     {
       "path": "protocol-shell/threshold-profiles.json",
-      "sha256": "9c18f9096c1eef2dde5702e102ae046623465db191454c2d2a4a16b4f1c919a0"
+      "sha256": "fc179622ed0caba5bfbbd151b2f6499d13eed5a353817449fdf9730230f4dc91"
     },
     {
       "path": "transcript-core/golden-transcript-core.json",

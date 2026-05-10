@@ -117,6 +117,7 @@ export const deriveThresholdProfile = (
     );
     const decryptionCorruptionBound = privacyCorruptionBound;
     const activeFaultBound = Math.floor(rosterSize / 5);
+    const replayBadCorruptionBound = activeFaultBound;
     const pvssThreshold = privacyCorruptionBound + 1;
     const decryptionThreshold = decryptionCorruptionBound + 1;
     const releaseQuorum = Math.min(
@@ -147,6 +148,7 @@ export const deriveThresholdProfile = (
         privacyCorruptionBound,
         decryptionCorruptionBound,
         activeFaultBound,
+        replayBadCorruptionBound,
         pvssThreshold,
         decryptionThreshold,
         releaseQuorum,

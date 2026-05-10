@@ -19,7 +19,7 @@ const expectValidPath = (states: readonly LifecycleState[]): void => {
 };
 
 describe('protocol-shell lifecycle shell', () => {
-    it('accepts the primary v43 lifecycle path', () => {
+    it('accepts the primary v46 lifecycle path', () => {
         expectValidPath([
             'DraftPoll',
             'RegistrationOpen',
@@ -84,6 +84,7 @@ describe('protocol-shell lifecycle shell', () => {
             lifecycleState: 'ResultComputedAuditable',
             thresholdProfile: mandatoryProfile,
             mheSecurityStage: 'ActiveMalicious',
+            mobileClaimGatePassed: true,
         });
         const unsafeLabels = deriveLifecycleLabels({
             lifecycleState: 'ResultComputedAuditable',
@@ -98,6 +99,20 @@ describe('protocol-shell lifecycle shell', () => {
         expect(unsafeLabels.primary).toEqual(['Unresolved']);
         expect(unsafeLabels.modes).toContain('UnsafeMicroRoster');
         expect(unsafeLabels.resultClaimLabel).toBeUndefined();
+    });
+
+    it('does not emit result labels before the M16 mobile claim gate passes', () => {
+        const profile = deriveThresholdProfile({ rosterSize: 20 });
+
+        const labels = deriveLifecycleLabels({
+            lifecycleState: 'ResultComputedAuditable',
+            thresholdProfile: profile,
+            mheSecurityStage: 'ActiveMalicious',
+        });
+
+        expect(labels.primary).toEqual(['Unresolved']);
+        expect(labels.primary).not.toContain('ResultComputedAuditable');
+        expect(labels.resultClaimLabel).toBeUndefined();
     });
 
     it('requires local verification context for user-specific labels', () => {
@@ -136,11 +151,53 @@ describe('protocol-shell lifecycle shell', () => {
         );
     });
 
+    it('derives v46 bridge, Brakerski, and mobile execution labels from local context', () => {
+        const profile = deriveThresholdProfile({ rosterSize: 20 });
+        const labels = deriveLifecycleLabels({
+            lifecycleState: 'EvaluationReplayOpen',
+            thresholdProfile: profile,
+            bridgeProofPending: true,
+            bridgeProofLocallyVerified: true,
+            aggregateInputsBridgeVerified: true,
+            bridgeProofRejected: true,
+            brakerskiBackendProfileRejected: true,
+            bridgeMobileCertRejected: true,
+            unsupportedLowResourceDevice: true,
+            mobileFlagshipProfile: true,
+            foregroundProofGenerationRequired: true,
+            foregroundProofVerificationRequired: true,
+        });
+
+        expect(labels.primary).toEqual(
+            expect.arrayContaining([
+                'BridgeProofPending',
+                'BridgeProofLocallyVerified',
+                'AggregateInputsBridgeVerified',
+            ]),
+        );
+        expect(labels.failures).toEqual(
+            expect.arrayContaining([
+                'BridgeProofRejected',
+                'BrakerskiBackendProfileRejected',
+                'BridgeMobileCertRejected',
+                'UnsupportedLowResourceDevice',
+            ]),
+        );
+        expect(labels.modes).toEqual(
+            expect.arrayContaining([
+                'MobileFlagshipProfile',
+                'ForegroundProofGenerationRequired',
+                'ForegroundProofVerificationRequired',
+            ]),
+        );
+    });
+
     it('marks passive MHE prototype and optional proof status explicitly', () => {
         const profile = deriveThresholdProfile({ rosterSize: 20 });
         const labels = deriveLifecycleLabels({
             lifecycleState: 'FullyVerifiedResult',
             thresholdProfile: profile,
+            mobileClaimGatePassed: true,
         });
 
         expect(labels.primary).toEqual(

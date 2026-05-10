@@ -105,8 +105,9 @@ const deriveEvaluationProofMode = (
 const deriveResultClaimLabel = (
     lifecycleState: LifecycleState,
     claimBearing: boolean,
+    mobileClaimGatePassed: boolean,
 ): ResultClaimLabel | undefined => {
-    if (!claimBearing) {
+    if (!claimBearing || !mobileClaimGatePassed) {
         return undefined;
     }
     if (lifecycleState === 'ResultComputedAuditable') {
@@ -132,6 +133,15 @@ const deriveLocalPrimaryLabels = (
     }
     if (input.evaluationLocallyReplayed === true) {
         labels.push('EvaluationLocallyReplayed');
+    }
+    if (input.bridgeProofPending === true) {
+        labels.push('BridgeProofPending');
+    }
+    if (input.bridgeProofLocallyVerified === true) {
+        labels.push('BridgeProofLocallyVerified');
+    }
+    if (input.aggregateInputsBridgeVerified === true) {
+        labels.push('AggregateInputsBridgeVerified');
     }
 
     return labels;
@@ -161,10 +171,35 @@ export const deriveLifecycleLabels = (
     ) {
         modes.push('PassiveMHEPrototype');
     }
+    if (input.mobileFlagshipProfile === true) {
+        modes.push('MobileFlagshipProfile');
+    }
+    if (input.foregroundProofGenerationRequired === true) {
+        modes.push('ForegroundProofGenerationRequired');
+    }
+    if (input.foregroundProofVerificationRequired === true) {
+        modes.push('ForegroundProofVerificationRequired');
+    }
+    if (input.bridgeProofRejected === true) {
+        failures.push('BridgeProofRejected');
+    }
+    if (input.brakerskiBackendProfileRejected === true) {
+        failures.push('BrakerskiBackendProfileRejected');
+    }
+    if (input.bridgeMobileCertRejected === true) {
+        failures.push('BridgeMobileCertRejected');
+    }
+    if (input.unsupportedLowResourceDevice === true) {
+        failures.push('UnsupportedLowResourceDevice');
+    }
+
+    const resultState =
+        input.lifecycleState === 'ResultComputedAuditable' ||
+        input.lifecycleState === 'FullyVerifiedResult';
     if (
-        !input.thresholdProfile.claimBearing &&
-        (input.lifecycleState === 'ResultComputedAuditable' ||
-            input.lifecycleState === 'FullyVerifiedResult')
+        resultState &&
+        (!input.thresholdProfile.claimBearing ||
+            input.mobileClaimGatePassed !== true)
     ) {
         primary = ['Unresolved'];
     }
@@ -172,6 +207,7 @@ export const deriveLifecycleLabels = (
     const resultClaimLabel = deriveResultClaimLabel(
         input.lifecycleState,
         input.thresholdProfile.claimBearing,
+        input.mobileClaimGatePassed === true,
     );
 
     return {
