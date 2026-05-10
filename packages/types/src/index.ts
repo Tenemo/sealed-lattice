@@ -16,29 +16,32 @@ export type TranscriptCoreVerificationLabel =
     | 'TranscriptCoreVerified'
     | 'TranscriptCoreRejected';
 
-export type CanonicalErrorCode =
-    | 'DuplicateField'
-    | 'FieldOrder'
-    | 'FixtureMismatch'
-    | 'InvalidChunkSize'
-    | 'InvalidEnum'
-    | 'InvalidFixture'
-    | 'InvalidHex'
-    | 'InvalidUtf8'
-    | 'MalformedLength'
-    | 'MalformedMagic'
-    | 'MalformedVarUint'
-    | 'MissingField'
-    | 'NonCanonicalVarUint'
-    | 'ProfileComponentMismatch'
-    | 'TrailingBytes'
-    | 'UnknownBaseClaimProfile'
-    | 'UnknownField'
-    | 'UnknownMheSecurityStage'
-    | 'UnknownProofProfile'
-    | 'UnsupportedCanonicalEnvelopeVersion'
-    | 'UnsupportedObjectType'
-    | 'UnsupportedObjectVersion';
+export const canonicalErrorCodeValues = [
+    'DuplicateField',
+    'FieldOrder',
+    'FixtureMismatch',
+    'InvalidChunkSize',
+    'InvalidEnum',
+    'InvalidFixture',
+    'InvalidHex',
+    'InvalidUtf8',
+    'MalformedLength',
+    'MalformedMagic',
+    'MalformedVarUint',
+    'MissingField',
+    'NonCanonicalVarUint',
+    'ProfileComponentMismatch',
+    'TrailingBytes',
+    'UnknownBaseClaimProfile',
+    'UnknownField',
+    'UnknownMheSecurityStage',
+    'UnknownProofProfile',
+    'UnsupportedCanonicalEnvelopeVersion',
+    'UnsupportedObjectType',
+    'UnsupportedObjectVersion',
+] as const;
+
+export type CanonicalErrorCode = (typeof canonicalErrorCodeValues)[number];
 
 export type CanonicalError = {
     readonly code: CanonicalErrorCode;
@@ -203,7 +206,7 @@ export type DuplicateBallotPolicy = 'LastValidBeforeVotingClosedCounts';
 export type TiePolicy = 'HigherScoreThenLowerOptionIndex';
 
 export type PollSpecInput = {
-    readonly ceremonyId: string;
+    readonly pollId: string;
     readonly question: string;
     readonly options: readonly string[];
     readonly topOptionCount: number;
@@ -213,7 +216,7 @@ export type PollSpecInput = {
 };
 
 export type PollSpec = {
-    readonly ceremonyId: string;
+    readonly pollId: string;
     readonly question: string;
     readonly options: readonly string[];
     readonly topOptionCount: number;
@@ -223,7 +226,7 @@ export type PollSpec = {
 };
 
 export type PollSpecValidationErrorCode =
-    | 'EmptyCeremonyId'
+    | 'EmptyPollId'
     | 'EmptyQuestion'
     | 'InvalidOptionCount'
     | 'EmptyOptionLabel'

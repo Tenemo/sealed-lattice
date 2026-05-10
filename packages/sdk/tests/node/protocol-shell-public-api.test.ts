@@ -64,7 +64,7 @@ describe('protocol-shell public package API in Node', () => {
         expect(thresholdProfile.privacyCorruptionBound).toBe(6);
         expect(
             publicApi.validatePollSpec({
-                ceremonyId: 'ceremony',
+                pollId: 'poll',
                 question: 'Question',
                 options: ['A', 'B'],
                 topOptionCount: 1,

@@ -4,7 +4,7 @@
     {
       "caseName": "valid-twenty-option-score-poll",
       "input": {
-        "ceremonyId": "ceremony-2026-board",
+        "pollId": "poll-2026-board",
         "question": "Select the top priorities",
         "options": [
           "Option 0",
@@ -42,7 +42,7 @@
     {
       "caseName": "invalid-empty-and-policy-errors",
       "input": {
-        "ceremonyId": "",
+        "pollId": "",
         "question": "",
         "options": [],
         "topOptionCount": 0,
@@ -56,7 +56,7 @@
       },
       "expectedOk": false,
       "expectedErrorCodes": [
-        "EmptyCeremonyId",
+        "EmptyPollId",
         "EmptyQuestion",
         "InvalidOptionCount",
         "InvalidTopOptionCount",
@@ -68,7 +68,7 @@
     {
       "caseName": "invalid-duplicate-option",
       "input": {
-        "ceremonyId": "ceremony-duplicate",
+        "pollId": "poll-duplicate",
         "question": "Question",
         "options": [
           "Alpha",
@@ -87,7 +87,7 @@
       "input": {},
       "expectedOk": false,
       "expectedErrorCodes": [
-        "EmptyCeremonyId",
+        "EmptyPollId",
         "EmptyQuestion",
         "InvalidOptionCount",
         "InvalidTopOptionCount"

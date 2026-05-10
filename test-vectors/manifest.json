@@ -11,7 +11,7 @@
     },
     {
       "path": "protocol-shell/poll-specs.json",
-      "sha256": "97ddc435049d0ccecf8b82cbd30efd05d9ccb2133eae4433610b4d32ac0f3e44"
+      "sha256": "5faf5583a06cad506cbf26dea221db7fa246d10cc54922f9a8a2fa1818c182c3"
     },
     {
       "path": "protocol-shell/threshold-profiles.json",

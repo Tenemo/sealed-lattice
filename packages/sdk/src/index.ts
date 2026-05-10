@@ -3,7 +3,7 @@ import {
     deriveThresholdProfile as deriveThresholdProfileInternal,
     evaluateActionCapability as evaluateActionCapabilityInternal,
     isValidLifecycleTransition as isValidLifecycleTransitionInternal,
-    validatePollSpec as validatePollSpecInternal,
+    validatePollSpecFromUnknown as validatePollSpecFromUnknownInternal,
 } from '@sealed-lattice/protocol';
 import type {
     CapabilityContext,
@@ -30,7 +30,7 @@ export const deriveThresholdProfile = (
 
 export function validatePollSpec(input: PollSpecInput): PollSpecValidation;
 export function validatePollSpec(input: unknown): PollSpecValidation {
-    return validatePollSpecInternal(input);
+    return validatePollSpecFromUnknownInternal(input);
 }
 
 export const isValidLifecycleTransition = (

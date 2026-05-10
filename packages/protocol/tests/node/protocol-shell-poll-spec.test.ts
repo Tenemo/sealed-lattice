@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'vitest';
 
-import { validatePollSpec } from '../../src/protocol-shell/index';
+import {
+    validatePollSpec,
+    validatePollSpecFromUnknown,
+} from '../../src/protocol-shell/index';
 import type { PollSpecInput } from '../../src/protocol-shell/index';
 
 const createValidPollSpecInput = (
     overrides: Partial<PollSpecInput> = {},
 ): PollSpecInput => ({
-    ceremonyId: 'ceremony-2026-board',
+    pollId: 'poll-2026-board',
     question: 'Select the top priorities',
     options: Array.from({ length: 20 }, (_value, index) => `Option ${index}`),
     topOptionCount: 20,
@@ -17,7 +20,7 @@ const expectErrorCodes = (
     input: unknown,
     expectedCodes: readonly string[],
 ): void => {
-    const validation = validatePollSpec(input);
+    const validation = validatePollSpecFromUnknown(input);
 
     expect(validation.ok).toBe(false);
     if (!validation.ok) {
@@ -80,7 +83,7 @@ describe('protocol-shell poll-spec validation', () => {
     it('rejects option count, question, topOptionCount, score, and policy errors', () => {
         expectErrorCodes(
             createValidPollSpecInput({
-                ceremonyId: '',
+                pollId: '',
                 question: '',
                 options: [],
                 topOptionCount: 0,
@@ -94,7 +97,7 @@ describe('protocol-shell poll-spec validation', () => {
                 tiePolicy: 'RandomTieBreak' as PollSpecInput['tiePolicy'],
             }),
             [
-                'EmptyCeremonyId',
+                'EmptyPollId',
                 'EmptyQuestion',
                 'InvalidOptionCount',
                 'InvalidTopOptionCount',
@@ -107,14 +110,14 @@ describe('protocol-shell poll-spec validation', () => {
 
     it('returns structured errors for malformed JavaScript input', () => {
         const decodedPollSpec: unknown = {
-            ceremonyId: 'ceremony',
+            pollId: 'poll',
             question: 'Question',
             options: ['A', 42, 'B'],
             topOptionCount: 2,
         };
 
         expectErrorCodes({}, [
-            'EmptyCeremonyId',
+            'EmptyPollId',
             'EmptyQuestion',
             'InvalidOptionCount',
             'InvalidTopOptionCount',

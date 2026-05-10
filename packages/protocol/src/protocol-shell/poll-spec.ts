@@ -1,6 +1,7 @@
 import type {
     DuplicateBallotPolicy,
     PollSpec,
+    PollSpecInput,
     PollSpecValidation,
     PollSpecValidationError,
     ScoreDomain,
@@ -42,16 +43,16 @@ const normalizeDuplicateBallotPolicy = (
 const normalizeTiePolicy = (tiePolicy: TiePolicy | undefined): TiePolicy =>
     tiePolicy ?? defaultTiePolicy;
 
-export const validatePollSpec = (input: unknown): PollSpecValidation => {
+export const validatePollSpecFromUnknown = (
+    input: unknown,
+): PollSpecValidation => {
     const errors: PollSpecValidationError[] = [];
     const optionLabels = new Set<string>();
     const inputRecord: Readonly<Record<string, unknown>> = isRecord(input)
         ? input
         : {};
-    const ceremonyId =
-        typeof inputRecord.ceremonyId === 'string'
-            ? inputRecord.ceremonyId
-            : undefined;
+    const pollId =
+        typeof inputRecord.pollId === 'string' ? inputRecord.pollId : undefined;
     const question =
         typeof inputRecord.question === 'string'
             ? inputRecord.question
@@ -66,11 +67,11 @@ export const validatePollSpec = (input: unknown): PollSpecValidation => {
     const tiePolicy = inputRecord.tiePolicy;
     const normalizedOptions: string[] = [];
 
-    if (ceremonyId === undefined || ceremonyId.length === 0) {
+    if (pollId === undefined || pollId.length === 0) {
         addError(errors, {
-            code: 'EmptyCeremonyId',
-            field: 'ceremonyId',
-            message: 'ceremonyId must be a nonempty string.',
+            code: 'EmptyPollId',
+            field: 'pollId',
+            message: 'pollId must be a nonempty string.',
         });
     }
     if (question === undefined || question.length === 0) {
@@ -161,7 +162,7 @@ export const validatePollSpec = (input: unknown): PollSpecValidation => {
     return {
         ok: true,
         normalized: {
-            ceremonyId: ceremonyId ?? '',
+            pollId: pollId ?? '',
             question: question ?? '',
             options: normalizedOptions,
             topOptionCount:
@@ -176,3 +177,6 @@ export const validatePollSpec = (input: unknown): PollSpecValidation => {
         } satisfies PollSpec,
     };
 };
+
+export const validatePollSpec = (input: PollSpecInput): PollSpecValidation =>
+    validatePollSpecFromUnknown(input);

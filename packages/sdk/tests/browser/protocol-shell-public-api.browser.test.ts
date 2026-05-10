@@ -31,7 +31,7 @@ describe('protocol-shell public package API in browsers', () => {
         expect(thresholdProfile.releaseQuorum).toBe(14);
         expect(
             publicApi.validatePollSpec({
-                ceremonyId: 'browser-ceremony',
+                pollId: 'browser-poll',
                 question: 'Question',
                 options: ['A', 'B', 'C'],
                 topOptionCount: 2,

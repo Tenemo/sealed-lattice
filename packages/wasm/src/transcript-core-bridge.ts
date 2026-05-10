@@ -69,7 +69,7 @@ type KernelFailureResponse = {
     readonly error: CanonicalError;
 };
 
-export const canonicalErrorCodes = new Set<string>([
+const bridgeCanonicalErrorCodeValues = [
     'DuplicateField',
     'FieldOrder',
     'FixtureMismatch',
@@ -92,7 +92,11 @@ export const canonicalErrorCodes = new Set<string>([
     'UnsupportedCanonicalEnvelopeVersion',
     'UnsupportedObjectType',
     'UnsupportedObjectVersion',
-]);
+] as const satisfies readonly CanonicalErrorCode[];
+
+export const canonicalErrorCodes: ReadonlySet<CanonicalErrorCode> = new Set(
+    bridgeCanonicalErrorCodeValues,
+);
 
 const textDecoder = new TextDecoder();
 const textEncoder = new TextEncoder();
@@ -124,7 +128,8 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
     typeof value === 'object' && value !== null;
 
 const isCanonicalErrorCode = (value: unknown): value is CanonicalErrorCode =>
-    typeof value === 'string' && canonicalErrorCodes.has(value);
+    typeof value === 'string' &&
+    canonicalErrorCodes.has(value as CanonicalErrorCode);
 
 const isCanonicalError = (value: unknown): value is CanonicalError =>
     isRecord(value) &&

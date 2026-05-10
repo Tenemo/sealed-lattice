@@ -10,6 +10,6 @@ export {
     minimumUnsafeRosterSize,
     strictLessThanOneThirdModel,
 } from './profiles.js';
-export { validatePollSpec } from './poll-spec.js';
+export { validatePollSpec, validatePollSpecFromUnknown } from './poll-spec.js';
 export { deriveThresholdProfile } from './thresholds.js';
 export type * from '@sealed-lattice/types';

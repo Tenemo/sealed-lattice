@@ -12,9 +12,21 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
     DiagnosticCategory,
     ModuleKind,
+    ScriptKind,
     ScriptTarget,
+    SyntaxKind,
+    createSourceFile,
     formatDiagnosticsWithColorAndContext,
+    forEachChild,
+    isCallExpression,
+    isExportDeclaration,
+    isImportDeclaration,
+    isImportTypeNode,
+    isLiteralTypeNode,
+    isStringLiteral,
     transpileModule,
+    type Node,
+    type StringLiteral,
 } from 'typescript';
 
 import { collectFiles } from '../internal/files.js';
@@ -53,6 +65,13 @@ const typesDeclarationSourcePath = path.resolve(
     'dist',
     'index.d.ts',
 );
+const typesRuntimeSourcePath = path.resolve(
+    repoRoot,
+    'packages',
+    'types',
+    'src',
+    'index.ts',
+);
 const typesDeclarationOutputPath = path.resolve(
     sdkDistDirectoryPath,
     'internal',
@@ -64,6 +83,7 @@ const typesRuntimeOutputPath = path.resolve(
     'types.js',
 );
 const runtimeImportTargets = new Map([
+    ['@sealed-lattice/types', typesRuntimeOutputPath],
     ['@sealed-lattice/protocol', protocolShellOutputDirectoryPath],
     ['@sealed-lattice/wasm', bridgeOutputPath],
 ]);
@@ -143,9 +163,118 @@ export const buildSdkProtocolShellRuntime = async (): Promise<void> => {
     );
 };
 
-const typesImportPattern = /(['"])@sealed-lattice\/types(?:\/[^'"]*)?\1/gu;
-const runtimeImportPattern =
-    /(['"])(@sealed-lattice\/(?:protocol|wasm))(?:\/[^'"]*)?\1/gu;
+type ModuleSpecifierRewrite = (specifier: string) => string | undefined;
+
+type ModuleSpecifierReplacement = {
+    readonly end: number;
+    readonly start: number;
+    readonly text: string;
+};
+
+const quoteModuleSpecifier = (specifier: string, quote: string): string => {
+    const escapedSpecifier = specifier
+        .replace(/\\/g, '\\\\')
+        .split(quote)
+        .join(`\\${quote}`);
+
+    return `${quote}${escapedSpecifier}${quote}`;
+};
+
+const collectModuleSpecifierLiterals = (
+    sourceText: string,
+    sourcePath: string,
+): {
+    readonly literals: readonly StringLiteral[];
+    readonly sourceFile: ReturnType<typeof createSourceFile>;
+} => {
+    const sourceFile = createSourceFile(
+        sourcePath,
+        sourceText,
+        ScriptTarget.Latest,
+        true,
+        ScriptKind.TSX,
+    );
+    const literals: StringLiteral[] = [];
+
+    const visit = (node: Node): void => {
+        if (
+            isImportDeclaration(node) &&
+            isStringLiteral(node.moduleSpecifier)
+        ) {
+            literals.push(node.moduleSpecifier);
+        } else if (
+            isExportDeclaration(node) &&
+            node.moduleSpecifier !== undefined &&
+            isStringLiteral(node.moduleSpecifier)
+        ) {
+            literals.push(node.moduleSpecifier);
+        } else if (
+            isCallExpression(node) &&
+            node.expression.kind === SyntaxKind.ImportKeyword
+        ) {
+            const [moduleSpecifier] = node.arguments;
+            if (
+                moduleSpecifier !== undefined &&
+                isStringLiteral(moduleSpecifier)
+            ) {
+                literals.push(moduleSpecifier);
+            }
+        } else if (isImportTypeNode(node)) {
+            const importTypeArgument = node.argument;
+            if (
+                isLiteralTypeNode(importTypeArgument) &&
+                isStringLiteral(importTypeArgument.literal)
+            ) {
+                literals.push(importTypeArgument.literal);
+            }
+        }
+
+        forEachChild(node, visit);
+    };
+
+    visit(sourceFile);
+
+    return { literals, sourceFile };
+};
+
+const rewriteModuleSpecifiers = (
+    sourcePath: string,
+    sourceText: string,
+    rewriteSpecifier: ModuleSpecifierRewrite,
+): string => {
+    const { literals, sourceFile } = collectModuleSpecifierLiterals(
+        sourceText,
+        sourcePath,
+    );
+    const replacements: ModuleSpecifierReplacement[] = [];
+
+    for (const literal of literals) {
+        const rewrittenSpecifier = rewriteSpecifier(literal.text);
+        if (
+            rewrittenSpecifier === undefined ||
+            rewrittenSpecifier === literal.text
+        ) {
+            continue;
+        }
+
+        const start = literal.getStart(sourceFile);
+        const end = literal.end;
+        const quote = sourceText[start];
+        replacements.push({
+            start,
+            end,
+            text: quoteModuleSpecifier(rewrittenSpecifier, quote),
+        });
+    }
+
+    return replacements
+        .sort((left, right) => right.start - left.start)
+        .reduce(
+            (rewrittenText, replacement) =>
+                `${rewrittenText.slice(0, replacement.start)}${replacement.text}${rewrittenText.slice(replacement.end)}`,
+            sourceText,
+        );
+};
 
 export const computeRelativeTypesSpecifier = (
     declarationFilePath: string,
@@ -186,17 +315,26 @@ export const rewriteRuntimeImports = (
     sourceFilePath: string,
     sourceText: string,
 ): string =>
-    sourceText.replace(
-        runtimeImportPattern,
-        (_match, quote: string, packageName: string) => {
-            const runtimeTargetPath = runtimeImportTargets.get(packageName);
-            if (runtimeTargetPath === undefined) {
-                return _match;
+    rewriteModuleSpecifiers(sourceFilePath, sourceText, (specifier) => {
+        for (const [
+            packageName,
+            runtimeTargetPath,
+        ] of runtimeImportTargets.entries()) {
+            if (specifier === packageName) {
+                return computeRelativeRuntimeSpecifier(
+                    sourceFilePath,
+                    runtimeTargetPath,
+                );
             }
+            if (specifier.startsWith(`${packageName}/`)) {
+                throw new Error(
+                    `Cannot vendor deep workspace runtime import ${specifier}. Import ${packageName} instead.`,
+                );
+            }
+        }
 
-            return `${quote}${computeRelativeRuntimeSpecifier(sourceFilePath, runtimeTargetPath)}${quote}`;
-        },
-    );
+        return undefined;
+    });
 
 export const rewriteTypesImports = (
     declarationFilePath: string,
@@ -208,9 +346,21 @@ export const rewriteTypesImports = (
         typesRuntimePath,
     );
 
-    return declarationText.replace(
-        typesImportPattern,
-        (_match, quote: string) => `${quote}${relativeSpecifier}${quote}`,
+    return rewriteModuleSpecifiers(
+        declarationFilePath,
+        declarationText,
+        (specifier) => {
+            if (specifier === typesPackageName) {
+                return relativeSpecifier;
+            }
+            if (specifier.startsWith(`${typesPackageName}/`)) {
+                throw new Error(
+                    `Cannot inline deep ${typesPackageName} declaration import ${specifier}. Import ${typesPackageName} instead.`,
+                );
+            }
+
+            return undefined;
+        },
     );
 };
 
@@ -252,7 +402,14 @@ export const inlineTypesIntoSdkDist = async (): Promise<void> => {
         recursive: true,
     });
     await writeFile(typesDeclarationOutputPath, typesDeclarationText, 'utf8');
-    await writeFile(typesRuntimeOutputPath, 'export {};\n', 'utf8');
+    await writeFile(
+        typesRuntimeOutputPath,
+        transpileSdkInternalSource(
+            await readFile(typesRuntimeSourcePath, 'utf8'),
+            typesRuntimeSourcePath,
+        ),
+        'utf8',
+    );
 
     const declarationFiles = await collectFiles(sdkDistDirectoryPath, {
         extensions: ['.d.ts'],
