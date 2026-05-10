@@ -24,6 +24,11 @@
         "src/**/*.ts"
       ]
     },
+    "packages/types": {
+      "project": [
+        "src/**/*.ts"
+      ]
+    },
     "packages/protocol": {
       "project": [
         "src/**/*.ts"

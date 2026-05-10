@@ -1,4 +1,7 @@
-import type { LifecycleState, LifecycleTransition } from './types.js';
+import type {
+    LifecycleState,
+    LifecycleTransition,
+} from '@sealed-lattice/types';
 
 const transitionMap = {
     DraftPoll: ['RegistrationOpen'],
@@ -59,14 +62,6 @@ const transitionMap = {
 export const lifecycleStates = Object.keys(
     transitionMap,
 ) as readonly LifecycleState[];
-
-export const lifecycleTransitionEntries = Object.entries(transitionMap).flatMap(
-    ([from, targets]) =>
-        targets.map((to) => ({
-            from: from as LifecycleState,
-            to,
-        })),
-);
 
 export const isValidLifecycleTransition = (
     transition: LifecycleTransition,

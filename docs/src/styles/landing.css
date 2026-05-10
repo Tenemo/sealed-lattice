@@ -79,8 +79,8 @@
         border-color: var(--sl-color-hairline);
         background: linear-gradient(
             180deg,
-            hsla(0, 0%, 100%, 0.04),
-            hsla(0, 0%, 100%, 0.02)
+            hsla(var(--landing-tint), 0.04),
+            hsla(var(--landing-tint), 0.02)
         );
         transition:
             transform 160ms ease,
@@ -91,11 +91,11 @@
 
     .sl-link-card:is(:hover, :focus-within) {
         transform: translateY(-2px);
-        border-color: hsla(0, 0%, 100%, 0.24);
+        border-color: hsla(var(--landing-tint), 0.24);
         background: linear-gradient(
             180deg,
-            hsla(0, 0%, 100%, 0.06),
-            hsla(0, 0%, 100%, 0.03)
+            hsla(var(--landing-tint), 0.06),
+            hsla(var(--landing-tint), 0.03)
         );
     }
 
@@ -129,8 +129,8 @@
         border-color: var(--sl-color-hairline);
         background: linear-gradient(
             180deg,
-            hsla(0, 0%, 100%, 0.05),
-            hsla(0, 0%, 100%, 0.02)
+            hsla(var(--landing-tint), 0.05),
+            hsla(var(--landing-tint), 0.02)
         );
         box-shadow: none;
     }
@@ -143,8 +143,8 @@
         border-radius: 1.25rem;
         background: linear-gradient(
             180deg,
-            hsla(0, 0%, 100%, 0.035),
-            hsla(0, 0%, 100%, 0.015)
+            hsla(var(--landing-tint), 0.035),
+            hsla(var(--landing-tint), 0.015)
         );
         box-shadow: var(--sl-shadow-sm);
     }
@@ -217,8 +217,8 @@
         border-radius: 1rem;
         background: linear-gradient(
             180deg,
-            hsla(0, 0%, 100%, 0.06),
-            hsla(0, 0%, 100%, 0.02)
+            hsla(var(--landing-tint), 0.06),
+            hsla(var(--landing-tint), 0.02)
         );
         box-shadow: var(--sl-shadow-sm);
     }

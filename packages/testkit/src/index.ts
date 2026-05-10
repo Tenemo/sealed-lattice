@@ -6,7 +6,7 @@ import type {
     GoldenTranscriptCoreFixture,
     MalformedObjectFixture,
     TranscriptCoreReplayFixture,
-} from '@sealed-lattice/protocol';
+} from '@sealed-lattice/types';
 
 const testVectorsRootDirectoryPath = fileURLToPath(
     new URL('../../../test-vectors/', import.meta.url),

@@ -1,0 +1,19 @@
+{
+    "name": "@sealed-lattice/types",
+    "version": "0.0.0",
+    "private": true,
+    "description": "Internal canonical type definitions for the sealed-lattice library. Inlined into the published sealed-lattice package at build time.",
+    "type": "module",
+    "main": "dist/index.js",
+    "types": "dist/index.d.ts",
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.ts",
+            "import": "./dist/index.js"
+        }
+    },
+    "scripts": {
+        "check": "tsc --project tsconfig.json --pretty false --noEmit",
+        "build": "pnpm exec del-cli dist tsconfig.tsbuildinfo && tsc --project tsconfig.json"
+    }
+}

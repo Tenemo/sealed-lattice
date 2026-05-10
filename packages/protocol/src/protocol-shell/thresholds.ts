@@ -1,16 +1,17 @@
-import {
-    mandatoryClaimRosterSize,
-    maximumCertificateGatedRosterSize,
-    minimumUnsafeRosterSize,
-    strictLessThanOneThirdModel,
-} from './profiles.js';
 import type {
     HeBackendCorruptionModel,
     RosterProfileKind,
     ThresholdProfile,
     ThresholdProfileInput,
     ThresholdWarning,
-} from './types.js';
+} from '@sealed-lattice/types';
+
+import {
+    mandatoryClaimRosterSize,
+    maximumCertificateGatedRosterSize,
+    minimumUnsafeRosterSize,
+    strictLessThanOneThirdModel,
+} from './profiles.js';
 
 const isNonNegativeInteger = (value: number): boolean =>
     Number.isInteger(value) && value >= 0;

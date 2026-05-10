@@ -86,6 +86,12 @@ export default defineConfig({
                 'dist',
                 'index.js',
             ),
+            '@sealed-lattice/types': resolveFromRepoRoot(
+                'packages',
+                'types',
+                'src',
+                'index.ts',
+            ),
             '@sealed-lattice/protocol': resolveFromRepoRoot(
                 'packages',
                 'protocol',

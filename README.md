@@ -51,6 +51,13 @@ release flow stable while the broader voting API remains future implementation.
 - transcript core test vector manifest verification
 - the Rust-to-WASM transcript core toolchain
 
+## Documentation
+
+- Hosted documentation site: [tenemo.github.io/sealed-lattice](https://tenemo.github.io/sealed-lattice/)
+- Guides index: [tenemo.github.io/sealed-lattice/guides](https://tenemo.github.io/sealed-lattice/guides/)
+- Protocol spec: [tenemo.github.io/sealed-lattice/spec](https://tenemo.github.io/sealed-lattice/spec/)
+- API reference: [tenemo.github.io/sealed-lattice/api](https://tenemo.github.io/sealed-lattice/api/)
+
 ## Workspace layout
 
 ```text
@@ -92,21 +99,6 @@ pnpm run smoke:pack
 pnpm run smoke:pack:npm
 pnpm run build
 ```
-
-## Documentation
-
-- Hosted documentation site: [tenemo.github.io/sealed-lattice](https://tenemo.github.io/sealed-lattice/)
-- Guides index: [tenemo.github.io/sealed-lattice/guides](https://tenemo.github.io/sealed-lattice/guides/)
-- Protocol spec: [tenemo.github.io/sealed-lattice/spec](https://tenemo.github.io/sealed-lattice/spec/)
-- API reference: [tenemo.github.io/sealed-lattice/api](https://tenemo.github.io/sealed-lattice/api/)
-
-## Status
-
-This repository currently ships a stable package boundary, explicit internal
-package ownership, verification tooling, documentation generation, package
-smoke checks, a Rust/WASM transcript core path, and a deterministic protocol
-shell. Ballots, signatures, board proofs, PVSS, BFV, MHE setup, replay, target
-acceptance, and decryption remain future implementation.
 
 ## License
 

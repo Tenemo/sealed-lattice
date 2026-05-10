@@ -4,7 +4,7 @@ import type {
     TranscriptCoreAnalysis,
     TranscriptCoreFixture,
     TranscriptCoreFixtureVerification,
-} from '@sealed-lattice/protocol';
+} from '@sealed-lattice/types';
 
 export type TranscriptCoreKernel = {
     readonly exportedFunctionNames: readonly string[];
@@ -17,6 +17,7 @@ export type TranscriptCoreKernel = {
         readonly chunkSize: number;
     }): string;
     hashRaw(inputHex: string): string;
+    listCanonicalErrorCodes(): readonly string[];
     roundTripBytes(input: Uint8Array): Uint8Array;
     verifyFixture(
         fixture: TranscriptCoreFixture,
@@ -37,6 +38,9 @@ type TranscriptCoreKernelCommand =
     | {
           readonly command: 'HashRaw';
           readonly inputHex: string;
+      }
+    | {
+          readonly command: 'ListCanonicalErrorCodes';
       }
     | {
           readonly command: 'VerifyFixture';
@@ -65,7 +69,7 @@ type KernelFailureResponse = {
     readonly error: CanonicalError;
 };
 
-const canonicalErrorCodes = new Set<string>([
+export const canonicalErrorCodes = new Set<string>([
     'DuplicateField',
     'FieldOrder',
     'FixtureMismatch',
@@ -348,6 +352,10 @@ export const createTranscriptCoreKernelLoader = (
                         command: 'HashRaw',
                         inputHex,
                     }).hash512,
+                listCanonicalErrorCodes: (): readonly string[] =>
+                    executeCommand<readonly string[]>({
+                        command: 'ListCanonicalErrorCodes',
+                    }),
                 roundTripBytes: (input: Uint8Array): Uint8Array => {
                     const normalizedInput = Uint8Array.from(input);
                     let inputPointer = 0;

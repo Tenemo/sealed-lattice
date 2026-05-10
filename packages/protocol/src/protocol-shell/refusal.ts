@@ -2,7 +2,7 @@ import type {
     CapabilityDecision,
     ProtocolAction,
     RefusalReason,
-} from './types.js';
+} from '@sealed-lattice/types';
 
 export const allowAction = (action: ProtocolAction): CapabilityDecision => ({
     allowed: true,

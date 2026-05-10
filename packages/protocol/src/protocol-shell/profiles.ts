@@ -3,7 +3,7 @@ import type {
     HeBackendCorruptionModel,
     ScoreDomain,
     TiePolicy,
-} from './types.js';
+} from '@sealed-lattice/types';
 
 export const strictLessThanOneThirdModel = {
     kind: 'StrictLessThanOneThird',

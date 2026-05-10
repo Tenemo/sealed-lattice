@@ -22,16 +22,18 @@ export type ImportObservation = {
 
 export const allowedInternalDependencyMap = {
     'sealed-lattice': [
+        '@sealed-lattice/types',
         '@sealed-lattice/protocol',
         '@sealed-lattice/crypto',
         '@sealed-lattice/wasm',
     ],
-    '@sealed-lattice/protocol': [],
+    '@sealed-lattice/types': [],
+    '@sealed-lattice/protocol': ['@sealed-lattice/types'],
     '@sealed-lattice/crypto': [],
-    '@sealed-lattice/wasm': ['@sealed-lattice/protocol'],
+    '@sealed-lattice/wasm': ['@sealed-lattice/types'],
     '@sealed-lattice/testkit': [
         'sealed-lattice',
-        '@sealed-lattice/protocol',
+        '@sealed-lattice/types',
         '@sealed-lattice/crypto',
         '@sealed-lattice/wasm',
     ],

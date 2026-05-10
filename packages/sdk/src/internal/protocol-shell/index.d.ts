@@ -8,7 +8,7 @@ import type {
     ProtocolAction,
     ThresholdProfile,
     ThresholdProfileInput,
-} from '../../types.js';
+} from '@sealed-lattice/types';
 
 export declare const deriveThresholdProfile: (
     input: ThresholdProfileInput,

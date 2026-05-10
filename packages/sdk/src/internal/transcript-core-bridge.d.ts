@@ -1,7 +1,7 @@
 import type {
     TranscriptCoreFixture,
     TranscriptCoreFixtureVerification,
-} from '../types.js';
+} from '@sealed-lattice/types';
 
 type TranscriptCoreKernel = {
     verifyFixture(

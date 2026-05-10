@@ -1,8 +1,3 @@
-import {
-    defaultDuplicateBallotPolicy,
-    defaultScoreDomain,
-    defaultTiePolicy,
-} from './profiles.js';
 import type {
     DuplicateBallotPolicy,
     PollSpec,
@@ -10,7 +5,13 @@ import type {
     PollSpecValidationError,
     ScoreDomain,
     TiePolicy,
-} from './types.js';
+} from '@sealed-lattice/types';
+
+import {
+    defaultDuplicateBallotPolicy,
+    defaultScoreDomain,
+    defaultTiePolicy,
+} from './profiles.js';
 
 const addError = (
     errors: PollSpecValidationError[],

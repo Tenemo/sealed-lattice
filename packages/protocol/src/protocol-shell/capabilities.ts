@@ -1,5 +1,3 @@
-import { isValidLifecycleTransition } from './lifecycle.js';
-import { allowAction, refuseAction } from './refusal.js';
 import type {
     CapabilityContext,
     CapabilityDecision,
@@ -7,7 +5,10 @@ import type {
     ProtocolAction,
     RefusalReason,
     RecoveryState,
-} from './types.js';
+} from '@sealed-lattice/types';
+
+import { isValidLifecycleTransition } from './lifecycle.js';
+import { allowAction, refuseAction } from './refusal.js';
 
 const claimBearingActions = new Set<ProtocolAction>([
     'DeriveAggregateContribution',

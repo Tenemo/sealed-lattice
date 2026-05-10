@@ -7,7 +7,7 @@ import type {
     ModeStatusLabel,
     PrimaryStatusLabel,
     ResultClaimLabel,
-} from './types.js';
+} from '@sealed-lattice/types';
 
 const primaryLabelsByState = {
     DraftPoll: [],

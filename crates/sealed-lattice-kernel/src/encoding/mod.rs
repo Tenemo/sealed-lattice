@@ -38,6 +38,36 @@ pub enum CanonicalErrorCode {
     UnsupportedObjectVersion,
 }
 
+/// All canonical error code variants in declaration order.
+///
+/// Adding a new variant to `CanonicalErrorCode` requires extending this slice
+/// and the exhaustive `match` in `all_canonical_error_codes_is_exhaustive`.
+/// The compiler enforces both.
+pub const ALL_CANONICAL_ERROR_CODES: &[CanonicalErrorCode] = &[
+    CanonicalErrorCode::DuplicateField,
+    CanonicalErrorCode::FieldOrder,
+    CanonicalErrorCode::FixtureMismatch,
+    CanonicalErrorCode::InvalidChunkSize,
+    CanonicalErrorCode::InvalidEnum,
+    CanonicalErrorCode::InvalidFixture,
+    CanonicalErrorCode::InvalidHex,
+    CanonicalErrorCode::InvalidUtf8,
+    CanonicalErrorCode::MalformedLength,
+    CanonicalErrorCode::MalformedMagic,
+    CanonicalErrorCode::MalformedVarUint,
+    CanonicalErrorCode::MissingField,
+    CanonicalErrorCode::NonCanonicalVarUint,
+    CanonicalErrorCode::ProfileComponentMismatch,
+    CanonicalErrorCode::TrailingBytes,
+    CanonicalErrorCode::UnknownField,
+    CanonicalErrorCode::UnknownBaseClaimProfile,
+    CanonicalErrorCode::UnknownMheSecurityStage,
+    CanonicalErrorCode::UnknownProofProfile,
+    CanonicalErrorCode::UnsupportedCanonicalEnvelopeVersion,
+    CanonicalErrorCode::UnsupportedObjectType,
+    CanonicalErrorCode::UnsupportedObjectVersion,
+];
+
 impl CanonicalErrorCode {
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -272,6 +302,12 @@ fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult<Value> {
         })?;
 
     match command {
+        "ListCanonicalErrorCodes" => Ok(Value::Array(
+            ALL_CANONICAL_ERROR_CODES
+                .iter()
+                .map(|code| Value::String(code.as_str().to_string()))
+                .collect(),
+        )),
         "AnalyzeCanonicalObject" => {
             let canonical_bytes_hex = request
                 .get("canonicalBytesHex")
@@ -405,5 +441,44 @@ mod tests {
 
         assert!(response.contains("\"success\":false"));
         assert!(response.contains("\"InvalidFixture\""));
+    }
+
+    #[test]
+    fn all_canonical_error_codes_is_exhaustive() {
+        // The compiler enforces exhaustiveness here. If a new variant is added
+        // to `CanonicalErrorCode`, this match fails and the dev must extend
+        // both the match arm and `ALL_CANONICAL_ERROR_CODES`.
+        fn ensure_exhaustive(code: CanonicalErrorCode) {
+            match code {
+                CanonicalErrorCode::DuplicateField
+                | CanonicalErrorCode::FieldOrder
+                | CanonicalErrorCode::FixtureMismatch
+                | CanonicalErrorCode::InvalidChunkSize
+                | CanonicalErrorCode::InvalidEnum
+                | CanonicalErrorCode::InvalidFixture
+                | CanonicalErrorCode::InvalidHex
+                | CanonicalErrorCode::InvalidUtf8
+                | CanonicalErrorCode::MalformedLength
+                | CanonicalErrorCode::MalformedMagic
+                | CanonicalErrorCode::MalformedVarUint
+                | CanonicalErrorCode::MissingField
+                | CanonicalErrorCode::NonCanonicalVarUint
+                | CanonicalErrorCode::ProfileComponentMismatch
+                | CanonicalErrorCode::TrailingBytes
+                | CanonicalErrorCode::UnknownField
+                | CanonicalErrorCode::UnknownBaseClaimProfile
+                | CanonicalErrorCode::UnknownMheSecurityStage
+                | CanonicalErrorCode::UnknownProofProfile
+                | CanonicalErrorCode::UnsupportedCanonicalEnvelopeVersion
+                | CanonicalErrorCode::UnsupportedObjectType
+                | CanonicalErrorCode::UnsupportedObjectVersion => {}
+            }
+        }
+
+        for code in super::ALL_CANONICAL_ERROR_CODES {
+            ensure_exhaustive(code.clone());
+        }
+
+        assert_eq!(super::ALL_CANONICAL_ERROR_CODES.len(), 22);
     }
 }
