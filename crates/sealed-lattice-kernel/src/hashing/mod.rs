@@ -10,34 +10,47 @@ use crate::encoding::{
 pub const MODULE_MARKER: &str = "hashing";
 pub const HASH512_PREIMAGE_PREFIX: &[u8] = b"sealed.vote/v1/hash512";
 
-pub const MANIFEST_DIGEST_NAMESPACE: &str = "sealed-lattice-root/manifest-digest-v1";
+pub const POLL_SPEC_DIGEST_NAMESPACE: &str = "sealed-lattice-root/poll-spec-digest-v1";
+pub const REGISTRATION_ENTRY_DIGEST_NAMESPACE: &str =
+    "sealed-lattice-root/registration-entry-digest-v1";
+pub const TRUSTEE_SETUP_ENTRY_DIGEST_NAMESPACE: &str =
+    "sealed-lattice-root/trustee-setup-entry-digest-v1";
+pub const ELECTION_MANIFEST_DIGEST_NAMESPACE: &str =
+    "sealed-lattice-root/election-manifest-digest-v1";
 pub const ROSTER_DIGEST_NAMESPACE: &str = "sealed-lattice-root/roster-digest-v1";
-pub const BOARD_HEAD_HASH_NAMESPACE: &str = "sealed-lattice-root/board-head-hash-v1";
+pub const BOARD_HEAD_DIGEST_NAMESPACE: &str = "sealed-lattice-root/board-head-digest-v1";
 pub const RECOVERY_EPOCH_UPDATE_DIGEST_NAMESPACE: &str =
     "sealed-lattice-root/recovery-epoch-update-digest-v1";
 pub const ACTION_CONTEXT_DIGEST_NAMESPACE: &str = "sealed-lattice-root/action-context-digest-v1";
-pub const CANONICAL_BALLOT_SET_DIGEST_NAMESPACE: &str =
-    "sealed-lattice-root/canonical-ballot-set-digest-v1";
+pub const BALLOT_PACKAGE_DIGEST_NAMESPACE: &str = "sealed-lattice-root/ballot-package-digest-v1";
+pub const BALLOT_SET_DIGEST_NAMESPACE: &str = "sealed-lattice-root/ballot-set-digest-v1";
+pub const CAST_RECEIPT_DIGEST_NAMESPACE: &str = "sealed-lattice-root/cast-receipt-digest-v1";
+pub const CLOSE_RECORD_DIGEST_NAMESPACE: &str = "sealed-lattice-root/close-record-digest-v1";
 pub const HE_PARAM_DIGEST_NAMESPACE: &str = "sealed-lattice-root/he-param-digest-v1";
 pub const CIPHERTEXT_ROOT_NAMESPACE: &str = "sealed-lattice-root/ciphertext-root-v1";
 pub const PLAINTEXT_ROOT_NAMESPACE: &str = "sealed-lattice-root/plaintext-root-v1";
 pub const EVAL_KEY_ROOT_NAMESPACE: &str = "sealed-lattice-root/eval-key-root-v1";
 pub const TOP_K_CIRCUIT_DIGEST_NAMESPACE: &str = "sealed-lattice-root/top-k-circuit-digest-v1";
-pub const AGGREGATE_CONTRIBUTION_DIGEST_NAMESPACE: &str =
-    "sealed-lattice-root/aggregate-contribution-digest-v1";
-pub const AGGREGATE_READY_RECORD_DIGEST_NAMESPACE: &str =
-    "sealed-lattice-root/aggregate-ready-record-digest-v1";
-pub const EVALUATION_CONTEXT_DIGEST_NAMESPACE: &str =
-    "sealed-lattice-root/evaluation-context-digest-v1";
-pub const TOP_K_EVALUATION_RECORD_DIGEST_NAMESPACE: &str =
-    "sealed-lattice-root/top-k-evaluation-record-digest-v1";
 pub const ROT_SET_DIGEST_NAMESPACE: &str = "sealed-lattice-root/rot-set-digest-v1";
 pub const TARGET_LAYOUT_DIGEST_NAMESPACE: &str = "sealed-lattice-root/target-layout-digest-v1";
 pub const PUBLIC_SLOT_MASK_DIGEST_NAMESPACE: &str =
     "sealed-lattice-root/public-slot-mask-digest-v1";
-pub const TARGET_FINALITY_RECORD_NAMESPACE: &str = "sealed-lattice-root/target-finality-record-v1";
-pub const ACCEPTED_TARGET_FINALITY_CHECKPOINT_DIGEST_NAMESPACE: &str =
-    "sealed-lattice-root/accepted-target-finality-checkpoint-digest-v1";
+pub const AGGREGATE_DERIVATION_COMPONENT_DIGEST_NAMESPACE: &str =
+    "sealed-lattice-root/aggregate-derivation-component-digest-v1";
+pub const AGGREGATE_CONTRIBUTION_DIGEST_NAMESPACE: &str =
+    "sealed-lattice-root/aggregate-contribution-digest-v1";
+pub const AGGREGATE_READY_RECORD_DIGEST_NAMESPACE: &str =
+    "sealed-lattice-root/aggregate-ready-record-digest-v1";
+pub const AGGREGATE_SELECTION_POLICY_DIGEST_NAMESPACE: &str =
+    "sealed-lattice-root/aggregate-selection-policy-digest-v1";
+pub const POST_VOTING_CLOSED_CONTEXT_DIGEST_NAMESPACE: &str =
+    "sealed-lattice-root/post-voting-closed-context-digest-v1";
+pub const EVALUATION_CONTEXT_DIGEST_NAMESPACE: &str =
+    "sealed-lattice-root/evaluation-context-digest-v1";
+pub const TOP_K_EVALUATION_RECORD_DIGEST_NAMESPACE: &str =
+    "sealed-lattice-root/top-k-evaluation-record-digest-v1";
+pub const TARGET_FINALITY_RECORD_DIGEST_NAMESPACE: &str =
+    "sealed-lattice-root/target-finality-record-digest-v1";
 pub const EVALUATION_REPLAY_ATTESTATION_DIGEST_NAMESPACE: &str =
     "sealed-lattice-root/evaluation-replay-attestation-digest-v1";
 pub const TARGET_ACCEPTED_RECORD_DIGEST_NAMESPACE: &str =
@@ -50,31 +63,91 @@ pub const TOP_K_DECRYPTION_SHARE_DIGEST_NAMESPACE: &str =
     "sealed-lattice-root/top-k-decryption-share-digest-v1";
 pub const VERIFIED_TOP_K_RESULT_DIGEST_NAMESPACE: &str =
     "sealed-lattice-root/verified-top-k-result-digest-v1";
+pub const EVALUATION_PROOF_ROOT_NAMESPACE: &str = "sealed-lattice-root/evaluation-proof-root-v1";
+pub const BRIDGE_PROOF_RECORD_DIGEST_NAMESPACE: &str =
+    "sealed-lattice-root/bridge-proof-record-digest-v1";
+pub const BRIDGE_PROOF_PROFILE_ID_NAMESPACE: &str =
+    "sealed-lattice-root/bridge-proof-profile-id-v1";
+pub const PROOF_PRIME_PARAM_DIGEST_NAMESPACE: &str =
+    "sealed-lattice-root/proof-prime-param-digest-v1";
+pub const PROOF_PRIME_CIPHERTEXT_ROOT_NAMESPACE: &str =
+    "sealed-lattice-root/proof-prime-ciphertext-root-v1";
+pub const PROOF_PRIME_PUBLIC_KEY_ROOT_NAMESPACE: &str =
+    "sealed-lattice-root/proof-prime-public-key-root-v1";
+pub const PROOF_PRIME_TO_Q_DATA_KEY_CONSISTENCY_DIGEST_NAMESPACE: &str =
+    "sealed-lattice-root/proof-prime-to-q-data-key-consistency-digest-v1";
+pub const DERIVED_AGGREGATE_CIPHERTEXT_ROOT_NAMESPACE: &str =
+    "sealed-lattice-root/derived-aggregate-ciphertext-root-v1";
+pub const CANONICAL_CIPHERTEXT_CONVENTION_DIGEST_NAMESPACE: &str =
+    "sealed-lattice-root/canonical-ciphertext-convention-digest-v1";
+pub const BFV_BATCH_ENCODER_DIGEST_NAMESPACE: &str =
+    "sealed-lattice-root/bfv-batch-encoder-digest-v1";
+pub const BRIDGE_LAYOUT_DIGEST_NAMESPACE: &str = "sealed-lattice-root/bridge-layout-digest-v1";
+pub const AGGREGATE_SHARE_COMMITMENT_DIGEST_NAMESPACE: &str =
+    "sealed-lattice-root/aggregate-share-commitment-digest-v1";
+pub const SHARE_COMMITMENT_DIGEST_NAMESPACE: &str =
+    "sealed-lattice-root/share-commitment-digest-v1";
+pub const BRAKERSKI_PROFILE_DIGEST_NAMESPACE: &str =
+    "sealed-lattice-root/brakerski-profile-digest-v1";
+pub const BRAKERSKI_DELTA_DIGEST_NAMESPACE: &str = "sealed-lattice-root/brakerski-delta-digest-v1";
+pub const BRAKERSKI_SHARE_VERIFICATION_KEY_ROOT_NAMESPACE: &str =
+    "sealed-lattice-root/brakerski-share-verification-key-root-v1";
+pub const TARGET_DECRYPTION_PREPARATION_RECORD_DIGEST_NAMESPACE: &str =
+    "sealed-lattice-root/target-decryption-preparation-record-digest-v1";
+pub const BRAKERSKI_PREPROCESS_RECORD_DIGEST_NAMESPACE: &str =
+    "sealed-lattice-root/brakerski-preprocess-record-digest-v1";
+pub const BRAKERSKI_PREPROCESS_TOKEN_DIGEST_NAMESPACE: &str =
+    "sealed-lattice-root/brakerski-preprocess-token-digest-v1";
+pub const BRAKERSKI_PREPROCESS_USE_RECORD_DIGEST_NAMESPACE: &str =
+    "sealed-lattice-root/brakerski-preprocess-use-record-digest-v1";
+pub const Q_TARGET_DIGEST_NAMESPACE: &str = "sealed-lattice-root/q-target-digest-v1";
+pub const MOBILE_PROFILE_CERT_DIGEST_NAMESPACE: &str =
+    "sealed-lattice-root/mobile-profile-cert-digest-v1";
+pub const BRIDGE_MOBILE_CERT_DIGEST_NAMESPACE: &str =
+    "sealed-lattice-root/bridge-mobile-cert-digest-v1";
+pub const BRIDGE_BATCHING_CERT_DIGEST_NAMESPACE: &str =
+    "sealed-lattice-root/bridge-batching-cert-digest-v1";
+pub const AGGREGATE_BRIDGE_PROVER_CERT_DIGEST_NAMESPACE: &str =
+    "sealed-lattice-root/aggregate-bridge-prover-cert-digest-v1";
 pub const ENCRYPTED_ENVELOPE_ROOT_NAMESPACE: &str =
     "sealed-lattice-root/encrypted-envelope-root-v1";
-pub const EVALUATION_PROOF_ROOT_NAMESPACE: &str = "sealed-lattice-root/evaluation-proof-root-v1";
 
-pub const RESERVED_ROOT_NAMESPACES: [&str; 29] = [
-    MANIFEST_DIGEST_NAMESPACE,
+pub const MANIFEST_DIGEST_NAMESPACE: &str = ELECTION_MANIFEST_DIGEST_NAMESPACE;
+pub const BOARD_HEAD_HASH_NAMESPACE: &str = BOARD_HEAD_DIGEST_NAMESPACE;
+pub const CANONICAL_BALLOT_SET_DIGEST_NAMESPACE: &str = BALLOT_SET_DIGEST_NAMESPACE;
+pub const TARGET_FINALITY_RECORD_NAMESPACE: &str = TARGET_FINALITY_RECORD_DIGEST_NAMESPACE;
+pub const ACCEPTED_TARGET_FINALITY_CHECKPOINT_DIGEST_NAMESPACE: &str =
+    TARGET_FINALITY_RECORD_DIGEST_NAMESPACE;
+
+pub const RESERVED_ROOT_NAMESPACES: &[&str] = &[
+    POLL_SPEC_DIGEST_NAMESPACE,
+    REGISTRATION_ENTRY_DIGEST_NAMESPACE,
+    TRUSTEE_SETUP_ENTRY_DIGEST_NAMESPACE,
+    ELECTION_MANIFEST_DIGEST_NAMESPACE,
     ROSTER_DIGEST_NAMESPACE,
-    BOARD_HEAD_HASH_NAMESPACE,
+    BOARD_HEAD_DIGEST_NAMESPACE,
     RECOVERY_EPOCH_UPDATE_DIGEST_NAMESPACE,
     ACTION_CONTEXT_DIGEST_NAMESPACE,
-    CANONICAL_BALLOT_SET_DIGEST_NAMESPACE,
+    BALLOT_PACKAGE_DIGEST_NAMESPACE,
+    BALLOT_SET_DIGEST_NAMESPACE,
+    CAST_RECEIPT_DIGEST_NAMESPACE,
+    CLOSE_RECORD_DIGEST_NAMESPACE,
     HE_PARAM_DIGEST_NAMESPACE,
     CIPHERTEXT_ROOT_NAMESPACE,
     PLAINTEXT_ROOT_NAMESPACE,
     EVAL_KEY_ROOT_NAMESPACE,
     TOP_K_CIRCUIT_DIGEST_NAMESPACE,
-    AGGREGATE_CONTRIBUTION_DIGEST_NAMESPACE,
-    AGGREGATE_READY_RECORD_DIGEST_NAMESPACE,
-    EVALUATION_CONTEXT_DIGEST_NAMESPACE,
-    TOP_K_EVALUATION_RECORD_DIGEST_NAMESPACE,
     ROT_SET_DIGEST_NAMESPACE,
     TARGET_LAYOUT_DIGEST_NAMESPACE,
     PUBLIC_SLOT_MASK_DIGEST_NAMESPACE,
-    TARGET_FINALITY_RECORD_NAMESPACE,
-    ACCEPTED_TARGET_FINALITY_CHECKPOINT_DIGEST_NAMESPACE,
+    AGGREGATE_DERIVATION_COMPONENT_DIGEST_NAMESPACE,
+    AGGREGATE_CONTRIBUTION_DIGEST_NAMESPACE,
+    AGGREGATE_READY_RECORD_DIGEST_NAMESPACE,
+    AGGREGATE_SELECTION_POLICY_DIGEST_NAMESPACE,
+    POST_VOTING_CLOSED_CONTEXT_DIGEST_NAMESPACE,
+    EVALUATION_CONTEXT_DIGEST_NAMESPACE,
+    TOP_K_EVALUATION_RECORD_DIGEST_NAMESPACE,
+    TARGET_FINALITY_RECORD_DIGEST_NAMESPACE,
     EVALUATION_REPLAY_ATTESTATION_DIGEST_NAMESPACE,
     TARGET_ACCEPTED_RECORD_DIGEST_NAMESPACE,
     TARGET_PREIMAGE_DIGEST_NAMESPACE,
@@ -82,8 +155,32 @@ pub const RESERVED_ROOT_NAMESPACES: [&str; 29] = [
     THRESHOLD_DECRYPTION_PROFILE_DIGEST_NAMESPACE,
     TOP_K_DECRYPTION_SHARE_DIGEST_NAMESPACE,
     VERIFIED_TOP_K_RESULT_DIGEST_NAMESPACE,
-    ENCRYPTED_ENVELOPE_ROOT_NAMESPACE,
     EVALUATION_PROOF_ROOT_NAMESPACE,
+    BRIDGE_PROOF_RECORD_DIGEST_NAMESPACE,
+    BRIDGE_PROOF_PROFILE_ID_NAMESPACE,
+    PROOF_PRIME_PARAM_DIGEST_NAMESPACE,
+    PROOF_PRIME_CIPHERTEXT_ROOT_NAMESPACE,
+    PROOF_PRIME_PUBLIC_KEY_ROOT_NAMESPACE,
+    PROOF_PRIME_TO_Q_DATA_KEY_CONSISTENCY_DIGEST_NAMESPACE,
+    DERIVED_AGGREGATE_CIPHERTEXT_ROOT_NAMESPACE,
+    CANONICAL_CIPHERTEXT_CONVENTION_DIGEST_NAMESPACE,
+    BFV_BATCH_ENCODER_DIGEST_NAMESPACE,
+    BRIDGE_LAYOUT_DIGEST_NAMESPACE,
+    AGGREGATE_SHARE_COMMITMENT_DIGEST_NAMESPACE,
+    SHARE_COMMITMENT_DIGEST_NAMESPACE,
+    BRAKERSKI_PROFILE_DIGEST_NAMESPACE,
+    BRAKERSKI_DELTA_DIGEST_NAMESPACE,
+    BRAKERSKI_SHARE_VERIFICATION_KEY_ROOT_NAMESPACE,
+    TARGET_DECRYPTION_PREPARATION_RECORD_DIGEST_NAMESPACE,
+    BRAKERSKI_PREPROCESS_RECORD_DIGEST_NAMESPACE,
+    BRAKERSKI_PREPROCESS_TOKEN_DIGEST_NAMESPACE,
+    BRAKERSKI_PREPROCESS_USE_RECORD_DIGEST_NAMESPACE,
+    Q_TARGET_DIGEST_NAMESPACE,
+    MOBILE_PROFILE_CERT_DIGEST_NAMESPACE,
+    BRIDGE_MOBILE_CERT_DIGEST_NAMESPACE,
+    BRIDGE_BATCHING_CERT_DIGEST_NAMESPACE,
+    AGGREGATE_BRIDGE_PROVER_CERT_DIGEST_NAMESPACE,
+    ENCRYPTED_ENVELOPE_ROOT_NAMESPACE,
 ];
 
 pub fn to_hex(bytes: &[u8]) -> String {
@@ -207,7 +304,38 @@ mod tests {
     use std::collections::BTreeSet;
 
     use super::{
-        RESERVED_ROOT_NAMESPACES, canonical_root, chunk_root, hash512, hash512_hex, namespace_root,
+        ACTION_CONTEXT_DIGEST_NAMESPACE, AGGREGATE_BRIDGE_PROVER_CERT_DIGEST_NAMESPACE,
+        AGGREGATE_CONTRIBUTION_DIGEST_NAMESPACE, AGGREGATE_DERIVATION_COMPONENT_DIGEST_NAMESPACE,
+        AGGREGATE_READY_RECORD_DIGEST_NAMESPACE, AGGREGATE_SELECTION_POLICY_DIGEST_NAMESPACE,
+        AGGREGATE_SHARE_COMMITMENT_DIGEST_NAMESPACE, BALLOT_PACKAGE_DIGEST_NAMESPACE,
+        BALLOT_SET_DIGEST_NAMESPACE, BFV_BATCH_ENCODER_DIGEST_NAMESPACE,
+        BOARD_HEAD_DIGEST_NAMESPACE, BRAKERSKI_DELTA_DIGEST_NAMESPACE,
+        BRAKERSKI_PREPROCESS_RECORD_DIGEST_NAMESPACE, BRAKERSKI_PREPROCESS_TOKEN_DIGEST_NAMESPACE,
+        BRAKERSKI_PREPROCESS_USE_RECORD_DIGEST_NAMESPACE, BRAKERSKI_PROFILE_DIGEST_NAMESPACE,
+        BRAKERSKI_SHARE_VERIFICATION_KEY_ROOT_NAMESPACE, BRIDGE_BATCHING_CERT_DIGEST_NAMESPACE,
+        BRIDGE_LAYOUT_DIGEST_NAMESPACE, BRIDGE_MOBILE_CERT_DIGEST_NAMESPACE,
+        BRIDGE_PROOF_PROFILE_ID_NAMESPACE, BRIDGE_PROOF_RECORD_DIGEST_NAMESPACE,
+        CANONICAL_CIPHERTEXT_CONVENTION_DIGEST_NAMESPACE, CAST_RECEIPT_DIGEST_NAMESPACE,
+        CIPHERTEXT_ROOT_NAMESPACE, CLOSE_RECORD_DIGEST_NAMESPACE, CPAD_PROFILE_DIGEST_NAMESPACE,
+        DERIVED_AGGREGATE_CIPHERTEXT_ROOT_NAMESPACE, ELECTION_MANIFEST_DIGEST_NAMESPACE,
+        ENCRYPTED_ENVELOPE_ROOT_NAMESPACE, EVAL_KEY_ROOT_NAMESPACE,
+        EVALUATION_CONTEXT_DIGEST_NAMESPACE, EVALUATION_PROOF_ROOT_NAMESPACE,
+        EVALUATION_REPLAY_ATTESTATION_DIGEST_NAMESPACE, HE_PARAM_DIGEST_NAMESPACE,
+        MOBILE_PROFILE_CERT_DIGEST_NAMESPACE, PLAINTEXT_ROOT_NAMESPACE, POLL_SPEC_DIGEST_NAMESPACE,
+        POST_VOTING_CLOSED_CONTEXT_DIGEST_NAMESPACE, PROOF_PRIME_CIPHERTEXT_ROOT_NAMESPACE,
+        PROOF_PRIME_PARAM_DIGEST_NAMESPACE, PROOF_PRIME_PUBLIC_KEY_ROOT_NAMESPACE,
+        PROOF_PRIME_TO_Q_DATA_KEY_CONSISTENCY_DIGEST_NAMESPACE, PUBLIC_SLOT_MASK_DIGEST_NAMESPACE,
+        Q_TARGET_DIGEST_NAMESPACE, RECOVERY_EPOCH_UPDATE_DIGEST_NAMESPACE,
+        REGISTRATION_ENTRY_DIGEST_NAMESPACE, RESERVED_ROOT_NAMESPACES, ROSTER_DIGEST_NAMESPACE,
+        ROT_SET_DIGEST_NAMESPACE, SHARE_COMMITMENT_DIGEST_NAMESPACE,
+        TARGET_ACCEPTED_RECORD_DIGEST_NAMESPACE,
+        TARGET_DECRYPTION_PREPARATION_RECORD_DIGEST_NAMESPACE,
+        TARGET_FINALITY_RECORD_DIGEST_NAMESPACE, TARGET_LAYOUT_DIGEST_NAMESPACE,
+        TARGET_PREIMAGE_DIGEST_NAMESPACE, THRESHOLD_DECRYPTION_PROFILE_DIGEST_NAMESPACE,
+        TOP_K_CIRCUIT_DIGEST_NAMESPACE, TOP_K_DECRYPTION_SHARE_DIGEST_NAMESPACE,
+        TOP_K_EVALUATION_RECORD_DIGEST_NAMESPACE, TRUSTEE_SETUP_ENTRY_DIGEST_NAMESPACE,
+        VERIFIED_TOP_K_RESULT_DIGEST_NAMESPACE, canonical_root, chunk_root, hash512, hash512_hex,
+        namespace_root,
     };
 
     #[test]
@@ -249,6 +377,81 @@ mod tests {
             .collect();
 
         assert_eq!(root_set.len(), RESERVED_ROOT_NAMESPACES.len());
+    }
+
+    #[test]
+    fn reserved_root_namespaces_cover_v46_1_protocol_shells() {
+        let namespace_set: BTreeSet<&str> = RESERVED_ROOT_NAMESPACES.iter().copied().collect();
+        let required_namespaces = [
+            POLL_SPEC_DIGEST_NAMESPACE,
+            REGISTRATION_ENTRY_DIGEST_NAMESPACE,
+            TRUSTEE_SETUP_ENTRY_DIGEST_NAMESPACE,
+            ELECTION_MANIFEST_DIGEST_NAMESPACE,
+            ROSTER_DIGEST_NAMESPACE,
+            BOARD_HEAD_DIGEST_NAMESPACE,
+            RECOVERY_EPOCH_UPDATE_DIGEST_NAMESPACE,
+            ACTION_CONTEXT_DIGEST_NAMESPACE,
+            BALLOT_PACKAGE_DIGEST_NAMESPACE,
+            BALLOT_SET_DIGEST_NAMESPACE,
+            CAST_RECEIPT_DIGEST_NAMESPACE,
+            CLOSE_RECORD_DIGEST_NAMESPACE,
+            HE_PARAM_DIGEST_NAMESPACE,
+            CIPHERTEXT_ROOT_NAMESPACE,
+            PLAINTEXT_ROOT_NAMESPACE,
+            EVAL_KEY_ROOT_NAMESPACE,
+            TOP_K_CIRCUIT_DIGEST_NAMESPACE,
+            ROT_SET_DIGEST_NAMESPACE,
+            TARGET_LAYOUT_DIGEST_NAMESPACE,
+            PUBLIC_SLOT_MASK_DIGEST_NAMESPACE,
+            AGGREGATE_DERIVATION_COMPONENT_DIGEST_NAMESPACE,
+            AGGREGATE_CONTRIBUTION_DIGEST_NAMESPACE,
+            AGGREGATE_READY_RECORD_DIGEST_NAMESPACE,
+            AGGREGATE_SELECTION_POLICY_DIGEST_NAMESPACE,
+            POST_VOTING_CLOSED_CONTEXT_DIGEST_NAMESPACE,
+            EVALUATION_CONTEXT_DIGEST_NAMESPACE,
+            TOP_K_EVALUATION_RECORD_DIGEST_NAMESPACE,
+            TARGET_FINALITY_RECORD_DIGEST_NAMESPACE,
+            EVALUATION_REPLAY_ATTESTATION_DIGEST_NAMESPACE,
+            TARGET_ACCEPTED_RECORD_DIGEST_NAMESPACE,
+            TARGET_PREIMAGE_DIGEST_NAMESPACE,
+            TOP_K_DECRYPTION_SHARE_DIGEST_NAMESPACE,
+            VERIFIED_TOP_K_RESULT_DIGEST_NAMESPACE,
+            EVALUATION_PROOF_ROOT_NAMESPACE,
+            BRIDGE_PROOF_RECORD_DIGEST_NAMESPACE,
+            BRIDGE_PROOF_PROFILE_ID_NAMESPACE,
+            PROOF_PRIME_PARAM_DIGEST_NAMESPACE,
+            PROOF_PRIME_CIPHERTEXT_ROOT_NAMESPACE,
+            PROOF_PRIME_PUBLIC_KEY_ROOT_NAMESPACE,
+            PROOF_PRIME_TO_Q_DATA_KEY_CONSISTENCY_DIGEST_NAMESPACE,
+            DERIVED_AGGREGATE_CIPHERTEXT_ROOT_NAMESPACE,
+            CANONICAL_CIPHERTEXT_CONVENTION_DIGEST_NAMESPACE,
+            BFV_BATCH_ENCODER_DIGEST_NAMESPACE,
+            BRIDGE_LAYOUT_DIGEST_NAMESPACE,
+            AGGREGATE_SHARE_COMMITMENT_DIGEST_NAMESPACE,
+            SHARE_COMMITMENT_DIGEST_NAMESPACE,
+            BRAKERSKI_PROFILE_DIGEST_NAMESPACE,
+            BRAKERSKI_DELTA_DIGEST_NAMESPACE,
+            BRAKERSKI_SHARE_VERIFICATION_KEY_ROOT_NAMESPACE,
+            TARGET_DECRYPTION_PREPARATION_RECORD_DIGEST_NAMESPACE,
+            BRAKERSKI_PREPROCESS_RECORD_DIGEST_NAMESPACE,
+            BRAKERSKI_PREPROCESS_TOKEN_DIGEST_NAMESPACE,
+            BRAKERSKI_PREPROCESS_USE_RECORD_DIGEST_NAMESPACE,
+            Q_TARGET_DIGEST_NAMESPACE,
+            MOBILE_PROFILE_CERT_DIGEST_NAMESPACE,
+            BRIDGE_MOBILE_CERT_DIGEST_NAMESPACE,
+            BRIDGE_BATCHING_CERT_DIGEST_NAMESPACE,
+            AGGREGATE_BRIDGE_PROVER_CERT_DIGEST_NAMESPACE,
+            CPAD_PROFILE_DIGEST_NAMESPACE,
+            THRESHOLD_DECRYPTION_PROFILE_DIGEST_NAMESPACE,
+            ENCRYPTED_ENVELOPE_ROOT_NAMESPACE,
+        ];
+
+        for namespace in required_namespaces {
+            assert!(
+                namespace_set.contains(namespace),
+                "missing reserved namespace {namespace}",
+            );
+        }
     }
 
     #[test]

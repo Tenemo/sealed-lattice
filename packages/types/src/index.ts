@@ -347,6 +347,12 @@ export type LifecycleLabelInput = {
     readonly mobileFlagshipProfile?: boolean;
     readonly foregroundProofGenerationRequired?: boolean;
     readonly foregroundProofVerificationRequired?: boolean;
+    readonly proofCheckpointRestored?: boolean;
+    readonly proofCheckpointRejected?: boolean;
+    readonly longRunningCryptographicCheck?: boolean;
+    readonly bridgeMobileCertificatePresent?: boolean;
+    readonly bridgeProverCertificatePresent?: boolean;
+    readonly brakerskiMobileProofCertificatePresent?: boolean;
     readonly mobileClaimGatePassed?: boolean;
 };
 
@@ -400,6 +406,11 @@ export type CapabilityContext = {
     readonly optionalEvaluationProofVerified?: boolean;
     readonly localReplaySucceeded?: boolean;
     readonly browserSupported?: boolean;
+    readonly mobileProfileSupported?: boolean;
+    readonly storageQuotaSufficient?: boolean;
+    readonly bridgeMobileCertificatePresent?: boolean;
+    readonly bridgeProverCertificatePresent?: boolean;
+    readonly brakerskiMobileProofCertificatePresent?: boolean;
     readonly recoveryState?: RecoveryState;
 };
 
@@ -417,6 +428,11 @@ export type RefusalReason =
     | 'TargetNotAccepted'
     | 'FirstThresholdSharesNotReached'
     | 'UnsupportedBrowserContext'
+    | 'UnsupportedMobileProfile'
+    | 'InsufficientStorageQuota'
+    | 'MissingBridgeMobileCertificate'
+    | 'MissingBridgeProverCertificate'
+    | 'MissingBrakerskiMobileProofCertificate'
     | 'AmbiguousRecoveryState'
     | 'StaleRecoveryEpoch'
     | 'ClonedDeviceState'

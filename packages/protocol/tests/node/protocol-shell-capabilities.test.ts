@@ -253,6 +253,73 @@ describe('protocol-shell capability evaluator', () => {
         ).toMatchObject({ reason: 'ProfileNotClaimBearing' });
     });
 
+    it('refuses claim-bearing capabilities when mobile environment gates fail', () => {
+        expect(
+            evaluateActionCapability(
+                'AcceptTarget',
+                createContext({
+                    lifecycleState: 'EvaluationReplayOpen',
+                    targetFinalityAccepted: true,
+                    replayAttestationCount:
+                        thresholdProfile.evaluationReplayQuorum,
+                    mobileProfileSupported: false,
+                }),
+            ),
+        ).toMatchObject({ reason: 'UnsupportedMobileProfile' });
+
+        expect(
+            evaluateActionCapability(
+                'AcceptTarget',
+                createContext({
+                    lifecycleState: 'EvaluationReplayOpen',
+                    targetFinalityAccepted: true,
+                    replayAttestationCount:
+                        thresholdProfile.evaluationReplayQuorum,
+                    storageQuotaSufficient: false,
+                }),
+            ),
+        ).toMatchObject({ reason: 'InsufficientStorageQuota' });
+    });
+
+    it('refuses bridge and Brakerski paths when required mobile certificates are missing', () => {
+        expect(
+            evaluateActionCapability(
+                'ReplayEvaluation',
+                createContext({
+                    lifecycleState: 'TopKEvaluated',
+                    targetFinalityAccepted: true,
+                    bridgeMobileCertificatePresent: false,
+                }),
+            ),
+        ).toMatchObject({ reason: 'MissingBridgeMobileCertificate' });
+
+        expect(
+            evaluateActionCapability(
+                'DeriveAggregateContribution',
+                createContext({
+                    lifecycleState: 'VotingClosed',
+                    setupCompleteCount: thresholdProfile.setupCompletionQuorum,
+                    turnoutCount: thresholdProfile.releaseQuorum,
+                    bridgeProverCertificatePresent: false,
+                }),
+            ),
+        ).toMatchObject({ reason: 'MissingBridgeProverCertificate' });
+
+        expect(
+            evaluateActionCapability(
+                'CreateTargetBoundDecryptionShare',
+                createContext({
+                    lifecycleState: 'TargetAccepted',
+                    targetFinalityAccepted: true,
+                    targetAccepted: true,
+                    brakerskiMobileProofCertificatePresent: false,
+                }),
+            ),
+        ).toMatchObject({
+            reason: 'MissingBrakerskiMobileProofCertificate',
+        });
+    });
+
     it('leaves verified top-k decoding unavailable in protocol shell', () => {
         expect(
             evaluateActionCapability(

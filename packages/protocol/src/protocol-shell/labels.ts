@@ -106,8 +106,9 @@ const deriveResultClaimLabel = (
     lifecycleState: LifecycleState,
     claimBearing: boolean,
     mobileClaimGatePassed: boolean,
+    mobileCertificatesPresent: boolean,
 ): ResultClaimLabel | undefined => {
-    if (!claimBearing || !mobileClaimGatePassed) {
+    if (!claimBearing || !mobileClaimGatePassed || !mobileCertificatesPresent) {
         return undefined;
     }
     if (lifecycleState === 'ResultComputedAuditable') {
@@ -180,6 +181,15 @@ export const deriveLifecycleLabels = (
     if (input.foregroundProofVerificationRequired === true) {
         modes.push('ForegroundProofVerificationRequired');
     }
+    if (input.proofCheckpointRestored === true) {
+        modes.push('ProofCheckpointRestored');
+    }
+    if (input.proofCheckpointRejected === true) {
+        modes.push('ProofCheckpointRejected');
+    }
+    if (input.longRunningCryptographicCheck === true) {
+        modes.push('LongRunningCryptographicCheck');
+    }
     if (input.bridgeProofRejected === true) {
         failures.push('BridgeProofRejected');
     }
@@ -193,13 +203,18 @@ export const deriveLifecycleLabels = (
         failures.push('UnsupportedLowResourceDevice');
     }
 
+    const mobileCertificatesPresent =
+        input.bridgeMobileCertificatePresent !== false &&
+        input.bridgeProverCertificatePresent !== false &&
+        input.brakerskiMobileProofCertificatePresent !== false;
     const resultState =
         input.lifecycleState === 'ResultComputedAuditable' ||
         input.lifecycleState === 'FullyVerifiedResult';
     if (
         resultState &&
         (!input.thresholdProfile.claimBearing ||
-            input.mobileClaimGatePassed !== true)
+            input.mobileClaimGatePassed !== true ||
+            !mobileCertificatesPresent)
     ) {
         primary = ['Unresolved'];
     }
@@ -208,6 +223,7 @@ export const deriveLifecycleLabels = (
         input.lifecycleState,
         input.thresholdProfile.claimBearing,
         input.mobileClaimGatePassed === true,
+        mobileCertificatesPresent,
     );
 
     return {

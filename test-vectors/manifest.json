@@ -3,7 +3,7 @@
   "entries": [
     {
       "path": "protocol-shell/capability-refusals.json",
-      "sha256": "15a989d15727e0d8f58830e646a268ea64672d20d5e0c8a73df77f93dd908d91"
+      "sha256": "29cf1c939f8ee4e14f58dd53da757b70fada61a775339a6a0fb7daf6bfe63cab"
     },
     {
       "path": "protocol-shell/lifecycle-transitions.json",

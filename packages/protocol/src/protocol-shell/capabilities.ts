@@ -21,6 +21,20 @@ const claimBearingActions = new Set<ProtocolAction>([
     'DecodeVerifiedTopK',
 ]);
 
+const bridgeMobileCertificateActions = new Set<ProtocolAction>([
+    'DeriveAggregateContribution',
+    'ReplayEvaluation',
+    'AttestReplay',
+    'AcceptTarget',
+]);
+
+const brakerskiMobileProofCertificateActions = new Set<ProtocolAction>([
+    'CreateTargetBoundDecryptionShare',
+    'VerifyDecryptionShare',
+    'RecombineAcceptedTarget',
+    'DecodeVerifiedTopK',
+]);
+
 const countAtLeast = (actual: number | undefined, required: number): boolean =>
     actual !== undefined && actual >= required;
 
@@ -87,6 +101,12 @@ const evaluateAggregateContribution = (
     ) {
         return refuseAction(action, 'TurnoutBelowReleaseFloor');
     }
+    if (context.bridgeMobileCertificatePresent === false) {
+        return refuseAction(action, 'MissingBridgeMobileCertificate');
+    }
+    if (context.bridgeProverCertificatePresent === false) {
+        return refuseAction(action, 'MissingBridgeProverCertificate');
+    }
 
     return allowAction(action);
 };
@@ -104,6 +124,9 @@ const evaluateReplay = (
     if (context.targetFinalityAccepted !== true) {
         return refuseAction(action, 'TargetFinalityCheckpointMissing');
     }
+    if (context.bridgeMobileCertificatePresent === false) {
+        return refuseAction(action, 'MissingBridgeMobileCertificate');
+    }
 
     return allowAction(action);
 };
@@ -120,6 +143,9 @@ const evaluateReplayAttestation = (
     }
     if (context.localReplaySucceeded !== true) {
         return refuseAction(action, 'LocalReplayNotVerified');
+    }
+    if (context.bridgeMobileCertificatePresent === false) {
+        return refuseAction(action, 'MissingBridgeMobileCertificate');
     }
 
     return allowAction(action);
@@ -148,6 +174,9 @@ const evaluateTargetAcceptance = (
     ) {
         return refuseAction(action, 'EvaluationReplayThresholdNotReached');
     }
+    if (context.bridgeMobileCertificatePresent === false) {
+        return refuseAction(action, 'MissingBridgeMobileCertificate');
+    }
 
     return allowAction(action);
 };
@@ -169,6 +198,9 @@ const evaluateDecryptionShare = (
     const recoveryRefusal = isRecoveryRefused(context.recoveryState);
     if (recoveryRefusal !== undefined) {
         return refuseAction(action, recoveryRefusal);
+    }
+    if (context.brakerskiMobileProofCertificatePresent === false) {
+        return refuseAction(action, 'MissingBrakerskiMobileProofCertificate');
     }
 
     return allowAction(action);
@@ -196,8 +228,48 @@ const evaluateRecombination = (
     ) {
         return refuseAction(action, 'FirstThresholdSharesNotReached');
     }
+    if (context.brakerskiMobileProofCertificatePresent === false) {
+        return refuseAction(action, 'MissingBrakerskiMobileProofCertificate');
+    }
 
     return allowAction(action);
+};
+
+const evaluateClaimBearingEnvironment = (
+    action: ProtocolAction,
+    context: CapabilityContext,
+): CapabilityDecision | undefined => {
+    if (!claimBearingActions.has(action)) {
+        return undefined;
+    }
+    if (context.mobileProfileSupported === false) {
+        return refuseAction(action, 'UnsupportedMobileProfile');
+    }
+    if (context.storageQuotaSufficient === false) {
+        return refuseAction(action, 'InsufficientStorageQuota');
+    }
+
+    return undefined;
+};
+
+const evaluateUnavailableFutureAction = (
+    action: ProtocolAction,
+    context: CapabilityContext,
+): CapabilityDecision => {
+    if (
+        bridgeMobileCertificateActions.has(action) &&
+        context.bridgeMobileCertificatePresent === false
+    ) {
+        return refuseAction(action, 'MissingBridgeMobileCertificate');
+    }
+    if (
+        brakerskiMobileProofCertificateActions.has(action) &&
+        context.brakerskiMobileProofCertificatePresent === false
+    ) {
+        return refuseAction(action, 'MissingBrakerskiMobileProofCertificate');
+    }
+
+    return refuseAction(action, 'OperationUnavailable');
 };
 
 export const evaluateActionCapability = (
@@ -215,6 +287,11 @@ export const evaluateActionCapability = (
         !context.thresholdProfile.claimBearing
     ) {
         return refuseAction(action, 'ProfileNotClaimBearing');
+    }
+
+    const environmentRefusal = evaluateClaimBearingEnvironment(action, context);
+    if (environmentRefusal !== undefined) {
+        return environmentRefusal;
     }
 
     switch (action) {
@@ -261,8 +338,11 @@ export const evaluateActionCapability = (
         case 'RecombineAcceptedTarget':
             return evaluateRecombination(action, context);
         case 'DecodeVerifiedTopK':
+            return evaluateUnavailableFutureAction(action, context);
         case 'CreateRecoveryEpochUpdate':
+            return refuseAction(action, 'OperationUnavailable');
         case 'VerifyDecryptionShare':
+            return evaluateUnavailableFutureAction(action, context);
         case 'VerifyEncryptedEnvelope':
             return refuseAction(action, 'OperationUnavailable');
     }

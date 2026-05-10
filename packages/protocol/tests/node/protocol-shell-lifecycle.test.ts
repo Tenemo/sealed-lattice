@@ -115,6 +115,26 @@ describe('protocol-shell lifecycle shell', () => {
         expect(labels.resultClaimLabel).toBeUndefined();
     });
 
+    it('does not emit result labels when required mobile certificates are missing', () => {
+        const profile = deriveThresholdProfile({ rosterSize: 20 });
+
+        for (const missingCertificate of [
+            { bridgeMobileCertificatePresent: false },
+            { bridgeProverCertificatePresent: false },
+            { brakerskiMobileProofCertificatePresent: false },
+        ] as const) {
+            const labels = deriveLifecycleLabels({
+                lifecycleState: 'ResultComputedAuditable',
+                thresholdProfile: profile,
+                mobileClaimGatePassed: true,
+                ...missingCertificate,
+            });
+
+            expect(labels.primary).toEqual(['Unresolved']);
+            expect(labels.resultClaimLabel).toBeUndefined();
+        }
+    });
+
     it('requires local verification context for user-specific labels', () => {
         const profile = deriveThresholdProfile({ rosterSize: 20 });
 
@@ -166,6 +186,9 @@ describe('protocol-shell lifecycle shell', () => {
             mobileFlagshipProfile: true,
             foregroundProofGenerationRequired: true,
             foregroundProofVerificationRequired: true,
+            proofCheckpointRestored: true,
+            proofCheckpointRejected: true,
+            longRunningCryptographicCheck: true,
         });
 
         expect(labels.primary).toEqual(
@@ -188,6 +211,9 @@ describe('protocol-shell lifecycle shell', () => {
                 'MobileFlagshipProfile',
                 'ForegroundProofGenerationRequired',
                 'ForegroundProofVerificationRequired',
+                'ProofCheckpointRestored',
+                'ProofCheckpointRejected',
+                'LongRunningCryptographicCheck',
             ]),
         );
     });

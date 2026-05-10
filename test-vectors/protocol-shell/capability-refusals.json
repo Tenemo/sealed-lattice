@@ -104,6 +104,85 @@
         "action": "AcceptTarget",
         "reason": "ProfileNotClaimBearing"
       }
+    },
+    {
+      "caseName": "accept-target-unsupported-mobile-profile",
+      "action": "AcceptTarget",
+      "context": {
+        "lifecycleState": "EvaluationReplayOpen",
+        "pollSpecValid": true,
+        "targetFinalityAccepted": true,
+        "replayAttestationCount": 5,
+        "mobileProfileSupported": false
+      },
+      "expected": {
+        "allowed": false,
+        "action": "AcceptTarget",
+        "reason": "UnsupportedMobileProfile"
+      }
+    },
+    {
+      "caseName": "accept-target-insufficient-storage-quota",
+      "action": "AcceptTarget",
+      "context": {
+        "lifecycleState": "EvaluationReplayOpen",
+        "pollSpecValid": true,
+        "targetFinalityAccepted": true,
+        "replayAttestationCount": 5,
+        "storageQuotaSufficient": false
+      },
+      "expected": {
+        "allowed": false,
+        "action": "AcceptTarget",
+        "reason": "InsufficientStorageQuota"
+      }
+    },
+    {
+      "caseName": "replay-missing-bridge-mobile-certificate",
+      "action": "ReplayEvaluation",
+      "context": {
+        "lifecycleState": "TopKEvaluated",
+        "pollSpecValid": true,
+        "targetFinalityAccepted": true,
+        "bridgeMobileCertificatePresent": false
+      },
+      "expected": {
+        "allowed": false,
+        "action": "ReplayEvaluation",
+        "reason": "MissingBridgeMobileCertificate"
+      }
+    },
+    {
+      "caseName": "aggregate-missing-bridge-prover-certificate",
+      "action": "DeriveAggregateContribution",
+      "context": {
+        "lifecycleState": "VotingClosed",
+        "pollSpecValid": true,
+        "setupCompleteCount": 20,
+        "turnoutCount": 14,
+        "bridgeProverCertificatePresent": false
+      },
+      "expected": {
+        "allowed": false,
+        "action": "DeriveAggregateContribution",
+        "reason": "MissingBridgeProverCertificate"
+      }
+    },
+    {
+      "caseName": "decryption-share-missing-brakerski-mobile-proof-certificate",
+      "action": "CreateTargetBoundDecryptionShare",
+      "context": {
+        "lifecycleState": "TargetAccepted",
+        "pollSpecValid": true,
+        "targetFinalityAccepted": true,
+        "targetAccepted": true,
+        "brakerskiMobileProofCertificatePresent": false
+      },
+      "expected": {
+        "allowed": false,
+        "action": "CreateTargetBoundDecryptionShare",
+        "reason": "MissingBrakerskiMobileProofCertificate"
+      }
     }
   ]
 }
