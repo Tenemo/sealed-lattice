@@ -60,17 +60,19 @@ describe('package boundary helpers', () => {
         ).toEqual([]);
     });
 
-    it('extracts static, side-effect, and dynamic import specifiers', () => {
+    it('extracts static, side-effect, dynamic, and import type specifiers', () => {
         const sourceText = `
             import 'sealed-lattice';
             import { loadByteBufferKernel } from '@sealed-lattice/wasm';
             export { something } from '@sealed-lattice/crypto';
             const moduleName = await import('@sealed-lattice/testkit');
+            type TranscriptKernel = import('@sealed-lattice/types').TranscriptKernel;
         `;
 
         expect(extractImportSpecifiers(sourceText).sort()).toEqual([
             '@sealed-lattice/crypto',
             '@sealed-lattice/testkit',
+            '@sealed-lattice/types',
             '@sealed-lattice/wasm',
             'sealed-lattice',
         ]);
@@ -78,6 +80,17 @@ describe('package boundary helpers', () => {
 
     it('returns an empty import list when a file has no imports', () => {
         expect(extractImportSpecifiers('const value = 1;')).toEqual([]);
+    });
+
+    it('ignores import-like syntax whose module target is not a string literal', () => {
+        const sourceText = `
+            const packageName = '@sealed-lattice/wasm';
+            void import(packageName);
+            type PackageName = '@sealed-lattice/types';
+            type TranscriptKernel = import(PackageName).TranscriptKernel;
+        `;
+
+        expect(extractImportSpecifiers(sourceText)).toEqual([]);
     });
 
     it('rejects forbidden declared dependencies into the public package', () => {
