@@ -6,6 +6,52 @@ const assert = (condition, message) => {
 
 const publicApi = await import('sealed-lattice');
 const { deriveThresholdProfile, verifyTranscriptCoreFixture } = publicApi;
+const expectedPublicKeys = [
+    'deriveLifecycleLabels',
+    'deriveThresholdProfile',
+    'evaluateActionCapability',
+    'isValidLifecycleTransition',
+    'validatePollSpec',
+    'verifyTranscriptCoreFixture',
+];
+const forbiddenPublicKeys = [
+    'getShare',
+    'exportShare',
+    'exportSecretKey',
+    'importSecretKey',
+    'setSecretKey',
+    'thresholdDecrypt',
+    'partialDecrypt',
+    'partialDecryptWithoutTarget',
+    'decryptToFile',
+    'decryptToString',
+    'rawHEAdd',
+    'rawHEMul',
+    'rawHERelin',
+    'rawHERotate',
+    'rawNTT',
+    'rawRNSLimbAccess',
+    'setNoiseFloodSigma',
+    'setSmudgingDistribution',
+    'bootstrap',
+    'decryptAggregateShare',
+    'decryptComparisonBit',
+    'decryptExactSum',
+    'decryptIntermediateWire',
+    'decryptRank',
+];
+
+assert(
+    JSON.stringify(Object.keys(publicApi).sort()) ===
+        JSON.stringify(expectedPublicKeys),
+    'Packed package public exports changed unexpectedly',
+);
+for (const publicKey of forbiddenPublicKeys) {
+    assert(
+        !(publicKey in publicApi),
+        `Packed package must not export ${publicKey}`,
+    );
+}
 
 assert(
     typeof verifyTranscriptCoreFixture === 'function',

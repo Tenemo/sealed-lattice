@@ -115,8 +115,8 @@ export const validatePollSpecFromUnknown = (
     });
 
     if (
-        !Number.isInteger(topOptionCount) ||
         typeof topOptionCount !== 'number' ||
+        !Number.isInteger(topOptionCount) ||
         topOptionCount < 1 ||
         topOptionCount > options.length
     ) {

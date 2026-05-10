@@ -126,6 +126,18 @@ describe('protocol-shell poll-spec validation', () => {
         expectErrorCodes(decodedPollSpec, ['EmptyOptionLabel']);
     });
 
+    it('returns structured errors for non-number top option counts', () => {
+        expectErrorCodes(
+            {
+                pollId: 'poll',
+                question: 'Question',
+                options: ['A', 'B'],
+                topOptionCount: 1n,
+            },
+            ['InvalidTopOptionCount'],
+        );
+    });
+
     it('rejects too many options and topOptionCount larger than the option count', () => {
         expectErrorCodes(
             createValidPollSpecInput({
