@@ -9,7 +9,7 @@ const createValidPollSpecInput = (
     ceremonyId: 'ceremony-2026-board',
     question: 'Select the top priorities',
     options: Array.from({ length: 20 }, (_value, index) => `Option ${index}`),
-    kTop: 20,
+    topOptionCount: 20,
     ...overrides,
 });
 
@@ -59,7 +59,7 @@ describe('protocol-shell poll-spec validation', () => {
         const validation = validatePollSpec(
             createValidPollSpecInput({
                 options: ['A', 'B', 'C'],
-                kTop: 2,
+                topOptionCount: 2,
             }),
         );
 
@@ -77,13 +77,13 @@ describe('protocol-shell poll-spec validation', () => {
         });
     });
 
-    it('rejects option count, question, kTop, score, and policy errors', () => {
+    it('rejects option count, question, topOptionCount, score, and policy errors', () => {
         expectErrorCodes(
             createValidPollSpecInput({
                 ceremonyId: '',
                 question: '',
                 options: [],
-                kTop: 0,
+                topOptionCount: 0,
                 scoreDomain: {
                     min: 1,
                     max: 9,
@@ -97,7 +97,7 @@ describe('protocol-shell poll-spec validation', () => {
                 'EmptyCeremonyId',
                 'EmptyQuestion',
                 'InvalidOptionCount',
-                'InvalidKTop',
+                'InvalidTopOptionCount',
                 'UnsupportedScoreDomain',
                 'UnsupportedDuplicateBallotPolicy',
                 'UnsupportedTiePolicy',
@@ -110,47 +110,47 @@ describe('protocol-shell poll-spec validation', () => {
             ceremonyId: 'ceremony',
             question: 'Question',
             options: ['A', 42, 'B'],
-            kTop: 2,
+            topOptionCount: 2,
         };
 
         expectErrorCodes({}, [
             'EmptyCeremonyId',
             'EmptyQuestion',
             'InvalidOptionCount',
-            'InvalidKTop',
+            'InvalidTopOptionCount',
         ]);
 
         expectErrorCodes(decodedPollSpec, ['EmptyOptionLabel']);
     });
 
-    it('rejects too many options and kTop larger than the option count', () => {
+    it('rejects too many options and topOptionCount larger than the option count', () => {
         expectErrorCodes(
             createValidPollSpecInput({
                 options: Array.from(
                     { length: 21 },
                     (_value, index) => `Option ${index}`,
                 ),
-                kTop: 22,
+                topOptionCount: 22,
             }),
-            ['InvalidOptionCount', 'InvalidKTop'],
+            ['InvalidOptionCount', 'InvalidTopOptionCount'],
         );
     });
 
     it('rejects empty and duplicate option labels by exact comparison', () => {
         expectErrorCodes(
             createValidPollSpecInput({
-                options: ['Alpha', '', 'Alpha', 'Ａlpha'],
-                kTop: 1,
+                options: ['Alpha', '', 'Alpha', 'Alpha '],
+                topOptionCount: 1,
             }),
             ['EmptyOptionLabel', 'DuplicateOptionLabel'],
         );
     });
 
-    it('accepts visually similar but byte-distinct option labels', () => {
+    it('accepts labels that differ only by trailing whitespace under exact comparison', () => {
         const validation = validatePollSpec(
             createValidPollSpecInput({
-                options: ['Alpha', 'Ａlpha'],
-                kTop: 1,
+                options: ['Alpha', 'Alpha '],
+                topOptionCount: 1,
             }),
         );
 

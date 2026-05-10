@@ -3,20 +3,10 @@ import { copyFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+import { isWithinDirectory } from '../internal/files.js';
+
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const cargoTargetDirectory = path.resolve(repoRoot, 'target');
-
-const isWithinDirectory = (
-    directoryPath: string,
-    candidatePath: string,
-): boolean => {
-    const relativePath = path.relative(directoryPath, candidatePath);
-
-    return (
-        relativePath === '' ||
-        (!relativePath.startsWith('..') && !path.isAbsolute(relativePath))
-    );
-};
 
 export const resolveOutputFilePath = (
     commandLineArguments: readonly string[],

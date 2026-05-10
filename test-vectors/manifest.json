@@ -3,7 +3,7 @@
   "entries": [
     {
       "path": "protocol-shell/capability-refusals.json",
-      "sha256": "95981182b714e2bede84d264c5891b5c5ef095e96d92a36fe2b592ea83661771"
+      "sha256": "15a989d15727e0d8f58830e646a268ea64672d20d5e0c8a73df77f93dd908d91"
     },
     {
       "path": "protocol-shell/lifecycle-transitions.json",
@@ -11,11 +11,11 @@
     },
     {
       "path": "protocol-shell/poll-specs.json",
-      "sha256": "440226c8baa30791fda721dc5f3874e3eefc08dda1a258f76f65944c5baa3047"
+      "sha256": "97ddc435049d0ccecf8b82cbd30efd05d9ccb2133eae4433610b4d32ac0f3e44"
     },
     {
       "path": "protocol-shell/threshold-profiles.json",
-      "sha256": "705dcd3ead834488734714e2037a93ab96e613a98645f5e054a713f7230ac859"
+      "sha256": "9c18f9096c1eef2dde5702e102ae046623465db191454c2d2a4a16b4f1c919a0"
     },
     {
       "path": "transcript-core/golden-transcript-core.json",

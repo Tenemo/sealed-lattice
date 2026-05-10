@@ -2,8 +2,7 @@ import type {
     TranscriptCoreFixture,
     TranscriptCoreFixtureVerification,
 } from '@sealed-lattice/types';
-
-import { createTranscriptCoreKernelLoader } from './internal/transcript-core-bridge.js';
+import { createTranscriptCoreKernelLoader } from '@sealed-lattice/wasm';
 
 type TranscriptCoreKernel = {
     verifyFixture(

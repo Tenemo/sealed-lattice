@@ -7,7 +7,8 @@
     type="button"
     class="sl-theme-toggle"
     data-sl-theme-toggle
-    aria-label="Toggle theme"
+    aria-label="Toggle color theme"
+    aria-pressed="false"
 >
     <svg
         class="sl-theme-toggle__icon sl-theme-toggle__icon--sun"
@@ -41,6 +42,19 @@
                 ? 'light'
                 : 'dark';
         }
+        function updateToggleState(toggle) {
+            var theme = currentTheme();
+            toggle.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+            toggle.setAttribute(
+                'aria-label',
+                theme === 'light' ? 'Switch to dark theme' : 'Switch to light theme',
+            );
+        }
+        function updateAllToggleStates() {
+            document
+                .querySelectorAll('[data-sl-theme-toggle]')
+                .forEach(updateToggleState);
+        }
         function setTheme(next) {
             document.documentElement.dataset.theme = next;
             try {
@@ -48,10 +62,12 @@
             } catch (_) {
                 // localStorage unavailable; in-page state still updates.
             }
+            updateAllToggleStates();
         }
         document
             .querySelectorAll('[data-sl-theme-toggle]')
             .forEach(function (toggle) {
+                updateToggleState(toggle);
                 toggle.addEventListener('click', function () {
                     setTheme(currentTheme() === 'light' ? 'dark' : 'light');
                 });

@@ -14,9 +14,9 @@ internal packages.
 - `packages/types`: canonical shared type definitions inlined into the published package during SDK builds
 - `packages/protocol`: deterministic election model and transcript package shell
 - `packages/crypto`: provider and capability package shell
-- `packages/wasm`: typed Rust/WASM loader and transcript-core command path
+- `packages/wasm`: typed Rust/WASM loader and transcript core command path
 - `packages/testkit`: deterministic integration scaffolding package shell
-- `crates/sealed-lattice-kernel`: Rust transcript-core crate that exports the WASM command path
+- `crates/sealed-lattice-kernel`: Rust transcript core crate that exports the WASM command path
 
 ## Dependency direction
 

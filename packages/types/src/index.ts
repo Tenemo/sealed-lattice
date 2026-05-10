@@ -150,12 +150,12 @@ export type HeBackendCorruptionModel =
       }
     | {
           readonly kind: 'CertifiedCustom';
-          readonly cHeBackend: number;
+          readonly backendCorruptionBound: number;
           readonly certificateDigest: string;
       };
 
 export type ThresholdProfileInput = {
-    readonly n: number;
+    readonly rosterSize: number;
     readonly heBackendCorruptionModel?: HeBackendCorruptionModel;
     readonly unsafeMicroRosterAcknowledged?: boolean;
 };
@@ -172,22 +172,22 @@ export type ThresholdWarning =
     | 'BackendCorruptionBoundTooHigh';
 
 export type ThresholdProfile = {
-    readonly n: number;
+    readonly rosterSize: number;
     readonly rosterProfileKind: RosterProfileKind;
     readonly claimBearing: boolean;
-    readonly cStruct: number;
-    readonly cHeBackend: number;
-    readonly cPriv: number;
-    readonly cDec: number;
-    readonly fAct: number;
-    readonly tPvss: number;
-    readonly tDec: number;
-    readonly qRelease: number;
-    readonly qAgg: number;
-    readonly qDec: number;
-    readonly qEval: number;
-    readonly raceShareMax: number;
-    readonly qSetupComplete: number;
+    readonly structuralCorruptionBound: number;
+    readonly backendCorruptionBound: number;
+    readonly privacyCorruptionBound: number;
+    readonly decryptionCorruptionBound: number;
+    readonly activeFaultBound: number;
+    readonly pvssThreshold: number;
+    readonly decryptionThreshold: number;
+    readonly releaseQuorum: number;
+    readonly aggregateContributionQuorum: number;
+    readonly decryptionShareQuorum: number;
+    readonly evaluationReplayQuorum: number;
+    readonly maximumRaceShares: number;
+    readonly setupCompletionQuorum: number;
     readonly backendCorruptionModel: HeBackendCorruptionModel;
     readonly warnings: readonly ThresholdWarning[];
 };
@@ -206,7 +206,7 @@ export type PollSpecInput = {
     readonly ceremonyId: string;
     readonly question: string;
     readonly options: readonly string[];
-    readonly kTop: number;
+    readonly topOptionCount: number;
     readonly scoreDomain?: ScoreDomain;
     readonly duplicateBallotPolicy?: DuplicateBallotPolicy;
     readonly tiePolicy?: TiePolicy;
@@ -216,7 +216,7 @@ export type PollSpec = {
     readonly ceremonyId: string;
     readonly question: string;
     readonly options: readonly string[];
-    readonly kTop: number;
+    readonly topOptionCount: number;
     readonly scoreDomain: ScoreDomain;
     readonly duplicateBallotPolicy: DuplicateBallotPolicy;
     readonly tiePolicy: TiePolicy;
@@ -228,7 +228,7 @@ export type PollSpecValidationErrorCode =
     | 'InvalidOptionCount'
     | 'EmptyOptionLabel'
     | 'DuplicateOptionLabel'
-    | 'InvalidKTop'
+    | 'InvalidTopOptionCount'
     | 'UnsupportedScoreDomain'
     | 'UnsupportedDuplicateBallotPolicy'
     | 'UnsupportedTiePolicy';
@@ -291,17 +291,10 @@ export type FailureStatusLabel =
     | 'BoardEvidencePublished'
     | 'ForkedElection'
     | 'SetupIncomplete'
-    | 'TurnoutBelowReleaseFloor'
     | 'AggregateThresholdNotReached'
     | 'EvaluationReplayThresholdNotReached'
     | 'MobileEvaluationPending'
-    | 'OptionalEvaluationProofRejected'
-    | 'EvaluationRejected'
-    | 'TargetRejected'
-    | 'CPADProfileRejected'
-    | 'AnyTDecryptionProfileRejected'
-    | 'EvaluationKeySizeProfileRejected'
-    | 'MobileReplayProfileRejected';
+    | 'EvaluationRejected';
 
 export type ModeStatusLabel = 'UnsafeMicroRoster' | 'PassiveMHEPrototype';
 
@@ -363,7 +356,6 @@ export type CapabilityContext = {
     readonly pollSpecValid: boolean;
     readonly setupCompleteCount?: number;
     readonly turnoutCount?: number;
-    readonly aggregateContributionCount?: number;
     readonly replayAttestationCount?: number;
     readonly decryptionShareCount?: number;
     readonly targetFinalityAccepted?: boolean;
@@ -375,7 +367,7 @@ export type CapabilityContext = {
 };
 
 export type RefusalReason =
-    | 'NotImplementedUntilLaterMilestone'
+    | 'OperationUnavailable'
     | 'InvalidLifecycleState'
     | 'PollSpecInvalid'
     | 'ProfileNotClaimBearing'

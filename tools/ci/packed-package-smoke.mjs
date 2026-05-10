@@ -16,7 +16,7 @@ assert(
     'Threshold profile calculator must be exported as a function',
 );
 assert(
-    deriveThresholdProfile({ n: 20 }).cPriv === 6,
+    deriveThresholdProfile({ rosterSize: 20 }).privacyCorruptionBound === 6,
     'Threshold profile calculator must be exported and deterministic',
 );
 const verification = await verifyTranscriptCoreFixture({

@@ -106,7 +106,7 @@ describe('protocol-shell test vectors', () => {
     it('matches capability refusal vectors against their threshold profiles', () => {
         for (const vector of capabilityRefusals.cases) {
             const thresholdProfile = deriveThresholdProfile(
-                vector.thresholdProfileInput ?? { n: 20 },
+                vector.thresholdProfileInput ?? { rosterSize: 20 },
             );
 
             expect(

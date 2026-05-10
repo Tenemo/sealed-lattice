@@ -1,6 +1,8 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
+import { collectFiles } from '../tools/internal/files.js';
+
 import {
     apiNavigationPath,
     apiReferenceRoot,
@@ -88,29 +90,8 @@ const toRelativeRouteTarget = (fromFile: string, rawTarget: string): string => {
     return relativeTarget === '' ? './' : `${relativeTarget}/`;
 };
 
-const collectMarkdownFiles = async (directory: string): Promise<string[]> => {
-    const files: string[] = [];
-    const pending = [directory];
-
-    while (pending.length > 0) {
-        const current = pending.pop();
-        if (current === undefined) {
-            continue;
-        }
-
-        const entries = await fs.readdir(current, { withFileTypes: true });
-        for (const entry of entries) {
-            const entryPath = path.join(current, entry.name);
-            if (entry.isDirectory()) {
-                pending.push(entryPath);
-            } else if (entry.isFile() && entryPath.endsWith('.md')) {
-                files.push(entryPath);
-            }
-        }
-    }
-
-    return files.sort();
-};
+const collectMarkdownFiles = async (directory: string): Promise<string[]> =>
+    collectFiles(directory, { extensions: ['.md'] });
 
 const deriveTitleFromRelativePath = (relativePath: string): string => {
     if (relativePath === 'index.md') {

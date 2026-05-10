@@ -74,13 +74,16 @@ const evaluateAggregateContribution = (
     if (
         !countAtLeast(
             context.setupCompleteCount,
-            context.thresholdProfile.qSetupComplete,
+            context.thresholdProfile.setupCompletionQuorum,
         )
     ) {
         return refuseAction(action, 'SetupIncomplete');
     }
     if (
-        !countAtLeast(context.turnoutCount, context.thresholdProfile.qRelease)
+        !countAtLeast(
+            context.turnoutCount,
+            context.thresholdProfile.releaseQuorum,
+        )
     ) {
         return refuseAction(action, 'TurnoutBelowReleaseFloor');
     }
@@ -140,7 +143,7 @@ const evaluateTargetAcceptance = (
         context.optionalEvaluationProofVerified !== true &&
         !countAtLeast(
             context.replayAttestationCount,
-            context.thresholdProfile.qEval,
+            context.thresholdProfile.evaluationReplayQuorum,
         )
     ) {
         return refuseAction(action, 'EvaluationReplayThresholdNotReached');
@@ -188,7 +191,7 @@ const evaluateRecombination = (
     if (
         !countAtLeast(
             context.decryptionShareCount,
-            context.thresholdProfile.qDec,
+            context.thresholdProfile.decryptionShareQuorum,
         )
     ) {
         return refuseAction(action, 'FirstThresholdSharesNotReached');
@@ -261,6 +264,6 @@ export const evaluateActionCapability = (
         case 'CreateRecoveryEpochUpdate':
         case 'VerifyDecryptionShare':
         case 'VerifyEncryptedEnvelope':
-            return refuseAction(action, 'NotImplementedUntilLaterMilestone');
+            return refuseAction(action, 'OperationUnavailable');
     }
 };

@@ -60,7 +60,7 @@ export const validatePollSpec = (input: unknown): PollSpecValidation => {
     const options: readonly unknown[] = Array.isArray(rawOptions)
         ? rawOptions
         : [];
-    const kTop = inputRecord.kTop;
+    const topOptionCount = inputRecord.topOptionCount;
     const scoreDomain = inputRecord.scoreDomain;
     const duplicateBallotPolicy = inputRecord.duplicateBallotPolicy;
     const tiePolicy = inputRecord.tiePolicy;
@@ -88,7 +88,7 @@ export const validatePollSpec = (input: unknown): PollSpecValidation => {
         addError(errors, {
             code: 'InvalidOptionCount',
             field: 'options',
-            message: 'options must be an array with between 1 and 20 labels.',
+            message: 'options must be an array with 1 to 20 labels.',
         });
     }
 
@@ -114,15 +114,15 @@ export const validatePollSpec = (input: unknown): PollSpecValidation => {
     });
 
     if (
-        !Number.isInteger(kTop) ||
-        typeof kTop !== 'number' ||
-        kTop < 1 ||
-        kTop > options.length
+        !Number.isInteger(topOptionCount) ||
+        typeof topOptionCount !== 'number' ||
+        topOptionCount < 1 ||
+        topOptionCount > options.length
     ) {
         addError(errors, {
-            code: 'InvalidKTop',
-            field: 'kTop',
-            message: 'kTop must be between 1 and options.length.',
+            code: 'InvalidTopOptionCount',
+            field: 'topOptionCount',
+            message: 'topOptionCount must be between 1 and options.length.',
         });
     }
     if (!isSupportedScoreDomain(scoreDomain)) {
@@ -164,7 +164,8 @@ export const validatePollSpec = (input: unknown): PollSpecValidation => {
             ceremonyId: ceremonyId ?? '',
             question: question ?? '',
             options: normalizedOptions,
-            kTop: typeof kTop === 'number' ? kTop : 0,
+            topOptionCount:
+                typeof topOptionCount === 'number' ? topOptionCount : 0,
             scoreDomain: normalizeScoreDomain(
                 scoreDomain as ScoreDomain | undefined,
             ),

@@ -6,7 +6,7 @@ import {
 } from '../../src/protocol-shell/index';
 import type { CapabilityContext } from '../../src/protocol-shell/index';
 
-const thresholdProfile = deriveThresholdProfile({ n: 20 });
+const thresholdProfile = deriveThresholdProfile({ rosterSize: 20 });
 
 const createContext = (
     overrides: Partial<CapabilityContext> = {},
@@ -39,7 +39,7 @@ describe('protocol-shell capability evaluator', () => {
                 createContext({
                     lifecycleState: 'VotingClosed',
                     setupCompleteCount: 19,
-                    turnoutCount: thresholdProfile.qRelease,
+                    turnoutCount: thresholdProfile.releaseQuorum,
                 }),
             ),
         ).toMatchObject({ reason: 'SetupIncomplete' });
@@ -48,8 +48,8 @@ describe('protocol-shell capability evaluator', () => {
                 'DeriveAggregateContribution',
                 createContext({
                     lifecycleState: 'VotingClosed',
-                    setupCompleteCount: thresholdProfile.qSetupComplete,
-                    turnoutCount: thresholdProfile.qRelease - 1,
+                    setupCompleteCount: thresholdProfile.setupCompletionQuorum,
+                    turnoutCount: thresholdProfile.releaseQuorum - 1,
                 }),
             ),
         ).toMatchObject({ reason: 'TurnoutBelowReleaseFloor' });
@@ -61,8 +61,8 @@ describe('protocol-shell capability evaluator', () => {
                 'DeriveAggregateContribution',
                 createContext({
                     lifecycleState: 'AwaitingAggregateContributors',
-                    setupCompleteCount: thresholdProfile.qSetupComplete,
-                    turnoutCount: thresholdProfile.qRelease,
+                    setupCompleteCount: thresholdProfile.setupCompletionQuorum,
+                    turnoutCount: thresholdProfile.releaseQuorum,
                 }),
             ),
         ).toEqual({
@@ -117,7 +117,8 @@ describe('protocol-shell capability evaluator', () => {
                 createContext({
                     lifecycleState: 'EvaluationReplayOpen',
                     targetFinalityAccepted: true,
-                    replayAttestationCount: thresholdProfile.qEval - 1,
+                    replayAttestationCount:
+                        thresholdProfile.evaluationReplayQuorum - 1,
                 }),
             ),
         ).toMatchObject({ reason: 'EvaluationReplayThresholdNotReached' });
@@ -127,7 +128,8 @@ describe('protocol-shell capability evaluator', () => {
                 createContext({
                     lifecycleState: 'EvaluationReplayOpen',
                     targetFinalityAccepted: true,
-                    replayAttestationCount: thresholdProfile.qEval,
+                    replayAttestationCount:
+                        thresholdProfile.evaluationReplayQuorum,
                 }),
             ),
         ).toEqual({ allowed: true, action: 'AcceptTarget' });
@@ -195,7 +197,8 @@ describe('protocol-shell capability evaluator', () => {
                 'RecombineAcceptedTarget',
                 createContext({
                     lifecycleState: 'AwaitingFirstDecryptionShares',
-                    decryptionShareCount: thresholdProfile.qDec,
+                    decryptionShareCount:
+                        thresholdProfile.decryptionShareQuorum,
                 }),
             ),
         ).toMatchObject({ reason: 'TargetNotAccepted' });
@@ -208,7 +211,8 @@ describe('protocol-shell capability evaluator', () => {
                 createContext({
                     lifecycleState: 'AwaitingFirstDecryptionShares',
                     targetAccepted: true,
-                    decryptionShareCount: thresholdProfile.qDec - 1,
+                    decryptionShareCount:
+                        thresholdProfile.decryptionShareQuorum - 1,
                 }),
             ),
         ).toMatchObject({ reason: 'FirstThresholdSharesNotReached' });
@@ -216,11 +220,11 @@ describe('protocol-shell capability evaluator', () => {
 
     it('keeps non-claim-bearing profiles out of claim-bearing capabilities', () => {
         const unsafeThresholdProfile = deriveThresholdProfile({
-            n: 19,
+            rosterSize: 19,
             unsafeMicroRosterAcknowledged: true,
         });
         const certificateGatedThresholdProfile = deriveThresholdProfile({
-            n: 21,
+            rosterSize: 21,
         });
 
         expect(
@@ -230,7 +234,8 @@ describe('protocol-shell capability evaluator', () => {
                     lifecycleState: 'EvaluationReplayOpen',
                     thresholdProfile: unsafeThresholdProfile,
                     targetFinalityAccepted: true,
-                    replayAttestationCount: unsafeThresholdProfile.qEval,
+                    replayAttestationCount:
+                        unsafeThresholdProfile.evaluationReplayQuorum,
                 }),
             ),
         ).toMatchObject({ reason: 'ProfileNotClaimBearing' });
@@ -242,21 +247,22 @@ describe('protocol-shell capability evaluator', () => {
                     thresholdProfile: certificateGatedThresholdProfile,
                     targetFinalityAccepted: true,
                     replayAttestationCount:
-                        certificateGatedThresholdProfile.qEval,
+                        certificateGatedThresholdProfile.evaluationReplayQuorum,
                 }),
             ),
         ).toMatchObject({ reason: 'ProfileNotClaimBearing' });
     });
 
-    it('leaves verified top-k decoding unimplemented in protocol shell', () => {
+    it('leaves verified top-k decoding unavailable in protocol shell', () => {
         expect(
             evaluateActionCapability(
                 'DecodeVerifiedTopK',
                 createContext({
                     lifecycleState: 'FullyVerifiedResult',
-                    decryptionShareCount: thresholdProfile.qDec,
+                    decryptionShareCount:
+                        thresholdProfile.decryptionShareQuorum,
                 }),
             ),
-        ).toMatchObject({ reason: 'NotImplementedUntilLaterMilestone' });
+        ).toMatchObject({ reason: 'OperationUnavailable' });
     });
 });

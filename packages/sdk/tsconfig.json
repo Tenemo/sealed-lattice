@@ -10,7 +10,13 @@
     "include": ["src/**/*.ts"],
     "references": [
         {
+            "path": "../protocol"
+        },
+        {
             "path": "../types"
+        },
+        {
+            "path": "../wasm"
         }
     ]
 }

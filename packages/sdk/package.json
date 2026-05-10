@@ -37,7 +37,9 @@
         "build": "pnpm run build:types && pnpm exec del-cli dist tsconfig.tsbuildinfo && tsc --project tsconfig.json && pnpm run build:bridge && pnpm run build:wasm"
     },
     "devDependencies": {
+        "@sealed-lattice/protocol": "workspace:*",
         "@sealed-lattice/types": "workspace:*",
+        "@sealed-lattice/wasm": "workspace:*",
         "vitest": "^4.1.4"
     },
     "keywords": [

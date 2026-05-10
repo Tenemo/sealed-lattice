@@ -24,15 +24,17 @@ describe('protocol-shell public package API in browsers', () => {
     });
 
     it('runs the deterministic protocol-shell shell without WASM-specific APIs', () => {
-        const thresholdProfile = publicApi.deriveThresholdProfile({ n: 20 });
+        const thresholdProfile = publicApi.deriveThresholdProfile({
+            rosterSize: 20,
+        });
 
-        expect(thresholdProfile.qRelease).toBe(14);
+        expect(thresholdProfile.releaseQuorum).toBe(14);
         expect(
             publicApi.validatePollSpec({
                 ceremonyId: 'browser-ceremony',
                 question: 'Question',
                 options: ['A', 'B', 'C'],
-                kTop: 2,
+                topOptionCount: 2,
             }),
         ).toMatchObject({ ok: true });
         expect(
@@ -40,8 +42,8 @@ describe('protocol-shell public package API in browsers', () => {
                 lifecycleState: 'VotingClosed',
                 thresholdProfile,
                 pollSpecValid: true,
-                setupCompleteCount: thresholdProfile.qSetupComplete,
-                turnoutCount: thresholdProfile.qRelease,
+                setupCompleteCount: thresholdProfile.setupCompletionQuorum,
+                turnoutCount: thresholdProfile.releaseQuorum,
             }),
         ).toEqual({
             allowed: true,

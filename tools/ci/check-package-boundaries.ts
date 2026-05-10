@@ -2,6 +2,12 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+import {
+    collectFiles,
+    isWithinDirectory,
+    toPosixPath,
+} from '../internal/files.js';
+
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const packagesRoot = path.resolve(repoRoot, 'packages');
 const codeFilePattern = /\.(?:cts|mts|ts|tsx|js|mjs)$/u;
@@ -45,18 +51,6 @@ type PackageJsonShape = {
     name: string;
     optionalDependencies?: Record<string, string>;
     peerDependencies?: Record<string, string>;
-};
-
-const isWithinDirectory = (
-    directoryPath: string,
-    candidatePath: string,
-): boolean => {
-    const relativePath = path.relative(directoryPath, candidatePath);
-
-    return (
-        relativePath === '' ||
-        (!relativePath.startsWith('..') && !path.isAbsolute(relativePath))
-    );
 };
 
 export const collectInternalDependencies = (
@@ -192,7 +186,7 @@ export const validateImportBoundaries = (
                 )
             ) {
                 failures.push(
-                    `${importObservation.packageName} deep-imports ${importObservation.specifier} from ${path.relative(repoRoot, importObservation.filePath).replace(/\\/g, '/')}`,
+                    `${importObservation.packageName} deep-imports ${importObservation.specifier} from ${toPosixPath(path.relative(repoRoot, importObservation.filePath))}`,
                 );
                 break;
             }
@@ -236,7 +230,7 @@ export const validateImportBoundaries = (
             targetPackage.name !== importObservation.packageName
         ) {
             failures.push(
-                `${importObservation.packageName} uses cross-package relative import ${importObservation.specifier} from ${path.relative(repoRoot, importObservation.filePath).replace(/\\/g, '/')} into ${targetPackage.name}`,
+                `${importObservation.packageName} uses cross-package relative import ${importObservation.specifier} from ${toPosixPath(path.relative(repoRoot, importObservation.filePath))} into ${targetPackage.name}`,
             );
         }
     }
@@ -246,42 +240,10 @@ export const validateImportBoundaries = (
 
 /* v8 ignore start */
 const collectCodeFiles = async (directoryPath: string): Promise<string[]> => {
-    try {
-        const stats = await fs.stat(directoryPath);
-        if (!stats.isDirectory()) {
-            return [];
-        }
-    } catch {
-        return [];
-    }
-
-    const files: string[] = [];
-    const pending = [directoryPath];
-
-    while (pending.length > 0) {
-        const currentDirectoryPath = pending.pop();
-        if (currentDirectoryPath === undefined) {
-            continue;
-        }
-
-        const entries = await fs.readdir(currentDirectoryPath, {
-            withFileTypes: true,
-        });
-
-        for (const entry of entries) {
-            const entryPath = path.join(currentDirectoryPath, entry.name);
-            if (entry.isDirectory()) {
-                pending.push(entryPath);
-                continue;
-            }
-
-            if (entry.isFile() && codeFilePattern.test(entry.name)) {
-                files.push(entryPath);
-            }
-        }
-    }
-
-    return files.sort();
+    return collectFiles(directoryPath, {
+        allowMissing: true,
+        fileNamePattern: codeFilePattern,
+    });
 };
 
 const loadWorkspacePackages = async (): Promise<WorkspacePackage[]> => {

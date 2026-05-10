@@ -1,7 +1,7 @@
 /*
  * Layout overrides target Starlight's internal class names (.main-frame,
  * .sidebar-pane, .right-sidebar, .lg\:sl-flex). Tuned for
- * @astrojs/starlight 0.38.3 — re-verify after a major Starlight upgrade.
+ * @astrojs/starlight 0.38.3. Re-verify after a major Starlight upgrade.
  */
 @layer starlight.core {
     header {

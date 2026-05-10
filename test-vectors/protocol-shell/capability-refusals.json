@@ -74,7 +74,7 @@
       }
     },
     {
-      "caseName": "decode-top-k-not-implemented",
+      "caseName": "decode-top-k-unavailable",
       "action": "DecodeVerifiedTopK",
       "context": {
         "lifecycleState": "FullyVerifiedResult",
@@ -84,14 +84,14 @@
       "expected": {
         "allowed": false,
         "action": "DecodeVerifiedTopK",
-        "reason": "NotImplementedUntilLaterMilestone"
+        "reason": "OperationUnavailable"
       }
     },
     {
       "caseName": "accept-target-certificate-gated-profile-not-claim-bearing",
       "action": "AcceptTarget",
       "thresholdProfileInput": {
-        "n": 21
+        "rosterSize": 21
       },
       "context": {
         "lifecycleState": "EvaluationReplayOpen",

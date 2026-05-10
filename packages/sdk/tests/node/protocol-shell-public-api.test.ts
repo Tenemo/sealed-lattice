@@ -11,6 +11,10 @@ const requiredPublicFunctions = [
     ['verifyTranscriptCoreFixture', publicApi.verifyTranscriptCoreFixture],
 ] as const;
 
+const allowedRuntimeExports = requiredPublicFunctions
+    .map(([publicFunctionName]) => publicFunctionName)
+    .sort();
+
 const forbiddenPublicKeys = [
     'getShare',
     'exportShare',
@@ -39,7 +43,8 @@ const forbiddenPublicKeys = [
 ];
 
 describe('protocol-shell public package API in Node', () => {
-    it('exposes callable safe runtime functions and keeps forbidden operations absent', () => {
+    it('exposes only the safe runtime functions and keeps forbidden operations absent', () => {
+        expect(Object.keys(publicApi).sort()).toEqual(allowedRuntimeExports);
         for (const [
             publicFunctionName,
             publicFunction,
@@ -52,15 +57,17 @@ describe('protocol-shell public package API in Node', () => {
     });
 
     it('derives threshold, poll, lifecycle, label, and capability decisions', () => {
-        const thresholdProfile = publicApi.deriveThresholdProfile({ n: 20 });
+        const thresholdProfile = publicApi.deriveThresholdProfile({
+            rosterSize: 20,
+        });
 
-        expect(thresholdProfile.cPriv).toBe(6);
+        expect(thresholdProfile.privacyCorruptionBound).toBe(6);
         expect(
             publicApi.validatePollSpec({
                 ceremonyId: 'ceremony',
                 question: 'Question',
                 options: ['A', 'B'],
-                kTop: 1,
+                topOptionCount: 1,
             }),
         ).toMatchObject({ ok: true });
         expect(
@@ -83,7 +90,7 @@ describe('protocol-shell public package API in Node', () => {
                 thresholdProfile,
                 pollSpecValid: true,
                 targetFinalityAccepted: true,
-                replayAttestationCount: thresholdProfile.qEval,
+                replayAttestationCount: thresholdProfile.evaluationReplayQuorum,
             }),
         ).toEqual({ allowed: true, action: 'AcceptTarget' });
     });

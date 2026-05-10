@@ -28,7 +28,7 @@
           "Option 18",
           "Option 19"
         ],
-        "kTop": 20,
+        "topOptionCount": 20,
         "scoreDomain": {
           "min": 1,
           "max": 10,
@@ -45,7 +45,7 @@
         "ceremonyId": "",
         "question": "",
         "options": [],
-        "kTop": 0,
+        "topOptionCount": 0,
         "scoreDomain": {
           "min": 1,
           "max": 9,
@@ -59,7 +59,7 @@
         "EmptyCeremonyId",
         "EmptyQuestion",
         "InvalidOptionCount",
-        "InvalidKTop",
+        "InvalidTopOptionCount",
         "UnsupportedScoreDomain",
         "UnsupportedDuplicateBallotPolicy",
         "UnsupportedTiePolicy"
@@ -75,7 +75,7 @@
           "Beta",
           "Alpha"
         ],
-        "kTop": 1
+        "topOptionCount": 1
       },
       "expectedOk": false,
       "expectedErrorCodes": [
@@ -90,7 +90,7 @@
         "EmptyCeremonyId",
         "EmptyQuestion",
         "InvalidOptionCount",
-        "InvalidKTop"
+        "InvalidTopOptionCount"
       ]
     }
   ]

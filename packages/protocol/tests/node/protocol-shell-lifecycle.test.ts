@@ -74,9 +74,9 @@ describe('protocol-shell lifecycle shell', () => {
     );
 
     it('derives claim-bearing result labels only for claim-bearing profiles', () => {
-        const mandatoryProfile = deriveThresholdProfile({ n: 20 });
+        const mandatoryProfile = deriveThresholdProfile({ rosterSize: 20 });
         const unsafeProfile = deriveThresholdProfile({
-            n: 19,
+            rosterSize: 19,
             unsafeMicroRosterAcknowledged: true,
         });
 
@@ -101,7 +101,7 @@ describe('protocol-shell lifecycle shell', () => {
     });
 
     it('requires local verification context for user-specific labels', () => {
-        const profile = deriveThresholdProfile({ n: 20 });
+        const profile = deriveThresholdProfile({ rosterSize: 20 });
 
         expect(
             deriveLifecycleLabels({
@@ -137,7 +137,7 @@ describe('protocol-shell lifecycle shell', () => {
     });
 
     it('marks passive MHE prototype and optional proof status explicitly', () => {
-        const profile = deriveThresholdProfile({ n: 20 });
+        const profile = deriveThresholdProfile({ rosterSize: 20 });
         const labels = deriveLifecycleLabels({
             lifecycleState: 'FullyVerifiedResult',
             thresholdProfile: profile,

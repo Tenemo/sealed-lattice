@@ -11,7 +11,7 @@ exposes the safe transcript core fixture verifier and protocol shell.
 ## Public package rules
 
 - The only committed public package name is `sealed-lattice`.
-- The public runtime facade currently exports transcript core fixture verification plus threshold, lifecycle, poll-spec, and capability helpers.
+- The public runtime facade currently exports transcript core fixture verification plus threshold, lifecycle, poll specification, and capability helpers.
 - No public subpaths are promised yet.
 - The current release freezes packaging, docs, smoke checks, transcript core fixtures, protocol shell vectors, and the workspace shape.
 
@@ -36,7 +36,7 @@ and refuse premature protocol actions. They do not implement voting.
 - the published `sealed-lattice` package identity
 - private types, protocol, crypto, wasm, and testkit shells
 - a Rust transcript core plus an internal WASM loader
-- a deterministic threshold, lifecycle, poll-spec, and capability shell
+- a deterministic threshold, lifecycle, poll specification, and capability shell
 - docs, TypeDoc, pack smoke, vector manifest verification, and CI verification
 
 ## What is not published yet

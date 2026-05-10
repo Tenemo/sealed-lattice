@@ -34,12 +34,12 @@ and five private internal packages:
 - `@sealed-lattice/testkit`
 
 The workspace also contains `crates/sealed-lattice-kernel`, the Rust transcript
-core used by the native-test and WASM-loading path.
+core used by the native test and WASM loading path.
 
 ## Current public boundary
 
 The published `sealed-lattice` package currently exposes a safe transcript core
-fixture verifier plus the threshold, lifecycle, poll-spec, and capability
+fixture verifier plus the threshold, lifecycle, poll specification, and capability
 shell.
 
 This keeps packaging, documentation, smoke checks, transcript fixtures, and

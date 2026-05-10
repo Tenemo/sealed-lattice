@@ -1,3 +1,10 @@
+import {
+    deriveLifecycleLabels as deriveLifecycleLabelsInternal,
+    deriveThresholdProfile as deriveThresholdProfileInternal,
+    evaluateActionCapability as evaluateActionCapabilityInternal,
+    isValidLifecycleTransition as isValidLifecycleTransitionInternal,
+    validatePollSpec as validatePollSpecInternal,
+} from '@sealed-lattice/protocol';
 import type {
     CapabilityContext,
     CapabilityDecision,
@@ -13,13 +20,6 @@ import type {
     TranscriptCoreVerificationResult,
 } from '@sealed-lattice/types';
 
-import {
-    deriveLifecycleLabels as deriveLifecycleLabelsInternal,
-    deriveThresholdProfile as deriveThresholdProfileInternal,
-    evaluateActionCapability as evaluateActionCapabilityInternal,
-    isValidLifecycleTransition as isValidLifecycleTransitionInternal,
-    validatePollSpec as validatePollSpecInternal,
-} from './internal/protocol-shell/index.js';
 import { loadTranscriptCoreKernel } from './kernel.js';
 
 export type * from '@sealed-lattice/types';

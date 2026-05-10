@@ -17,7 +17,7 @@ const isNonNegativeInteger = (value: number): boolean =>
     Number.isInteger(value) && value >= 0;
 
 const normalizeBackendCorruptionModel = (
-    n: number,
+    rosterSize: number,
     model: HeBackendCorruptionModel | undefined,
 ): HeBackendCorruptionModel => {
     if (model === undefined) {
@@ -28,14 +28,14 @@ const normalizeBackendCorruptionModel = (
         return strictLessThanOneThirdModel;
     }
 
-    if (!isNonNegativeInteger(model.cHeBackend)) {
+    if (!isNonNegativeInteger(model.backendCorruptionBound)) {
         throw new RangeError(
             'Certified HE backend corruption bound must be a non-negative integer.',
         );
     }
-    if (model.cHeBackend >= n) {
+    if (model.backendCorruptionBound >= rosterSize) {
         throw new RangeError(
-            'Certified HE backend corruption bound must be less than n.',
+            'Certified HE backend corruption bound must be less than rosterSize.',
         );
     }
     if (model.certificateDigest.length === 0) {
@@ -44,29 +44,29 @@ const normalizeBackendCorruptionModel = (
 
     return {
         kind: 'CertifiedCustom',
-        cHeBackend: model.cHeBackend,
+        backendCorruptionBound: model.backendCorruptionBound,
         certificateDigest: model.certificateDigest,
     };
 };
 
 const deriveRosterProfile = (
-    n: number,
+    rosterSize: number,
     unsafeMicroRosterAcknowledged: boolean | undefined,
 ): {
     readonly claimBearing: boolean;
     readonly rosterProfileKind: RosterProfileKind;
     readonly warnings: readonly ThresholdWarning[];
 } => {
-    if (!Number.isInteger(n)) {
+    if (!Number.isInteger(rosterSize)) {
         throw new RangeError('Roster size must be an integer.');
     }
-    if (n < minimumUnsafeRosterSize) {
+    if (rosterSize < minimumUnsafeRosterSize) {
         throw new RangeError('Roster size must be at least 3.');
     }
-    if (n > maximumCertificateGatedRosterSize) {
+    if (rosterSize > maximumCertificateGatedRosterSize) {
         throw new RangeError('Roster size must be at most 50.');
     }
-    if (n < mandatoryClaimRosterSize) {
+    if (rosterSize < mandatoryClaimRosterSize) {
         if (unsafeMicroRosterAcknowledged !== true) {
             throw new Error(
                 'Unsafe micro-roster profiles require explicit acknowledgement.',
@@ -79,7 +79,7 @@ const deriveRosterProfile = (
             warnings: ['UnsafeMicroRoster'],
         };
     }
-    if (n === mandatoryClaimRosterSize) {
+    if (rosterSize === mandatoryClaimRosterSize) {
         return {
             claimBearing: true,
             rosterProfileKind: 'MandatoryN20',
@@ -97,57 +97,64 @@ const deriveRosterProfile = (
 export const deriveThresholdProfile = (
     input: ThresholdProfileInput,
 ): ThresholdProfile => {
-    const { n } = input;
+    const { rosterSize } = input;
     const rosterProfile = deriveRosterProfile(
-        n,
+        rosterSize,
         input.unsafeMicroRosterAcknowledged,
     );
     const backendCorruptionModel = normalizeBackendCorruptionModel(
-        n,
+        rosterSize,
         input.heBackendCorruptionModel,
     );
-    const cStruct = Math.floor(n / 3);
-    const cHeBackend =
+    const structuralCorruptionBound = Math.floor(rosterSize / 3);
+    const backendCorruptionBound =
         backendCorruptionModel.kind === 'StrictLessThanOneThird'
-            ? Math.floor((n - 1) / 3)
-            : backendCorruptionModel.cHeBackend;
-    const cPriv = Math.min(cStruct, cHeBackend);
-    const cDec = cPriv;
-    const fAct = Math.floor(n / 5);
-    const tPvss = cPriv + 1;
-    const tDec = cDec + 1;
-    const qRelease = Math.min(n, Math.max(10, Math.ceil((2 * n) / 3)));
-    const qAgg = tPvss;
-    const qDec = tDec;
-    const qEval = fAct + 1;
-    const raceShareMax = n;
-    const qSetupComplete = n;
+            ? Math.floor((rosterSize - 1) / 3)
+            : backendCorruptionModel.backendCorruptionBound;
+    const privacyCorruptionBound = Math.min(
+        structuralCorruptionBound,
+        backendCorruptionBound,
+    );
+    const decryptionCorruptionBound = privacyCorruptionBound;
+    const activeFaultBound = Math.floor(rosterSize / 5);
+    const pvssThreshold = privacyCorruptionBound + 1;
+    const decryptionThreshold = decryptionCorruptionBound + 1;
+    const releaseQuorum = Math.min(
+        rosterSize,
+        Math.max(10, Math.ceil((2 * rosterSize) / 3)),
+    );
+    const aggregateContributionQuorum = pvssThreshold;
+    const decryptionShareQuorum = decryptionThreshold;
+    const evaluationReplayQuorum = activeFaultBound + 1;
+    const maximumRaceShares = rosterSize;
+    const setupCompletionQuorum = rosterSize;
     const warnings = [...rosterProfile.warnings];
 
     if (
         backendCorruptionModel.kind === 'CertifiedCustom' &&
-        backendCorruptionModel.cHeBackend > cStruct
+        backendCorruptionModel.backendCorruptionBound >
+            structuralCorruptionBound
     ) {
         warnings.push('BackendCorruptionBoundTooHigh');
     }
 
     return {
-        n,
+        rosterSize,
         rosterProfileKind: rosterProfile.rosterProfileKind,
         claimBearing: rosterProfile.claimBearing,
-        cStruct,
-        cHeBackend,
-        cPriv,
-        cDec,
-        fAct,
-        tPvss,
-        tDec,
-        qRelease,
-        qAgg,
-        qDec,
-        qEval,
-        raceShareMax,
-        qSetupComplete,
+        structuralCorruptionBound,
+        backendCorruptionBound,
+        privacyCorruptionBound,
+        decryptionCorruptionBound,
+        activeFaultBound,
+        pvssThreshold,
+        decryptionThreshold,
+        releaseQuorum,
+        aggregateContributionQuorum,
+        decryptionShareQuorum,
+        evaluationReplayQuorum,
+        maximumRaceShares,
+        setupCompletionQuorum,
         backendCorruptionModel,
         warnings,
     };
