@@ -48,8 +48,11 @@ export const allowedInternalDependencyMap = {
         '@sealed-lattice/wasm',
     ],
     '@sealed-lattice/types': [],
-    '@sealed-lattice/protocol': ['@sealed-lattice/types'],
-    '@sealed-lattice/crypto': [],
+    '@sealed-lattice/protocol': [
+        '@sealed-lattice/crypto',
+        '@sealed-lattice/types',
+    ],
+    '@sealed-lattice/crypto': ['@sealed-lattice/types'],
     '@sealed-lattice/wasm': ['@sealed-lattice/types'],
     '@sealed-lattice/testkit': [
         'sealed-lattice',

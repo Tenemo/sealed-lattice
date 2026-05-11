@@ -57,6 +57,8 @@
   "ignoreDependencies": [
     "@fontsource/ibm-plex-sans",
     "@fontsource/jetbrains-mono",
+    "@noble/hashes",
+    "@noble/post-quantum",
     "@typescript-eslint/eslint-plugin",
     "@typescript-eslint/parser",
     "turbo"

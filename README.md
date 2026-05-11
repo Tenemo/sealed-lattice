@@ -39,8 +39,9 @@ core used by the native test and WASM loading path.
 ## Current public boundary
 
 The published `sealed-lattice` package currently exposes a safe transcript core
-fixture verifier plus the threshold, lifecycle, poll specification, and capability
-shell.
+fixture verifier plus the threshold, lifecycle, poll specification, capability,
+board/finality, roster-manifest, cast receipt, close record, first-come, and
+recovery-epoch election foundation helpers.
 
 This keeps packaging, documentation, smoke checks, transcript fixtures, and
 release flow stable while the broader voting API remains future implementation.
@@ -50,6 +51,7 @@ release flow stable while the broader voting API remains future implementation.
 - TypeScript, ESLint, browser, and Node verification
 - Astro documentation and TypeDoc generation
 - transcript core test vector manifest verification
+- election foundation board/finality, roster-manifest, ML-DSA-65 signed-root, cast receipt, close record, first-come, and recovery-epoch checks
 - the Rust-to-WASM transcript core toolchain
 
 ## Documentation
@@ -84,7 +86,7 @@ pnpm add sealed-lattice
 ```
 
 The package exports the current transcript core fixture verifier and safe
-protocol shell helpers. It is not a usable voting library yet.
+election foundation helpers. It is not a usable voting library yet.
 
 ## Development
 

@@ -12,8 +12,8 @@ internal packages.
 
 - `packages/sdk`: the only published package directory, with the public package name `sealed-lattice`
 - `packages/types`: canonical shared type definitions inlined into the published package during SDK builds
-- `packages/protocol`: deterministic election model and transcript package shell
-- `packages/crypto`: provider and capability package shell
+- `packages/protocol`: deterministic election model and transcript verification helpers
+- `packages/crypto`: internal Hash512, digest, ML-DSA-65 profile, fixture signing, and signed-root verification wrappers
 - `packages/wasm`: typed Rust/WASM loader and transcript core command path
 - `packages/testkit`: deterministic integration scaffolding package shell
 - `crates/sealed-lattice-kernel`: Rust transcript core crate that exports the WASM command path
@@ -21,7 +21,8 @@ internal packages.
 ## Dependency direction
 
 - `sealed-lattice` may depend on `@sealed-lattice/types`, `@sealed-lattice/protocol`, `@sealed-lattice/crypto`, and `@sealed-lattice/wasm`.
-- `@sealed-lattice/protocol` and `@sealed-lattice/wasm` may depend on `@sealed-lattice/types`.
+- `@sealed-lattice/protocol` may depend on `@sealed-lattice/types` and `@sealed-lattice/crypto`.
+- `@sealed-lattice/crypto` and `@sealed-lattice/wasm` may depend on `@sealed-lattice/types`.
 - `@sealed-lattice/testkit` may depend on all internal packages and on `sealed-lattice`.
 - No private package may depend on `sealed-lattice` unless it is `@sealed-lattice/testkit`.
 - Deep imports like `@sealed-lattice/crypto/src/...` are forbidden.

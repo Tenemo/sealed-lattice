@@ -1,10 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import {
-    validatePollSpec,
-    validatePollSpecFromUnknown,
-} from '../../src/protocol-shell/index';
-import type { PollSpecInput } from '../../src/protocol-shell/index';
+import { validatePollSpec, validatePollSpecFromUnknown } from '../../src/index';
+import type { PollSpecInput } from '../../src/index';
 
 const createValidPollSpecInput = (
     overrides: Partial<PollSpecInput> = {},
@@ -30,7 +27,7 @@ const expectErrorCodes = (
     }
 };
 
-describe('protocol-shell poll-spec validation', () => {
+describe('election foundation poll-spec validation', () => {
     it('normalizes the supported score domain and policies', () => {
         const validation = validatePollSpec(
             createValidPollSpecInput({

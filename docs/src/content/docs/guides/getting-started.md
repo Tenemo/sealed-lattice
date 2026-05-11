@@ -6,14 +6,14 @@ sidebar:
 ---
 
 Start with the public package name and the current rule: `sealed-lattice`
-exposes the safe transcript core fixture verifier and protocol shell.
+exposes the safe transcript core fixture verifier and election foundation.
 
 ## Public package rules
 
 - The only committed public package name is `sealed-lattice`.
-- The public runtime facade currently exports transcript core fixture verification plus threshold, lifecycle, poll specification, and capability helpers.
+- The public runtime facade currently exports transcript core fixture verification plus threshold, lifecycle, poll specification, capability, board, target-finality, roster-manifest, cast receipt, close record, first-come, and recovery helpers.
 - No public subpaths are promised yet.
-- The current release freezes packaging, docs, smoke checks, transcript core fixtures, protocol shell vectors, and the workspace shape.
+- The current release freezes packaging, docs, smoke checks, transcript core fixtures, election foundation vectors, and the workspace shape.
 
 ## Consumer posture
 
@@ -26,7 +26,7 @@ import {
 ```
 
 The verifier accepts transcript core fixture objects and returns deterministic
-verification or rejection labels. The protocol shell helpers validate public poll shape,
+verification or rejection labels. The election foundation helpers validate public poll shape,
 derive threshold profiles, check lifecycle transitions, derive status labels,
 and refuse premature protocol actions. They do not implement voting.
 
@@ -36,14 +36,14 @@ and refuse premature protocol actions. They do not implement voting.
 - the published `sealed-lattice` package identity
 - private types, protocol, crypto, wasm, and testkit shells
 - a Rust transcript core plus an internal WASM loader
-- a deterministic threshold, lifecycle, poll specification, and capability shell
+- deterministic election foundation helpers for threshold, lifecycle, poll specification, capability, board/finality, roster-manifest, cast/close receipt, first-come, and recovery checks
 - docs, TypeDoc, pack smoke, vector manifest verification, and CI verification
 
 ## What is not published yet
 
-- manifest types
 - ballot or tally APIs
 - proof systems
+- replay-attestation shell helpers, semantic target acceptance, decryption-share shell helpers, or decryption APIs
 - public crypto provider wrappers
 - public WASM or native arithmetic entry points
 

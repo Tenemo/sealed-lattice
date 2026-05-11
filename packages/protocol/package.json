@@ -17,6 +17,7 @@
     "build": "pnpm exec del-cli dist && tsc --project tsconfig.json"
   },
   "dependencies": {
+    "@sealed-lattice/crypto": "workspace:*",
     "@sealed-lattice/types": "workspace:*"
   },
   "devDependencies": {

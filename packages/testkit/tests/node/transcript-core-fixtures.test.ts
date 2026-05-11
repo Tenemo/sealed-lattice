@@ -47,7 +47,7 @@ describe('transcript-core fixtures', () => {
         });
     });
 
-    it('resolves protocol shell helpers through the public package import', () => {
+    it('resolves election foundation helpers through the public package import', () => {
         expect(deriveThresholdProfile({ rosterSize: 20 }).releaseQuorum).toBe(
             14,
         );

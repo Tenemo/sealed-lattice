@@ -3,8 +3,8 @@ import { describe, expect, it } from 'vitest';
 import {
     deriveThresholdProfile,
     evaluateActionCapability,
-} from '../../src/protocol-shell/index';
-import type { CapabilityContext } from '../../src/protocol-shell/index';
+} from '../../src/index';
+import type { CapabilityContext } from '../../src/index';
 
 const thresholdProfile = deriveThresholdProfile({ rosterSize: 20 });
 
@@ -18,7 +18,7 @@ const createContext = (
     ...overrides,
 });
 
-describe('protocol-shell capability evaluator', () => {
+describe('election foundation capability evaluator', () => {
     it('refuses aggregate contribution before voting is closed', () => {
         expect(
             evaluateActionCapability(
@@ -320,7 +320,7 @@ describe('protocol-shell capability evaluator', () => {
         });
     });
 
-    it('leaves verified top-k decoding unavailable in protocol shell', () => {
+    it('leaves verified top-k decoding unavailable in election foundation', () => {
         expect(
             evaluateActionCapability(
                 'DecodeVerifiedTopK',

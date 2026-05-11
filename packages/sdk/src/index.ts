@@ -1,23 +1,48 @@
 import {
+    deriveValidatedFirstComeOrder as deriveValidatedFirstComeOrderInternal,
     deriveLifecycleLabels as deriveLifecycleLabelsInternal,
     deriveThresholdProfile as deriveThresholdProfileInternal,
     evaluateActionCapability as evaluateActionCapabilityInternal,
+    verifyCastReceiptShell as verifyCastReceiptShellInternal,
+    verifyCloseRecordShell as verifyCloseRecordShellInternal,
     isValidLifecycleTransition as isValidLifecycleTransitionInternal,
+    isActionCurrentForRecoveryEpoch as isActionCurrentForRecoveryEpochInternal,
     validatePollSpecFromUnknown as validatePollSpecFromUnknownInternal,
+    verifyBoardConsistency as verifyBoardConsistencyInternal,
+    verifyFirstComePolicy as verifyFirstComePolicyInternal,
+    verifyRecoveryEpochUpdate as verifyRecoveryEpochUpdateInternal,
+    verifyRosterManifestTranscript as verifyRosterManifestTranscriptInternal,
+    verifyTargetFinality as verifyTargetFinalityInternal,
 } from '@sealed-lattice/protocol';
 import type {
+    ActionCurrentForRecoveryEpochInput,
+    ActionCurrentForRecoveryEpochResult,
+    BoardConsistencyInput,
+    BoardConsistencyVerification,
+    CastReceiptVerification,
+    CastReceiptVerificationInput,
     CapabilityContext,
     CapabilityDecision,
+    CloseRecordVerification,
+    CloseRecordVerificationInput,
+    FirstComeOrderingInput,
+    FirstComeOrderingVerification,
     LifecycleLabelInput,
     LifecycleLabels,
     LifecycleTransition,
     PollSpecInput,
     PollSpecValidation,
     ProtocolAction,
+    RecoveryEpochVerification,
+    RecoveryEpochVerificationInput,
     ThresholdProfile,
     ThresholdProfileInput,
     TranscriptCoreFixture,
     TranscriptCoreVerificationResult,
+    RosterManifestTranscriptInput,
+    RosterManifestTranscriptVerification,
+    TargetFinalityVerification,
+    TargetFinalityVerificationInput,
 } from '@sealed-lattice/types';
 
 import { loadTranscriptCoreKernel } from './kernel.js';
@@ -45,6 +70,45 @@ export const evaluateActionCapability = (
     action: ProtocolAction,
     context: CapabilityContext,
 ): CapabilityDecision => evaluateActionCapabilityInternal(action, context);
+
+export const verifyBoardConsistency = (
+    input: BoardConsistencyInput,
+): BoardConsistencyVerification => verifyBoardConsistencyInternal(input);
+
+export const verifyCastReceiptShell = (
+    input: CastReceiptVerificationInput,
+): CastReceiptVerification => verifyCastReceiptShellInternal(input);
+
+export const verifyCloseRecordShell = (
+    input: CloseRecordVerificationInput,
+): CloseRecordVerification => verifyCloseRecordShellInternal(input);
+
+export const verifyTargetFinality = (
+    input: TargetFinalityVerificationInput,
+): TargetFinalityVerification => verifyTargetFinalityInternal(input);
+
+export const deriveValidatedFirstComeOrder = (
+    input: FirstComeOrderingInput,
+): FirstComeOrderingVerification =>
+    deriveValidatedFirstComeOrderInternal(input);
+
+export const verifyFirstComePolicy = (
+    input: FirstComeOrderingInput,
+): FirstComeOrderingVerification => verifyFirstComePolicyInternal(input);
+
+export const verifyRosterManifestTranscript = (
+    input: RosterManifestTranscriptInput,
+): RosterManifestTranscriptVerification =>
+    verifyRosterManifestTranscriptInternal(input);
+
+export const isActionCurrentForRecoveryEpoch = (
+    input: ActionCurrentForRecoveryEpochInput,
+): ActionCurrentForRecoveryEpochResult =>
+    isActionCurrentForRecoveryEpochInternal(input);
+
+export const verifyRecoveryEpochUpdate = (
+    input: RecoveryEpochVerificationInput,
+): RecoveryEpochVerification => verifyRecoveryEpochUpdateInternal(input);
 
 export const verifyTranscriptCoreFixture = async (
     fixture: TranscriptCoreFixture,

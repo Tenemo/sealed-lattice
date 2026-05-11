@@ -3,11 +3,26 @@ import { describe, expect, it } from 'vitest';
 import * as publicApi from '../../dist/index.js';
 
 const requiredPublicFunctions = [
+    ['deriveValidatedFirstComeOrder', publicApi.deriveValidatedFirstComeOrder],
     ['deriveLifecycleLabels', publicApi.deriveLifecycleLabels],
     ['deriveThresholdProfile', publicApi.deriveThresholdProfile],
     ['evaluateActionCapability', publicApi.evaluateActionCapability],
+    [
+        'isActionCurrentForRecoveryEpoch',
+        publicApi.isActionCurrentForRecoveryEpoch,
+    ],
     ['isValidLifecycleTransition', publicApi.isValidLifecycleTransition],
     ['validatePollSpec', publicApi.validatePollSpec],
+    ['verifyBoardConsistency', publicApi.verifyBoardConsistency],
+    ['verifyCastReceiptShell', publicApi.verifyCastReceiptShell],
+    ['verifyCloseRecordShell', publicApi.verifyCloseRecordShell],
+    ['verifyFirstComePolicy', publicApi.verifyFirstComePolicy],
+    ['verifyRecoveryEpochUpdate', publicApi.verifyRecoveryEpochUpdate],
+    [
+        'verifyRosterManifestTranscript',
+        publicApi.verifyRosterManifestTranscript,
+    ],
+    ['verifyTargetFinality', publicApi.verifyTargetFinality],
     ['verifyTranscriptCoreFixture', publicApi.verifyTranscriptCoreFixture],
 ] as const;
 
@@ -40,9 +55,12 @@ const forbiddenPublicKeys = [
     'decryptRank',
     'decryptComparisonBit',
     'decryptIntermediateWire',
+    'verifyEvaluationReplayAttestationShell',
+    'verifyTargetAcceptedRecordShell',
+    'verifyTopKDecryptionShareShell',
 ];
 
-describe('protocol-shell public package API in Node', () => {
+describe('election foundation public package API in Node', () => {
     it('exposes only the safe runtime functions and keeps forbidden operations absent', () => {
         expect(Object.keys(publicApi).sort()).toEqual(allowedRuntimeExports);
         for (const [
@@ -94,5 +112,38 @@ describe('protocol-shell public package API in Node', () => {
                 replayAttestationCount: thresholdProfile.evaluationReplayQuorum,
             }),
         ).toEqual({ allowed: true, action: 'AcceptTarget' });
+        expect(
+            publicApi.deriveValidatedFirstComeOrder({
+                requiredContextDigest: 'context',
+                selectionPolicyDigest: 'policy',
+                expectedSelectionPolicyDigest: 'policy',
+                currentRecoveryEpochMap: {
+                    participant: {
+                        signerIdentity: 'participant',
+                        currentRecoveryEpoch: 0,
+                        currentDeviceEpoch: 0,
+                    },
+                },
+                candidates: [
+                    {
+                        objectDigest: 'candidate',
+                        objectType: 'TargetFinalityRecord',
+                        boardSeq: 1,
+                        boardPosition: 0,
+                        signerIdentity: 'participant',
+                        recoveryEpoch: 0,
+                        deviceEpoch: 0,
+                        actionSequence: 0,
+                        contextDigest: 'context',
+                        isByteIdenticalRetransmission: false,
+                    },
+                ],
+            }),
+        ).toMatchObject({
+            ok: true,
+            orderedCandidates: [
+                expect.objectContaining({ objectDigest: 'candidate' }),
+            ],
+        });
     });
 });

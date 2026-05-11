@@ -32,7 +32,7 @@ describe('SDK bridge build helpers', () => {
                 export const isMandatory = (profile: ThresholdProfile): boolean =>
                     profile.rosterProfileKind === 'MandatoryN20';
             `,
-            'packages/protocol/src/protocol-shell/thresholds.ts',
+            'packages/protocol/src/lifecycle/thresholds.ts',
         );
 
         expect(outputText).toContain('export const isMandatory');
@@ -56,7 +56,7 @@ describe('SDK bridge build helpers', () => {
     it('computes a relative specifier from nested dist files', () => {
         const nestedDeclarationFilePath = path.resolve(
             distRoot,
-            'internal/protocol-shell/index.d.ts',
+            'internal/election-foundation/index.d.ts',
         );
         const specifier = computeRelativeTypesSpecifier(
             nestedDeclarationFilePath,

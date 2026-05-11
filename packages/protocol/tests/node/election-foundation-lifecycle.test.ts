@@ -4,8 +4,8 @@ import {
     deriveLifecycleLabels,
     deriveThresholdProfile,
     isValidLifecycleTransition,
-} from '../../src/protocol-shell/index';
-import type { LifecycleState } from '../../src/protocol-shell/index';
+} from '../../src/index';
+import type { LifecycleState } from '../../src/index';
 
 const expectValidPath = (states: readonly LifecycleState[]): void => {
     for (let index = 0; index < states.length - 1; index += 1) {
@@ -18,7 +18,7 @@ const expectValidPath = (states: readonly LifecycleState[]): void => {
     }
 };
 
-describe('protocol-shell lifecycle shell', () => {
+describe('election foundation lifecycle', () => {
     it('accepts the primary v46 lifecycle path', () => {
         expectValidPath([
             'DraftPoll',

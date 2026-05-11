@@ -32,12 +32,12 @@ pnpm run build
 
 ## What each command proves
 
-- `pnpm run check`: package shell typechecks, repo lint, Rust checks, package-boundary checks, vector manifest verification, and dead-code analysis
+- `pnpm run check`: package typechecks, repo lint, Rust checks, package-boundary checks, vector manifest verification, and dead-code analysis
 - `pnpm run vectors`: committed test vector files match `test-vectors/manifest.json`
 - `pnpm run test`: Node tests, browser tests, and the internal WASM transcript core loader path
 - `pnpm run verify:docs`: generated API pages and docs link structure stay consistent
-- `pnpm run smoke:pack` and `pnpm run smoke:pack:npm`: the published package tarball installs cleanly and exposes the transcript core fixture verifier plus protocol shell helpers
-- `pnpm run build`: every package shell builds and the WASM transcript core artifact is copied into the internal loader package
+- `pnpm run smoke:pack` and `pnpm run smoke:pack:npm`: the published package tarball installs cleanly and exposes the transcript core fixture verifier plus election foundation helpers
+- `pnpm run build`: every package builds, the private crypto/runtime bridge is vendored into the SDK, and the WASM transcript core artifact is copied into the internal loader package
 
 ## Release-facing rule
 

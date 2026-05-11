@@ -2,19 +2,27 @@
   "schemaVersion": 1,
   "entries": [
     {
-      "path": "protocol-shell/capability-refusals.json",
+      "path": "election-foundation/board-finality.json",
+      "sha256": "9faa24f73c0019cfb47ba02041eebf3539bab43c5c7fe2677eb2ef7f7ca565b5"
+    },
+    {
+      "path": "election-foundation/capability-refusals.json",
       "sha256": "29cf1c939f8ee4e14f58dd53da757b70fada61a775339a6a0fb7daf6bfe63cab"
     },
     {
-      "path": "protocol-shell/lifecycle-transitions.json",
+      "path": "election-foundation/deterministic-fixtures.json",
+      "sha256": "d2f45c3b73581eae987c82a18b1e9a7d811b4491ce7d88432f03fb0156d53651"
+    },
+    {
+      "path": "election-foundation/lifecycle-transitions.json",
       "sha256": "c869885305100267445bd80ccd287757e45e8c5f6bd8dead21e47d577c39d2d8"
     },
     {
-      "path": "protocol-shell/poll-specs.json",
+      "path": "election-foundation/poll-specs.json",
       "sha256": "5faf5583a06cad506cbf26dea221db7fa246d10cc54922f9a8a2fa1818c182c3"
     },
     {
-      "path": "protocol-shell/threshold-profiles.json",
+      "path": "election-foundation/threshold-profiles.json",
       "sha256": "fc179622ed0caba5bfbbd151b2f6499d13eed5a353817449fdf9730230f4dc91"
     },
     {

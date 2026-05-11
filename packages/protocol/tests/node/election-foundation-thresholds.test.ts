@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { deriveThresholdProfile } from '../../src/protocol-shell/index';
+import { deriveThresholdProfile } from '../../src/index';
 
 const expectFeasibleThresholds = (rosterSize: number): void => {
     const profile = deriveThresholdProfile({
@@ -27,7 +27,7 @@ const expectFeasibleThresholds = (rosterSize: number): void => {
     expect(profile.setupCompletionQuorum).toBe(rosterSize);
 };
 
-describe('protocol-shell threshold profiles', () => {
+describe('election foundation threshold profiles', () => {
     it.each([
         {
             rosterSize: 20,
@@ -133,7 +133,7 @@ describe('protocol-shell threshold profiles', () => {
     });
 
     it.each([21, 50])(
-        'marks roster size %d as certificate-gated in protocol shell',
+        'marks roster size %d as certificate-gated in election foundation',
         (rosterSize) => {
             const profile = deriveThresholdProfile({ rosterSize });
 

@@ -1,11 +1,4 @@
-import {
-    mkdir,
-    readFile,
-    readdir,
-    rm,
-    stat,
-    writeFile,
-} from 'node:fs/promises';
+import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -45,17 +38,27 @@ const bridgeOutputPath = path.resolve(
     'internal',
     'transcript-core-bridge.js',
 );
-const protocolShellSourceDirectoryPath = path.resolve(
+const protocolSourceDirectoryPath = path.resolve(
     repoRoot,
     'packages',
     'protocol',
     'src',
-    'protocol-shell',
 );
-const protocolShellOutputDirectoryPath = path.resolve(
+const cryptoSourceDirectoryPath = path.resolve(
+    repoRoot,
+    'packages',
+    'crypto',
+    'src',
+);
+const electionFoundationOutputDirectoryPath = path.resolve(
     sdkDistDirectoryPath,
     'internal',
-    'protocol-shell',
+    'election-foundation',
+);
+const cryptoOutputDirectoryPath = path.resolve(
+    sdkDistDirectoryPath,
+    'internal',
+    'crypto',
 );
 const typesPackageName = '@sealed-lattice/types';
 const typesDeclarationSourcePath = path.resolve(
@@ -83,8 +86,9 @@ const typesRuntimeOutputPath = path.resolve(
     'types.js',
 );
 const runtimeImportTargets = new Map([
+    ['@sealed-lattice/crypto', cryptoOutputDirectoryPath],
     ['@sealed-lattice/types', typesRuntimeOutputPath],
-    ['@sealed-lattice/protocol', protocolShellOutputDirectoryPath],
+    ['@sealed-lattice/protocol', electionFoundationOutputDirectoryPath],
     ['@sealed-lattice/wasm', bridgeOutputPath],
 ]);
 
@@ -131,26 +135,26 @@ export const buildSdkBridge = async (): Promise<void> => {
     await writeFile(bridgeOutputPath, outputText, 'utf8');
 };
 
-export const buildSdkProtocolShellRuntime = async (): Promise<void> => {
-    const sourceFileNames = (await readdir(protocolShellSourceDirectoryPath))
-        .filter((sourceFileName) => sourceFileName.endsWith('.ts'))
-        .sort();
+export const buildSdkProtocolRuntime = async (): Promise<void> => {
+    const sourceFilePaths = await collectFiles(protocolSourceDirectoryPath, {
+        extensions: ['.ts'],
+    });
 
-    await rm(protocolShellOutputDirectoryPath, {
+    await rm(electionFoundationOutputDirectoryPath, {
         recursive: true,
         force: true,
     });
-    await mkdir(protocolShellOutputDirectoryPath, { recursive: true });
+    await mkdir(electionFoundationOutputDirectoryPath, { recursive: true });
 
     await Promise.all(
-        sourceFileNames.map(async (sourceFileName) => {
-            const sourcePath = path.join(
-                protocolShellSourceDirectoryPath,
-                sourceFileName,
+        sourceFilePaths.map(async (sourcePath) => {
+            const relativeSourcePath = path.relative(
+                protocolSourceDirectoryPath,
+                sourcePath,
             );
             const outputPath = path.join(
-                protocolShellOutputDirectoryPath,
-                sourceFileName.replace(/\.ts$/u, '.js'),
+                electionFoundationOutputDirectoryPath,
+                relativeSourcePath.replace(/\.ts$/u, '.js'),
             );
             const sourceText = await readFile(sourcePath, 'utf8');
             const outputText = transpileSdkInternalSource(
@@ -158,6 +162,40 @@ export const buildSdkProtocolShellRuntime = async (): Promise<void> => {
                 sourcePath,
             );
 
+            await mkdir(path.dirname(outputPath), { recursive: true });
+            await writeFile(outputPath, outputText, 'utf8');
+        }),
+    );
+};
+
+export const buildSdkCryptoRuntime = async (): Promise<void> => {
+    const sourceFilePaths = await collectFiles(cryptoSourceDirectoryPath, {
+        extensions: ['.ts'],
+    });
+
+    await rm(cryptoOutputDirectoryPath, {
+        recursive: true,
+        force: true,
+    });
+    await mkdir(cryptoOutputDirectoryPath, { recursive: true });
+
+    await Promise.all(
+        sourceFilePaths.map(async (sourcePath) => {
+            const relativeSourcePath = path.relative(
+                cryptoSourceDirectoryPath,
+                sourcePath,
+            );
+            const outputPath = path.join(
+                cryptoOutputDirectoryPath,
+                relativeSourcePath.replace(/\.ts$/u, '.js'),
+            );
+            const sourceText = await readFile(sourcePath, 'utf8');
+            const outputText = transpileSdkInternalSource(
+                sourceText,
+                sourcePath,
+            );
+
+            await mkdir(path.dirname(outputPath), { recursive: true });
             await writeFile(outputPath, outputText, 'utf8');
         }),
     );
@@ -369,7 +407,7 @@ const ensureTypesPackageBuilt = async (): Promise<void> => {
         await stat(typesDeclarationSourcePath);
     } catch {
         throw new Error(
-            `Cannot inline @sealed-lattice/types into the published sdk. The types package has not been built. Run \`pnpm --filter @sealed-lattice/types run build\` first (the workspace \`pnpm run build\` already chains it via Turborepo).`,
+            `Cannot inline @sealed-lattice/types into the published SDK. The types package has not been built. Run \`pnpm --filter @sealed-lattice/types run build\` first (the workspace \`pnpm run build\` already chains it via Turborepo).`,
         );
     }
 };
@@ -412,7 +450,7 @@ export const inlineTypesIntoSdkDist = async (): Promise<void> => {
     );
 
     const declarationFiles = await collectFiles(sdkDistDirectoryPath, {
-        extensions: ['.d.ts'],
+        fileNamePattern: /\.d\.ts$/u,
     });
 
     await Promise.all(
@@ -440,7 +478,8 @@ export const inlineTypesIntoSdkDist = async (): Promise<void> => {
 
 export const buildSdkInternalRuntime = async (): Promise<void> => {
     await buildSdkBridge();
-    await buildSdkProtocolShellRuntime();
+    await buildSdkCryptoRuntime();
+    await buildSdkProtocolRuntime();
     await rewriteWorkspaceRuntimeImports();
     await inlineTypesIntoSdkDist();
 };

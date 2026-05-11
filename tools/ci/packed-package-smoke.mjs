@@ -5,13 +5,26 @@ const assert = (condition, message) => {
 };
 
 const publicApi = await import('sealed-lattice');
-const { deriveThresholdProfile, verifyTranscriptCoreFixture } = publicApi;
+const {
+    deriveThresholdProfile,
+    deriveValidatedFirstComeOrder,
+    verifyTranscriptCoreFixture,
+} = publicApi;
 const expectedPublicKeys = [
     'deriveLifecycleLabels',
     'deriveThresholdProfile',
+    'deriveValidatedFirstComeOrder',
     'evaluateActionCapability',
+    'isActionCurrentForRecoveryEpoch',
     'isValidLifecycleTransition',
     'validatePollSpec',
+    'verifyBoardConsistency',
+    'verifyCastReceiptShell',
+    'verifyCloseRecordShell',
+    'verifyFirstComePolicy',
+    'verifyRecoveryEpochUpdate',
+    'verifyRosterManifestTranscript',
+    'verifyTargetFinality',
     'verifyTranscriptCoreFixture',
 ];
 const forbiddenPublicKeys = [
@@ -39,6 +52,9 @@ const forbiddenPublicKeys = [
     'decryptExactSum',
     'decryptIntermediateWire',
     'decryptRank',
+    'verifyEvaluationReplayAttestationShell',
+    'verifyTargetAcceptedRecordShell',
+    'verifyTopKDecryptionShareShell',
 ];
 
 assert(
@@ -64,6 +80,35 @@ assert(
 assert(
     deriveThresholdProfile({ rosterSize: 20 }).privacyCorruptionBound === 6,
     'Threshold profile calculator must be exported and deterministic',
+);
+assert(
+    deriveValidatedFirstComeOrder({
+        requiredContextDigest: 'context',
+        selectionPolicyDigest: 'policy',
+        expectedSelectionPolicyDigest: 'policy',
+        currentRecoveryEpochMap: {
+            participant: {
+                signerIdentity: 'participant',
+                currentRecoveryEpoch: 0,
+                currentDeviceEpoch: 0,
+            },
+        },
+        candidates: [
+            {
+                objectDigest: 'candidate',
+                objectType: 'TargetFinalityRecord',
+                boardSeq: 1,
+                boardPosition: 0,
+                signerIdentity: 'participant',
+                recoveryEpoch: 0,
+                deviceEpoch: 0,
+                actionSequence: 0,
+                contextDigest: 'context',
+                isByteIdenticalRetransmission: false,
+            },
+        ],
+    }).orderedCandidates[0]?.objectDigest === 'candidate',
+    'First-come ordering helper must be exported and deterministic',
 );
 const verification = await verifyTranscriptCoreFixture({
     kind: 'malformed-object',
