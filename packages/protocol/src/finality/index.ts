@@ -445,7 +445,7 @@ const findFinalityForkEvidence = (
     return undefined;
 };
 
-export const verifyTargetFinality = (
+const verifyTargetFinalityUnchecked = (
     input: TargetFinalityVerificationInput,
 ): TargetFinalityVerification => {
     const boardResult = verifyBoardConsistency(input.boardEvidence);
@@ -555,4 +555,28 @@ export const verifyTargetFinality = (
         validWitnessIdentities,
         equivocatingWitnessIdentities,
     };
+};
+
+export const verifyTargetFinality = (
+    input: TargetFinalityVerificationInput,
+): TargetFinalityVerification => {
+    try {
+        return verifyTargetFinalityUnchecked(input);
+    } catch {
+        return {
+            ok: false,
+            statusLabels: [],
+            acceptedDigests: [],
+            refusedObjects: [
+                createRefusal(
+                    'TargetFinalityPolicyMismatch',
+                    'Target finality evidence could not be canonicalized or validated.',
+                    undefined,
+                    'TargetFinalityRecord',
+                ),
+            ],
+            validWitnessIdentities: [],
+            equivocatingWitnessIdentities: [],
+        };
+    }
 };

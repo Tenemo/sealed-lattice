@@ -69,7 +69,7 @@ export const deriveFirstComeOrderDigest = (
         selectionPolicyDigest: input.selectionPolicyDigest,
     });
 
-export const deriveValidatedFirstComeOrder = (
+const deriveValidatedFirstComeOrderUnchecked = (
     input: FirstComeOrderingInput,
 ): FirstComeOrderingVerification => {
     const refusedObjects: RefusalRecord[] = [];
@@ -201,6 +201,27 @@ export const deriveValidatedFirstComeOrder = (
             refusedObjects.length === 0 ? firstComeOrderDigest : undefined,
         orderedCandidates,
     };
+};
+
+export const deriveValidatedFirstComeOrder = (
+    input: FirstComeOrderingInput,
+): FirstComeOrderingVerification => {
+    try {
+        return deriveValidatedFirstComeOrderUnchecked(input);
+    } catch {
+        return {
+            ok: false,
+            statusLabels: [],
+            acceptedDigests: [],
+            refusedObjects: [
+                createRefusal(
+                    'FirstComePolicyMismatch',
+                    'First-come ordering input could not be canonicalized or validated.',
+                ),
+            ],
+            orderedCandidates: [],
+        };
+    }
 };
 
 export const verifyFirstComePolicy = (

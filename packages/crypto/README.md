@@ -3,7 +3,7 @@
 This private package owns the current domain-separated cryptographic wrappers
 used by the election foundation.
 
-The current release implements the M0-compatible `Hash512` SHAKE256 framing,
+The current release implements the transcript-core `Hash512` SHAKE256 framing,
 protocol digest derivation, canonical JSON normalization, ML-DSA-65 fixture key
 generation, ML-DSA signature profile construction, canonical signed-root
 fixture signing, and signed-root verification.

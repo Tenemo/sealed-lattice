@@ -176,7 +176,7 @@ const verifyCastReceiptShape = (
     return refusedObjects;
 };
 
-export const verifyCastReceiptShell = (
+const verifyCastReceiptShellUnchecked = (
     input: CastReceiptVerificationInput,
 ): CastReceiptVerification => {
     const boardResult = verifyBoardConsistency(input.boardEvidence);
@@ -221,6 +221,26 @@ export const verifyCastReceiptShell = (
                 ? input.receipt.castReceiptDigest
                 : undefined,
     };
+};
+
+export const verifyCastReceiptShell = (
+    input: CastReceiptVerificationInput,
+): CastReceiptVerification => {
+    try {
+        return verifyCastReceiptShellUnchecked(input);
+    } catch {
+        return {
+            ok: false,
+            statusLabels: [],
+            acceptedDigests: [],
+            refusedObjects: [
+                createRefusal(
+                    'CastReceiptInvalid',
+                    'Cast receipt evidence could not be canonicalized or validated.',
+                ),
+            ],
+        };
+    }
 };
 
 const verifyCloseRecordShape = (
@@ -363,7 +383,7 @@ const verifyCloseRecordShape = (
     return refusedObjects;
 };
 
-export const verifyCloseRecordShell = (
+const verifyCloseRecordShellUnchecked = (
     input: CloseRecordVerificationInput,
 ): CloseRecordVerification => {
     const boardResult = verifyBoardConsistency(input.boardEvidence);
@@ -425,4 +445,24 @@ export const verifyCloseRecordShell = (
                 ? (input.closeRecord.postVotingClosedContextDigest ?? undefined)
                 : undefined,
     };
+};
+
+export const verifyCloseRecordShell = (
+    input: CloseRecordVerificationInput,
+): CloseRecordVerification => {
+    try {
+        return verifyCloseRecordShellUnchecked(input);
+    } catch {
+        return {
+            ok: false,
+            statusLabels: [],
+            acceptedDigests: [],
+            refusedObjects: [
+                createRefusal(
+                    'CloseRecordInvalid',
+                    'Close record evidence could not be canonicalized or validated.',
+                ),
+            ],
+        };
+    }
 };

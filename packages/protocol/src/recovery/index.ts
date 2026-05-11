@@ -71,7 +71,7 @@ export const deriveRecoveryEpochUpdateDigest = (
         signerIdentity: update.signerIdentity,
     });
 
-export const isActionCurrentForRecoveryEpoch = (
+const isActionCurrentForRecoveryEpochUnchecked = (
     input: ActionCurrentForRecoveryEpochInput,
 ): ActionCurrentForRecoveryEpochResult => {
     const expectedActionContextDigest = deriveActionContextDigest({
@@ -177,7 +177,29 @@ export const isActionCurrentForRecoveryEpoch = (
     };
 };
 
-export const verifyRecoveryEpochUpdate = (
+export const isActionCurrentForRecoveryEpoch = (
+    input: ActionCurrentForRecoveryEpochInput,
+): ActionCurrentForRecoveryEpochResult => {
+    try {
+        return isActionCurrentForRecoveryEpochUnchecked(input);
+    } catch {
+        return {
+            ok: false,
+            statusLabels: [],
+            acceptedDigests: [],
+            refusedObjects: [
+                createRefusal(
+                    'InvalidSignedRoot',
+                    'Action recovery context could not be canonicalized or validated.',
+                    undefined,
+                    'ActionContext',
+                ),
+            ],
+        };
+    }
+};
+
+const verifyRecoveryEpochUpdateUnchecked = (
     input: RecoveryEpochVerificationInput,
 ): RecoveryEpochVerification => {
     const { update, currentEntry } = input;
@@ -391,4 +413,26 @@ export const verifyRecoveryEpochUpdate = (
                   }
                 : undefined,
     };
+};
+
+export const verifyRecoveryEpochUpdate = (
+    input: RecoveryEpochVerificationInput,
+): RecoveryEpochVerification => {
+    try {
+        return verifyRecoveryEpochUpdateUnchecked(input);
+    } catch {
+        return {
+            ok: false,
+            statusLabels: [],
+            acceptedDigests: [],
+            refusedObjects: [
+                createRefusal(
+                    'RecoveryUpdateInvalid',
+                    'Recovery epoch update evidence could not be canonicalized or validated.',
+                    undefined,
+                    'RecoveryEpochUpdate',
+                ),
+            ],
+        };
+    }
 };

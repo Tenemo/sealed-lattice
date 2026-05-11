@@ -89,7 +89,7 @@ type BoardFinalityVectors = {
         readonly witnessQuorum: 5;
         readonly conflictingFinalizedHeadsImplyEquivocatingWitnesses: 3;
     };
-    readonly m2CoverageCases: readonly {
+    readonly coverageCases: readonly {
         readonly caseName: string;
         readonly category:
             | 'board-consistency'
@@ -227,7 +227,7 @@ describe('election foundation test vectors', () => {
             conflictingFinalizedHeadsImplyEquivocatingWitnesses: 3,
         });
         expect(
-            boardFinality.m2CoverageCases.map((testCase) => testCase.caseName),
+            boardFinality.coverageCases.map((testCase) => testCase.caseName),
         ).toEqual([
             'honest-board-chain-with-inclusion',
             'fabricated-inclusion-proof',
@@ -249,7 +249,7 @@ describe('election foundation test vectors', () => {
             'stale-recovery-action',
         ]);
         expect(
-            boardFinality.m2CoverageCases.find(
+            boardFinality.coverageCases.find(
                 (testCase) =>
                     testCase.caseName ===
                     'target-finality-conflicting-finalized-heads',
@@ -285,7 +285,7 @@ describe('election foundation test vectors', () => {
 
     it('matches deterministic signed board, roster, finality, recovery, and signature fixtures', () => {
         expect(deterministicFixtures.caseName).toBe(
-            'deterministic-m2-signed-fixtures',
+            'deterministic-signed-fixtures',
         );
 
         const { envelope } = deterministicFixtures.signature;

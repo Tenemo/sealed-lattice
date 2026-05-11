@@ -101,7 +101,7 @@ describe('election foundation lifecycle', () => {
         expect(unsafeLabels.resultClaimLabel).toBeUndefined();
     });
 
-    it('does not emit result labels before the M16 mobile claim gate passes', () => {
+    it('does not emit result labels before the mobile claim gate passes', () => {
         const profile = deriveThresholdProfile({ rosterSize: 20 });
 
         const labels = deriveLifecycleLabels({

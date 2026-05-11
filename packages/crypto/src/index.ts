@@ -694,7 +694,7 @@ const validateExpectation = (
     return undefined;
 };
 
-export const verifySignedObjectSignature = (
+const verifySignedObjectSignatureInner = (
     signature: ProtocolSignatureEnvelope,
     expectation: SignatureExpectation = {},
 ): SignatureVerificationResult => {
@@ -761,4 +761,20 @@ export const verifySignedObjectSignature = (
     }
 
     return successfulSignatureVerification(signature.signatureDigest);
+};
+
+export const verifySignedObjectSignature = (
+    signature: ProtocolSignatureEnvelope,
+    expectation: SignatureExpectation = {},
+): SignatureVerificationResult => {
+    try {
+        return verifySignedObjectSignatureInner(signature, expectation);
+    } catch {
+        return emptySignatureVerificationResult(
+            'InvalidSignature',
+            'Signature envelope is not a canonical ML-DSA signed-root envelope.',
+            (signature as Partial<ProtocolSignatureEnvelope> | undefined)
+                ?.signatureDigest,
+        );
+    }
 };

@@ -5,7 +5,7 @@
     "witnessQuorum": 5,
     "conflictingFinalizedHeadsImplyEquivocatingWitnesses": 3
   },
-  "m2CoverageCases": [
+  "coverageCases": [
     {
       "caseName": "honest-board-chain-with-inclusion",
       "category": "board-consistency",

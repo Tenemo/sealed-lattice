@@ -557,7 +557,7 @@ const verifyConsistencyProofs = (
     return refusedObjects;
 };
 
-export const verifyBoardConsistency = (
+const verifyBoardConsistencyUnchecked = (
     input: BoardConsistencyInput,
 ): BoardConsistencyVerification => {
     const refusedObjects: RefusalRecord[] = [];
@@ -647,4 +647,25 @@ export const verifyBoardConsistency = (
             input.signedBoardHeads.map((head) => head.headDigest),
         ),
     };
+};
+
+export const verifyBoardConsistency = (
+    input: BoardConsistencyInput,
+): BoardConsistencyVerification => {
+    try {
+        return verifyBoardConsistencyUnchecked(input);
+    } catch {
+        return {
+            ok: false,
+            statusLabels: [],
+            acceptedDigests: [],
+            refusedObjects: [
+                createRefusal(
+                    'BoardConsistencyFailure',
+                    'Board evidence could not be canonicalized or validated.',
+                ),
+            ],
+            verifiedHeadDigests: [],
+        };
+    }
 };

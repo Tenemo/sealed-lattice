@@ -36,6 +36,7 @@ import {
     verifyEvaluationReplayAttestationShell,
     verifyRecoveryEpochUpdate,
     verifyRosterManifestTranscript,
+    verifySignedObjectSignature,
     verifyTargetAcceptedRecordShell,
     verifyTargetFinality,
     verifyTopKDecryptionShareShell,
@@ -105,6 +106,12 @@ const getWitnessKeyFixture = (
     createKeyFixture(`witness:${witnessIdentity}`);
 const boardPublicKeyDigest = boardKeyFixture.publicKeyDigest;
 const organizerPublicKeyDigest = organizerKeyFixture.publicKeyDigest;
+const getParticipantSigningPublicKeyDigest = (
+    participantIdentity: string,
+): string =>
+    participantIdentity === 'organizer'
+        ? organizerPublicKeyDigest
+        : getParticipantKeyFixture(participantIdentity).publicKeyDigest;
 const witnessIdentities = [
     'witness-1',
     'witness-2',
@@ -536,7 +543,7 @@ const createRegistrationEntry = (
     boardPosition: number,
 ): RegistrationEntry => {
     const signingPublicKeyDigest =
-        getParticipantKeyFixture(participantIdentity).publicKeyDigest;
+        getParticipantSigningPublicKeyDigest(participantIdentity);
     const payload = {
         objectType: 'RegistrationEntry',
         objectVersion: 1,
@@ -572,7 +579,7 @@ const createReceiverKeyRegistration = (
     boardPosition: number,
 ): ReceiverKeyRegistration => {
     const signingPublicKeyDigest =
-        getParticipantKeyFixture(participantIdentity).publicKeyDigest;
+        getParticipantSigningPublicKeyDigest(participantIdentity);
     const payload = {
         objectType: 'ReceiverKeyRegistration',
         objectVersion: 1,
@@ -611,7 +618,7 @@ const createTrusteeSetupEntry = (
     boardPosition: number,
 ): TrusteeSetupEntry => {
     const signingPublicKeyDigest =
-        getParticipantKeyFixture(trusteeIdentity).publicKeyDigest;
+        getParticipantSigningPublicKeyDigest(trusteeIdentity);
     const payload = {
         objectType: 'TrusteeSetupEntry',
         objectVersion: 1,
@@ -683,23 +690,32 @@ const createElectionManifest = (
 const createRosterManifestTranscriptInput = (
     registrations: readonly RegistrationEntry[],
     manifestOverrides: Partial<ElectionManifest> = {},
+    options: { readonly includeOrganizer?: boolean } = {},
 ): RosterManifestTranscriptInput => {
-    const receiverKeyRegistrations = registrations.map((entry, index) =>
+    const rosterRegistrations =
+        options.includeOrganizer === false ||
+        registrations.some((entry) => entry.participantIdentity === 'organizer')
+            ? registrations
+            : [
+                  ...registrations,
+                  createRegistrationEntry('organizer', 1, registrations.length),
+              ];
+    const receiverKeyRegistrations = rosterRegistrations.map((entry, index) =>
         createReceiverKeyRegistration(
             entry.participantIdentity,
             1,
-            registrations.length + index,
+            rosterRegistrations.length + index,
         ),
     );
-    const trusteeSetupEntries = registrations.map((entry, index) =>
+    const trusteeSetupEntries = rosterRegistrations.map((entry, index) =>
         createTrusteeSetupEntry(
             entry.participantIdentity,
             1,
-            registrations.length * 2 + index,
+            rosterRegistrations.length * 2 + index,
         ),
     );
     const setupObjects = [
-        ...registrations.map((entry) => ({
+        ...rosterRegistrations.map((entry) => ({
             objectType: 'RegistrationEntry' as const,
             objectDigest: entry.registrationEntryDigest,
             boardPosition: entry.boardPosition,
@@ -719,7 +735,10 @@ const createRosterManifestTranscriptInput = (
     const { head: setupHead, inclusionProofs: setupInclusionProofs } =
         createBoardHeadWithObjects(1, genesisHead.headDigest, setupObjects);
     const freezeHead = createBoardHead(2, setupHead.headDigest);
-    const manifest = createElectionManifest(registrations, manifestOverrides);
+    const manifest = createElectionManifest(
+        rosterRegistrations,
+        manifestOverrides,
+    );
     const { head: manifestHead, inclusionProofs: manifestInclusionProofs } =
         createBoardHeadWithObjects(3, freezeHead.headDigest, [
             {
@@ -728,7 +747,7 @@ const createRosterManifestTranscriptInput = (
                 boardPosition: manifest.boardPosition,
             },
         ]);
-    const registrationInclusionProofs = registrations.map(
+    const registrationInclusionProofs = rosterRegistrations.map(
         (entry) =>
             setupInclusionProofs.find(
                 (proof) =>
@@ -761,7 +780,7 @@ const createRosterManifestTranscriptInput = (
             freezeHead,
             manifestHead,
         ]),
-        registrationEntries: registrations,
+        registrationEntries: rosterRegistrations,
         registrationInclusionProofs,
         receiverKeyRegistrations,
         receiverKeyRegistrationInclusionProofs,
@@ -1181,6 +1200,142 @@ describe('board consistency and target finality', () => {
                 ]),
             );
         }
+    });
+
+    it('returns structured refusals for malformed JavaScript verifier inputs', () => {
+        const head0 = createBoardHead(0, null);
+        const targetHead = createTargetProposalHead(1, head0.headDigest);
+        const targetRecord = createTargetFinalityRecord(targetHead);
+        const malformedBoardHead = { ...head0 } as Record<string, unknown>;
+        const malformedSignature = {
+            ...head0.signature,
+            signedRoot: undefined,
+        } as unknown as ProtocolSignatureEnvelope;
+        const malformedTargetRecord = {
+            ...targetRecord,
+            witnessCheckpoints: undefined,
+        } as unknown as TargetFinalityRecord;
+        const castReceiptDigest = deriveProtocolDigest('CastReceiptDigest', {
+            malformed: 'receipt',
+        });
+        const castReceipt = {
+            objectType: 'CastReceipt',
+            objectVersion: 1,
+            castReceiptDigest,
+            ceremonyId,
+            electionManifestDigest: deriveProtocolDigest(
+                'ElectionManifestDigest',
+                { manifest: 'cast' },
+            ),
+            voterIdentity: 'participant-1',
+            ballotPackageDigest: deriveProtocolDigest('BallotPackageDigest', {
+                ballot: 'participant-1',
+            }),
+            contextDigest,
+            boardSeq: head0.boardSeq,
+            boardPosition: 0,
+            recoveryEpoch: 0,
+            deviceEpoch: 0,
+            signature: createSignature(
+                'CastReceipt',
+                'Voter',
+                'participant-1',
+                getParticipantSigningPublicKeyDigest('participant-1'),
+                castReceiptDigest,
+            ),
+        } satisfies CastReceipt;
+        const malformedCastReceipt = {
+            ...castReceipt,
+            boardPosition: undefined,
+        } as unknown as CastReceipt;
+        const malformedRosterInput = createRosterManifestTranscriptInput([
+            createRegistrationEntry('participant-1', 1, 0),
+        ]);
+        const malformedRegistration = {
+            ...malformedRosterInput.registrationEntries[0],
+            boardPosition: undefined,
+        } as unknown as RegistrationEntry;
+
+        const expectFailClosed = (
+            verifier: () => {
+                readonly ok: boolean;
+                readonly refusedObjects: readonly { readonly code: string }[];
+            },
+            expectedCode: string,
+        ): void => {
+            let result:
+                | {
+                      readonly ok: boolean;
+                      readonly refusedObjects: readonly {
+                          readonly code: string;
+                      }[];
+                  }
+                | undefined;
+
+            expect(() => {
+                result = verifier();
+            }).not.toThrow();
+            expect(result?.ok).toBe(false);
+            expect(result?.refusedObjects).toEqual(
+                expect.arrayContaining([
+                    expect.objectContaining({ code: expectedCode }),
+                ]),
+            );
+        };
+
+        delete malformedBoardHead.previousHeadDigest;
+        expectFailClosed(
+            () =>
+                verifyBoardConsistency(
+                    createBoardEvidence([
+                        malformedBoardHead as SignedBoardHead,
+                    ]),
+                ),
+            'BoardConsistencyFailure',
+        );
+        expectFailClosed(
+            () => verifySignedObjectSignature(malformedSignature),
+            'InvalidSignature',
+        );
+        expectFailClosed(
+            () =>
+                verifyTargetFinality({
+                    boardEvidence: createBoardEvidence([head0, targetHead]),
+                    record: malformedTargetRecord,
+                    targetFinalityPolicy,
+                    witnessPolicy,
+                    witnessPublicKeyDigests,
+                }),
+            'TargetFinalityPolicyMismatch',
+        );
+        expectFailClosed(
+            () =>
+                verifyCastReceiptShell({
+                    boardEvidence: createBoardEvidence([head0]),
+                    receipt: malformedCastReceipt,
+                    receiptInclusionProof: createInclusionProof(
+                        head0,
+                        'CastReceipt',
+                        castReceiptDigest,
+                    ),
+                    expectedElectionManifestDigest:
+                        castReceipt.electionManifestDigest,
+                    expectedVoterPublicKeyDigest:
+                        getParticipantSigningPublicKeyDigest('participant-1'),
+                }),
+            'CastReceiptInvalid',
+        );
+        expectFailClosed(
+            () =>
+                verifyRosterManifestTranscript({
+                    ...malformedRosterInput,
+                    registrationEntries: [
+                        malformedRegistration,
+                        ...malformedRosterInput.registrationEntries.slice(1),
+                    ],
+                }),
+            'RosterDigestMismatch',
+        );
     });
 
     it('verifies 5-of-7 target finality and rejects weak witness evidence', () => {
@@ -1900,8 +2055,28 @@ describe('roster, manifest, first-come, and recovery shells', () => {
             'participant-1',
             'participant-2',
             'participant-3',
+            'organizer',
         ]);
-        expect(result.rosterDigest).toBe(deriveRosterDigest(registrations));
+        expect(result.rosterDigest).toBe(
+            deriveRosterDigest(input.registrationEntries),
+        );
+    });
+
+    it('rejects a manifest organizer that is not part of the all-trustee roster', () => {
+        const input = createRosterManifestTranscriptInput(
+            [createRegistrationEntry('participant-1', 1, 0)],
+            {},
+            { includeOrganizer: false },
+        );
+
+        const result = verifyRosterManifestTranscript(input);
+
+        expect(result.ok).toBe(false);
+        expect(result.refusedObjects).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({ code: 'RosterDigestMismatch' }),
+            ]),
+        );
     });
 
     it('rejects duplicate, late, conflicting, and changed manifest inputs', () => {

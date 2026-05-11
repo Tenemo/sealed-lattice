@@ -590,7 +590,7 @@ const findConflictingRawManifest = (
     );
 };
 
-export const verifyRosterManifestTranscript = (
+const verifyRosterManifestTranscriptUnchecked = (
     input: RosterManifestTranscriptInput,
 ): RosterManifestTranscriptVerification => {
     const refusedObjects: RefusalRecord[] = [];
@@ -656,6 +656,25 @@ export const verifyRosterManifestTranscript = (
             entry.signingPublicKeyDigest,
         );
         participantIdentities.push(entry.participantIdentity);
+    }
+
+    const organizerPublicKeyDigest = participantPublicKeys.get(
+        input.organizerIdentity,
+    );
+    if (organizerPublicKeyDigest === undefined) {
+        refusedObjects.push(
+            createRefusal(
+                'RosterDigestMismatch',
+                'Organizer identity must be part of the frozen all-trustee roster.',
+            ),
+        );
+    } else if (organizerPublicKeyDigest !== input.organizerPublicKeyDigest) {
+        refusedObjects.push(
+            createRefusal(
+                'WrongPublicKey',
+                'Organizer public key must match the organizer roster registration.',
+            ),
+        );
     }
 
     const receiverIdentities = new Set<string>();
@@ -907,4 +926,25 @@ export const verifyRosterManifestTranscript = (
                 : undefined,
         participantIdentities,
     };
+};
+
+export const verifyRosterManifestTranscript = (
+    input: RosterManifestTranscriptInput,
+): RosterManifestTranscriptVerification => {
+    try {
+        return verifyRosterManifestTranscriptUnchecked(input);
+    } catch {
+        return {
+            ok: false,
+            statusLabels: [],
+            acceptedDigests: [],
+            refusedObjects: [
+                createRefusal(
+                    'RosterDigestMismatch',
+                    'Roster-manifest transcript could not be canonicalized or validated.',
+                ),
+            ],
+            participantIdentities: [],
+        };
+    }
 };
