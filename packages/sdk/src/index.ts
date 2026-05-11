@@ -54,6 +54,7 @@ export const deriveThresholdProfile = (
 ): ThresholdProfile => deriveThresholdProfileInternal(input);
 
 export function validatePollSpec(input: PollSpecInput): PollSpecValidation;
+export function validatePollSpec(input: unknown): PollSpecValidation;
 export function validatePollSpec(input: unknown): PollSpecValidation {
     return validatePollSpecFromUnknownInternal(input);
 }
