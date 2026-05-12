@@ -22,7 +22,11 @@ import {
 const defaultMaximumExhaustiveSubsetCount = 250_000;
 
 const assertPositiveRosterPosition = (rosterPosition: number): number => {
-    if (!Number.isInteger(rosterPosition) || rosterPosition <= 0) {
+    if (
+        !Number.isSafeInteger(rosterPosition) ||
+        rosterPosition <= 0 ||
+        !Number.isInteger(rosterPosition)
+    ) {
         throw new RangeError(
             'Roster interpolation points must be positive nonzero integers.',
         );
@@ -35,11 +39,11 @@ const assertSupportedRosterAndThreshold = (
     rosterSize: number,
     threshold: number,
 ): void => {
-    if (!Number.isInteger(rosterSize) || rosterSize < 1) {
+    if (!Number.isSafeInteger(rosterSize) || rosterSize < 1) {
         throw new RangeError('Roster size must be a positive integer.');
     }
     if (
-        !Number.isInteger(threshold) ||
+        !Number.isSafeInteger(threshold) ||
         threshold < 1 ||
         threshold > rosterSize
     ) {
@@ -90,7 +94,7 @@ export const evaluateShamirPolynomialForRoster = (
     polynomial: ShamirPolynomial,
     rosterSize: number,
 ): readonly ShamirSharePoint[] => {
-    if (!Number.isInteger(rosterSize) || rosterSize < 1) {
+    if (!Number.isSafeInteger(rosterSize) || rosterSize < 1) {
         throw new RangeError('Roster size must be a positive integer.');
     }
 

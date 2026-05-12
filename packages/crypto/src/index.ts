@@ -150,8 +150,11 @@ const successfulSignatureVerification = (
     refusedObjects: [],
 });
 
+const isCanonicalInteger = (value: number): boolean =>
+    Number.isSafeInteger(value) && !Object.is(value, -0);
+
 const isNonNegativeInteger = (value: number): boolean =>
-    Number.isInteger(value) && value >= 0;
+    isCanonicalInteger(value) && value >= 0;
 
 const isLowercaseHex = (value: string): boolean =>
     /^[0-9a-f]*$/u.test(value) && value.length % 2 === 0;
@@ -164,8 +167,6 @@ const isPlainObject = (
     !Array.isArray(value) &&
     Object.getPrototypeOf(value) === Object.prototype;
 
-const normalizeHex = (value: string): string => value.toLowerCase();
-
 const normalizeCanonicalValue = (value: unknown): unknown => {
     if (value === null) {
         return null;
@@ -174,8 +175,10 @@ const normalizeCanonicalValue = (value: unknown): unknown => {
         return value;
     }
     if (typeof value === 'number') {
-        if (!Number.isFinite(value) || !Number.isInteger(value)) {
-            throw new TypeError('Canonical numeric fields must be integers.');
+        if (!isCanonicalInteger(value)) {
+            throw new TypeError(
+                'Canonical numeric fields must be safe integers.',
+            );
         }
 
         return value;
@@ -282,9 +285,20 @@ export const derivePolicyDigest = (
     policy: unknown,
 ): ProtocolDigest => deriveProtocolDigest(namespace, policy);
 
-const canonicalSignedRootMessage = (
-    signedRoot: CanonicalSignedRootObject,
-): Uint8Array => textEncoder.encode(canonicalJson(signedRoot));
+const canonicalProtocolSignatureMessage = (
+    signature: Pick<
+        ProtocolSignatureEnvelope,
+        'profile' | 'publicKeyDigest' | 'signedRoot'
+    >,
+): Uint8Array =>
+    textEncoder.encode(
+        canonicalJson({
+            messageDomain: 'sealed-lattice/protocol-signature-v1',
+            profile: signature.profile,
+            publicKeyDigest: signature.publicKeyDigest,
+            signedRoot: signature.signedRoot,
+        }),
+    );
 
 const decodeHexField = (
     value: string,
@@ -335,11 +349,18 @@ export const createMlDsaSignatureProfileFixture = (
 
 export const deriveMlDsaPublicKeyDigest = (
     publicKeyBytesHex: string,
-): ProtocolDigest =>
-    deriveProtocolDigest('PublicKeyDigest', {
+): ProtocolDigest => {
+    decodeHexField(
+        publicKeyBytesHex,
+        mlDsa65PublicKeyByteLength,
+        'publicKeyBytesHex',
+    );
+
+    return deriveProtocolDigest('PublicKeyDigest', {
         algorithm: 'ML-DSA-65',
-        publicKeyBytesHex: normalizeHex(publicKeyBytesHex),
+        publicKeyBytesHex,
     });
+};
 
 export const createMlDsaKeyPairFixture = (
     seedLabel: string,
@@ -367,9 +388,9 @@ export const deriveProtocolSignatureDigest = (
 ): ProtocolDigest =>
     deriveProtocolDigest('ProtocolSignatureEnvelopeDigest', {
         profile: signature.profile,
-        publicKeyBytesHex: normalizeHex(signature.publicKeyBytesHex),
+        publicKeyBytesHex: signature.publicKeyBytesHex,
         publicKeyDigest: signature.publicKeyDigest,
-        signatureBytesHex: normalizeHex(signature.signatureBytesHex),
+        signatureBytesHex: signature.signatureBytesHex,
         signedRoot: signature.signedRoot,
     });
 
@@ -382,18 +403,22 @@ export const createProtocolSignatureFixture = (
     },
 ): ProtocolSignatureEnvelope => {
     const secretKey = decodeHexField(
-        normalizeHex(input.secretKeyBytesHex),
+        input.secretKeyBytesHex,
         mlDsa65SecretKeyByteLength,
         'secretKeyBytesHex',
     );
-    const message = canonicalSignedRootMessage(input.signedRoot);
+    const message = canonicalProtocolSignatureMessage({
+        profile: input.profile,
+        publicKeyDigest: input.publicKeyDigest,
+        signedRoot: input.signedRoot,
+    });
     const signatureBytes = ml_dsa65.sign(message, secretKey, {
         context: textEncoder.encode(input.profile.contextString),
         extraEntropy: false,
     });
     const signature = {
         profile: input.profile,
-        publicKeyBytesHex: normalizeHex(input.publicKeyBytesHex),
+        publicKeyBytesHex: input.publicKeyBytesHex,
         publicKeyDigest: input.publicKeyDigest,
         signatureBytesHex: bytesToHex(signatureBytes),
         signedRoot: input.signedRoot,
@@ -469,12 +494,12 @@ const validateSignatureMaterial = (
 ): SignatureVerificationResult | undefined => {
     try {
         decodeHexField(
-            normalizeHex(signature.publicKeyBytesHex),
+            signature.publicKeyBytesHex,
             mlDsa65PublicKeyByteLength,
             'publicKeyBytesHex',
         );
         decodeHexField(
-            normalizeHex(signature.signatureBytesHex),
+            signature.signatureBytesHex,
             mlDsa65SignatureByteLength,
             'signatureBytesHex',
         );
@@ -487,7 +512,7 @@ const validateSignatureMaterial = (
     }
 
     const expectedPublicKeyDigest = deriveMlDsaPublicKeyDigest(
-        normalizeHex(signature.publicKeyBytesHex),
+        signature.publicKeyBytesHex,
     );
     if (signature.publicKeyDigest !== expectedPublicKeyDigest) {
         return emptySignatureVerificationResult(
@@ -720,9 +745,9 @@ const verifySignedObjectSignatureInner = (
 
     const expectedSignatureDigest = deriveProtocolSignatureDigest({
         profile: signature.profile,
-        publicKeyBytesHex: normalizeHex(signature.publicKeyBytesHex),
+        publicKeyBytesHex: signature.publicKeyBytesHex,
         publicKeyDigest: signature.publicKeyDigest,
-        signatureBytesHex: normalizeHex(signature.signatureBytesHex),
+        signatureBytesHex: signature.signatureBytesHex,
         signedRoot: signature.signedRoot,
     });
     if (signature.signatureDigest !== expectedSignatureDigest) {
@@ -734,18 +759,22 @@ const verifySignedObjectSignatureInner = (
     }
 
     const publicKeyBytes = decodeHexField(
-        normalizeHex(signature.publicKeyBytesHex),
+        signature.publicKeyBytesHex,
         mlDsa65PublicKeyByteLength,
         'publicKeyBytesHex',
     );
     const signatureBytes = decodeHexField(
-        normalizeHex(signature.signatureBytesHex),
+        signature.signatureBytesHex,
         mlDsa65SignatureByteLength,
         'signatureBytesHex',
     );
     const signatureValid = ml_dsa65.verify(
         signatureBytes,
-        canonicalSignedRootMessage(signature.signedRoot),
+        canonicalProtocolSignatureMessage({
+            profile: signature.profile,
+            publicKeyDigest: signature.publicKeyDigest,
+            signedRoot: signature.signedRoot,
+        }),
         publicKeyBytes,
         {
             context: textEncoder.encode(signature.profile.contextString),

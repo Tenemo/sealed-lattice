@@ -8,6 +8,7 @@ import type {
 import { deriveProtocolDigest } from '../common/digests.js';
 import {
     createRefusal,
+    isNonNegativeInteger,
     uniqueStrings,
 } from '../common/verification-helpers.js';
 
@@ -28,6 +29,65 @@ const candidateConflictKey = (candidate: ValidatedFirstComeCandidate): string =>
         candidate.objectType,
         candidate.contextDigest,
     ].join('\u0000');
+
+const isNonEmptyString = (value: unknown): value is string =>
+    typeof value === 'string' && value.length > 0;
+
+const validateFirstComeCandidateShape = (
+    candidate: ValidatedFirstComeCandidate,
+): readonly RefusalRecord[] => {
+    const refusedObjects: RefusalRecord[] = [];
+    const objectDigest = isNonEmptyString(candidate.objectDigest)
+        ? candidate.objectDigest
+        : undefined;
+    const objectType = isNonEmptyString(candidate.objectType)
+        ? candidate.objectType
+        : undefined;
+
+    if (
+        !isNonEmptyString(candidate.objectDigest) ||
+        !isNonEmptyString(candidate.objectType) ||
+        !isNonEmptyString(candidate.signerIdentity) ||
+        !isNonEmptyString(candidate.contextDigest)
+    ) {
+        refusedObjects.push(
+            createRefusal(
+                'FirstComePolicyMismatch',
+                'First-come candidate string fields must be non-empty canonical strings.',
+                objectDigest,
+                objectType,
+            ),
+        );
+    }
+    if (
+        !isNonNegativeInteger(candidate.boardSeq) ||
+        !isNonNegativeInteger(candidate.boardPosition) ||
+        !isNonNegativeInteger(candidate.recoveryEpoch) ||
+        !isNonNegativeInteger(candidate.deviceEpoch) ||
+        !isNonNegativeInteger(candidate.actionSequence)
+    ) {
+        refusedObjects.push(
+            createRefusal(
+                'FirstComePolicyMismatch',
+                'First-come candidate sequence and epoch fields must be non-negative safe integers.',
+                objectDigest,
+                objectType,
+            ),
+        );
+    }
+    if (typeof candidate.isByteIdenticalRetransmission !== 'boolean') {
+        refusedObjects.push(
+            createRefusal(
+                'FirstComePolicyMismatch',
+                'First-come candidate retransmission flag must be boolean.',
+                objectDigest,
+                objectType,
+            ),
+        );
+    }
+
+    return refusedObjects;
+};
 
 const isCurrentRecoveryEpoch = (
     input: FirstComeOrderingInput,
@@ -88,6 +148,13 @@ const deriveValidatedFirstComeOrderUnchecked = (
     }
 
     for (const candidate of input.candidates) {
+        const candidateShapeRefusals =
+            validateFirstComeCandidateShape(candidate);
+        if (candidateShapeRefusals.length > 0) {
+            refusedObjects.push(...candidateShapeRefusals);
+            continue;
+        }
+
         const recoveryEntry =
             input.currentRecoveryEpochMap[candidate.signerIdentity];
 

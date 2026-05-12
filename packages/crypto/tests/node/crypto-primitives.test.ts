@@ -8,6 +8,7 @@ import {
     createProtocolSignatureFixture,
     deriveMlDsaPublicKeyDigest,
     deriveProtocolDigest,
+    deriveProtocolSignatureDigest,
     hash512Hex,
     resolveProtocolDigestDomain,
     verifySignedObjectSignature,
@@ -64,7 +65,13 @@ describe('crypto primitive boundary', () => {
             'Canonical objects cannot contain undefined.',
         );
         expect(() => canonicalJson(1.5)).toThrow(
-            'Canonical numeric fields must be integers.',
+            'Canonical numeric fields must be safe integers.',
+        );
+        expect(() =>
+            canonicalJson({ value: Number.MAX_SAFE_INTEGER + 1 }),
+        ).toThrow('Canonical numeric fields must be safe integers.');
+        expect(() => canonicalJson({ value: -0 })).toThrow(
+            'Canonical numeric fields must be safe integers.',
         );
     });
 
@@ -118,5 +125,67 @@ describe('crypto primitive boundary', () => {
                 expect.objectContaining({ code: 'WrongPublicKey' }),
             ]),
         );
+    });
+
+    it('rejects unsigned signature metadata and non-canonical hex encodings', () => {
+        const profile = createMlDsaSignatureProfileFixture();
+        const keyPair = createMlDsaKeyPairFixture('crypto-test-metadata');
+        const signedRoot = createSignedRoot();
+        const signature = createProtocolSignatureFixture({
+            profile,
+            publicKeyBytesHex: keyPair.publicKeyBytesHex,
+            publicKeyDigest: keyPair.publicKeyDigest,
+            secretKeyBytesHex: keyPair.secretKeyBytesHex,
+            signedRoot,
+        });
+        const tamperedProfilePayload = {
+            profile: {
+                ...signature.profile,
+                providerName: 'forged-provider',
+                providerVersion: '999',
+                providerBuildHash: deriveProtocolDigest('ProviderBuildDigest', {
+                    forged: true,
+                }),
+            },
+            publicKeyBytesHex: signature.publicKeyBytesHex,
+            publicKeyDigest: signature.publicKeyDigest,
+            signatureBytesHex: signature.signatureBytesHex,
+            signedRoot: signature.signedRoot,
+        };
+        const tamperedProfileSignature = {
+            ...tamperedProfilePayload,
+            signatureDigest: deriveProtocolSignatureDigest(
+                tamperedProfilePayload,
+            ),
+        };
+        const uppercaseHexSignature = {
+            ...signature,
+            publicKeyBytesHex: signature.publicKeyBytesHex.toUpperCase(),
+            signatureBytesHex: signature.signatureBytesHex.toUpperCase(),
+        };
+
+        for (const rejectedSignature of [
+            tamperedProfileSignature,
+            uppercaseHexSignature,
+        ]) {
+            expect(
+                verifySignedObjectSignature(rejectedSignature, {
+                    objectType: 'BoardHead',
+                    objectVersion: 1,
+                    signerRole: 'Board',
+                    signerIdentity: 'board',
+                    ceremonyId: 'ceremony',
+                    publicKeyDigest: keyPair.publicKeyDigest,
+                    objectRoot: signedRoot.objectRoot,
+                    boardHeadHash: null,
+                    manifestHash: null,
+                    contextDigest,
+                }).refusedObjects,
+            ).toEqual(
+                expect.arrayContaining([
+                    expect.objectContaining({ code: 'InvalidSignature' }),
+                ]),
+            );
+        }
     });
 });

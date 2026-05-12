@@ -7,7 +7,10 @@ export const fieldElementByteLength = 3;
 const lowercaseHexBytePattern = /^[0-9a-f]{6}$/u;
 
 export const isCanonicalFieldElement = (value: number): value is FieldElement =>
-    Number.isInteger(value) && value >= 0 && value < fieldModulus;
+    Number.isSafeInteger(value) &&
+    value >= 0 &&
+    value < fieldModulus &&
+    !Object.is(value, -0);
 
 export const assertCanonicalFieldElement = (
     value: number,
@@ -23,11 +26,13 @@ export const assertCanonicalFieldElement = (
 };
 
 export const normalizeFieldElement = (value: number): FieldElement => {
-    if (!Number.isInteger(value)) {
+    if (!Number.isSafeInteger(value)) {
         throw new RangeError('Field elements must be derived from integers.');
     }
 
-    return ((value % fieldModulus) + fieldModulus) % fieldModulus;
+    const integerValue = Object.is(value, -0) ? 0 : value;
+
+    return ((integerValue % fieldModulus) + fieldModulus) % fieldModulus;
 };
 
 export const centeredFieldElement = (value: FieldElement): number => {

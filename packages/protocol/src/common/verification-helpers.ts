@@ -24,7 +24,7 @@ export const uniqueStrings = (values: readonly string[]): string[] => [
 ];
 
 export const isNonNegativeInteger = (value: number): boolean =>
-    Number.isInteger(value) && value >= 0;
+    Number.isSafeInteger(value) && value >= 0 && !Object.is(value, -0);
 
 export const buildBoardHeadMap = (
     heads: readonly SignedBoardHead[],

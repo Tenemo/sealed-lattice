@@ -398,6 +398,77 @@ describe('roster, manifest, first-come, and recovery shells', () => {
         );
     });
 
+    it('rejects malformed first-come candidate shape before ordering', () => {
+        const baseCandidate: ValidatedFirstComeCandidate = {
+            objectDigest: 'object-a',
+            objectType: 'TargetFinalityRecord',
+            boardSeq: 1,
+            boardPosition: 0,
+            signerIdentity: 'participant-1',
+            recoveryEpoch: 0,
+            deviceEpoch: 0,
+            actionSequence: 0,
+            contextDigest,
+            isByteIdenticalRetransmission: false,
+        };
+        const result = deriveValidatedFirstComeOrder({
+            requiredContextDigest: contextDigest,
+            selectionPolicyDigest: manifestPolicyDigests.firstComePolicyDigest,
+            expectedSelectionPolicyDigest:
+                manifestPolicyDigests.firstComePolicyDigest,
+            currentRecoveryEpochMap: {
+                'participant-1': {
+                    signerIdentity: 'participant-1',
+                    currentRecoveryEpoch: 0,
+                    currentDeviceEpoch: 0,
+                },
+            },
+            candidates: [
+                {
+                    ...baseCandidate,
+                    objectDigest: 'negative-position',
+                    boardPosition: -1,
+                },
+                {
+                    ...baseCandidate,
+                    objectDigest: 'unsafe-action-sequence',
+                    actionSequence: Number.MAX_SAFE_INTEGER + 1,
+                },
+                {
+                    ...baseCandidate,
+                    objectDigest: '',
+                },
+                {
+                    ...baseCandidate,
+                    objectDigest: 'malformed-retransmission-flag',
+                    isByteIdenticalRetransmission: 'yes' as unknown as boolean,
+                },
+            ],
+        });
+
+        expect(result.ok).toBe(false);
+        expect(result.orderedCandidates).toEqual([]);
+        expect(result.refusedObjects).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    code: 'FirstComePolicyMismatch',
+                    message:
+                        'First-come candidate sequence and epoch fields must be non-negative safe integers.',
+                }),
+                expect.objectContaining({
+                    code: 'FirstComePolicyMismatch',
+                    message:
+                        'First-come candidate string fields must be non-empty canonical strings.',
+                }),
+                expect.objectContaining({
+                    code: 'FirstComePolicyMismatch',
+                    message:
+                        'First-come candidate retransmission flag must be boolean.',
+                }),
+            ]),
+        );
+    });
+
     it('rejects mixed stale recovery and current device epochs before the old-action cutoff', () => {
         expect(
             deriveValidatedFirstComeOrder({
