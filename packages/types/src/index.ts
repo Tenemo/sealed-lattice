@@ -1,7 +1,9 @@
+/** Claim profile labels attached to transcript-core fixtures and results. */
 export type BaseClaimProfile =
     | 'ResultComputedAuditable'
     | 'FullyVerifiedResult';
 
+/** High-level malicious security stage claimed by transcript-core fixtures. */
 export type MheSecurityStage = 'PassiveMHEPrototype' | 'ActiveMalicious';
 
 /**
@@ -10,8 +12,10 @@ export type MheSecurityStage = 'PassiveMHEPrototype' | 'ActiveMalicious';
  */
 export type TranscriptCoreMheSecurityStage = MheSecurityStage;
 
+/** Successful transcript-core status label returned by fixture verification. */
 export type TranscriptCoreStatusLabel = 'TranscriptCoreVerified';
 
+/** Top-level transcript-core verification label for accepted and rejected fixtures. */
 export type TranscriptCoreVerificationLabel =
     | 'TranscriptCoreVerified'
     | 'TranscriptCoreRejected';
@@ -41,13 +45,16 @@ export const canonicalErrorCodeValues = [
     'UnsupportedObjectVersion',
 ] as const;
 
+/** Stable canonical codec error code emitted by fixture verification. */
 export type CanonicalErrorCode = (typeof canonicalErrorCodeValues)[number];
 
+/** Structured canonical codec error with a stable code and diagnostic message. */
 export type CanonicalError = {
     readonly code: CanonicalErrorCode;
     readonly message: string;
 };
 
+/** Golden transcript-core fixture with expected canonical digests and labels. */
 export type GoldenTranscriptCoreFixture = {
     readonly kind: 'golden-transcript-core';
     readonly fixtureVersion: 1;
@@ -68,6 +75,7 @@ export type GoldenTranscriptCoreFixture = {
     readonly expectedStatusLabels: readonly TranscriptCoreStatusLabel[];
 };
 
+/** Negative transcript-core fixture expected to fail canonical decoding. */
 export type MalformedObjectFixture = {
     readonly kind: 'malformed-object';
     readonly fixtureVersion: 1;
@@ -76,10 +84,12 @@ export type MalformedObjectFixture = {
     readonly expectedErrorCode: CanonicalErrorCode;
 };
 
+/** Transcript-core fixture accepted by the public verifier. */
 export type TranscriptCoreFixture =
     | GoldenTranscriptCoreFixture
     | MalformedObjectFixture;
 
+/** Replay fixture that binds a golden transcript-core fixture to expected labels. */
 export type TranscriptCoreReplayFixture = {
     readonly schemaVersion: 1;
     readonly caseName: string;
@@ -87,6 +97,7 @@ export type TranscriptCoreReplayFixture = {
     readonly expectedStatusLabels: readonly TranscriptCoreStatusLabel[];
 };
 
+/** Decoded transcript-core analysis output used by fixture tooling. */
 export type TranscriptCoreAnalysis = {
     readonly canonicalBytesHex: string;
     readonly objectType: 'TranscriptCore';
@@ -109,6 +120,7 @@ export type TranscriptCoreAnalysis = {
     readonly checkpoints: readonly number[];
 };
 
+/** Verification result for a golden transcript-core fixture. */
 export type GoldenTranscriptCoreFixtureVerification = {
     readonly verified: true;
     readonly caseName: string;
@@ -117,16 +129,19 @@ export type GoldenTranscriptCoreFixtureVerification = {
     readonly statusLabels: readonly TranscriptCoreStatusLabel[];
 };
 
+/** Verification result for a malformed transcript-core fixture. */
 export type MalformedObjectFixtureVerification = {
     readonly verified: true;
     readonly caseName: string;
     readonly expectedErrorCode: CanonicalErrorCode;
 };
 
+/** Detailed fixture verification result for transcript-core test data. */
 export type TranscriptCoreFixtureVerification =
     | GoldenTranscriptCoreFixtureVerification
     | MalformedObjectFixtureVerification;
 
+/** Public transcript-core fixture verifier result. */
 export type TranscriptCoreVerificationResult = {
     readonly caseName: string;
     readonly label: TranscriptCoreVerificationLabel;
@@ -138,15 +153,18 @@ export type TranscriptCoreVerificationResult = {
     };
 };
 
+/** Result claim labels used after decryption and verification complete. */
 export type ResultClaimLabel =
     | 'ResultComputedAuditable'
     | 'FullyVerifiedResult';
 
+/** Evaluation proof state represented in lifecycle labels. */
 export type EvaluationProofMode =
     | 'NoOptionalEvaluationProof'
     | 'OptionalEvaluationProofPresent'
     | 'OptionalEvaluationProofVerified';
 
+/** Backend corruption model used when deriving threshold profiles. */
 export type HeBackendCorruptionModel =
     | {
           readonly kind: 'StrictLessThanOneThird';
@@ -157,23 +175,27 @@ export type HeBackendCorruptionModel =
           readonly certificateDigest: string;
       };
 
+/** Input used to derive a threshold profile from roster and backend assumptions. */
 export type ThresholdProfileInput = {
     readonly rosterSize: number;
     readonly heBackendCorruptionModel?: HeBackendCorruptionModel;
     readonly unsafeMicroRosterAcknowledged?: boolean;
 };
 
+/** Roster profile classification for the derived threshold parameters. */
 export type RosterProfileKind =
     | 'UnsafeMicroRoster'
     | 'MandatoryN20'
     | 'CertificateGatedRange';
 
+/** Warning label emitted when threshold parameters require caveats. */
 export type ThresholdWarning =
     | 'UnsafeMicroRoster'
     | 'CertificateGatedProfile'
     | 'BackendCertificateRequired'
     | 'BackendCorruptionBoundTooHigh';
 
+/** Derived threshold, quorum, and corruption-bound parameters for one roster. */
 export type ThresholdProfile = {
     readonly rosterSize: number;
     readonly rosterProfileKind: RosterProfileKind;
@@ -196,16 +218,20 @@ export type ThresholdProfile = {
     readonly warnings: readonly ThresholdWarning[];
 };
 
+/** Supported score domain for additive score ballots. */
 export type ScoreDomain = {
     readonly min: 1;
     readonly max: 10;
     readonly skippedOptionScore: 1;
 };
 
+/** Duplicate ballot policy currently supported by the public facade. */
 export type DuplicateBallotPolicy = 'LastValidBeforeVotingClosedCounts';
 
+/** Tie-breaking policy currently supported by the public facade. */
 export type TiePolicy = 'HigherScoreThenLowerOptionIndex';
 
+/** Untrusted poll specification input accepted by validation helpers. */
 export type PollSpecInput = {
     readonly pollId: string;
     readonly question: string;
@@ -216,6 +242,7 @@ export type PollSpecInput = {
     readonly tiePolicy?: TiePolicy;
 };
 
+/** Normalized poll specification after validation defaults have been applied. */
 export type PollSpec = {
     readonly pollId: string;
     readonly question: string;
@@ -226,6 +253,7 @@ export type PollSpec = {
     readonly tiePolicy: TiePolicy;
 };
 
+/** Stable poll specification validation error code. */
 export type PollSpecValidationErrorCode =
     | 'EmptyPollId'
     | 'EmptyQuestion'
@@ -237,12 +265,14 @@ export type PollSpecValidationErrorCode =
     | 'UnsupportedDuplicateBallotPolicy'
     | 'UnsupportedTiePolicy';
 
+/** Structured poll specification validation error. */
 export type PollSpecValidationError = {
     readonly code: PollSpecValidationErrorCode;
     readonly field: string;
     readonly message: string;
 };
 
+/** Poll specification validation result with normalized output or errors. */
 export type PollSpecValidation =
     | {
           readonly ok: true;
@@ -253,6 +283,7 @@ export type PollSpecValidation =
           readonly errors: readonly PollSpecValidationError[];
       };
 
+/** Protocol lifecycle state label used by capability and status helpers. */
 export type LifecycleState =
     | 'DraftPoll'
     | 'RegistrationOpen'
@@ -276,6 +307,7 @@ export type LifecycleState =
     | 'Unresolved'
     | 'ForkedElection';
 
+/** Primary non-failure status label shown for lifecycle progress. */
 export type PrimaryStatusLabel =
     | 'RosterAudited'
     | 'BallotIncluded'
@@ -293,6 +325,7 @@ export type PrimaryStatusLabel =
     | 'FullyVerifiedResult'
     | 'Unresolved';
 
+/** Failure status label shown when transcript or profile checks cannot proceed. */
 export type FailureStatusLabel =
     | 'BoardForkSuspected'
     | 'BoardEvidencePublished'
@@ -314,6 +347,7 @@ export type FailureStatusLabel =
     | 'BridgeMobileCertRejected'
     | 'UnsupportedLowResourceDevice';
 
+/** Mode or caveat status label attached to lifecycle outputs. */
 export type ModeStatusLabel =
     | 'UnsafeMicroRoster'
     | 'PassiveMHEPrototype'
@@ -324,11 +358,13 @@ export type ModeStatusLabel =
     | 'ProofCheckpointRejected'
     | 'LongRunningCryptographicCheck';
 
+/** Allowed lifecycle transition edge. */
 export type LifecycleTransition = {
     readonly from: LifecycleState;
     readonly to: LifecycleState;
 };
 
+/** Input used to derive lifecycle, failure, and mode labels. */
 export type LifecycleLabelInput = {
     readonly lifecycleState: LifecycleState;
     readonly thresholdProfile: ThresholdProfile;
@@ -356,6 +392,7 @@ export type LifecycleLabelInput = {
     readonly mobileClaimGatePassed?: boolean;
 };
 
+/** Derived lifecycle labels for device-facing status presentation. */
 export type LifecycleLabels = {
     readonly primary: readonly PrimaryStatusLabel[];
     readonly failures: readonly FailureStatusLabel[];
@@ -364,6 +401,7 @@ export type LifecycleLabels = {
     readonly evaluationProofMode: EvaluationProofMode;
 };
 
+/** Public protocol action checked by capability helpers. */
 export type ProtocolAction =
     | 'CreatePoll'
     | 'OpenRegistration'
@@ -385,6 +423,7 @@ export type ProtocolAction =
     | 'CreateRecoveryEpochUpdate'
     | 'VerifyEncryptedEnvelope';
 
+/** Recovery state used to gate actions after device or key recovery events. */
 export type RecoveryState =
     | 'NotRequired'
     | 'Ready'
@@ -393,6 +432,7 @@ export type RecoveryState =
     | 'ClonedDeviceSuspected'
     | 'MissingRecoveryMaterial';
 
+/** Context used to decide whether a protocol action is currently allowed. */
 export type CapabilityContext = {
     readonly lifecycleState: LifecycleState;
     readonly thresholdProfile: ThresholdProfile;
@@ -414,6 +454,7 @@ export type CapabilityContext = {
     readonly recoveryState?: RecoveryState;
 };
 
+/** Stable reason returned when a protocol action is refused. */
 export type RefusalReason =
     | 'OperationUnavailable'
     | 'InvalidLifecycleState'
@@ -438,6 +479,7 @@ export type RefusalReason =
     | 'ClonedDeviceState'
     | 'ForbiddenOperation';
 
+/** Capability decision for a requested protocol action. */
 export type CapabilityDecision =
     | {
           readonly allowed: true;
@@ -449,8 +491,10 @@ export type CapabilityDecision =
           readonly reason: RefusalReason;
       };
 
+/** Hex digest string used for canonical protocol objects and policies. */
 export type ProtocolDigest = string;
 
+/** Canonical object type covered by protocol digest and verification helpers. */
 export type ProtocolObjectType =
     | 'ActionContext'
     | 'BoardHead'
@@ -470,6 +514,7 @@ export type ProtocolObjectType =
     | 'TrusteeSetupEntry'
     | 'WitnessCheckpoint';
 
+/** Object type that is signed as a canonical signed root. */
 export type SignedObjectType =
     | 'BoardHead'
     | 'CastReceipt'
@@ -485,6 +530,7 @@ export type SignedObjectType =
     | 'TrusteeSetupEntry'
     | 'WitnessCheckpoint';
 
+/** Role asserted by a protocol signature envelope. */
 export type SignerRole =
     | 'Board'
     | 'Organizer'
@@ -494,8 +540,10 @@ export type SignerRole =
     | 'Voter'
     | 'Witness';
 
+/** ML-DSA signature mode recorded in signature profiles. */
 export type MlDsaSignatureMode = 'PureMLDSA' | 'HashMLDSA' | 'ExternalMuMLDSA';
 
+/** ML-DSA provider and context profile bound to protocol signatures. */
 export type MlDsaSignatureProfile = {
     readonly algorithm: 'ML-DSA-65';
     readonly mode: MlDsaSignatureMode;
@@ -508,6 +556,7 @@ export type MlDsaSignatureProfile = {
     readonly contextStringByteLength: number;
 };
 
+/** Canonical root object covered by a protocol signature. */
 export type CanonicalSignedRootObject = {
     readonly objectType: SignedObjectType;
     readonly objectVersion: number;
@@ -524,6 +573,7 @@ export type CanonicalSignedRootObject = {
     readonly contextDigest: ProtocolDigest;
 };
 
+/** Signature envelope attached to signed protocol objects. */
 export type ProtocolSignatureEnvelope = {
     readonly profile: MlDsaSignatureProfile;
     readonly publicKeyDigest: ProtocolDigest;
@@ -533,11 +583,13 @@ export type ProtocolSignatureEnvelope = {
     readonly signatureDigest: ProtocolDigest;
 };
 
+/** Unified status label emitted by protocol verification helpers. */
 export type ProtocolVerificationStatusLabel =
     | PrimaryStatusLabel
     | FailureStatusLabel
     | ModeStatusLabel;
 
+/** Stable refusal code emitted by protocol verification helpers. */
 export type ProtocolRefusalCode =
     | 'BoardConsistencyFailure'
     | 'BoardForkDetected'
@@ -581,6 +633,7 @@ export type ProtocolRefusalCode =
     | 'WrongPublicKey'
     | 'WrongSignerRole';
 
+/** Structured verification refusal for one object or condition. */
 export type RefusalRecord = {
     readonly code: ProtocolRefusalCode;
     readonly message: string;
@@ -588,6 +641,7 @@ export type RefusalRecord = {
     readonly objectType?: ProtocolObjectType | SignedObjectType;
 };
 
+/** Evidence that a board witness or backend published conflicting heads. */
 export type ConflictingHeadEvidence = {
     readonly evidenceDigest: ProtocolDigest;
     readonly ceremonyId: string;
@@ -598,6 +652,7 @@ export type ConflictingHeadEvidence = {
     readonly equivocatingWitnessIdentities?: readonly string[];
 };
 
+/** Shared structured result shape for protocol verification helpers. */
 export type StructuredProtocolVerificationResult = {
     readonly ok: boolean;
     readonly statusLabels: readonly ProtocolVerificationStatusLabel[];
@@ -607,8 +662,10 @@ export type StructuredProtocolVerificationResult = {
     readonly unresolvedReason?: string;
 };
 
+/** Structured result shape returned by signature verification. */
 export type SignatureVerificationResult = StructuredProtocolVerificationResult;
 
+/** Signed bulletin-board head used for append-only consistency checks. */
 export type SignedBoardHead = {
     readonly objectType: 'BoardHead';
     readonly objectVersion: 1;
@@ -621,6 +678,7 @@ export type SignedBoardHead = {
     readonly signature: ProtocolSignatureEnvelope;
 };
 
+/** Inclusion evidence for one protocol object under a signed board head. */
 export type InclusionProof = {
     readonly boardHeadDigest: ProtocolDigest;
     readonly boardSeq: number;
@@ -633,6 +691,7 @@ export type InclusionProof = {
     readonly inclusionProofDigest: ProtocolDigest;
 };
 
+/** Append-only proof represented as a signed board-head chain. */
 export type AppendOnlyConsistencyProof = {
     readonly proofType: 'SignedHeadChain';
     readonly fromBoardHeadDigest: ProtocolDigest | null;
@@ -640,6 +699,7 @@ export type AppendOnlyConsistencyProof = {
     readonly signedBoardHeads: readonly SignedBoardHead[];
 };
 
+/** Input bundle used to verify bulletin-board consistency. */
 export type BoardConsistencyInput = {
     readonly ceremonyId: string;
     readonly boardPolicyDigest: ProtocolDigest;
@@ -650,11 +710,13 @@ export type BoardConsistencyInput = {
     readonly conflictingHeadEvidence?: readonly ConflictingHeadEvidence[];
 };
 
+/** Bulletin-board consistency result with verified head digests. */
 export type BoardConsistencyVerification =
     StructuredProtocolVerificationResult & {
         readonly verifiedHeadDigests: readonly ProtocolDigest[];
     };
 
+/** Signed receipt proving that one voter ballot package was accepted. */
 export type CastReceipt = {
     readonly objectType: 'CastReceipt';
     readonly objectVersion: 1;
@@ -671,8 +733,10 @@ export type CastReceipt = {
     readonly signature: ProtocolSignatureEnvelope;
 };
 
+/** Close-record kind for registration and voting closure records. */
 export type CloseRecordKind = 'RegistrationClosed' | 'VotingClosed';
 
+/** Signed organizer record closing registration or voting. */
 export type CloseRecord = {
     readonly objectType: 'CloseRecord';
     readonly objectVersion: 1;
@@ -688,6 +752,7 @@ export type CloseRecord = {
     readonly signature: ProtocolSignatureEnvelope;
 };
 
+/** Input used to verify a cast receipt and its board inclusion. */
 export type CastReceiptVerificationInput = {
     readonly boardEvidence: BoardConsistencyInput;
     readonly receipt: CastReceipt;
@@ -696,10 +761,12 @@ export type CastReceiptVerificationInput = {
     readonly expectedVoterPublicKeyDigest: ProtocolDigest;
 };
 
+/** Cast receipt verification result. */
 export type CastReceiptVerification = StructuredProtocolVerificationResult & {
     readonly castReceiptDigest?: ProtocolDigest;
 };
 
+/** Input used to verify a close record and its board inclusion. */
 export type CloseRecordVerificationInput = {
     readonly boardEvidence: BoardConsistencyInput;
     readonly closeRecord: CloseRecord;
@@ -709,11 +776,13 @@ export type CloseRecordVerificationInput = {
     readonly expectedOrganizerPublicKeyDigest: ProtocolDigest;
 };
 
+/** Close record verification result. */
 export type CloseRecordVerification = StructuredProtocolVerificationResult & {
     readonly closeRecordDigest?: ProtocolDigest;
     readonly postVotingClosedContextDigest?: ProtocolDigest;
 };
 
+/** Witness roster and quorum policy for target finality. */
 export type WitnessPolicy = {
     readonly witnessPolicyDigest: ProtocolDigest;
     readonly witnessIdentities: readonly string[];
@@ -721,6 +790,7 @@ export type WitnessPolicy = {
     readonly totalWitnesses: number;
 };
 
+/** Target finality policy for one deterministic target phase. */
 export type TargetFinalityPolicy = {
     readonly targetFinalityPolicyDigest: ProtocolDigest;
     readonly targetPhase: string;
@@ -728,6 +798,7 @@ export type TargetFinalityPolicy = {
     readonly totalWitnesses: number;
 };
 
+/** Signed witness checkpoint over a finalized board head and target policy. */
 export type WitnessCheckpoint = {
     readonly objectType: 'WitnessCheckpoint';
     readonly objectVersion: 1;
@@ -741,6 +812,7 @@ export type WitnessCheckpoint = {
     readonly signature: ProtocolSignatureEnvelope;
 };
 
+/** Record proving that enough witnesses finalized one target phase. */
 export type TargetFinalityRecord = {
     readonly objectType: 'TargetFinalityRecord';
     readonly objectVersion: 1;
@@ -755,6 +827,7 @@ export type TargetFinalityRecord = {
     readonly witnessCheckpoints: readonly WitnessCheckpoint[];
 };
 
+/** Input used to verify target finality against board and witness evidence. */
 export type TargetFinalityVerificationInput = {
     readonly boardEvidence: BoardConsistencyInput;
     readonly record: TargetFinalityRecord;
@@ -764,6 +837,7 @@ export type TargetFinalityVerificationInput = {
     readonly conflictingRecords?: readonly TargetFinalityRecord[];
 };
 
+/** Target finality verification result with accepted witnesses and equivocation. */
 export type TargetFinalityVerification =
     StructuredProtocolVerificationResult & {
         readonly targetFinalityRecordDigest?: ProtocolDigest;
@@ -772,6 +846,7 @@ export type TargetFinalityVerification =
         readonly equivocatingWitnessIdentities: readonly string[];
     };
 
+/** Minimal checkpoint values carried forward after target finality is accepted. */
 export type AcceptedTargetFinalityCheckpoint = {
     readonly targetFinalityRecordDigest: ProtocolDigest;
     readonly finalizedBoardHeadDigest: ProtocolDigest;
@@ -881,6 +956,7 @@ export type TopKDecryptionShareShellVerification =
         readonly targetFinalityRecordDigest?: ProtocolDigest;
     };
 
+/** Signed participant registration entry included before roster freeze. */
 export type RegistrationEntry = {
     readonly objectType: 'RegistrationEntry';
     readonly objectVersion: 1;
@@ -895,6 +971,7 @@ export type RegistrationEntry = {
     readonly signature: ProtocolSignatureEnvelope;
 };
 
+/** Signed receiver-key registration for encrypted trustee setup material. */
 export type ReceiverKeyRegistration = {
     readonly objectType: 'ReceiverKeyRegistration';
     readonly objectVersion: 1;
@@ -909,6 +986,7 @@ export type ReceiverKeyRegistration = {
     readonly signature: ProtocolSignatureEnvelope;
 };
 
+/** Signed trustee setup entry bound to a frozen roster participant. */
 export type TrusteeSetupEntry = {
     readonly objectType: 'TrusteeSetupEntry';
     readonly objectVersion: 1;
@@ -923,6 +1001,7 @@ export type TrusteeSetupEntry = {
     readonly signature: ProtocolSignatureEnvelope;
 };
 
+/** Policy digests embedded in an election manifest. */
 export type ManifestPolicyDigests = {
     readonly aggregateSelectionPolicyDigest: ProtocolDigest;
     readonly duplicateBallotPolicyDigest: ProtocolDigest;
@@ -932,6 +1011,7 @@ export type ManifestPolicyDigests = {
     readonly witnessPolicyDigest: ProtocolDigest;
 };
 
+/** Opaque cryptographic implementation bindings embedded in a manifest. */
 export type ManifestOpaqueBindings = {
     readonly bridgeProofProfileId: string;
     readonly proofPrimeParamId: string;
@@ -947,6 +1027,7 @@ export type ManifestOpaqueBindings = {
     readonly bridgeMobileCertificatePolicyDigest: ProtocolDigest;
 };
 
+/** Signed election manifest accepted after roster and setup checks. */
 export type ElectionManifest = {
     readonly objectType: 'ElectionManifest';
     readonly objectVersion: 1;
@@ -962,11 +1043,13 @@ export type ElectionManifest = {
     readonly signature: ProtocolSignatureEnvelope;
 };
 
+/** Conflicting manifest evidence with the manifest and its inclusion proof. */
 export type ConflictingManifestEvidence = {
     readonly manifest: ElectionManifest;
     readonly manifestInclusionProof: InclusionProof;
 };
 
+/** Input used to verify roster, manifest, receiver keys, and trustee setup. */
 export type RosterManifestTranscriptInput = {
     readonly ceremonyId: string;
     readonly boardEvidence: BoardConsistencyInput;
@@ -985,6 +1068,7 @@ export type RosterManifestTranscriptInput = {
     readonly conflictingManifestEvidence?: readonly ConflictingManifestEvidence[];
 };
 
+/** Roster and manifest transcript verification result. */
 export type RosterManifestTranscriptVerification =
     StructuredProtocolVerificationResult & {
         readonly electionManifestDigest?: ProtocolDigest;
@@ -992,6 +1076,7 @@ export type RosterManifestTranscriptVerification =
         readonly participantIdentities: readonly string[];
     };
 
+/** Signed-action context used for replay and recovery freshness checks. */
 export type ActionContext = {
     readonly actionContextDigest: ProtocolDigest;
     readonly ceremonyId: string;
@@ -1007,6 +1092,7 @@ export type ActionContext = {
     readonly contextDigest: ProtocolDigest;
 };
 
+/** Current recovery epoch state for one signer identity. */
 export type RecoveryEpochMapEntry = {
     readonly signerIdentity: string;
     readonly currentRecoveryEpoch: number;
@@ -1014,6 +1100,7 @@ export type RecoveryEpochMapEntry = {
     readonly oldActionCutoffBoardSeq?: number;
 };
 
+/** Candidate action after context, epoch, and duplicate checks. */
 export type ValidatedFirstComeCandidate = {
     readonly objectDigest: ProtocolDigest;
     readonly objectType: ProtocolObjectType;
@@ -1027,6 +1114,7 @@ export type ValidatedFirstComeCandidate = {
     readonly isByteIdenticalRetransmission: boolean;
 };
 
+/** Input used to derive deterministic first-come ordering. */
 export type FirstComeOrderingInput = {
     readonly candidates: readonly ValidatedFirstComeCandidate[];
     readonly requiredContextDigest: ProtocolDigest;
@@ -1038,12 +1126,14 @@ export type FirstComeOrderingInput = {
     readonly maxPerIdentity?: number;
 };
 
+/** First-come ordering verification result with ordered candidates. */
 export type FirstComeOrderingVerification =
     StructuredProtocolVerificationResult & {
         readonly firstComeOrderDigest?: ProtocolDigest;
         readonly orderedCandidates: readonly ValidatedFirstComeCandidate[];
     };
 
+/** Signed recovery epoch update for a participant or trustee identity. */
 export type RecoveryEpochUpdate = {
     readonly objectType: 'RecoveryEpochUpdate';
     readonly objectVersion: 1;
@@ -1064,6 +1154,7 @@ export type RecoveryEpochUpdate = {
     readonly signature: ProtocolSignatureEnvelope;
 };
 
+/** Input used to verify a recovery epoch update. */
 export type RecoveryEpochVerificationInput = {
     readonly update: RecoveryEpochUpdate;
     readonly currentEntry: RecoveryEpochMapEntry;
@@ -1074,14 +1165,17 @@ export type RecoveryEpochVerificationInput = {
     readonly conflictingUpdates?: readonly RecoveryEpochUpdate[];
 };
 
+/** Recovery epoch verification result with the updated epoch entry. */
 export type RecoveryEpochVerification = StructuredProtocolVerificationResult & {
     readonly updatedEntry?: RecoveryEpochMapEntry;
 };
 
+/** Input used to check whether an action matches the current recovery epoch. */
 export type ActionCurrentForRecoveryEpochInput = {
     readonly actionContext: ActionContext;
     readonly recoveryEpochState: RecoveryEpochMapEntry;
 };
 
+/** Result returned when checking action freshness against recovery state. */
 export type ActionCurrentForRecoveryEpochResult =
     StructuredProtocolVerificationResult;
