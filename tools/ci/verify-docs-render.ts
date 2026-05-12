@@ -4,7 +4,7 @@ import { createServer, type ServerResponse } from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { chromium, type Page } from 'playwright';
+import { chromium, type ConsoleMessage, type Page } from 'playwright';
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const docsDistRoot = path.resolve(repoRoot, 'docs', 'dist');
@@ -41,9 +41,10 @@ const sendNotFound = (response: ServerResponse): void => {
 const resolveRequestPath = async (requestUrl: string): Promise<string> => {
     const parsedUrl = new URL(requestUrl, 'http://localhost');
     const decodedPath = decodeURIComponent(parsedUrl.pathname);
+    const relativeRequestPath = decodedPath.replace(/^\/+/, '');
     const candidatePath = decodedPath.endsWith('/')
-        ? path.join(docsDistRoot, decodedPath, 'index.html')
-        : path.join(docsDistRoot, decodedPath);
+        ? path.join(docsDistRoot, relativeRequestPath, 'index.html')
+        : path.join(docsDistRoot, relativeRequestPath);
     const resolvedCandidatePath = path.resolve(candidatePath);
     const relativePath = path.relative(docsDistRoot, resolvedCandidatePath);
 
@@ -214,43 +215,51 @@ const verifyRoute = async (
 ): Promise<void> => {
     const consoleErrors: string[] = [];
     const pageErrors: string[] = [];
-    page.on('console', (message) => {
+    const captureConsoleError = (message: ConsoleMessage): void => {
         if (message.type() === 'error') {
             consoleErrors.push(message.text());
         }
-    });
-    page.on('pageerror', (error) => {
+    };
+    const capturePageError = (error: Error): void => {
         pageErrors.push(error.message);
-    });
+    };
 
-    const response = await page.goto(`${origin}${route}`, {
-        waitUntil: 'networkidle',
-    });
-    if (!response?.ok()) {
-        throw new Error(
-            `${route} returned ${response?.status() ?? 'no response'}`,
+    page.on('console', captureConsoleError);
+    page.on('pageerror', capturePageError);
+
+    try {
+        const response = await page.goto(`${origin}${route}`, {
+            waitUntil: 'networkidle',
+        });
+        if (!response?.ok()) {
+            throw new Error(
+                `${route} returned ${response?.status() ?? 'no response'}`,
+            );
+        }
+
+        await requireVisibleElement(page, 'main', route);
+        await requireVisibleElement(page, 'a[href]', route);
+        await verifyThemeToggle(
+            page,
+            route,
+            viewportName === 'desktop',
+            viewportName === 'desktop' && route === '/',
         );
-    }
 
-    await requireVisibleElement(page, 'main', route);
-    await requireVisibleElement(page, 'a[href]', route);
-    await verifyThemeToggle(
-        page,
-        route,
-        viewportName === 'desktop',
-        viewportName === 'desktop' && route === '/',
-    );
-
-    if (viewportName === 'desktop') {
-        await verifyDesktopRails(page, route);
-    }
-    if (consoleErrors.length > 0 || pageErrors.length > 0) {
-        throw new Error(
-            `${route} emitted browser errors:\n${[
-                ...consoleErrors,
-                ...pageErrors,
-            ].join('\n')}`,
-        );
+        if (viewportName === 'desktop') {
+            await verifyDesktopRails(page, route);
+        }
+        if (consoleErrors.length > 0 || pageErrors.length > 0) {
+            throw new Error(
+                `${route} emitted browser errors:\n${[
+                    ...consoleErrors,
+                    ...pageErrors,
+                ].join('\n')}`,
+            );
+        }
+    } finally {
+        page.off('console', captureConsoleError);
+        page.off('pageerror', capturePageError);
     }
 };
 
