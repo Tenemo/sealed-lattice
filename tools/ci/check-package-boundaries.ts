@@ -2,11 +2,31 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+import {
+    ScriptKind,
+    ScriptTarget,
+    SyntaxKind,
+    createSourceFile,
+    forEachChild,
+    isCallExpression,
+    isExportDeclaration,
+    isImportDeclaration,
+    isImportTypeNode,
+    isLiteralTypeNode,
+    isStringLiteral,
+    type Node,
+    type StringLiteral,
+} from 'typescript';
+
+import {
+    collectFiles,
+    isWithinDirectory,
+    toPosixPath,
+} from '../internal/files.js';
+
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const packagesRoot = path.resolve(repoRoot, 'packages');
 const codeFilePattern = /\.(?:cts|mts|ts|tsx|js|mjs)$/u;
-const importSpecifierPattern =
-    /\b(?:import|export)\s+(?:type\s+)?(?:[^'"]*?\sfrom\s*)?['"]([^'"]+)['"]|\bimport\(\s*['"]([^'"]+)['"]\s*\)/gu;
 
 export type WorkspacePackage = {
     directoryPath: string;
@@ -22,16 +42,21 @@ export type ImportObservation = {
 
 export const allowedInternalDependencyMap = {
     'sealed-lattice': [
+        '@sealed-lattice/types',
         '@sealed-lattice/protocol',
         '@sealed-lattice/crypto',
         '@sealed-lattice/wasm',
     ],
-    '@sealed-lattice/protocol': [],
-    '@sealed-lattice/crypto': [],
-    '@sealed-lattice/wasm': ['@sealed-lattice/protocol'],
+    '@sealed-lattice/types': [],
+    '@sealed-lattice/protocol': [
+        '@sealed-lattice/crypto',
+        '@sealed-lattice/types',
+    ],
+    '@sealed-lattice/crypto': ['@sealed-lattice/types'],
+    '@sealed-lattice/wasm': ['@sealed-lattice/types'],
     '@sealed-lattice/testkit': [
         'sealed-lattice',
-        '@sealed-lattice/protocol',
+        '@sealed-lattice/types',
         '@sealed-lattice/crypto',
         '@sealed-lattice/wasm',
     ],
@@ -43,18 +68,6 @@ type PackageJsonShape = {
     name: string;
     optionalDependencies?: Record<string, string>;
     peerDependencies?: Record<string, string>;
-};
-
-const isWithinDirectory = (
-    directoryPath: string,
-    candidatePath: string,
-): boolean => {
-    const relativePath = path.relative(directoryPath, candidatePath);
-
-    return (
-        relativePath === '' ||
-        (!relativePath.startsWith('..') && !path.isAbsolute(relativePath))
-    );
 };
 
 export const collectInternalDependencies = (
@@ -75,15 +88,64 @@ export const collectInternalDependencies = (
         .sort();
 };
 
+const collectImportSpecifierLiterals = (
+    sourceText: string,
+): readonly StringLiteral[] => {
+    const sourceFile = createSourceFile(
+        'package-boundary-source.tsx',
+        sourceText,
+        ScriptTarget.Latest,
+        true,
+        ScriptKind.TSX,
+    );
+    const specifiers: StringLiteral[] = [];
+
+    const visit = (node: Node): void => {
+        if (
+            isImportDeclaration(node) &&
+            isStringLiteral(node.moduleSpecifier)
+        ) {
+            specifiers.push(node.moduleSpecifier);
+        } else if (
+            isExportDeclaration(node) &&
+            node.moduleSpecifier !== undefined &&
+            isStringLiteral(node.moduleSpecifier)
+        ) {
+            specifiers.push(node.moduleSpecifier);
+        } else if (
+            isCallExpression(node) &&
+            node.expression.kind === SyntaxKind.ImportKeyword
+        ) {
+            const [moduleSpecifier] = node.arguments;
+            if (
+                moduleSpecifier !== undefined &&
+                isStringLiteral(moduleSpecifier)
+            ) {
+                specifiers.push(moduleSpecifier);
+            }
+        } else if (isImportTypeNode(node)) {
+            const importTypeArgument = node.argument;
+            if (
+                isLiteralTypeNode(importTypeArgument) &&
+                isStringLiteral(importTypeArgument.literal)
+            ) {
+                specifiers.push(importTypeArgument.literal);
+            }
+        }
+
+        forEachChild(node, visit);
+    };
+
+    visit(sourceFile);
+
+    return specifiers;
+};
+
 export const extractImportSpecifiers = (sourceText: string): string[] => {
     const specifiers = new Set<string>();
 
-    for (const match of sourceText.matchAll(importSpecifierPattern)) {
-        const specifier = match[1] ?? match[2];
-        /* v8 ignore next */
-        if (specifier !== undefined && specifier !== '') {
-            specifiers.add(specifier);
-        }
+    for (const moduleSpecifier of collectImportSpecifierLiterals(sourceText)) {
+        specifiers.add(moduleSpecifier.text);
     }
 
     return [...specifiers];
@@ -190,7 +252,7 @@ export const validateImportBoundaries = (
                 )
             ) {
                 failures.push(
-                    `${importObservation.packageName} deep-imports ${importObservation.specifier} from ${path.relative(repoRoot, importObservation.filePath).replace(/\\/g, '/')}`,
+                    `${importObservation.packageName} deep-imports ${importObservation.specifier} from ${toPosixPath(path.relative(repoRoot, importObservation.filePath))}`,
                 );
                 break;
             }
@@ -234,7 +296,7 @@ export const validateImportBoundaries = (
             targetPackage.name !== importObservation.packageName
         ) {
             failures.push(
-                `${importObservation.packageName} uses cross-package relative import ${importObservation.specifier} from ${path.relative(repoRoot, importObservation.filePath).replace(/\\/g, '/')} into ${targetPackage.name}`,
+                `${importObservation.packageName} uses cross-package relative import ${importObservation.specifier} from ${toPosixPath(path.relative(repoRoot, importObservation.filePath))} into ${targetPackage.name}`,
             );
         }
     }
@@ -244,42 +306,10 @@ export const validateImportBoundaries = (
 
 /* v8 ignore start */
 const collectCodeFiles = async (directoryPath: string): Promise<string[]> => {
-    try {
-        const stats = await fs.stat(directoryPath);
-        if (!stats.isDirectory()) {
-            return [];
-        }
-    } catch {
-        return [];
-    }
-
-    const files: string[] = [];
-    const pending = [directoryPath];
-
-    while (pending.length > 0) {
-        const currentDirectoryPath = pending.pop();
-        if (currentDirectoryPath === undefined) {
-            continue;
-        }
-
-        const entries = await fs.readdir(currentDirectoryPath, {
-            withFileTypes: true,
-        });
-
-        for (const entry of entries) {
-            const entryPath = path.join(currentDirectoryPath, entry.name);
-            if (entry.isDirectory()) {
-                pending.push(entryPath);
-                continue;
-            }
-
-            if (entry.isFile() && codeFilePattern.test(entry.name)) {
-                files.push(entryPath);
-            }
-        }
-    }
-
-    return files.sort();
+    return collectFiles(directoryPath, {
+        allowMissing: true,
+        fileNamePattern: codeFilePattern,
+    });
 };
 
 const loadWorkspacePackages = async (): Promise<WorkspacePackage[]> => {

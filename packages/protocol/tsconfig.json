@@ -9,5 +9,13 @@
   },
   "include": [
     "src/**/*.ts"
+  ],
+  "references": [
+    {
+      "path": "../crypto"
+    },
+    {
+      "path": "../types"
+    }
   ]
 }

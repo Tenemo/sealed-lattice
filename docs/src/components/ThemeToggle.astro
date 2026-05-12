@@ -1,0 +1,113 @@
+---
+// Replaces Starlight's three-option theme dropdown with a single dark/light toggle.
+// Reuses Starlight's `data-theme` attribute and `starlight-theme` localStorage key
+// so the existing theme bootstrap script keeps working on first paint.
+---
+<button
+    type="button"
+    class="sl-theme-toggle"
+    data-sl-theme-toggle
+    aria-label="Toggle color theme"
+    aria-pressed="false"
+>
+    <svg
+        class="sl-theme-toggle__icon sl-theme-toggle__icon--sun"
+        viewBox="0 0 20 20"
+        fill="currentColor"
+        aria-hidden="true"
+    >
+        <path
+            d="M10 2a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 10 2Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 10 15Zm0-8a3 3 0 1 0 0 6 3 3 0 0 0 0-6Zm5.657-1.596a.75.75 0 1 0-1.06-1.06l-1.061 1.06a.75.75 0 0 0 1.06 1.06l1.06-1.06ZM6.464 14.596a.75.75 0 1 0-1.06-1.06l-1.06 1.06a.75.75 0 1 0 1.06 1.06l1.06-1.06ZM18 10a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 18 10ZM5 10a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 5 10Zm9.596 5.657a.75.75 0 0 0 1.06-1.06l-1.06-1.061a.75.75 0 1 0-1.06 1.06l1.06 1.06ZM5.404 6.464a.75.75 0 0 0 1.06-1.06l-1.06-1.06a.75.75 0 1 0-1.061 1.06l1.06 1.06Z"
+        />
+    </svg>
+    <svg
+        class="sl-theme-toggle__icon sl-theme-toggle__icon--moon"
+        viewBox="0 0 20 20"
+        fill="currentColor"
+        aria-hidden="true"
+    >
+        <path
+            fill-rule="evenodd"
+            d="M7.455 2.004a.75.75 0 0 1 .26.77 7 7 0 0 0 9.958 7.967.75.75 0 0 1 1.067.853A8.5 8.5 0 1 1 6.647 1.921a.75.75 0 0 1 .808.083Z"
+            clip-rule="evenodd"
+        />
+    </svg>
+</button>
+
+<script is:inline>
+    (function () {
+        var STORAGE_KEY = 'starlight-theme';
+        function currentTheme() {
+            return document.documentElement.dataset.theme === 'light'
+                ? 'light'
+                : 'dark';
+        }
+        function updateToggleState(toggle) {
+            var theme = currentTheme();
+            toggle.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+            toggle.setAttribute(
+                'aria-label',
+                theme === 'light' ? 'Switch to dark theme' : 'Switch to light theme',
+            );
+        }
+        function updateAllToggleStates() {
+            document
+                .querySelectorAll('[data-sl-theme-toggle]')
+                .forEach(updateToggleState);
+        }
+        function setTheme(next) {
+            document.documentElement.dataset.theme = next;
+            try {
+                window.localStorage.setItem(STORAGE_KEY, next);
+            } catch (_) {
+                // localStorage unavailable; in-page state still updates.
+            }
+            updateAllToggleStates();
+        }
+        document
+            .querySelectorAll('[data-sl-theme-toggle]')
+            .forEach(function (toggle) {
+                updateToggleState(toggle);
+                toggle.addEventListener('click', function () {
+                    setTheme(currentTheme() === 'light' ? 'dark' : 'light');
+                });
+            });
+    })();
+</script>
+
+<style is:global>
+    .sl-theme-toggle {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 2.25rem;
+        height: 2.25rem;
+        padding: 0;
+        background: transparent;
+        border: 1px solid var(--sl-color-hairline);
+        border-radius: 0.5rem;
+        color: var(--sl-color-text-accent);
+        cursor: pointer;
+        transition:
+            background-color 160ms ease,
+            border-color 160ms ease,
+            color 160ms ease;
+    }
+    .sl-theme-toggle:hover,
+    .sl-theme-toggle:focus-visible {
+        background: var(--sl-color-hairline-light);
+        border-color: var(--sl-color-hairline);
+    }
+    .sl-theme-toggle:focus-visible {
+        outline: 2px solid var(--sl-color-text-accent);
+        outline-offset: 2px;
+    }
+    .sl-theme-toggle__icon {
+        width: 1.1rem;
+        height: 1.1rem;
+    }
+    :root[data-theme="light"] .sl-theme-toggle__icon--sun,
+    :root:not([data-theme="light"]) .sl-theme-toggle__icon--moon {
+        display: none;
+    }
+</style>

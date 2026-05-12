@@ -1,0 +1,162 @@
+{
+  "schemaVersion": 1,
+  "profiles": [
+    {
+      "caseName": "mandatory-n20",
+      "input": {
+        "rosterSize": 20
+      },
+      "expected": {
+        "rosterSize": 20,
+        "rosterProfileKind": "MandatoryN20",
+        "claimBearing": true,
+        "structuralCorruptionBound": 6,
+        "backendCorruptionBound": 6,
+        "privacyCorruptionBound": 6,
+        "decryptionCorruptionBound": 6,
+        "activeFaultBound": 4,
+        "replayBadCorruptionBound": 4,
+        "pvssThreshold": 7,
+        "decryptionThreshold": 7,
+        "releaseQuorum": 14,
+        "aggregateContributionQuorum": 7,
+        "decryptionShareQuorum": 7,
+        "evaluationReplayQuorum": 5,
+        "maximumRaceShares": 20,
+        "setupCompletionQuorum": 20,
+        "backendCorruptionModel": {
+          "kind": "StrictLessThanOneThird"
+        },
+        "warnings": []
+      }
+    },
+    {
+      "caseName": "strict-n30",
+      "input": {
+        "rosterSize": 30
+      },
+      "expected": {
+        "rosterSize": 30,
+        "rosterProfileKind": "CertificateGatedRange",
+        "claimBearing": false,
+        "structuralCorruptionBound": 10,
+        "backendCorruptionBound": 9,
+        "privacyCorruptionBound": 9,
+        "decryptionCorruptionBound": 9,
+        "activeFaultBound": 6,
+        "replayBadCorruptionBound": 6,
+        "pvssThreshold": 10,
+        "decryptionThreshold": 10,
+        "releaseQuorum": 20,
+        "aggregateContributionQuorum": 10,
+        "decryptionShareQuorum": 10,
+        "evaluationReplayQuorum": 7,
+        "maximumRaceShares": 30,
+        "setupCompletionQuorum": 30,
+        "backendCorruptionModel": {
+          "kind": "StrictLessThanOneThird"
+        },
+        "warnings": [
+          "CertificateGatedProfile",
+          "BackendCertificateRequired"
+        ]
+      }
+    },
+    {
+      "caseName": "strict-n40",
+      "input": {
+        "rosterSize": 40
+      },
+      "expected": {
+        "rosterSize": 40,
+        "rosterProfileKind": "CertificateGatedRange",
+        "claimBearing": false,
+        "structuralCorruptionBound": 13,
+        "backendCorruptionBound": 13,
+        "privacyCorruptionBound": 13,
+        "decryptionCorruptionBound": 13,
+        "activeFaultBound": 8,
+        "replayBadCorruptionBound": 8,
+        "pvssThreshold": 14,
+        "decryptionThreshold": 14,
+        "releaseQuorum": 27,
+        "aggregateContributionQuorum": 14,
+        "decryptionShareQuorum": 14,
+        "evaluationReplayQuorum": 9,
+        "maximumRaceShares": 40,
+        "setupCompletionQuorum": 40,
+        "backendCorruptionModel": {
+          "kind": "StrictLessThanOneThird"
+        },
+        "warnings": [
+          "CertificateGatedProfile",
+          "BackendCertificateRequired"
+        ]
+      }
+    },
+    {
+      "caseName": "strict-n50",
+      "input": {
+        "rosterSize": 50
+      },
+      "expected": {
+        "rosterSize": 50,
+        "rosterProfileKind": "CertificateGatedRange",
+        "claimBearing": false,
+        "structuralCorruptionBound": 16,
+        "backendCorruptionBound": 16,
+        "privacyCorruptionBound": 16,
+        "decryptionCorruptionBound": 16,
+        "activeFaultBound": 10,
+        "replayBadCorruptionBound": 10,
+        "pvssThreshold": 17,
+        "decryptionThreshold": 17,
+        "releaseQuorum": 34,
+        "aggregateContributionQuorum": 17,
+        "decryptionShareQuorum": 17,
+        "evaluationReplayQuorum": 11,
+        "maximumRaceShares": 50,
+        "setupCompletionQuorum": 50,
+        "backendCorruptionModel": {
+          "kind": "StrictLessThanOneThird"
+        },
+        "warnings": [
+          "CertificateGatedProfile",
+          "BackendCertificateRequired"
+        ]
+      }
+    },
+    {
+      "caseName": "unsafe-n19",
+      "input": {
+        "rosterSize": 19,
+        "unsafeMicroRosterAcknowledged": true
+      },
+      "expected": {
+        "rosterSize": 19,
+        "rosterProfileKind": "UnsafeMicroRoster",
+        "claimBearing": false,
+        "structuralCorruptionBound": 6,
+        "backendCorruptionBound": 6,
+        "privacyCorruptionBound": 6,
+        "decryptionCorruptionBound": 6,
+        "activeFaultBound": 3,
+        "replayBadCorruptionBound": 3,
+        "pvssThreshold": 7,
+        "decryptionThreshold": 7,
+        "releaseQuorum": 13,
+        "aggregateContributionQuorum": 7,
+        "decryptionShareQuorum": 7,
+        "evaluationReplayQuorum": 4,
+        "maximumRaceShares": 19,
+        "setupCompletionQuorum": 19,
+        "backendCorruptionModel": {
+          "kind": "StrictLessThanOneThird"
+        },
+        "warnings": [
+          "UnsafeMicroRoster"
+        ]
+      }
+    }
+  ]
+}

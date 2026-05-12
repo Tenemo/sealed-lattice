@@ -6,6 +6,9 @@
       "sealed-lattice": [
         "./packages/sdk/src/index.ts"
       ],
+      "@sealed-lattice/types": [
+        "./packages/types/src/index.ts"
+      ],
       "@sealed-lattice/protocol": [
         "./packages/protocol/src/index.ts"
       ],

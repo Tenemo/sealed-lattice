@@ -26,6 +26,9 @@ export default defineConfig({
             description:
                 'Documentation for the sealed-lattice workspace, package boundaries, and current public facade.',
             disable404Route: true,
+            components: {
+                ThemeSelect: './src/components/ThemeToggle.astro',
+            },
             social: [
                 {
                     icon: 'github',

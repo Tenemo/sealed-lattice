@@ -1,134 +1,89 @@
-export type BaseClaimProfile =
-    | 'ResultComputedAuditable'
-    | 'FullyVerifiedResult';
-
-export type TranscriptCoreMheSecurityStage =
-    | 'PassiveMhePrototype'
-    | 'ActiveMalicious';
-
-export type TranscriptCoreStatusLabel = 'TranscriptCoreVerified';
-
-export type TranscriptCoreVerificationLabel =
-    | 'TranscriptCoreVerified'
-    | 'TranscriptCoreRejected';
-
-export type CanonicalErrorCode =
-    | 'DuplicateField'
-    | 'FieldOrder'
-    | 'FixtureMismatch'
-    | 'InvalidChunkSize'
-    | 'InvalidEnum'
-    | 'InvalidFixture'
-    | 'InvalidHex'
-    | 'InvalidUtf8'
-    | 'MalformedLength'
-    | 'MalformedMagic'
-    | 'MalformedVarUint'
-    | 'MissingField'
-    | 'NonCanonicalVarUint'
-    | 'ProfileComponentMismatch'
-    | 'TrailingBytes'
-    | 'UnknownBaseClaimProfile'
-    | 'UnknownField'
-    | 'UnknownMheSecurityStage'
-    | 'UnknownProofProfile'
-    | 'UnsupportedCanonicalEnvelopeVersion'
-    | 'UnsupportedObjectType'
-    | 'UnsupportedObjectVersion';
-
-export type CanonicalError = {
-    readonly code: CanonicalErrorCode;
-    readonly message: string;
-};
-
-export type GoldenTranscriptCoreFixture = {
-    readonly kind: 'golden-transcript-core';
-    readonly fixtureVersion: 1;
-    readonly caseName: string;
-    readonly canonicalBytesHex: string;
-    readonly objectType: 'TranscriptCore';
-    readonly objectVersion: 1;
-    readonly baseClaimProfile: BaseClaimProfile;
-    readonly mheSecurityStage: TranscriptCoreMheSecurityStage;
-    readonly baseClaimProfileId: string;
-    readonly mheSecurityProfileId: string;
-    readonly heSetupProofProfileId: string;
-    readonly evaluationProofProfileId: string;
-    readonly decryptionProofProfileId: string;
-    readonly expectedObjectHash512: string;
-    readonly expectedChunkRoot: string;
-    readonly chunkSize: number;
-    readonly expectedStatusLabels: readonly TranscriptCoreStatusLabel[];
-};
-
-export type MalformedObjectFixture = {
-    readonly kind: 'malformed-object';
-    readonly fixtureVersion: 1;
-    readonly caseName: string;
-    readonly canonicalBytesHex: string;
-    readonly expectedErrorCode: CanonicalErrorCode;
-};
-
-export type TranscriptCoreFixture =
-    | GoldenTranscriptCoreFixture
-    | MalformedObjectFixture;
-
-export type TranscriptCoreReplayFixture = {
-    readonly schemaVersion: 1;
-    readonly caseName: string;
-    readonly fixture: GoldenTranscriptCoreFixture;
-    readonly expectedStatusLabels: readonly TranscriptCoreStatusLabel[];
-};
-
-export type TranscriptCoreAnalysis = {
-    readonly canonicalBytesHex: string;
-    readonly objectType: 'TranscriptCore';
-    readonly objectVersion: 1;
-    readonly baseClaimProfile: BaseClaimProfile;
-    readonly mheSecurityStage: TranscriptCoreMheSecurityStage;
-    readonly baseClaimProfileId: string;
-    readonly mheSecurityProfileId: string;
-    readonly heSetupProofProfileId: string;
-    readonly evaluationProofProfileId: string;
-    readonly decryptionProofProfileId: string;
-    readonly objectHash512: string;
-    readonly chunkRoot: string;
-    readonly chunkSize: number;
-    readonly statusLabels: readonly TranscriptCoreStatusLabel[];
-    readonly title: string;
-    readonly sequence: number;
-    readonly payloadHex: string;
-    readonly tags: readonly string[];
-    readonly checkpoints: readonly number[];
-};
-
-export type GoldenTranscriptCoreFixtureVerification = {
-    readonly verified: true;
-    readonly caseName: string;
-    readonly objectHash512: string;
-    readonly chunkRoot: string;
-    readonly statusLabels: readonly TranscriptCoreStatusLabel[];
-};
-
-export type MalformedObjectFixtureVerification = {
-    readonly verified: true;
-    readonly caseName: string;
-    readonly expectedErrorCode: CanonicalErrorCode;
-};
-
-export type TranscriptCoreFixtureVerification =
-    | GoldenTranscriptCoreFixtureVerification
-    | MalformedObjectFixtureVerification;
-
-export type TranscriptCoreVerificationResult = {
-    readonly caseName: string;
-    readonly label: TranscriptCoreVerificationLabel;
-    readonly statusLabels: readonly TranscriptCoreStatusLabel[];
-    readonly objectHash512?: string;
-    readonly chunkRoot?: string;
-    readonly rejection?: {
-        readonly code: CanonicalErrorCode;
-    };
-};
-
-export * from './protocol-shell/index.js';
+export { evaluateActionCapability } from './lifecycle/capabilities.js';
+export {
+    deriveBoardEntryDigest,
+    deriveBoardHeadDigest,
+    deriveBoardRootDigest,
+    deriveConflictingHeadEvidenceDigest,
+    deriveInclusionProofDigest,
+    isVerifiedAncestor,
+    verifyBoardConsistency,
+    verifyInclusionProof,
+} from './board/index.js';
+export {
+    deriveCastReceiptDigest,
+    deriveCloseRecordDigest,
+    derivePostVotingClosedContextDigest,
+    verifyCastReceiptShell,
+    verifyCloseRecordShell,
+} from './closing/index.js';
+export {
+    canonicalJson,
+    derivePolicyDigest,
+    deriveProtocolDigest,
+    protocolDigestNamespaceValues,
+} from './common/digests.js';
+export {
+    deriveFirstComeOrderDigest,
+    deriveValidatedFirstComeOrder,
+    verifyFirstComePolicy,
+} from './ordering/index.js';
+export {
+    deriveTargetFinalityPolicyDigest,
+    deriveTargetFinalityRecordDigest,
+    deriveWitnessPolicyDigest,
+    deriveWitnessCheckpointDigest,
+    verifyTargetFinality,
+} from './finality/index.js';
+export { deriveLifecycleLabels } from './lifecycle/labels.js';
+export {
+    isValidLifecycleTransition,
+    lifecycleStates,
+} from './lifecycle/lifecycle.js';
+export {
+    defaultDuplicateBallotPolicy,
+    defaultScoreDomain,
+    defaultTiePolicy,
+    mandatoryClaimRosterSize,
+    maximumCertificateGatedRosterSize,
+    minimumUnsafeRosterSize,
+    strictLessThanOneThirdModel,
+} from './lifecycle/profiles.js';
+export {
+    validatePollSpec,
+    validatePollSpecFromUnknown,
+} from './lifecycle/poll-spec.js';
+export {
+    deriveActionContextDigest,
+    deriveRecoveryEpochUpdateDigest,
+    isActionCurrentForRecoveryEpoch,
+    verifyRecoveryEpochUpdate,
+} from './recovery/index.js';
+export {
+    deriveElectionManifestDigest,
+    deriveReceiverKeyRegistrationDigest,
+    deriveRegistrationEntryDigest,
+    deriveRosterDigest,
+    deriveTrusteeSetupEntryDigest,
+    verifyRosterManifestTranscript,
+} from './roster/index.js';
+export {
+    createMlDsaKeyPairFixture,
+    createMlDsaSignatureProfileFixture,
+    createProtocolSignatureFixture,
+    deriveCanonicalSignedRootDigest,
+    deriveMlDsaContextByteLength,
+    deriveMlDsaPublicKeyDigest,
+    deriveProtocolSignatureDigest,
+    verifySignedObjectSignature,
+} from './common/signatures.js';
+export {
+    deriveAcceptedTargetFinalityCheckpoint,
+    deriveEvaluationReplayAttestationDigest,
+    deriveTargetAcceptedRecordDigest,
+    deriveTopKDecryptionShareDigest,
+    verifyEvaluationReplayAttestationShell,
+    verifyTargetAcceptedRecordShell,
+    verifyTopKDecryptionShareShell,
+} from './target-phase/index.js';
+export { deriveThresholdProfile } from './lifecycle/thresholds.js';
+export type * from '@sealed-lattice/types';

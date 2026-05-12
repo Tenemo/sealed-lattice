@@ -8,6 +8,7 @@ import {
     type DeclarationReflection,
 } from 'typedoc';
 
+import { collectFiles, isWithinDirectory } from '../tools/internal/files.js';
 import config from '../typedoc.config.mjs';
 
 import {
@@ -77,15 +78,6 @@ const isBaseUnsafeLinkTarget = (target: string): boolean =>
 
 const toRepoRelativePath = (absolutePath: string): string =>
     path.relative(repoRoot, absolutePath).replace(/\\/g, '/');
-
-const isWithinDirectory = (directory: string, candidate: string): boolean => {
-    const relativePath = path.relative(directory, candidate);
-
-    return (
-        relativePath === '' ||
-        (!relativePath.startsWith('..') && !path.isAbsolute(relativePath))
-    );
-};
 
 const isDocsContentFile = (candidate: string): boolean =>
     isWithinDirectory(docsRoot, candidate);
@@ -246,41 +238,10 @@ const resolveLinkCandidates = (
     return [...candidates];
 };
 
-const collectMarkdownFiles = async (entry: string): Promise<string[]> => {
-    const absoluteEntry = path.resolve(repoRoot, entry);
-    const stats = await fs.stat(absoluteEntry);
-
-    if (stats.isFile()) {
-        return absoluteEntry.endsWith('.md') || absoluteEntry.endsWith('.mdx')
-            ? [absoluteEntry]
-            : [];
-    }
-
-    const files: string[] = [];
-    const pending = [absoluteEntry];
-
-    while (pending.length > 0) {
-        const current = pending.pop();
-        if (current === undefined) {
-            continue;
-        }
-
-        const entries = await fs.readdir(current, { withFileTypes: true });
-        for (const child of entries) {
-            const childPath = path.join(current, child.name);
-            if (child.isDirectory()) {
-                pending.push(childPath);
-            } else if (
-                child.isFile() &&
-                (childPath.endsWith('.md') || childPath.endsWith('.mdx'))
-            ) {
-                files.push(childPath);
-            }
-        }
-    }
-
-    return files.sort();
-};
+const collectMarkdownFiles = async (entry: string): Promise<string[]> =>
+    collectFiles(path.resolve(repoRoot, entry), {
+        extensions: ['.md', '.mdx'],
+    });
 
 const verifyLinks = async (): Promise<string[]> => {
     const markdownFiles = (

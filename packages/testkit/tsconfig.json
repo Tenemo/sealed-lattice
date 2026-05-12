@@ -10,10 +10,10 @@
     "include": ["src/**/*.ts"],
     "references": [
         {
-            "path": "../protocol"
+            "path": "../sdk"
         },
         {
-            "path": "../sdk"
+            "path": "../types"
         }
     ]
 }

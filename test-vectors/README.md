@@ -21,6 +21,7 @@ pnpm run vectors:generate
 the directory.
 
 The repository includes tracked transcript-core golden, malformed-object, and
-transcript replay fixtures plus protocol-shell threshold, poll-spec, lifecycle, and
-capability vectors so the manifest always exercises real file hashing and
-verification.
+transcript replay fixtures plus election-foundation threshold, poll-spec,
+lifecycle, capability, board/finality, first-come, recovery, and full signed
+deterministic fixture vectors so the manifest always exercises real file
+hashing and verification.

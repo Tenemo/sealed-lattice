@@ -1,7 +1,7 @@
 import type {
     GoldenTranscriptCoreFixture,
     MalformedObjectFixture,
-} from '@sealed-lattice/protocol';
+} from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
 import goldenTranscriptCoreFixturesJson from '../../../../test-vectors/transcript-core/golden-transcript-core.json';

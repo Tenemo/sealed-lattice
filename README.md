@@ -24,22 +24,24 @@ WORK IN PROGRESS - protocol-facing APIs remain under implementation. Versions be
 homomorphic voting library workspace.
 
 The repository uses a private Turborepo workspace with one published package
-and four private internal packages:
+and five private internal packages:
 
 - `sealed-lattice`
+- `@sealed-lattice/types`
 - `@sealed-lattice/protocol`
 - `@sealed-lattice/crypto`
 - `@sealed-lattice/wasm`
 - `@sealed-lattice/testkit`
 
 The workspace also contains `crates/sealed-lattice-kernel`, the Rust transcript
-core used by the native-test and WASM-loading path.
+core used by the native test and WASM loading path.
 
 ## Current public boundary
 
-The published `sealed-lattice` package currently exposes a safe transcript-core
-fixture verifier plus the threshold, lifecycle, poll-spec, and capability
-shell.
+The published `sealed-lattice` package currently exposes a safe transcript core
+fixture verifier plus the threshold, lifecycle, poll specification, capability,
+board/finality, roster-manifest, cast receipt, close record, first-come, and
+recovery-epoch election foundation helpers.
 
 This keeps packaging, documentation, smoke checks, transcript fixtures, and
 release flow stable while the broader voting API remains future implementation.
@@ -48,8 +50,16 @@ release flow stable while the broader voting API remains future implementation.
 - packaging and tarball smoke checks
 - TypeScript, ESLint, browser, and Node verification
 - Astro documentation and TypeDoc generation
-- transcript-core test vector manifest verification
-- the Rust-to-WASM transcript-core toolchain
+- transcript core test vector manifest verification
+- election foundation board/finality, roster-manifest, ML-DSA-65 signed-root, cast receipt, close record, first-come, and recovery-epoch checks
+- the Rust-to-WASM transcript core toolchain
+
+## Documentation
+
+- Hosted documentation site: [tenemo.github.io/sealed-lattice](https://tenemo.github.io/sealed-lattice/)
+- Guides index: [tenemo.github.io/sealed-lattice/guides](https://tenemo.github.io/sealed-lattice/guides/)
+- Protocol spec: [tenemo.github.io/sealed-lattice/spec](https://tenemo.github.io/sealed-lattice/spec/)
+- API reference: [tenemo.github.io/sealed-lattice/api](https://tenemo.github.io/sealed-lattice/api/)
 
 ## Workspace layout
 
@@ -75,8 +85,8 @@ sealed-lattice/
 pnpm add sealed-lattice
 ```
 
-The package exports the current transcript-core fixture verifier and safe
-protocol-shell helpers. It is not a usable voting library yet.
+The package exports the current transcript core fixture verifier and safe
+election foundation helpers. It is not a usable voting library yet.
 
 ## Development
 
@@ -92,21 +102,6 @@ pnpm run smoke:pack
 pnpm run smoke:pack:npm
 pnpm run build
 ```
-
-## Documentation
-
-- Hosted documentation site: [tenemo.github.io/sealed-lattice](https://tenemo.github.io/sealed-lattice/)
-- Guides index: [tenemo.github.io/sealed-lattice/guides](https://tenemo.github.io/sealed-lattice/guides/)
-- Protocol spec: [tenemo.github.io/sealed-lattice/spec](https://tenemo.github.io/sealed-lattice/spec/)
-- API reference: [tenemo.github.io/sealed-lattice/api](https://tenemo.github.io/sealed-lattice/api/)
-
-## Status
-
-This repository currently ships a stable package boundary, explicit internal
-package ownership, verification tooling, documentation generation, package
-smoke checks, a Rust/WASM transcript-core path, and a deterministic protocol
-shell. Ballots, signatures, board proofs, PVSS, BFV, MHE setup, replay, target
-acceptance, and decryption remain future implementation.
 
 ## License
 

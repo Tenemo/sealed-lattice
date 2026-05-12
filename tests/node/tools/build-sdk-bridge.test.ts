@@ -1,34 +1,68 @@
+import path from 'node:path';
+
 import { describe, expect, it } from 'vitest';
 
 import {
+    computeRelativeTypesSpecifier,
+    rewriteTypesImports,
     transpileBridgeSource,
     transpileSdkInternalSource,
 } from '../../../tools/ci/build-sdk-bridge';
 
+const distRoot = path.resolve('/fake-repo/packages/sdk/dist');
+const typesRuntime = path.resolve(distRoot, 'internal/types.js');
+
 describe('SDK bridge build helpers', () => {
     it('removes type-only workspace imports from the published bridge copy', () => {
         const outputText = transpileBridgeSource(`
-            import type { TranscriptCoreFixture } from '@sealed-lattice/protocol';
+            import type { TranscriptCoreFixture } from '@sealed-lattice/types';
 
             export const acceptsFixture = (_fixture: TranscriptCoreFixture): boolean => true;
         `);
 
         expect(outputText).toContain('export const acceptsFixture');
-        expect(outputText).not.toContain('@sealed-lattice/protocol');
+        expect(outputText).not.toContain('@sealed-lattice/types');
     });
 
     it('transpiles selected protocol runtime modules for SDK vendoring', () => {
         const outputText = transpileSdkInternalSource(
             `
-                import type { ThresholdProfile } from './types.js';
+                import type { ThresholdProfile } from '@sealed-lattice/types';
 
                 export const isMandatory = (profile: ThresholdProfile): boolean =>
                     profile.rosterProfileKind === 'MandatoryN20';
             `,
-            'packages/protocol/src/protocol-shell/thresholds.ts',
+            'packages/protocol/src/lifecycle/thresholds.ts',
         );
 
         expect(outputText).toContain('export const isMandatory');
         expect(outputText).not.toContain('ThresholdProfile');
+    });
+
+    it('rewrites @sealed-lattice/types imports to a relative dist path', () => {
+        const declarationFilePath = path.resolve(distRoot, 'index.d.ts');
+        const original =
+            "import type { Foo } from '@sealed-lattice/types';\nexport type * from '@sealed-lattice/types';\n";
+        const rewritten = rewriteTypesImports(
+            declarationFilePath,
+            original,
+            typesRuntime,
+        );
+
+        expect(rewritten).toContain("from './internal/types.js'");
+        expect(rewritten).not.toContain('@sealed-lattice/types');
+    });
+
+    it('computes a relative specifier from nested dist files', () => {
+        const nestedDeclarationFilePath = path.resolve(
+            distRoot,
+            'internal/election-foundation/index.d.ts',
+        );
+        const specifier = computeRelativeTypesSpecifier(
+            nestedDeclarationFilePath,
+            typesRuntime,
+        );
+
+        expect(specifier).toBe('../types.js');
     });
 });

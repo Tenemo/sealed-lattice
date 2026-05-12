@@ -75,12 +75,12 @@
 
     .sl-link-card {
         min-height: 100%;
-        border-radius: 1rem;
+        border-radius: 0.5rem;
         border-color: var(--sl-color-hairline);
         background: linear-gradient(
             180deg,
-            hsla(0, 0%, 100%, 0.04),
-            hsla(0, 0%, 100%, 0.02)
+            hsla(var(--landing-tint), 0.04),
+            hsla(var(--landing-tint), 0.02)
         );
         transition:
             transform 160ms ease,
@@ -91,11 +91,11 @@
 
     .sl-link-card:is(:hover, :focus-within) {
         transform: translateY(-2px);
-        border-color: hsla(0, 0%, 100%, 0.24);
+        border-color: hsla(var(--landing-tint), 0.24);
         background: linear-gradient(
             180deg,
-            hsla(0, 0%, 100%, 0.06),
-            hsla(0, 0%, 100%, 0.03)
+            hsla(var(--landing-tint), 0.06),
+            hsla(var(--landing-tint), 0.03)
         );
     }
 
@@ -125,12 +125,12 @@
 
     html[data-has-hero] .landing-section .card,
     html[data-has-hero] .landing-steps-shell {
-        border-radius: 1rem;
+        border-radius: 0.5rem;
         border-color: var(--sl-color-hairline);
         background: linear-gradient(
             180deg,
-            hsla(0, 0%, 100%, 0.05),
-            hsla(0, 0%, 100%, 0.02)
+            hsla(var(--landing-tint), 0.05),
+            hsla(var(--landing-tint), 0.02)
         );
         box-shadow: none;
     }
@@ -138,15 +138,11 @@
     html[data-has-hero] .landing-section {
         display: grid;
         gap: 1.5rem;
-        padding: clamp(1.25rem, 2vw, 2rem);
-        border: 1px solid var(--sl-color-hairline);
-        border-radius: 1.25rem;
-        background: linear-gradient(
-            180deg,
-            hsla(0, 0%, 100%, 0.035),
-            hsla(0, 0%, 100%, 0.015)
-        );
-        box-shadow: var(--sl-shadow-sm);
+        padding-block: clamp(1.25rem, 2vw, 2rem);
+        border: 0;
+        border-radius: 0;
+        background: none;
+        box-shadow: none;
     }
 
     html[data-has-hero] .landing-section ul {
@@ -214,11 +210,11 @@
     html[data-has-hero] .landing-hero-panel__card,
     html[data-has-hero] .landing-hero-panel__fact {
         border: 1px solid var(--sl-color-hairline);
-        border-radius: 1rem;
+        border-radius: 0.5rem;
         background: linear-gradient(
             180deg,
-            hsla(0, 0%, 100%, 0.06),
-            hsla(0, 0%, 100%, 0.02)
+            hsla(var(--landing-tint), 0.06),
+            hsla(var(--landing-tint), 0.02)
         );
         box-shadow: var(--sl-shadow-sm);
     }
@@ -232,8 +228,8 @@
         margin: 0;
         font-size: var(--sl-text-xs);
         font-weight: 600;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
+        letter-spacing: 0;
+        text-transform: none;
         color: var(--sl-color-gray-3);
     }
 

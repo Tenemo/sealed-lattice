@@ -10,9 +10,9 @@ boundary.
 ## Public package surface
 
 - The only committed public package name is `sealed-lattice`.
-- The current public runtime facade exposes only the transcript-core fixture verifier.
+- The current public runtime facade exposes transcript core fixture verification plus deterministic election foundation helpers.
 - No public subpaths are promised yet.
-- The published package exists to stabilize packaging, docs, smoke checks, transcript-core fixtures, and release flow before wider APIs are introduced.
+- The published package exists to stabilize packaging, docs, smoke checks, transcript core fixtures, election foundation vectors, and release flow before wider APIs are introduced.
 
 ## Private workspace surface
 
@@ -29,6 +29,6 @@ boundary.
 
 ## Verification rules
 
-- Node tests, browser tests, vector manifest verification, docs verification, pack smoke checks, and release-smoke checks must all continue to pass.
+- Node tests, browser tests, public package behavior checks, vector manifest verification, docs verification, pack smoke checks, and release-smoke checks must all continue to pass.
 - The Rust transcript core must keep building for native tests and `wasm32-unknown-unknown`.
-- The internal WASM loader must keep loading the transcript-core artifact in both Node and browser tests.
+- The internal WASM loader must keep loading the transcript core artifact in both Node and browser tests.

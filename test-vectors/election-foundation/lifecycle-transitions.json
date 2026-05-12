@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "validTransitions": [
+    {
+      "from": "DraftPoll",
+      "to": "RegistrationOpen"
+    },
+    {
+      "from": "VotingClosed",
+      "to": "AwaitingAggregateContributors"
+    },
+    {
+      "from": "EvaluationReplayOpen",
+      "to": "EvaluationReplayAttested"
+    },
+    {
+      "from": "EvaluationReplayOpen",
+      "to": "OptionalEvaluationProofVerified"
+    },
+    {
+      "from": "TargetAccepted",
+      "to": "AwaitingFirstDecryptionShares"
+    },
+    {
+      "from": "AwaitingFirstDecryptionShares",
+      "to": "ResultComputedAuditable"
+    },
+    {
+      "from": "AwaitingFirstDecryptionShares",
+      "to": "FullyVerifiedResult"
+    },
+    {
+      "from": "ResultComputedAuditable",
+      "to": "FullyVerifiedResult"
+    }
+  ],
+  "invalidTransitions": [
+    {
+      "from": "VotingOpen",
+      "to": "TargetAccepted"
+    },
+    {
+      "from": "TopKEvaluated",
+      "to": "AwaitingFirstDecryptionShares"
+    },
+    {
+      "from": "EvaluationReplayOpen",
+      "to": "ResultComputedAuditable"
+    },
+    {
+      "from": "TargetAccepted",
+      "to": "FullyVerifiedResult"
+    },
+    {
+      "from": "DraftPoll",
+      "to": "VotingOpen"
+    }
+  ]
+}

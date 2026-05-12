@@ -1,0 +1,290 @@
+{
+  "schemaVersion": 1,
+  "mandatoryTargetFinalityPolicy": {
+    "witnessTotal": 7,
+    "witnessQuorum": 5,
+    "conflictingFinalizedHeadsImplyEquivocatingWitnesses": 3
+  },
+  "coverageCases": [
+    {
+      "caseName": "honest-board-chain-with-inclusion",
+      "category": "board-consistency",
+      "expectedOk": true,
+      "expectedRefusalCodes": []
+    },
+    {
+      "caseName": "fabricated-inclusion-proof",
+      "category": "board-consistency",
+      "expectedOk": false,
+      "expectedRefusalCodes": ["InclusionProofInvalid"]
+    },
+    {
+      "caseName": "non-ancestor-consistency-proof",
+      "category": "board-consistency",
+      "expectedOk": false,
+      "expectedRefusalCodes": ["BoardConsistencyFailure"]
+    },
+    {
+      "caseName": "forked-board-heads",
+      "category": "board-consistency",
+      "expectedOk": false,
+      "expectedRefusalCodes": ["BoardForkDetected"]
+    },
+    {
+      "caseName": "signed-root-missing-required-field",
+      "category": "signed-root",
+      "expectedOk": false,
+      "expectedRefusalCodes": ["InvalidSignedRoot"]
+    },
+    {
+      "caseName": "honest-target-finality-5-of-7",
+      "category": "target-finality",
+      "expectedOk": true,
+      "expectedRefusalCodes": []
+    },
+    {
+      "caseName": "target-finality-too-few-witnesses",
+      "category": "target-finality",
+      "expectedOk": false,
+      "expectedRefusalCodes": ["WitnessQuorumNotReached"]
+    },
+    {
+      "caseName": "target-finality-duplicate-witness",
+      "category": "target-finality",
+      "expectedOk": false,
+      "expectedRefusalCodes": ["DuplicateWitness"]
+    },
+    {
+      "caseName": "target-finality-unknown-witness",
+      "category": "target-finality",
+      "expectedOk": false,
+      "expectedRefusalCodes": ["UnknownWitness"]
+    },
+    {
+      "caseName": "target-finality-conflicting-finalized-heads",
+      "category": "target-finality",
+      "expectedOk": false,
+      "expectedRefusalCodes": ["BoardForkDetected"],
+      "expectedEquivocatingWitnessCount": 5
+    },
+    {
+      "caseName": "replay-attestation-without-finality",
+      "category": "target-phase",
+      "expectedOk": false,
+      "expectedRefusalCodes": ["TargetPhaseAuthorizationFailure"]
+    },
+    {
+      "caseName": "decryption-share-wrong-finality",
+      "category": "target-phase",
+      "expectedOk": false,
+      "expectedRefusalCodes": ["DecryptionShareInvalid"]
+    },
+    {
+      "caseName": "honest-roster-manifest",
+      "category": "roster-manifest",
+      "expectedOk": true,
+      "expectedRefusalCodes": []
+    },
+    {
+      "caseName": "duplicate-registration",
+      "category": "roster-manifest",
+      "expectedOk": false,
+      "expectedRefusalCodes": ["DuplicateRegistration"]
+    },
+    {
+      "caseName": "late-registration",
+      "category": "roster-manifest",
+      "expectedOk": false,
+      "expectedRefusalCodes": ["LateRegistration"]
+    },
+    {
+      "caseName": "conflicting-board-included-manifest",
+      "category": "roster-manifest",
+      "expectedOk": false,
+      "expectedRefusalCodes": ["ConflictingManifest"]
+    },
+    {
+      "caseName": "recovery-update-conflict",
+      "category": "recovery",
+      "expectedOk": false,
+      "expectedRefusalCodes": ["RecoveryUpdateConflict"]
+    },
+    {
+      "caseName": "stale-recovery-action",
+      "category": "recovery",
+      "expectedOk": false,
+      "expectedRefusalCodes": ["StaleRecoveryEpoch"]
+    }
+  ],
+  "requiredDigestNamespaces": [
+    "BoardEntryDigest",
+    "BoardHeadDigest",
+    "BoardPolicyDigest",
+    "BoardRootDigest",
+    "CastReceiptDigest",
+    "CloseRecordDigest",
+    "ConflictingHeadEvidenceDigest",
+    "DuplicateBallotPolicyDigest",
+    "ElectionManifestDigest",
+    "EvaluationReplayAttestationDigest",
+    "FirstComeOrderDigest",
+    "FirstComePolicyDigest",
+    "InclusionProofDigest",
+    "PollSpecDigest",
+    "PublicKeyDigest",
+    "ReceiverKeyRegistrationDigest",
+    "RegistrationEntryDigest",
+    "RecoveryEpochUpdateDigest",
+    "RecoveryPolicyDigest",
+    "RosterDigest",
+    "TargetAcceptedRecordDigest",
+    "TargetFinalityPolicyDigest",
+    "TargetFinalityRecordDigest",
+    "ThresholdProfileDigest",
+    "TopKDecryptionShareDigest",
+    "TrusteeSetupEntryDigest",
+    "WitnessPolicyDigest",
+    "WitnessCheckpointDigest",
+    "SignedRootDigest",
+    "ProtocolSignatureEnvelopeDigest",
+    "ProviderBuildDigest",
+    "AggregateSelectionPolicyDigest",
+    "PostVotingClosedContextDigest",
+    "ProofPrimeToQDataKeyConsistencyDigest",
+    "TargetDecryptionPreparationRecordDigest"
+  ],
+  "firstComeOrdering": {
+    "requiredContextDigest": "context-digest",
+    "selectionPolicyDigest": "selection-policy-digest",
+    "expectedSelectionPolicyDigest": "selection-policy-digest",
+    "currentRecoveryEpochMap": {
+      "participant-1": {
+        "signerIdentity": "participant-1",
+        "currentRecoveryEpoch": 0,
+        "currentDeviceEpoch": 0
+      },
+      "participant-2": {
+        "signerIdentity": "participant-2",
+        "currentRecoveryEpoch": 0,
+        "currentDeviceEpoch": 0
+      }
+    },
+    "candidates": [
+      {
+        "objectDigest": "candidate-b",
+        "objectType": "TargetFinalityRecord",
+        "boardSeq": 2,
+        "boardPosition": 0,
+        "signerIdentity": "participant-2",
+        "recoveryEpoch": 0,
+        "deviceEpoch": 0,
+        "actionSequence": 0,
+        "contextDigest": "context-digest",
+        "isByteIdenticalRetransmission": false
+      },
+      {
+        "objectDigest": "candidate-a",
+        "objectType": "TargetFinalityRecord",
+        "boardSeq": 1,
+        "boardPosition": 0,
+        "signerIdentity": "participant-1",
+        "recoveryEpoch": 0,
+        "deviceEpoch": 0,
+        "actionSequence": 0,
+        "contextDigest": "context-digest",
+        "isByteIdenticalRetransmission": false
+      },
+      {
+        "objectDigest": "candidate-a",
+        "objectType": "TargetFinalityRecord",
+        "boardSeq": 3,
+        "boardPosition": 0,
+        "signerIdentity": "participant-1",
+        "recoveryEpoch": 0,
+        "deviceEpoch": 0,
+        "actionSequence": 0,
+        "contextDigest": "context-digest",
+        "isByteIdenticalRetransmission": true
+      }
+    ],
+    "expectedOrderedObjectDigests": [
+      "candidate-a",
+      "candidate-b"
+    ]
+  },
+  "negativeFirstComeOrderings": [
+    {
+      "caseName": "mixed-stale-recovery-current-device-before-cutoff",
+      "requiredContextDigest": "context-digest",
+      "selectionPolicyDigest": "selection-policy-digest",
+      "expectedSelectionPolicyDigest": "selection-policy-digest",
+      "currentRecoveryEpochMap": {
+        "participant-1": {
+          "signerIdentity": "participant-1",
+          "currentRecoveryEpoch": 1,
+          "currentDeviceEpoch": 1,
+          "oldActionCutoffBoardSeq": 10
+        }
+      },
+      "candidates": [
+        {
+          "objectDigest": "candidate-stale-mixed-epoch",
+          "objectType": "TargetFinalityRecord",
+          "boardSeq": 9,
+          "boardPosition": 0,
+          "signerIdentity": "participant-1",
+          "recoveryEpoch": 0,
+          "deviceEpoch": 1,
+          "actionSequence": 0,
+          "contextDigest": "context-digest",
+          "isByteIdenticalRetransmission": false
+        }
+      ],
+      "expectedRefusalCodes": [
+        "StaleRecoveryEpoch"
+      ]
+    },
+    {
+      "caseName": "non-identical-same-identity-same-context",
+      "requiredContextDigest": "context-digest",
+      "selectionPolicyDigest": "selection-policy-digest",
+      "expectedSelectionPolicyDigest": "selection-policy-digest",
+      "currentRecoveryEpochMap": {
+        "participant-1": {
+          "signerIdentity": "participant-1",
+          "currentRecoveryEpoch": 0,
+          "currentDeviceEpoch": 0
+        }
+      },
+      "candidates": [
+        {
+          "objectDigest": "candidate-a",
+          "objectType": "TargetFinalityRecord",
+          "boardSeq": 1,
+          "boardPosition": 0,
+          "signerIdentity": "participant-1",
+          "recoveryEpoch": 0,
+          "deviceEpoch": 0,
+          "actionSequence": 0,
+          "contextDigest": "context-digest",
+          "isByteIdenticalRetransmission": false
+        },
+        {
+          "objectDigest": "candidate-conflict",
+          "objectType": "TargetFinalityRecord",
+          "boardSeq": 1,
+          "boardPosition": 1,
+          "signerIdentity": "participant-1",
+          "recoveryEpoch": 0,
+          "deviceEpoch": 0,
+          "actionSequence": 1,
+          "contextDigest": "context-digest",
+          "isByteIdenticalRetransmission": false
+        }
+      ],
+      "expectedRefusalCodes": [
+        "ConflictingFirstComeCandidate"
+      ]
+    }
+  ]
+}

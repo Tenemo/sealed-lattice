@@ -5,7 +5,7 @@ import { pathToFileURL } from 'node:url';
 import type {
     GoldenTranscriptCoreFixture,
     MalformedObjectFixture,
-} from '@sealed-lattice/protocol';
+} from '@sealed-lattice/types';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import goldenTranscriptCoreFixturesJson from '../../../../test-vectors/transcript-core/golden-transcript-core.json';

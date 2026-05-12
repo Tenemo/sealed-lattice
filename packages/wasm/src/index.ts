@@ -1,9 +1,10 @@
 import type {
     TranscriptCoreFixture,
     TranscriptCoreFixtureVerification,
-} from '@sealed-lattice/protocol';
+} from '@sealed-lattice/types';
 
 import {
+    canonicalErrorCodes,
     createTranscriptCoreKernelLoader,
     TranscriptCoreKernelCommandError,
     type TranscriptCoreKernel,
@@ -14,7 +15,11 @@ const transcriptCoreKernelUrl = new URL(
     import.meta.url,
 );
 
-export { createTranscriptCoreKernelLoader, TranscriptCoreKernelCommandError };
+export {
+    canonicalErrorCodes,
+    createTranscriptCoreKernelLoader,
+    TranscriptCoreKernelCommandError,
+};
 export type { TranscriptCoreKernel };
 
 export const loadTranscriptCoreKernel: () => Promise<TranscriptCoreKernel> =

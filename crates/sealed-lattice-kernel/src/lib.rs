@@ -76,7 +76,9 @@ pub unsafe extern "C" fn sealed_lattice_deallocate(pointer: *mut u8, length: usi
     }
 
     unsafe {
-        drop(Vec::from_raw_parts(pointer, length, length));
+        drop(Box::from_raw(ptr::slice_from_raw_parts_mut(
+            pointer, length,
+        )));
     }
 }
 
@@ -129,8 +131,11 @@ pub unsafe extern "C" fn sealed_lattice_transcript_core_command(
 mod tests {
     use super::{
         TRANSCRIPT_CORE_COMMAND_CONTRACT_VERSION, close, encoding, fixtures, hashing, he, proofs,
-        ring, setup, transcript_core, verifier,
+        ring, sealed_lattice_allocate, sealed_lattice_deallocate,
+        sealed_lattice_last_output_length, sealed_lattice_roundtrip,
+        sealed_lattice_transcript_core_command, setup, transcript_core, verifier,
     };
+    use core::{ptr, slice};
 
     #[test]
     fn exposes_stable_transcript_core_markers() {
@@ -151,5 +156,34 @@ mod tests {
             verifier::future_implementation_summary(),
             "verifier future implementation pending"
         );
+    }
+
+    #[test]
+    fn exported_allocations_deallocate_with_matching_layout() {
+        let allocated = sealed_lattice_allocate(4);
+        assert!(!allocated.is_null());
+        unsafe {
+            ptr::write_bytes(allocated, 0xaa, 4);
+            sealed_lattice_deallocate(allocated, 4);
+        }
+
+        let input = [1_u8, 2, 3, 4, 5];
+        let roundtrip = unsafe { sealed_lattice_roundtrip(input.as_ptr(), input.len()) };
+        assert!(!roundtrip.is_null());
+        let roundtrip_bytes = unsafe { slice::from_raw_parts(roundtrip, input.len()) };
+        assert_eq!(roundtrip_bytes, input);
+        unsafe {
+            sealed_lattice_deallocate(roundtrip, input.len());
+        }
+
+        let command = br#"{}"#;
+        let response =
+            unsafe { sealed_lattice_transcript_core_command(command.as_ptr(), command.len()) };
+        let response_length = sealed_lattice_last_output_length();
+        assert!(!response.is_null());
+        assert!(response_length > 0);
+        unsafe {
+            sealed_lattice_deallocate(response, response_length);
+        }
     }
 }

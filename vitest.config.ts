@@ -83,6 +83,12 @@ export default defineConfig({
             'sealed-lattice': resolveFromRepoRoot(
                 'packages',
                 'sdk',
+                'dist',
+                'index.js',
+            ),
+            '@sealed-lattice/types': resolveFromRepoRoot(
+                'packages',
+                'types',
                 'src',
                 'index.ts',
             ),

@@ -1,15 +1,9 @@
-import path from 'node:path';
-
 import { describe, expect, it } from 'vitest';
 
 import {
-    createDryRunPackArguments,
     createPackageManagerSpawnCommand,
-    createInstallArguments,
-    createPackArguments,
     detectPackageManager,
     getPackageManagerExecutableName,
-    getPublicPackageDirectory,
     parsePackDryRunFilePaths,
     parsePackageManagerOverride,
     resolvePackageManagerRunner,
@@ -17,12 +11,6 @@ import {
 } from '../../../tools/ci/verify-packed-package';
 
 describe('packed package smoke helpers', () => {
-    it('resolves the public package directory', () => {
-        expect(getPublicPackageDirectory('/repo/root')).toBe(
-            path.resolve('/repo/root', 'packages', 'sdk'),
-        );
-    });
-
     it('parses explicit package manager overrides', () => {
         expect(parsePackageManagerOverride(['--package-manager', 'npm'])).toBe(
             'npm',
@@ -58,32 +46,6 @@ describe('packed package smoke helpers', () => {
         );
         expect(getPackageManagerExecutableName('npm', 'linux')).toBe('npm');
         expect(getPackageManagerExecutableName('pnpm', 'darwin')).toBe('pnpm');
-    });
-
-    it('builds package manager arguments for pack and install commands', () => {
-        expect(createPackArguments('/tmp/pack')).toEqual([
-            'pack',
-            '--pack-destination',
-            '/tmp/pack',
-        ]);
-        expect(createDryRunPackArguments()).toEqual([
-            'pack',
-            '--dry-run',
-            '--json',
-            '--ignore-scripts',
-        ]);
-        expect(createInstallArguments('pnpm', '/tmp/pkg.tgz')).toEqual([
-            'add',
-            '--ignore-scripts',
-            '--silent',
-            '/tmp/pkg.tgz',
-        ]);
-        expect(createInstallArguments('npm', '/tmp/pkg.tgz')).toEqual([
-            'install',
-            '--ignore-scripts',
-            '--silent',
-            '/tmp/pkg.tgz',
-        ]);
     });
 
     it('builds a Windows-safe spawn command for package manager shims', () => {

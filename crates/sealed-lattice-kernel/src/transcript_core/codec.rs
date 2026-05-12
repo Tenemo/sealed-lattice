@@ -1,0 +1,507 @@
+use serde_json::Value;
+
+use super::rng::DeterministicFixtureRng;
+use super::types::{
+    ACTIVE_MALICIOUS_MHE_PROFILE_ID, BaseClaimProfile, ENVELOPE_VERSION, FIELD_CHECKPOINTS,
+    FIELD_PAYLOAD, FIELD_SEQUENCE, FIELD_STATUS, FIELD_TAGS, FIELD_TITLE,
+    FULLY_VERIFIED_RESULT_PROFILE_ID, MAGIC, MheSecurityStage, NO_DECRYPTION_PROOF_PROFILE_ID,
+    NO_EVALUATION_PROOF_PROFILE_ID, NO_HE_SETUP_PROOF_PROFILE_ID,
+    OPTIONAL_EVALUATION_PROOF_PROFILE_ID, PASSIVE_MHE_PROTOTYPE_PROFILE_ID, REQUIRED_FIELDS,
+    RESULT_COMPUTED_AUDITABLE_PROFILE_ID, TRANSCRIPT_CORE_OBJECT_TYPE,
+    TRANSCRIPT_CORE_OBJECT_VERSION, TranscriptCoreAnalysis, TranscriptCoreObject,
+    TranscriptCoreProfile, TranscriptCoreStatus,
+};
+use crate::encoding::{
+    CanonicalError, CanonicalErrorCode, CanonicalReader, CanonicalResult, append_bytes,
+    append_string, append_varuint,
+};
+use crate::hashing::{chunk_root, object_root, to_hex};
+
+pub fn encode_hex(bytes: &[u8]) -> String {
+    to_hex(bytes)
+}
+
+pub fn decode_hex(hex: &str) -> CanonicalResult<Vec<u8>> {
+    if !hex.len().is_multiple_of(2) {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidHex,
+            "hex string must have an even length",
+        ));
+    }
+
+    let mut bytes = Vec::with_capacity(hex.len() / 2);
+    let mut index = 0;
+    while index < hex.len() {
+        let byte = u8::from_str_radix(&hex[index..index + 2], 16).map_err(|_| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidHex,
+                "hex string contains a non-hexadecimal byte",
+            )
+        })?;
+        bytes.push(byte);
+        index += 2;
+    }
+
+    Ok(bytes)
+}
+
+pub fn canonical_transcript_core_object(profile: TranscriptCoreProfile) -> TranscriptCoreObject {
+    let mut fixture_rng = DeterministicFixtureRng::new(&profile.seed_label());
+    let base_claim_profile = profile.base_claim_profile;
+    let mhe_security_stage = profile.mhe_security_stage;
+    let uses_optional_evaluation_proof =
+        base_claim_profile == BaseClaimProfile::FullyVerifiedResult;
+
+    TranscriptCoreObject {
+        base_claim_profile,
+        mhe_security_stage,
+        base_claim_profile_id: base_claim_profile.expected_profile_id().to_string(),
+        mhe_security_profile_id: mhe_security_stage.expected_profile_id().to_string(),
+        he_setup_proof_profile_id: NO_HE_SETUP_PROOF_PROFILE_ID.to_string(),
+        evaluation_proof_profile_id: if uses_optional_evaluation_proof {
+            OPTIONAL_EVALUATION_PROOF_PROFILE_ID.to_string()
+        } else {
+            NO_EVALUATION_PROOF_PROFILE_ID.to_string()
+        },
+        decryption_proof_profile_id: NO_DECRYPTION_PROOF_PROFILE_ID.to_string(),
+        title: match (base_claim_profile, mhe_security_stage) {
+            (BaseClaimProfile::ResultComputedAuditable, MheSecurityStage::PassiveMhePrototype) => {
+                "Transcript core result-computed passive MHE".to_string()
+            }
+            (BaseClaimProfile::FullyVerifiedResult, MheSecurityStage::PassiveMhePrototype) => {
+                "Transcript core fully verified passive MHE".to_string()
+            }
+            (BaseClaimProfile::ResultComputedAuditable, MheSecurityStage::ActiveMalicious) => {
+                "Transcript core result-computed active malicious".to_string()
+            }
+            (BaseClaimProfile::FullyVerifiedResult, MheSecurityStage::ActiveMalicious) => {
+                "Transcript core fully verified active malicious".to_string()
+            }
+        },
+        sequence: match (base_claim_profile, mhe_security_stage) {
+            (BaseClaimProfile::ResultComputedAuditable, MheSecurityStage::PassiveMhePrototype) => {
+                42
+            }
+            (BaseClaimProfile::FullyVerifiedResult, MheSecurityStage::PassiveMhePrototype) => 44,
+            (BaseClaimProfile::ResultComputedAuditable, MheSecurityStage::ActiveMalicious) => 43,
+            (BaseClaimProfile::FullyVerifiedResult, MheSecurityStage::ActiveMalicious) => 45,
+        },
+        payload: fixture_rng.next_bytes(6),
+        status: TranscriptCoreStatus::TranscriptCoreVerified,
+        tags: match (base_claim_profile, mhe_security_stage) {
+            (BaseClaimProfile::ResultComputedAuditable, MheSecurityStage::PassiveMhePrototype) => {
+                vec![
+                    "canonical".to_string(),
+                    "result-computed-auditable".to_string(),
+                    "passive-mhe-prototype".to_string(),
+                    "wasm-parity".to_string(),
+                ]
+            }
+            (BaseClaimProfile::FullyVerifiedResult, MheSecurityStage::PassiveMhePrototype) => vec![
+                "canonical".to_string(),
+                "fully-verified-result".to_string(),
+                "passive-mhe-prototype".to_string(),
+                "optional-proof-reserved".to_string(),
+            ],
+            (BaseClaimProfile::ResultComputedAuditable, MheSecurityStage::ActiveMalicious) => vec![
+                "canonical".to_string(),
+                "result-computed-auditable".to_string(),
+                "active-malicious".to_string(),
+                "active-proof-reserved".to_string(),
+            ],
+            (BaseClaimProfile::FullyVerifiedResult, MheSecurityStage::ActiveMalicious) => vec![
+                "canonical".to_string(),
+                "fully-verified-result".to_string(),
+                "active-malicious".to_string(),
+                "optional-proof-reserved".to_string(),
+            ],
+        },
+        checkpoints: match (base_claim_profile, mhe_security_stage) {
+            (BaseClaimProfile::ResultComputedAuditable, MheSecurityStage::PassiveMhePrototype) => {
+                vec![1, 3, 5, 8, 13]
+            }
+            (BaseClaimProfile::FullyVerifiedResult, MheSecurityStage::PassiveMhePrototype) => {
+                vec![3, 6, 9, 12, 15]
+            }
+            (BaseClaimProfile::ResultComputedAuditable, MheSecurityStage::ActiveMalicious) => {
+                vec![2, 4, 8, 16, 32]
+            }
+            (BaseClaimProfile::FullyVerifiedResult, MheSecurityStage::ActiveMalicious) => {
+                vec![5, 10, 15, 20, 25]
+            }
+        },
+    }
+}
+
+pub fn serialize_transcript_core_object(object: &TranscriptCoreObject) -> Vec<u8> {
+    let mut output = Vec::new();
+    output.extend(MAGIC);
+    append_varuint(&mut output, ENVELOPE_VERSION);
+    append_varuint(&mut output, TRANSCRIPT_CORE_OBJECT_TYPE);
+    append_varuint(&mut output, TRANSCRIPT_CORE_OBJECT_VERSION);
+    append_varuint(&mut output, object.base_claim_profile.code());
+    append_varuint(&mut output, object.mhe_security_stage.code());
+    append_string(&mut output, &object.base_claim_profile_id);
+    append_string(&mut output, &object.mhe_security_profile_id);
+    append_string(&mut output, &object.he_setup_proof_profile_id);
+    append_string(&mut output, &object.evaluation_proof_profile_id);
+    append_string(&mut output, &object.decryption_proof_profile_id);
+    append_varuint(&mut output, REQUIRED_FIELDS.len() as u64);
+
+    append_varuint(&mut output, FIELD_TITLE);
+    append_string(&mut output, &object.title);
+    append_varuint(&mut output, FIELD_SEQUENCE);
+    append_varuint(&mut output, object.sequence);
+    append_varuint(&mut output, FIELD_PAYLOAD);
+    append_bytes(&mut output, &object.payload);
+    append_varuint(&mut output, FIELD_STATUS);
+    append_varuint(&mut output, object.status.code());
+    append_varuint(&mut output, FIELD_TAGS);
+    append_varuint(&mut output, object.tags.len() as u64);
+    for tag in &object.tags {
+        append_string(&mut output, tag);
+    }
+    append_varuint(&mut output, FIELD_CHECKPOINTS);
+    append_varuint(&mut output, object.checkpoints.len() as u64);
+    for checkpoint in &object.checkpoints {
+        append_varuint(&mut output, *checkpoint);
+    }
+
+    output
+}
+
+pub fn parse_transcript_core_object(bytes: &[u8]) -> CanonicalResult<TranscriptCoreObject> {
+    let mut reader = CanonicalReader::new(bytes);
+    if reader.read_exact(MAGIC.len())? != MAGIC {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedMagic,
+            "object does not start with SLBE magic",
+        ));
+    }
+
+    let envelope_version = reader.read_varuint()?;
+    if envelope_version != ENVELOPE_VERSION {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::UnsupportedCanonicalEnvelopeVersion,
+            "unsupported canonical object envelope version",
+        ));
+    }
+
+    let object_type = reader.read_varuint()?;
+    if object_type != TRANSCRIPT_CORE_OBJECT_TYPE {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::UnsupportedObjectType,
+            "unsupported object type",
+        ));
+    }
+
+    let object_version = reader.read_varuint()?;
+    if object_version != TRANSCRIPT_CORE_OBJECT_VERSION {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::UnsupportedObjectVersion,
+            "unsupported object version",
+        ));
+    }
+
+    let base_claim_profile = parse_base_claim_profile(reader.read_varuint()?)?;
+    let mhe_security_stage = parse_mhe_security_stage(reader.read_varuint()?)?;
+    let base_claim_profile_id = reader.read_string()?;
+    let mhe_security_profile_id = reader.read_string()?;
+    let he_setup_proof_profile_id = reader.read_string()?;
+    let evaluation_proof_profile_id = reader.read_string()?;
+    let decryption_proof_profile_id = reader.read_string()?;
+    validate_profiles(
+        base_claim_profile,
+        mhe_security_stage,
+        &base_claim_profile_id,
+        &mhe_security_profile_id,
+        &he_setup_proof_profile_id,
+        &evaluation_proof_profile_id,
+        &decryption_proof_profile_id,
+    )?;
+
+    let field_count = reader.read_varuint()?;
+
+    let mut previous_field_id = 0_u64;
+    let mut title = None;
+    let mut sequence = None;
+    let mut payload = None;
+    let mut status = None;
+    let mut tags = None;
+    let mut checkpoints = None;
+
+    for _ in 0..field_count {
+        let field_id = reader.read_varuint()?;
+        if field_id == previous_field_id {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::DuplicateField,
+                "field ID is duplicated",
+            ));
+        }
+        if field_id < previous_field_id {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::FieldOrder,
+                "field IDs must be strictly increasing",
+            ));
+        }
+        previous_field_id = field_id;
+
+        match field_id {
+            FIELD_TITLE => title = Some(reader.read_string()?),
+            FIELD_SEQUENCE => sequence = Some(reader.read_varuint()?),
+            FIELD_PAYLOAD => payload = Some(reader.read_bytes()?),
+            FIELD_STATUS => status = Some(parse_status(reader.read_varuint()?)?),
+            FIELD_TAGS => tags = Some(read_string_list(&mut reader)?),
+            FIELD_CHECKPOINTS => checkpoints = Some(read_varuint_list(&mut reader)?),
+            _ => {
+                return Err(CanonicalError::new(
+                    CanonicalErrorCode::UnknownField,
+                    "field ID is not defined for transcript core objects",
+                ));
+            }
+        }
+    }
+
+    if !reader.is_finished() {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::TrailingBytes,
+            "object has trailing bytes after the field set",
+        ));
+    }
+
+    let object = TranscriptCoreObject {
+        base_claim_profile,
+        mhe_security_stage,
+        base_claim_profile_id,
+        mhe_security_profile_id,
+        he_setup_proof_profile_id,
+        evaluation_proof_profile_id,
+        decryption_proof_profile_id,
+        title: title.ok_or_else(|| missing_field("title"))?,
+        sequence: sequence.ok_or_else(|| missing_field("sequence"))?,
+        payload: payload.ok_or_else(|| missing_field("payload"))?,
+        status: status.ok_or_else(|| missing_field("status"))?,
+        tags: tags.ok_or_else(|| missing_field("tags"))?,
+        checkpoints: checkpoints.ok_or_else(|| missing_field("checkpoints"))?,
+    };
+
+    if serialize_transcript_core_object(&object) != bytes {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::FixtureMismatch,
+            "parsed object does not reserialize to identical bytes",
+        ));
+    }
+
+    Ok(object)
+}
+
+pub fn analyze_canonical_object(
+    bytes: &[u8],
+    chunk_size: u64,
+) -> CanonicalResult<TranscriptCoreAnalysis> {
+    let chunk_size_usize = usize::try_from(chunk_size).map_err(|_| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidChunkSize,
+            "chunk size does not fit usize",
+        )
+    })?;
+    let object = parse_transcript_core_object(bytes)?;
+
+    Ok(TranscriptCoreAnalysis {
+        canonical_bytes_hex: encode_hex(bytes),
+        object_type: "TranscriptCore",
+        object_version: TRANSCRIPT_CORE_OBJECT_VERSION,
+        base_claim_profile: object.base_claim_profile.label(),
+        mhe_security_stage: object.mhe_security_stage.label(),
+        base_claim_profile_id: object.base_claim_profile_id,
+        mhe_security_profile_id: object.mhe_security_profile_id,
+        he_setup_proof_profile_id: object.he_setup_proof_profile_id,
+        evaluation_proof_profile_id: object.evaluation_proof_profile_id,
+        decryption_proof_profile_id: object.decryption_proof_profile_id,
+        object_hash512: object_root(bytes),
+        chunk_root: chunk_root(bytes, chunk_size_usize)?,
+        chunk_size,
+        status_labels: vec![object.status.label()],
+        title: object.title,
+        sequence: object.sequence,
+        payload_hex: encode_hex(&object.payload),
+        tags: object.tags,
+        checkpoints: object.checkpoints,
+    })
+}
+
+pub fn analyze_canonical_object_hex(
+    canonical_bytes_hex: &str,
+    chunk_size: u64,
+) -> CanonicalResult<Value> {
+    let bytes = decode_hex(canonical_bytes_hex)?;
+
+    analyze_canonical_object(&bytes, chunk_size)?.to_json_value()
+}
+
+fn parse_base_claim_profile(value: u64) -> CanonicalResult<BaseClaimProfile> {
+    match value {
+        1 => Ok(BaseClaimProfile::ResultComputedAuditable),
+        2 => Ok(BaseClaimProfile::FullyVerifiedResult),
+        _ => Err(CanonicalError::new(
+            CanonicalErrorCode::UnknownBaseClaimProfile,
+            "base claim profile is not supported",
+        )),
+    }
+}
+
+fn parse_mhe_security_stage(value: u64) -> CanonicalResult<MheSecurityStage> {
+    match value {
+        1 => Ok(MheSecurityStage::PassiveMhePrototype),
+        2 => Ok(MheSecurityStage::ActiveMalicious),
+        _ => Err(CanonicalError::new(
+            CanonicalErrorCode::UnknownMheSecurityStage,
+            "MHE security stage is not supported",
+        )),
+    }
+}
+
+fn parse_status(value: u64) -> CanonicalResult<TranscriptCoreStatus> {
+    match value {
+        1 => Ok(TranscriptCoreStatus::TranscriptCoreVerified),
+        _ => Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidEnum,
+            "transcript core status is not supported",
+        )),
+    }
+}
+
+fn validate_profiles(
+    base_claim_profile: BaseClaimProfile,
+    mhe_security_stage: MheSecurityStage,
+    base_claim_profile_id: &str,
+    mhe_security_profile_id: &str,
+    he_setup_proof_profile_id: &str,
+    evaluation_proof_profile_id: &str,
+    decryption_proof_profile_id: &str,
+) -> CanonicalResult<()> {
+    if base_claim_profile_id != base_claim_profile.expected_profile_id() {
+        let allowed = [
+            RESULT_COMPUTED_AUDITABLE_PROFILE_ID,
+            FULLY_VERIFIED_RESULT_PROFILE_ID,
+        ];
+        if !allowed.contains(&base_claim_profile_id) {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::UnknownProofProfile,
+                "base claim profile ID is not supported",
+            ));
+        }
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "base claim profile ID does not match base claim profile",
+        ));
+    }
+    if mhe_security_profile_id != mhe_security_stage.expected_profile_id() {
+        let allowed = [
+            PASSIVE_MHE_PROTOTYPE_PROFILE_ID,
+            ACTIVE_MALICIOUS_MHE_PROFILE_ID,
+        ];
+        if !allowed.contains(&mhe_security_profile_id) {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::UnknownProofProfile,
+                "MHE security profile ID is not supported",
+            ));
+        }
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "MHE security profile ID does not match MHE security stage",
+        ));
+    }
+    if he_setup_proof_profile_id != NO_HE_SETUP_PROOF_PROFILE_ID
+        || decryption_proof_profile_id != NO_DECRYPTION_PROOF_PROFILE_ID
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::UnknownProofProfile,
+            "one or more reserved proof profile IDs are not supported",
+        ));
+    }
+    match evaluation_proof_profile_id {
+        NO_EVALUATION_PROOF_PROFILE_ID => {
+            if base_claim_profile == BaseClaimProfile::FullyVerifiedResult {
+                return Err(CanonicalError::new(
+                    CanonicalErrorCode::ProfileComponentMismatch,
+                    "FullyVerifiedResult requires the reserved optional evaluation-proof profile",
+                ));
+            }
+        }
+        OPTIONAL_EVALUATION_PROOF_PROFILE_ID => {
+            if base_claim_profile != BaseClaimProfile::FullyVerifiedResult {
+                return Err(CanonicalError::new(
+                    CanonicalErrorCode::ProfileComponentMismatch,
+                    "optional evaluation-proof profile requires FullyVerifiedResult",
+                ));
+            }
+        }
+        _ => {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::UnknownProofProfile,
+                "evaluation proof profile ID is not supported",
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+fn read_string_list(reader: &mut CanonicalReader<'_>) -> CanonicalResult<Vec<String>> {
+    let count = reader.read_varuint()?;
+    let mut items = Vec::with_capacity(usize::try_from(count).map_err(|_| {
+        CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "list count does not fit usize",
+        )
+    })?);
+    for _ in 0..count {
+        items.push(reader.read_string()?);
+    }
+
+    Ok(items)
+}
+
+fn read_varuint_list(reader: &mut CanonicalReader<'_>) -> CanonicalResult<Vec<u64>> {
+    let count = reader.read_varuint()?;
+    let mut items = Vec::with_capacity(usize::try_from(count).map_err(|_| {
+        CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "list count does not fit usize",
+        )
+    })?);
+    for _ in 0..count {
+        items.push(reader.read_varuint()?);
+    }
+
+    Ok(items)
+}
+
+fn missing_field(field_name: &str) -> CanonicalError {
+    CanonicalError::new(
+        CanonicalErrorCode::MissingField,
+        format!("missing required field: {field_name}"),
+    )
+}
+
+pub(super) fn append_transcript_core_header(output: &mut Vec<u8>, object: &TranscriptCoreObject) {
+    output.extend(MAGIC);
+    append_varuint(output, ENVELOPE_VERSION);
+    append_varuint(output, TRANSCRIPT_CORE_OBJECT_TYPE);
+    append_varuint(output, TRANSCRIPT_CORE_OBJECT_VERSION);
+    append_varuint(output, object.base_claim_profile.code());
+    append_varuint(output, object.mhe_security_stage.code());
+    append_string(output, &object.base_claim_profile_id);
+    append_string(output, &object.mhe_security_profile_id);
+    append_string(output, &object.he_setup_proof_profile_id);
+    append_string(output, &object.evaluation_proof_profile_id);
+    append_string(output, &object.decryption_proof_profile_id);
+}
+
+pub(super) fn header_length_before_field_count(object: &TranscriptCoreObject) -> usize {
+    let mut bytes = Vec::new();
+    append_transcript_core_header(&mut bytes, object);
+
+    bytes.len()
+}

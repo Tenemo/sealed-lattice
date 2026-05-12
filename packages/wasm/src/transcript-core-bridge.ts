@@ -4,7 +4,7 @@ import type {
     TranscriptCoreAnalysis,
     TranscriptCoreFixture,
     TranscriptCoreFixtureVerification,
-} from '@sealed-lattice/protocol';
+} from '@sealed-lattice/types';
 
 export type TranscriptCoreKernel = {
     readonly exportedFunctionNames: readonly string[];
@@ -17,6 +17,7 @@ export type TranscriptCoreKernel = {
         readonly chunkSize: number;
     }): string;
     hashRaw(inputHex: string): string;
+    listCanonicalErrorCodes(): readonly string[];
     roundTripBytes(input: Uint8Array): Uint8Array;
     verifyFixture(
         fixture: TranscriptCoreFixture,
@@ -37,6 +38,9 @@ type TranscriptCoreKernelCommand =
     | {
           readonly command: 'HashRaw';
           readonly inputHex: string;
+      }
+    | {
+          readonly command: 'ListCanonicalErrorCodes';
       }
     | {
           readonly command: 'VerifyFixture';
@@ -65,7 +69,7 @@ type KernelFailureResponse = {
     readonly error: CanonicalError;
 };
 
-const canonicalErrorCodes = new Set<string>([
+const bridgeCanonicalErrorCodeValues = [
     'DuplicateField',
     'FieldOrder',
     'FixtureMismatch',
@@ -88,7 +92,11 @@ const canonicalErrorCodes = new Set<string>([
     'UnsupportedCanonicalEnvelopeVersion',
     'UnsupportedObjectType',
     'UnsupportedObjectVersion',
-]);
+] as const satisfies readonly CanonicalErrorCode[];
+
+export const canonicalErrorCodes: ReadonlySet<CanonicalErrorCode> = new Set(
+    bridgeCanonicalErrorCodeValues,
+);
 
 const textDecoder = new TextDecoder();
 const textEncoder = new TextEncoder();
@@ -120,7 +128,8 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
     typeof value === 'object' && value !== null;
 
 const isCanonicalErrorCode = (value: unknown): value is CanonicalErrorCode =>
-    typeof value === 'string' && canonicalErrorCodes.has(value);
+    typeof value === 'string' &&
+    canonicalErrorCodes.has(value as CanonicalErrorCode);
 
 const isCanonicalError = (value: unknown): value is CanonicalError =>
     isRecord(value) &&
@@ -348,6 +357,10 @@ export const createTranscriptCoreKernelLoader = (
                         command: 'HashRaw',
                         inputHex,
                     }).hash512,
+                listCanonicalErrorCodes: (): readonly string[] =>
+                    executeCommand<readonly string[]>({
+                        command: 'ListCanonicalErrorCodes',
+                    }),
                 roundTripBytes: (input: Uint8Array): Uint8Array => {
                     const normalizedInput = Uint8Array.from(input);
                     let inputPointer = 0;

@@ -13,7 +13,7 @@
         }
     },
     "dependencies": {
-        "@sealed-lattice/protocol": "workspace:*"
+        "@sealed-lattice/types": "workspace:*"
     },
     "scripts": {
         "check": "tsc --project tsconfig.json --pretty false --noEmit",

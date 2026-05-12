@@ -1,7 +1,18 @@
+/*
+ * Layout overrides target Starlight's internal class names (.main-frame,
+ * .sidebar-pane, .right-sidebar, .lg\:sl-flex). Tuned for
+ * @astrojs/starlight 0.38.3. Re-verify after a major Starlight upgrade.
+ */
 @layer starlight.core {
     header {
         border-bottom: 1px solid var(--sl-color-hairline);
         backdrop-filter: blur(18px);
+    }
+
+    @supports not (backdrop-filter: blur(1px)) {
+        header {
+            background-color: var(--sl-color-bg-nav);
+        }
     }
 
     .sl-markdown-content blockquote {
@@ -9,7 +20,7 @@
         border-radius: 0 0.75rem 0.75rem 0;
         background: linear-gradient(
             90deg,
-            hsla(0, 0%, 100%, 0.05),
+            hsla(var(--landing-tint), 0.05),
             transparent
         );
     }

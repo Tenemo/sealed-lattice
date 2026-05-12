@@ -1,0 +1,97 @@
+{
+  "schemaVersion": 1,
+  "cases": [
+    {
+      "caseName": "valid-twenty-option-score-poll",
+      "input": {
+        "pollId": "poll-2026-board",
+        "question": "Select the top priorities",
+        "options": [
+          "Option 0",
+          "Option 1",
+          "Option 2",
+          "Option 3",
+          "Option 4",
+          "Option 5",
+          "Option 6",
+          "Option 7",
+          "Option 8",
+          "Option 9",
+          "Option 10",
+          "Option 11",
+          "Option 12",
+          "Option 13",
+          "Option 14",
+          "Option 15",
+          "Option 16",
+          "Option 17",
+          "Option 18",
+          "Option 19"
+        ],
+        "topOptionCount": 20,
+        "scoreDomain": {
+          "min": 1,
+          "max": 10,
+          "skippedOptionScore": 1
+        },
+        "duplicateBallotPolicy": "LastValidBeforeVotingClosedCounts",
+        "tiePolicy": "HigherScoreThenLowerOptionIndex"
+      },
+      "expectedOk": true
+    },
+    {
+      "caseName": "invalid-empty-and-policy-errors",
+      "input": {
+        "pollId": "",
+        "question": "",
+        "options": [],
+        "topOptionCount": 0,
+        "scoreDomain": {
+          "min": 1,
+          "max": 9,
+          "skippedOptionScore": 1
+        },
+        "duplicateBallotPolicy": "FirstBallotCounts",
+        "tiePolicy": "RandomTieBreak"
+      },
+      "expectedOk": false,
+      "expectedErrorCodes": [
+        "EmptyPollId",
+        "EmptyQuestion",
+        "InvalidOptionCount",
+        "InvalidTopOptionCount",
+        "UnsupportedScoreDomain",
+        "UnsupportedDuplicateBallotPolicy",
+        "UnsupportedTiePolicy"
+      ]
+    },
+    {
+      "caseName": "invalid-duplicate-option",
+      "input": {
+        "pollId": "poll-duplicate",
+        "question": "Question",
+        "options": [
+          "Alpha",
+          "Beta",
+          "Alpha"
+        ],
+        "topOptionCount": 1
+      },
+      "expectedOk": false,
+      "expectedErrorCodes": [
+        "DuplicateOptionLabel"
+      ]
+    },
+    {
+      "caseName": "malformed-empty-object",
+      "input": {},
+      "expectedOk": false,
+      "expectedErrorCodes": [
+        "EmptyPollId",
+        "EmptyQuestion",
+        "InvalidOptionCount",
+        "InvalidTopOptionCount"
+      ]
+    }
+  ]
+}
