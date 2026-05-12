@@ -91,6 +91,36 @@ const runtimeImportTargets = new Map([
     ['@sealed-lattice/protocol', electionFoundationOutputDirectoryPath],
     ['@sealed-lattice/wasm', bridgeOutputPath],
 ]);
+export const sdkProtocolRuntimeSourceRelativePaths = [
+    'board/index.ts',
+    'closing/index.ts',
+    'common/digests.ts',
+    'common/signatures.ts',
+    'common/verification-helpers.ts',
+    'finality/index.ts',
+    'lifecycle/capabilities.ts',
+    'lifecycle/labels.ts',
+    'lifecycle/lifecycle.ts',
+    'lifecycle/poll-spec.ts',
+    'lifecycle/profiles.ts',
+    'lifecycle/refusal.ts',
+    'lifecycle/thresholds.ts',
+    'ordering/index.ts',
+    'recovery/index.ts',
+    'roster/index.ts',
+] as const;
+const sdkProtocolRuntimeIndexSource = `export { evaluateActionCapability } from './lifecycle/capabilities.js';
+export { verifyBoardConsistency, verifyInclusionProof } from './board/index.js';
+export { verifyCastReceiptShell, verifyCloseRecordShell } from './closing/index.js';
+export { deriveValidatedFirstComeOrder, verifyFirstComePolicy } from './ordering/index.js';
+export { verifyTargetFinality } from './finality/index.js';
+export { deriveLifecycleLabels } from './lifecycle/labels.js';
+export { isValidLifecycleTransition } from './lifecycle/lifecycle.js';
+export { validatePollSpecFromUnknown } from './lifecycle/poll-spec.js';
+export { isActionCurrentForRecoveryEpoch, verifyRecoveryEpochUpdate } from './recovery/index.js';
+export { verifyRosterManifestTranscript } from './roster/index.js';
+export { deriveThresholdProfile } from './lifecycle/thresholds.js';
+`;
 
 export const transpileSdkInternalSource = (
     sourceText: string,
@@ -136,10 +166,6 @@ export const buildSdkBridge = async (): Promise<void> => {
 };
 
 export const buildSdkProtocolRuntime = async (): Promise<void> => {
-    const sourceFilePaths = await collectFiles(protocolSourceDirectoryPath, {
-        extensions: ['.ts'],
-    });
-
     await rm(electionFoundationOutputDirectoryPath, {
         recursive: true,
         force: true,
@@ -147,24 +173,31 @@ export const buildSdkProtocolRuntime = async (): Promise<void> => {
     await mkdir(electionFoundationOutputDirectoryPath, { recursive: true });
 
     await Promise.all(
-        sourceFilePaths.map(async (sourcePath) => {
-            const relativeSourcePath = path.relative(
-                protocolSourceDirectoryPath,
-                sourcePath,
-            );
-            const outputPath = path.join(
-                electionFoundationOutputDirectoryPath,
-                relativeSourcePath.replace(/\.ts$/u, '.js'),
-            );
-            const sourceText = await readFile(sourcePath, 'utf8');
-            const outputText = transpileSdkInternalSource(
-                sourceText,
-                sourcePath,
-            );
+        sdkProtocolRuntimeSourceRelativePaths.map(
+            async (relativeSourcePath) => {
+                const sourcePath = path.join(
+                    protocolSourceDirectoryPath,
+                    relativeSourcePath,
+                );
+                const outputPath = path.join(
+                    electionFoundationOutputDirectoryPath,
+                    relativeSourcePath.replace(/\.ts$/u, '.js'),
+                );
+                const sourceText = await readFile(sourcePath, 'utf8');
+                const outputText = transpileSdkInternalSource(
+                    sourceText,
+                    sourcePath,
+                );
 
-            await mkdir(path.dirname(outputPath), { recursive: true });
-            await writeFile(outputPath, outputText, 'utf8');
-        }),
+                await mkdir(path.dirname(outputPath), { recursive: true });
+                await writeFile(outputPath, outputText, 'utf8');
+            },
+        ),
+    );
+    await writeFile(
+        path.join(electionFoundationOutputDirectoryPath, 'index.js'),
+        sdkProtocolRuntimeIndexSource,
+        'utf8',
     );
 };
 

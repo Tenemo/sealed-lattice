@@ -494,6 +494,135 @@ export type CapabilityDecision =
 /** Hex digest string used for canonical protocol objects and policies. */
 export type ProtocolDigest = string;
 
+/** Canonical element of `GF(65537)`, represented as an integer in `0..65536`. */
+export type FieldElement = number;
+
+/** Fixed-width canonical encoding for a `GF(65537)` element. */
+export type FieldElementEncoding = {
+    readonly bytesHex: string;
+    readonly centeredValue: number;
+    readonly value: FieldElement;
+};
+
+/** Polynomial over `GF(65537)` with the constant term at index zero. */
+export type ShamirPolynomial = {
+    readonly coefficients: readonly FieldElement[];
+};
+
+/** One Shamir evaluation at the one-based roster point `alpha = rosterPosition`. */
+export type ShamirSharePoint = {
+    readonly rosterPosition: number;
+    readonly value: FieldElement;
+};
+
+/** Lagrange coefficient at zero for one selected roster position. */
+export type LagrangeCoefficient = {
+    readonly coefficient: FieldElement;
+    readonly centeredCoefficient: number;
+    readonly rosterPosition: number;
+};
+
+/** Coefficients and summary bounds for one interpolation contributor set. */
+export type InterpolationCoefficientReport = {
+    readonly centeredL1CoefficientSum: number;
+    readonly coefficients: readonly LagrangeCoefficient[];
+    readonly contributorRosterPositions: readonly number[];
+    readonly maxCenteredAbsCoefficient: number;
+    readonly reportDigest: ProtocolDigest;
+    readonly rosterSize: number;
+    readonly threshold: number;
+};
+
+/** Exhaustive worst-case interpolation report for a bounded roster profile. */
+export type WorstCaseInterpolationCoefficientReport = {
+    readonly exhaustiveSubsetCount: number;
+    readonly maxCenteredAbsCoefficient: number;
+    readonly maxCenteredAbsContributorRosterPositions: readonly number[];
+    readonly maxCenteredAbsCoefficients: readonly LagrangeCoefficient[];
+    readonly maxCenteredL1CoefficientSum: number;
+    readonly maxCenteredL1ContributorRosterPositions: readonly number[];
+    readonly maxCenteredL1Coefficients: readonly LagrangeCoefficient[];
+    readonly reportDigest: ProtocolDigest;
+    readonly rosterSize: number;
+    readonly threshold: number;
+};
+
+/** Supported normalized score value for one option. */
+export type PlaintextScore = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;
+
+/** Input ballot before skipped scores are normalized. */
+export type PlaintextScoreBallotInput = {
+    readonly scores: readonly (number | null | undefined)[];
+    readonly voterIdentity?: string;
+};
+
+/** Ballot after skipped scores have been filled with score one. */
+export type NormalizedPlaintextScoreBallot = {
+    readonly scores: readonly PlaintextScore[];
+    readonly voterIdentity?: string;
+};
+
+/** Plaintext score tally used as the reference oracle for later encrypted paths. */
+export type PlaintextTally = {
+    readonly maximumRosterSize: number;
+    readonly normalizedBallots: readonly NormalizedPlaintextScoreBallot[];
+    readonly optionTallies: readonly number[];
+    readonly pollSpecDigest: ProtocolDigest;
+    readonly tallyDigest: ProtocolDigest;
+    readonly tallyFieldElements: readonly FieldElement[];
+};
+
+/** One ranked option in the plaintext top-k oracle. */
+export type PlaintextTopKRankingEntry = {
+    readonly optionIndex: number;
+    readonly optionOrdinal: number;
+    readonly rank: number;
+    readonly totalScore: number;
+};
+
+/** Comparator polynomials over the bounded tally-difference domain. */
+export type ComparatorPolynomialSet = {
+    readonly comparatorDigest: ProtocolDigest;
+    readonly domainMaximum: number;
+    readonly domainMinimum: number;
+    readonly equalCoefficients: readonly FieldElement[];
+    readonly greaterThanCoefficients: readonly FieldElement[];
+    readonly rosterSize: number;
+};
+
+/** Sparse target layout used by the mandatory homomorphic top-k path. */
+export type SparseTopKTargetLayoutId = 'WinnerRankTopK-v1';
+
+/** Plain sparse target expected from the later homomorphic top-k evaluator. */
+export type SparseTopKTarget = {
+    readonly forbiddenSemanticSlots: readonly FieldElement[];
+    readonly layoutDigest: ProtocolDigest;
+    readonly layoutId: SparseTopKTargetLayoutId;
+    readonly optionCount: number;
+    readonly targetDigest: ProtocolDigest;
+    readonly targetIdSlots: readonly FieldElement[];
+    readonly targetOrderSlots: readonly FieldElement[];
+    readonly topOptionCount: number;
+};
+
+/** One decoded sparse target selection ordered by final result position. */
+export type DecodedSparseTopKSelection = {
+    readonly optionIndex: number;
+    readonly optionOrdinal: number;
+    readonly orderPosition: number;
+};
+
+/** Plaintext top-k oracle output consumed by future encrypted tally paths. */
+export type PlaintextTopKOracle = {
+    readonly comparatorDomainMaximum: number;
+    readonly comparatorDomainMinimum: number;
+    readonly oracleDigest: ProtocolDigest;
+    readonly ranking: readonly PlaintextTopKRankingEntry[];
+    readonly sparseTarget: SparseTopKTarget;
+    readonly tally: PlaintextTally;
+    readonly topOptionCount: number;
+};
+
 /** Canonical object type covered by protocol digest and verification helpers. */
 export type ProtocolObjectType =
     | 'ActionContext'
@@ -603,6 +732,7 @@ export type ProtocolRefusalCode =
     | 'DuplicateRegistration'
     | 'DuplicateTrusteeSetupEntry'
     | 'DuplicateWitness'
+    | 'FieldElementInvalid'
     | 'FirstComeContextMismatch'
     | 'FirstComePolicyMismatch'
     | 'InclusionProofInvalid'
@@ -613,11 +743,14 @@ export type ProtocolRefusalCode =
     | 'ManifestDigestMismatch'
     | 'MissingReceiverKeyRegistration'
     | 'MissingTrusteeSetupEntry'
+    | 'PlaintextOracleInvalid'
     | 'RecoveryUpdateConflict'
     | 'RecoveryUpdateInvalid'
     | 'RecoveryUpdateStale'
     | 'ReplayAttestationInvalid'
     | 'RosterDigestMismatch'
+    | 'ShamirInputInvalid'
+    | 'SparseTargetInvalid'
     | 'TargetAcceptedRecordInvalid'
     | 'TargetFinalityPolicyMismatch'
     | 'TargetPhaseAuthorizationFailure'
@@ -664,6 +797,13 @@ export type StructuredProtocolVerificationResult = {
 
 /** Structured result shape returned by signature verification. */
 export type SignatureVerificationResult = StructuredProtocolVerificationResult;
+
+/** Sparse target decoder result with structured rejection reasons. */
+export type SparseTopKTargetDecoding = StructuredProtocolVerificationResult & {
+    readonly decodedSelections: readonly DecodedSparseTopKSelection[];
+    readonly selectedOptionOrdinals: readonly number[];
+    readonly targetDigest?: ProtocolDigest;
+};
 
 /** Signed bulletin-board head used for append-only consistency checks. */
 export type SignedBoardHead = {

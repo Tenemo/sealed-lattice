@@ -1,29 +1,77 @@
+import type {
+    CapabilityContext,
+    CapabilityDecision,
+    FirstComeOrderingInput,
+    FirstComeOrderingVerification,
+    LifecycleLabelInput,
+    LifecycleLabels,
+    LifecycleTransition,
+    PollSpecInput,
+    PollSpecValidation,
+    ProtocolAction,
+    ThresholdProfile,
+    ThresholdProfileInput,
+} from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
-import * as publicApi from '../../dist/index.js';
+import * as publicApiRuntime from '../../dist/index.js';
+
+type DeriveThresholdProfile = (
+    input: ThresholdProfileInput,
+) => ThresholdProfile;
+type ValidatePollSpec = (input: PollSpecInput) => PollSpecValidation;
+type IsValidLifecycleTransition = (transition: LifecycleTransition) => boolean;
+type DeriveLifecycleLabels = (input: LifecycleLabelInput) => LifecycleLabels;
+type EvaluateActionCapability = (
+    action: ProtocolAction,
+    context: CapabilityContext,
+) => CapabilityDecision;
+type DeriveValidatedFirstComeOrder = (
+    input: FirstComeOrderingInput,
+) => FirstComeOrderingVerification;
+
+const publicApiRuntimeRecord = publicApiRuntime as Record<string, unknown>;
+const deriveThresholdProfile =
+    publicApiRuntimeRecord.deriveThresholdProfile as DeriveThresholdProfile;
+const validatePollSpec =
+    publicApiRuntimeRecord.validatePollSpec as ValidatePollSpec;
+const isValidLifecycleTransition =
+    publicApiRuntimeRecord.isValidLifecycleTransition as IsValidLifecycleTransition;
+const deriveLifecycleLabels =
+    publicApiRuntimeRecord.deriveLifecycleLabels as DeriveLifecycleLabels;
+const evaluateActionCapability =
+    publicApiRuntimeRecord.evaluateActionCapability as EvaluateActionCapability;
+const deriveValidatedFirstComeOrder =
+    publicApiRuntimeRecord.deriveValidatedFirstComeOrder as DeriveValidatedFirstComeOrder;
 
 const requiredPublicFunctions = [
-    ['deriveValidatedFirstComeOrder', publicApi.deriveValidatedFirstComeOrder],
-    ['deriveLifecycleLabels', publicApi.deriveLifecycleLabels],
-    ['deriveThresholdProfile', publicApi.deriveThresholdProfile],
-    ['evaluateActionCapability', publicApi.evaluateActionCapability],
+    ['deriveValidatedFirstComeOrder', deriveValidatedFirstComeOrder],
+    ['deriveLifecycleLabels', deriveLifecycleLabels],
+    ['deriveThresholdProfile', deriveThresholdProfile],
+    ['evaluateActionCapability', evaluateActionCapability],
     [
         'isActionCurrentForRecoveryEpoch',
-        publicApi.isActionCurrentForRecoveryEpoch,
+        publicApiRuntimeRecord.isActionCurrentForRecoveryEpoch,
     ],
-    ['isValidLifecycleTransition', publicApi.isValidLifecycleTransition],
-    ['validatePollSpec', publicApi.validatePollSpec],
-    ['verifyBoardConsistency', publicApi.verifyBoardConsistency],
-    ['verifyCastReceiptShell', publicApi.verifyCastReceiptShell],
-    ['verifyCloseRecordShell', publicApi.verifyCloseRecordShell],
-    ['verifyFirstComePolicy', publicApi.verifyFirstComePolicy],
-    ['verifyRecoveryEpochUpdate', publicApi.verifyRecoveryEpochUpdate],
+    ['isValidLifecycleTransition', isValidLifecycleTransition],
+    ['validatePollSpec', validatePollSpec],
+    ['verifyBoardConsistency', publicApiRuntimeRecord.verifyBoardConsistency],
+    ['verifyCastReceiptShell', publicApiRuntimeRecord.verifyCastReceiptShell],
+    ['verifyCloseRecordShell', publicApiRuntimeRecord.verifyCloseRecordShell],
+    ['verifyFirstComePolicy', publicApiRuntimeRecord.verifyFirstComePolicy],
+    [
+        'verifyRecoveryEpochUpdate',
+        publicApiRuntimeRecord.verifyRecoveryEpochUpdate,
+    ],
     [
         'verifyRosterManifestTranscript',
-        publicApi.verifyRosterManifestTranscript,
+        publicApiRuntimeRecord.verifyRosterManifestTranscript,
     ],
-    ['verifyTargetFinality', publicApi.verifyTargetFinality],
-    ['verifyTranscriptCoreFixture', publicApi.verifyTranscriptCoreFixture],
+    ['verifyTargetFinality', publicApiRuntimeRecord.verifyTargetFinality],
+    [
+        'verifyTranscriptCoreFixture',
+        publicApiRuntimeRecord.verifyTranscriptCoreFixture,
+    ],
 ] as const;
 
 const allowedRuntimeExports = requiredPublicFunctions
@@ -58,11 +106,17 @@ const forbiddenPublicKeys = [
     'verifyEvaluationReplayAttestationShell',
     'verifyTargetAcceptedRecordShell',
     'verifyTopKDecryptionShareShell',
+    'createShamirPolynomial',
+    'derivePlaintextTopKOracle',
+    'decodeSparseTopKTarget',
+    'fieldModulus',
 ];
 
 describe('election foundation public package API in Node', () => {
     it('exposes only the safe runtime functions and keeps forbidden operations absent', () => {
-        expect(Object.keys(publicApi).sort()).toEqual(allowedRuntimeExports);
+        expect(Object.keys(publicApiRuntimeRecord).sort()).toEqual(
+            allowedRuntimeExports,
+        );
         for (const [
             publicFunctionName,
             publicFunction,
@@ -70,18 +124,18 @@ describe('election foundation public package API in Node', () => {
             expect(typeof publicFunction, publicFunctionName).toBe('function');
         }
         for (const publicKey of forbiddenPublicKeys) {
-            expect(publicKey in publicApi).toBe(false);
+            expect(publicKey in publicApiRuntimeRecord).toBe(false);
         }
     });
 
     it('derives threshold, poll, lifecycle, label, and capability decisions', () => {
-        const thresholdProfile = publicApi.deriveThresholdProfile({
+        const thresholdProfile = deriveThresholdProfile({
             rosterSize: 20,
         });
 
         expect(thresholdProfile.privacyCorruptionBound).toBe(6);
         expect(
-            publicApi.validatePollSpec({
+            validatePollSpec({
                 pollId: 'poll',
                 question: 'Question',
                 options: ['A', 'B'],
@@ -89,12 +143,12 @@ describe('election foundation public package API in Node', () => {
             }),
         ).toMatchObject({ ok: true });
         expect(
-            publicApi.isValidLifecycleTransition({
+            isValidLifecycleTransition({
                 from: 'VotingOpen',
                 to: 'VotingClosed',
             }),
         ).toBe(true);
-        const labels = publicApi.deriveLifecycleLabels({
+        const labels = deriveLifecycleLabels({
             lifecycleState: 'ResultComputedAuditable',
             thresholdProfile,
             mheSecurityStage: 'ActiveMalicious',
@@ -104,7 +158,7 @@ describe('election foundation public package API in Node', () => {
         expect(labels.resultClaimLabel).toBe('ResultComputedAuditable');
         expect(labels.modes).toEqual([]);
         expect(
-            publicApi.evaluateActionCapability('AcceptTarget', {
+            evaluateActionCapability('AcceptTarget', {
                 lifecycleState: 'EvaluationReplayOpen',
                 thresholdProfile,
                 pollSpecValid: true,
@@ -113,7 +167,7 @@ describe('election foundation public package API in Node', () => {
             }),
         ).toEqual({ allowed: true, action: 'AcceptTarget' });
         expect(
-            publicApi.deriveValidatedFirstComeOrder({
+            deriveValidatedFirstComeOrder({
                 requiredContextDigest: 'context',
                 selectionPolicyDigest: 'policy',
                 expectedSelectionPolicyDigest: 'policy',

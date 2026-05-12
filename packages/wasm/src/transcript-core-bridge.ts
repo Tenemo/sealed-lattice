@@ -18,6 +18,7 @@ export type TranscriptCoreKernel = {
     }): string;
     hashRaw(inputHex: string): string;
     listCanonicalErrorCodes(): readonly string[];
+    listReservedRootNamespaces(): readonly string[];
     roundTripBytes(input: Uint8Array): Uint8Array;
     verifyFixture(
         fixture: TranscriptCoreFixture,
@@ -41,6 +42,9 @@ type TranscriptCoreKernelCommand =
       }
     | {
           readonly command: 'ListCanonicalErrorCodes';
+      }
+    | {
+          readonly command: 'ListReservedRootNamespaces';
       }
     | {
           readonly command: 'VerifyFixture';
@@ -360,6 +364,10 @@ export const createTranscriptCoreKernelLoader = (
                 listCanonicalErrorCodes: (): readonly string[] =>
                     executeCommand<readonly string[]>({
                         command: 'ListCanonicalErrorCodes',
+                    }),
+                listReservedRootNamespaces: (): readonly string[] =>
+                    executeCommand<readonly string[]>({
+                        command: 'ListReservedRootNamespaces',
                     }),
                 roundTripBytes: (input: Uint8Array): Uint8Array => {
                     const normalizedInput = Uint8Array.from(input);

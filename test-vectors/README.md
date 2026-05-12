@@ -22,6 +22,6 @@ the directory.
 
 The repository includes tracked transcript-core golden, malformed-object, and
 transcript replay fixtures plus election-foundation threshold, poll-spec,
-lifecycle, capability, board/finality, first-come, recovery, and full signed
-deterministic fixture vectors so the manifest always exercises real file
-hashing and verification.
+lifecycle, capability, board/finality, first-come, recovery, full signed
+deterministic fixture, and plaintext oracle vectors so the manifest always
+exercises real file hashing and verification.

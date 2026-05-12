@@ -55,6 +55,10 @@ const forbiddenPublicKeys = [
     'verifyEvaluationReplayAttestationShell',
     'verifyTargetAcceptedRecordShell',
     'verifyTopKDecryptionShareShell',
+    'createShamirPolynomial',
+    'derivePlaintextTopKOracle',
+    'decodeSparseTopKTarget',
+    'fieldModulus',
 ];
 
 assert(

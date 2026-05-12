@@ -13,12 +13,11 @@ import type {
 import { deriveProtocolDigest } from '../common/digests.js';
 import { verifySignedObjectSignature } from '../common/signatures.js';
 import {
+    buildBoardHeadMap,
     createRefusal,
+    isNonNegativeInteger,
     uniqueStrings,
 } from '../common/verification-helpers.js';
-
-const isNonNegativeInteger = (value: number): boolean =>
-    Number.isInteger(value) && value >= 0;
 
 type BoardEntryDigestInput = {
     readonly boardPosition: number;
@@ -165,11 +164,6 @@ const verifyBoardHead = (
     return refusedObjects;
 };
 
-const buildHeadMap = (
-    heads: readonly SignedBoardHead[],
-): Map<ProtocolDigest, SignedBoardHead> =>
-    new Map(heads.map((head) => [head.headDigest, head]));
-
 export const isVerifiedAncestor = (
     ancestorDigest: ProtocolDigest,
     descendantDigest: ProtocolDigest,
@@ -199,7 +193,7 @@ export const isVerifiedAncestor = (
 const findConflictingHeads = (
     heads: readonly SignedBoardHead[],
 ): ConflictingHeadEvidence | undefined => {
-    const headsByDigest = buildHeadMap(heads);
+    const headsByDigest = buildBoardHeadMap(heads);
 
     for (let leftIndex = 0; leftIndex < heads.length; leftIndex += 1) {
         for (
@@ -250,7 +244,7 @@ const verifyPreviousHeadLinks = (
     heads: readonly SignedBoardHead[],
 ): readonly RefusalRecord[] => {
     const refusedObjects: RefusalRecord[] = [];
-    const headsByDigest = buildHeadMap(heads);
+    const headsByDigest = buildBoardHeadMap(heads);
 
     for (const head of heads) {
         if (head.previousHeadDigest === null) {
@@ -521,7 +515,7 @@ const verifyConsistencyProofs = (
         }
         refusedObjects.push(...verifyPreviousHeadLinks(proof.signedBoardHeads));
 
-        const proofHeadsByDigest = buildHeadMap(proof.signedBoardHeads);
+        const proofHeadsByDigest = buildBoardHeadMap(proof.signedBoardHeads);
         if (
             proof.fromBoardHeadDigest !== null &&
             proofHeadDigests.has(proof.fromBoardHeadDigest) &&
@@ -590,7 +584,7 @@ const verifyBoardConsistencyUnchecked = (
     refusedObjects.push(...verifyPreviousHeadLinks(input.signedBoardHeads));
     refusedObjects.push(...verifyConsistencyProofs(input));
 
-    const headsByDigest = buildHeadMap(input.signedBoardHeads);
+    const headsByDigest = buildBoardHeadMap(input.signedBoardHeads);
     for (const inclusionProof of input.inclusionProofs ?? []) {
         refusedObjects.push(
             ...verifyInclusionProof(inclusionProof, headsByDigest),

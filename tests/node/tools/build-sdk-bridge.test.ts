@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import {
     computeRelativeTypesSpecifier,
     rewriteTypesImports,
+    sdkProtocolRuntimeSourceRelativePaths,
     transpileBridgeSource,
     transpileSdkInternalSource,
 } from '../../../tools/ci/build-sdk-bridge';
@@ -64,5 +65,20 @@ describe('SDK bridge build helpers', () => {
         );
 
         expect(specifier).toBe('../types.js');
+    });
+
+    it('vendors only SDK-safe protocol runtime modules', () => {
+        expect(sdkProtocolRuntimeSourceRelativePaths).toContain(
+            'board/index.ts',
+        );
+        expect(sdkProtocolRuntimeSourceRelativePaths).toContain(
+            'roster/index.ts',
+        );
+        expect(sdkProtocolRuntimeSourceRelativePaths).not.toContain(
+            'plaintext-oracle/index.ts',
+        );
+        expect(sdkProtocolRuntimeSourceRelativePaths).not.toContain(
+            'target-phase/index.ts',
+        );
     });
 });

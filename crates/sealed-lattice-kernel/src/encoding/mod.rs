@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 
 use crate::{
     fixtures::{TranscriptCoreFixture, verify_fixture},
-    hashing::{chunk_root, hash512_hex},
+    hashing::{RESERVED_ROOT_NAMESPACES, chunk_root, hash512_hex},
     transcript_core::{analyze_canonical_object_hex, invalid_response},
 };
 
@@ -306,6 +306,12 @@ fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult<Value> {
             ALL_CANONICAL_ERROR_CODES
                 .iter()
                 .map(|code| Value::String(code.as_str().to_string()))
+                .collect(),
+        )),
+        "ListReservedRootNamespaces" => Ok(Value::Array(
+            RESERVED_ROOT_NAMESPACES
+                .iter()
+                .map(|namespace| Value::String((*namespace).to_string()))
                 .collect(),
         )),
         "AnalyzeCanonicalObject" => {

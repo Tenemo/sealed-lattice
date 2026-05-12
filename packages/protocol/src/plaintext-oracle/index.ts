@@ -1,0 +1,45 @@
+export {
+    addFieldElements,
+    assertCanonicalFieldElement,
+    centeredFieldElement,
+    decodeFieldElement,
+    describeFieldElement,
+    divideFieldElements,
+    encodeFieldElement,
+    exponentiateFieldElement,
+    fieldElementByteLength,
+    fieldModulus,
+    invertFieldElement,
+    isCanonicalFieldElement,
+    maximumCanonicalFieldElement,
+    multiplyFieldElements,
+    negateFieldElement,
+    normalizeFieldElement,
+    subtractFieldElements,
+    sumFieldElements,
+} from './field.js';
+export {
+    createShamirPolynomial,
+    deriveInterpolationCoefficientReport,
+    deriveLagrangeCoefficientsAtZero,
+    deriveWorstCaseInterpolationCoefficientReport,
+    evaluateShamirPolynomial,
+    evaluateShamirPolynomialForRoster,
+    interpolateShamirConstantTerm,
+} from './shamir.js';
+export {
+    deriveComparatorPolynomialSet,
+    derivePlaintextTally,
+    derivePlaintextTopKOracle,
+    derivePlaintextTopKRanking,
+    evaluateFieldPolynomial,
+    interpolateFieldPolynomial,
+    normalizePlaintextScoreBallot,
+} from './top-k.js';
+export {
+    decodeSparseTopKTarget,
+    deriveSparseTopKTarget,
+    deriveSparseTopKTargetDigest,
+    deriveSparseTopKTargetLayoutDigest,
+    sparseTopKTargetLayoutId,
+} from './sparse-target.js';

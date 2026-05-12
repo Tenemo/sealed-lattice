@@ -19,17 +19,11 @@ import {
 import { deriveProtocolDigest } from '../common/digests.js';
 import { verifySignedObjectSignature } from '../common/signatures.js';
 import {
+    buildBoardHeadMap,
     createRefusal,
+    isNonNegativeInteger,
     uniqueStrings,
 } from '../common/verification-helpers.js';
-
-const isNonNegativeInteger = (value: number): boolean =>
-    Number.isInteger(value) && value >= 0;
-
-const buildHeadMap = (
-    heads: readonly SignedBoardHead[],
-): Map<ProtocolDigest, SignedBoardHead> =>
-    new Map(heads.map((head) => [head.headDigest, head]));
 
 const mapInclusionProofsByObjectDigest = (
     inclusionProofs: readonly InclusionProof[],
@@ -595,7 +589,9 @@ const verifyRosterManifestTranscriptUnchecked = (
 ): RosterManifestTranscriptVerification => {
     const refusedObjects: RefusalRecord[] = [];
     const boardResult = verifyBoardConsistency(input.boardEvidence);
-    const headsByDigest = buildHeadMap(input.boardEvidence.signedBoardHeads);
+    const headsByDigest = buildBoardHeadMap(
+        input.boardEvidence.signedBoardHeads,
+    );
     const registrationProofsByDigest = mapInclusionProofsByObjectDigest(
         input.registrationInclusionProofs,
     );

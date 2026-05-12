@@ -6,7 +6,6 @@ import type {
     RecoveryEpochVerification,
     RecoveryEpochVerificationInput,
     RefusalRecord,
-    SignedBoardHead,
 } from '@sealed-lattice/types';
 
 import {
@@ -15,15 +14,11 @@ import {
 } from '../board/index.js';
 import { deriveProtocolDigest } from '../common/digests.js';
 import { verifySignedObjectSignature } from '../common/signatures.js';
-import { createRefusal } from '../common/verification-helpers.js';
-
-const isNonNegativeInteger = (value: number): boolean =>
-    Number.isInteger(value) && value >= 0;
-
-const buildHeadMap = (
-    heads: readonly SignedBoardHead[],
-): Map<ProtocolDigest, SignedBoardHead> =>
-    new Map(heads.map((head) => [head.headDigest, head]));
+import {
+    buildBoardHeadMap,
+    createRefusal,
+    isNonNegativeInteger,
+} from '../common/verification-helpers.js';
 
 export const deriveActionContextDigest = (
     actionContext: Omit<
@@ -204,7 +199,9 @@ const verifyRecoveryEpochUpdateUnchecked = (
 ): RecoveryEpochVerification => {
     const { update, currentEntry } = input;
     const boardResult = verifyBoardConsistency(input.boardEvidence);
-    const headsByDigest = buildHeadMap(input.boardEvidence.signedBoardHeads);
+    const headsByDigest = buildBoardHeadMap(
+        input.boardEvidence.signedBoardHeads,
+    );
     const refusedObjects: RefusalRecord[] = [...boardResult.refusedObjects];
     const expectedDigest = deriveRecoveryEpochUpdateDigest({
         boardHeadDigest: update.boardHeadDigest,

@@ -141,12 +141,16 @@ describe('packed package smoke helpers', () => {
             validatePublishedPackageFilePaths([
                 'README.md',
                 'dist/index.js',
+                'dist/internal/election-foundation/plaintext-oracle/index.js',
+                'dist/internal/election-foundation/target-phase/index.js',
                 'dist/tsconfig.tsbuildinfo',
             ]),
         ).toEqual([
             'Published package is missing LICENSE',
             'Published package is missing transcript-core WASM',
             'Published package must not include TypeScript build metadata: dist/tsconfig.tsbuildinfo',
+            'Published package must not include internal protocol runtime: dist/internal/election-foundation/plaintext-oracle/index.js',
+            'Published package must not include internal protocol runtime: dist/internal/election-foundation/target-phase/index.js',
         ]);
     });
 
