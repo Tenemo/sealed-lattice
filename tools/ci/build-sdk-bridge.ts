@@ -107,7 +107,11 @@ export const sdkProtocolRuntimeSourceRelativePaths = [
     'lifecycle/thresholds.ts',
     'ordering/index.ts',
     'recovery/index.ts',
+    'roster/digests.ts',
+    'roster/inclusion.ts',
     'roster/index.ts',
+    'roster/object-validation.ts',
+    'roster/verification.ts',
 ] as const;
 const sdkProtocolRuntimeIndexSource = `export { evaluateActionCapability } from './lifecycle/capabilities.js';
 export { verifyBoardConsistency, verifyInclusionProof } from './board/index.js';
