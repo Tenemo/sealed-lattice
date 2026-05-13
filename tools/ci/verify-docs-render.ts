@@ -9,6 +9,19 @@ import { chromium, type ConsoleMessage, type Page } from 'playwright';
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const docsDistRoot = path.resolve(repoRoot, 'docs', 'dist');
 const host = '127.0.0.1';
+const normalizeBasePath = (value: string | undefined): string => {
+    const trimmed = (value ?? '/').trim();
+
+    if (!trimmed || trimmed === '/') {
+        return '/';
+    }
+
+    return `/${trimmed.replace(/^\/+|\/+$/gu, '')}`;
+};
+const docsBasePath = normalizeBasePath(
+    process.env.DOCS_BASE_PATH ??
+        (process.env.GITHUB_ACTIONS === 'true' ? '/sealed-lattice' : '/'),
+);
 const routesToCheck = [
     '/',
     '/guides/getting-started/',
@@ -38,11 +51,37 @@ const sendNotFound = (response: ServerResponse): void => {
     response.end('Not found');
 };
 
+const stripDocsBasePath = (decodedPath: string): string => {
+    if (docsBasePath === '/') {
+        return decodedPath;
+    }
+    if (decodedPath === docsBasePath) {
+        return '/';
+    }
+    if (decodedPath.startsWith(`${docsBasePath}/`)) {
+        return decodedPath.slice(docsBasePath.length);
+    }
+
+    return decodedPath;
+};
+
+const routeWithDocsBasePath = (route: string): string => {
+    if (docsBasePath === '/') {
+        return route;
+    }
+    if (route === '/') {
+        return `${docsBasePath}/`;
+    }
+
+    return `${docsBasePath}${route}`;
+};
+
 const resolveRequestPath = async (requestUrl: string): Promise<string> => {
     const parsedUrl = new URL(requestUrl, 'http://localhost');
     const decodedPath = decodeURIComponent(parsedUrl.pathname);
-    const relativeRequestPath = decodedPath.replace(/^\/+/, '');
-    const candidatePath = decodedPath.endsWith('/')
+    const requestPath = stripDocsBasePath(decodedPath);
+    const relativeRequestPath = requestPath.replace(/^\/+/u, '');
+    const candidatePath = requestPath.endsWith('/')
         ? path.join(docsDistRoot, relativeRequestPath, 'index.html')
         : path.join(docsDistRoot, relativeRequestPath);
     const resolvedCandidatePath = path.resolve(candidatePath);
@@ -50,7 +89,7 @@ const resolveRequestPath = async (requestUrl: string): Promise<string> => {
 
     if (relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
         throw new Error(
-            `Docs request escaped the output directory: ${decodedPath}`,
+            `Docs request escaped the output directory: ${requestPath}`,
         );
     }
 
@@ -69,7 +108,7 @@ const resolveRequestPath = async (requestUrl: string): Promise<string> => {
         }
     }
 
-    throw new Error(`Docs route does not exist: ${decodedPath}`);
+    throw new Error(`Docs route does not exist: ${requestPath}`);
 };
 
 const startStaticServer = async (): Promise<{
@@ -228,9 +267,12 @@ const verifyRoute = async (
     page.on('pageerror', capturePageError);
 
     try {
-        const response = await page.goto(`${origin}${route}`, {
-            waitUntil: 'networkidle',
-        });
+        const response = await page.goto(
+            `${origin}${routeWithDocsBasePath(route)}`,
+            {
+                waitUntil: 'networkidle',
+            },
+        );
         if (!response?.ok()) {
             throw new Error(
                 `${route} returned ${response?.status() ?? 'no response'}`,

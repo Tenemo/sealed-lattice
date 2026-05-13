@@ -1,4 +1,11 @@
-import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import {
+    copyFile,
+    mkdir,
+    readFile,
+    rm,
+    stat,
+    writeFile,
+} from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -61,11 +68,14 @@ const cryptoOutputDirectoryPath = path.resolve(
     'crypto',
 );
 const typesPackageName = '@sealed-lattice/types';
-const typesDeclarationSourcePath = path.resolve(
+const typesBuildOutputDirectoryPath = path.resolve(
     repoRoot,
     'packages',
     'types',
     'dist',
+);
+const typesDeclarationSourcePath = path.resolve(
+    typesBuildOutputDirectoryPath,
     'index.d.ts',
 );
 const typesRuntimeSourcePath = path.resolve(
@@ -449,6 +459,37 @@ const ensureTypesPackageBuilt = async (): Promise<void> => {
     }
 };
 
+const copyTypesPackageSupportFiles = async (): Promise<void> => {
+    const supportFilePaths = await collectFiles(typesBuildOutputDirectoryPath, {
+        fileNamePattern: /\.(?:d\.ts|js|js\.map)$/u,
+    });
+
+    await Promise.all(
+        supportFilePaths.map(async (sourcePath) => {
+            const relativeSourcePath = path.relative(
+                typesBuildOutputDirectoryPath,
+                sourcePath,
+            );
+            if (
+                relativeSourcePath === 'index.d.ts' ||
+                relativeSourcePath === 'index.js' ||
+                relativeSourcePath === 'index.js.map'
+            ) {
+                return;
+            }
+
+            const outputPath = path.join(
+                sdkDistDirectoryPath,
+                'internal',
+                relativeSourcePath,
+            );
+
+            await mkdir(path.dirname(outputPath), { recursive: true });
+            await copyFile(sourcePath, outputPath);
+        }),
+    );
+};
+
 export const rewriteWorkspaceRuntimeImports = async (): Promise<void> => {
     const runtimeFiles = await collectFiles(sdkDistDirectoryPath, {
         extensions: ['.js'],
@@ -485,6 +526,7 @@ export const inlineTypesIntoSdkDist = async (): Promise<void> => {
         ),
         'utf8',
     );
+    await copyTypesPackageSupportFiles();
 
     const declarationFiles = await collectFiles(sdkDistDirectoryPath, {
         fileNamePattern: /\.d\.ts$/u,
