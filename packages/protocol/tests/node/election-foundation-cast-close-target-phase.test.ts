@@ -459,5 +459,78 @@ describe('cast, close, and target-phase shells', () => {
                 expect.objectContaining({ code: 'DecryptionShareInvalid' }),
             ]),
         );
+
+        const malformedReplayVerification =
+            verifyEvaluationReplayAttestationShell({
+                boardEvidence: createBoardEvidence([
+                    head0,
+                    targetHead,
+                    replayHead,
+                ]),
+                attestation: {
+                    ...replayAttestation,
+                    boardSeq: Number.NaN,
+                },
+                attestationInclusionProof: replayProofs[0],
+                targetFinalityRecord,
+                targetFinalityVerification,
+                expectedSignerPublicKeyDigest: participantKey.publicKeyDigest,
+            });
+        const malformedTargetAcceptedVerification =
+            verifyTargetAcceptedRecordShell({
+                boardEvidence: createBoardEvidence([
+                    head0,
+                    targetHead,
+                    replayHead,
+                    acceptedHead,
+                ]),
+                targetAcceptedRecord: {
+                    ...targetAcceptedRecord,
+                    boardSeq: Number.NaN,
+                },
+                targetAcceptedRecordInclusionProof: acceptedProofs[0],
+                targetFinalityRecord,
+                targetFinalityVerification,
+                acceptedReplayAttestationDigests: [
+                    replayVerification.evaluationReplayAttestationDigest ?? '',
+                ],
+                expectedOrganizerPublicKeyDigest: organizerPublicKeyDigest,
+            });
+        const malformedDecryptionShareVerification =
+            verifyTopKDecryptionShareShell({
+                boardEvidence: createBoardEvidence([
+                    head0,
+                    targetHead,
+                    replayHead,
+                    acceptedHead,
+                    shareHead,
+                ]),
+                decryptionShare: {
+                    ...decryptionShare,
+                    boardSeq: Number.NaN,
+                },
+                decryptionShareInclusionProof: shareProofs[0],
+                targetAcceptedRecord,
+                targetAcceptedRecordVerification: targetAcceptedVerification,
+                expectedTrusteePublicKeyDigest: participantKey.publicKeyDigest,
+            });
+
+        expect(malformedReplayVerification.refusedObjects).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({ code: 'ReplayAttestationInvalid' }),
+            ]),
+        );
+        expect(malformedTargetAcceptedVerification.refusedObjects).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    code: 'TargetAcceptedRecordInvalid',
+                }),
+            ]),
+        );
+        expect(malformedDecryptionShareVerification.refusedObjects).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({ code: 'DecryptionShareInvalid' }),
+            ]),
+        );
     });
 });

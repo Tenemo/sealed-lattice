@@ -62,6 +62,9 @@ describe('roster, manifest, first-come, and recovery shells', () => {
         const result = verifyRosterManifestTranscript(input);
 
         expect(result.ok).toBe(false);
+        expect(result.acceptedDigests).toEqual([]);
+        expect(result.electionManifestDigest).toBeUndefined();
+        expect(result.rosterDigest).toBeUndefined();
         expect(result.refusedObjects).toEqual(
             expect.arrayContaining([
                 expect.objectContaining({ code: 'RosterDigestMismatch' }),

@@ -350,36 +350,36 @@ const verifyRosterManifestTranscriptUnchecked = (
             ),
         );
     }
+    const transcriptAccepted =
+        refusedObjects.length === 0 && forkEvidence === undefined;
 
     return {
-        ok: refusedObjects.length === 0 && forkEvidence === undefined,
+        ok: transcriptAccepted,
         statusLabels,
-        acceptedDigests: uniqueStrings([
-            ...boardResult.acceptedDigests,
-            ...input.registrationEntries.map(
-                (entry) => entry.registrationEntryDigest,
-            ),
-            ...input.receiverKeyRegistrations.map(
-                (entry) => entry.receiverKeyRegistrationDigest,
-            ),
-            ...input.trusteeSetupEntries.map(
-                (entry) => entry.trusteeSetupEntryDigest,
-            ),
-            rosterDigest,
-            input.electionManifest.electionManifestDigest,
-            input.manifestInclusionProof.inclusionProofDigest,
-            ...acceptedConflictingManifestEvidenceDigests,
-        ]),
+        acceptedDigests: transcriptAccepted
+            ? uniqueStrings([
+                  ...boardResult.acceptedDigests,
+                  ...input.registrationEntries.map(
+                      (entry) => entry.registrationEntryDigest,
+                  ),
+                  ...input.receiverKeyRegistrations.map(
+                      (entry) => entry.receiverKeyRegistrationDigest,
+                  ),
+                  ...input.trusteeSetupEntries.map(
+                      (entry) => entry.trusteeSetupEntryDigest,
+                  ),
+                  rosterDigest,
+                  input.electionManifest.electionManifestDigest,
+                  input.manifestInclusionProof.inclusionProofDigest,
+                  ...acceptedConflictingManifestEvidenceDigests,
+              ])
+            : [],
         refusedObjects,
         forkEvidence,
-        electionManifestDigest:
-            refusedObjects.length === 0 && forkEvidence === undefined
-                ? input.electionManifest.electionManifestDigest
-                : undefined,
-        rosterDigest:
-            refusedObjects.length === 0 && forkEvidence === undefined
-                ? rosterDigest
-                : undefined,
+        electionManifestDigest: transcriptAccepted
+            ? input.electionManifest.electionManifestDigest
+            : undefined,
+        rosterDigest: transcriptAccepted ? rosterDigest : undefined,
         participantIdentities,
     };
 };

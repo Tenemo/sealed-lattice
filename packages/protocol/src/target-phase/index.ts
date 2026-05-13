@@ -240,7 +240,7 @@ const verifyReplayAttestationShape = (
     return refusedObjects;
 };
 
-export const verifyEvaluationReplayAttestationShell = (
+const verifyEvaluationReplayAttestationShellUnchecked = (
     input: EvaluationReplayAttestationVerificationInput,
 ): EvaluationReplayAttestationVerification => {
     const boardResult = verifyBoardConsistency(input.boardEvidence);
@@ -291,6 +291,28 @@ export const verifyEvaluationReplayAttestationShell = (
                 ? input.attestation.targetFinalityRecordDigest
                 : undefined,
     };
+};
+
+export const verifyEvaluationReplayAttestationShell = (
+    input: EvaluationReplayAttestationVerificationInput,
+): EvaluationReplayAttestationVerification => {
+    try {
+        return verifyEvaluationReplayAttestationShellUnchecked(input);
+    } catch {
+        return {
+            ok: false,
+            statusLabels: [],
+            acceptedDigests: [],
+            refusedObjects: [
+                createRefusal(
+                    'ReplayAttestationInvalid',
+                    'Replay attestation evidence could not be canonicalized or validated.',
+                    undefined,
+                    'EvaluationReplayAttestation',
+                ),
+            ],
+        };
+    }
 };
 
 const verifyTargetAcceptedRecordShape = (
@@ -446,7 +468,7 @@ const verifyTargetAcceptedRecordShape = (
     return refusedObjects;
 };
 
-export const verifyTargetAcceptedRecordShell = (
+const verifyTargetAcceptedRecordShellUnchecked = (
     input: TargetAcceptedRecordVerificationInput,
 ): TargetAcceptedRecordVerification => {
     const boardResult = verifyBoardConsistency(input.boardEvidence);
@@ -501,6 +523,28 @@ export const verifyTargetAcceptedRecordShell = (
                 ? input.targetAcceptedRecord.targetFinalityRecordDigest
                 : undefined,
     };
+};
+
+export const verifyTargetAcceptedRecordShell = (
+    input: TargetAcceptedRecordVerificationInput,
+): TargetAcceptedRecordVerification => {
+    try {
+        return verifyTargetAcceptedRecordShellUnchecked(input);
+    } catch {
+        return {
+            ok: false,
+            statusLabels: [],
+            acceptedDigests: [],
+            refusedObjects: [
+                createRefusal(
+                    'TargetAcceptedRecordInvalid',
+                    'Target-accepted record evidence could not be canonicalized or validated.',
+                    undefined,
+                    'TargetAcceptedRecord',
+                ),
+            ],
+        };
+    }
 };
 
 const verifyTopKDecryptionShareShape = (
@@ -626,7 +670,7 @@ const verifyTopKDecryptionShareShape = (
     return refusedObjects;
 };
 
-export const verifyTopKDecryptionShareShell = (
+const verifyTopKDecryptionShareShellUnchecked = (
     input: TopKDecryptionShareShellVerificationInput,
 ): TopKDecryptionShareShellVerification => {
     const boardResult = verifyBoardConsistency(input.boardEvidence);
@@ -683,4 +727,26 @@ export const verifyTopKDecryptionShareShell = (
                 ? input.decryptionShare.targetFinalityRecordDigest
                 : undefined,
     };
+};
+
+export const verifyTopKDecryptionShareShell = (
+    input: TopKDecryptionShareShellVerificationInput,
+): TopKDecryptionShareShellVerification => {
+    try {
+        return verifyTopKDecryptionShareShellUnchecked(input);
+    } catch {
+        return {
+            ok: false,
+            statusLabels: [],
+            acceptedDigests: [],
+            refusedObjects: [
+                createRefusal(
+                    'DecryptionShareInvalid',
+                    'Decryption-share shell evidence could not be canonicalized or validated.',
+                    undefined,
+                    'TopKDecryptionShare',
+                ),
+            ],
+        };
+    }
 };

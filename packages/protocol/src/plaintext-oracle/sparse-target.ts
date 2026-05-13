@@ -187,7 +187,24 @@ const validateSlotElement = (
     }
 };
 
-export const decodeSparseTopKTarget = (input: {
+const createSparseTargetDecodingFailure = (
+    targetDigest?: string,
+): SparseTopKTargetDecoding => ({
+    acceptedDigests: [],
+    decodedSelections: [],
+    ok: false,
+    refusedObjects: [
+        createRefusal(
+            'SparseTargetInvalid',
+            'Sparse target could not be canonicalized or validated.',
+            targetDigest,
+        ),
+    ],
+    selectedOptionOrdinals: [],
+    statusLabels: [],
+});
+
+const decodeSparseTopKTargetUnchecked = (input: {
     readonly expectedLayoutDigest: string;
     readonly target: SparseTopKTarget;
 }): SparseTopKTargetDecoding => {
@@ -397,4 +414,23 @@ export const decodeSparseTopKTarget = (input: {
         targetDigest:
             refusedObjects.length === 0 ? target.targetDigest : undefined,
     };
+};
+
+export const decodeSparseTopKTarget = (input: {
+    readonly expectedLayoutDigest: string;
+    readonly target: SparseTopKTarget;
+}): SparseTopKTargetDecoding => {
+    try {
+        return decodeSparseTopKTargetUnchecked(input);
+    } catch {
+        const targetDigest = (
+            input as
+                | Partial<{
+                      readonly target: Partial<SparseTopKTarget>;
+                  }>
+                | undefined
+        )?.target?.targetDigest;
+
+        return createSparseTargetDecodingFailure(targetDigest);
+    }
 };

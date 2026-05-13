@@ -185,4 +185,22 @@ describe('sparse target decoder oracle', () => {
             ]),
         );
     });
+
+    it('returns a structured refusal for non-canonical target payloads', () => {
+        const malformedTarget = {
+            ...sparseTargetVectors.target,
+            optionCount: Number.NaN,
+        } satisfies SparseTopKTarget;
+        const decoding = decodeSparseTopKTarget({
+            expectedLayoutDigest: sparseTargetVectors.layoutDigest,
+            target: malformedTarget,
+        });
+
+        expect(decoding.ok).toBe(false);
+        expect(decoding.refusedObjects).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({ code: 'SparseTargetInvalid' }),
+            ]),
+        );
+    });
 });
