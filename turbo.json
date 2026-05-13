@@ -1,6 +1,11 @@
 {
     "$schema": "https://turbo.build/schema.json",
-    "globalDependencies": ["Cargo.lock", "Cargo.toml", "crates/**"],
+    "globalDependencies": [
+        "Cargo.lock",
+        "Cargo.toml",
+        "crates/**",
+        "tools/**"
+    ],
     "tasks": {
         "build": {
             "dependsOn": ["^build"],

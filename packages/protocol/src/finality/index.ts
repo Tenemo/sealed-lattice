@@ -3,7 +3,6 @@ import type {
     ProtocolDigest,
     ProtocolVerificationStatusLabel,
     RefusalRecord,
-    SignedBoardHead,
     TargetFinalityPolicy,
     TargetFinalityRecord,
     TargetFinalityVerification,
@@ -21,6 +20,7 @@ import {
 import { deriveProtocolDigest } from '../common/digests.js';
 import { verifySignedObjectSignature } from '../common/signatures.js';
 import {
+    buildBoardHeadMap,
     createRefusal,
     uniqueStrings,
 } from '../common/verification-helpers.js';
@@ -76,16 +76,6 @@ export const deriveTargetFinalityRecordDigest = (
         ),
         witnessPolicyDigest: record.witnessPolicyDigest,
     });
-
-const buildHeadMapFromInput = (
-    input: TargetFinalityVerificationInput,
-): Map<ProtocolDigest, SignedBoardHead> =>
-    new Map(
-        input.boardEvidence.signedBoardHeads.map((head) => [
-            head.headDigest,
-            head,
-        ]),
-    );
 
 const verifyTargetRecordShape = (
     input: TargetFinalityVerificationInput,
@@ -334,7 +324,9 @@ const collectValidWitnessIdentitiesForRecord = (
     input: TargetFinalityVerificationInput,
     record: TargetFinalityRecord,
 ): readonly string[] | undefined => {
-    const headsByDigest = buildHeadMapFromInput(input);
+    const headsByDigest = buildBoardHeadMap(
+        input.boardEvidence.signedBoardHeads,
+    );
     const refusedObjects: RefusalRecord[] = [
         ...verifyTargetRecordShape(input, record),
         ...verifyInclusionProof(record.inclusionProof, headsByDigest),
@@ -385,7 +377,9 @@ const findFinalityForkEvidence = (
     input: TargetFinalityVerificationInput,
     validWitnessIdentities: readonly string[],
 ): ConflictingHeadEvidence | undefined => {
-    const headsByDigest = buildHeadMapFromInput(input);
+    const headsByDigest = buildBoardHeadMap(
+        input.boardEvidence.signedBoardHeads,
+    );
 
     for (const conflictingRecord of input.conflictingRecords ?? []) {
         if (
@@ -449,7 +443,9 @@ const verifyTargetFinalityUnchecked = (
     input: TargetFinalityVerificationInput,
 ): TargetFinalityVerification => {
     const boardResult = verifyBoardConsistency(input.boardEvidence);
-    const headsByDigest = buildHeadMapFromInput(input);
+    const headsByDigest = buildBoardHeadMap(
+        input.boardEvidence.signedBoardHeads,
+    );
     const refusedObjects: RefusalRecord[] = [
         ...boardResult.refusedObjects,
         ...verifyTargetRecordShape(input, input.record),

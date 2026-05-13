@@ -27,19 +27,20 @@ const documentedPublicApiEntries = publicApiReferenceEntries as readonly {
     apiReferencePagePath: string;
     moduleName: string;
 }[];
+const toPosixPath = (value: string): string => value.replace(/\\/g, '/');
 const expectedGeneratedApiPagePaths = new Set([
     'index.md',
     ...documentedPublicApiEntries.map((entry) =>
-        path
-            .relative(apiReferenceRoot, entry.apiReferencePagePath)
-            .replace(/\\/g, '/'),
+        toPosixPath(
+            path.relative(apiReferenceRoot, entry.apiReferencePagePath),
+        ),
     ),
 ]);
 const expectedGeneratedApiNavigationPaths = new Map(
     documentedPublicApiEntries.map((entry) => [
-        path
-            .relative(apiReferenceRoot, entry.apiReferencePagePath)
-            .replace(/\\/g, '/'),
+        toPosixPath(
+            path.relative(apiReferenceRoot, entry.apiReferencePagePath),
+        ),
         entry.moduleName,
     ]),
 );
@@ -77,7 +78,7 @@ const isBaseUnsafeLinkTarget = (target: string): boolean =>
     target.startsWith('/') && !target.startsWith('//');
 
 const toRepoRelativePath = (absolutePath: string): string =>
-    path.relative(repoRoot, absolutePath).replace(/\\/g, '/');
+    toPosixPath(path.relative(repoRoot, absolutePath));
 
 const isDocsContentFile = (candidate: string): boolean =>
     isWithinDirectory(docsRoot, candidate);
@@ -110,29 +111,36 @@ const isDocsRouteLink = (
 };
 
 const toDocsRoutePath = (absolutePath: string): string => {
-    const relativePath = path
-        .relative(docsRoot, absolutePath)
-        .replace(/\\/g, '/');
-    const extension = path.extname(relativePath);
-    const fileName = path.basename(relativePath, extension);
-    const directorySegments = path
-        .dirname(relativePath)
-        .split(path.sep)
-        .join('/')
-        .split('/')
-        .filter(Boolean)
-        .map((segment) => segment.toLowerCase());
-    const routeSegments =
-        fileName === 'index'
-            ? directorySegments
-            : [...directorySegments, fileName.toLowerCase()];
+    const normalizedPath = path.posix.normalize(
+        toPosixPath(path.relative(docsRoot, absolutePath)),
+    );
 
-    return routeSegments.length === 0 ? '/' : `/${routeSegments.join('/')}/`;
+    if (normalizedPath === 'index.md' || normalizedPath === 'index.mdx') {
+        return '/';
+    }
+
+    if (normalizedPath.endsWith('/index.md')) {
+        return `/${normalizedPath.slice(0, -'index.md'.length)}`;
+    }
+
+    if (normalizedPath.endsWith('/index.mdx')) {
+        return `/${normalizedPath.slice(0, -'index.mdx'.length)}`;
+    }
+
+    if (normalizedPath.endsWith('.md')) {
+        return `/${normalizedPath.slice(0, -'.md'.length)}/`;
+    }
+
+    if (normalizedPath.endsWith('.mdx')) {
+        return `/${normalizedPath.slice(0, -'.mdx'.length)}/`;
+    }
+
+    return `/${normalizedPath.replace(/\/+$/u, '')}/`;
 };
 
 const stripMarkdownRouteExtension = (target: string): string => {
     if (target.endsWith('.md') || target.endsWith('.mdx')) {
-        return target.slice(0, -path.extname(target).length);
+        return target.slice(0, -path.posix.extname(target).length);
     }
 
     return target;

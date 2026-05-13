@@ -150,6 +150,7 @@ jobs:
               with:
                   components: clippy, rustfmt
                   targets: wasm32-unknown-unknown
+            - run: pnpm exec playwright install --with-deps chromium
             - run: pnpm run verify:docs
             - run: pnpm run docs:build:site
 
@@ -169,6 +170,7 @@ jobs:
                   components: clippy, rustfmt
                   targets: wasm32-unknown-unknown
             - run: pnpm run build
+            - run: pnpm exec playwright install --with-deps chromium
             - run: pnpm run verify:docs
             - run: pnpm run docs:build:site
             - run: pnpm run smoke:pack
@@ -279,6 +281,7 @@ jobs:
                   echo "prerelease=${PRERELEASE}" >> "${GITHUB_OUTPUT}"
 
             - run: pnpm run build
+            - run: pnpm exec playwright install --with-deps chromium
             - run: pnpm run verify:docs
             - run: pnpm run docs:build:site
             - run: pnpm run smoke:pack

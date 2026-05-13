@@ -11,6 +11,17 @@ type BlockedTargetPhaseTypes = [
     publicTypes.TopKDecryptionShareShell,
 ];
 
+type BlockedPlaintextOracleTypes = [
+    // @ts-expect-error field arithmetic types are intentionally not public.
+    publicTypes.FieldElement,
+    // @ts-expect-error Shamir helper types are intentionally not public.
+    publicTypes.ShamirPolynomial,
+    // @ts-expect-error plaintext oracle types are intentionally not public.
+    publicTypes.PlaintextTopKOracle,
+    // @ts-expect-error sparse target oracle types are intentionally not public.
+    publicTypes.SparseTopKTarget,
+];
+
 type PublicFoundationTypes = [
     publicTypes.BoardConsistencyInput,
     publicTypes.PollSpecInput,
@@ -19,6 +30,7 @@ type PublicFoundationTypes = [
 ];
 
 type PublicTypeSurfaceProbe = {
+    readonly blockedPlaintextOracleTypes: BlockedPlaintextOracleTypes;
     readonly blockedTargetPhaseTypes: BlockedTargetPhaseTypes;
     readonly publicFoundationTypes: PublicFoundationTypes;
 };

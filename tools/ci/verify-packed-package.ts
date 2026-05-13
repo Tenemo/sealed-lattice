@@ -36,6 +36,21 @@ type PackDryRunMetadataEntry = {
 };
 
 const supportedPackageManagers = new Set<PackageManager>(['npm', 'pnpm']);
+const forbiddenPublishedRuntimePathFragments = [
+    'dist/internal/election-foundation/plaintext-oracle/',
+    'dist/internal/election-foundation/target-phase/',
+] as const;
+const requiredPublishedPackageFilePaths = [
+    'LICENSE',
+    'dist/sealed-lattice-kernel.wasm',
+    'dist/internal/board-target.d.ts',
+    'dist/internal/lifecycle.d.ts',
+    'dist/internal/plaintext-oracle.d.ts',
+    'dist/internal/protocol-digest.d.ts',
+    'dist/internal/protocol-objects.d.ts',
+    'dist/internal/roster-recovery.d.ts',
+    'dist/internal/transcript-core.d.ts',
+] as const;
 
 export const getPublicPackageDirectory = (
     projectRoot: string = repoRoot,
@@ -263,13 +278,12 @@ export const validatePublishedPackageFilePaths = (
 ): string[] => {
     const failures: string[] = [];
 
-    if (!publishedPackageFilePaths.includes('LICENSE')) {
-        failures.push('Published package is missing LICENSE');
-    }
-    if (
-        !publishedPackageFilePaths.includes('dist/sealed-lattice-kernel.wasm')
-    ) {
-        failures.push('Published package is missing transcript-core WASM');
+    for (const requiredFilePath of requiredPublishedPackageFilePaths) {
+        if (!publishedPackageFilePaths.includes(requiredFilePath)) {
+            failures.push(
+                `Published package is missing required file: ${requiredFilePath}`,
+            );
+        }
     }
 
     const typeScriptBuildInfoPaths = publishedPackageFilePaths.filter(
@@ -279,6 +293,15 @@ export const validatePublishedPackageFilePaths = (
         failures.push(
             `Published package must not include TypeScript build metadata: ${typeScriptBuildInfoPath}`,
         );
+    }
+    for (const publishedPackageFilePath of publishedPackageFilePaths) {
+        for (const forbiddenPathFragment of forbiddenPublishedRuntimePathFragments) {
+            if (publishedPackageFilePath.includes(forbiddenPathFragment)) {
+                failures.push(
+                    `Published package must not include internal protocol runtime: ${publishedPackageFilePath}`,
+                );
+            }
+        }
     }
 
     return failures;

@@ -7,7 +7,6 @@ import type {
     CloseRecordVerificationInput,
     ProtocolDigest,
     RefusalRecord,
-    SignedBoardHead,
 } from '@sealed-lattice/types';
 
 import {
@@ -17,17 +16,11 @@ import {
 import { deriveProtocolDigest } from '../common/digests.js';
 import { verifySignedObjectSignature } from '../common/signatures.js';
 import {
+    buildBoardHeadMap,
     createRefusal,
+    isNonNegativeInteger,
     uniqueStrings,
 } from '../common/verification-helpers.js';
-
-const isNonNegativeInteger = (value: number): boolean =>
-    Number.isInteger(value) && value >= 0;
-
-const buildHeadMap = (
-    heads: readonly SignedBoardHead[],
-): Map<ProtocolDigest, SignedBoardHead> =>
-    new Map(heads.map((head) => [head.headDigest, head]));
 
 export const deriveCastReceiptDigest = (
     receipt: Omit<CastReceipt, 'castReceiptDigest' | 'signature'>,
@@ -180,7 +173,9 @@ const verifyCastReceiptShellUnchecked = (
     input: CastReceiptVerificationInput,
 ): CastReceiptVerification => {
     const boardResult = verifyBoardConsistency(input.boardEvidence);
-    const headsByDigest = buildHeadMap(input.boardEvidence.signedBoardHeads);
+    const headsByDigest = buildBoardHeadMap(
+        input.boardEvidence.signedBoardHeads,
+    );
     const refusedObjects: RefusalRecord[] = [
         ...boardResult.refusedObjects,
         ...verifyCastReceiptShape(input),
@@ -387,7 +382,9 @@ const verifyCloseRecordShellUnchecked = (
     input: CloseRecordVerificationInput,
 ): CloseRecordVerification => {
     const boardResult = verifyBoardConsistency(input.boardEvidence);
-    const headsByDigest = buildHeadMap(input.boardEvidence.signedBoardHeads);
+    const headsByDigest = buildBoardHeadMap(
+        input.boardEvidence.signedBoardHeads,
+    );
     const refusedObjects: RefusalRecord[] = [
         ...boardResult.refusedObjects,
         ...verifyCloseRecordShape(input),

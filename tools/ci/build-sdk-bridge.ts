@@ -1,4 +1,11 @@
-import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import {
+    copyFile,
+    mkdir,
+    readFile,
+    rm,
+    stat,
+    writeFile,
+} from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -61,11 +68,14 @@ const cryptoOutputDirectoryPath = path.resolve(
     'crypto',
 );
 const typesPackageName = '@sealed-lattice/types';
-const typesDeclarationSourcePath = path.resolve(
+const typesBuildOutputDirectoryPath = path.resolve(
     repoRoot,
     'packages',
     'types',
     'dist',
+);
+const typesDeclarationSourcePath = path.resolve(
+    typesBuildOutputDirectoryPath,
     'index.d.ts',
 );
 const typesRuntimeSourcePath = path.resolve(
@@ -91,6 +101,40 @@ const runtimeImportTargets = new Map([
     ['@sealed-lattice/protocol', electionFoundationOutputDirectoryPath],
     ['@sealed-lattice/wasm', bridgeOutputPath],
 ]);
+export const sdkProtocolRuntimeSourceRelativePaths = [
+    'board/index.ts',
+    'closing/index.ts',
+    'common/digests.ts',
+    'common/signatures.ts',
+    'common/verification-helpers.ts',
+    'finality/index.ts',
+    'lifecycle/capabilities.ts',
+    'lifecycle/labels.ts',
+    'lifecycle/lifecycle.ts',
+    'lifecycle/poll-spec.ts',
+    'lifecycle/profiles.ts',
+    'lifecycle/refusal.ts',
+    'lifecycle/thresholds.ts',
+    'ordering/index.ts',
+    'recovery/index.ts',
+    'roster/digests.ts',
+    'roster/inclusion.ts',
+    'roster/index.ts',
+    'roster/object-validation.ts',
+    'roster/verification.ts',
+] as const;
+const sdkProtocolRuntimeIndexSource = `export { evaluateActionCapability } from './lifecycle/capabilities.js';
+export { verifyBoardConsistency, verifyInclusionProof } from './board/index.js';
+export { verifyCastReceiptShell, verifyCloseRecordShell } from './closing/index.js';
+export { deriveValidatedFirstComeOrder, verifyFirstComePolicy } from './ordering/index.js';
+export { verifyTargetFinality } from './finality/index.js';
+export { deriveLifecycleLabels } from './lifecycle/labels.js';
+export { isValidLifecycleTransition } from './lifecycle/lifecycle.js';
+export { validatePollSpecFromUnknown } from './lifecycle/poll-spec.js';
+export { isActionCurrentForRecoveryEpoch, verifyRecoveryEpochUpdate } from './recovery/index.js';
+export { verifyRosterManifestTranscript } from './roster/index.js';
+export { deriveThresholdProfile } from './lifecycle/thresholds.js';
+`;
 
 export const transpileSdkInternalSource = (
     sourceText: string,
@@ -136,10 +180,6 @@ export const buildSdkBridge = async (): Promise<void> => {
 };
 
 export const buildSdkProtocolRuntime = async (): Promise<void> => {
-    const sourceFilePaths = await collectFiles(protocolSourceDirectoryPath, {
-        extensions: ['.ts'],
-    });
-
     await rm(electionFoundationOutputDirectoryPath, {
         recursive: true,
         force: true,
@@ -147,24 +187,31 @@ export const buildSdkProtocolRuntime = async (): Promise<void> => {
     await mkdir(electionFoundationOutputDirectoryPath, { recursive: true });
 
     await Promise.all(
-        sourceFilePaths.map(async (sourcePath) => {
-            const relativeSourcePath = path.relative(
-                protocolSourceDirectoryPath,
-                sourcePath,
-            );
-            const outputPath = path.join(
-                electionFoundationOutputDirectoryPath,
-                relativeSourcePath.replace(/\.ts$/u, '.js'),
-            );
-            const sourceText = await readFile(sourcePath, 'utf8');
-            const outputText = transpileSdkInternalSource(
-                sourceText,
-                sourcePath,
-            );
+        sdkProtocolRuntimeSourceRelativePaths.map(
+            async (relativeSourcePath) => {
+                const sourcePath = path.join(
+                    protocolSourceDirectoryPath,
+                    relativeSourcePath,
+                );
+                const outputPath = path.join(
+                    electionFoundationOutputDirectoryPath,
+                    relativeSourcePath.replace(/\.ts$/u, '.js'),
+                );
+                const sourceText = await readFile(sourcePath, 'utf8');
+                const outputText = transpileSdkInternalSource(
+                    sourceText,
+                    sourcePath,
+                );
 
-            await mkdir(path.dirname(outputPath), { recursive: true });
-            await writeFile(outputPath, outputText, 'utf8');
-        }),
+                await mkdir(path.dirname(outputPath), { recursive: true });
+                await writeFile(outputPath, outputText, 'utf8');
+            },
+        ),
+    );
+    await writeFile(
+        path.join(electionFoundationOutputDirectoryPath, 'index.js'),
+        sdkProtocolRuntimeIndexSource,
+        'utf8',
     );
 };
 
@@ -412,6 +459,37 @@ const ensureTypesPackageBuilt = async (): Promise<void> => {
     }
 };
 
+const copyTypesPackageSupportFiles = async (): Promise<void> => {
+    const supportFilePaths = await collectFiles(typesBuildOutputDirectoryPath, {
+        fileNamePattern: /\.(?:d\.ts|js|js\.map)$/u,
+    });
+
+    await Promise.all(
+        supportFilePaths.map(async (sourcePath) => {
+            const relativeSourcePath = path.relative(
+                typesBuildOutputDirectoryPath,
+                sourcePath,
+            );
+            if (
+                relativeSourcePath === 'index.d.ts' ||
+                relativeSourcePath === 'index.js' ||
+                relativeSourcePath === 'index.js.map'
+            ) {
+                return;
+            }
+
+            const outputPath = path.join(
+                sdkDistDirectoryPath,
+                'internal',
+                relativeSourcePath,
+            );
+
+            await mkdir(path.dirname(outputPath), { recursive: true });
+            await copyFile(sourcePath, outputPath);
+        }),
+    );
+};
+
 export const rewriteWorkspaceRuntimeImports = async (): Promise<void> => {
     const runtimeFiles = await collectFiles(sdkDistDirectoryPath, {
         extensions: ['.js'],
@@ -448,6 +526,7 @@ export const inlineTypesIntoSdkDist = async (): Promise<void> => {
         ),
         'utf8',
     );
+    await copyTypesPackageSupportFiles();
 
     const declarationFiles = await collectFiles(sdkDistDirectoryPath, {
         fileNamePattern: /\.d\.ts$/u,

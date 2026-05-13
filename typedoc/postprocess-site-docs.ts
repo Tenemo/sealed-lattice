@@ -47,11 +47,13 @@ const sentenceCaseReplacements: readonly (readonly [RegExp, string])[] = [
     [/\bExtended By\b/g, 'Extended by'],
 ] as const;
 
+const toPosixPath = (value: string): string => value.replace(/\\/g, '/');
+
 const toReferenceConfigRelativePath = (configPath: string): string =>
-    path.relative(apiReferenceRoot, configPath).replace(/\\/g, '/');
+    toPosixPath(path.relative(apiReferenceRoot, configPath));
 
 const toReferenceRelativePath = (absolutePath: string): string =>
-    path.relative(referenceRoot, absolutePath).replace(/\\/g, '/');
+    toPosixPath(path.relative(referenceRoot, absolutePath));
 
 const moduleNameByReferencePath = new Map(
     publicApiReferenceEntries.map((entry) => [
@@ -60,34 +62,18 @@ const moduleNameByReferencePath = new Map(
     ]),
 );
 
-const toRoutePath = (absolutePath: string): string => {
-    const relativePath = toReferenceRelativePath(absolutePath);
-    const extension = path.extname(relativePath);
-    const fileName = path.basename(relativePath, extension);
-    const directorySegments = path
-        .dirname(relativePath)
-        .split(path.sep)
-        .join('/')
-        .split('/')
-        .filter(Boolean)
-        .map((segment) => segment.toLowerCase());
-    const routeSegments =
-        fileName === 'index'
-            ? directorySegments
-            : [...directorySegments, fileName.toLowerCase()];
+const toReferenceRoutePath = (relativePath: string): string => {
+    const normalizedPath = path.posix.normalize(relativePath);
 
-    return routeSegments.length === 0 ? '/' : `/${routeSegments.join('/')}/`;
-};
+    if (normalizedPath === 'index.md') {
+        return '';
+    }
 
-const toRelativeRouteTarget = (fromFile: string, rawTarget: string): string => {
-    const absoluteTarget = path.resolve(path.dirname(fromFile), rawTarget);
-    const fromRoute = toRoutePath(fromFile);
-    const targetRoute = toRoutePath(absoluteTarget);
-    const fromSegments = fromRoute.slice(1, -1);
-    const targetSegments = targetRoute.slice(1, -1);
-    const relativeTarget = path.posix.relative(fromSegments, targetSegments);
+    if (normalizedPath.endsWith('/index.md')) {
+        return normalizedPath.slice(0, -'index.md'.length);
+    }
 
-    return relativeTarget === '' ? './' : `${relativeTarget}/`;
+    return `${normalizedPath.slice(0, -'.md'.length)}/`;
 };
 
 const collectMarkdownFiles = async (directory: string): Promise<string[]> =>
@@ -116,7 +102,10 @@ const deriveSidebarOrder = (relativePath: string): number | undefined => {
     return moduleOrder.get(moduleName);
 };
 
-const rewriteMarkdownLinks = (content: string, fromFile: string): string =>
+const rewriteMarkdownLinks = (
+    content: string,
+    sourceRelativePath: string,
+): string =>
     content.replace(
         internalLinkPattern,
         (fullMatch, label, rawTarget: string, hash = ''): string => {
@@ -130,7 +119,21 @@ const rewriteMarkdownLinks = (content: string, fromFile: string): string =>
                 return fullMatch;
             }
 
-            const rewrittenTarget = toRelativeRouteTarget(fromFile, rawTarget);
+            const sourceDirectory = path.posix.dirname(sourceRelativePath);
+            const resolvedTargetPath = path.posix.normalize(
+                rawTarget.startsWith('/')
+                    ? rawTarget.slice(1)
+                    : path.posix.join(sourceDirectory, rawTarget),
+            );
+            const sourceRoutePath = toReferenceRoutePath(sourceRelativePath);
+            const targetRoutePath = toReferenceRoutePath(resolvedTargetPath);
+            const rewrittenTargetBase = path.posix.relative(
+                sourceRoutePath === '' ? '.' : sourceRoutePath,
+                targetRoutePath === '' ? '.' : targetRoutePath,
+            );
+            const rewrittenTarget = `${
+                rewrittenTargetBase === '' ? '.' : rewrittenTargetBase
+            }/`;
 
             return `${label}(${rewrittenTarget}${hash})`;
         },
@@ -212,7 +215,7 @@ const main = async (): Promise<void> => {
 
         let content = await fs.readFile(file, 'utf8');
         content = content.replace(generatedPreamblePattern, '');
-        content = rewriteMarkdownLinks(content, file);
+        content = rewriteMarkdownLinks(content, relativePath);
         content = rewriteSentenceCase(content);
 
         const frontmatterLines = [

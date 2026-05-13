@@ -11,7 +11,7 @@
     },
     {
       "path": "election-foundation/deterministic-fixtures.json",
-      "sha256": "31ac12d246655a29fc6528ff352faf80f6555d35204ffc3a3db12c22a60dacdc"
+      "sha256": "a5f4b38a967f87d090a3c4ae0132ceee515cab40d9efcea9c8b90cbe34738e6d"
     },
     {
       "path": "election-foundation/lifecycle-transitions.json",
@@ -24,6 +24,26 @@
     {
       "path": "election-foundation/threshold-profiles.json",
       "sha256": "fc179622ed0caba5bfbbd151b2f6499d13eed5a353817449fdf9730230f4dc91"
+    },
+    {
+      "path": "plaintext-oracle/comparator-polynomials.json",
+      "sha256": "048eb1911632bf569d6b1a4820beb0ec11dbad93f156d8a247f1175e77916549"
+    },
+    {
+      "path": "plaintext-oracle/field.json",
+      "sha256": "3cae50a7f3ef6b994c90e3e7731cefb7811860d952b5e591921258eaf8520196"
+    },
+    {
+      "path": "plaintext-oracle/shamir.json",
+      "sha256": "5b6eb3931b4b4649ba0c85ef21f813a664ce51320307c2a0bf17a094839c0302"
+    },
+    {
+      "path": "plaintext-oracle/sparse-target.json",
+      "sha256": "71c5238fefdda981b74510eba79d7e876ff1961486c18c2043702e5a85ad8727"
+    },
+    {
+      "path": "plaintext-oracle/top-k.json",
+      "sha256": "ae59d446465d099a3dca8efaf473c91f7b8f8d709d456dc61e769fb8521b9ec5"
     },
     {
       "path": "transcript-core/golden-transcript-core.json",

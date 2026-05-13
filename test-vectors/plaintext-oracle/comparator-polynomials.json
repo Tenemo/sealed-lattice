@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "rosterSize": 20,
+  "domainMinimum": -180,
+  "domainMaximum": 180,
+  "comparatorDigest": "df28b5db09998cb48cac76a54bf2408b42181f6b7602ba96276311192b76c6de81dcb6205952cb0649a8ba23f75d5f6e9efeac02f3b26532d2544aa48b9b82bc",
+  "greaterThanCoefficientCount": 361,
+  "equalCoefficientCount": 361,
+  "firstGreaterThanCoefficients": [0, 6205, 58485, 19259, 37037, 4669, 10894, 4550, 49254, 15107],
+  "lastGreaterThanCoefficients": [54786, 18649, 61097, 33772, 39882, 43774, 17272, 20291, 514, 23599],
+  "firstEqualCoefficients": [1, 0, 14104, 0, 57000, 0, 43749, 0, 32566, 0],
+  "lastEqualCoefficients": [0, 28239, 0, 63530, 0, 43526, 0, 24955, 0, 18339],
+  "evaluationCases": [
+    { "value": -180, "greaterThan": 0, "equal": 0 },
+    { "value": -1, "greaterThan": 0, "equal": 0 },
+    { "value": 0, "greaterThan": 0, "equal": 1 },
+    { "value": 1, "greaterThan": 1, "equal": 0 },
+    { "value": 180, "greaterThan": 1, "equal": 0 }
+  ],
+  "maximumRosterBoundaryCase": {
+    "rosterSize": 50,
+    "domainMinimum": -450,
+    "domainMaximum": 450,
+    "comparatorDigest": "2f0b6269a5784d0067aecb9c8259c576c537ccabe08e3afc5ace6cd828364d1a4a3532a9d1317576189e950a5675a15fb55aa4811c784e621ccf8f75da47c27a",
+    "greaterThanCoefficientCount": 901,
+    "equalCoefficientCount": 901,
+    "evaluationCases": [
+      { "value": -450, "greaterThan": 0, "equal": 0 },
+      { "value": -1, "greaterThan": 0, "equal": 0 },
+      { "value": 0, "greaterThan": 0, "equal": 1 },
+      { "value": 1, "greaterThan": 1, "equal": 0 },
+      { "value": 450, "greaterThan": 1, "equal": 0 }
+    ]
+  }
+}

@@ -1,0 +1,162 @@
+{
+  "schemaVersion": 1,
+  "pollSpecInput": {
+    "pollId": "plaintext-oracle-board-priorities",
+    "question": "Select the top priorities",
+    "options": ["Alpha", "Beta", "Gamma", "Delta"],
+    "topOptionCount": 2
+  },
+  "ballots": [
+    { "voterIdentity": "voter-1", "scores": [10, 7, null, 2] },
+    { "voterIdentity": "voter-2", "scores": [4, 10, 1, 2] },
+    { "voterIdentity": "voter-3", "scores": [6, 10, 1] },
+    { "voterIdentity": "voter-4", "scores": [9, 6, 1, 10] }
+  ],
+  "maximumRosterSize": 20,
+  "expected": {
+    "optionTallies": [29, 33, 4, 15],
+    "tallyFieldElements": [29, 33, 4, 15],
+    "rankingOptionOrdinals": [2, 1, 4, 3],
+    "selectedOptionOrdinals": [2, 1],
+    "targetIdSlots": [1, 2, 0, 0],
+    "targetOrderSlots": [2, 1, 0, 0],
+    "tallyDigest": "166a253dcd6cc91f1672e98608bd128330b1aa634f587842833753afb1a0ac28ad70350614cd850aa346821a88b8733edf48c58207870c18a9a13c95454b98dc",
+    "oracleDigest": "ca4190cfde33e94b60f4d6f479328fad3f82fafba857f5ca51d78101744849365131495aedd0e26b7e6010047d9360043206f4c3c8c5110077357b8458602dcc"
+  },
+  "fullTieCase": {
+    "pollSpecInput": {
+      "pollId": "full-tie",
+      "question": "Tie",
+      "options": ["A", "B", "C"],
+      "topOptionCount": 3
+    },
+    "ballots": [
+      { "scores": [5, 5, 5] },
+      { "scores": [5, 5, 5] }
+    ],
+    "expectedRankingOptionOrdinals": [1, 2, 3],
+    "expectedTargetIdSlots": [1, 2, 3],
+    "expectedTargetOrderSlots": [1, 2, 3],
+    "expectedOracleDigest": "18c037a886f4f59b6172de9381e33ca0c3cb5c696179d355cadae020062a7effa6851af74f1bc782228d6f34213e6a7a25f38d923027af23d8354c41b140abb3"
+  },
+  "topOneClearWinnerCase": {
+    "pollSpecInput": {
+      "pollId": "top-one-clear-winner",
+      "question": "Select the single leading option",
+      "options": ["Alpha", "Beta", "Gamma", "Delta"],
+      "topOptionCount": 1
+    },
+    "ballots": [
+      { "scores": [10, 1, 1, 1] },
+      { "scores": [9, 2, 2, 2] },
+      { "scores": [8, 10, 3, 3] }
+    ],
+    "expectedOptionTallies": [27, 13, 6, 6],
+    "expectedRankingOptionOrdinals": [1, 2, 3, 4],
+    "expectedSelectedOptionOrdinals": [1],
+    "expectedTargetIdSlots": [1, 0, 0, 0],
+    "expectedTargetOrderSlots": [1, 0, 0, 0],
+    "expectedTallyDigest": "248713d6939c84b8e4fc32adf4e856dee51d77877e278fbd8c7c0d0beed37c570321b8adde633a6e1c9de5e8c112c9c09c72257cb9f9328472fe71a74c2a8d5c",
+    "expectedOracleDigest": "8388330cae93be7e893f25db0eefc929f50a621d48f1e1f67cebb01910e3c30fffe09cbcf4a52a58cff97a8dd881dba4f6dbe9a954b31013d4cbc5887e300d26"
+  },
+  "maximumNoWrapCase": {
+    "pollSpecInput": {
+      "pollId": "maximum-no-wrap",
+      "question": "Maximum no-wrap tally",
+      "options": [
+        "Option 1",
+        "Option 2",
+        "Option 3",
+        "Option 4",
+        "Option 5",
+        "Option 6",
+        "Option 7",
+        "Option 8",
+        "Option 9",
+        "Option 10",
+        "Option 11",
+        "Option 12",
+        "Option 13",
+        "Option 14",
+        "Option 15",
+        "Option 16",
+        "Option 17",
+        "Option 18",
+        "Option 19",
+        "Option 20"
+      ],
+      "topOptionCount": 20
+    },
+    "ballotCount": 50,
+    "score": 10,
+    "expectedMaximumTally": 500,
+    "expectedRankingOptionOrdinals": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20
+    ],
+    "expectedTargetIdSlots": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20
+    ],
+    "expectedTargetOrderSlots": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20
+    ],
+    "expectedTallyDigest": "8905fb177a4ffcfb7ce6373024f3a33832a50dafee0ebcf420507e4e7762037fa7aeab837385cdb24b5dd17267a20816741ed054fc860be561b7307fd2beefb6",
+    "expectedOracleDigest": "7ba9ad7ed8cf6e3a5d1e3d5cccb62e27133873604e10ff123d2aa75c7ec7f0c8a9e56ebb46b49609fc83db0af74ab99d18c974ee419afeb730d3f1999e3a82c1"
+  }
+}

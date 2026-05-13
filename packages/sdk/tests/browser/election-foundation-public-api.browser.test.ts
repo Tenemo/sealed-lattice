@@ -1,59 +1,112 @@
+import type {
+    BoardConsistencyInput,
+    BoardConsistencyVerification,
+    CapabilityContext,
+    CapabilityDecision,
+    FirstComeOrderingInput,
+    FirstComeOrderingVerification,
+    PollSpecInput,
+    PollSpecValidation,
+    ProtocolAction,
+    ThresholdProfile,
+    ThresholdProfileInput,
+} from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
-import {
-    deriveValidatedFirstComeOrder,
-    deriveLifecycleLabels,
-    deriveThresholdProfile,
-    evaluateActionCapability,
-    isActionCurrentForRecoveryEpoch,
-    isValidLifecycleTransition,
-    validatePollSpec,
-    verifyBoardConsistency,
-    verifyCastReceiptShell,
-    verifyCloseRecordShell,
-    verifyFirstComePolicy,
-    verifyRecoveryEpochUpdate,
-    verifyRosterManifestTranscript,
-    verifyTargetFinality,
-    verifyTranscriptCoreFixture,
-} from '../../dist/index.js';
-import * as publicApi from '../../dist/index.js';
+import * as publicApiRuntime from '../../dist/index.js';
+
+type DeriveThresholdProfile = (
+    input: ThresholdProfileInput,
+) => ThresholdProfile;
+type ValidatePollSpec = (input: PollSpecInput) => PollSpecValidation;
+type EvaluateActionCapability = (
+    action: ProtocolAction,
+    context: CapabilityContext,
+) => CapabilityDecision;
+type DeriveValidatedFirstComeOrder = (
+    input: FirstComeOrderingInput,
+) => FirstComeOrderingVerification;
+type VerifyBoardConsistency = (
+    input: BoardConsistencyInput,
+) => BoardConsistencyVerification;
+
+const publicApiRuntimeRecord = publicApiRuntime as Record<string, unknown>;
+const deriveThresholdProfile =
+    publicApiRuntimeRecord.deriveThresholdProfile as DeriveThresholdProfile;
+const validatePollSpec =
+    publicApiRuntimeRecord.validatePollSpec as ValidatePollSpec;
+const evaluateActionCapability =
+    publicApiRuntimeRecord.evaluateActionCapability as EvaluateActionCapability;
+const deriveValidatedFirstComeOrder =
+    publicApiRuntimeRecord.deriveValidatedFirstComeOrder as DeriveValidatedFirstComeOrder;
+const verifyBoardConsistency =
+    publicApiRuntimeRecord.verifyBoardConsistency as VerifyBoardConsistency;
 
 describe('election foundation public package API in browsers', () => {
     it('exposes callable safe runtime functions and keeps obvious raw APIs absent', () => {
-        expect(typeof deriveLifecycleLabels).toBe('function');
+        expect(typeof publicApiRuntimeRecord.deriveLifecycleLabels).toBe(
+            'function',
+        );
         expect(typeof deriveValidatedFirstComeOrder).toBe('function');
         expect(typeof deriveThresholdProfile).toBe('function');
         expect(typeof evaluateActionCapability).toBe('function');
-        expect(typeof isActionCurrentForRecoveryEpoch).toBe('function');
-        expect(typeof isValidLifecycleTransition).toBe('function');
+        expect(
+            typeof publicApiRuntimeRecord.isActionCurrentForRecoveryEpoch,
+        ).toBe('function');
+        expect(typeof publicApiRuntimeRecord.isValidLifecycleTransition).toBe(
+            'function',
+        );
         expect(typeof validatePollSpec).toBe('function');
         expect(typeof verifyBoardConsistency).toBe('function');
-        expect(typeof verifyCastReceiptShell).toBe('function');
-        expect(typeof verifyCloseRecordShell).toBe('function');
-        expect(typeof verifyFirstComePolicy).toBe('function');
-        expect(typeof verifyRecoveryEpochUpdate).toBe('function');
-        expect(typeof verifyRosterManifestTranscript).toBe('function');
-        expect(typeof verifyTargetFinality).toBe('function');
-        expect(typeof verifyTranscriptCoreFixture).toBe('function');
-        expect('thresholdDecrypt' in publicApi).toBe(false);
-        expect('rawHEAdd' in publicApi).toBe(false);
-        expect('rawNTT' in publicApi).toBe(false);
-        expect('verifyEvaluationReplayAttestationShell' in publicApi).toBe(
+        expect(typeof publicApiRuntimeRecord.verifyCastReceiptShell).toBe(
+            'function',
+        );
+        expect(typeof publicApiRuntimeRecord.verifyCloseRecordShell).toBe(
+            'function',
+        );
+        expect(typeof publicApiRuntimeRecord.verifyFirstComePolicy).toBe(
+            'function',
+        );
+        expect(typeof publicApiRuntimeRecord.verifyRecoveryEpochUpdate).toBe(
+            'function',
+        );
+        expect(
+            typeof publicApiRuntimeRecord.verifyRosterManifestTranscript,
+        ).toBe('function');
+        expect(typeof publicApiRuntimeRecord.verifyTargetFinality).toBe(
+            'function',
+        );
+        expect(typeof publicApiRuntimeRecord.verifyTranscriptCoreFixture).toBe(
+            'function',
+        );
+        expect('thresholdDecrypt' in publicApiRuntimeRecord).toBe(false);
+        expect('rawHEAdd' in publicApiRuntimeRecord).toBe(false);
+        expect('rawNTT' in publicApiRuntimeRecord).toBe(false);
+        expect(
+            'verifyEvaluationReplayAttestationShell' in publicApiRuntimeRecord,
+        ).toBe(false);
+        expect(
+            'verifyTargetAcceptedRecordShell' in publicApiRuntimeRecord,
+        ).toBe(false);
+        expect('verifyTopKDecryptionShareShell' in publicApiRuntimeRecord).toBe(
             false,
         );
-        expect('verifyTargetAcceptedRecordShell' in publicApi).toBe(false);
-        expect('verifyTopKDecryptionShareShell' in publicApi).toBe(false);
+        expect('createShamirPolynomial' in publicApiRuntimeRecord).toBe(false);
+        expect('derivePlaintextTopKOracle' in publicApiRuntimeRecord).toBe(
+            false,
+        );
+        expect('decodeSparseTopKTarget' in publicApiRuntimeRecord).toBe(false);
+        expect('fieldModulus' in publicApiRuntimeRecord).toBe(false);
     });
 
     it('runs the deterministic election foundation without WASM-specific APIs', () => {
-        const thresholdProfile = publicApi.deriveThresholdProfile({
+        const thresholdProfile = deriveThresholdProfile({
             rosterSize: 20,
         });
 
         expect(thresholdProfile.releaseQuorum).toBe(14);
         expect(
-            publicApi.validatePollSpec({
+            validatePollSpec({
                 pollId: 'browser-poll',
                 question: 'Question',
                 options: ['A', 'B', 'C'],
@@ -61,7 +114,7 @@ describe('election foundation public package API in browsers', () => {
             }),
         ).toMatchObject({ ok: true });
         expect(
-            publicApi.evaluateActionCapability('DeriveAggregateContribution', {
+            evaluateActionCapability('DeriveAggregateContribution', {
                 lifecycleState: 'VotingClosed',
                 thresholdProfile,
                 pollSpecValid: true,
@@ -73,7 +126,7 @@ describe('election foundation public package API in browsers', () => {
             action: 'DeriveAggregateContribution',
         });
         expect(
-            publicApi.deriveValidatedFirstComeOrder({
+            deriveValidatedFirstComeOrder({
                 requiredContextDigest: 'context',
                 selectionPolicyDigest: 'policy',
                 expectedSelectionPolicyDigest: 'policy',
@@ -106,7 +159,7 @@ describe('election foundation public package API in browsers', () => {
             ],
         });
         expect(
-            publicApi.verifyBoardConsistency({
+            verifyBoardConsistency({
                 ceremonyId: 'ceremony',
                 boardPolicyDigest: 'policy',
                 expectedBoardPublicKeyDigest: 'board-key',

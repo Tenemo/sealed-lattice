@@ -23,7 +23,7 @@
         "docs:build:site": "pnpm run docs:api && pnpm exec del-cli docs/dist && astro build --root docs --silent",
         "docs:preview": "pnpm run docs:build:site && astro preview --root docs",
         "docs": "pnpm run docs:build:site",
-        "verify:docs": "pnpm run docs:api && tsx ./typedoc/verify-docs.ts",
+        "verify:docs": "pnpm run docs:build:site && tsx ./typedoc/verify-docs.ts && tsx ./tools/ci/verify-docs-render.ts",
         "smoke:pack": "pnpm --filter sealed-lattice run build && tsx ./tools/ci/verify-packed-package.ts",
         "smoke:pack:npm": "pnpm --filter sealed-lattice run build && tsx ./tools/ci/verify-packed-package.ts --package-manager npm",
         "prepare": "husky"

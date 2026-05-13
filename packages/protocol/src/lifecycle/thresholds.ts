@@ -6,15 +6,14 @@ import type {
     ThresholdWarning,
 } from '@sealed-lattice/types';
 
+import { isNonNegativeInteger } from '../common/verification-helpers.js';
+
 import {
     mandatoryClaimRosterSize,
     maximumCertificateGatedRosterSize,
     minimumUnsafeRosterSize,
     strictLessThanOneThirdModel,
 } from './profiles.js';
-
-const isNonNegativeInteger = (value: number): boolean =>
-    Number.isInteger(value) && value >= 0;
 
 const normalizeBackendCorruptionModel = (
     rosterSize: number,
