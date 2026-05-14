@@ -20,8 +20,7 @@ import {
 import { deriveRosterDigest } from './digests.js';
 import {
     mapInclusionProofsByObjectDigest,
-    verifyIncludedBoardPlacement,
-    verifyRequiredInclusionProof,
+    verifyRequiredIncludedObjectPlacement,
 } from './inclusion.js';
 import {
     verifyManifest,
@@ -78,20 +77,15 @@ const verifyRosterManifestTranscriptUnchecked = (
     for (const entry of input.registrationEntries) {
         refusedObjects.push(...verifyRegistrationEntry(input, entry));
         refusedObjects.push(
-            ...verifyRequiredInclusionProof(
-                registrationProofsByDigest,
-                entry.registrationEntryDigest,
-                'RegistrationEntry',
+            ...verifyRequiredIncludedObjectPlacement({
+                proofByDigest: registrationProofsByDigest,
+                objectDigest: entry.registrationEntryDigest,
+                expectedObjectType: 'RegistrationEntry',
                 headsByDigest,
-            ),
-            ...verifyIncludedBoardPlacement(
-                registrationProofsByDigest,
-                entry.registrationEntryDigest,
-                'RegistrationEntry',
-                entry.boardSequence,
-                entry.boardPosition,
-                input.rosterFreezeBoardSequence,
-            ),
+                objectBoardSequence: entry.boardSequence,
+                objectBoardPosition: entry.boardPosition,
+                rosterFreezeBoardSequence: input.rosterFreezeBoardSequence,
+            }),
         );
 
         if (seenParticipantIdentities.has(entry.participantIdentity)) {
@@ -154,20 +148,15 @@ const verifyRosterManifestTranscriptUnchecked = (
             ),
         );
         refusedObjects.push(
-            ...verifyRequiredInclusionProof(
-                receiverProofsByDigest,
-                entry.receiverKeyRegistrationDigest,
-                'ReceiverKeyRegistration',
+            ...verifyRequiredIncludedObjectPlacement({
+                proofByDigest: receiverProofsByDigest,
+                objectDigest: entry.receiverKeyRegistrationDigest,
+                expectedObjectType: 'ReceiverKeyRegistration',
                 headsByDigest,
-            ),
-            ...verifyIncludedBoardPlacement(
-                receiverProofsByDigest,
-                entry.receiverKeyRegistrationDigest,
-                'ReceiverKeyRegistration',
-                entry.boardSequence,
-                entry.boardPosition,
-                input.rosterFreezeBoardSequence,
-            ),
+                objectBoardSequence: entry.boardSequence,
+                objectBoardPosition: entry.boardPosition,
+                rosterFreezeBoardSequence: input.rosterFreezeBoardSequence,
+            }),
         );
     }
 
@@ -192,20 +181,15 @@ const verifyRosterManifestTranscriptUnchecked = (
             ),
         );
         refusedObjects.push(
-            ...verifyRequiredInclusionProof(
-                trusteeProofsByDigest,
-                entry.trusteeSetupEntryDigest,
-                'TrusteeSetupEntry',
+            ...verifyRequiredIncludedObjectPlacement({
+                proofByDigest: trusteeProofsByDigest,
+                objectDigest: entry.trusteeSetupEntryDigest,
+                expectedObjectType: 'TrusteeSetupEntry',
                 headsByDigest,
-            ),
-            ...verifyIncludedBoardPlacement(
-                trusteeProofsByDigest,
-                entry.trusteeSetupEntryDigest,
-                'TrusteeSetupEntry',
-                entry.boardSequence,
-                entry.boardPosition,
-                input.rosterFreezeBoardSequence,
-            ),
+                objectBoardSequence: entry.boardSequence,
+                objectBoardPosition: entry.boardPosition,
+                rosterFreezeBoardSequence: input.rosterFreezeBoardSequence,
+            }),
         );
     }
 
@@ -231,33 +215,20 @@ const verifyRosterManifestTranscriptUnchecked = (
     const rosterDigest = deriveRosterDigest(input.registrationEntries);
     refusedObjects.push(...verifyManifest(input, rosterDigest));
     refusedObjects.push(
-        ...verifyRequiredInclusionProof(
-            new Map([
+        ...verifyRequiredIncludedObjectPlacement({
+            proofByDigest: new Map([
                 [
                     input.manifestInclusionProof.includedObjectDigest,
                     input.manifestInclusionProof,
                 ],
             ]),
-            input.electionManifest.electionManifestDigest,
-            'ElectionManifest',
+            objectDigest: input.electionManifest.electionManifestDigest,
+            expectedObjectType: 'ElectionManifest',
             headsByDigest,
-        ),
+            objectBoardSequence: input.electionManifest.boardSequence,
+            objectBoardPosition: input.electionManifest.boardPosition,
+        }),
     );
-    if (
-        input.manifestInclusionProof.boardSequence !==
-            input.electionManifest.boardSequence ||
-        input.manifestInclusionProof.boardPosition !==
-            input.electionManifest.boardPosition
-    ) {
-        refusedObjects.push(
-            createRefusal(
-                'InclusionProofInvalid',
-                'Election manifest board position must match its inclusion proof.',
-                input.manifestInclusionProof.inclusionProofDigest,
-                'ElectionManifest',
-            ),
-        );
-    }
     if (
         input.manifestInclusionProof.boardSequence <
         input.rosterFreezeBoardSequence

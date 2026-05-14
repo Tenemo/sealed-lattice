@@ -1,3 +1,4 @@
+import { deriveProtocolDigest } from '@sealed-lattice/crypto';
 import type {
     CastReceipt,
     CastReceiptVerification,
@@ -9,13 +10,10 @@ import type {
     RefusalRecord,
 } from '@sealed-lattice/types';
 
-import { collectBoardInclusionEvidence } from '../board/shell-evidence.js';
-import { deriveProtocolDigest } from '../common/digests.js';
-import { verifySignedObjectSignature } from '../common/signatures.js';
+import { collectSignedBoardInclusionEvidence } from '../board/shell-evidence.js';
 import {
     createRefusal,
     isNonNegativeInteger,
-    uniqueStrings,
 } from '../common/verification-helpers.js';
 
 export const deriveCastReceiptDigest = (
@@ -168,39 +166,31 @@ const verifyCastReceiptShape = (
 const verifyCastReceiptShellUnchecked = (
     input: CastReceiptVerificationInput,
 ): CastReceiptVerification => {
-    const { boardResult, refusedObjects } = collectBoardInclusionEvidence({
-        boardEvidence: input.boardEvidence,
-        inclusionProof: input.receiptInclusionProof,
-        objectRefusals: verifyCastReceiptShape(input),
-    });
-    const signatureResult = verifySignedObjectSignature(
-        input.receipt.signature,
-        {
-            objectType: 'CastReceipt',
-            objectVersion: 1,
-            signerRole: 'Voter',
-            signerIdentity: input.receipt.voterIdentity,
-            ceremonyId: input.receipt.ceremonyId,
-            publicKeyDigest: input.expectedVoterPublicKeyDigest,
-            manifestDigest: input.expectedElectionManifestDigest,
-            objectRoot: input.receipt.castReceiptDigest,
-            boardHeadDigest: input.receiptInclusionProof.boardHeadDigest,
-            contextDigest: input.receipt.contextDigest,
-        },
-    );
-    refusedObjects.push(...signatureResult.refusedObjects);
+    const { acceptedDigests, boardResult, refusedObjects } =
+        collectSignedBoardInclusionEvidence({
+            boardEvidence: input.boardEvidence,
+            inclusionProof: input.receiptInclusionProof,
+            objectRefusals: verifyCastReceiptShape(input),
+            signature: input.receipt.signature,
+            signatureExpectation: {
+                objectType: 'CastReceipt',
+                objectVersion: 1,
+                signerRole: 'Voter',
+                signerIdentity: input.receipt.voterIdentity,
+                ceremonyId: input.receipt.ceremonyId,
+                publicKeyDigest: input.expectedVoterPublicKeyDigest,
+                manifestDigest: input.expectedElectionManifestDigest,
+                objectRoot: input.receipt.castReceiptDigest,
+                boardHeadDigest: input.receiptInclusionProof.boardHeadDigest,
+                contextDigest: input.receipt.contextDigest,
+            },
+            acceptedObjectDigest: input.receipt.castReceiptDigest,
+        });
 
     return {
         ok: refusedObjects.length === 0,
         statusLabels: boardResult.statusLabels,
-        acceptedDigests:
-            refusedObjects.length === 0
-                ? uniqueStrings([
-                      ...boardResult.acceptedDigests,
-                      input.receipt.castReceiptDigest,
-                      input.receiptInclusionProof.inclusionProofDigest,
-                  ])
-                : [],
+        acceptedDigests,
         refusedObjects,
         forkEvidence: boardResult.forkEvidence,
         castReceiptDigest:
@@ -374,11 +364,29 @@ const verifyCloseRecordShape = (
 const verifyCloseRecordShellUnchecked = (
     input: CloseRecordVerificationInput,
 ): CloseRecordVerification => {
-    const { boardResult, headsByDigest, refusedObjects } =
-        collectBoardInclusionEvidence({
+    const { acceptedDigests, boardResult, headsByDigest, refusedObjects } =
+        collectSignedBoardInclusionEvidence({
             boardEvidence: input.boardEvidence,
+            extraAcceptedDigests:
+                input.closeRecord.postVotingClosedContextDigest === null
+                    ? []
+                    : [input.closeRecord.postVotingClosedContextDigest],
             inclusionProof: input.closeRecordInclusionProof,
             objectRefusals: verifyCloseRecordShape(input),
+            signature: input.closeRecord.signature,
+            signatureExpectation: {
+                objectType: 'CloseRecord',
+                objectVersion: 1,
+                signerRole: 'Organizer',
+                signerIdentity: input.closeRecord.organizerIdentity,
+                ceremonyId: input.closeRecord.ceremonyId,
+                publicKeyDigest: input.expectedOrganizerPublicKeyDigest,
+                manifestDigest: input.expectedElectionManifestDigest,
+                objectRoot: input.closeRecord.closeRecordDigest,
+                boardHeadDigest:
+                    input.closeRecordInclusionProof.boardHeadDigest,
+            },
+            acceptedObjectDigest: input.closeRecord.closeRecordDigest,
         });
     if (!headsByDigest.has(input.closeRecord.closedBoardHeadDigest)) {
         refusedObjects.push(
@@ -390,37 +398,10 @@ const verifyCloseRecordShellUnchecked = (
             ),
         );
     }
-    const signatureResult = verifySignedObjectSignature(
-        input.closeRecord.signature,
-        {
-            objectType: 'CloseRecord',
-            objectVersion: 1,
-            signerRole: 'Organizer',
-            signerIdentity: input.closeRecord.organizerIdentity,
-            ceremonyId: input.closeRecord.ceremonyId,
-            publicKeyDigest: input.expectedOrganizerPublicKeyDigest,
-            manifestDigest: input.expectedElectionManifestDigest,
-            objectRoot: input.closeRecord.closeRecordDigest,
-            boardHeadDigest: input.closeRecordInclusionProof.boardHeadDigest,
-        },
-    );
-    refusedObjects.push(...signatureResult.refusedObjects);
-
     return {
         ok: refusedObjects.length === 0,
         statusLabels: boardResult.statusLabels,
-        acceptedDigests:
-            refusedObjects.length === 0
-                ? uniqueStrings([
-                      ...boardResult.acceptedDigests,
-                      input.closeRecord.closeRecordDigest,
-                      input.closeRecordInclusionProof.inclusionProofDigest,
-                      ...(input.closeRecord.postVotingClosedContextDigest ===
-                      null
-                          ? []
-                          : [input.closeRecord.postVotingClosedContextDigest]),
-                  ])
-                : [],
+        acceptedDigests: refusedObjects.length === 0 ? acceptedDigests : [],
         refusedObjects,
         forkEvidence: boardResult.forkEvidence,
         closeRecordDigest:

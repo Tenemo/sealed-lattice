@@ -1,3 +1,7 @@
+import {
+    deriveProtocolDigest,
+    verifySignedObjectSignature,
+} from '@sealed-lattice/crypto';
 import type {
     ActionCurrentForRecoveryEpochInput,
     ActionCurrentForRecoveryEpochResult,
@@ -12,8 +16,6 @@ import {
     verifyBoardConsistency,
     verifyInclusionProof,
 } from '../board/index.js';
-import { deriveProtocolDigest } from '../common/digests.js';
-import { verifySignedObjectSignature } from '../common/signatures.js';
 import {
     buildBoardHeadMap,
     createRefusal,

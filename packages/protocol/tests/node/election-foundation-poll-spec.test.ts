@@ -1,7 +1,7 @@
+import type { PollSpecInput } from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
-import { validatePollSpec, validatePollSpecFromUnknown } from '../../src/index';
-import type { PollSpecInput } from '../../src/index';
+import { validatePollSpec } from '../../src/lifecycle/poll-spec';
 
 const createValidPollSpecInput = (
     overrides: Partial<PollSpecInput> = {},
@@ -17,7 +17,7 @@ const expectErrorCodes = (
     input: unknown,
     expectedCodes: readonly string[],
 ): void => {
-    const validation = validatePollSpecFromUnknown(input);
+    const validation = validatePollSpec(input);
 
     expect(validation.ok).toBe(false);
     if (!validation.ok) {

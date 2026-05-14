@@ -1,3 +1,4 @@
+import type { FieldElement } from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -9,8 +10,7 @@ import {
     invertFieldElement,
     multiplyFieldElements,
     subtractFieldElements,
-} from '../../src/index';
-import type { FieldElement } from '../../src/index';
+} from '../../src/plaintext-oracle/index';
 
 import { fieldVectors } from './plaintext-oracle-test-vectors';
 

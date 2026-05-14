@@ -1,19 +1,22 @@
-import {
-    deriveBoardEntryDigest,
-    deriveBoardHeadDigest,
-    deriveBoardRootDigest,
-    deriveInclusionProofDigest,
-    deriveProtocolDigest,
-    deriveTargetFinalityRecordDigest,
-    deriveWitnessCheckpointDigest,
-} from '../../src/index';
+import { deriveProtocolDigest } from '@sealed-lattice/crypto';
 import type {
     BoardConsistencyInput,
     InclusionProof,
     SignedBoardHead,
     TargetFinalityRecord,
     WitnessCheckpoint,
-} from '../../src/index';
+} from '@sealed-lattice/types';
+
+import {
+    deriveBoardEntryDigest,
+    deriveBoardHeadDigest,
+    deriveBoardRootDigest,
+    deriveInclusionProofDigest,
+} from '../../src/board/index';
+import {
+    deriveTargetFinalityRecordDigest,
+    deriveWitnessCheckpointDigest,
+} from '../../src/finality/index';
 
 import {
     boardPolicyDigest,

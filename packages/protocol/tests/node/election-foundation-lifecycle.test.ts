@@ -1,3 +1,4 @@
+import type { LifecycleState } from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -5,7 +6,6 @@ import {
     deriveThresholdProfile,
     isValidLifecycleTransition,
 } from '../../src/index';
-import type { LifecycleState } from '../../src/index';
 
 const expectValidPath = (states: readonly LifecycleState[]): void => {
     for (let index = 0; index < states.length - 1; index += 1) {

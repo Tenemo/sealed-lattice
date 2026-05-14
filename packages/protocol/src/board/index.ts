@@ -1,3 +1,7 @@
+import {
+    deriveProtocolDigest,
+    verifySignedObjectSignature,
+} from '@sealed-lattice/crypto';
 import type {
     BoardConsistencyInput,
     BoardConsistencyVerification,
@@ -10,8 +14,6 @@ import type {
     SignedBoardHead,
 } from '@sealed-lattice/types';
 
-import { deriveProtocolDigest } from '../common/digests.js';
-import { verifySignedObjectSignature } from '../common/signatures.js';
 import {
     buildBoardHeadMap,
     createRefusal,

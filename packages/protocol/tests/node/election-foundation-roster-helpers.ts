@@ -1,18 +1,19 @@
-import {
-    deriveElectionManifestDigest,
-    deriveProtocolDigest,
-    deriveReceiverKeyRegistrationDigest,
-    deriveRegistrationEntryDigest,
-    deriveRosterDigest,
-    deriveTrusteeSetupEntryDigest,
-} from '../../src/index';
+import { deriveProtocolDigest } from '@sealed-lattice/crypto';
 import type {
     ElectionManifest,
     ReceiverKeyRegistration,
     RegistrationEntry,
     RosterManifestTranscriptInput,
     TrusteeSetupEntry,
-} from '../../src/index';
+} from '@sealed-lattice/types';
+
+import {
+    deriveElectionManifestDigest,
+    deriveReceiverKeyRegistrationDigest,
+    deriveRegistrationEntryDigest,
+    deriveRosterDigest,
+    deriveTrusteeSetupEntryDigest,
+} from '../../src/roster/index';
 
 import {
     createBoardEvidence,

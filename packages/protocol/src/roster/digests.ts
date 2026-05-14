@@ -1,3 +1,4 @@
+import { deriveProtocolDigest } from '@sealed-lattice/crypto';
 import type {
     ElectionManifest,
     ProtocolDigest,
@@ -5,8 +6,6 @@ import type {
     RegistrationEntry,
     TrusteeSetupEntry,
 } from '@sealed-lattice/types';
-
-import { deriveProtocolDigest } from '../common/digests.js';
 
 export const deriveRegistrationEntryDigest = (
     entry: Omit<RegistrationEntry, 'registrationEntryDigest' | 'signature'>,

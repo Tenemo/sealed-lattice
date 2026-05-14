@@ -7,7 +7,7 @@ import {
     verifyCloseRecordShell as verifyCloseRecordShellInternal,
     isValidLifecycleTransition as isValidLifecycleTransitionInternal,
     isActionCurrentForRecoveryEpoch as isActionCurrentForRecoveryEpochInternal,
-    validatePollSpecFromUnknown as validatePollSpecFromUnknownInternal,
+    validatePollSpec as validatePollSpecInternal,
     verifyBoardConsistency as verifyBoardConsistencyInternal,
     verifyFirstComePolicy as verifyFirstComePolicyInternal,
     verifyRecoveryEpochUpdate as verifyRecoveryEpochUpdateInternal,
@@ -154,7 +154,7 @@ export const deriveThresholdProfile = (
 export function validatePollSpec(input: PollSpecInput): PollSpecValidation;
 export function validatePollSpec(input: unknown): PollSpecValidation;
 export function validatePollSpec(input: unknown): PollSpecValidation {
-    return validatePollSpecFromUnknownInternal(input);
+    return validatePollSpecInternal(input);
 }
 
 /** Returns whether a lifecycle transition is part of the supported state graph. */

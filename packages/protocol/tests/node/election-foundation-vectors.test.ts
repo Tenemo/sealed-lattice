@@ -1,24 +1,7 @@
-import { describe, expect, it } from 'vitest';
-
-import boardFinalityJson from '../../../../test-vectors/election-foundation/board-finality.json';
-import capabilityRefusalsJson from '../../../../test-vectors/election-foundation/capability-refusals.json';
-import deterministicFixturesJson from '../../../../test-vectors/election-foundation/deterministic-fixtures.json';
-import lifecycleTransitionsJson from '../../../../test-vectors/election-foundation/lifecycle-transitions.json';
-import pollSpecsJson from '../../../../test-vectors/election-foundation/poll-specs.json';
-import thresholdProfilesJson from '../../../../test-vectors/election-foundation/threshold-profiles.json';
 import {
-    deriveValidatedFirstComeOrder,
-    deriveThresholdProfile,
-    evaluateActionCapability,
-    isValidLifecycleTransition,
     protocolDigestNamespaceValues,
-    validatePollSpec,
-    verifyBoardConsistency,
-    verifyRecoveryEpochUpdate,
-    verifyRosterManifestTranscript,
     verifySignedObjectSignature,
-    verifyTargetFinality,
-} from '../../src/index';
+} from '@sealed-lattice/crypto';
 import type {
     BoardConsistencyInput,
     CapabilityContext,
@@ -33,6 +16,25 @@ import type {
     TargetFinalityVerificationInput,
     ThresholdProfile,
     ThresholdProfileInput,
+} from '@sealed-lattice/types';
+import { describe, expect, it } from 'vitest';
+
+import boardFinalityJson from '../../../../test-vectors/election-foundation/board-finality.json';
+import capabilityRefusalsJson from '../../../../test-vectors/election-foundation/capability-refusals.json';
+import deterministicFixturesJson from '../../../../test-vectors/election-foundation/deterministic-fixtures.json';
+import lifecycleTransitionsJson from '../../../../test-vectors/election-foundation/lifecycle-transitions.json';
+import pollSpecsJson from '../../../../test-vectors/election-foundation/poll-specs.json';
+import thresholdProfilesJson from '../../../../test-vectors/election-foundation/threshold-profiles.json';
+import {
+    deriveValidatedFirstComeOrder,
+    deriveThresholdProfile,
+    evaluateActionCapability,
+    isValidLifecycleTransition,
+    validatePollSpec,
+    verifyBoardConsistency,
+    verifyRecoveryEpochUpdate,
+    verifyRosterManifestTranscript,
+    verifyTargetFinality,
 } from '../../src/index';
 
 type ThresholdProfileVector = {

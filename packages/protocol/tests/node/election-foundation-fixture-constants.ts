@@ -4,9 +4,7 @@ import {
     createProtocolSignatureFixture,
     deriveProtocolDigest,
     deriveProtocolSignatureDigest,
-    deriveTargetFinalityPolicyDigest,
-    deriveWitnessPolicyDigest,
-} from '../../src/index';
+} from '@sealed-lattice/crypto';
 import type {
     CanonicalSignedRootObject,
     ManifestOpaqueBindings,
@@ -15,7 +13,12 @@ import type {
     SignedObjectType,
     SignerRole,
     WitnessPolicy,
-} from '../../src/index';
+} from '@sealed-lattice/types';
+
+import {
+    deriveTargetFinalityPolicyDigest,
+    deriveWitnessPolicyDigest,
+} from '../../src/finality/index';
 
 export const ceremonyId = 'ceremony-main';
 export const boardPolicyDigest = deriveProtocolDigest('BoardPolicyDigest', {

@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
+import { deriveThresholdProfile } from '../../src/lifecycle/thresholds';
 import {
     deriveInterpolationCoefficientReport,
-    deriveThresholdProfile,
     deriveWorstCaseInterpolationCoefficientReport,
     evaluateShamirPolynomialForRoster,
     interpolateShamirConstantTerm,
     normalizeFieldElement,
-} from '../../src/index';
+} from '../../src/plaintext-oracle/index';
 
 import {
     collectContributorPositionSets,

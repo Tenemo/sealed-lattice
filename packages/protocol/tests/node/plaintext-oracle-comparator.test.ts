@@ -1,11 +1,11 @@
+import type { ComparatorPolynomialSet } from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
 import {
     deriveComparatorPolynomialSet,
     evaluateFieldPolynomial,
     normalizeFieldElement,
-} from '../../src/index';
-import type { ComparatorPolynomialSet } from '../../src/index';
+} from '../../src/plaintext-oracle/index';
 
 import { comparatorPolynomialVectors } from './plaintext-oracle-test-vectors';
 

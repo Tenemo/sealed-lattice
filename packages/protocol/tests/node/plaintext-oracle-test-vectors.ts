@@ -1,16 +1,3 @@
-import { expect } from 'vitest';
-
-import comparatorPolynomialVectorsJson from '../../../../test-vectors/plaintext-oracle/comparator-polynomials.json';
-import fieldVectorsJson from '../../../../test-vectors/plaintext-oracle/field.json';
-import shamirVectorsJson from '../../../../test-vectors/plaintext-oracle/shamir.json';
-import sparseTargetVectorsJson from '../../../../test-vectors/plaintext-oracle/sparse-target.json';
-import topKVectorsJson from '../../../../test-vectors/plaintext-oracle/top-k.json';
-import {
-    createShamirPolynomial,
-    deriveSparseTopKTargetDigest,
-    normalizeFieldElement,
-    validatePollSpec,
-} from '../../src/index';
 import type {
     FieldElement,
     PlaintextScoreBallotInput,
@@ -18,7 +5,20 @@ import type {
     ShamirPolynomial,
     ShamirSharePoint,
     SparseTopKTarget,
-} from '../../src/index';
+} from '@sealed-lattice/types';
+import { expect } from 'vitest';
+
+import comparatorPolynomialVectorsJson from '../../../../test-vectors/plaintext-oracle/comparator-polynomials.json';
+import fieldVectorsJson from '../../../../test-vectors/plaintext-oracle/field.json';
+import shamirVectorsJson from '../../../../test-vectors/plaintext-oracle/shamir.json';
+import sparseTargetVectorsJson from '../../../../test-vectors/plaintext-oracle/sparse-target.json';
+import topKVectorsJson from '../../../../test-vectors/plaintext-oracle/top-k.json';
+import { validatePollSpec } from '../../src/lifecycle/poll-spec';
+import {
+    createShamirPolynomial,
+    deriveSparseTopKTargetDigest,
+    normalizeFieldElement,
+} from '../../src/plaintext-oracle/index';
 
 type FieldVectors = {
     readonly encodings: readonly {

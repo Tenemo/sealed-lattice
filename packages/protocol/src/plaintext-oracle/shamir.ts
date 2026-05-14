@@ -1,3 +1,4 @@
+import { deriveProtocolDigest } from '@sealed-lattice/crypto';
 import type {
     FieldElement,
     InterpolationCoefficientReport,
@@ -6,8 +7,6 @@ import type {
     ShamirSharePoint,
     WorstCaseInterpolationCoefficientReport,
 } from '@sealed-lattice/types';
-
-import { deriveProtocolDigest } from '../common/digests.js';
 
 import {
     addFieldElements,
@@ -65,7 +64,7 @@ export const createShamirPolynomial = (
     ],
 });
 
-export const evaluateShamirPolynomial = (
+const evaluateShamirPolynomial = (
     polynomial: ShamirPolynomial,
     rosterPosition: number,
 ): FieldElement => {
@@ -161,7 +160,7 @@ const validateContributorRosterPositions = (
     return validatedRosterPositions;
 };
 
-export const deriveLagrangeCoefficientsAtZero = (
+const deriveLagrangeCoefficientsAtZero = (
     contributorRosterPositions: readonly number[],
 ): readonly LagrangeCoefficient[] => {
     const seenRosterPositions = new Set<number>();

@@ -1,3 +1,4 @@
+import { verifySignedObjectSignature } from '@sealed-lattice/crypto';
 import type {
     ElectionManifest,
     InclusionProof,
@@ -9,7 +10,6 @@ import type {
     TrusteeSetupEntry,
 } from '@sealed-lattice/types';
 
-import { verifySignedObjectSignature } from '../common/signatures.js';
 import {
     createRefusal,
     isNonNegativeInteger,

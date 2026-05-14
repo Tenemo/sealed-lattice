@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
+import { validatePollSpec } from '../../src/lifecycle/poll-spec';
 import {
     decodeSparseTopKTarget,
     derivePlaintextTopKOracle,
-    validatePollSpec,
-} from '../../src/index';
+} from '../../src/plaintext-oracle/index';
 
 describe('plaintext oracle in browsers', () => {
     it('derives and decodes a deterministic sparse top-k target without native helpers', () => {

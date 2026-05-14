@@ -59,10 +59,6 @@ const transitionMap = {
     ForkedElection: [],
 } as const satisfies Record<LifecycleState, readonly LifecycleState[]>;
 
-export const lifecycleStates = Object.keys(
-    transitionMap,
-) as readonly LifecycleState[];
-
 export const isValidLifecycleTransition = (
     transition: LifecycleTransition,
 ): boolean =>

@@ -1,3 +1,4 @@
+import { deriveProtocolDigest } from '@sealed-lattice/crypto';
 import type {
     ComparatorPolynomialSet,
     FieldElement,
@@ -9,8 +10,6 @@ import type {
     PlaintextTopKRankingEntry,
     PollSpec,
 } from '@sealed-lattice/types';
-
-import { deriveProtocolDigest } from '../common/digests.js';
 
 import {
     addFieldElements,
@@ -52,7 +51,7 @@ const assertPollSpecShape = (pollSpec: PollSpec): void => {
     }
 };
 
-export const normalizePlaintextScoreBallot = (
+const normalizePlaintextScoreBallot = (
     pollSpec: PollSpec,
     ballot: PlaintextScoreBallotInput,
 ): NormalizedPlaintextScoreBallot => {
@@ -81,7 +80,7 @@ export const normalizePlaintextScoreBallot = (
           };
 };
 
-export const derivePlaintextTally = (input: {
+const derivePlaintextTally = (input: {
     readonly ballots: readonly PlaintextScoreBallotInput[];
     readonly maximumRosterSize?: number;
     readonly pollSpec: PollSpec;
@@ -144,7 +143,7 @@ export const derivePlaintextTally = (input: {
     };
 };
 
-export const derivePlaintextTopKRanking = (
+const derivePlaintextTopKRanking = (
     tally: Pick<PlaintextTally, 'optionTallies'>,
 ): readonly PlaintextTopKRankingEntry[] =>
     tally.optionTallies
@@ -187,7 +186,7 @@ const multiplyPolynomialByLinearTerm = (
     return output;
 };
 
-export const interpolateFieldPolynomial = (
+const interpolateFieldPolynomial = (
     points: readonly {
         readonly xValue: FieldElement;
         readonly y: FieldElement;

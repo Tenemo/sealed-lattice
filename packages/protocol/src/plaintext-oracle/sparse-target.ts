@@ -1,3 +1,4 @@
+import { deriveProtocolDigest } from '@sealed-lattice/crypto';
 import type {
     DecodedSparseTopKSelection,
     FieldElement,
@@ -7,7 +8,6 @@ import type {
     SparseTopKTargetDecoding,
 } from '@sealed-lattice/types';
 
-import { deriveProtocolDigest } from '../common/digests.js';
 import {
     createRefusal,
     uniqueStrings,
@@ -15,10 +15,10 @@ import {
 
 import { assertCanonicalFieldElement } from './field.js';
 
-export const sparseTopKTargetLayoutId = 'WinnerRankTopK-v1' as const;
+const sparseTopKTargetLayoutId = 'WinnerRankTopK-v1' as const;
 const forbiddenSemanticSlotCount = 4;
 
-export const deriveSparseTopKTargetLayoutDigest = (input: {
+const deriveSparseTopKTargetLayoutDigest = (input: {
     readonly optionCount: number;
     readonly topOptionCount: number;
 }): string =>

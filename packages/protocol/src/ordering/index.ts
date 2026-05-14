@@ -1,3 +1,4 @@
+import { deriveProtocolDigest } from '@sealed-lattice/crypto';
 import type {
     FirstComeOrderingInput,
     FirstComeOrderingVerification,
@@ -5,7 +6,6 @@ import type {
     ValidatedFirstComeCandidate,
 } from '@sealed-lattice/types';
 
-import { deriveProtocolDigest } from '../common/digests.js';
 import {
     createRefusal,
     isNonNegativeInteger,
@@ -114,7 +114,7 @@ const isCurrentRecoveryEpoch = (
     );
 };
 
-export const deriveFirstComeOrderDigest = (
+const deriveFirstComeOrderDigest = (
     input: Pick<
         FirstComeOrderingInput,
         'requiredContextDigest' | 'selectionPolicyDigest'

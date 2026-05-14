@@ -152,8 +152,6 @@
     "board/index.ts",
     "board/shell-evidence.ts",
     "closing/index.ts",
-    "common/digests.ts",
-    "common/signatures.ts",
     "common/verification-helpers.ts",
     "finality/index.ts",
     "lifecycle/capabilities.ts",
@@ -174,7 +172,7 @@
   "vendoredProtocolRuntimeEntryExports": [
     {
       "source": "board/index.js",
-      "exports": ["verifyBoardConsistency", "verifyInclusionProof"]
+      "exports": ["verifyBoardConsistency"]
     },
     {
       "source": "closing/index.js",
@@ -198,7 +196,7 @@
     },
     {
       "source": "lifecycle/poll-spec.js",
-      "exports": ["validatePollSpecFromUnknown"]
+      "exports": ["validatePollSpec"]
     },
     {
       "source": "lifecycle/thresholds.js",

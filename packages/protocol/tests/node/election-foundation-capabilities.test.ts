@@ -1,10 +1,10 @@
+import type { CapabilityContext } from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
 import {
     deriveThresholdProfile,
     evaluateActionCapability,
 } from '../../src/index';
-import type { CapabilityContext } from '../../src/index';
 
 const thresholdProfile = deriveThresholdProfile({ rosterSize: 20 });
 

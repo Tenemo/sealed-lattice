@@ -2,43 +2,55 @@ export {
     createMlDsaKeyPairFixture,
     createMlDsaSignatureProfileFixture,
     createProtocolSignatureFixture,
+    deriveProtocolDigest,
+    deriveProtocolSignatureDigest,
+    verifySignedObjectSignature,
+} from '@sealed-lattice/crypto';
+export {
     deriveActionContextDigest,
+    deriveRecoveryEpochUpdateDigest,
+    isActionCurrentForRecoveryEpoch,
+    verifyRecoveryEpochUpdate,
+} from '../../src/recovery/index';
+export {
     deriveBoardEntryDigest,
     deriveBoardHeadDigest,
     deriveBoardRootDigest,
+    deriveConflictingHeadEvidenceDigest,
+    deriveInclusionProofDigest,
+    verifyBoardConsistency,
+} from '../../src/board/index';
+export {
     deriveCastReceiptDigest,
     deriveCloseRecordDigest,
-    deriveConflictingHeadEvidenceDigest,
-    deriveElectionManifestDigest,
-    deriveEvaluationReplayAttestationDigest,
-    deriveInclusionProofDigest,
     derivePostVotingClosedContextDigest,
-    deriveProtocolDigest,
-    deriveProtocolSignatureDigest,
-    deriveReceiverKeyRegistrationDigest,
-    deriveRecoveryEpochUpdateDigest,
-    deriveRegistrationEntryDigest,
-    deriveRosterDigest,
-    deriveTargetAcceptedRecordDigest,
-    deriveTargetFinalityPolicyDigest,
-    deriveTargetFinalityRecordDigest,
-    deriveTopKDecryptionShareDigest,
-    deriveTrusteeSetupEntryDigest,
-    deriveValidatedFirstComeOrder,
-    deriveWitnessCheckpointDigest,
-    deriveWitnessPolicyDigest,
-    isActionCurrentForRecoveryEpoch,
-    verifyBoardConsistency,
     verifyCastReceiptShell,
     verifyCloseRecordShell,
-    verifyEvaluationReplayAttestationShell,
-    verifyRecoveryEpochUpdate,
+} from '../../src/closing/index';
+export {
+    deriveElectionManifestDigest,
+    deriveReceiverKeyRegistrationDigest,
+    deriveRegistrationEntryDigest,
+    deriveRosterDigest,
+    deriveTrusteeSetupEntryDigest,
     verifyRosterManifestTranscript,
-    verifySignedObjectSignature,
-    verifyTargetAcceptedRecordShell,
+} from '../../src/roster/index';
+export {
+    deriveTargetFinalityPolicyDigest,
+    deriveTargetFinalityRecordDigest,
+    deriveWitnessCheckpointDigest,
+    deriveWitnessPolicyDigest,
     verifyTargetFinality,
+} from '../../src/finality/index';
+export { deriveValidatedFirstComeOrder } from '../../src/ordering/index';
+export {
+    deriveEvaluationReplayAttestationDigest,
+    deriveTargetAcceptedRecordDigest,
+    deriveTopKDecryptionShareDigest,
+    verifyEvaluationReplayAttestationShell,
+    verifyTargetAcceptedRecordShell,
     verifyTopKDecryptionShareShell,
-} from '../../src/index';
+} from '../../src/target-phase/index';
 export type {
     ActionContext,
     BoardConsistencyInput,
@@ -68,7 +80,7 @@ export type {
     ValidatedFirstComeCandidate,
     WitnessCheckpoint,
     WitnessPolicy,
-} from '../../src/index';
+} from '@sealed-lattice/types';
 export * from './election-foundation-board-helpers';
 export * from './election-foundation-fixture-constants';
 export * from './election-foundation-roster-helpers';

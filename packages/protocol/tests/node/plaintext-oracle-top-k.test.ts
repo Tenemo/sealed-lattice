@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
     decodeSparseTopKTarget,
     derivePlaintextTopKOracle,
-} from '../../src/index';
+} from '../../src/plaintext-oracle/index';
 
 import {
     assertValidPollSpec,
