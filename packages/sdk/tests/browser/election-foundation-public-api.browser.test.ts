@@ -80,6 +80,8 @@ describe('election foundation public package API in browsers', () => {
                 pollSpecValid: true,
                 setupCompleteCount: thresholdProfile.setupCompletionQuorum,
                 turnoutCount: thresholdProfile.releaseQuorum,
+                bridgeMobileCertificatePresent: true,
+                bridgeProverCertificatePresent: true,
             }),
         ).toEqual({
             allowed: true,

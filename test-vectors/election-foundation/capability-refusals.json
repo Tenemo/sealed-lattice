@@ -36,7 +36,8 @@
         "lifecycleState": "EvaluationReplayOpen",
         "pollSpecValid": true,
         "targetFinalityAccepted": true,
-        "replayAttestationCount": 5
+        "replayAttestationCount": 5,
+        "bridgeMobileCertificatePresent": true
       },
       "expected": {
         "allowed": true,
@@ -46,12 +47,25 @@
     {
       "caseName": "decryption-share-ambiguous-recovery",
       "action": "CreateTargetBoundDecryptionShare",
+      "thresholdProfileInput": {
+        "rosterSize": 20,
+        "appendixCShareSelectionProfile": {
+          "profileId": "appendix-c-certified-first-valid-v1",
+          "certificateDigest": "appendix-c-certificate-digest",
+          "decryptionShareQuorum": 9,
+          "minimumSharesForInterpolation": 7,
+          "minimumArrivalsForRobustDecode": 9,
+          "invalidShareFilteringMode": "ProofVerifiedSharesOnly",
+          "selectedShareRule": "FirstValidSharesInCanonicalBoardOrder"
+        }
+      },
       "context": {
         "lifecycleState": "TargetAccepted",
         "pollSpecValid": true,
         "targetFinalityAccepted": true,
         "targetAccepted": true,
-        "recoveryState": "Ambiguous"
+        "recoveryState": "Ambiguous",
+        "oneShotDecryptionProofCertificatePresent": true
       },
       "expected": {
         "allowed": false,
@@ -160,6 +174,7 @@
         "pollSpecValid": true,
         "setupCompleteCount": 20,
         "turnoutCount": 14,
+        "bridgeMobileCertificatePresent": true,
         "bridgeProverCertificatePresent": false
       },
       "expected": {
@@ -169,19 +184,31 @@
       }
     },
     {
-      "caseName": "decryption-share-missing-brakerski-mobile-proof-certificate",
+      "caseName": "decryption-share-missing-one-shot-decryption-proof-certificate",
       "action": "CreateTargetBoundDecryptionShare",
+      "thresholdProfileInput": {
+        "rosterSize": 20,
+        "appendixCShareSelectionProfile": {
+          "profileId": "appendix-c-certified-first-valid-v1",
+          "certificateDigest": "appendix-c-certificate-digest",
+          "decryptionShareQuorum": 9,
+          "minimumSharesForInterpolation": 7,
+          "minimumArrivalsForRobustDecode": 9,
+          "invalidShareFilteringMode": "ProofVerifiedSharesOnly",
+          "selectedShareRule": "FirstValidSharesInCanonicalBoardOrder"
+        }
+      },
       "context": {
         "lifecycleState": "TargetAccepted",
         "pollSpecValid": true,
         "targetFinalityAccepted": true,
         "targetAccepted": true,
-        "brakerskiMobileProofCertificatePresent": false
+        "oneShotDecryptionProofCertificatePresent": false
       },
       "expected": {
         "allowed": false,
         "action": "CreateTargetBoundDecryptionShare",
-        "reason": "MissingBrakerskiMobileProofCertificate"
+        "reason": "MissingOneShotDecryptionProofCertificate"
       }
     }
   ]

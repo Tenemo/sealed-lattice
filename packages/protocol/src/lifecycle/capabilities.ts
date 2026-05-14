@@ -28,7 +28,7 @@ const bridgeMobileCertificateActions = new Set<ProtocolAction>([
     'AcceptTarget',
 ]);
 
-const brakerskiMobileProofCertificateActions = new Set<ProtocolAction>([
+const oneShotDecryptionProofCertificateActions = new Set<ProtocolAction>([
     'CreateTargetBoundDecryptionShare',
     'VerifyDecryptionShare',
     'RecombineAcceptedTarget',
@@ -37,6 +37,11 @@ const brakerskiMobileProofCertificateActions = new Set<ProtocolAction>([
 
 const countAtLeast = (actual: number | undefined, required: number): boolean =>
     actual !== undefined && actual >= required;
+
+const getCertifiedDecryptionShareQuorum = (
+    context: CapabilityContext,
+): number | undefined =>
+    context.thresholdProfile.decryptionShareQuorum ?? undefined;
 
 const isRecoveryRefused = (
     recoveryState: RecoveryState | undefined,
@@ -101,10 +106,10 @@ const evaluateAggregateContribution = (
     ) {
         return refuseAction(action, 'TurnoutBelowReleaseFloor');
     }
-    if (context.bridgeMobileCertificatePresent === false) {
+    if (context.bridgeMobileCertificatePresent !== true) {
         return refuseAction(action, 'MissingBridgeMobileCertificate');
     }
-    if (context.bridgeProverCertificatePresent === false) {
+    if (context.bridgeProverCertificatePresent !== true) {
         return refuseAction(action, 'MissingBridgeProverCertificate');
     }
 
@@ -124,7 +129,7 @@ const evaluateReplay = (
     if (context.targetFinalityAccepted !== true) {
         return refuseAction(action, 'TargetFinalityCheckpointMissing');
     }
-    if (context.bridgeMobileCertificatePresent === false) {
+    if (context.bridgeMobileCertificatePresent !== true) {
         return refuseAction(action, 'MissingBridgeMobileCertificate');
     }
 
@@ -144,7 +149,7 @@ const evaluateReplayAttestation = (
     if (context.localReplaySucceeded !== true) {
         return refuseAction(action, 'LocalReplayNotVerified');
     }
-    if (context.bridgeMobileCertificatePresent === false) {
+    if (context.bridgeMobileCertificatePresent !== true) {
         return refuseAction(action, 'MissingBridgeMobileCertificate');
     }
 
@@ -174,7 +179,7 @@ const evaluateTargetAcceptance = (
     ) {
         return refuseAction(action, 'EvaluationReplayThresholdNotReached');
     }
-    if (context.bridgeMobileCertificatePresent === false) {
+    if (context.bridgeMobileCertificatePresent !== true) {
         return refuseAction(action, 'MissingBridgeMobileCertificate');
     }
 
@@ -194,13 +199,16 @@ const evaluateDecryptionShare = (
     if (context.targetAccepted !== true) {
         return refuseAction(action, 'TargetNotAccepted');
     }
+    if (getCertifiedDecryptionShareQuorum(context) === undefined) {
+        return refuseAction(action, 'ShareSelectionProfileNotCertified');
+    }
 
     const recoveryRefusal = isRecoveryRefused(context.recoveryState);
     if (recoveryRefusal !== undefined) {
         return refuseAction(action, recoveryRefusal);
     }
-    if (context.brakerskiMobileProofCertificatePresent === false) {
-        return refuseAction(action, 'MissingBrakerskiMobileProofCertificate');
+    if (context.oneShotDecryptionProofCertificatePresent !== true) {
+        return refuseAction(action, 'MissingOneShotDecryptionProofCertificate');
     }
 
     return allowAction(action);
@@ -220,16 +228,24 @@ const evaluateRecombination = (
     if (context.targetAccepted !== true) {
         return refuseAction(action, 'TargetNotAccepted');
     }
+    if (context.targetFinalityAccepted !== true) {
+        return refuseAction(action, 'TargetFinalityCheckpointMissing');
+    }
+    const certifiedDecryptionShareQuorum =
+        getCertifiedDecryptionShareQuorum(context);
+    if (certifiedDecryptionShareQuorum === undefined) {
+        return refuseAction(action, 'ShareSelectionProfileNotCertified');
+    }
     if (
         !countAtLeast(
             context.decryptionShareCount,
-            context.thresholdProfile.decryptionShareQuorum,
+            certifiedDecryptionShareQuorum,
         )
     ) {
         return refuseAction(action, 'FirstThresholdSharesNotReached');
     }
-    if (context.brakerskiMobileProofCertificatePresent === false) {
-        return refuseAction(action, 'MissingBrakerskiMobileProofCertificate');
+    if (context.oneShotDecryptionProofCertificatePresent !== true) {
+        return refuseAction(action, 'MissingOneShotDecryptionProofCertificate');
     }
 
     return allowAction(action);
@@ -263,10 +279,10 @@ const evaluateUnavailableFutureAction = (
         return refuseAction(action, 'MissingBridgeMobileCertificate');
     }
     if (
-        brakerskiMobileProofCertificateActions.has(action) &&
-        context.brakerskiMobileProofCertificatePresent === false
+        oneShotDecryptionProofCertificateActions.has(action) &&
+        context.oneShotDecryptionProofCertificatePresent === false
     ) {
-        return refuseAction(action, 'MissingBrakerskiMobileProofCertificate');
+        return refuseAction(action, 'MissingOneShotDecryptionProofCertificate');
     }
 
     return refuseAction(action, 'OperationUnavailable');

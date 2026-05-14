@@ -193,20 +193,20 @@ export const deriveLifecycleLabels = (
     if (input.bridgeProofRejected === true) {
         failures.push('BridgeProofRejected');
     }
-    if (input.brakerskiBackendProfileRejected === true) {
-        failures.push('BrakerskiBackendProfileRejected');
+    if (input.thresholdBackendProfileRejected === true) {
+        failures.push('ThresholdBackendProfileRejected');
     }
-    if (input.bridgeMobileCertRejected === true) {
-        failures.push('BridgeMobileCertRejected');
+    if (input.bridgeMobileCertificateRejected === true) {
+        failures.push('BridgeMobileCertificateRejected');
     }
     if (input.unsupportedLowResourceDevice === true) {
         failures.push('UnsupportedLowResourceDevice');
     }
 
     const mobileCertificatesPresent =
-        input.bridgeMobileCertificatePresent !== false &&
-        input.bridgeProverCertificatePresent !== false &&
-        input.brakerskiMobileProofCertificatePresent !== false;
+        input.bridgeMobileCertificatePresent === true &&
+        input.bridgeProverCertificatePresent === true &&
+        input.oneShotDecryptionProofCertificatePresent === true;
     const resultState =
         input.lifecycleState === 'ResultComputedAuditable' ||
         input.lifecycleState === 'FullyVerifiedResult';

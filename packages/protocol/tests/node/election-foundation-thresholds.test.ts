@@ -2,9 +2,26 @@ import { describe, expect, it } from 'vitest';
 
 import { deriveThresholdProfile } from '../../src/index';
 
+const appendixCShareSelectionProfile = {
+    profileId: 'appendix-c-certified-first-valid-v1',
+    certificateDigest: 'appendix-c-certificate-digest',
+    decryptionShareQuorum: 9,
+    minimumSharesForInterpolation: 7,
+    minimumArrivalsForRobustDecode: 9,
+    invalidShareFilteringMode: 'ProofVerifiedSharesOnly',
+    selectedShareRule: 'FirstValidSharesInCanonicalBoardOrder',
+} as const;
+
 const expectFeasibleThresholds = (rosterSize: number): void => {
+    const decryptionThreshold = Math.floor((rosterSize - 1) / 3) + 1;
     const profile = deriveThresholdProfile({
         rosterSize,
+        appendixCShareSelectionProfile: {
+            ...appendixCShareSelectionProfile,
+            decryptionShareQuorum: decryptionThreshold + 2,
+            minimumSharesForInterpolation: decryptionThreshold,
+            minimumArrivalsForRobustDecode: decryptionThreshold + 2,
+        },
         unsafeMicroRosterAcknowledged: rosterSize < 20,
     });
 
@@ -18,7 +35,9 @@ const expectFeasibleThresholds = (rosterSize: number): void => {
         profile.decryptionThreshold,
     );
     expect(profile.aggregateContributionQuorum).toBe(profile.pvssThreshold);
-    expect(profile.decryptionShareQuorum).toBe(profile.decryptionThreshold);
+    expect(profile.decryptionShareQuorum).toBeGreaterThanOrEqual(
+        profile.decryptionThreshold,
+    );
     expect(profile.replayBadCorruptionBound).toBe(profile.activeFaultBound);
     expect(profile.evaluationReplayQuorum).toBe(
         profile.replayBadCorruptionBound + 1,
@@ -80,10 +99,13 @@ describe('election foundation threshold profiles', () => {
                 replayBadCorruptionBound: activeFaultBound,
                 pvssThreshold: threshold,
                 decryptionThreshold: threshold,
+                decryptionShareQuorum: null,
+                appendixCShareSelectionProfile: null,
                 activeFaultBound,
                 evaluationReplayQuorum,
                 releaseQuorum,
             });
+            expect(profile.warnings).toContain('ShareSelectionProfileRequired');
         },
     );
 
@@ -129,7 +151,7 @@ describe('election foundation threshold profiles', () => {
 
         expect(profile.rosterProfileKind).toBe('MandatoryN20');
         expect(profile.claimBearing).toBe(true);
-        expect(profile.warnings).toEqual([]);
+        expect(profile.warnings).toEqual(['ShareSelectionProfileRequired']);
     });
 
     it.each([21, 50])(
@@ -142,6 +164,7 @@ describe('election foundation threshold profiles', () => {
             expect(profile.warnings).toEqual([
                 'CertificateGatedProfile',
                 'BackendCertificateRequired',
+                'ShareSelectionProfileRequired',
             ]);
         },
     );
@@ -166,5 +189,57 @@ describe('election foundation threshold profiles', () => {
         expect(profile.backendCorruptionBound).toBe(8);
         expect(profile.privacyCorruptionBound).toBe(6);
         expect(profile.warnings).toContain('BackendCorruptionBoundTooHigh');
+    });
+
+    it('uses Appendix-C-certified share-selection output for decryption share quorum', () => {
+        const profile = deriveThresholdProfile({
+            rosterSize: 20,
+            appendixCShareSelectionProfile,
+        });
+
+        expect(profile.decryptionThreshold).toBe(7);
+        expect(profile.decryptionShareQuorum).toBe(9);
+        expect(profile.appendixCShareSelectionProfile).toEqual(
+            appendixCShareSelectionProfile,
+        );
+        expect(profile.warnings).not.toContain('ShareSelectionProfileRequired');
+    });
+
+    it('rejects Appendix C share-selection profiles that cannot certify safe recombination', () => {
+        expect(() =>
+            deriveThresholdProfile({
+                rosterSize: 20,
+                appendixCShareSelectionProfile: {
+                    ...appendixCShareSelectionProfile,
+                    decryptionShareQuorum: 6,
+                },
+            }),
+        ).toThrow(
+            'Appendix C decryption share quorum must be at least the decryption threshold.',
+        );
+
+        expect(() =>
+            deriveThresholdProfile({
+                rosterSize: 20,
+                appendixCShareSelectionProfile: {
+                    ...appendixCShareSelectionProfile,
+                    certificateDigest: '',
+                },
+            }),
+        ).toThrow(
+            'Appendix C share-selection profile requires a certificate digest.',
+        );
+
+        expect(() =>
+            deriveThresholdProfile({
+                rosterSize: 20,
+                appendixCShareSelectionProfile: {
+                    ...appendixCShareSelectionProfile,
+                    minimumArrivalsForRobustDecode: 8,
+                },
+            }),
+        ).toThrow(
+            'Appendix C robust-decode arrival count must be at least the decryption share quorum.',
+        );
     });
 });

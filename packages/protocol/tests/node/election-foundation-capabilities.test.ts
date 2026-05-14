@@ -6,7 +6,21 @@ import {
     evaluateActionCapability,
 } from '../../src/index';
 
+const appendixCShareSelectionProfile = {
+    profileId: 'appendix-c-certified-first-valid-v1',
+    certificateDigest: 'appendix-c-certificate-digest',
+    decryptionShareQuorum: 9,
+    minimumSharesForInterpolation: 7,
+    minimumArrivalsForRobustDecode: 9,
+    invalidShareFilteringMode: 'ProofVerifiedSharesOnly',
+    selectedShareRule: 'FirstValidSharesInCanonicalBoardOrder',
+} as const;
+
 const thresholdProfile = deriveThresholdProfile({ rosterSize: 20 });
+const certifiedThresholdProfile = deriveThresholdProfile({
+    rosterSize: 20,
+    appendixCShareSelectionProfile,
+});
 
 const createContext = (
     overrides: Partial<CapabilityContext> = {},
@@ -63,6 +77,8 @@ describe('election foundation capability evaluator', () => {
                     lifecycleState: 'AwaitingAggregateContributors',
                     setupCompleteCount: thresholdProfile.setupCompletionQuorum,
                     turnoutCount: thresholdProfile.releaseQuorum,
+                    bridgeMobileCertificatePresent: true,
+                    bridgeProverCertificatePresent: true,
                 }),
             ),
         ).toEqual({
@@ -130,6 +146,7 @@ describe('election foundation capability evaluator', () => {
                     targetFinalityAccepted: true,
                     replayAttestationCount:
                         thresholdProfile.evaluationReplayQuorum,
+                    bridgeMobileCertificatePresent: true,
                 }),
             ),
         ).toEqual({ allowed: true, action: 'AcceptTarget' });
@@ -140,6 +157,7 @@ describe('election foundation capability evaluator', () => {
                     lifecycleState: 'OptionalEvaluationProofVerified',
                     targetFinalityAccepted: true,
                     optionalEvaluationProofVerified: true,
+                    bridgeMobileCertificatePresent: true,
                 }),
             ),
         ).toEqual({ allowed: true, action: 'AcceptTarget' });
@@ -182,9 +200,11 @@ describe('election foundation capability evaluator', () => {
                     'CreateTargetBoundDecryptionShare',
                     createContext({
                         lifecycleState: 'TargetAccepted',
+                        thresholdProfile: certifiedThresholdProfile,
                         targetFinalityAccepted: true,
                         targetAccepted: true,
                         recoveryState,
+                        oneShotDecryptionProofCertificatePresent: true,
                     }),
                 ),
             ).toMatchObject({ reason });
@@ -197,11 +217,52 @@ describe('election foundation capability evaluator', () => {
                 'RecombineAcceptedTarget',
                 createContext({
                     lifecycleState: 'AwaitingFirstDecryptionShares',
+                    thresholdProfile: certifiedThresholdProfile,
                     decryptionShareCount:
-                        thresholdProfile.decryptionShareQuorum,
+                        certifiedThresholdProfile.decryptionShareQuorum ?? 0,
                 }),
             ),
         ).toMatchObject({ reason: 'TargetNotAccepted' });
+    });
+
+    it('requires target finality before recombination', () => {
+        expect(
+            evaluateActionCapability(
+                'RecombineAcceptedTarget',
+                createContext({
+                    lifecycleState: 'AwaitingFirstDecryptionShares',
+                    thresholdProfile: certifiedThresholdProfile,
+                    targetAccepted: true,
+                    decryptionShareCount:
+                        certifiedThresholdProfile.decryptionShareQuorum ?? 0,
+                }),
+            ),
+        ).toMatchObject({ reason: 'TargetFinalityCheckpointMissing' });
+    });
+
+    it('requires an Appendix-C-certified share-selection profile before decryption and recombination', () => {
+        expect(
+            evaluateActionCapability(
+                'CreateTargetBoundDecryptionShare',
+                createContext({
+                    lifecycleState: 'TargetAccepted',
+                    targetFinalityAccepted: true,
+                    targetAccepted: true,
+                }),
+            ),
+        ).toMatchObject({ reason: 'ShareSelectionProfileNotCertified' });
+
+        expect(
+            evaluateActionCapability(
+                'RecombineAcceptedTarget',
+                createContext({
+                    lifecycleState: 'AwaitingFirstDecryptionShares',
+                    targetFinalityAccepted: true,
+                    targetAccepted: true,
+                    decryptionShareCount: 9,
+                }),
+            ),
+        ).toMatchObject({ reason: 'ShareSelectionProfileNotCertified' });
     });
 
     it('refuses recombination until the first threshold shares are reached', () => {
@@ -210,9 +271,12 @@ describe('election foundation capability evaluator', () => {
                 'RecombineAcceptedTarget',
                 createContext({
                     lifecycleState: 'AwaitingFirstDecryptionShares',
+                    thresholdProfile: certifiedThresholdProfile,
+                    targetFinalityAccepted: true,
                     targetAccepted: true,
                     decryptionShareCount:
-                        thresholdProfile.decryptionShareQuorum - 1,
+                        (certifiedThresholdProfile.decryptionShareQuorum ?? 0) -
+                        1,
                 }),
             ),
         ).toMatchObject({ reason: 'FirstThresholdSharesNotReached' });
@@ -281,7 +345,7 @@ describe('election foundation capability evaluator', () => {
         ).toMatchObject({ reason: 'InsufficientStorageQuota' });
     });
 
-    it('refuses bridge and Brakerski paths when required mobile certificates are missing', () => {
+    it('refuses bridge and one-shot decryption paths when required mobile certificates are missing', () => {
         expect(
             evaluateActionCapability(
                 'ReplayEvaluation',
@@ -300,6 +364,7 @@ describe('election foundation capability evaluator', () => {
                     lifecycleState: 'VotingClosed',
                     setupCompleteCount: thresholdProfile.setupCompletionQuorum,
                     turnoutCount: thresholdProfile.releaseQuorum,
+                    bridgeMobileCertificatePresent: true,
                     bridgeProverCertificatePresent: false,
                 }),
             ),
@@ -310,13 +375,14 @@ describe('election foundation capability evaluator', () => {
                 'CreateTargetBoundDecryptionShare',
                 createContext({
                     lifecycleState: 'TargetAccepted',
+                    thresholdProfile: certifiedThresholdProfile,
                     targetFinalityAccepted: true,
                     targetAccepted: true,
-                    brakerskiMobileProofCertificatePresent: false,
+                    oneShotDecryptionProofCertificatePresent: false,
                 }),
             ),
         ).toMatchObject({
-            reason: 'MissingBrakerskiMobileProofCertificate',
+            reason: 'MissingOneShotDecryptionProofCertificate',
         });
     });
 
@@ -327,7 +393,7 @@ describe('election foundation capability evaluator', () => {
                 createContext({
                     lifecycleState: 'FullyVerifiedResult',
                     decryptionShareCount:
-                        thresholdProfile.decryptionShareQuorum,
+                        certifiedThresholdProfile.decryptionShareQuorum ?? 0,
                 }),
             ),
         ).toMatchObject({ reason: 'OperationUnavailable' });

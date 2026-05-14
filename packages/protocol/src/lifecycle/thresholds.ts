@@ -1,4 +1,7 @@
 import type {
+    AppendixCShareSelectionProfile,
+    DecryptionShareFilteringMode,
+    DecryptionShareSelectionRule,
     HeBackendCorruptionModel,
     RosterProfileKind,
     ThresholdProfile,
@@ -45,6 +48,109 @@ const normalizeBackendCorruptionModel = (
         kind: 'CertifiedCustom',
         backendCorruptionBound: model.backendCorruptionBound,
         certificateDigest: model.certificateDigest,
+    };
+};
+
+const supportedDecryptionShareFilteringModes =
+    new Set<DecryptionShareFilteringMode>([
+        'ProofVerifiedSharesOnly',
+        'RobustDecodeAfterInvalidShareFiltering',
+    ]);
+
+const supportedDecryptionShareSelectionRules =
+    new Set<DecryptionShareSelectionRule>([
+        'FirstValidSharesInCanonicalBoardOrder',
+    ]);
+
+const normalizeAppendixCShareSelectionProfile = (
+    rosterSize: number,
+    decryptionThreshold: number,
+    profile: AppendixCShareSelectionProfile | undefined,
+): AppendixCShareSelectionProfile | null => {
+    if (profile === undefined) {
+        return null;
+    }
+
+    if (profile.profileId.trim().length === 0) {
+        throw new Error('Appendix C share-selection profile requires an ID.');
+    }
+    if (profile.certificateDigest.trim().length === 0) {
+        throw new Error(
+            'Appendix C share-selection profile requires a certificate digest.',
+        );
+    }
+    if (!isNonNegativeInteger(profile.decryptionShareQuorum)) {
+        throw new RangeError(
+            'Appendix C decryption share quorum must be a non-negative integer.',
+        );
+    }
+    if (profile.decryptionShareQuorum < decryptionThreshold) {
+        throw new RangeError(
+            'Appendix C decryption share quorum must be at least the decryption threshold.',
+        );
+    }
+    if (profile.decryptionShareQuorum > rosterSize) {
+        throw new RangeError(
+            'Appendix C decryption share quorum must not exceed rosterSize.',
+        );
+    }
+    if (!isNonNegativeInteger(profile.minimumSharesForInterpolation)) {
+        throw new RangeError(
+            'Appendix C interpolation share count must be a non-negative integer.',
+        );
+    }
+    if (profile.minimumSharesForInterpolation < decryptionThreshold) {
+        throw new RangeError(
+            'Appendix C interpolation share count must be at least the decryption threshold.',
+        );
+    }
+    if (profile.minimumSharesForInterpolation > profile.decryptionShareQuorum) {
+        throw new RangeError(
+            'Appendix C interpolation share count must not exceed the decryption share quorum.',
+        );
+    }
+    if (!isNonNegativeInteger(profile.minimumArrivalsForRobustDecode)) {
+        throw new RangeError(
+            'Appendix C robust-decode arrival count must be a non-negative integer.',
+        );
+    }
+    if (
+        profile.minimumArrivalsForRobustDecode < profile.decryptionShareQuorum
+    ) {
+        throw new RangeError(
+            'Appendix C robust-decode arrival count must be at least the decryption share quorum.',
+        );
+    }
+    if (profile.minimumArrivalsForRobustDecode > rosterSize) {
+        throw new RangeError(
+            'Appendix C robust-decode arrival count must not exceed rosterSize.',
+        );
+    }
+    if (
+        !supportedDecryptionShareFilteringModes.has(
+            profile.invalidShareFilteringMode,
+        )
+    ) {
+        throw new Error(
+            'Appendix C share-selection profile uses an unsupported invalid-share filtering mode.',
+        );
+    }
+    if (
+        !supportedDecryptionShareSelectionRules.has(profile.selectedShareRule)
+    ) {
+        throw new Error(
+            'Appendix C share-selection profile uses an unsupported selected-share rule.',
+        );
+    }
+
+    return {
+        profileId: profile.profileId,
+        certificateDigest: profile.certificateDigest,
+        decryptionShareQuorum: profile.decryptionShareQuorum,
+        minimumSharesForInterpolation: profile.minimumSharesForInterpolation,
+        minimumArrivalsForRobustDecode: profile.minimumArrivalsForRobustDecode,
+        invalidShareFilteringMode: profile.invalidShareFilteringMode,
+        selectedShareRule: profile.selectedShareRule,
     };
 };
 
@@ -119,12 +225,19 @@ export const deriveThresholdProfile = (
     const replayBadCorruptionBound = activeFaultBound;
     const pvssThreshold = privacyCorruptionBound + 1;
     const decryptionThreshold = decryptionCorruptionBound + 1;
+    const appendixCShareSelectionProfile =
+        normalizeAppendixCShareSelectionProfile(
+            rosterSize,
+            decryptionThreshold,
+            input.appendixCShareSelectionProfile,
+        );
     const releaseQuorum = Math.min(
         rosterSize,
         Math.max(10, Math.ceil((2 * rosterSize) / 3)),
     );
     const aggregateContributionQuorum = pvssThreshold;
-    const decryptionShareQuorum = decryptionThreshold;
+    const decryptionShareQuorum =
+        appendixCShareSelectionProfile?.decryptionShareQuorum ?? null;
     const evaluationReplayQuorum = activeFaultBound + 1;
     const maximumRaceShares = rosterSize;
     const setupCompletionQuorum = rosterSize;
@@ -136,6 +249,9 @@ export const deriveThresholdProfile = (
             structuralCorruptionBound
     ) {
         warnings.push('BackendCorruptionBoundTooHigh');
+    }
+    if (appendixCShareSelectionProfile === null) {
+        warnings.push('ShareSelectionProfileRequired');
     }
 
     return {
@@ -153,6 +269,7 @@ export const deriveThresholdProfile = (
         releaseQuorum,
         aggregateContributionQuorum,
         decryptionShareQuorum,
+        appendixCShareSelectionProfile,
         evaluationReplayQuorum,
         maximumRaceShares,
         setupCompletionQuorum,

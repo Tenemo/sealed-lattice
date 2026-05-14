@@ -20,14 +20,17 @@
         "decryptionThreshold": 7,
         "releaseQuorum": 14,
         "aggregateContributionQuorum": 7,
-        "decryptionShareQuorum": 7,
+        "decryptionShareQuorum": null,
+        "appendixCShareSelectionProfile": null,
         "evaluationReplayQuorum": 5,
         "maximumRaceShares": 20,
         "setupCompletionQuorum": 20,
         "backendCorruptionModel": {
           "kind": "StrictLessThanOneThird"
         },
-        "warnings": []
+        "warnings": [
+          "ShareSelectionProfileRequired"
+        ]
       }
     },
     {
@@ -49,7 +52,8 @@
         "decryptionThreshold": 10,
         "releaseQuorum": 20,
         "aggregateContributionQuorum": 10,
-        "decryptionShareQuorum": 10,
+        "decryptionShareQuorum": null,
+        "appendixCShareSelectionProfile": null,
         "evaluationReplayQuorum": 7,
         "maximumRaceShares": 30,
         "setupCompletionQuorum": 30,
@@ -58,7 +62,8 @@
         },
         "warnings": [
           "CertificateGatedProfile",
-          "BackendCertificateRequired"
+          "BackendCertificateRequired",
+          "ShareSelectionProfileRequired"
         ]
       }
     },
@@ -81,7 +86,8 @@
         "decryptionThreshold": 14,
         "releaseQuorum": 27,
         "aggregateContributionQuorum": 14,
-        "decryptionShareQuorum": 14,
+        "decryptionShareQuorum": null,
+        "appendixCShareSelectionProfile": null,
         "evaluationReplayQuorum": 9,
         "maximumRaceShares": 40,
         "setupCompletionQuorum": 40,
@@ -90,7 +96,8 @@
         },
         "warnings": [
           "CertificateGatedProfile",
-          "BackendCertificateRequired"
+          "BackendCertificateRequired",
+          "ShareSelectionProfileRequired"
         ]
       }
     },
@@ -113,7 +120,8 @@
         "decryptionThreshold": 17,
         "releaseQuorum": 34,
         "aggregateContributionQuorum": 17,
-        "decryptionShareQuorum": 17,
+        "decryptionShareQuorum": null,
+        "appendixCShareSelectionProfile": null,
         "evaluationReplayQuorum": 11,
         "maximumRaceShares": 50,
         "setupCompletionQuorum": 50,
@@ -122,7 +130,8 @@
         },
         "warnings": [
           "CertificateGatedProfile",
-          "BackendCertificateRequired"
+          "BackendCertificateRequired",
+          "ShareSelectionProfileRequired"
         ]
       }
     },
@@ -146,7 +155,8 @@
         "decryptionThreshold": 7,
         "releaseQuorum": 13,
         "aggregateContributionQuorum": 7,
-        "decryptionShareQuorum": 7,
+        "decryptionShareQuorum": null,
+        "appendixCShareSelectionProfile": null,
         "evaluationReplayQuorum": 4,
         "maximumRaceShares": 19,
         "setupCompletionQuorum": 19,
@@ -154,7 +164,8 @@
           "kind": "StrictLessThanOneThird"
         },
         "warnings": [
-          "UnsafeMicroRoster"
+          "UnsafeMicroRoster",
+          "ShareSelectionProfileRequired"
         ]
       }
     }

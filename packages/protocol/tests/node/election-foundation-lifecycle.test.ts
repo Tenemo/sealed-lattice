@@ -85,6 +85,9 @@ describe('election foundation lifecycle', () => {
             thresholdProfile: mandatoryProfile,
             mheSecurityStage: 'ActiveMalicious',
             mobileClaimGatePassed: true,
+            bridgeMobileCertificatePresent: true,
+            bridgeProverCertificatePresent: true,
+            oneShotDecryptionProofCertificatePresent: true,
         });
         const unsafeLabels = deriveLifecycleLabels({
             lifecycleState: 'ResultComputedAuditable',
@@ -119,9 +122,18 @@ describe('election foundation lifecycle', () => {
         const profile = deriveThresholdProfile({ rosterSize: 20 });
 
         for (const missingCertificate of [
+            {},
             { bridgeMobileCertificatePresent: false },
-            { bridgeProverCertificatePresent: false },
-            { brakerskiMobileProofCertificatePresent: false },
+            {
+                bridgeMobileCertificatePresent: true,
+                bridgeProverCertificatePresent: false,
+                oneShotDecryptionProofCertificatePresent: true,
+            },
+            {
+                bridgeMobileCertificatePresent: true,
+                bridgeProverCertificatePresent: true,
+                oneShotDecryptionProofCertificatePresent: false,
+            },
         ] as const) {
             const labels = deriveLifecycleLabels({
                 lifecycleState: 'ResultComputedAuditable',
@@ -171,7 +183,7 @@ describe('election foundation lifecycle', () => {
         );
     });
 
-    it('derives v46 bridge, Brakerski, and mobile execution labels from local context', () => {
+    it('derives bridge, threshold backend, and mobile execution labels from local context', () => {
         const profile = deriveThresholdProfile({ rosterSize: 20 });
         const labels = deriveLifecycleLabels({
             lifecycleState: 'EvaluationReplayOpen',
@@ -180,8 +192,8 @@ describe('election foundation lifecycle', () => {
             bridgeProofLocallyVerified: true,
             aggregateInputsBridgeVerified: true,
             bridgeProofRejected: true,
-            brakerskiBackendProfileRejected: true,
-            bridgeMobileCertRejected: true,
+            thresholdBackendProfileRejected: true,
+            bridgeMobileCertificateRejected: true,
             unsupportedLowResourceDevice: true,
             mobileFlagshipProfile: true,
             foregroundProofGenerationRequired: true,
@@ -201,8 +213,8 @@ describe('election foundation lifecycle', () => {
         expect(labels.failures).toEqual(
             expect.arrayContaining([
                 'BridgeProofRejected',
-                'BrakerskiBackendProfileRejected',
-                'BridgeMobileCertRejected',
+                'ThresholdBackendProfileRejected',
+                'BridgeMobileCertificateRejected',
                 'UnsupportedLowResourceDevice',
             ]),
         );
@@ -224,6 +236,9 @@ describe('election foundation lifecycle', () => {
             lifecycleState: 'FullyVerifiedResult',
             thresholdProfile: profile,
             mobileClaimGatePassed: true,
+            bridgeMobileCertificatePresent: true,
+            bridgeProverCertificatePresent: true,
+            oneShotDecryptionProofCertificatePresent: true,
         });
 
         expect(labels.primary).toEqual(

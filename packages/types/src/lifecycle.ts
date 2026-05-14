@@ -22,10 +22,31 @@ export type HeBackendCorruptionModel =
           readonly certificateDigest: string;
       };
 
+/** How Appendix C filters invalid target-bound decryption shares. */
+export type DecryptionShareFilteringMode =
+    | 'ProofVerifiedSharesOnly'
+    | 'RobustDecodeAfterInvalidShareFiltering';
+
+/** Canonical rule used to select target-bound decryption shares. */
+export type DecryptionShareSelectionRule =
+    'FirstValidSharesInCanonicalBoardOrder';
+
+/** Appendix-C-certified target-bound decryption share-selection profile. */
+export type AppendixCShareSelectionProfile = {
+    readonly profileId: string;
+    readonly certificateDigest: string;
+    readonly decryptionShareQuorum: number;
+    readonly minimumSharesForInterpolation: number;
+    readonly minimumArrivalsForRobustDecode: number;
+    readonly invalidShareFilteringMode: DecryptionShareFilteringMode;
+    readonly selectedShareRule: DecryptionShareSelectionRule;
+};
+
 /** Input used to derive a threshold profile from roster and backend assumptions. */
 export type ThresholdProfileInput = {
     readonly rosterSize: number;
     readonly heBackendCorruptionModel?: HeBackendCorruptionModel;
+    readonly appendixCShareSelectionProfile?: AppendixCShareSelectionProfile;
     readonly unsafeMicroRosterAcknowledged?: boolean;
 };
 
@@ -40,7 +61,8 @@ export type ThresholdWarning =
     | 'UnsafeMicroRoster'
     | 'CertificateGatedProfile'
     | 'BackendCertificateRequired'
-    | 'BackendCorruptionBoundTooHigh';
+    | 'BackendCorruptionBoundTooHigh'
+    | 'ShareSelectionProfileRequired';
 
 /** Derived threshold, quorum, and corruption-bound parameters for one roster. */
 export type ThresholdProfile = {
@@ -57,7 +79,8 @@ export type ThresholdProfile = {
     readonly decryptionThreshold: number;
     readonly releaseQuorum: number;
     readonly aggregateContributionQuorum: number;
-    readonly decryptionShareQuorum: number;
+    readonly decryptionShareQuorum: number | null;
+    readonly appendixCShareSelectionProfile: AppendixCShareSelectionProfile | null;
     readonly evaluationReplayQuorum: number;
     readonly maximumRaceShares: number;
     readonly setupCompletionQuorum: number;
@@ -187,11 +210,12 @@ export type FailureStatusLabel =
     | 'EvaluationRejected'
     | 'TargetRejected'
     | 'CPADProfileRejected'
-    | 'AnyTDecryptionProfileRejected'
-    | 'BrakerskiBackendProfileRejected'
+    | 'OneShotDecryptionProfileRejected'
+    | 'ThresholdBackendProfileRejected'
+    | 'ShareSelectionProfileRejected'
     | 'EvaluationKeySizeProfileRejected'
     | 'MobileReplayProfileRejected'
-    | 'BridgeMobileCertRejected'
+    | 'BridgeMobileCertificateRejected'
     | 'UnsupportedLowResourceDevice';
 
 /** Mode or caveat status label attached to lifecycle outputs. */
@@ -224,8 +248,8 @@ export type LifecycleLabelInput = {
     readonly bridgeProofLocallyVerified?: boolean;
     readonly aggregateInputsBridgeVerified?: boolean;
     readonly bridgeProofRejected?: boolean;
-    readonly brakerskiBackendProfileRejected?: boolean;
-    readonly bridgeMobileCertRejected?: boolean;
+    readonly thresholdBackendProfileRejected?: boolean;
+    readonly bridgeMobileCertificateRejected?: boolean;
     readonly unsupportedLowResourceDevice?: boolean;
     readonly mobileFlagshipProfile?: boolean;
     readonly foregroundProofGenerationRequired?: boolean;
@@ -235,7 +259,7 @@ export type LifecycleLabelInput = {
     readonly longRunningCryptographicCheck?: boolean;
     readonly bridgeMobileCertificatePresent?: boolean;
     readonly bridgeProverCertificatePresent?: boolean;
-    readonly brakerskiMobileProofCertificatePresent?: boolean;
+    readonly oneShotDecryptionProofCertificatePresent?: boolean;
     readonly mobileClaimGatePassed?: boolean;
 };
 
@@ -297,7 +321,7 @@ export type CapabilityContext = {
     readonly storageQuotaSufficient?: boolean;
     readonly bridgeMobileCertificatePresent?: boolean;
     readonly bridgeProverCertificatePresent?: boolean;
-    readonly brakerskiMobileProofCertificatePresent?: boolean;
+    readonly oneShotDecryptionProofCertificatePresent?: boolean;
     readonly recoveryState?: RecoveryState;
 };
 
@@ -320,7 +344,8 @@ export type RefusalReason =
     | 'InsufficientStorageQuota'
     | 'MissingBridgeMobileCertificate'
     | 'MissingBridgeProverCertificate'
-    | 'MissingBrakerskiMobileProofCertificate'
+    | 'MissingOneShotDecryptionProofCertificate'
+    | 'ShareSelectionProfileNotCertified'
     | 'AmbiguousRecoveryState'
     | 'StaleRecoveryEpoch'
     | 'ClonedDeviceState'

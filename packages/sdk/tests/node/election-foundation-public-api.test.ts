@@ -124,6 +124,9 @@ describe('election foundation public package API in Node', () => {
             thresholdProfile,
             mheSecurityStage: 'ActiveMalicious',
             mobileClaimGatePassed: true,
+            bridgeMobileCertificatePresent: true,
+            bridgeProverCertificatePresent: true,
+            oneShotDecryptionProofCertificatePresent: true,
         });
 
         expect(labels.resultClaimLabel).toBe('ResultComputedAuditable');
@@ -135,6 +138,7 @@ describe('election foundation public package API in Node', () => {
                 pollSpecValid: true,
                 targetFinalityAccepted: true,
                 replayAttestationCount: thresholdProfile.evaluationReplayQuorum,
+                bridgeMobileCertificatePresent: true,
             }),
         ).toEqual({ allowed: true, action: 'AcceptTarget' });
         expect(

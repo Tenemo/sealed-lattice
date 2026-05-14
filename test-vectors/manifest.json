@@ -7,7 +7,7 @@
     },
     {
       "path": "election-foundation/capability-refusals.json",
-      "sha256": "29cf1c939f8ee4e14f58dd53da757b70fada61a775339a6a0fb7daf6bfe63cab"
+      "sha256": "a8d25c76eb477212125a188f4c1f6561290b5137c7e875f1943b926fc70b7650"
     },
     {
       "path": "election-foundation/deterministic-fixtures.json",
@@ -23,7 +23,7 @@
     },
     {
       "path": "election-foundation/threshold-profiles.json",
-      "sha256": "fc179622ed0caba5bfbbd151b2f6499d13eed5a353817449fdf9730230f4dc91"
+      "sha256": "55c241bd0fc72301de6743581e9a8b6f709ea52b16aeb104680715cf343f46d9"
     },
     {
       "path": "plaintext-oracle/comparator-polynomials.json",
