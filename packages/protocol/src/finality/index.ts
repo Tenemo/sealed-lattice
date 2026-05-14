@@ -311,9 +311,9 @@ const verifyWitnessCheckpoint = (
         signerIdentity: checkpoint.witnessIdentity,
         ceremonyId: record.ceremonyId,
         publicKeyDigest: expectedPublicKeyDigest,
-        manifestHash: null,
+        manifestDigest: null,
         objectRoot: checkpoint.checkpointDigest,
-        boardHeadHash: record.finalizedBoardHeadDigest,
+        boardHeadDigest: record.finalizedBoardHeadDigest,
     });
     refusedObjects.push(...signatureResult.refusedObjects);
 

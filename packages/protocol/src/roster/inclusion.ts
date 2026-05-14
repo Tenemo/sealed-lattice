@@ -55,9 +55,9 @@ export const verifyIncludedBoardPlacement = (
     proofByDigest: ReadonlyMap<ProtocolDigest, InclusionProof>,
     objectDigest: ProtocolDigest,
     expectedObjectType: InclusionProof['includedObjectType'],
-    objectBoardSeq: number,
+    objectBoardSequence: number,
     objectBoardPosition: number,
-    rosterFreezeBoardSeq: number | undefined,
+    rosterFreezeBoardSequence: number | undefined,
 ): readonly RefusalRecord[] => {
     const proof = proofByDigest.get(objectDigest);
     if (proof === undefined) {
@@ -72,7 +72,7 @@ export const verifyIncludedBoardPlacement = (
         return refusedObjects;
     }
     if (
-        proof.boardSeq !== objectBoardSeq ||
+        proof.boardSequence !== objectBoardSequence ||
         proof.boardPosition !== objectBoardPosition
     ) {
         refusedObjects.push(
@@ -85,8 +85,8 @@ export const verifyIncludedBoardPlacement = (
         );
     }
     if (
-        rosterFreezeBoardSeq !== undefined &&
-        proof.boardSeq >= rosterFreezeBoardSeq
+        rosterFreezeBoardSequence !== undefined &&
+        proof.boardSequence >= rosterFreezeBoardSequence
     ) {
         refusedObjects.push(
             createRefusal(

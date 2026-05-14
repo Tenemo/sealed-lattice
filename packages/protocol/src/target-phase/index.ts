@@ -15,14 +15,10 @@ import type {
     TopKDecryptionShareShellVerificationInput,
 } from '@sealed-lattice/types';
 
-import {
-    verifyBoardConsistency,
-    verifyInclusionProof,
-} from '../board/index.js';
+import { collectBoardInclusionEvidence } from '../board/shell-evidence.js';
 import { deriveProtocolDigest } from '../common/digests.js';
 import { verifySignedObjectSignature } from '../common/signatures.js';
 import {
-    buildBoardHeadMap,
     createRefusal,
     isNonNegativeInteger,
     uniqueStrings,
@@ -60,7 +56,7 @@ export const deriveEvaluationReplayAttestationDigest = (
 ): ProtocolDigest =>
     deriveProtocolDigest('EvaluationReplayAttestationDigest', {
         boardPosition: attestation.boardPosition,
-        boardSeq: attestation.boardSeq,
+        boardSequence: attestation.boardSequence,
         ceremonyId: attestation.ceremonyId,
         deviceEpoch: attestation.deviceEpoch,
         electionManifestDigest: attestation.electionManifestDigest,
@@ -82,7 +78,7 @@ export const deriveTargetAcceptedRecordDigest = (
 ): ProtocolDigest =>
     deriveProtocolDigest('TargetAcceptedRecordDigest', {
         boardPosition: record.boardPosition,
-        boardSeq: record.boardSeq,
+        boardSequence: record.boardSequence,
         ceremonyId: record.ceremonyId,
         electionManifestDigest: record.electionManifestDigest,
         objectType: record.objectType,
@@ -103,7 +99,7 @@ export const deriveTopKDecryptionShareDigest = (
 ): ProtocolDigest =>
     deriveProtocolDigest('TopKDecryptionShareDigest', {
         boardPosition: share.boardPosition,
-        boardSeq: share.boardSeq,
+        boardSequence: share.boardSequence,
         ceremonyId: share.ceremonyId,
         deviceEpoch: share.deviceEpoch,
         electionManifestDigest: share.electionManifestDigest,
@@ -124,7 +120,7 @@ const verifyReplayAttestationShape = (
     const refusedObjects: RefusalRecord[] = [];
     const expectedDigest = deriveEvaluationReplayAttestationDigest({
         boardPosition: attestation.boardPosition,
-        boardSeq: attestation.boardSeq,
+        boardSequence: attestation.boardSequence,
         ceremonyId: attestation.ceremonyId,
         deviceEpoch: attestation.deviceEpoch,
         electionManifestDigest: attestation.electionManifestDigest,
@@ -151,7 +147,7 @@ const verifyReplayAttestationShape = (
     if (
         attestation.objectType !== 'EvaluationReplayAttestation' ||
         attestation.objectVersion !== 1 ||
-        !isNonNegativeInteger(attestation.boardSeq) ||
+        !isNonNegativeInteger(attestation.boardSequence) ||
         !isNonNegativeInteger(attestation.boardPosition) ||
         !isNonNegativeInteger(attestation.recoveryEpoch) ||
         !isNonNegativeInteger(attestation.deviceEpoch)
@@ -223,7 +219,8 @@ const verifyReplayAttestationShape = (
         );
     }
     if (
-        input.attestationInclusionProof.boardSeq !== attestation.boardSeq ||
+        input.attestationInclusionProof.boardSequence !==
+            attestation.boardSequence ||
         input.attestationInclusionProof.boardPosition !==
             attestation.boardPosition
     ) {
@@ -243,15 +240,11 @@ const verifyReplayAttestationShape = (
 const verifyEvaluationReplayAttestationShellUnchecked = (
     input: EvaluationReplayAttestationVerificationInput,
 ): EvaluationReplayAttestationVerification => {
-    const boardResult = verifyBoardConsistency(input.boardEvidence);
-    const headsByDigest = buildBoardHeadMap(
-        input.boardEvidence.signedBoardHeads,
-    );
-    const refusedObjects: RefusalRecord[] = [
-        ...boardResult.refusedObjects,
-        ...verifyReplayAttestationShape(input),
-        ...verifyInclusionProof(input.attestationInclusionProof, headsByDigest),
-    ];
+    const { boardResult, refusedObjects } = collectBoardInclusionEvidence({
+        boardEvidence: input.boardEvidence,
+        inclusionProof: input.attestationInclusionProof,
+        objectRefusals: verifyReplayAttestationShape(input),
+    });
     const signatureResult = verifySignedObjectSignature(
         input.attestation.signature,
         {
@@ -261,9 +254,9 @@ const verifyEvaluationReplayAttestationShellUnchecked = (
             signerIdentity: input.attestation.signerIdentity,
             ceremonyId: input.attestation.ceremonyId,
             publicKeyDigest: input.expectedSignerPublicKeyDigest,
-            manifestHash: input.attestation.electionManifestDigest,
+            manifestDigest: input.attestation.electionManifestDigest,
             objectRoot: input.attestation.evaluationReplayAttestationDigest,
-            boardHeadHash: input.attestationInclusionProof.boardHeadDigest,
+            boardHeadDigest: input.attestationInclusionProof.boardHeadDigest,
             contextDigest: input.attestation.replayContextDigest,
         },
     );
@@ -322,7 +315,7 @@ const verifyTargetAcceptedRecordShape = (
     const refusedObjects: RefusalRecord[] = [];
     const expectedDigest = deriveTargetAcceptedRecordDigest({
         boardPosition: targetAcceptedRecord.boardPosition,
-        boardSeq: targetAcceptedRecord.boardSeq,
+        boardSequence: targetAcceptedRecord.boardSequence,
         ceremonyId: targetAcceptedRecord.ceremonyId,
         electionManifestDigest: targetAcceptedRecord.electionManifestDigest,
         objectType: targetAcceptedRecord.objectType,
@@ -351,7 +344,7 @@ const verifyTargetAcceptedRecordShape = (
     if (
         targetAcceptedRecord.objectType !== 'TargetAcceptedRecord' ||
         targetAcceptedRecord.objectVersion !== 1 ||
-        !isNonNegativeInteger(targetAcceptedRecord.boardSeq) ||
+        !isNonNegativeInteger(targetAcceptedRecord.boardSequence) ||
         !isNonNegativeInteger(targetAcceptedRecord.boardPosition)
     ) {
         refusedObjects.push(
@@ -450,8 +443,8 @@ const verifyTargetAcceptedRecordShape = (
         );
     }
     if (
-        input.targetAcceptedRecordInclusionProof.boardSeq !==
-            targetAcceptedRecord.boardSeq ||
+        input.targetAcceptedRecordInclusionProof.boardSequence !==
+            targetAcceptedRecord.boardSequence ||
         input.targetAcceptedRecordInclusionProof.boardPosition !==
             targetAcceptedRecord.boardPosition
     ) {
@@ -471,18 +464,11 @@ const verifyTargetAcceptedRecordShape = (
 const verifyTargetAcceptedRecordShellUnchecked = (
     input: TargetAcceptedRecordVerificationInput,
 ): TargetAcceptedRecordVerification => {
-    const boardResult = verifyBoardConsistency(input.boardEvidence);
-    const headsByDigest = buildBoardHeadMap(
-        input.boardEvidence.signedBoardHeads,
-    );
-    const refusedObjects: RefusalRecord[] = [
-        ...boardResult.refusedObjects,
-        ...verifyTargetAcceptedRecordShape(input),
-        ...verifyInclusionProof(
-            input.targetAcceptedRecordInclusionProof,
-            headsByDigest,
-        ),
-    ];
+    const { boardResult, refusedObjects } = collectBoardInclusionEvidence({
+        boardEvidence: input.boardEvidence,
+        inclusionProof: input.targetAcceptedRecordInclusionProof,
+        objectRefusals: verifyTargetAcceptedRecordShape(input),
+    });
     const signatureResult = verifySignedObjectSignature(
         input.targetAcceptedRecord.signature,
         {
@@ -492,9 +478,9 @@ const verifyTargetAcceptedRecordShellUnchecked = (
             signerIdentity: input.targetAcceptedRecord.organizerIdentity,
             ceremonyId: input.targetAcceptedRecord.ceremonyId,
             publicKeyDigest: input.expectedOrganizerPublicKeyDigest,
-            manifestHash: input.targetAcceptedRecord.electionManifestDigest,
+            manifestDigest: input.targetAcceptedRecord.electionManifestDigest,
             objectRoot: input.targetAcceptedRecord.targetAcceptedRecordDigest,
-            boardHeadHash:
+            boardHeadDigest:
                 input.targetAcceptedRecordInclusionProof.boardHeadDigest,
         },
     );
@@ -554,7 +540,7 @@ const verifyTopKDecryptionShareShape = (
     const refusedObjects: RefusalRecord[] = [];
     const expectedDigest = deriveTopKDecryptionShareDigest({
         boardPosition: decryptionShare.boardPosition,
-        boardSeq: decryptionShare.boardSeq,
+        boardSequence: decryptionShare.boardSequence,
         ceremonyId: decryptionShare.ceremonyId,
         deviceEpoch: decryptionShare.deviceEpoch,
         electionManifestDigest: decryptionShare.electionManifestDigest,
@@ -581,7 +567,7 @@ const verifyTopKDecryptionShareShape = (
     if (
         decryptionShare.objectType !== 'TopKDecryptionShare' ||
         decryptionShare.objectVersion !== 1 ||
-        !isNonNegativeInteger(decryptionShare.boardSeq) ||
+        !isNonNegativeInteger(decryptionShare.boardSequence) ||
         !isNonNegativeInteger(decryptionShare.boardPosition) ||
         !isNonNegativeInteger(decryptionShare.recoveryEpoch) ||
         !isNonNegativeInteger(decryptionShare.deviceEpoch)
@@ -652,8 +638,8 @@ const verifyTopKDecryptionShareShape = (
         );
     }
     if (
-        input.decryptionShareInclusionProof.boardSeq !==
-            decryptionShare.boardSeq ||
+        input.decryptionShareInclusionProof.boardSequence !==
+            decryptionShare.boardSequence ||
         input.decryptionShareInclusionProof.boardPosition !==
             decryptionShare.boardPosition
     ) {
@@ -673,18 +659,11 @@ const verifyTopKDecryptionShareShape = (
 const verifyTopKDecryptionShareShellUnchecked = (
     input: TopKDecryptionShareShellVerificationInput,
 ): TopKDecryptionShareShellVerification => {
-    const boardResult = verifyBoardConsistency(input.boardEvidence);
-    const headsByDigest = buildBoardHeadMap(
-        input.boardEvidence.signedBoardHeads,
-    );
-    const refusedObjects: RefusalRecord[] = [
-        ...boardResult.refusedObjects,
-        ...verifyTopKDecryptionShareShape(input),
-        ...verifyInclusionProof(
-            input.decryptionShareInclusionProof,
-            headsByDigest,
-        ),
-    ];
+    const { boardResult, refusedObjects } = collectBoardInclusionEvidence({
+        boardEvidence: input.boardEvidence,
+        inclusionProof: input.decryptionShareInclusionProof,
+        objectRefusals: verifyTopKDecryptionShareShape(input),
+    });
     const signatureResult = verifySignedObjectSignature(
         input.decryptionShare.signature,
         {
@@ -694,9 +673,10 @@ const verifyTopKDecryptionShareShellUnchecked = (
             signerIdentity: input.decryptionShare.trusteeIdentity,
             ceremonyId: input.decryptionShare.ceremonyId,
             publicKeyDigest: input.expectedTrusteePublicKeyDigest,
-            manifestHash: input.decryptionShare.electionManifestDigest,
+            manifestDigest: input.decryptionShare.electionManifestDigest,
             objectRoot: input.decryptionShare.topKDecryptionShareDigest,
-            boardHeadHash: input.decryptionShareInclusionProof.boardHeadDigest,
+            boardHeadDigest:
+                input.decryptionShareInclusionProof.boardHeadDigest,
         },
     );
     refusedObjects.push(...signatureResult.refusedObjects);

@@ -38,6 +38,29 @@
         --sl-text-6xl: 4rem;
         /* HSL channels used by landing-card tint gradients. Teal on dark. */
         --landing-tint: 176, 38%, 72%;
+        --landing-card-radius: 0.5rem;
+        --landing-card-border-color: var(--sl-color-hairline);
+        --landing-card-border-color-hover: hsla(var(--landing-tint), 0.24);
+        --landing-link-card-background: linear-gradient(
+            180deg,
+            hsla(var(--landing-tint), 0.04),
+            hsla(var(--landing-tint), 0.02)
+        );
+        --landing-link-card-background-hover: linear-gradient(
+            180deg,
+            hsla(var(--landing-tint), 0.06),
+            hsla(var(--landing-tint), 0.03)
+        );
+        --landing-section-card-background: linear-gradient(
+            180deg,
+            hsla(var(--landing-tint), 0.05),
+            hsla(var(--landing-tint), 0.02)
+        );
+        --landing-panel-card-background: linear-gradient(
+            180deg,
+            hsla(var(--landing-tint), 0.06),
+            hsla(var(--landing-tint), 0.02)
+        );
     }
 
     :root[data-theme="light"],

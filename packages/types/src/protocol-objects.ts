@@ -73,8 +73,8 @@ export type CanonicalSignedRootObject = {
     readonly objectType: SignedObjectType;
     readonly objectVersion: number;
     readonly ceremonyId: string;
-    readonly manifestHash: ProtocolDigest | null;
-    readonly boardHeadHash: ProtocolDigest | null;
+    readonly manifestDigest: ProtocolDigest | null;
+    readonly boardHeadDigest: ProtocolDigest | null;
     readonly objectRoot: ProtocolDigest | null;
     readonly chunkMerkleRoot: ProtocolDigest | null;
     readonly byteLength: number;

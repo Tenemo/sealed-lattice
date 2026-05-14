@@ -81,7 +81,9 @@
         html[data-has-sidebar][data-has-toc] .right-sidebar {
             position: sticky;
             top: 0;
-            width: var(--sl-sidebar-width);
+            box-sizing: border-box;
+            width: 100%;
+            max-width: var(--sl-sidebar-width);
             height: 100vh;
             padding-top: var(--sl-nav-height);
             border-inline-start: 1px solid var(--sl-color-hairline);

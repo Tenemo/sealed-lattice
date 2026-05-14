@@ -14,7 +14,7 @@ export type RegistrationEntry = {
     readonly ceremonyId: string;
     readonly participantIdentity: string;
     readonly signingPublicKeyDigest: ProtocolDigest;
-    readonly boardSeq: number;
+    readonly boardSequence: number;
     readonly boardPosition: number;
     readonly recoveryEpoch: number;
     readonly deviceEpoch: number;
@@ -29,7 +29,7 @@ export type ReceiverKeyRegistration = {
     readonly ceremonyId: string;
     readonly participantIdentity: string;
     readonly receiverKeyRoot: ProtocolDigest;
-    readonly boardSeq: number;
+    readonly boardSequence: number;
     readonly boardPosition: number;
     readonly recoveryEpoch: number;
     readonly deviceEpoch: number;
@@ -44,7 +44,7 @@ export type TrusteeSetupEntry = {
     readonly ceremonyId: string;
     readonly trusteeIdentity: string;
     readonly trusteeSetupRoot: ProtocolDigest;
-    readonly boardSeq: number;
+    readonly boardSequence: number;
     readonly boardPosition: number;
     readonly recoveryEpoch: number;
     readonly deviceEpoch: number;
@@ -88,7 +88,7 @@ export type ElectionManifest = {
     readonly thresholdProfileDigest: ProtocolDigest;
     readonly manifestPolicyDigests: ManifestPolicyDigests;
     readonly manifestOpaqueBindings: ManifestOpaqueBindings;
-    readonly boardSeq: number;
+    readonly boardSequence: number;
     readonly boardPosition: number;
     readonly signature: ProtocolSignatureEnvelope;
 };
@@ -112,7 +112,7 @@ export type RosterManifestTranscriptInput = {
     readonly electionManifest: ElectionManifest;
     readonly organizerPublicKeyDigest: ProtocolDigest;
     readonly organizerIdentity: string;
-    readonly rosterFreezeBoardSeq: number;
+    readonly rosterFreezeBoardSequence: number;
     readonly manifestInclusionProof: InclusionProof;
     readonly suppliedElectionManifests?: readonly ElectionManifest[];
     readonly conflictingManifestEvidence?: readonly ConflictingManifestEvidence[];
@@ -133,7 +133,7 @@ export type ActionContext = {
     readonly electionManifestDigest: ProtocolDigest;
     readonly signerIdentity: string;
     readonly boardHeadDigest: ProtocolDigest;
-    readonly boardSeq: number;
+    readonly boardSequence: number;
     readonly recoveryEpoch: number;
     readonly deviceEpoch: number;
     readonly actionSequence: number;
@@ -147,14 +147,14 @@ export type RecoveryEpochMapEntry = {
     readonly signerIdentity: string;
     readonly currentRecoveryEpoch: number;
     readonly currentDeviceEpoch: number;
-    readonly oldActionCutoffBoardSeq?: number;
+    readonly oldActionCutoffBoardSequence?: number;
 };
 
 /** Candidate action after context, epoch, and duplicate checks. */
 export type ValidatedFirstComeCandidate = {
     readonly objectDigest: ProtocolDigest;
     readonly objectType: ProtocolObjectType;
-    readonly boardSeq: number;
+    readonly boardSequence: number;
     readonly boardPosition: number;
     readonly signerIdentity: string;
     readonly recoveryEpoch: number;
@@ -196,7 +196,7 @@ export type RecoveryEpochUpdate = {
     readonly newRecoveryEpoch: number;
     readonly previousDeviceEpoch: number;
     readonly newDeviceEpoch: number;
-    readonly oldActionCutoffBoardSeq: number;
+    readonly oldActionCutoffBoardSequence: number;
     readonly boardHeadDigest: ProtocolDigest;
     readonly newSigningPublicKeyDigest: ProtocolDigest;
     readonly restoredFrozenReceiverStateCommitment: ProtocolDigest;

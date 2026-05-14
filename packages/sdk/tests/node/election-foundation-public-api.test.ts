@@ -15,6 +15,7 @@ import type {
 import { describe, expect, it } from 'vitest';
 
 import * as publicApiRuntime from '../../dist/index.js';
+import publicSurface from '../../public-surface.json' with { type: 'json' };
 
 type DeriveThresholdProfile = (
     input: ThresholdProfileInput,
@@ -45,9 +46,9 @@ const deriveValidatedFirstComeOrder =
     publicApiRuntimeRecord.deriveValidatedFirstComeOrder as DeriveValidatedFirstComeOrder;
 
 const requiredPublicFunctions = [
-    ['deriveValidatedFirstComeOrder', deriveValidatedFirstComeOrder],
     ['deriveLifecycleLabels', deriveLifecycleLabels],
     ['deriveThresholdProfile', deriveThresholdProfile],
+    ['deriveValidatedFirstComeOrder', deriveValidatedFirstComeOrder],
     ['evaluateActionCapability', evaluateActionCapability],
     [
         'isActionCurrentForRecoveryEpoch',
@@ -74,46 +75,16 @@ const requiredPublicFunctions = [
     ],
 ] as const;
 
-const allowedRuntimeExports = requiredPublicFunctions
-    .map(([publicFunctionName]) => publicFunctionName)
-    .sort();
-
-const forbiddenPublicKeys = [
-    'getShare',
-    'exportShare',
-    'exportSecretKey',
-    'importSecretKey',
-    'setSecretKey',
-    'thresholdDecrypt',
-    'partialDecrypt',
-    'partialDecryptWithoutTarget',
-    'decryptToFile',
-    'decryptToString',
-    'rawHEAdd',
-    'rawHEMul',
-    'rawHERelin',
-    'rawHERotate',
-    'rawNTT',
-    'rawRNSLimbAccess',
-    'setNoiseFloodSigma',
-    'setSmudgingDistribution',
-    'bootstrap',
-    'decryptAggregateShare',
-    'decryptExactSum',
-    'decryptRank',
-    'decryptComparisonBit',
-    'decryptIntermediateWire',
-    'verifyEvaluationReplayAttestationShell',
-    'verifyTargetAcceptedRecordShell',
-    'verifyTopKDecryptionShareShell',
-    'createShamirPolynomial',
-    'derivePlaintextTopKOracle',
-    'decodeSparseTopKTarget',
-    'fieldModulus',
-];
+const allowedRuntimeExports = [...publicSurface.runtimeExports].sort();
+const forbiddenPublicKeys = publicSurface.forbiddenRuntimeExports;
 
 describe('election foundation public package API in Node', () => {
     it('exposes only the safe runtime functions and keeps forbidden operations absent', () => {
+        expect(
+            requiredPublicFunctions.map(
+                ([publicFunctionName]) => publicFunctionName,
+            ),
+        ).toEqual(publicSurface.runtimeExports);
         expect(Object.keys(publicApiRuntimeRecord).sort()).toEqual(
             allowedRuntimeExports,
         );
@@ -182,7 +153,7 @@ describe('election foundation public package API in Node', () => {
                     {
                         objectDigest: 'candidate',
                         objectType: 'TargetFinalityRecord',
-                        boardSeq: 1,
+                        boardSequence: 1,
                         boardPosition: 0,
                         signerIdentity: 'participant',
                         recoveryEpoch: 0,

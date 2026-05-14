@@ -29,7 +29,7 @@ export const verifyRegistrationEntry = (
     const refusedObjects: RefusalRecord[] = [];
     const expectedDigest = deriveRegistrationEntryDigest({
         boardPosition: entry.boardPosition,
-        boardSeq: entry.boardSeq,
+        boardSequence: entry.boardSequence,
         ceremonyId: entry.ceremonyId,
         deviceEpoch: entry.deviceEpoch,
         objectType: entry.objectType,
@@ -52,7 +52,7 @@ export const verifyRegistrationEntry = (
     if (
         entry.objectType !== 'RegistrationEntry' ||
         entry.objectVersion !== 1 ||
-        !isNonNegativeInteger(entry.boardSeq) ||
+        !isNonNegativeInteger(entry.boardSequence) ||
         !isNonNegativeInteger(entry.boardPosition) ||
         !isNonNegativeInteger(entry.recoveryEpoch) ||
         !isNonNegativeInteger(entry.deviceEpoch)
@@ -76,7 +76,7 @@ export const verifyRegistrationEntry = (
             ),
         );
     }
-    if (entry.boardSeq >= input.rosterFreezeBoardSeq) {
+    if (entry.boardSequence >= input.rosterFreezeBoardSequence) {
         refusedObjects.push(
             createRefusal(
                 'LateRegistration',
@@ -93,9 +93,9 @@ export const verifyRegistrationEntry = (
         signerRole: 'Participant',
         signerIdentity: entry.participantIdentity,
         ceremonyId: input.ceremonyId,
-        manifestHash: null,
+        manifestDigest: null,
         objectRoot: entry.registrationEntryDigest,
-        boardHeadHash: null,
+        boardHeadDigest: null,
         publicKeyDigest: entry.signingPublicKeyDigest,
     });
     refusedObjects.push(...signatureResult.refusedObjects);
@@ -111,7 +111,7 @@ export const verifyReceiverKeyRegistration = (
     const refusedObjects: RefusalRecord[] = [];
     const expectedDigest = deriveReceiverKeyRegistrationDigest({
         boardPosition: entry.boardPosition,
-        boardSeq: entry.boardSeq,
+        boardSequence: entry.boardSequence,
         ceremonyId: entry.ceremonyId,
         deviceEpoch: entry.deviceEpoch,
         objectType: entry.objectType,
@@ -134,7 +134,7 @@ export const verifyReceiverKeyRegistration = (
     if (
         entry.objectType !== 'ReceiverKeyRegistration' ||
         entry.objectVersion !== 1 ||
-        !isNonNegativeInteger(entry.boardSeq) ||
+        !isNonNegativeInteger(entry.boardSequence) ||
         !isNonNegativeInteger(entry.boardPosition) ||
         !isNonNegativeInteger(entry.recoveryEpoch) ||
         !isNonNegativeInteger(entry.deviceEpoch)
@@ -158,7 +158,7 @@ export const verifyReceiverKeyRegistration = (
             ),
         );
     }
-    if (entry.boardSeq >= input.rosterFreezeBoardSeq) {
+    if (entry.boardSequence >= input.rosterFreezeBoardSequence) {
         refusedObjects.push(
             createRefusal(
                 'LateRegistration',
@@ -185,9 +185,9 @@ export const verifyReceiverKeyRegistration = (
         signerRole: 'Participant',
         signerIdentity: entry.participantIdentity,
         ceremonyId: input.ceremonyId,
-        manifestHash: null,
+        manifestDigest: null,
         objectRoot: entry.receiverKeyRegistrationDigest,
-        boardHeadHash: null,
+        boardHeadDigest: null,
         publicKeyDigest: expectedPublicKeyDigest,
     });
     refusedObjects.push(...signatureResult.refusedObjects);
@@ -203,7 +203,7 @@ export const verifyTrusteeSetupEntry = (
     const refusedObjects: RefusalRecord[] = [];
     const expectedDigest = deriveTrusteeSetupEntryDigest({
         boardPosition: entry.boardPosition,
-        boardSeq: entry.boardSeq,
+        boardSequence: entry.boardSequence,
         ceremonyId: entry.ceremonyId,
         deviceEpoch: entry.deviceEpoch,
         objectType: entry.objectType,
@@ -226,7 +226,7 @@ export const verifyTrusteeSetupEntry = (
     if (
         entry.objectType !== 'TrusteeSetupEntry' ||
         entry.objectVersion !== 1 ||
-        !isNonNegativeInteger(entry.boardSeq) ||
+        !isNonNegativeInteger(entry.boardSequence) ||
         !isNonNegativeInteger(entry.boardPosition) ||
         !isNonNegativeInteger(entry.recoveryEpoch) ||
         !isNonNegativeInteger(entry.deviceEpoch)
@@ -250,7 +250,7 @@ export const verifyTrusteeSetupEntry = (
             ),
         );
     }
-    if (entry.boardSeq >= input.rosterFreezeBoardSeq) {
+    if (entry.boardSequence >= input.rosterFreezeBoardSequence) {
         refusedObjects.push(
             createRefusal(
                 'LateRegistration',
@@ -277,9 +277,9 @@ export const verifyTrusteeSetupEntry = (
         signerRole: 'Trustee',
         signerIdentity: entry.trusteeIdentity,
         ceremonyId: input.ceremonyId,
-        manifestHash: null,
+        manifestDigest: null,
         objectRoot: entry.trusteeSetupEntryDigest,
-        boardHeadHash: null,
+        boardHeadDigest: null,
         publicKeyDigest: expectedPublicKeyDigest,
     });
     refusedObjects.push(...signatureResult.refusedObjects);
@@ -296,7 +296,7 @@ export const verifyManifest = (
     const refusedObjects: RefusalRecord[] = [];
     const expectedDigest = deriveElectionManifestDigest({
         boardPosition: manifest.boardPosition,
-        boardSeq: manifest.boardSeq,
+        boardSequence: manifest.boardSequence,
         ceremonyId: manifest.ceremonyId,
         manifestOpaqueBindings: manifest.manifestOpaqueBindings,
         manifestPolicyDigests: manifest.manifestPolicyDigests,
@@ -320,7 +320,7 @@ export const verifyManifest = (
     if (
         manifest.objectType !== 'ElectionManifest' ||
         manifest.objectVersion !== 1 ||
-        !isNonNegativeInteger(manifest.boardSeq) ||
+        !isNonNegativeInteger(manifest.boardSequence) ||
         !isNonNegativeInteger(manifest.boardPosition)
     ) {
         refusedObjects.push(
@@ -352,7 +352,7 @@ export const verifyManifest = (
             ),
         );
     }
-    if (manifest.boardSeq < input.rosterFreezeBoardSeq) {
+    if (manifest.boardSequence < input.rosterFreezeBoardSequence) {
         refusedObjects.push(
             createRefusal(
                 'ManifestDigestMismatch',
@@ -382,9 +382,9 @@ export const verifyManifest = (
         signerRole: 'Organizer',
         signerIdentity: input.organizerIdentity,
         ceremonyId: input.ceremonyId,
-        manifestHash: null,
+        manifestDigest: null,
         objectRoot: manifest.electionManifestDigest,
-        boardHeadHash: null,
+        boardHeadDigest: null,
         publicKeyDigest: input.organizerPublicKeyDigest,
     });
     refusedObjects.push(...signatureResult.refusedObjects);

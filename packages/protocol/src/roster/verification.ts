@@ -88,9 +88,9 @@ const verifyRosterManifestTranscriptUnchecked = (
                 registrationProofsByDigest,
                 entry.registrationEntryDigest,
                 'RegistrationEntry',
-                entry.boardSeq,
+                entry.boardSequence,
                 entry.boardPosition,
-                input.rosterFreezeBoardSeq,
+                input.rosterFreezeBoardSequence,
             ),
         );
 
@@ -164,9 +164,9 @@ const verifyRosterManifestTranscriptUnchecked = (
                 receiverProofsByDigest,
                 entry.receiverKeyRegistrationDigest,
                 'ReceiverKeyRegistration',
-                entry.boardSeq,
+                entry.boardSequence,
                 entry.boardPosition,
-                input.rosterFreezeBoardSeq,
+                input.rosterFreezeBoardSequence,
             ),
         );
     }
@@ -202,9 +202,9 @@ const verifyRosterManifestTranscriptUnchecked = (
                 trusteeProofsByDigest,
                 entry.trusteeSetupEntryDigest,
                 'TrusteeSetupEntry',
-                entry.boardSeq,
+                entry.boardSequence,
                 entry.boardPosition,
-                input.rosterFreezeBoardSeq,
+                input.rosterFreezeBoardSequence,
             ),
         );
     }
@@ -244,8 +244,8 @@ const verifyRosterManifestTranscriptUnchecked = (
         ),
     );
     if (
-        input.manifestInclusionProof.boardSeq !==
-            input.electionManifest.boardSeq ||
+        input.manifestInclusionProof.boardSequence !==
+            input.electionManifest.boardSequence ||
         input.manifestInclusionProof.boardPosition !==
             input.electionManifest.boardPosition
     ) {
@@ -258,7 +258,10 @@ const verifyRosterManifestTranscriptUnchecked = (
             ),
         );
     }
-    if (input.manifestInclusionProof.boardSeq < input.rosterFreezeBoardSeq) {
+    if (
+        input.manifestInclusionProof.boardSequence <
+        input.rosterFreezeBoardSequence
+    ) {
         refusedObjects.push(
             createRefusal(
                 'ManifestDigestMismatch',
@@ -285,8 +288,8 @@ const verifyRosterManifestTranscriptUnchecked = (
             ),
         ];
         if (
-            evidence.manifestInclusionProof.boardSeq !==
-                evidence.manifest.boardSeq ||
+            evidence.manifestInclusionProof.boardSequence !==
+                evidence.manifest.boardSequence ||
             evidence.manifestInclusionProof.boardPosition !==
                 evidence.manifest.boardPosition
         ) {

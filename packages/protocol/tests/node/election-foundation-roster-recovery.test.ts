@@ -91,14 +91,14 @@ describe('roster, manifest, first-come, and recovery shells', () => {
             lateRegistration,
         ]);
         const changedManifest = createElectionManifest(registrations, {
-            boardSeq: 4,
+            boardSequence: 4,
             manifestOpaqueBindings: {
                 ...manifestOpaqueBindings,
                 mobileProfileId: 'different-mobile-profile',
             },
         });
         const changedPollSpecManifest = createElectionManifest(registrations, {
-            boardSeq: 4,
+            boardSequence: 4,
             pollSpecDigest: deriveProtocolDigest('PollSpecDigest', {
                 poll: 'different',
             }),
@@ -253,7 +253,7 @@ describe('roster, manifest, first-come, and recovery shells', () => {
             {
                 objectDigest: 'object-b',
                 objectType: 'TargetFinalityRecord',
-                boardSeq: 2,
+                boardSequence: 2,
                 boardPosition: 1,
                 signerIdentity: 'participant-2',
                 recoveryEpoch: 0,
@@ -265,7 +265,7 @@ describe('roster, manifest, first-come, and recovery shells', () => {
             {
                 objectDigest: 'object-a',
                 objectType: 'TargetFinalityRecord',
-                boardSeq: 1,
+                boardSequence: 1,
                 boardPosition: 0,
                 signerIdentity: 'participant-1',
                 recoveryEpoch: 0,
@@ -277,7 +277,7 @@ describe('roster, manifest, first-come, and recovery shells', () => {
             {
                 objectDigest: 'object-a',
                 objectType: 'TargetFinalityRecord',
-                boardSeq: 3,
+                boardSequence: 3,
                 boardPosition: 0,
                 signerIdentity: 'participant-1',
                 recoveryEpoch: 0,
@@ -369,7 +369,7 @@ describe('roster, manifest, first-come, and recovery shells', () => {
                     {
                         objectDigest: 'object-a',
                         objectType: 'TargetFinalityRecord',
-                        boardSeq: 1,
+                        boardSequence: 1,
                         boardPosition: 0,
                         signerIdentity: 'participant-1',
                         recoveryEpoch: 0,
@@ -381,7 +381,7 @@ describe('roster, manifest, first-come, and recovery shells', () => {
                     {
                         objectDigest: 'object-b',
                         objectType: 'TargetFinalityRecord',
-                        boardSeq: 1,
+                        boardSequence: 1,
                         boardPosition: 1,
                         signerIdentity: 'participant-1',
                         recoveryEpoch: 0,
@@ -405,7 +405,7 @@ describe('roster, manifest, first-come, and recovery shells', () => {
         const baseCandidate: ValidatedFirstComeCandidate = {
             objectDigest: 'object-a',
             objectType: 'TargetFinalityRecord',
-            boardSeq: 1,
+            boardSequence: 1,
             boardPosition: 0,
             signerIdentity: 'participant-1',
             recoveryEpoch: 0,
@@ -485,14 +485,14 @@ describe('roster, manifest, first-come, and recovery shells', () => {
                         signerIdentity: 'participant-1',
                         currentRecoveryEpoch: 1,
                         currentDeviceEpoch: 1,
-                        oldActionCutoffBoardSeq: 10,
+                        oldActionCutoffBoardSequence: 10,
                     },
                 },
                 candidates: [
                     {
                         objectDigest: 'object-mixed-epoch',
                         objectType: 'TargetFinalityRecord',
-                        boardSeq: 9,
+                        boardSequence: 9,
                         boardPosition: 0,
                         signerIdentity: 'participant-1',
                         recoveryEpoch: 0,
@@ -541,7 +541,7 @@ describe('roster, manifest, first-come, and recovery shells', () => {
             newRecoveryEpoch: 1,
             previousDeviceEpoch: 0,
             newDeviceEpoch: 1,
-            oldActionCutoffBoardSeq: 5,
+            oldActionCutoffBoardSequence: 5,
             boardHeadDigest: recoveryContextHead.headDigest,
             newSigningPublicKeyDigest: newSigningKeyFixture.publicKeyDigest,
             restoredFrozenReceiverStateCommitment: deriveProtocolDigest(
@@ -567,7 +567,7 @@ describe('roster, manifest, first-come, and recovery shells', () => {
                 'participant-1',
                 recoveryRootKeyFixture.publicKeyDigest,
                 recoveryEpochUpdateDigest,
-                { boardHeadHash: payload.boardHeadDigest },
+                { boardHeadDigest: payload.boardHeadDigest },
             ),
         };
         const { head: recoveryUpdateHead, inclusionProofs } =
@@ -619,7 +619,7 @@ describe('roster, manifest, first-come, and recovery shells', () => {
                 'participant-1',
                 recoveryRootKeyFixture.publicKeyDigest,
                 conflictingRecoveryEpochUpdateDigest,
-                { boardHeadHash: payload.boardHeadDigest },
+                { boardHeadDigest: payload.boardHeadDigest },
             ),
         };
 
@@ -689,7 +689,7 @@ describe('roster, manifest, first-come, and recovery shells', () => {
                 'participant-1',
                 recoveryRootKeyFixture.publicKeyDigest,
                 wrongRecoveryPolicyUpdateDigest,
-                { boardHeadHash: payload.boardHeadDigest },
+                { boardHeadDigest: payload.boardHeadDigest },
             ),
         };
         const {
@@ -742,7 +742,7 @@ describe('roster, manifest, first-come, and recovery shells', () => {
                 recoveryRootKeyFixture.publicKeyDigest,
                 wrongCeremonyRecoveryUpdateDigest,
                 {
-                    boardHeadHash: payload.boardHeadDigest,
+                    boardHeadDigest: payload.boardHeadDigest,
                     ceremonyId: 'ceremony-other',
                 },
             ),
@@ -790,7 +790,7 @@ describe('roster, manifest, first-come, and recovery shells', () => {
             ),
             signerIdentity: 'participant-1',
             boardHeadDigest: payload.boardHeadDigest,
-            boardSeq: 6,
+            boardSequence: 6,
             recoveryEpoch: 0,
             deviceEpoch: 0,
             actionSequence: 1,

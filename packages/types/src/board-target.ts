@@ -12,7 +12,7 @@ export type SignedBoardHead = {
     readonly objectVersion: 1;
     readonly headDigest: ProtocolDigest;
     readonly ceremonyId: string;
-    readonly boardSeq: number;
+    readonly boardSequence: number;
     readonly boardRoot: ProtocolDigest;
     readonly previousHeadDigest: ProtocolDigest | null;
     readonly boardPolicyDigest: ProtocolDigest;
@@ -22,7 +22,7 @@ export type SignedBoardHead = {
 /** Inclusion evidence for one protocol object under a signed board head. */
 export type InclusionProof = {
     readonly boardHeadDigest: ProtocolDigest;
-    readonly boardSeq: number;
+    readonly boardSequence: number;
     readonly boardPosition: number;
     readonly includedObjectType: ProtocolObjectType;
     readonly includedObjectDigest: ProtocolDigest;
@@ -66,7 +66,7 @@ export type CastReceipt = {
     readonly electionManifestDigest: ProtocolDigest;
     readonly voterIdentity: string;
     readonly ballotPackageDigest: ProtocolDigest;
-    readonly boardSeq: number;
+    readonly boardSequence: number;
     readonly boardPosition: number;
     readonly recoveryEpoch: number;
     readonly deviceEpoch: number;
@@ -87,7 +87,7 @@ export type CloseRecord = {
     readonly closeKind: CloseRecordKind;
     readonly closedBoardHeadDigest: ProtocolDigest;
     readonly postVotingClosedContextDigest: ProtocolDigest | null;
-    readonly boardSeq: number;
+    readonly boardSequence: number;
     readonly boardPosition: number;
     readonly organizerIdentity: string;
     readonly signature: ProtocolSignatureEnvelope;
@@ -208,7 +208,7 @@ export type EvaluationReplayAttestation = {
     readonly targetFinalityRecordDigest: ProtocolDigest;
     readonly finalizedBoardHeadDigest: ProtocolDigest;
     readonly replayContextDigest: ProtocolDigest;
-    readonly boardSeq: number;
+    readonly boardSequence: number;
     readonly boardPosition: number;
     readonly recoveryEpoch: number;
     readonly deviceEpoch: number;
@@ -226,7 +226,7 @@ export type TargetAcceptedRecord = {
     readonly targetFinalityRecordDigest: ProtocolDigest;
     readonly replayAttestationDigests: readonly ProtocolDigest[];
     readonly optionalEvaluationProofRoot: ProtocolDigest | null;
-    readonly boardSeq: number;
+    readonly boardSequence: number;
     readonly boardPosition: number;
     readonly organizerIdentity: string;
     readonly signature: ProtocolSignatureEnvelope;
@@ -242,7 +242,7 @@ export type TopKDecryptionShareShell = {
     readonly targetAcceptedRecordDigest: ProtocolDigest;
     readonly targetFinalityRecordDigest: ProtocolDigest;
     readonly topKEvaluationRecordDigest: ProtocolDigest;
-    readonly boardSeq: number;
+    readonly boardSequence: number;
     readonly boardPosition: number;
     readonly recoveryEpoch: number;
     readonly deviceEpoch: number;

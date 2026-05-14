@@ -13,7 +13,7 @@ export const deriveRegistrationEntryDigest = (
 ): ProtocolDigest =>
     deriveProtocolDigest('RegistrationEntryDigest', {
         boardPosition: entry.boardPosition,
-        boardSeq: entry.boardSeq,
+        boardSequence: entry.boardSequence,
         ceremonyId: entry.ceremonyId,
         deviceEpoch: entry.deviceEpoch,
         objectType: entry.objectType,
@@ -31,7 +31,7 @@ export const deriveReceiverKeyRegistrationDigest = (
 ): ProtocolDigest =>
     deriveProtocolDigest('ReceiverKeyRegistrationDigest', {
         boardPosition: entry.boardPosition,
-        boardSeq: entry.boardSeq,
+        boardSequence: entry.boardSequence,
         ceremonyId: entry.ceremonyId,
         deviceEpoch: entry.deviceEpoch,
         objectType: entry.objectType,
@@ -46,7 +46,7 @@ export const deriveTrusteeSetupEntryDigest = (
 ): ProtocolDigest =>
     deriveProtocolDigest('TrusteeSetupEntryDigest', {
         boardPosition: entry.boardPosition,
-        boardSeq: entry.boardSeq,
+        boardSequence: entry.boardSequence,
         ceremonyId: entry.ceremonyId,
         deviceEpoch: entry.deviceEpoch,
         objectType: entry.objectType,
@@ -79,7 +79,7 @@ export const deriveElectionManifestDigest = (
 ): ProtocolDigest =>
     deriveProtocolDigest('ElectionManifestDigest', {
         boardPosition: manifest.boardPosition,
-        boardSeq: manifest.boardSeq,
+        boardSequence: manifest.boardSequence,
         ceremonyId: manifest.ceremonyId,
         manifestOpaqueBindings: manifest.manifestOpaqueBindings,
         manifestPolicyDigests: manifest.manifestPolicyDigests,

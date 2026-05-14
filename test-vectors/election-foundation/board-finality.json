@@ -173,7 +173,7 @@
       {
         "objectDigest": "candidate-b",
         "objectType": "TargetFinalityRecord",
-        "boardSeq": 2,
+        "boardSequence": 2,
         "boardPosition": 0,
         "signerIdentity": "participant-2",
         "recoveryEpoch": 0,
@@ -185,7 +185,7 @@
       {
         "objectDigest": "candidate-a",
         "objectType": "TargetFinalityRecord",
-        "boardSeq": 1,
+        "boardSequence": 1,
         "boardPosition": 0,
         "signerIdentity": "participant-1",
         "recoveryEpoch": 0,
@@ -197,7 +197,7 @@
       {
         "objectDigest": "candidate-a",
         "objectType": "TargetFinalityRecord",
-        "boardSeq": 3,
+        "boardSequence": 3,
         "boardPosition": 0,
         "signerIdentity": "participant-1",
         "recoveryEpoch": 0,
@@ -223,14 +223,14 @@
           "signerIdentity": "participant-1",
           "currentRecoveryEpoch": 1,
           "currentDeviceEpoch": 1,
-          "oldActionCutoffBoardSeq": 10
+          "oldActionCutoffBoardSequence": 10
         }
       },
       "candidates": [
         {
           "objectDigest": "candidate-stale-mixed-epoch",
           "objectType": "TargetFinalityRecord",
-          "boardSeq": 9,
+          "boardSequence": 9,
           "boardPosition": 0,
           "signerIdentity": "participant-1",
           "recoveryEpoch": 0,
@@ -260,7 +260,7 @@
         {
           "objectDigest": "candidate-a",
           "objectType": "TargetFinalityRecord",
-          "boardSeq": 1,
+          "boardSequence": 1,
           "boardPosition": 0,
           "signerIdentity": "participant-1",
           "recoveryEpoch": 0,
@@ -272,7 +272,7 @@
         {
           "objectDigest": "candidate-conflict",
           "objectType": "TargetFinalityRecord",
-          "boardSeq": 1,
+          "boardSequence": 1,
           "boardPosition": 1,
           "signerIdentity": "participant-1",
           "recoveryEpoch": 0,

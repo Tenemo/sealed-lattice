@@ -9,14 +9,10 @@ import type {
     RefusalRecord,
 } from '@sealed-lattice/types';
 
-import {
-    verifyBoardConsistency,
-    verifyInclusionProof,
-} from '../board/index.js';
+import { collectBoardInclusionEvidence } from '../board/shell-evidence.js';
 import { deriveProtocolDigest } from '../common/digests.js';
 import { verifySignedObjectSignature } from '../common/signatures.js';
 import {
-    buildBoardHeadMap,
     createRefusal,
     isNonNegativeInteger,
     uniqueStrings,
@@ -28,7 +24,7 @@ export const deriveCastReceiptDigest = (
     deriveProtocolDigest('CastReceiptDigest', {
         ballotPackageDigest: receipt.ballotPackageDigest,
         boardPosition: receipt.boardPosition,
-        boardSeq: receipt.boardSeq,
+        boardSequence: receipt.boardSequence,
         ceremonyId: receipt.ceremonyId,
         contextDigest: receipt.contextDigest,
         deviceEpoch: receipt.deviceEpoch,
@@ -60,7 +56,7 @@ export const deriveCloseRecordDigest = (
 ): ProtocolDigest =>
     deriveProtocolDigest('CloseRecordDigest', {
         boardPosition: closeRecord.boardPosition,
-        boardSeq: closeRecord.boardSeq,
+        boardSequence: closeRecord.boardSequence,
         ceremonyId: closeRecord.ceremonyId,
         closeKind: closeRecord.closeKind,
         closedBoardHeadDigest: closeRecord.closedBoardHeadDigest,
@@ -78,7 +74,7 @@ const verifyCastReceiptShape = (
     const expectedDigest = deriveCastReceiptDigest({
         ballotPackageDigest: receipt.ballotPackageDigest,
         boardPosition: receipt.boardPosition,
-        boardSeq: receipt.boardSeq,
+        boardSequence: receipt.boardSequence,
         ceremonyId: receipt.ceremonyId,
         contextDigest: receipt.contextDigest,
         deviceEpoch: receipt.deviceEpoch,
@@ -102,7 +98,7 @@ const verifyCastReceiptShape = (
     if (
         receipt.objectType !== 'CastReceipt' ||
         receipt.objectVersion !== 1 ||
-        !isNonNegativeInteger(receipt.boardSeq) ||
+        !isNonNegativeInteger(receipt.boardSequence) ||
         !isNonNegativeInteger(receipt.boardPosition) ||
         !isNonNegativeInteger(receipt.recoveryEpoch) ||
         !isNonNegativeInteger(receipt.deviceEpoch)
@@ -153,7 +149,7 @@ const verifyCastReceiptShape = (
         );
     }
     if (
-        input.receiptInclusionProof.boardSeq !== receipt.boardSeq ||
+        input.receiptInclusionProof.boardSequence !== receipt.boardSequence ||
         input.receiptInclusionProof.boardPosition !== receipt.boardPosition
     ) {
         refusedObjects.push(
@@ -172,15 +168,11 @@ const verifyCastReceiptShape = (
 const verifyCastReceiptShellUnchecked = (
     input: CastReceiptVerificationInput,
 ): CastReceiptVerification => {
-    const boardResult = verifyBoardConsistency(input.boardEvidence);
-    const headsByDigest = buildBoardHeadMap(
-        input.boardEvidence.signedBoardHeads,
-    );
-    const refusedObjects: RefusalRecord[] = [
-        ...boardResult.refusedObjects,
-        ...verifyCastReceiptShape(input),
-        ...verifyInclusionProof(input.receiptInclusionProof, headsByDigest),
-    ];
+    const { boardResult, refusedObjects } = collectBoardInclusionEvidence({
+        boardEvidence: input.boardEvidence,
+        inclusionProof: input.receiptInclusionProof,
+        objectRefusals: verifyCastReceiptShape(input),
+    });
     const signatureResult = verifySignedObjectSignature(
         input.receipt.signature,
         {
@@ -190,9 +182,9 @@ const verifyCastReceiptShellUnchecked = (
             signerIdentity: input.receipt.voterIdentity,
             ceremonyId: input.receipt.ceremonyId,
             publicKeyDigest: input.expectedVoterPublicKeyDigest,
-            manifestHash: input.expectedElectionManifestDigest,
+            manifestDigest: input.expectedElectionManifestDigest,
             objectRoot: input.receipt.castReceiptDigest,
-            boardHeadHash: input.receiptInclusionProof.boardHeadDigest,
+            boardHeadDigest: input.receiptInclusionProof.boardHeadDigest,
             contextDigest: input.receipt.contextDigest,
         },
     );
@@ -245,7 +237,7 @@ const verifyCloseRecordShape = (
     const refusedObjects: RefusalRecord[] = [];
     const expectedDigest = deriveCloseRecordDigest({
         boardPosition: closeRecord.boardPosition,
-        boardSeq: closeRecord.boardSeq,
+        boardSequence: closeRecord.boardSequence,
         ceremonyId: closeRecord.ceremonyId,
         closeKind: closeRecord.closeKind,
         closedBoardHeadDigest: closeRecord.closedBoardHeadDigest,
@@ -268,7 +260,7 @@ const verifyCloseRecordShape = (
     if (
         closeRecord.objectType !== 'CloseRecord' ||
         closeRecord.objectVersion !== 1 ||
-        !isNonNegativeInteger(closeRecord.boardSeq) ||
+        !isNonNegativeInteger(closeRecord.boardSequence) ||
         !isNonNegativeInteger(closeRecord.boardPosition)
     ) {
         refusedObjects.push(
@@ -328,7 +320,8 @@ const verifyCloseRecordShape = (
         );
     }
     if (
-        input.closeRecordInclusionProof.boardSeq !== closeRecord.boardSeq ||
+        input.closeRecordInclusionProof.boardSequence !==
+            closeRecord.boardSequence ||
         input.closeRecordInclusionProof.boardPosition !==
             closeRecord.boardPosition
     ) {
@@ -381,15 +374,12 @@ const verifyCloseRecordShape = (
 const verifyCloseRecordShellUnchecked = (
     input: CloseRecordVerificationInput,
 ): CloseRecordVerification => {
-    const boardResult = verifyBoardConsistency(input.boardEvidence);
-    const headsByDigest = buildBoardHeadMap(
-        input.boardEvidence.signedBoardHeads,
-    );
-    const refusedObjects: RefusalRecord[] = [
-        ...boardResult.refusedObjects,
-        ...verifyCloseRecordShape(input),
-        ...verifyInclusionProof(input.closeRecordInclusionProof, headsByDigest),
-    ];
+    const { boardResult, headsByDigest, refusedObjects } =
+        collectBoardInclusionEvidence({
+            boardEvidence: input.boardEvidence,
+            inclusionProof: input.closeRecordInclusionProof,
+            objectRefusals: verifyCloseRecordShape(input),
+        });
     if (!headsByDigest.has(input.closeRecord.closedBoardHeadDigest)) {
         refusedObjects.push(
             createRefusal(
@@ -409,9 +399,9 @@ const verifyCloseRecordShellUnchecked = (
             signerIdentity: input.closeRecord.organizerIdentity,
             ceremonyId: input.closeRecord.ceremonyId,
             publicKeyDigest: input.expectedOrganizerPublicKeyDigest,
-            manifestHash: input.expectedElectionManifestDigest,
+            manifestDigest: input.expectedElectionManifestDigest,
             objectRoot: input.closeRecord.closeRecordDigest,
-            boardHeadHash: input.closeRecordInclusionProof.boardHeadDigest,
+            boardHeadDigest: input.closeRecordInclusionProof.boardHeadDigest,
         },
     );
     refusedObjects.push(...signatureResult.refusedObjects);

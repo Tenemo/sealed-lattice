@@ -6,8 +6,10 @@ import {
     Comment,
     ReflectionKind,
     type DeclarationReflection,
+    type ProjectReflection,
 } from 'typedoc';
 
+import publicSurface from '../packages/sdk/public-surface.json' with { type: 'json' };
 import { collectFiles, isWithinDirectory } from '../tools/internal/files.js';
 import config from '../typedoc.config.mjs';
 
@@ -458,7 +460,7 @@ const publicReflectionKinds =
     ReflectionKind.Interface |
     ReflectionKind.Variable;
 
-const verifyTypeDocSummaries = async (): Promise<string[]> => {
+const loadTypeDocProject = async (): Promise<ProjectReflection> => {
     const app = await Application.bootstrapWithPlugins(config);
     const project = await app.convert();
 
@@ -466,6 +468,10 @@ const verifyTypeDocSummaries = async (): Promise<string[]> => {
         throw new Error('TypeDoc could not build the public reflection graph');
     }
 
+    return project;
+};
+
+const verifyTypeDocSummaries = (project: ProjectReflection): string[] => {
     const failures: string[] = [];
     const seen = new Set<string>();
 
@@ -500,12 +506,52 @@ const verifyTypeDocSummaries = async (): Promise<string[]> => {
     return failures.sort();
 };
 
+const verifyPublicSurfaceAllowlist = (project: ProjectReflection): string[] => {
+    const allowedExports = new Set<string>([
+        ...publicSurface.runtimeExports,
+        ...publicSurface.publicTypeExports,
+    ]);
+    const seenExports = new Set<string>();
+    const failures: string[] = [];
+
+    for (const reflection of project.getReflectionsByKind(
+        publicReflectionKinds,
+    )) {
+        const publicReflection = reflection.isReference()
+            ? reflection.getTargetReflectionDeep()
+            : reflection;
+
+        if (
+            !publicReflection.kindOf(publicReflectionKinds) ||
+            publicReflection.isProject() ||
+            publicReflection.kindOf(ReflectionKind.Module)
+        ) {
+            continue;
+        }
+
+        seenExports.add(publicReflection.name);
+        if (!allowedExports.has(publicReflection.name)) {
+            failures.push(`unexpected export "${publicReflection.name}"`);
+        }
+    }
+
+    for (const expectedExport of allowedExports) {
+        if (!seenExports.has(expectedExport)) {
+            failures.push(`missing export "${expectedExport}"`);
+        }
+    }
+
+    return failures.sort();
+};
+
 const main = async (): Promise<void> => {
     const linkFailures = await verifyLinks();
     const baseAwareFailures = await verifyBaseAwareLinks();
     const generatedLayoutFailures = await verifyGeneratedApiLayout();
     const apiFailures = await verifyApiEntryPages();
-    const summaryFailures = await verifyTypeDocSummaries();
+    const typeDocProject = await loadTypeDocProject();
+    const summaryFailures = verifyTypeDocSummaries(typeDocProject);
+    const surfaceFailures = verifyPublicSurfaceAllowlist(typeDocProject);
 
     const failures: string[] = [];
 
@@ -534,6 +580,11 @@ const main = async (): Promise<void> => {
     if (summaryFailures.length > 0) {
         failures.push('Public API reflections without a summary:');
         failures.push(...summaryFailures.map((failure) => `- ${failure}`));
+    }
+
+    if (surfaceFailures.length > 0) {
+        failures.push('Public API reflections outside the surface manifest:');
+        failures.push(...surfaceFailures.map((failure) => `- ${failure}`));
     }
 
     if (failures.length > 0) {

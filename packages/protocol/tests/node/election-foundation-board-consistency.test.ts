@@ -420,8 +420,8 @@ describe('board consistency', () => {
             return signedRoot as CanonicalSignedRootObject;
         };
         const malformedHeads = [
-            createHeadWithSignedRoot(omitSignedRootField('manifestHash')),
-            createHeadWithSignedRoot(omitSignedRootField('boardHeadHash')),
+            createHeadWithSignedRoot(omitSignedRootField('manifestDigest')),
+            createHeadWithSignedRoot(omitSignedRootField('boardHeadDigest')),
             createHeadWithSignedRoot(omitSignedRootField('byteLength')),
             createHeadWithSignedRoot(omitSignedRootField('contextDigest')),
             createHeadWithSignedRoot({
@@ -480,7 +480,7 @@ describe('board consistency', () => {
                 ballot: 'participant-1',
             }),
             contextDigest,
-            boardSeq: head0.boardSeq,
+            boardSequence: head0.boardSequence,
             boardPosition: 0,
             recoveryEpoch: 0,
             deviceEpoch: 0,

@@ -43,7 +43,7 @@ export const deriveBoardHeadDigest = (head: SignedBoardHead): ProtocolDigest =>
     deriveProtocolDigest('BoardHeadDigest', {
         boardPolicyDigest: head.boardPolicyDigest,
         boardRoot: head.boardRoot,
-        boardSeq: head.boardSeq,
+        boardSequence: head.boardSequence,
         ceremonyId: head.ceremonyId,
         objectType: head.objectType,
         objectVersion: head.objectVersion,
@@ -59,7 +59,7 @@ export const deriveInclusionProofDigest = (
         boardEntryDigests: inclusionProof.boardEntryDigests,
         boardPosition: inclusionProof.boardPosition,
         boardRoot: inclusionProof.boardRoot,
-        boardSeq: inclusionProof.boardSeq,
+        boardSequence: inclusionProof.boardSequence,
         includedObjectDigest: inclusionProof.includedObjectDigest,
         includedObjectType: inclusionProof.includedObjectType,
     });
@@ -115,7 +115,7 @@ const verifyBoardHead = (
         );
     }
     if (
-        !isNonNegativeInteger(head.boardSeq) ||
+        !isNonNegativeInteger(head.boardSequence) ||
         head.objectType !== 'BoardHead' ||
         head.objectVersion !== 1
     ) {
@@ -128,7 +128,7 @@ const verifyBoardHead = (
             ),
         );
     }
-    if (head.previousHeadDigest === null && head.boardSeq !== 0) {
+    if (head.previousHeadDigest === null && head.boardSequence !== 0) {
         refusedObjects.push(
             createRefusal(
                 'BoardConsistencyFailure',
@@ -138,7 +138,7 @@ const verifyBoardHead = (
             ),
         );
     }
-    if (head.previousHeadDigest !== null && head.boardSeq === 0) {
+    if (head.previousHeadDigest !== null && head.boardSequence === 0) {
         refusedObjects.push(
             createRefusal(
                 'BoardConsistencyFailure',
@@ -154,9 +154,9 @@ const verifyBoardHead = (
         objectVersion: 1,
         signerRole: 'Board',
         ceremonyId: input.ceremonyId,
-        manifestHash: null,
+        manifestDigest: null,
         objectRoot: head.headDigest,
-        boardHeadHash: null,
+        boardHeadDigest: null,
         publicKeyDigest: input.expectedBoardPublicKeyDigest,
     });
     refusedObjects.push(...signatureResult.refusedObjects);
@@ -262,7 +262,7 @@ const verifyPreviousHeadLinks = (
             );
             continue;
         }
-        if (previousHead.boardSeq + 1 !== head.boardSeq) {
+        if (previousHead.boardSequence + 1 !== head.boardSequence) {
             refusedObjects.push(
                 createRefusal(
                     'BoardConsistencyFailure',
@@ -380,7 +380,7 @@ export const verifyInclusionProof = (
         boardEntryDigests: inclusionProof.boardEntryDigests,
         boardPosition: inclusionProof.boardPosition,
         boardRoot: inclusionProof.boardRoot,
-        boardSeq: inclusionProof.boardSeq,
+        boardSequence: inclusionProof.boardSequence,
         includedObjectDigest: inclusionProof.includedObjectDigest,
         includedObjectType: inclusionProof.includedObjectType,
     });
@@ -421,7 +421,7 @@ export const verifyInclusionProof = (
                 inclusionProof.includedObjectType,
             ),
         );
-    } else if (head.boardSeq !== inclusionProof.boardSeq) {
+    } else if (head.boardSequence !== inclusionProof.boardSequence) {
         refusedObjects.push(
             createRefusal(
                 'InclusionProofInvalid',

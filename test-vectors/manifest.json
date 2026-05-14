@@ -3,7 +3,7 @@
   "entries": [
     {
       "path": "election-foundation/board-finality.json",
-      "sha256": "019133635cebfd5becb4e5004d61e3cbeb58e03f821b4ad36dd2b3f9234a0c2f"
+      "sha256": "2688d41553d4ba0858545b2bc26130dee80344e687658174ea8c8995dea15b00"
     },
     {
       "path": "election-foundation/capability-refusals.json",
@@ -11,7 +11,7 @@
     },
     {
       "path": "election-foundation/deterministic-fixtures.json",
-      "sha256": "a5f4b38a967f87d090a3c4ae0132ceee515cab40d9efcea9c8b90cbe34738e6d"
+      "sha256": "8ae102219f85846c57912f213c557dc8fc3f10ebb70d518ec89266c77c352136"
     },
     {
       "path": "election-foundation/lifecycle-transitions.json",

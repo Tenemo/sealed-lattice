@@ -300,9 +300,9 @@ describe('election foundation test vectors', () => {
                 signerIdentity: envelope.signedRoot.signerIdentity,
                 ceremonyId: envelope.signedRoot.ceremonyId,
                 publicKeyDigest: envelope.publicKeyDigest,
-                manifestHash: envelope.signedRoot.manifestHash,
+                manifestDigest: envelope.signedRoot.manifestDigest,
                 objectRoot: envelope.signedRoot.objectRoot,
-                boardHeadHash: envelope.signedRoot.boardHeadHash,
+                boardHeadDigest: envelope.signedRoot.boardHeadDigest,
                 contextDigest: envelope.signedRoot.contextDigest,
             }),
         ).toMatchObject(deterministicFixtures.signature.expectedVerification);

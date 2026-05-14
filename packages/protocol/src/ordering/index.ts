@@ -18,7 +18,7 @@ const compareCandidates = (
     left: ValidatedFirstComeCandidate,
     right: ValidatedFirstComeCandidate,
 ): number =>
-    left.boardSeq - right.boardSeq ||
+    left.boardSequence - right.boardSequence ||
     left.boardPosition - right.boardPosition ||
     left.actionSequence - right.actionSequence ||
     left.objectDigest.localeCompare(right.objectDigest);
@@ -60,7 +60,7 @@ const validateFirstComeCandidateShape = (
         );
     }
     if (
-        !isNonNegativeInteger(candidate.boardSeq) ||
+        !isNonNegativeInteger(candidate.boardSequence) ||
         !isNonNegativeInteger(candidate.boardPosition) ||
         !isNonNegativeInteger(candidate.recoveryEpoch) ||
         !isNonNegativeInteger(candidate.deviceEpoch) ||
@@ -107,8 +107,8 @@ const isCurrentRecoveryEpoch = (
     }
 
     return (
-        recoveryEntry.oldActionCutoffBoardSeq !== undefined &&
-        candidate.boardSeq < recoveryEntry.oldActionCutoffBoardSeq &&
+        recoveryEntry.oldActionCutoffBoardSequence !== undefined &&
+        candidate.boardSequence < recoveryEntry.oldActionCutoffBoardSequence &&
         candidate.recoveryEpoch < recoveryEntry.currentRecoveryEpoch &&
         candidate.deviceEpoch < recoveryEntry.currentDeviceEpoch
     );

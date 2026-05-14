@@ -52,7 +52,7 @@ describe('cast, close, and target-phase shells', () => {
             ballotPackageDigest: deriveProtocolDigest('BallotPackageDigest', {
                 ballot: 'participant-1',
             }),
-            boardSeq: 1,
+            boardSequence: 1,
             boardPosition: 0,
             recoveryEpoch: 0,
             deviceEpoch: 0,
@@ -77,8 +77,8 @@ describe('cast, close, and target-phase shells', () => {
                 voterKey.publicKeyDigest,
                 castReceiptDigest,
                 {
-                    boardHeadHash: castHead.headDigest,
-                    manifestHash: electionManifestDigest,
+                    boardHeadDigest: castHead.headDigest,
+                    manifestDigest: electionManifestDigest,
                 },
             ),
         };
@@ -101,7 +101,7 @@ describe('cast, close, and target-phase shells', () => {
             closeKind: 'VotingClosed',
             closedBoardHeadDigest: castHead.headDigest,
             postVotingClosedContextDigest: null,
-            boardSeq: 2,
+            boardSequence: 2,
             boardPosition: 0,
             organizerIdentity: 'organizer',
         } satisfies Omit<CloseRecord, 'closeRecordDigest' | 'signature'>;
@@ -132,8 +132,8 @@ describe('cast, close, and target-phase shells', () => {
                 organizerPublicKeyDigest,
                 closeRecordDigest,
                 {
-                    boardHeadHash: closeHead.headDigest,
-                    manifestHash: electionManifestDigest,
+                    boardHeadDigest: closeHead.headDigest,
+                    manifestDigest: electionManifestDigest,
                 },
             ),
         };
@@ -205,7 +205,7 @@ describe('cast, close, and target-phase shells', () => {
             finalizedBoardHeadDigest:
                 targetFinalityRecord.finalizedBoardHeadDigest,
             replayContextDigest: contextDigest,
-            boardSeq: 2,
+            boardSequence: 2,
             boardPosition: 0,
             recoveryEpoch: 0,
             deviceEpoch: 0,
@@ -233,9 +233,9 @@ describe('cast, close, and target-phase shells', () => {
                 participantKey.publicKeyDigest,
                 replayDigest,
                 {
-                    boardHeadHash: replayHead.headDigest,
+                    boardHeadDigest: replayHead.headDigest,
                     contextDigest,
-                    manifestHash: electionManifestDigest,
+                    manifestDigest: electionManifestDigest,
                 },
             ),
         };
@@ -288,7 +288,7 @@ describe('cast, close, and target-phase shells', () => {
                 targetFinalityRecord.targetFinalityRecordDigest,
             replayAttestationDigests: [replayDigest],
             optionalEvaluationProofRoot: null,
-            boardSeq: 3,
+            boardSequence: 3,
             boardPosition: 0,
             organizerIdentity: 'organizer',
         } satisfies Omit<
@@ -316,8 +316,8 @@ describe('cast, close, and target-phase shells', () => {
                 organizerPublicKeyDigest,
                 targetAcceptedRecordDigest,
                 {
-                    boardHeadHash: acceptedHead.headDigest,
-                    manifestHash: electionManifestDigest,
+                    boardHeadDigest: acceptedHead.headDigest,
+                    manifestDigest: electionManifestDigest,
                 },
             ),
         };
@@ -351,7 +351,7 @@ describe('cast, close, and target-phase shells', () => {
                 targetFinalityRecord.targetFinalityRecordDigest,
             topKEvaluationRecordDigest:
                 targetFinalityRecord.topKEvaluationRecordDigest,
-            boardSeq: 4,
+            boardSequence: 4,
             boardPosition: 0,
             recoveryEpoch: 0,
             deviceEpoch: 0,
@@ -383,8 +383,8 @@ describe('cast, close, and target-phase shells', () => {
                 participantKey.publicKeyDigest,
                 decryptionShareDigest,
                 {
-                    boardHeadHash: shareHead.headDigest,
-                    manifestHash: electionManifestDigest,
+                    boardHeadDigest: shareHead.headDigest,
+                    manifestDigest: electionManifestDigest,
                 },
             ),
         };
@@ -444,8 +444,8 @@ describe('cast, close, and target-phase shells', () => {
                         participantKey.publicKeyDigest,
                         wrongFinalityShareDigest,
                         {
-                            boardHeadHash: wrongShareHead.headDigest,
-                            manifestHash: electionManifestDigest,
+                            boardHeadDigest: wrongShareHead.headDigest,
+                            manifestDigest: electionManifestDigest,
                         },
                     ),
                 },
@@ -469,7 +469,7 @@ describe('cast, close, and target-phase shells', () => {
                 ]),
                 attestation: {
                     ...replayAttestation,
-                    boardSeq: Number.NaN,
+                    boardSequence: Number.NaN,
                 },
                 attestationInclusionProof: replayProofs[0],
                 targetFinalityRecord,
@@ -486,7 +486,7 @@ describe('cast, close, and target-phase shells', () => {
                 ]),
                 targetAcceptedRecord: {
                     ...targetAcceptedRecord,
-                    boardSeq: Number.NaN,
+                    boardSequence: Number.NaN,
                 },
                 targetAcceptedRecordInclusionProof: acceptedProofs[0],
                 targetFinalityRecord,
@@ -507,7 +507,7 @@ describe('cast, close, and target-phase shells', () => {
                 ]),
                 decryptionShare: {
                     ...decryptionShare,
-                    boardSeq: Number.NaN,
+                    boardSequence: Number.NaN,
                 },
                 decryptionShareInclusionProof: shareProofs[0],
                 targetAcceptedRecord,

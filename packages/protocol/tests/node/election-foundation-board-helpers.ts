@@ -29,7 +29,7 @@ import {
 } from './election-foundation-fixture-constants';
 
 export const createBoardHead = (
-    boardSeq: number,
+    boardSequence: number,
     previousHeadDigest: string | null,
     branchName = 'main',
     boardEntryDigests?: readonly string[],
@@ -38,7 +38,7 @@ export const createBoardHead = (
         deriveProtocolDigest('BoardEntryDigest', {
             branchName,
             marker: 'empty-board-head',
-            boardSeq,
+            boardSequence,
         }),
     ];
     const unsignedHead: SignedBoardHead = {
@@ -46,7 +46,7 @@ export const createBoardHead = (
         objectVersion: 1,
         headDigest: '',
         ceremonyId,
-        boardSeq,
+        boardSequence,
         boardRoot: deriveBoardRootDigest(resolvedBoardEntryDigests),
         previousHeadDigest,
         boardPolicyDigest,
@@ -97,7 +97,7 @@ export const createInclusionProof = (
         );
     const payload = {
         boardHeadDigest: head.headDigest,
-        boardSeq: head.boardSeq,
+        boardSequence: head.boardSequence,
         boardPosition,
         includedObjectType,
         includedObjectDigest,
@@ -113,7 +113,7 @@ export const createInclusionProof = (
 };
 
 export const createBoardHeadWithObjects = (
-    boardSeq: number,
+    boardSequence: number,
     previousHeadDigest: string | null,
     objects: readonly {
         readonly objectType: InclusionProof['includedObjectType'];
@@ -140,7 +140,7 @@ export const createBoardHeadWithObjects = (
                 ? deriveProtocolDigest('BoardEntryDigest', {
                       filler: boardPosition,
                       branchName,
-                      boardSeq,
+                      boardSequence,
                   })
                 : deriveBoardEntryDigest({
                       boardPosition: object.boardPosition,
@@ -150,7 +150,7 @@ export const createBoardHeadWithObjects = (
         },
     );
     const head = createBoardHead(
-        boardSeq,
+        boardSequence,
         previousHeadDigest,
         branchName,
         boardEntryDigests,
@@ -169,13 +169,13 @@ export const createBoardHeadWithObjects = (
 };
 
 export const createTargetProposalHead = (
-    boardSeq: number,
+    boardSequence: number,
     previousHeadDigest: string | null,
     branchName = 'main',
     topKEvaluationRecordDigest = defaultTopKEvaluationRecordDigest,
 ): SignedBoardHead =>
     createBoardHeadWithObjects(
-        boardSeq,
+        boardSequence,
         previousHeadDigest,
         [
             {
@@ -217,7 +217,7 @@ export const createWitnessCheckpoint = (
                     .publicKeyDigest,
             checkpointDigest,
             {
-                boardHeadHash: finalizedBoardHeadDigest,
+                boardHeadDigest: finalizedBoardHeadDigest,
             },
         ),
     };

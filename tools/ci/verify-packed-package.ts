@@ -50,6 +50,7 @@ const requiredPublishedPackageFilePaths = [
     'dist/internal/protocol-objects.d.ts',
     'dist/internal/roster-recovery.d.ts',
     'dist/internal/transcript-core.d.ts',
+    'public-surface.json',
 ] as const;
 
 export const getPublicPackageDirectory = (

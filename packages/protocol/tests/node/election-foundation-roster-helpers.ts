@@ -30,7 +30,7 @@ import {
 
 export const createRegistrationEntry = (
     participantIdentity: string,
-    boardSeq: number,
+    boardSequence: number,
     boardPosition: number,
 ): RegistrationEntry => {
     const signingPublicKeyDigest =
@@ -41,7 +41,7 @@ export const createRegistrationEntry = (
         ceremonyId,
         participantIdentity,
         signingPublicKeyDigest,
-        boardSeq,
+        boardSequence,
         boardPosition,
         recoveryEpoch: 0,
         deviceEpoch: 0,
@@ -66,7 +66,7 @@ export const createRegistrationEntry = (
 
 export const createReceiverKeyRegistration = (
     participantIdentity: string,
-    boardSeq: number,
+    boardSequence: number,
     boardPosition: number,
 ): ReceiverKeyRegistration => {
     const signingPublicKeyDigest =
@@ -79,7 +79,7 @@ export const createReceiverKeyRegistration = (
         receiverKeyRoot: deriveProtocolDigest('ReceiverKeyRoot', {
             participantIdentity,
         }),
-        boardSeq,
+        boardSequence,
         boardPosition,
         recoveryEpoch: 0,
         deviceEpoch: 0,
@@ -105,7 +105,7 @@ export const createReceiverKeyRegistration = (
 
 export const createTrusteeSetupEntry = (
     trusteeIdentity: string,
-    boardSeq: number,
+    boardSequence: number,
     boardPosition: number,
 ): TrusteeSetupEntry => {
     const signingPublicKeyDigest =
@@ -118,7 +118,7 @@ export const createTrusteeSetupEntry = (
         trusteeSetupRoot: deriveProtocolDigest('TrusteeSetupRoot', {
             trusteeIdentity,
         }),
-        boardSeq,
+        boardSequence,
         boardPosition,
         recoveryEpoch: 0,
         deviceEpoch: 0,
@@ -159,7 +159,7 @@ export const createElectionManifest = (
         }),
         manifestPolicyDigests,
         manifestOpaqueBindings,
-        boardSeq: 3,
+        boardSequence: 3,
         boardPosition: 0,
         ...overrides,
     } satisfies Omit<ElectionManifest, 'electionManifestDigest' | 'signature'>;
@@ -280,7 +280,7 @@ export const createRosterManifestTranscriptInput = (
         electionManifest: manifest,
         organizerPublicKeyDigest,
         organizerIdentity: 'organizer',
-        rosterFreezeBoardSeq: 2,
+        rosterFreezeBoardSequence: 2,
         manifestInclusionProof: manifestInclusionProofs[0],
     };
 };

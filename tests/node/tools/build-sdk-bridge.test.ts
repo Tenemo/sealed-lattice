@@ -2,6 +2,7 @@ import path from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
+import publicSurface from '../../../packages/sdk/public-surface.json' with { type: 'json' };
 import {
     computeRelativeTypesSpecifier,
     rewriteTypesImports,
@@ -68,6 +69,9 @@ describe('SDK bridge build helpers', () => {
     });
 
     it('vendors only SDK-safe protocol runtime modules', () => {
+        expect(sdkProtocolRuntimeSourceRelativePaths).toEqual(
+            publicSurface.vendoredProtocolRuntimeModules,
+        );
         expect(sdkProtocolRuntimeSourceRelativePaths).toContain(
             'board/index.ts',
         );
