@@ -35,7 +35,7 @@
         "build:types": "pnpm --filter @sealed-lattice/types run build",
         "build:wasm": "tsx ../../tools/ci/build-wasm-kernel.ts --out packages/sdk/dist/sealed-lattice-kernel.wasm",
         "build:bridge": "tsx ../../tools/ci/build-sdk-bridge.ts",
-        "build": "pnpm exec del-cli dist tsconfig.tsbuildinfo && tsc --project tsconfig.json && pnpm run build:bridge && pnpm run build:wasm"
+        "build": "pnpm run build:types && pnpm exec del-cli dist tsconfig.tsbuildinfo && tsc --project tsconfig.json && pnpm run build:bridge && pnpm run build:wasm"
     },
     "devDependencies": {
         "@sealed-lattice/protocol": "workspace:*",
