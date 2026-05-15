@@ -13,22 +13,19 @@ pub use mutations::{
     mutate_invalid_enum_fixture, mutate_invalid_profile_fixture, mutate_invalid_utf8_fixture,
     mutate_malformed_length_fixture, mutate_malformed_magic_fixture,
     mutate_mhe_security_profile_mismatch_fixture, mutate_missing_field_fixture,
-    mutate_non_canonical_varuint_fixture,
-    mutate_result_computed_optional_evaluation_profile_fixture, mutate_trailing_bytes_fixture,
+    mutate_non_canonical_varuint_fixture, mutate_trailing_bytes_fixture,
     mutate_unknown_base_claim_profile_fixture, mutate_unknown_evaluation_profile_fixture,
     mutate_unknown_field_fixture, mutate_unknown_mhe_security_stage_fixture,
     mutate_unsupported_envelope_version_fixture, mutate_unsupported_object_type_fixture,
-    mutate_unsupported_object_version_fixture,
+    mutate_unsupported_object_version_fixture, mutate_wrong_evaluation_profile_fixture,
 };
 pub use rng::DeterministicFixtureRng;
 pub use types::{
     ACTIVE_MALICIOUS_MHE_PROFILE_ID, BaseClaimProfile, FULLY_VERIFIED_ACTIVE_MALICIOUS_PROFILE,
-    FULLY_VERIFIED_PASSIVE_MHE_PROFILE, FULLY_VERIFIED_RESULT_PROFILE_ID, MheSecurityStage,
-    NO_DECRYPTION_PROOF_PROFILE_ID, NO_EVALUATION_PROOF_PROFILE_ID, NO_HE_SETUP_PROOF_PROFILE_ID,
-    OPTIONAL_EVALUATION_PROOF_PROFILE_ID, PASSIVE_MHE_PROTOTYPE_PROFILE_ID,
-    RESULT_COMPUTED_ACTIVE_MALICIOUS_PROFILE, RESULT_COMPUTED_AUDITABLE_PROFILE_ID,
-    RESULT_COMPUTED_PASSIVE_MHE_PROFILE, TranscriptCoreAnalysis, TranscriptCoreObject,
-    TranscriptCoreProfile, TranscriptCoreStatus, invalid_response,
+    FULLY_VERIFIED_PASSIVE_MHE_PROFILE, FULLY_VERIFIED_RESULT_PROFILE_ID,
+    MANDATORY_EVALUATION_PROOF_PROFILE_ID, MheSecurityStage, NO_DECRYPTION_PROOF_PROFILE_ID,
+    NO_HE_SETUP_PROOF_PROFILE_ID, PASSIVE_MHE_PROTOTYPE_PROFILE_ID, TranscriptCoreAnalysis,
+    TranscriptCoreObject, TranscriptCoreProfile, TranscriptCoreStatus, invalid_response,
 };
 
 pub const MODULE_MARKER: &str = "transcript-core";
@@ -37,28 +34,25 @@ pub const MODULE_MARKER: &str = "transcript-core";
 mod tests {
     use super::{
         DeterministicFixtureRng, FULLY_VERIFIED_ACTIVE_MALICIOUS_PROFILE,
-        FULLY_VERIFIED_PASSIVE_MHE_PROFILE, NO_EVALUATION_PROOF_PROFILE_ID,
-        OPTIONAL_EVALUATION_PROOF_PROFILE_ID, RESULT_COMPUTED_ACTIVE_MALICIOUS_PROFILE,
-        RESULT_COMPUTED_PASSIVE_MHE_PROFILE, analyze_canonical_object,
-        canonical_transcript_core_object, decode_hex, mutate_base_claim_profile_mismatch_fixture,
-        mutate_duplicate_field_fixture, mutate_field_order_fixture,
-        mutate_fully_verified_missing_evaluation_profile_fixture, mutate_invalid_enum_fixture,
-        mutate_invalid_profile_fixture, mutate_invalid_utf8_fixture,
+        FULLY_VERIFIED_PASSIVE_MHE_PROFILE, MANDATORY_EVALUATION_PROOF_PROFILE_ID,
+        analyze_canonical_object, canonical_transcript_core_object, decode_hex,
+        mutate_base_claim_profile_mismatch_fixture, mutate_duplicate_field_fixture,
+        mutate_field_order_fixture, mutate_fully_verified_missing_evaluation_profile_fixture,
+        mutate_invalid_enum_fixture, mutate_invalid_profile_fixture, mutate_invalid_utf8_fixture,
         mutate_malformed_length_fixture, mutate_malformed_magic_fixture,
         mutate_mhe_security_profile_mismatch_fixture, mutate_missing_field_fixture,
-        mutate_non_canonical_varuint_fixture,
-        mutate_result_computed_optional_evaluation_profile_fixture, mutate_trailing_bytes_fixture,
+        mutate_non_canonical_varuint_fixture, mutate_trailing_bytes_fixture,
         mutate_unknown_base_claim_profile_fixture, mutate_unknown_evaluation_profile_fixture,
         mutate_unknown_field_fixture, mutate_unknown_mhe_security_stage_fixture,
         mutate_unsupported_envelope_version_fixture, mutate_unsupported_object_type_fixture,
-        mutate_unsupported_object_version_fixture, parse_transcript_core_object,
-        serialize_transcript_core_object,
+        mutate_unsupported_object_version_fixture, mutate_wrong_evaluation_profile_fixture,
+        parse_transcript_core_object, serialize_transcript_core_object,
     };
     use crate::encoding::CanonicalErrorCode;
 
     #[test]
     fn canonical_object_round_trips_byte_identically() {
-        let object = canonical_transcript_core_object(RESULT_COMPUTED_PASSIVE_MHE_PROFILE);
+        let object = canonical_transcript_core_object(FULLY_VERIFIED_ACTIVE_MALICIOUS_PROFILE);
         let canonical_bytes = serialize_transcript_core_object(&object);
         let parsed = parse_transcript_core_object(&canonical_bytes).expect("object should parse");
 
@@ -67,66 +61,32 @@ mod tests {
 
     #[test]
     fn profile_components_keep_the_same_shape_but_distinct_roots() {
-        let result_computed_passive_bytes = serialize_transcript_core_object(
-            &canonical_transcript_core_object(RESULT_COMPUTED_PASSIVE_MHE_PROFILE),
-        );
         let fully_verified_passive_bytes = serialize_transcript_core_object(
             &canonical_transcript_core_object(FULLY_VERIFIED_PASSIVE_MHE_PROFILE),
-        );
-        let result_computed_active_bytes = serialize_transcript_core_object(
-            &canonical_transcript_core_object(RESULT_COMPUTED_ACTIVE_MALICIOUS_PROFILE),
         );
         let fully_verified_active_bytes = serialize_transcript_core_object(
             &canonical_transcript_core_object(FULLY_VERIFIED_ACTIVE_MALICIOUS_PROFILE),
         );
-        let result_computed_passive = analyze_canonical_object(&result_computed_passive_bytes, 8)
-            .expect("result-computed passive profile should analyze");
         let fully_verified_passive = analyze_canonical_object(&fully_verified_passive_bytes, 8)
             .expect("fully verified passive profile should analyze");
-        let result_computed_active = analyze_canonical_object(&result_computed_active_bytes, 8)
-            .expect("result-computed active profile should analyze");
         let fully_verified_active = analyze_canonical_object(&fully_verified_active_bytes, 8)
             .expect("fully verified active profile should analyze");
 
         assert_eq!(
-            result_computed_passive.object_type,
-            fully_verified_passive.object_type
+            fully_verified_passive.object_type,
+            fully_verified_active.object_type
         );
         assert_eq!(
-            result_computed_passive.object_type,
-            result_computed_active.object_type
-        );
-        assert_eq!(
-            result_computed_passive.object_version,
+            fully_verified_passive.object_version,
             fully_verified_active.object_version
-        );
-        assert_ne!(
-            result_computed_passive.base_claim_profile,
-            fully_verified_passive.base_claim_profile
-        );
-        assert_ne!(
-            result_computed_passive.mhe_security_stage,
-            result_computed_active.mhe_security_stage
-        );
-        assert_ne!(
-            result_computed_passive.object_hash512,
-            fully_verified_passive.object_hash512
-        );
-        assert_ne!(
-            result_computed_passive.object_hash512,
-            result_computed_active.object_hash512
         );
         assert_ne!(
             fully_verified_passive.object_hash512,
             fully_verified_active.object_hash512
         );
         assert_eq!(
-            result_computed_active.evaluation_proof_profile_id,
-            NO_EVALUATION_PROOF_PROFILE_ID,
-        );
-        assert_eq!(
             fully_verified_active.evaluation_proof_profile_id,
-            OPTIONAL_EVALUATION_PROOF_PROFILE_ID,
+            MANDATORY_EVALUATION_PROOF_PROFILE_ID,
         );
     }
 
@@ -192,7 +152,7 @@ mod tests {
             ),
             (
                 mutate_unknown_evaluation_profile_fixture(),
-                CanonicalErrorCode::UnknownProofProfile,
+                CanonicalErrorCode::ProfileComponentMismatch,
             ),
             (
                 mutate_malformed_magic_fixture(),
@@ -220,14 +180,14 @@ mod tests {
             ),
             (
                 mutate_base_claim_profile_mismatch_fixture(),
-                CanonicalErrorCode::ProfileComponentMismatch,
+                CanonicalErrorCode::UnknownProofProfile,
             ),
             (
                 mutate_mhe_security_profile_mismatch_fixture(),
                 CanonicalErrorCode::ProfileComponentMismatch,
             ),
             (
-                mutate_result_computed_optional_evaluation_profile_fixture(),
+                mutate_wrong_evaluation_profile_fixture(),
                 CanonicalErrorCode::ProfileComponentMismatch,
             ),
             (

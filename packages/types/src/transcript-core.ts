@@ -1,7 +1,5 @@
-/** Claim profile labels attached to transcript-core fixtures and results. */
-export type BaseClaimProfile =
-    | 'ResultComputedAuditable'
-    | 'FullyVerifiedResult';
+/** Claim profile label attached to transcript-core fixtures and results. */
+export type BaseClaimProfile = 'FullyVerifiedResult';
 
 /** High-level malicious security stage claimed by transcript-core fixtures. */
 export type MheSecurityStage = 'PassiveMHEPrototype' | 'ActiveMalicious';

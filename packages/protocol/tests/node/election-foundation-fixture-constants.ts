@@ -113,8 +113,8 @@ export const manifestPolicyDigests: ManifestPolicyDigests = {
         'DuplicateBallotPolicyDigest',
         { policy: 'last-valid-before-close' },
     ),
-    firstComePolicyDigest: deriveProtocolDigest('FirstComePolicyDigest', {
-        policy: 'board-order-current-epoch',
+    firstValidPolicyDigest: deriveProtocolDigest('FirstValidPolicyDigest', {
+        policy: 'canonical-signed-board-order-current-epoch',
     }),
     recoveryPolicyDigest: deriveProtocolDigest('RecoveryPolicyDigest', {
         policy: 'same-slot-recovery-v1',
@@ -123,34 +123,49 @@ export const manifestPolicyDigests: ManifestPolicyDigests = {
     witnessPolicyDigest,
 };
 export const manifestOpaqueBindings: ManifestOpaqueBindings = {
-    bridgeProofProfileId: 'CommittedAggregateShare-HwangPiEnc-v1',
-    proofPrimeParamId: 'proof-prime-param-v1',
-    proofPrimePublicKeyRoot: deriveProtocolDigest('ProofPrimePublicKeyRoot', {
-        key: 'proof-prime',
+    bridgeProofProfileId:
+        'CommittedAggregateShare-DirectQData-HwangPiEnc-BGV-v1',
+    directQDataBridgeProfileId: 'CommittedAggregateShare-DirectQData-BGV-v1',
+    bgvProfileDigest: deriveProtocolDigest('BGVProfileDigest', {
+        profile: 'BGV-RNS-v1',
     }),
-    proofPrimeToQDataKeyConsistencyDigest: deriveProtocolDigest(
-        'ProofPrimeToQDataKeyConsistencyDigest',
-        { rule: 'same-setup' },
-    ),
-    proofPrimeToQDataKeyConsistencyEvidence: deriveProtocolDigest(
-        'ProofPrimeToQDataKeyConsistencyDigest',
-        { evidence: 'same-setup' },
-    ),
+    bgvPublicKeyRoot: deriveProtocolDigest('BGVPublicKeyRoot', {
+        key: 'bgv-collective',
+    }),
+    collectivePublicKeyRoot: deriveProtocolDigest('CollectivePublicKeyRoot', {
+        key: 'bgv-collective',
+    }),
     canonicalCiphertextConventionDigest: deriveProtocolDigest(
         'CanonicalCiphertextConventionDigest',
-        { convention: 'bfv-c0-plus-c1-s' },
+        { convention: 'bgv-rns-coefficient-domain-c0-plus-c1-s' },
     ),
-    bfvBatchEncoderDigest: deriveProtocolDigest('BFVBatchEncoderDigest', {
+    bgvBatchEncoderDigest: deriveProtocolDigest('BGVBatchEncoderDigest', {
         layout: 'WinnerRankTopK-v1',
     }),
     bridgeLayoutDigest: deriveProtocolDigest('BridgeLayoutDigest', {
         layout: 'aggregate-share-layout-v1',
     }),
-    brakerskiBackendProfileId: 'Brakerski25-PQAsync-RingShamir-BFVHPS-RNS-v1',
-    brakerskiShareVerificationKeyRoot: deriveProtocolDigest(
-        'BrakerskiShareVerificationKeyRoot',
-        { root: 'share-verification' },
+    evaluationProofProfileId: 'PQEvalProof-STARK-BGVReplay-v1',
+    evaluationProofProfileDigest: deriveProtocolDigest(
+        'EvaluationProofProfileDigest',
+        { profile: 'PQEvalProof-STARK-BGVReplay-v1' },
     ),
+    thresholdDecryptionProfileId: 'BGV-RNS-AsyncThresholdDecryption-CPAD-v1',
+    thresholdDecryptionProfileDigest: deriveProtocolDigest(
+        'ThresholdDecryptionProfileDigest',
+        { profile: 'BGV-RNS-AsyncThresholdDecryption-CPAD-v1' },
+    ),
+    bgvAsyncThresholdCPADProfileDigest: deriveProtocolDigest(
+        'BGVAsyncThresholdCPADProfileDigest',
+        { profile: 'BGV-RNS-AsyncThresholdDecryption-CPAD-v1' },
+    ),
+    cpadProfileId: 'CPAD-BGV-AsyncThreshold-v1',
+    cpadProfileDigest: deriveProtocolDigest('CPADProfileDigest', {
+        profile: 'CPAD-BGV-AsyncThreshold-v1',
+    }),
+    qTargetDigest: deriveProtocolDigest('QTargetDigest', {
+        profile: 'Appendix-C-target-basis-v1',
+    }),
     mobileProfileId: 'mobile-flagship-profile-v1',
     bridgeMobileCertificatePolicyDigest: deriveProtocolDigest(
         'BridgeMobileCertDigest',

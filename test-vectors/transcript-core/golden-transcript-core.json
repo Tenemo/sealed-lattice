@@ -1,86 +1,44 @@
 [
-    {
-        "kind": "golden-transcript-core",
-        "fixtureVersion": 1,
-        "caseName": "result-computed-passive-mhe-transcript-core",
-        "canonicalBytesHex": "534c42450101010101347472616e7363726970742d636f72652d726573756c742d636f6d70757465642d617564697461626c652d70726f66696c652d7631307472616e7363726970742d636f72652d706173736976652d6d68652d70726f746f747970652d70726f66696c652d7631247472616e7363726970742d636f72652d6e6f2d68652d73657475702d70726f6f662d7631267472616e7363726970742d636f72652d6e6f2d6576616c756174696f6e2d70726f6f662d7631267472616e7363726970742d636f72652d6e6f2d64656372797074696f6e2d70726f6f662d763106012b5472616e73637269707420636f726520726573756c742d636f6d70757465642070617373697665204d4845022a0306ecc4c96f2e67040105040963616e6f6e6963616c19726573756c742d636f6d70757465642d617564697461626c6515706173736976652d6d68652d70726f746f747970650b7761736d2d7061726974790605010305080d",
-        "objectType": "TranscriptCore",
-        "objectVersion": 1,
-        "baseClaimProfile": "ResultComputedAuditable",
-        "mheSecurityStage": "PassiveMHEPrototype",
-        "baseClaimProfileId": "transcript-core-result-computed-auditable-profile-v1",
-        "mheSecurityProfileId": "transcript-core-passive-mhe-prototype-profile-v1",
-        "heSetupProofProfileId": "transcript-core-no-he-setup-proof-v1",
-        "evaluationProofProfileId": "transcript-core-no-evaluation-proof-v1",
-        "decryptionProofProfileId": "transcript-core-no-decryption-proof-v1",
-        "expectedObjectHash512": "728c4aed3e3fd11b8814e7b7c0f1498db690b8055aed6daf50b7a656320e17099f45199abf92107595a0f09f2d02bd32cd63b052cfbb73c29f6a0c3a1c96403d",
-        "expectedChunkRoot": "64ea2f23e6fe8c7a05cb215557a29f1f4a6b9fca8d1d992a229cf8087151ea086967f5f1591f4da909ff52f3690c8c9273d3a51b15dd8c45943cb58583dfd22a",
-        "chunkSize": 8,
-        "expectedStatusLabels": [
-            "TranscriptCoreVerified"
-        ]
-    },
-    {
-        "kind": "golden-transcript-core",
-        "fixtureVersion": 1,
-        "caseName": "fully-verified-passive-mhe-transcript-core",
-        "canonicalBytesHex": "534c42450101010201307472616e7363726970742d636f72652d66756c6c792d76657269666965642d726573756c742d70726f66696c652d7631307472616e7363726970742d636f72652d706173736976652d6d68652d70726f746f747970652d70726f66696c652d7631247472616e7363726970742d636f72652d6e6f2d68652d73657475702d70726f6f662d7631347472616e7363726970742d636f72652d6f7074696f6e616c2d6576616c756174696f6e2d70726f6f662d70726f66696c652d7631267472616e7363726970742d636f72652d6e6f2d64656372797074696f6e2d70726f6f662d763106012a5472616e73637269707420636f72652066756c6c792076657269666965642070617373697665204d4845022c03066d7d24cb0447040105040963616e6f6e6963616c1566756c6c792d76657269666965642d726573756c7415706173736976652d6d68652d70726f746f74797065176f7074696f6e616c2d70726f6f662d726573657276656406050306090c0f",
-        "objectType": "TranscriptCore",
-        "objectVersion": 1,
-        "baseClaimProfile": "FullyVerifiedResult",
-        "mheSecurityStage": "PassiveMHEPrototype",
-        "baseClaimProfileId": "transcript-core-fully-verified-result-profile-v1",
-        "mheSecurityProfileId": "transcript-core-passive-mhe-prototype-profile-v1",
-        "heSetupProofProfileId": "transcript-core-no-he-setup-proof-v1",
-        "evaluationProofProfileId": "transcript-core-optional-evaluation-proof-profile-v1",
-        "decryptionProofProfileId": "transcript-core-no-decryption-proof-v1",
-        "expectedObjectHash512": "bb8131b1c4f94c90d25c957753200e1c9b90df662128158f7ae2f9c4e0ea0cb00a048015e3cf8840fd53bf96a89e2666e4482f65c1e4ff5d6d7cebc4bed0ee3c",
-        "expectedChunkRoot": "6ff3589b99210fc6628450c6192e4a536f4fda6f02423e9317ca4108fbc929386549506497051469bb880a749124acff395689a6ac85e9b341cacd3bb1238e14",
-        "chunkSize": 8,
-        "expectedStatusLabels": [
-            "TranscriptCoreVerified"
-        ]
-    },
-    {
-        "kind": "golden-transcript-core",
-        "fixtureVersion": 1,
-        "caseName": "result-computed-active-malicious-transcript-core",
-        "canonicalBytesHex": "534c42450101010102347472616e7363726970742d636f72652d726573756c742d636f6d70757465642d617564697461626c652d70726f66696c652d76312f7472616e7363726970742d636f72652d6163746976652d6d616c6963696f75732d6d68652d70726f66696c652d7631247472616e7363726970742d636f72652d6e6f2d68652d73657475702d70726f6f662d7631267472616e7363726970742d636f72652d6e6f2d6576616c756174696f6e2d70726f6f662d7631267472616e7363726970742d636f72652d6e6f2d64656372797074696f6e2d70726f6f662d76310601305472616e73637269707420636f726520726573756c742d636f6d707574656420616374697665206d616c6963696f7573022b03069640b9cba31b040105040963616e6f6e6963616c19726573756c742d636f6d70757465642d617564697461626c65106163746976652d6d616c6963696f7573156163746976652d70726f6f662d726573657276656406050204081020",
-        "objectType": "TranscriptCore",
-        "objectVersion": 1,
-        "baseClaimProfile": "ResultComputedAuditable",
-        "mheSecurityStage": "ActiveMalicious",
-        "baseClaimProfileId": "transcript-core-result-computed-auditable-profile-v1",
-        "mheSecurityProfileId": "transcript-core-active-malicious-mhe-profile-v1",
-        "heSetupProofProfileId": "transcript-core-no-he-setup-proof-v1",
-        "evaluationProofProfileId": "transcript-core-no-evaluation-proof-v1",
-        "decryptionProofProfileId": "transcript-core-no-decryption-proof-v1",
-        "expectedObjectHash512": "1ef3879f4736266375f7a8e8fae8a5fe5a7d03582a7402bb3a7266ff67e62e73cfa022967fb8b586e9defc8812272a660c71ead46683b316c39d320ab95e89ae",
-        "expectedChunkRoot": "4678b34b7576d86e48120f71d857376b7e34c6f81b4afd0fc7a0d428c30006a7c51a563f78a5e3e336fab43fd46807f5066b361ac1f18f05add958e8eb6ea5a6",
-        "chunkSize": 8,
-        "expectedStatusLabels": [
-            "TranscriptCoreVerified"
-        ]
-    },
-    {
-        "kind": "golden-transcript-core",
-        "fixtureVersion": 1,
-        "caseName": "fully-verified-active-malicious-transcript-core",
-        "canonicalBytesHex": "534c42450101010202307472616e7363726970742d636f72652d66756c6c792d76657269666965642d726573756c742d70726f66696c652d76312f7472616e7363726970742d636f72652d6163746976652d6d616c6963696f75732d6d68652d70726f66696c652d7631247472616e7363726970742d636f72652d6e6f2d68652d73657475702d70726f6f662d7631347472616e7363726970742d636f72652d6f7074696f6e616c2d6576616c756174696f6e2d70726f6f662d70726f66696c652d7631267472616e7363726970742d636f72652d6e6f2d64656372797074696f6e2d70726f6f662d763106012f5472616e73637269707420636f72652066756c6c7920766572696669656420616374697665206d616c6963696f7573022d030653fbf8753a71040105040963616e6f6e6963616c1566756c6c792d76657269666965642d726573756c74106163746976652d6d616c6963696f7573176f7074696f6e616c2d70726f6f662d72657365727665640605050a0f1419",
-        "objectType": "TranscriptCore",
-        "objectVersion": 1,
-        "baseClaimProfile": "FullyVerifiedResult",
-        "mheSecurityStage": "ActiveMalicious",
-        "baseClaimProfileId": "transcript-core-fully-verified-result-profile-v1",
-        "mheSecurityProfileId": "transcript-core-active-malicious-mhe-profile-v1",
-        "heSetupProofProfileId": "transcript-core-no-he-setup-proof-v1",
-        "evaluationProofProfileId": "transcript-core-optional-evaluation-proof-profile-v1",
-        "decryptionProofProfileId": "transcript-core-no-decryption-proof-v1",
-        "expectedObjectHash512": "d3837f772026fbf3b398c4b82e7340cb0dfcfb98012f1deb7ff3e1dba4a90c19c0d5451ee73ca187cbca2f62c72c5ce807ec41e5eee5afa06508cb4dfbead52e",
-        "expectedChunkRoot": "eda187404b01ae9e00be992447afa5fe39778e973dbc806fbafec1404fd0a8a5e1017361853dbe896f20fd8fe051f0b18863ccec4cc77d2105d051443315b169",
-        "chunkSize": 8,
-        "expectedStatusLabels": [
-            "TranscriptCoreVerified"
-        ]
-    }
+  {
+    "kind": "golden-transcript-core",
+    "fixtureVersion": 1,
+    "caseName": "fully-verified-passive-mhe-transcript-core",
+    "canonicalBytesHex": "534c42450101010201307472616e7363726970742d636f72652d66756c6c792d76657269666965642d726573756c742d70726f66696c652d7631307472616e7363726970742d636f72652d706173736976652d6d68652d70726f746f747970652d70726f66696c652d7631247472616e7363726970742d636f72652d6e6f2d68652d73657475702d70726f6f662d76311e50514576616c50726f6f662d535441524b2d4247565265706c61792d7631267472616e7363726970742d636f72652d6e6f2d64656372797074696f6e2d70726f6f662d763106012a5472616e73637269707420636f72652066756c6c792076657269666965642070617373697665204d4845022c03066d7d24cb0447040105040963616e6f6e6963616c1566756c6c792d76657269666965642d726573756c7415706173736976652d6d68652d70726f746f74797065176d616e6461746f72792d70726f6f662d70726f66696c6506050306090c0f",
+    "objectType": "TranscriptCore",
+    "objectVersion": 1,
+    "baseClaimProfile": "FullyVerifiedResult",
+    "mheSecurityStage": "PassiveMHEPrototype",
+    "baseClaimProfileId": "transcript-core-fully-verified-result-profile-v1",
+    "mheSecurityProfileId": "transcript-core-passive-mhe-prototype-profile-v1",
+    "heSetupProofProfileId": "transcript-core-no-he-setup-proof-v1",
+    "evaluationProofProfileId": "PQEvalProof-STARK-BGVReplay-v1",
+    "decryptionProofProfileId": "transcript-core-no-decryption-proof-v1",
+    "expectedObjectHash512": "ca47a787bbf41655651f585636c1dd549a446b95b06097dde306ccdaec243daaa86940280f69b8db7e01c1ac0e677497cde6c32e2ef6120eb8942c425cf4c11d",
+    "expectedChunkRoot": "c140bd09bd478a4df7a614f3ca5cc3b1be718e0c6d3e9998ac4b6170f4b1633fec4e9573552ed0d204447232cf5f33d9ef49fc541f2a8616af8e236adc371100",
+    "chunkSize": 8,
+    "expectedStatusLabels": [
+      "TranscriptCoreVerified"
+    ]
+  },
+  {
+    "kind": "golden-transcript-core",
+    "fixtureVersion": 1,
+    "caseName": "fully-verified-active-malicious-transcript-core",
+    "canonicalBytesHex": "534c42450101010202307472616e7363726970742d636f72652d66756c6c792d76657269666965642d726573756c742d70726f66696c652d76312f7472616e7363726970742d636f72652d6163746976652d6d616c6963696f75732d6d68652d70726f66696c652d7631247472616e7363726970742d636f72652d6e6f2d68652d73657475702d70726f6f662d76311e50514576616c50726f6f662d535441524b2d4247565265706c61792d7631267472616e7363726970742d636f72652d6e6f2d64656372797074696f6e2d70726f6f662d763106012f5472616e73637269707420636f72652066756c6c7920766572696669656420616374697665206d616c6963696f7573022d030653fbf8753a71040105040963616e6f6e6963616c1566756c6c792d76657269666965642d726573756c74106163746976652d6d616c6963696f7573176d616e6461746f72792d70726f6f662d70726f66696c650605050a0f1419",
+    "objectType": "TranscriptCore",
+    "objectVersion": 1,
+    "baseClaimProfile": "FullyVerifiedResult",
+    "mheSecurityStage": "ActiveMalicious",
+    "baseClaimProfileId": "transcript-core-fully-verified-result-profile-v1",
+    "mheSecurityProfileId": "transcript-core-active-malicious-mhe-profile-v1",
+    "heSetupProofProfileId": "transcript-core-no-he-setup-proof-v1",
+    "evaluationProofProfileId": "PQEvalProof-STARK-BGVReplay-v1",
+    "decryptionProofProfileId": "transcript-core-no-decryption-proof-v1",
+    "expectedObjectHash512": "75646b441cfe2e35b76807d6aef7b41353bef4bd47d211511ef1b6173b0a234afaecdad57ab8c5bafd292651635d0020a54137ee12ac6f45c92d9979e84ea224",
+    "expectedChunkRoot": "b07d1413688cf8608376f556363d8fefc587fc513eea80e21baa421493c7687322a78e10d152fdc7bf1cedc868112d38afdc5f734540ad0573804b41479aabb7",
+    "chunkSize": 8,
+    "expectedStatusLabels": [
+      "TranscriptCoreVerified"
+    ]
+  }
 ]

@@ -15,7 +15,7 @@ election foundation helpers.
 - `sealed-lattice` as the only public package name
 - transcript core fixture verification
 - threshold, lifecycle, poll specification, and capability helpers
-- board consistency, target finality, roster-manifest, cast receipt, close record, first-come ordering, and recovery-epoch helpers
+- board consistency, target finality, roster-manifest, cast receipt, close record, first-valid ordering, and recovery-epoch helpers
 - ML-DSA-65 signed-root verification inside those election foundation helpers, including runtime envelope-field checks
 - fail-closed target-bound decryption gates that require an Appendix-C-certified share-selection profile and explicit proof certificates before decryption-share or recombination capabilities are allowed
 - generated reference pages that confirm the current public surface stays narrow
@@ -35,13 +35,13 @@ import {
 
 - you need the stable published package identity
 - you want to verify transcript core fixtures and run the safe election foundation
-- you want structured board, finality, manifest, first-come, or recovery refusals
+- you want structured board, finality, manifest, first-valid, or recovery refusals
 - you want to follow the documented path without depending on private workspace packages
 
 ## What stays intentionally internal
 
 - crypto provider wrappers
-- replay-attestation, target-accepted-record, and decryption-share shell helpers
+- local replay record, target-accepted-record, and decryption-share shell helpers
 - the Rust/WASM loader internals
 - testkit utilities
 - any future public subpath layout

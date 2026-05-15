@@ -166,7 +166,7 @@ const verifyBoardHead = (
     return refusedObjects;
 };
 
-export const isVerifiedAncestor = (
+const isVerifiedAncestor = (
     ancestorDigest: ProtocolDigest,
     descendantDigest: ProtocolDigest,
     headsByDigest: ReadonlyMap<ProtocolDigest, SignedBoardHead>,

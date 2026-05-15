@@ -76,7 +76,7 @@ import { Card, CardGrid, LinkCard, Steps } from "@astrojs/starlight/components";
           <code>sealed-lattice</code> remains the only public npm name, and its
           current runtime facade exposes the transcript core fixture verifier
           plus threshold, lifecycle, poll specification, capability, board,
-          finality, roster-manifest, cast/close, first-come, and recovery helpers.
+          finality, roster-manifest, cast/close, first-valid, and recovery helpers.
         </p>
         <p>
           That keeps packaging, docs, release flow, and smoke checks stable
@@ -183,7 +183,7 @@ import { Card, CardGrid, LinkCard, Steps } from "@astrojs/starlight/components";
         <li>Package-boundary checks against deep imports and illegal internal dependencies.</li>
         <li>Node, browser, docs, vector, pack smoke, and release verification.</li>
         <li>Rust transcript core build plus internal WASM loading path.</li>
-        <li>Election foundation threshold, lifecycle, poll specification, capability, board/finality, signed fixture, first-come, and recovery vectors.</li>
+        <li>Election foundation threshold, lifecycle, poll specification, capability, board/finality, signed fixture, first-valid, and recovery vectors.</li>
       </ul>
     </Card>
 
@@ -191,8 +191,8 @@ import { Card, CardGrid, LinkCard, Steps } from "@astrojs/starlight/components";
       <ul>
         <li>Ballot or tally APIs.</li>
         <li>Crypto provider wrappers or proof APIs.</li>
-        <li>Replay-attestation, target-accepted-record, or decryption-share shell helpers.</li>
-        <li>Semantic replay, target acceptance, or decryption APIs.</li>
+        <li>Local replay record, target-accepted-record, or decryption-share shell helpers.</li>
+        <li>Semantic local replay, target acceptance, or decryption APIs.</li>
         <li>Any public subpaths beyond the root package name.</li>
       </ul>
     </Card>

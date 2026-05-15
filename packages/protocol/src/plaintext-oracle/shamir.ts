@@ -19,6 +19,7 @@ import {
 } from './field.js';
 
 const defaultMaximumExhaustiveSubsetCount = 250_000;
+const maximumSupportedRosterSize = 50;
 
 const assertPositiveRosterPosition = (rosterPosition: number): number => {
     if (
@@ -38,8 +39,12 @@ const assertSupportedRosterAndThreshold = (
     rosterSize: number,
     threshold: number,
 ): void => {
-    if (!Number.isSafeInteger(rosterSize) || rosterSize < 1) {
-        throw new RangeError('Roster size must be a positive integer.');
+    if (
+        !Number.isSafeInteger(rosterSize) ||
+        rosterSize < 1 ||
+        rosterSize > maximumSupportedRosterSize
+    ) {
+        throw new RangeError('Roster size must be an integer in 1..50.');
     }
     if (
         !Number.isSafeInteger(threshold) ||
@@ -93,8 +98,12 @@ export const evaluateShamirPolynomialForRoster = (
     polynomial: ShamirPolynomial,
     rosterSize: number,
 ): readonly ShamirSharePoint[] => {
-    if (!Number.isSafeInteger(rosterSize) || rosterSize < 1) {
-        throw new RangeError('Roster size must be a positive integer.');
+    if (
+        !Number.isSafeInteger(rosterSize) ||
+        rosterSize < 1 ||
+        rosterSize > maximumSupportedRosterSize
+    ) {
+        throw new RangeError('Roster size must be an integer in 1..50.');
     }
 
     return Array.from({ length: rosterSize }, (_unused, rosterIndex) => {

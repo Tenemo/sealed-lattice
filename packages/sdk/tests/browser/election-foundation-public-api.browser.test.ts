@@ -3,8 +3,8 @@ import type {
     BoardConsistencyVerification,
     CapabilityContext,
     CapabilityDecision,
-    FirstComeOrderingInput,
-    FirstComeOrderingVerification,
+    FirstValidOrderingInput,
+    FirstValidOrderingVerification,
     PollSpecInput,
     PollSpecValidation,
     ProtocolAction,
@@ -24,9 +24,9 @@ type EvaluateActionCapability = (
     action: ProtocolAction,
     context: CapabilityContext,
 ) => CapabilityDecision;
-type DeriveValidatedFirstComeOrder = (
-    input: FirstComeOrderingInput,
-) => FirstComeOrderingVerification;
+type DeriveValidatedFirstValidOrder = (
+    input: FirstValidOrderingInput,
+) => FirstValidOrderingVerification;
 type VerifyBoardConsistency = (
     input: BoardConsistencyInput,
 ) => BoardConsistencyVerification;
@@ -38,8 +38,8 @@ const validatePollSpec =
     publicApiRuntimeRecord.validatePollSpec as ValidatePollSpec;
 const evaluateActionCapability =
     publicApiRuntimeRecord.evaluateActionCapability as EvaluateActionCapability;
-const deriveValidatedFirstComeOrder =
-    publicApiRuntimeRecord.deriveValidatedFirstComeOrder as DeriveValidatedFirstComeOrder;
+const deriveValidatedFirstValidOrder =
+    publicApiRuntimeRecord.deriveValidatedFirstValidOrder as DeriveValidatedFirstValidOrder;
 const verifyBoardConsistency =
     publicApiRuntimeRecord.verifyBoardConsistency as VerifyBoardConsistency;
 
@@ -78,6 +78,7 @@ describe('election foundation public package API in browsers', () => {
                 lifecycleState: 'VotingClosed',
                 thresholdProfile,
                 pollSpecValid: true,
+                localRosterExternallyAccepted: true,
                 setupCompleteCount: thresholdProfile.setupCompletionQuorum,
                 turnoutCount: thresholdProfile.releaseQuorum,
                 bridgeMobileCertificatePresent: true,
@@ -88,7 +89,7 @@ describe('election foundation public package API in browsers', () => {
             action: 'DeriveAggregateContribution',
         });
         expect(
-            deriveValidatedFirstComeOrder({
+            deriveValidatedFirstValidOrder({
                 requiredContextDigest: 'context',
                 selectionPolicyDigest: 'policy',
                 expectedSelectionPolicyDigest: 'policy',
@@ -99,7 +100,7 @@ describe('election foundation public package API in browsers', () => {
                         currentDeviceEpoch: 0,
                     },
                 },
-                candidates: [
+                objects: [
                     {
                         objectDigest: 'candidate',
                         objectType: 'TargetFinalityRecord',
@@ -116,7 +117,7 @@ describe('election foundation public package API in browsers', () => {
             }),
         ).toMatchObject({
             ok: true,
-            orderedCandidates: [
+            orderedObjects: [
                 expect.objectContaining({ objectDigest: 'candidate' }),
             ],
         });

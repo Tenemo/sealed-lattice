@@ -16,7 +16,7 @@ voting API.
 - the public runtime facade exposes transcript core fixture verification plus deterministic election foundation helpers
 - the election foundation verifies ML-DSA-65 signed-root envelopes for the current board, finality, roster-manifest, cast receipt, close record, and recovery helpers
 - the Rust transcript core builds and the internal WASM loader path works in Node and browsers
-- replay-attestation, target-accepted-record, and decryption-share shell checks remain internal protocol coverage
+- local replay record, target-accepted-record, and decryption-share shell checks remain internal protocol coverage
 - target-bound decryption capabilities fail closed unless a threshold profile includes an Appendix-C-certified share-selection profile and the relevant proof certificates are explicitly present
 - docs, smoke checks, browser coverage, vector manifest verification, and release workflow continue to verify the current boundary
 

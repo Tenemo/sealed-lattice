@@ -40,6 +40,8 @@ export const deriveActionContextDigest = (
         electionManifestDigest: actionContext.electionManifestDigest,
         recoveryEpoch: actionContext.recoveryEpoch,
         recoveryPolicyDigest: actionContext.recoveryPolicyDigest,
+        rosterExternalAcceptanceDigest:
+            actionContext.rosterExternalAcceptanceDigest,
         signerIdentity: actionContext.signerIdentity,
     });
 
@@ -81,6 +83,8 @@ const isActionCurrentForRecoveryEpochUnchecked = (
         electionManifestDigest: input.actionContext.electionManifestDigest,
         recoveryEpoch: input.actionContext.recoveryEpoch,
         recoveryPolicyDigest: input.actionContext.recoveryPolicyDigest,
+        rosterExternalAcceptanceDigest:
+            input.actionContext.rosterExternalAcceptanceDigest,
         acceptedRecoveryEpochUpdateDigest:
             input.actionContext.acceptedRecoveryEpochUpdateDigest,
         signerIdentity: input.actionContext.signerIdentity,
@@ -122,6 +126,20 @@ const isActionCurrentForRecoveryEpochUnchecked = (
             createRefusal(
                 'InvalidSignedRoot',
                 'Action context sequence and epoch fields must be non-negative integers.',
+                input.actionContext.actionContextDigest,
+                'ActionContext',
+            ),
+        );
+    }
+    if (
+        input.expectedRosterExternalAcceptanceDigest !== undefined &&
+        input.actionContext.rosterExternalAcceptanceDigest !==
+            input.expectedRosterExternalAcceptanceDigest
+    ) {
+        refusedObjects.push(
+            createRefusal(
+                'RosterExternalAcceptanceInvalid',
+                'Action context must bind the expected local roster external acceptance digest.',
                 input.actionContext.actionContextDigest,
                 'ActionContext',
             ),

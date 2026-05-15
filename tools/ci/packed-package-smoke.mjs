@@ -22,7 +22,7 @@ const publicSurface = JSON.parse(
 );
 const {
     deriveThresholdProfile,
-    deriveValidatedFirstComeOrder,
+    deriveValidatedFirstValidOrder,
     verifyTranscriptCoreFixture,
 } = publicApi;
 
@@ -51,7 +51,7 @@ assert(
     'Threshold profile calculator must be exported and deterministic',
 );
 assert(
-    deriveValidatedFirstComeOrder({
+    deriveValidatedFirstValidOrder({
         requiredContextDigest: 'context',
         selectionPolicyDigest: 'policy',
         expectedSelectionPolicyDigest: 'policy',
@@ -62,7 +62,7 @@ assert(
                 currentDeviceEpoch: 0,
             },
         },
-        candidates: [
+        objects: [
             {
                 objectDigest: 'candidate',
                 objectType: 'TargetFinalityRecord',
@@ -76,8 +76,8 @@ assert(
                 isByteIdenticalRetransmission: false,
             },
         ],
-    }).orderedCandidates[0]?.objectDigest === 'candidate',
-    'First-come ordering helper must be exported and deterministic',
+    }).orderedObjects[0]?.objectDigest === 'candidate',
+    'First-valid ordering helper must be exported and deterministic',
 );
 const verification = await verifyTranscriptCoreFixture({
     kind: 'malformed-object',

@@ -36,18 +36,20 @@ export {
     verifyRosterManifestTranscript,
 } from '../../src/roster/index';
 export {
+    deriveTargetFinalityCheckpointDigest,
     deriveTargetFinalityPolicyDigest,
     deriveTargetFinalityRecordDigest,
+    deriveTargetProposalDigest,
     deriveWitnessCheckpointDigest,
     deriveWitnessPolicyDigest,
     verifyTargetFinality,
 } from '../../src/finality/index';
-export { deriveValidatedFirstComeOrder } from '../../src/ordering/index';
+export { deriveValidatedFirstValidOrder } from '../../src/ordering/index';
 export {
-    deriveEvaluationReplayAttestationDigest,
+    deriveLocalReplayRecordDigest,
     deriveTargetAcceptedRecordDigest,
     deriveTopKDecryptionShareDigest,
-    verifyEvaluationReplayAttestationShell,
+    verifyLocalReplayRecordShell,
     verifyTargetAcceptedRecordShell,
     verifyTopKDecryptionShareShell,
 } from '../../src/target-phase/index';
@@ -58,9 +60,10 @@ export type {
     CastReceipt,
     CloseRecord,
     ElectionManifest,
-    EvaluationReplayAttestation,
-    FirstComeOrderingInput,
+    EvaluationProofRecord,
+    FirstValidOrderingInput,
     InclusionProof,
+    LocalReplayRecord,
     ManifestOpaqueBindings,
     ManifestPolicyDigests,
     ProtocolSignatureEnvelope,
@@ -77,7 +80,7 @@ export type {
     TargetFinalityVerification,
     TopKDecryptionShareShell,
     TrusteeSetupEntry,
-    ValidatedFirstComeCandidate,
+    ValidatedFirstValidObject,
     WitnessCheckpoint,
     WitnessPolicy,
 } from '@sealed-lattice/types';

@@ -15,6 +15,7 @@ export const protocolDigestNamespaceValues = [
     'TrusteeSetupEntryDigest',
     'ElectionManifestDigest',
     'RosterDigest',
+    'RosterExternalAcceptanceDigest',
     'BoardHeadDigest',
     'RecoveryEpochUpdateDigest',
     'ActionContextDigest',
@@ -24,10 +25,11 @@ export const protocolDigestNamespaceValues = [
     'CloseRecordDigest',
     'WitnessCheckpointDigest',
     'ConflictingHeadEvidenceDigest',
+    'WitnessEquivocationEvidenceDigest',
     'InclusionProofDigest',
-    'FirstComeOrderDigest',
+    'FirstValidOrderDigest',
     'DuplicateBallotPolicyDigest',
-    'FirstComePolicyDigest',
+    'FirstValidPolicyDigest',
     'TargetFinalityPolicyDigest',
     'WitnessPolicyDigest',
     'RecoveryPolicyDigest',
@@ -36,8 +38,11 @@ export const protocolDigestNamespaceValues = [
     'ProviderBuildDigest',
     'ThresholdProfileDigest',
     'HEParamDigest',
+    'BGVProfileDigest',
     'CiphertextRoot',
     'PlaintextRoot',
+    'BGVPublicKeyRoot',
+    'CollectivePublicKeyRoot',
     'EvalKeyRoot',
     'TopKCircuitDigest',
     'RotSetDigest',
@@ -50,34 +55,38 @@ export const protocolDigestNamespaceValues = [
     'PostVotingClosedContextDigest',
     'EvaluationContextDigest',
     'TopKEvaluationRecordDigest',
+    'TargetProposalDigest',
+    'TargetFinalityCheckpointDigest',
     'TargetFinalityRecordDigest',
-    'EvaluationReplayAttestationDigest',
+    'EvaluationProofRecordDigest',
+    'EvaluationProofProfileDigest',
     'TargetAcceptedRecordDigest',
     'TargetPreimageDigest',
+    'TargetContextDigest',
+    'LocalReplayRecordDigest',
+    'MobileReplayCertDigest',
     'TopKDecryptionShareDigest',
     'VerifiedTopKResultDigest',
-    'EvaluationProofRoot',
     'CPADProfileDigest',
+    'CPADProfileVerificationDigest',
     'ThresholdDecryptionProfileDigest',
+    'BGVAsyncThresholdCPADProfileDigest',
     'BridgeProofRecordDigest',
-    'BridgeProofProfileId',
-    'ProofPrimeParamDigest',
-    'ProofPrimeCiphertextRoot',
-    'ProofPrimePublicKeyRoot',
-    'ProofPrimeToQDataKeyConsistencyDigest',
-    'DerivedAggregateCiphertextRoot',
+    'BridgeProofProfileDigest',
+    'DirectQDataBridgeProfileDigest',
+    'ActualAggregateCiphertextRoot',
     'CanonicalCiphertextConventionDigest',
-    'BFVBatchEncoderDigest',
+    'BGVBatchEncoderDigest',
+    'AppendixDProfileDigest',
+    'HEEvaluationNoiseCertDigest',
+    'AllowedEvaluatorOpsDigest',
     'BridgeLayoutDigest',
     'AggregateShareCommitmentDigest',
     'ShareCommitmentDigest',
-    'BrakerskiProfileDigest',
-    'BrakerskiDeltaDigest',
-    'BrakerskiShareVerificationKeyRoot',
+    'ThresholdShareVerificationKeyRoot',
+    'ThresholdShareVerificationKeyDigest',
     'TargetDecryptionPreparationRecordDigest',
-    'BrakerskiPreprocessRecordDigest',
-    'BrakerskiPreprocessTokenDigest',
-    'BrakerskiPreprocessUseRecordDigest',
+    'TargetDecryptionCiphertextDigest',
     'QTargetDigest',
     'MobileProfileCertDigest',
     'BridgeMobileCertDigest',
@@ -89,23 +98,46 @@ export const protocolDigestNamespaceValues = [
 export type ProtocolDigestNamespace =
     (typeof protocolDigestNamespaceValues)[number];
 
+const protocolDigestNamespaceSet = new Set<string>(
+    protocolDigestNamespaceValues,
+);
+
 const pascalCaseToKebabCase = (value: string): string =>
     value
         .replace(/([A-Z]+)([A-Z][a-z])/gu, '$1-$2')
         .replace(/([a-z0-9])([A-Z])/gu, '$1-$2')
         .toLowerCase();
 
+const reservedProtocolDigestDomainSet = new Set(
+    protocolDigestNamespaceValues.map(
+        (reservedNamespace) =>
+            `sealed-lattice-root/${pascalCaseToKebabCase(reservedNamespace)}-v1`,
+    ),
+);
+
 export const resolveProtocolDigestDomain = (namespace: string): string => {
+    if (protocolDigestNamespaceSet.has(namespace)) {
+        return `sealed-lattice-root/${pascalCaseToKebabCase(namespace)}-v1`;
+    }
+
     if (namespace.startsWith('sealed-lattice-root/')) {
-        return namespace;
+        if (reservedProtocolDigestDomainSet.has(namespace)) {
+            return namespace;
+        }
+
+        throw new TypeError(
+            'Protocol digest namespace domain must be reserved in the transcript-core registry.',
+        );
     }
     if (!/^[A-Z][A-Za-z0-9]*$/u.test(namespace)) {
         throw new TypeError(
-            'Protocol digest namespace must be a reserved PascalCase name or an explicit sealed-lattice-root domain.',
+            'Protocol digest namespace must be a reserved PascalCase name.',
         );
     }
 
-    return `sealed-lattice-root/${pascalCaseToKebabCase(namespace)}-v1`;
+    throw new TypeError(
+        'Protocol digest namespace must be reserved in the transcript-core registry.',
+    );
 };
 
 export const deriveProtocolDigest = (

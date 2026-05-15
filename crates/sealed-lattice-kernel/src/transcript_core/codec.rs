@@ -4,10 +4,9 @@ use super::rng::DeterministicFixtureRng;
 use super::types::{
     ACTIVE_MALICIOUS_MHE_PROFILE_ID, BaseClaimProfile, ENVELOPE_VERSION, FIELD_CHECKPOINTS,
     FIELD_PAYLOAD, FIELD_SEQUENCE, FIELD_STATUS, FIELD_TAGS, FIELD_TITLE,
-    FULLY_VERIFIED_RESULT_PROFILE_ID, MAGIC, MheSecurityStage, NO_DECRYPTION_PROOF_PROFILE_ID,
-    NO_EVALUATION_PROOF_PROFILE_ID, NO_HE_SETUP_PROOF_PROFILE_ID,
-    OPTIONAL_EVALUATION_PROOF_PROFILE_ID, PASSIVE_MHE_PROTOTYPE_PROFILE_ID, REQUIRED_FIELDS,
-    RESULT_COMPUTED_AUDITABLE_PROFILE_ID, TRANSCRIPT_CORE_OBJECT_TYPE,
+    FULLY_VERIFIED_RESULT_PROFILE_ID, MAGIC, MANDATORY_EVALUATION_PROOF_PROFILE_ID,
+    MheSecurityStage, NO_DECRYPTION_PROOF_PROFILE_ID, NO_HE_SETUP_PROOF_PROFILE_ID,
+    PASSIVE_MHE_PROTOTYPE_PROFILE_ID, REQUIRED_FIELDS, TRANSCRIPT_CORE_OBJECT_TYPE,
     TRANSCRIPT_CORE_OBJECT_VERSION, TranscriptCoreAnalysis, TranscriptCoreObject,
     TranscriptCoreProfile, TranscriptCoreStatus,
 };
@@ -49,8 +48,6 @@ pub fn canonical_transcript_core_object(profile: TranscriptCoreProfile) -> Trans
     let mut fixture_rng = DeterministicFixtureRng::new(&profile.seed_label());
     let base_claim_profile = profile.base_claim_profile;
     let mhe_security_stage = profile.mhe_security_stage;
-    let uses_optional_evaluation_proof =
-        base_claim_profile == BaseClaimProfile::FullyVerifiedResult;
 
     TranscriptCoreObject {
         base_claim_profile,
@@ -58,73 +55,39 @@ pub fn canonical_transcript_core_object(profile: TranscriptCoreProfile) -> Trans
         base_claim_profile_id: base_claim_profile.expected_profile_id().to_string(),
         mhe_security_profile_id: mhe_security_stage.expected_profile_id().to_string(),
         he_setup_proof_profile_id: NO_HE_SETUP_PROOF_PROFILE_ID.to_string(),
-        evaluation_proof_profile_id: if uses_optional_evaluation_proof {
-            OPTIONAL_EVALUATION_PROOF_PROFILE_ID.to_string()
-        } else {
-            NO_EVALUATION_PROOF_PROFILE_ID.to_string()
-        },
+        evaluation_proof_profile_id: MANDATORY_EVALUATION_PROOF_PROFILE_ID.to_string(),
         decryption_proof_profile_id: NO_DECRYPTION_PROOF_PROFILE_ID.to_string(),
         title: match (base_claim_profile, mhe_security_stage) {
-            (BaseClaimProfile::ResultComputedAuditable, MheSecurityStage::PassiveMhePrototype) => {
-                "Transcript core result-computed passive MHE".to_string()
-            }
             (BaseClaimProfile::FullyVerifiedResult, MheSecurityStage::PassiveMhePrototype) => {
                 "Transcript core fully verified passive MHE".to_string()
-            }
-            (BaseClaimProfile::ResultComputedAuditable, MheSecurityStage::ActiveMalicious) => {
-                "Transcript core result-computed active malicious".to_string()
             }
             (BaseClaimProfile::FullyVerifiedResult, MheSecurityStage::ActiveMalicious) => {
                 "Transcript core fully verified active malicious".to_string()
             }
         },
         sequence: match (base_claim_profile, mhe_security_stage) {
-            (BaseClaimProfile::ResultComputedAuditable, MheSecurityStage::PassiveMhePrototype) => {
-                42
-            }
             (BaseClaimProfile::FullyVerifiedResult, MheSecurityStage::PassiveMhePrototype) => 44,
-            (BaseClaimProfile::ResultComputedAuditable, MheSecurityStage::ActiveMalicious) => 43,
             (BaseClaimProfile::FullyVerifiedResult, MheSecurityStage::ActiveMalicious) => 45,
         },
         payload: fixture_rng.next_bytes(6),
         status: TranscriptCoreStatus::TranscriptCoreVerified,
         tags: match (base_claim_profile, mhe_security_stage) {
-            (BaseClaimProfile::ResultComputedAuditable, MheSecurityStage::PassiveMhePrototype) => {
-                vec![
-                    "canonical".to_string(),
-                    "result-computed-auditable".to_string(),
-                    "passive-mhe-prototype".to_string(),
-                    "wasm-parity".to_string(),
-                ]
-            }
             (BaseClaimProfile::FullyVerifiedResult, MheSecurityStage::PassiveMhePrototype) => vec![
                 "canonical".to_string(),
                 "fully-verified-result".to_string(),
                 "passive-mhe-prototype".to_string(),
-                "optional-proof-reserved".to_string(),
-            ],
-            (BaseClaimProfile::ResultComputedAuditable, MheSecurityStage::ActiveMalicious) => vec![
-                "canonical".to_string(),
-                "result-computed-auditable".to_string(),
-                "active-malicious".to_string(),
-                "active-proof-reserved".to_string(),
+                "mandatory-proof-profile".to_string(),
             ],
             (BaseClaimProfile::FullyVerifiedResult, MheSecurityStage::ActiveMalicious) => vec![
                 "canonical".to_string(),
                 "fully-verified-result".to_string(),
                 "active-malicious".to_string(),
-                "optional-proof-reserved".to_string(),
+                "mandatory-proof-profile".to_string(),
             ],
         },
         checkpoints: match (base_claim_profile, mhe_security_stage) {
-            (BaseClaimProfile::ResultComputedAuditable, MheSecurityStage::PassiveMhePrototype) => {
-                vec![1, 3, 5, 8, 13]
-            }
             (BaseClaimProfile::FullyVerifiedResult, MheSecurityStage::PassiveMhePrototype) => {
                 vec![3, 6, 9, 12, 15]
-            }
-            (BaseClaimProfile::ResultComputedAuditable, MheSecurityStage::ActiveMalicious) => {
-                vec![2, 4, 8, 16, 32]
             }
             (BaseClaimProfile::FullyVerifiedResult, MheSecurityStage::ActiveMalicious) => {
                 vec![5, 10, 15, 20, 25]
@@ -341,7 +304,6 @@ pub fn analyze_canonical_object_hex(
 
 fn parse_base_claim_profile(value: u64) -> CanonicalResult<BaseClaimProfile> {
     match value {
-        1 => Ok(BaseClaimProfile::ResultComputedAuditable),
         2 => Ok(BaseClaimProfile::FullyVerifiedResult),
         _ => Err(CanonicalError::new(
             CanonicalErrorCode::UnknownBaseClaimProfile,
@@ -381,10 +343,7 @@ fn validate_profiles(
     decryption_proof_profile_id: &str,
 ) -> CanonicalResult<()> {
     if base_claim_profile_id != base_claim_profile.expected_profile_id() {
-        let allowed = [
-            RESULT_COMPUTED_AUDITABLE_PROFILE_ID,
-            FULLY_VERIFIED_RESULT_PROFILE_ID,
-        ];
+        let allowed = [FULLY_VERIFIED_RESULT_PROFILE_ID];
         if !allowed.contains(&base_claim_profile_id) {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::UnknownProofProfile,
@@ -420,29 +379,11 @@ fn validate_profiles(
             "one or more reserved proof profile IDs are not supported",
         ));
     }
-    match evaluation_proof_profile_id {
-        NO_EVALUATION_PROOF_PROFILE_ID => {
-            if base_claim_profile == BaseClaimProfile::FullyVerifiedResult {
-                return Err(CanonicalError::new(
-                    CanonicalErrorCode::ProfileComponentMismatch,
-                    "FullyVerifiedResult requires the reserved optional evaluation-proof profile",
-                ));
-            }
-        }
-        OPTIONAL_EVALUATION_PROOF_PROFILE_ID => {
-            if base_claim_profile != BaseClaimProfile::FullyVerifiedResult {
-                return Err(CanonicalError::new(
-                    CanonicalErrorCode::ProfileComponentMismatch,
-                    "optional evaluation-proof profile requires FullyVerifiedResult",
-                ));
-            }
-        }
-        _ => {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::UnknownProofProfile,
-                "evaluation proof profile ID is not supported",
-            ));
-        }
+    if evaluation_proof_profile_id != MANDATORY_EVALUATION_PROOF_PROFILE_ID {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "FullyVerifiedResult requires the mandatory evaluation-proof profile",
+        ));
     }
 
     Ok(())

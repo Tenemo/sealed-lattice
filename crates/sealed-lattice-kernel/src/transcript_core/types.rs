@@ -23,43 +23,35 @@ pub(super) const REQUIRED_FIELDS: [u64; 6] = [
     FIELD_CHECKPOINTS,
 ];
 
-pub const RESULT_COMPUTED_AUDITABLE_PROFILE_ID: &str =
-    "transcript-core-result-computed-auditable-profile-v1";
 pub const FULLY_VERIFIED_RESULT_PROFILE_ID: &str =
     "transcript-core-fully-verified-result-profile-v1";
 pub const PASSIVE_MHE_PROTOTYPE_PROFILE_ID: &str =
     "transcript-core-passive-mhe-prototype-profile-v1";
 pub const ACTIVE_MALICIOUS_MHE_PROFILE_ID: &str = "transcript-core-active-malicious-mhe-profile-v1";
 pub const NO_HE_SETUP_PROOF_PROFILE_ID: &str = "transcript-core-no-he-setup-proof-v1";
-pub const NO_EVALUATION_PROOF_PROFILE_ID: &str = "transcript-core-no-evaluation-proof-v1";
-pub const OPTIONAL_EVALUATION_PROOF_PROFILE_ID: &str =
-    "transcript-core-optional-evaluation-proof-profile-v1";
+pub const MANDATORY_EVALUATION_PROOF_PROFILE_ID: &str = "PQEvalProof-STARK-BGVReplay-v1";
 pub const NO_DECRYPTION_PROOF_PROFILE_ID: &str = "transcript-core-no-decryption-proof-v1";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum BaseClaimProfile {
-    ResultComputedAuditable,
     FullyVerifiedResult,
 }
 
 impl BaseClaimProfile {
     pub fn code(self) -> u64 {
         match self {
-            Self::ResultComputedAuditable => 1,
             Self::FullyVerifiedResult => 2,
         }
     }
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::ResultComputedAuditable => "ResultComputedAuditable",
             Self::FullyVerifiedResult => "FullyVerifiedResult",
         }
     }
 
     pub fn expected_profile_id(self) -> &'static str {
         match self {
-            Self::ResultComputedAuditable => RESULT_COMPUTED_AUDITABLE_PROFILE_ID,
             Self::FullyVerifiedResult => FULLY_VERIFIED_RESULT_PROFILE_ID,
         }
     }
@@ -120,19 +112,10 @@ impl TranscriptCoreProfile {
     }
 }
 
-pub const RESULT_COMPUTED_PASSIVE_MHE_PROFILE: TranscriptCoreProfile = TranscriptCoreProfile::new(
-    BaseClaimProfile::ResultComputedAuditable,
-    MheSecurityStage::PassiveMhePrototype,
-);
 pub const FULLY_VERIFIED_PASSIVE_MHE_PROFILE: TranscriptCoreProfile = TranscriptCoreProfile::new(
     BaseClaimProfile::FullyVerifiedResult,
     MheSecurityStage::PassiveMhePrototype,
 );
-pub const RESULT_COMPUTED_ACTIVE_MALICIOUS_PROFILE: TranscriptCoreProfile =
-    TranscriptCoreProfile::new(
-        BaseClaimProfile::ResultComputedAuditable,
-        MheSecurityStage::ActiveMalicious,
-    );
 pub const FULLY_VERIFIED_ACTIVE_MALICIOUS_PROFILE: TranscriptCoreProfile =
     TranscriptCoreProfile::new(
         BaseClaimProfile::FullyVerifiedResult,

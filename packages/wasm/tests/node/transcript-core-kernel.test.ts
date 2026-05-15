@@ -54,17 +54,9 @@ const findFixture = <Fixture extends NamedFixture>(
     return fixture;
 };
 
-const resultComputedPassiveFixture = findFixture(
-    goldenTranscriptCoreFixtures,
-    'result-computed-passive-mhe-transcript-core',
-);
 const fullyVerifiedPassiveFixture = findFixture(
     goldenTranscriptCoreFixtures,
     'fully-verified-passive-mhe-transcript-core',
-);
-const resultComputedActiveFixture = findFixture(
-    goldenTranscriptCoreFixtures,
-    'result-computed-active-malicious-transcript-core',
 );
 const fullyVerifiedActiveFixture = findFixture(
     goldenTranscriptCoreFixtures,
@@ -188,14 +180,6 @@ describe('transcript-core kernel in Node', () => {
     it('analyzes golden transcript-core fixtures through WASM', async () => {
         const kernel = await loadTranscriptCoreKernel();
 
-        const resultComputedPassiveAnalysis = kernel.analyzeCanonicalObject({
-            canonicalBytesHex: resultComputedPassiveFixture.canonicalBytesHex,
-            chunkSize: resultComputedPassiveFixture.chunkSize,
-        });
-        const resultComputedActiveAnalysis = kernel.analyzeCanonicalObject({
-            canonicalBytesHex: resultComputedActiveFixture.canonicalBytesHex,
-            chunkSize: resultComputedActiveFixture.chunkSize,
-        });
         const fullyVerifiedPassiveAnalysis = kernel.analyzeCanonicalObject({
             canonicalBytesHex: fullyVerifiedPassiveFixture.canonicalBytesHex,
             chunkSize: fullyVerifiedPassiveFixture.chunkSize,
@@ -205,53 +189,32 @@ describe('transcript-core kernel in Node', () => {
             chunkSize: fullyVerifiedActiveFixture.chunkSize,
         });
 
-        expect(resultComputedPassiveAnalysis.objectHash512).toBe(
-            resultComputedPassiveFixture.expectedObjectHash512,
-        );
-        expect(resultComputedPassiveAnalysis.chunkRoot).toBe(
-            resultComputedPassiveFixture.expectedChunkRoot,
-        );
-        expect(resultComputedPassiveAnalysis.statusLabels).toEqual(
-            resultComputedPassiveFixture.expectedStatusLabels,
-        );
-        expect(resultComputedActiveAnalysis.baseClaimProfile).toBe(
-            'ResultComputedAuditable',
-        );
-        expect(resultComputedActiveAnalysis.mheSecurityStage).toBe(
-            'ActiveMalicious',
-        );
-        expect(resultComputedActiveAnalysis.objectHash512).toBe(
-            resultComputedActiveFixture.expectedObjectHash512,
-        );
         expect(fullyVerifiedPassiveAnalysis.baseClaimProfile).toBe(
             'FullyVerifiedResult',
         );
         expect(fullyVerifiedPassiveAnalysis.evaluationProofProfileId).toBe(
-            'transcript-core-optional-evaluation-proof-profile-v1',
+            'PQEvalProof-STARK-BGVReplay-v1',
         );
         expect(fullyVerifiedActiveAnalysis.mheSecurityStage).toBe(
             'ActiveMalicious',
         );
         expect(fullyVerifiedActiveAnalysis.evaluationProofProfileId).toBe(
-            'transcript-core-optional-evaluation-proof-profile-v1',
-        );
-        expect(resultComputedActiveAnalysis.objectHash512).not.toBe(
-            resultComputedPassiveAnalysis.objectHash512,
+            'PQEvalProof-STARK-BGVReplay-v1',
         );
         expect(fullyVerifiedPassiveAnalysis.objectHash512).not.toBe(
-            resultComputedPassiveAnalysis.objectHash512,
+            fullyVerifiedActiveAnalysis.objectHash512,
         );
     });
 
     it('verifies golden and malformed fixtures with stable outputs', async () => {
         const kernel = await loadTranscriptCoreKernel();
 
-        expect(kernel.verifyFixture(resultComputedPassiveFixture)).toEqual({
+        expect(kernel.verifyFixture(fullyVerifiedPassiveFixture)).toEqual({
             verified: true,
-            caseName: 'result-computed-passive-mhe-transcript-core',
-            objectHash512: resultComputedPassiveFixture.expectedObjectHash512,
-            chunkRoot: resultComputedPassiveFixture.expectedChunkRoot,
-            statusLabels: resultComputedPassiveFixture.expectedStatusLabels,
+            caseName: 'fully-verified-passive-mhe-transcript-core',
+            objectHash512: fullyVerifiedPassiveFixture.expectedObjectHash512,
+            chunkRoot: fullyVerifiedPassiveFixture.expectedChunkRoot,
+            statusLabels: fullyVerifiedPassiveFixture.expectedStatusLabels,
         });
         expect(kernel.verifyFixture(invalidEnumFixture)).toEqual({
             verified: true,
@@ -291,13 +254,13 @@ describe('transcript-core kernel in Node', () => {
 
     it('verifies fixtures through the public WASM wrapper', async () => {
         await expect(
-            verifyTranscriptCoreFixture(resultComputedPassiveFixture),
+            verifyTranscriptCoreFixture(fullyVerifiedPassiveFixture),
         ).resolves.toEqual({
             verified: true,
-            caseName: 'result-computed-passive-mhe-transcript-core',
-            objectHash512: resultComputedPassiveFixture.expectedObjectHash512,
-            chunkRoot: resultComputedPassiveFixture.expectedChunkRoot,
-            statusLabels: resultComputedPassiveFixture.expectedStatusLabels,
+            caseName: 'fully-verified-passive-mhe-transcript-core',
+            objectHash512: fullyVerifiedPassiveFixture.expectedObjectHash512,
+            chunkRoot: fullyVerifiedPassiveFixture.expectedChunkRoot,
+            statusLabels: fullyVerifiedPassiveFixture.expectedStatusLabels,
         });
     });
 

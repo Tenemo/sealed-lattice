@@ -6,6 +6,8 @@ import type {
     ReceiverKeyRegistration,
     RefusalRecord,
     RegistrationEntry,
+    RosterExternalAcceptanceVerification,
+    RosterExternalAcceptanceVerificationInput,
     RosterManifestTranscriptInput,
     TrusteeSetupEntry,
 } from '@sealed-lattice/types';
@@ -19,6 +21,7 @@ import {
     deriveElectionManifestDigest,
     deriveReceiverKeyRegistrationDigest,
     deriveRegistrationEntryDigest,
+    deriveRosterExternalAcceptanceDigest,
     deriveTrusteeSetupEntryDigest,
 } from './digests.js';
 
@@ -332,6 +335,23 @@ export const verifyManifest = (
             ),
         );
     }
+    if (
+        manifest.manifestOpaqueBindings.bridgeProofProfileId !==
+            'CommittedAggregateShare-DirectQData-HwangPiEnc-BGV-v1' ||
+        manifest.manifestOpaqueBindings.evaluationProofProfileId !==
+            'PQEvalProof-STARK-BGVReplay-v1' ||
+        manifest.manifestOpaqueBindings.thresholdDecryptionProfileId !==
+            'BGV-RNS-AsyncThresholdDecryption-CPAD-v1'
+    ) {
+        refusedObjects.push(
+            createRefusal(
+                'ManifestDigestMismatch',
+                'Election manifest must bind the fixed v53 BGV bridge, evaluation-proof, and threshold-decryption profile identifiers.',
+                manifest.electionManifestDigest,
+                'ElectionManifest',
+            ),
+        );
+    }
     if (manifest.ceremonyId !== input.ceremonyId) {
         refusedObjects.push(
             createRefusal(
@@ -390,4 +410,99 @@ export const verifyManifest = (
     refusedObjects.push(...signatureResult.refusedObjects);
 
     return refusedObjects;
+};
+
+export const verifyRosterExternalAcceptance = (
+    input: RosterExternalAcceptanceVerificationInput,
+): RosterExternalAcceptanceVerification => {
+    try {
+        const { acceptance } = input;
+        const refusedObjects: RefusalRecord[] = [];
+        const expectedDigest = deriveRosterExternalAcceptanceDigest({
+            acceptedBoardHeadDigest: acceptance.acceptedBoardHeadDigest,
+            ceremonyId: acceptance.ceremonyId,
+            electionManifestDigest: acceptance.electionManifestDigest,
+            objectType: acceptance.objectType,
+            objectVersion: acceptance.objectVersion,
+            participantIdentity: acceptance.participantIdentity,
+            rosterDigest: acceptance.rosterDigest,
+            warningTextVersion: acceptance.warningTextVersion,
+        });
+
+        if (acceptance.rosterExternalAcceptanceDigest !== expectedDigest) {
+            refusedObjects.push(
+                createRefusal(
+                    'RosterExternalAcceptanceInvalid',
+                    'Roster external acceptance digest does not match its canonical payload.',
+                    acceptance.rosterExternalAcceptanceDigest,
+                    'RosterExternalAcceptance',
+                ),
+            );
+        }
+        if (
+            acceptance.objectType !== 'RosterExternalAcceptance' ||
+            acceptance.objectVersion !== 1 ||
+            acceptance.ceremonyId !== input.expectedCeremonyId ||
+            acceptance.rosterDigest !== input.expectedRosterDigest ||
+            acceptance.electionManifestDigest !==
+                input.expectedElectionManifestDigest ||
+            acceptance.acceptedBoardHeadDigest !==
+                input.expectedAcceptedBoardHeadDigest ||
+            acceptance.warningTextVersion.trim().length === 0
+        ) {
+            refusedObjects.push(
+                createRefusal(
+                    'RosterExternalAcceptanceInvalid',
+                    'Roster external acceptance does not bind the expected frozen roster view.',
+                    acceptance.rosterExternalAcceptanceDigest,
+                    'RosterExternalAcceptance',
+                ),
+            );
+        }
+
+        const signatureResult = verifySignedObjectSignature(
+            acceptance.signature,
+            {
+                objectType: 'RosterExternalAcceptance',
+                objectVersion: 1,
+                signerRole: 'Participant',
+                signerIdentity: acceptance.participantIdentity,
+                ceremonyId: acceptance.ceremonyId,
+                manifestDigest: acceptance.electionManifestDigest,
+                objectRoot: acceptance.rosterExternalAcceptanceDigest,
+                boardHeadDigest: acceptance.acceptedBoardHeadDigest,
+                publicKeyDigest: input.expectedParticipantPublicKeyDigest,
+            },
+        );
+        refusedObjects.push(...signatureResult.refusedObjects);
+
+        return {
+            ok: refusedObjects.length === 0,
+            statusLabels:
+                refusedObjects.length === 0 ? ['RosterExternallyAccepted'] : [],
+            acceptedDigests:
+                refusedObjects.length === 0
+                    ? [acceptance.rosterExternalAcceptanceDigest]
+                    : [],
+            refusedObjects,
+            rosterExternalAcceptanceDigest:
+                refusedObjects.length === 0
+                    ? acceptance.rosterExternalAcceptanceDigest
+                    : undefined,
+        };
+    } catch {
+        return {
+            ok: false,
+            statusLabels: [],
+            acceptedDigests: [],
+            refusedObjects: [
+                createRefusal(
+                    'RosterExternalAcceptanceInvalid',
+                    'Roster external acceptance could not be canonicalized or validated.',
+                    undefined,
+                    'RosterExternalAcceptance',
+                ),
+            ],
+        };
+    }
 };

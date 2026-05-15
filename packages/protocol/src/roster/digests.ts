@@ -4,6 +4,7 @@ import type {
     ProtocolDigest,
     ReceiverKeyRegistration,
     RegistrationEntry,
+    RosterExternalAcceptance,
     TrusteeSetupEntry,
 } from '@sealed-lattice/types';
 
@@ -72,6 +73,23 @@ export const deriveRosterDigest = (
                 ),
             ),
     );
+
+export const deriveRosterExternalAcceptanceDigest = (
+    acceptance: Omit<
+        RosterExternalAcceptance,
+        'rosterExternalAcceptanceDigest' | 'signature'
+    >,
+): ProtocolDigest =>
+    deriveProtocolDigest('RosterExternalAcceptanceDigest', {
+        acceptedBoardHeadDigest: acceptance.acceptedBoardHeadDigest,
+        ceremonyId: acceptance.ceremonyId,
+        electionManifestDigest: acceptance.electionManifestDigest,
+        objectType: acceptance.objectType,
+        objectVersion: acceptance.objectVersion,
+        participantIdentity: acceptance.participantIdentity,
+        rosterDigest: acceptance.rosterDigest,
+        warningTextVersion: acceptance.warningTextVersion,
+    });
 
 export const deriveElectionManifestDigest = (
     manifest: Omit<ElectionManifest, 'electionManifestDigest' | 'signature'>,

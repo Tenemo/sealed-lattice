@@ -1,8 +1,8 @@
 import { deriveProtocolDigest } from '@sealed-lattice/crypto';
 import type {
-    EvaluationReplayAttestation,
-    EvaluationReplayAttestationVerification,
-    EvaluationReplayAttestationVerificationInput,
+    LocalReplayRecord,
+    LocalReplayRecordVerification,
+    LocalReplayRecordVerificationInput,
     ProtocolDigest,
     RefusalRecord,
     TargetAcceptedRecord,
@@ -28,28 +28,24 @@ const targetFinalityIsAccepted = (
     verification.ok &&
     verification.targetFinalityRecordDigest ===
         record.targetFinalityRecordDigest &&
-    verification.finalizedBoardHeadDigest === record.finalizedBoardHeadDigest;
+    verification.targetProposalDigest === record.targetProposalDigest;
 
-export const deriveEvaluationReplayAttestationDigest = (
-    attestation: Omit<
-        EvaluationReplayAttestation,
-        'evaluationReplayAttestationDigest' | 'signature'
-    >,
+export const deriveLocalReplayRecordDigest = (
+    record: Omit<LocalReplayRecord, 'localReplayRecordDigest' | 'signature'>,
 ): ProtocolDigest =>
-    deriveProtocolDigest('EvaluationReplayAttestationDigest', {
-        boardPosition: attestation.boardPosition,
-        boardSequence: attestation.boardSequence,
-        ceremonyId: attestation.ceremonyId,
-        deviceEpoch: attestation.deviceEpoch,
-        electionManifestDigest: attestation.electionManifestDigest,
-        finalizedBoardHeadDigest: attestation.finalizedBoardHeadDigest,
-        objectType: attestation.objectType,
-        objectVersion: attestation.objectVersion,
-        recoveryEpoch: attestation.recoveryEpoch,
-        replayContextDigest: attestation.replayContextDigest,
-        signerIdentity: attestation.signerIdentity,
-        targetFinalityRecordDigest: attestation.targetFinalityRecordDigest,
-        topKEvaluationRecordDigest: attestation.topKEvaluationRecordDigest,
+    deriveProtocolDigest('LocalReplayRecordDigest', {
+        ceremonyId: record.ceremonyId,
+        deviceEpoch: record.deviceEpoch,
+        electionManifestDigest: record.electionManifestDigest,
+        evaluationProofRecordDigest: record.evaluationProofRecordDigest,
+        mobileReplayCertDigest: record.mobileReplayCertDigest,
+        objectType: record.objectType,
+        objectVersion: record.objectVersion,
+        participantIdentity: record.participantIdentity,
+        recoveryEpoch: record.recoveryEpoch,
+        replayContextDigest: record.replayContextDigest,
+        targetFinalityRecordDigest: record.targetFinalityRecordDigest,
+        targetProposalDigest: record.targetProposalDigest,
     });
 
 export const deriveTargetAcceptedRecordDigest = (
@@ -61,15 +57,30 @@ export const deriveTargetAcceptedRecordDigest = (
     deriveProtocolDigest('TargetAcceptedRecordDigest', {
         boardPosition: record.boardPosition,
         boardSequence: record.boardSequence,
+        acceptanceMode: record.acceptanceMode,
+        bgvAsyncThresholdCPADProfileDigest:
+            record.bgvAsyncThresholdCPADProfileDigest,
         ceremonyId: record.ceremonyId,
+        cpadProfileDigest: record.cpadProfileDigest,
+        cpadProfileId: record.cpadProfileId,
+        cTargetDigest: record.cTargetDigest,
         electionManifestDigest: record.electionManifestDigest,
+        evaluationProofProfileDigest: record.evaluationProofProfileDigest,
+        evaluationProofRecordDigest: record.evaluationProofRecordDigest,
         objectType: record.objectType,
         objectVersion: record.objectVersion,
-        optionalEvaluationProofRoot: record.optionalEvaluationProofRoot,
         organizerIdentity: record.organizerIdentity,
-        replayAttestationDigests: record.replayAttestationDigests,
+        qTargetDigest: record.qTargetDigest,
+        targetContextDigest: record.targetContextDigest,
+        targetFinalityCheckpointDigest: record.targetFinalityCheckpointDigest,
         targetFinalityRecordDigest: record.targetFinalityRecordDigest,
+        targetLayoutDigest: record.targetLayoutDigest,
         targetPhase: record.targetPhase,
+        targetPreimageDigest: record.targetPreimageDigest,
+        targetProposalDigest: record.targetProposalDigest,
+        thresholdDecryptionProfileDigest:
+            record.thresholdDecryptionProfileDigest,
+        thresholdDecryptionProfileId: record.thresholdDecryptionProfileId,
         topKEvaluationRecordDigest: record.topKEvaluationRecordDigest,
     });
 
@@ -80,76 +91,85 @@ export const deriveTopKDecryptionShareDigest = (
     >,
 ): ProtocolDigest =>
     deriveProtocolDigest('TopKDecryptionShareDigest', {
+        bgvAsyncThresholdCPADProfileDigest:
+            share.bgvAsyncThresholdCPADProfileDigest,
         boardPosition: share.boardPosition,
         boardSequence: share.boardSequence,
         ceremonyId: share.ceremonyId,
+        cpadProfileDigest: share.cpadProfileDigest,
+        cTargetDigest: share.cTargetDigest,
         deviceEpoch: share.deviceEpoch,
         electionManifestDigest: share.electionManifestDigest,
+        evaluationProofRecordDigest: share.evaluationProofRecordDigest,
         objectType: share.objectType,
         objectVersion: share.objectVersion,
+        qTargetDigest: share.qTargetDigest,
         recoveryEpoch: share.recoveryEpoch,
         shareRoot: share.shareRoot,
         targetAcceptedRecordDigest: share.targetAcceptedRecordDigest,
+        targetContextDigest: share.targetContextDigest,
+        targetDecryptionCiphertextDigest:
+            share.targetDecryptionCiphertextDigest,
+        targetDecryptionPreparationRecordDigest:
+            share.targetDecryptionPreparationRecordDigest,
+        targetFinalityCheckpointDigest: share.targetFinalityCheckpointDigest,
         targetFinalityRecordDigest: share.targetFinalityRecordDigest,
+        targetPreimageDigest: share.targetPreimageDigest,
+        targetProposalDigest: share.targetProposalDigest,
+        thresholdShareVerificationKeyDigest:
+            share.thresholdShareVerificationKeyDigest,
+        thresholdShareVerificationKeyRoot:
+            share.thresholdShareVerificationKeyRoot,
+        thresholdDecryptionProfileDigest:
+            share.thresholdDecryptionProfileDigest,
         topKEvaluationRecordDigest: share.topKEvaluationRecordDigest,
+        trusteeThresholdVerificationKeyDigest:
+            share.trusteeThresholdVerificationKeyDigest,
         trusteeIdentity: share.trusteeIdentity,
     });
 
-const verifyReplayAttestationShape = (
-    input: EvaluationReplayAttestationVerificationInput,
+const verifyLocalReplayRecordShape = (
+    input: LocalReplayRecordVerificationInput,
 ): readonly RefusalRecord[] => {
-    const { attestation, targetFinalityRecord } = input;
+    const { evaluationProofRecord, record, targetFinalityRecord } = input;
     const refusedObjects: RefusalRecord[] = [];
-    const expectedDigest = deriveEvaluationReplayAttestationDigest({
-        boardPosition: attestation.boardPosition,
-        boardSequence: attestation.boardSequence,
-        ceremonyId: attestation.ceremonyId,
-        deviceEpoch: attestation.deviceEpoch,
-        electionManifestDigest: attestation.electionManifestDigest,
-        finalizedBoardHeadDigest: attestation.finalizedBoardHeadDigest,
-        objectType: attestation.objectType,
-        objectVersion: attestation.objectVersion,
-        recoveryEpoch: attestation.recoveryEpoch,
-        replayContextDigest: attestation.replayContextDigest,
-        signerIdentity: attestation.signerIdentity,
-        targetFinalityRecordDigest: attestation.targetFinalityRecordDigest,
-        topKEvaluationRecordDigest: attestation.topKEvaluationRecordDigest,
+    const expectedDigest = deriveLocalReplayRecordDigest({
+        ceremonyId: record.ceremonyId,
+        deviceEpoch: record.deviceEpoch,
+        electionManifestDigest: record.electionManifestDigest,
+        evaluationProofRecordDigest: record.evaluationProofRecordDigest,
+        mobileReplayCertDigest: record.mobileReplayCertDigest,
+        objectType: record.objectType,
+        objectVersion: record.objectVersion,
+        participantIdentity: record.participantIdentity,
+        recoveryEpoch: record.recoveryEpoch,
+        replayContextDigest: record.replayContextDigest,
+        targetFinalityRecordDigest: record.targetFinalityRecordDigest,
+        targetProposalDigest: record.targetProposalDigest,
     });
 
-    if (attestation.evaluationReplayAttestationDigest !== expectedDigest) {
+    if (record.localReplayRecordDigest !== expectedDigest) {
         refusedObjects.push(
             createRefusal(
-                'ReplayAttestationInvalid',
-                'Replay attestation digest does not match its canonical payload.',
-                attestation.evaluationReplayAttestationDigest,
-                'EvaluationReplayAttestation',
+                'LocalReplayRecordInvalid',
+                'Local replay record digest does not match its canonical payload.',
+                record.localReplayRecordDigest,
+                'LocalReplayRecord',
             ),
         );
     }
     if (
-        attestation.objectType !== 'EvaluationReplayAttestation' ||
-        attestation.objectVersion !== 1 ||
-        !isNonNegativeInteger(attestation.boardSequence) ||
-        !isNonNegativeInteger(attestation.boardPosition) ||
-        !isNonNegativeInteger(attestation.recoveryEpoch) ||
-        !isNonNegativeInteger(attestation.deviceEpoch)
+        record.objectType !== 'LocalReplayRecord' ||
+        record.objectVersion !== 1 ||
+        !isNonNegativeInteger(record.recoveryEpoch) ||
+        !isNonNegativeInteger(record.deviceEpoch)
     ) {
         refusedObjects.push(
             createRefusal(
-                'ReplayAttestationInvalid',
-                'Replay attestation object shape is not canonical.',
-                attestation.evaluationReplayAttestationDigest,
-                'EvaluationReplayAttestation',
-            ),
-        );
-    }
-    if (attestation.ceremonyId !== input.boardEvidence.ceremonyId) {
-        refusedObjects.push(
-            createRefusal(
-                'WrongCeremony',
-                'Replay attestation ceremony does not match the board evidence.',
-                attestation.evaluationReplayAttestationDigest,
-                'EvaluationReplayAttestation',
+                'LocalReplayRecordInvalid',
+                'Local replay record object shape is not canonical.',
+                record.localReplayRecordDigest,
+                'LocalReplayRecord',
             ),
         );
     }
@@ -162,56 +182,40 @@ const verifyReplayAttestationShape = (
         refusedObjects.push(
             createRefusal(
                 'TargetPhaseAuthorizationFailure',
-                'Replay attestation requires an accepted target-finality record.',
-                attestation.evaluationReplayAttestationDigest,
-                'EvaluationReplayAttestation',
+                'Local replay record requires an accepted target-finality record.',
+                record.localReplayRecordDigest,
+                'LocalReplayRecord',
             ),
         );
     }
     if (
-        attestation.targetFinalityRecordDigest !==
+        record.targetProposalDigest !==
+            targetFinalityRecord.targetProposalDigest ||
+        record.targetFinalityRecordDigest !==
             targetFinalityRecord.targetFinalityRecordDigest ||
-        attestation.finalizedBoardHeadDigest !==
-            targetFinalityRecord.finalizedBoardHeadDigest ||
-        attestation.topKEvaluationRecordDigest !==
-            targetFinalityRecord.topKEvaluationRecordDigest
+        record.evaluationProofRecordDigest !==
+            evaluationProofRecord.evaluationProofRecordDigest
     ) {
         refusedObjects.push(
             createRefusal(
-                'ReplayAttestationInvalid',
-                'Replay attestation must bind the accepted top-k proposal and target-finality record.',
-                attestation.evaluationReplayAttestationDigest,
-                'EvaluationReplayAttestation',
+                'LocalReplayRecordInvalid',
+                'Local replay record must bind the exact accepted target and evaluation proof.',
+                record.localReplayRecordDigest,
+                'LocalReplayRecord',
             ),
         );
     }
     if (
-        input.attestationInclusionProof.includedObjectType !==
-            'EvaluationReplayAttestation' ||
-        input.attestationInclusionProof.includedObjectDigest !==
-            attestation.evaluationReplayAttestationDigest
+        input.recordInclusionProof.includedObjectType !== 'LocalReplayRecord' ||
+        input.recordInclusionProof.includedObjectDigest !==
+            record.localReplayRecordDigest
     ) {
         refusedObjects.push(
             createRefusal(
                 'InclusionProofInvalid',
-                'Replay attestation inclusion proof does not bind the attestation.',
-                input.attestationInclusionProof.inclusionProofDigest,
-                'EvaluationReplayAttestation',
-            ),
-        );
-    }
-    if (
-        input.attestationInclusionProof.boardSequence !==
-            attestation.boardSequence ||
-        input.attestationInclusionProof.boardPosition !==
-            attestation.boardPosition
-    ) {
-        refusedObjects.push(
-            createRefusal(
-                'InclusionProofInvalid',
-                'Replay attestation board placement must match its inclusion proof.',
-                input.attestationInclusionProof.inclusionProofDigest,
-                'EvaluationReplayAttestation',
+                'Local replay record inclusion proof does not bind the record.',
+                input.recordInclusionProof.inclusionProofDigest,
+                'LocalReplayRecord',
             ),
         );
     }
@@ -219,54 +223,46 @@ const verifyReplayAttestationShape = (
     return refusedObjects;
 };
 
-const verifyEvaluationReplayAttestationShellUnchecked = (
-    input: EvaluationReplayAttestationVerificationInput,
-): EvaluationReplayAttestationVerification => {
-    const { acceptedDigests, boardResult, refusedObjects } =
-        collectSignedBoardInclusionEvidence({
-            boardEvidence: input.boardEvidence,
-            inclusionProof: input.attestationInclusionProof,
-            objectRefusals: verifyReplayAttestationShape(input),
-            signature: input.attestation.signature,
-            signatureExpectation: {
-                objectType: 'EvaluationReplayAttestation',
-                objectVersion: 1,
-                signerRole: 'Participant',
-                signerIdentity: input.attestation.signerIdentity,
-                ceremonyId: input.attestation.ceremonyId,
-                publicKeyDigest: input.expectedSignerPublicKeyDigest,
-                manifestDigest: input.attestation.electionManifestDigest,
-                objectRoot: input.attestation.evaluationReplayAttestationDigest,
-                boardHeadDigest:
-                    input.attestationInclusionProof.boardHeadDigest,
-                contextDigest: input.attestation.replayContextDigest,
-            },
-            acceptedObjectDigest:
-                input.attestation.evaluationReplayAttestationDigest,
-        });
-
-    return {
-        ok: refusedObjects.length === 0,
-        statusLabels: boardResult.statusLabels,
-        acceptedDigests,
-        refusedObjects,
-        forkEvidence: boardResult.forkEvidence,
-        evaluationReplayAttestationDigest:
-            refusedObjects.length === 0
-                ? input.attestation.evaluationReplayAttestationDigest
-                : undefined,
-        targetFinalityRecordDigest:
-            refusedObjects.length === 0
-                ? input.attestation.targetFinalityRecordDigest
-                : undefined,
-    };
-};
-
-export const verifyEvaluationReplayAttestationShell = (
-    input: EvaluationReplayAttestationVerificationInput,
-): EvaluationReplayAttestationVerification => {
+export const verifyLocalReplayRecordShell = (
+    input: LocalReplayRecordVerificationInput,
+): LocalReplayRecordVerification => {
     try {
-        return verifyEvaluationReplayAttestationShellUnchecked(input);
+        const { acceptedDigests, boardResult, refusedObjects } =
+            collectSignedBoardInclusionEvidence({
+                boardEvidence: input.boardEvidence,
+                inclusionProof: input.recordInclusionProof,
+                objectRefusals: verifyLocalReplayRecordShape(input),
+                signature: input.record.signature,
+                signatureExpectation: {
+                    objectType: 'LocalReplayRecord',
+                    objectVersion: 1,
+                    signerRole: 'Participant',
+                    signerIdentity: input.record.participantIdentity,
+                    ceremonyId: input.record.ceremonyId,
+                    publicKeyDigest: input.expectedSignerPublicKeyDigest,
+                    manifestDigest: input.record.electionManifestDigest,
+                    objectRoot: input.record.localReplayRecordDigest,
+                    boardHeadDigest: input.recordInclusionProof.boardHeadDigest,
+                    contextDigest: input.record.replayContextDigest,
+                },
+                acceptedObjectDigest: input.record.localReplayRecordDigest,
+            });
+
+        return {
+            ok: refusedObjects.length === 0,
+            statusLabels: boardResult.statusLabels,
+            acceptedDigests,
+            refusedObjects,
+            forkEvidence: boardResult.forkEvidence,
+            localReplayRecordDigest:
+                refusedObjects.length === 0
+                    ? input.record.localReplayRecordDigest
+                    : undefined,
+            targetFinalityRecordDigest:
+                refusedObjects.length === 0
+                    ? input.record.targetFinalityRecordDigest
+                    : undefined,
+        };
     } catch {
         return {
             ok: false,
@@ -274,10 +270,10 @@ export const verifyEvaluationReplayAttestationShell = (
             acceptedDigests: [],
             refusedObjects: [
                 createRefusal(
-                    'ReplayAttestationInvalid',
-                    'Replay attestation evidence could not be canonicalized or validated.',
+                    'LocalReplayRecordInvalid',
+                    'Local replay record evidence could not be canonicalized or validated.',
                     undefined,
-                    'EvaluationReplayAttestation',
+                    'LocalReplayRecord',
                 ),
             ],
         };
@@ -287,22 +283,44 @@ export const verifyEvaluationReplayAttestationShell = (
 const verifyTargetAcceptedRecordShape = (
     input: TargetAcceptedRecordVerificationInput,
 ): readonly RefusalRecord[] => {
-    const { targetAcceptedRecord, targetFinalityRecord } = input;
+    const {
+        evaluationProofRecord,
+        targetAcceptedRecord,
+        targetFinalityRecord,
+    } = input;
     const refusedObjects: RefusalRecord[] = [];
     const expectedDigest = deriveTargetAcceptedRecordDigest({
         boardPosition: targetAcceptedRecord.boardPosition,
         boardSequence: targetAcceptedRecord.boardSequence,
+        acceptanceMode: targetAcceptedRecord.acceptanceMode,
+        bgvAsyncThresholdCPADProfileDigest:
+            targetAcceptedRecord.bgvAsyncThresholdCPADProfileDigest,
         ceremonyId: targetAcceptedRecord.ceremonyId,
+        cpadProfileDigest: targetAcceptedRecord.cpadProfileDigest,
+        cpadProfileId: targetAcceptedRecord.cpadProfileId,
+        cTargetDigest: targetAcceptedRecord.cTargetDigest,
         electionManifestDigest: targetAcceptedRecord.electionManifestDigest,
+        evaluationProofProfileDigest:
+            targetAcceptedRecord.evaluationProofProfileDigest,
+        evaluationProofRecordDigest:
+            targetAcceptedRecord.evaluationProofRecordDigest,
         objectType: targetAcceptedRecord.objectType,
         objectVersion: targetAcceptedRecord.objectVersion,
-        optionalEvaluationProofRoot:
-            targetAcceptedRecord.optionalEvaluationProofRoot,
         organizerIdentity: targetAcceptedRecord.organizerIdentity,
-        replayAttestationDigests: targetAcceptedRecord.replayAttestationDigests,
+        qTargetDigest: targetAcceptedRecord.qTargetDigest,
+        targetContextDigest: targetAcceptedRecord.targetContextDigest,
+        targetFinalityCheckpointDigest:
+            targetAcceptedRecord.targetFinalityCheckpointDigest,
         targetFinalityRecordDigest:
             targetAcceptedRecord.targetFinalityRecordDigest,
+        targetLayoutDigest: targetAcceptedRecord.targetLayoutDigest,
         targetPhase: targetAcceptedRecord.targetPhase,
+        targetPreimageDigest: targetAcceptedRecord.targetPreimageDigest,
+        targetProposalDigest: targetAcceptedRecord.targetProposalDigest,
+        thresholdDecryptionProfileDigest:
+            targetAcceptedRecord.thresholdDecryptionProfileDigest,
+        thresholdDecryptionProfileId:
+            targetAcceptedRecord.thresholdDecryptionProfileId,
         topKEvaluationRecordDigest:
             targetAcceptedRecord.topKEvaluationRecordDigest,
     });
@@ -320,6 +338,7 @@ const verifyTargetAcceptedRecordShape = (
     if (
         targetAcceptedRecord.objectType !== 'TargetAcceptedRecord' ||
         targetAcceptedRecord.objectVersion !== 1 ||
+        targetAcceptedRecord.acceptanceMode !== 'evaluation-proof' ||
         !isNonNegativeInteger(targetAcceptedRecord.boardSequence) ||
         !isNonNegativeInteger(targetAcceptedRecord.boardPosition)
     ) {
@@ -327,16 +346,6 @@ const verifyTargetAcceptedRecordShape = (
             createRefusal(
                 'TargetAcceptedRecordInvalid',
                 'Target-accepted record object shape is not canonical.',
-                targetAcceptedRecord.targetAcceptedRecordDigest,
-                'TargetAcceptedRecord',
-            ),
-        );
-    }
-    if (targetAcceptedRecord.ceremonyId !== input.boardEvidence.ceremonyId) {
-        refusedObjects.push(
-            createRefusal(
-                'WrongCeremony',
-                'Target-accepted record ceremony does not match the board evidence.',
                 targetAcceptedRecord.targetAcceptedRecordDigest,
                 'TargetAcceptedRecord',
             ),
@@ -358,48 +367,30 @@ const verifyTargetAcceptedRecordShape = (
         );
     }
     if (
+        targetAcceptedRecord.targetProposalDigest !==
+            targetFinalityRecord.targetProposalDigest ||
         targetAcceptedRecord.targetFinalityRecordDigest !==
             targetFinalityRecord.targetFinalityRecordDigest ||
+        targetAcceptedRecord.targetFinalityCheckpointDigest !==
+            targetFinalityRecord.targetFinalityCheckpoint
+                .targetFinalityCheckpointDigest ||
+        targetAcceptedRecord.evaluationProofRecordDigest !==
+            evaluationProofRecord.evaluationProofRecordDigest ||
+        targetAcceptedRecord.evaluationProofProfileDigest !==
+            evaluationProofRecord.evaluationProofProfileDigest ||
         targetAcceptedRecord.topKEvaluationRecordDigest !==
-            targetFinalityRecord.topKEvaluationRecordDigest ||
-        targetAcceptedRecord.targetPhase !== targetFinalityRecord.targetPhase
+            evaluationProofRecord.topKEvaluationRecordDigest ||
+        targetAcceptedRecord.cTargetDigest !==
+            evaluationProofRecord.cTargetDigest ||
+        targetAcceptedRecord.targetLayoutDigest !==
+            evaluationProofRecord.targetLayoutDigest
     ) {
         refusedObjects.push(
             createRefusal(
                 'TargetAcceptedRecordInvalid',
-                'Target-accepted record must bind the accepted top-k proposal and target-finality record.',
+                'Target-accepted record must bind exact finality and mandatory evaluation proof evidence.',
                 targetAcceptedRecord.targetAcceptedRecordDigest,
                 'TargetAcceptedRecord',
-            ),
-        );
-    }
-    const acceptedReplayAttestationDigestSet = new Set(
-        input.acceptedReplayAttestationDigests,
-    );
-    const missingReplayAttestationDigest =
-        targetAcceptedRecord.replayAttestationDigests.find(
-            (digest) => !acceptedReplayAttestationDigestSet.has(digest),
-        );
-    if (
-        targetAcceptedRecord.optionalEvaluationProofRoot === null &&
-        targetAcceptedRecord.replayAttestationDigests.length === 0
-    ) {
-        refusedObjects.push(
-            createRefusal(
-                'TargetAcceptedRecordInvalid',
-                'Target-accepted record must bind replay attestations or an optional proof root.',
-                targetAcceptedRecord.targetAcceptedRecordDigest,
-                'TargetAcceptedRecord',
-            ),
-        );
-    }
-    if (missingReplayAttestationDigest !== undefined) {
-        refusedObjects.push(
-            createRefusal(
-                'TargetAcceptedRecordInvalid',
-                'Target-accepted record references a replay attestation that was not supplied as accepted.',
-                missingReplayAttestationDigest,
-                'EvaluationReplayAttestation',
             ),
         );
     }
@@ -418,74 +409,55 @@ const verifyTargetAcceptedRecordShape = (
             ),
         );
     }
-    if (
-        input.targetAcceptedRecordInclusionProof.boardSequence !==
-            targetAcceptedRecord.boardSequence ||
-        input.targetAcceptedRecordInclusionProof.boardPosition !==
-            targetAcceptedRecord.boardPosition
-    ) {
-        refusedObjects.push(
-            createRefusal(
-                'InclusionProofInvalid',
-                'Target-accepted record board placement must match its inclusion proof.',
-                input.targetAcceptedRecordInclusionProof.inclusionProofDigest,
-                'TargetAcceptedRecord',
-            ),
-        );
-    }
 
     return refusedObjects;
-};
-
-const verifyTargetAcceptedRecordShellUnchecked = (
-    input: TargetAcceptedRecordVerificationInput,
-): TargetAcceptedRecordVerification => {
-    const { acceptedDigests, boardResult, refusedObjects } =
-        collectSignedBoardInclusionEvidence({
-            boardEvidence: input.boardEvidence,
-            inclusionProof: input.targetAcceptedRecordInclusionProof,
-            objectRefusals: verifyTargetAcceptedRecordShape(input),
-            signature: input.targetAcceptedRecord.signature,
-            signatureExpectation: {
-                objectType: 'TargetAcceptedRecord',
-                objectVersion: 1,
-                signerRole: 'Organizer',
-                signerIdentity: input.targetAcceptedRecord.organizerIdentity,
-                ceremonyId: input.targetAcceptedRecord.ceremonyId,
-                publicKeyDigest: input.expectedOrganizerPublicKeyDigest,
-                manifestDigest:
-                    input.targetAcceptedRecord.electionManifestDigest,
-                objectRoot:
-                    input.targetAcceptedRecord.targetAcceptedRecordDigest,
-                boardHeadDigest:
-                    input.targetAcceptedRecordInclusionProof.boardHeadDigest,
-            },
-            acceptedObjectDigest:
-                input.targetAcceptedRecord.targetAcceptedRecordDigest,
-        });
-
-    return {
-        ok: refusedObjects.length === 0,
-        statusLabels: boardResult.statusLabels,
-        acceptedDigests,
-        refusedObjects,
-        forkEvidence: boardResult.forkEvidence,
-        targetAcceptedRecordDigest:
-            refusedObjects.length === 0
-                ? input.targetAcceptedRecord.targetAcceptedRecordDigest
-                : undefined,
-        targetFinalityRecordDigest:
-            refusedObjects.length === 0
-                ? input.targetAcceptedRecord.targetFinalityRecordDigest
-                : undefined,
-    };
 };
 
 export const verifyTargetAcceptedRecordShell = (
     input: TargetAcceptedRecordVerificationInput,
 ): TargetAcceptedRecordVerification => {
     try {
-        return verifyTargetAcceptedRecordShellUnchecked(input);
+        const { acceptedDigests, boardResult, refusedObjects } =
+            collectSignedBoardInclusionEvidence({
+                boardEvidence: input.boardEvidence,
+                inclusionProof: input.targetAcceptedRecordInclusionProof,
+                objectRefusals: verifyTargetAcceptedRecordShape(input),
+                signature: input.targetAcceptedRecord.signature,
+                signatureExpectation: {
+                    objectType: 'TargetAcceptedRecord',
+                    objectVersion: 1,
+                    signerRole: 'Organizer',
+                    signerIdentity:
+                        input.targetAcceptedRecord.organizerIdentity,
+                    ceremonyId: input.targetAcceptedRecord.ceremonyId,
+                    publicKeyDigest: input.expectedOrganizerPublicKeyDigest,
+                    manifestDigest:
+                        input.targetAcceptedRecord.electionManifestDigest,
+                    objectRoot:
+                        input.targetAcceptedRecord.targetAcceptedRecordDigest,
+                    boardHeadDigest:
+                        input.targetAcceptedRecordInclusionProof
+                            .boardHeadDigest,
+                },
+                acceptedObjectDigest:
+                    input.targetAcceptedRecord.targetAcceptedRecordDigest,
+            });
+
+        return {
+            ok: refusedObjects.length === 0,
+            statusLabels: boardResult.statusLabels,
+            acceptedDigests,
+            refusedObjects,
+            forkEvidence: boardResult.forkEvidence,
+            targetAcceptedRecordDigest:
+                refusedObjects.length === 0
+                    ? input.targetAcceptedRecord.targetAcceptedRecordDigest
+                    : undefined,
+            targetFinalityRecordDigest:
+                refusedObjects.length === 0
+                    ? input.targetAcceptedRecord.targetFinalityRecordDigest
+                    : undefined,
+        };
     } catch {
         return {
             ok: false,
@@ -509,18 +481,42 @@ const verifyTopKDecryptionShareShape = (
     const { decryptionShare, targetAcceptedRecord } = input;
     const refusedObjects: RefusalRecord[] = [];
     const expectedDigest = deriveTopKDecryptionShareDigest({
+        bgvAsyncThresholdCPADProfileDigest:
+            decryptionShare.bgvAsyncThresholdCPADProfileDigest,
         boardPosition: decryptionShare.boardPosition,
         boardSequence: decryptionShare.boardSequence,
         ceremonyId: decryptionShare.ceremonyId,
+        cpadProfileDigest: decryptionShare.cpadProfileDigest,
+        cTargetDigest: decryptionShare.cTargetDigest,
         deviceEpoch: decryptionShare.deviceEpoch,
         electionManifestDigest: decryptionShare.electionManifestDigest,
+        evaluationProofRecordDigest:
+            decryptionShare.evaluationProofRecordDigest,
         objectType: decryptionShare.objectType,
         objectVersion: decryptionShare.objectVersion,
+        qTargetDigest: decryptionShare.qTargetDigest,
         recoveryEpoch: decryptionShare.recoveryEpoch,
         shareRoot: decryptionShare.shareRoot,
         targetAcceptedRecordDigest: decryptionShare.targetAcceptedRecordDigest,
+        targetContextDigest: decryptionShare.targetContextDigest,
+        targetDecryptionCiphertextDigest:
+            decryptionShare.targetDecryptionCiphertextDigest,
+        targetDecryptionPreparationRecordDigest:
+            decryptionShare.targetDecryptionPreparationRecordDigest,
+        targetFinalityCheckpointDigest:
+            decryptionShare.targetFinalityCheckpointDigest,
         targetFinalityRecordDigest: decryptionShare.targetFinalityRecordDigest,
+        targetPreimageDigest: decryptionShare.targetPreimageDigest,
+        targetProposalDigest: decryptionShare.targetProposalDigest,
+        thresholdShareVerificationKeyDigest:
+            decryptionShare.thresholdShareVerificationKeyDigest,
+        thresholdShareVerificationKeyRoot:
+            decryptionShare.thresholdShareVerificationKeyRoot,
+        thresholdDecryptionProfileDigest:
+            decryptionShare.thresholdDecryptionProfileDigest,
         topKEvaluationRecordDigest: decryptionShare.topKEvaluationRecordDigest,
+        trusteeThresholdVerificationKeyDigest:
+            decryptionShare.trusteeThresholdVerificationKeyDigest,
         trusteeIdentity: decryptionShare.trusteeIdentity,
     });
 
@@ -535,27 +531,31 @@ const verifyTopKDecryptionShareShape = (
         );
     }
     if (
-        decryptionShare.objectType !== 'TopKDecryptionShare' ||
-        decryptionShare.objectVersion !== 1 ||
-        !isNonNegativeInteger(decryptionShare.boardSequence) ||
-        !isNonNegativeInteger(decryptionShare.boardPosition) ||
-        !isNonNegativeInteger(decryptionShare.recoveryEpoch) ||
-        !isNonNegativeInteger(decryptionShare.deviceEpoch)
+        decryptionShare.targetAcceptedRecordDigest !==
+            targetAcceptedRecord.targetAcceptedRecordDigest ||
+        decryptionShare.targetProposalDigest !==
+            targetAcceptedRecord.targetProposalDigest ||
+        decryptionShare.targetPreimageDigest !==
+            targetAcceptedRecord.targetPreimageDigest ||
+        decryptionShare.targetFinalityRecordDigest !==
+            targetAcceptedRecord.targetFinalityRecordDigest ||
+        decryptionShare.targetFinalityCheckpointDigest !==
+            targetAcceptedRecord.targetFinalityCheckpointDigest ||
+        decryptionShare.evaluationProofRecordDigest !==
+            targetAcceptedRecord.evaluationProofRecordDigest ||
+        decryptionShare.cTargetDigest !== targetAcceptedRecord.cTargetDigest ||
+        decryptionShare.cpadProfileDigest !==
+            targetAcceptedRecord.cpadProfileDigest ||
+        decryptionShare.qTargetDigest !== targetAcceptedRecord.qTargetDigest ||
+        decryptionShare.targetContextDigest !==
+            targetAcceptedRecord.targetContextDigest ||
+        decryptionShare.thresholdDecryptionProfileDigest !==
+            targetAcceptedRecord.thresholdDecryptionProfileDigest
     ) {
         refusedObjects.push(
             createRefusal(
                 'DecryptionShareInvalid',
-                'Decryption-share shell object shape is not canonical.',
-                decryptionShare.topKDecryptionShareDigest,
-                'TopKDecryptionShare',
-            ),
-        );
-    }
-    if (decryptionShare.ceremonyId !== input.boardEvidence.ceremonyId) {
-        refusedObjects.push(
-            createRefusal(
-                'WrongCeremony',
-                'Decryption-share shell ceremony does not match the board evidence.',
+                'Decryption-share shell must bind the accepted target and profile digests.',
                 decryptionShare.topKDecryptionShareDigest,
                 'TopKDecryptionShare',
             ),
@@ -576,23 +576,6 @@ const verifyTopKDecryptionShareShape = (
         );
     }
     if (
-        decryptionShare.targetAcceptedRecordDigest !==
-            targetAcceptedRecord.targetAcceptedRecordDigest ||
-        decryptionShare.targetFinalityRecordDigest !==
-            targetAcceptedRecord.targetFinalityRecordDigest ||
-        decryptionShare.topKEvaluationRecordDigest !==
-            targetAcceptedRecord.topKEvaluationRecordDigest
-    ) {
-        refusedObjects.push(
-            createRefusal(
-                'DecryptionShareInvalid',
-                'Decryption-share shell must bind the accepted target and target-finality record.',
-                decryptionShare.topKDecryptionShareDigest,
-                'TopKDecryptionShare',
-            ),
-        );
-    }
-    if (
         input.decryptionShareInclusionProof.includedObjectType !==
             'TopKDecryptionShare' ||
         input.decryptionShareInclusionProof.includedObjectDigest !==
@@ -607,76 +590,56 @@ const verifyTopKDecryptionShareShape = (
             ),
         );
     }
-    if (
-        input.decryptionShareInclusionProof.boardSequence !==
-            decryptionShare.boardSequence ||
-        input.decryptionShareInclusionProof.boardPosition !==
-            decryptionShare.boardPosition
-    ) {
-        refusedObjects.push(
-            createRefusal(
-                'InclusionProofInvalid',
-                'Decryption-share shell board placement must match its inclusion proof.',
-                input.decryptionShareInclusionProof.inclusionProofDigest,
-                'TopKDecryptionShare',
-            ),
-        );
-    }
 
     return refusedObjects;
-};
-
-const verifyTopKDecryptionShareShellUnchecked = (
-    input: TopKDecryptionShareShellVerificationInput,
-): TopKDecryptionShareShellVerification => {
-    const { acceptedDigests, boardResult, refusedObjects } =
-        collectSignedBoardInclusionEvidence({
-            boardEvidence: input.boardEvidence,
-            inclusionProof: input.decryptionShareInclusionProof,
-            objectRefusals: verifyTopKDecryptionShareShape(input),
-            signature: input.decryptionShare.signature,
-            signatureExpectation: {
-                objectType: 'TopKDecryptionShare',
-                objectVersion: 1,
-                signerRole: 'Trustee',
-                signerIdentity: input.decryptionShare.trusteeIdentity,
-                ceremonyId: input.decryptionShare.ceremonyId,
-                publicKeyDigest: input.expectedTrusteePublicKeyDigest,
-                manifestDigest: input.decryptionShare.electionManifestDigest,
-                objectRoot: input.decryptionShare.topKDecryptionShareDigest,
-                boardHeadDigest:
-                    input.decryptionShareInclusionProof.boardHeadDigest,
-            },
-            acceptedObjectDigest:
-                input.decryptionShare.topKDecryptionShareDigest,
-        });
-
-    return {
-        ok: refusedObjects.length === 0,
-        statusLabels: boardResult.statusLabels,
-        acceptedDigests,
-        refusedObjects,
-        forkEvidence: boardResult.forkEvidence,
-        topKDecryptionShareDigest:
-            refusedObjects.length === 0
-                ? input.decryptionShare.topKDecryptionShareDigest
-                : undefined,
-        targetAcceptedRecordDigest:
-            refusedObjects.length === 0
-                ? input.decryptionShare.targetAcceptedRecordDigest
-                : undefined,
-        targetFinalityRecordDigest:
-            refusedObjects.length === 0
-                ? input.decryptionShare.targetFinalityRecordDigest
-                : undefined,
-    };
 };
 
 export const verifyTopKDecryptionShareShell = (
     input: TopKDecryptionShareShellVerificationInput,
 ): TopKDecryptionShareShellVerification => {
     try {
-        return verifyTopKDecryptionShareShellUnchecked(input);
+        const { acceptedDigests, boardResult, refusedObjects } =
+            collectSignedBoardInclusionEvidence({
+                boardEvidence: input.boardEvidence,
+                inclusionProof: input.decryptionShareInclusionProof,
+                objectRefusals: verifyTopKDecryptionShareShape(input),
+                signature: input.decryptionShare.signature,
+                signatureExpectation: {
+                    objectType: 'TopKDecryptionShare',
+                    objectVersion: 1,
+                    signerRole: 'Trustee',
+                    signerIdentity: input.decryptionShare.trusteeIdentity,
+                    ceremonyId: input.decryptionShare.ceremonyId,
+                    publicKeyDigest: input.expectedTrusteePublicKeyDigest,
+                    manifestDigest:
+                        input.decryptionShare.electionManifestDigest,
+                    objectRoot: input.decryptionShare.topKDecryptionShareDigest,
+                    boardHeadDigest:
+                        input.decryptionShareInclusionProof.boardHeadDigest,
+                },
+                acceptedObjectDigest:
+                    input.decryptionShare.topKDecryptionShareDigest,
+            });
+
+        return {
+            ok: refusedObjects.length === 0,
+            statusLabels: boardResult.statusLabels,
+            acceptedDigests,
+            refusedObjects,
+            forkEvidence: boardResult.forkEvidence,
+            topKDecryptionShareDigest:
+                refusedObjects.length === 0
+                    ? input.decryptionShare.topKDecryptionShareDigest
+                    : undefined,
+            targetAcceptedRecordDigest:
+                refusedObjects.length === 0
+                    ? input.decryptionShare.targetAcceptedRecordDigest
+                    : undefined,
+            targetFinalityRecordDigest:
+                refusedObjects.length === 0
+                    ? input.decryptionShare.targetFinalityRecordDigest
+                    : undefined,
+        };
     } catch {
         return {
             ok: false,

@@ -19,39 +19,96 @@ const primaryLabelsByState = {
     VotingClosed: [],
     AwaitingAggregateContributors: [],
     AggregateInputsReady: ['AggregateInputsReady'],
-    AwaitingMobileEvaluation: ['AggregateInputsReady'],
-    TopKEvaluated: ['AggregateInputsReady', 'TopKEvaluated'],
-    EvaluationReplayOpen: ['AggregateInputsReady', 'TopKEvaluated'],
-    EvaluationReplayAttested: [
+    AggregateInputsBridgeVerified: [
         'AggregateInputsReady',
-        'TopKEvaluated',
-        'EvaluationReplayAttested',
+        'AggregateInputsBridgeVerified',
     ],
-    OptionalEvaluationProofVerified: [
+    AwaitingEvaluation: [
         'AggregateInputsReady',
-        'TopKEvaluated',
-        'OptionalEvaluationProofVerified',
+        'AggregateInputsBridgeVerified',
+        'AwaitingEvaluation',
     ],
-    EvaluationRejected: [],
-    TargetAccepted: ['AggregateInputsReady', 'TopKEvaluated', 'TargetAccepted'],
+    TopKEvaluated: [
+        'AggregateInputsReady',
+        'AggregateInputsBridgeVerified',
+        'AwaitingEvaluation',
+        'TopKEvaluated',
+    ],
+    TargetFinalityReached: [
+        'AggregateInputsReady',
+        'AggregateInputsBridgeVerified',
+        'AwaitingEvaluation',
+        'TopKEvaluated',
+        'TargetFinalityReached',
+    ],
+    EvaluationProofOpen: [
+        'AggregateInputsReady',
+        'AggregateInputsBridgeVerified',
+        'AwaitingEvaluation',
+        'TopKEvaluated',
+        'TargetFinalityReached',
+        'EvaluationProofOpen',
+    ],
+    EvaluationProofVerified: [
+        'AggregateInputsReady',
+        'AggregateInputsBridgeVerified',
+        'AwaitingEvaluation',
+        'TopKEvaluated',
+        'TargetFinalityReached',
+        'EvaluationProofVerified',
+    ],
+    EvaluationProofRejected: [],
+    EvaluationProofProfileRejected: [],
+    TargetAccepted: [
+        'AggregateInputsReady',
+        'AggregateInputsBridgeVerified',
+        'AwaitingEvaluation',
+        'TopKEvaluated',
+        'TargetFinalityReached',
+        'EvaluationProofVerified',
+        'TargetAccepted',
+    ],
     AwaitingFirstDecryptionShares: [
         'AggregateInputsReady',
+        'AggregateInputsBridgeVerified',
+        'AwaitingEvaluation',
         'TopKEvaluated',
+        'TargetFinalityReached',
+        'EvaluationProofVerified',
         'TargetAccepted',
     ],
-    ResultComputedAuditable: [
+    FirstThresholdSharesReached: [
         'AggregateInputsReady',
+        'AggregateInputsBridgeVerified',
+        'AwaitingEvaluation',
         'TopKEvaluated',
+        'TargetFinalityReached',
+        'EvaluationProofVerified',
         'TargetAccepted',
         'FirstThresholdSharesReached',
-        'ResultComputedAuditable',
     ],
+    CPADProfileVerified: [
+        'AggregateInputsReady',
+        'AggregateInputsBridgeVerified',
+        'AwaitingEvaluation',
+        'TopKEvaluated',
+        'TargetFinalityReached',
+        'EvaluationProofVerified',
+        'TargetAccepted',
+        'FirstThresholdSharesReached',
+        'CPADProfileVerified',
+    ],
+    CPADProfileRejected: [],
     FullyVerifiedResult: [
         'AggregateInputsReady',
+        'AggregateInputsBridgeVerified',
+        'AwaitingEvaluation',
         'TopKEvaluated',
-        'OptionalEvaluationProofVerified',
+        'TargetFinalityReached',
+        'EvaluationProofVerified',
         'TargetAccepted',
         'FirstThresholdSharesReached',
+        'CPADProfileVerified',
         'FullyVerifiedResult',
     ],
     Unresolved: ['Unresolved'],
@@ -68,15 +125,19 @@ const failureLabelsByState = {
     VotingClosed: [],
     AwaitingAggregateContributors: ['AggregateThresholdNotReached'],
     AggregateInputsReady: [],
-    AwaitingMobileEvaluation: ['MobileEvaluationPending'],
+    AggregateInputsBridgeVerified: [],
+    AwaitingEvaluation: [],
     TopKEvaluated: [],
-    EvaluationReplayOpen: ['EvaluationReplayThresholdNotReached'],
-    EvaluationReplayAttested: [],
-    OptionalEvaluationProofVerified: [],
-    EvaluationRejected: ['EvaluationRejected'],
+    TargetFinalityReached: [],
+    EvaluationProofOpen: [],
+    EvaluationProofVerified: [],
+    EvaluationProofRejected: ['EvaluationProofRejected'],
+    EvaluationProofProfileRejected: ['EvaluationProofProfileRejected'],
     TargetAccepted: [],
     AwaitingFirstDecryptionShares: [],
-    ResultComputedAuditable: [],
+    FirstThresholdSharesReached: ['DecryptionThresholdNotReached'],
+    CPADProfileVerified: [],
+    CPADProfileRejected: ['CPADProfileRejected'],
     FullyVerifiedResult: [],
     Unresolved: [],
     ForkedElection: [
@@ -92,33 +153,24 @@ const deriveEvaluationProofMode = (
     if (input.evaluationProofMode !== undefined) {
         return input.evaluationProofMode;
     }
+    if (input.lifecycleState === 'EvaluationProofRejected') {
+        return 'EvaluationProofRejected';
+    }
+    if (input.lifecycleState === 'EvaluationProofProfileRejected') {
+        return 'EvaluationProofProfileRejected';
+    }
     if (
-        input.lifecycleState === 'OptionalEvaluationProofVerified' ||
+        input.lifecycleState === 'EvaluationProofVerified' ||
+        input.lifecycleState === 'TargetAccepted' ||
+        input.lifecycleState === 'AwaitingFirstDecryptionShares' ||
+        input.lifecycleState === 'FirstThresholdSharesReached' ||
+        input.lifecycleState === 'CPADProfileVerified' ||
         input.lifecycleState === 'FullyVerifiedResult'
     ) {
-        return 'OptionalEvaluationProofVerified';
+        return 'EvaluationProofVerified';
     }
 
-    return 'NoOptionalEvaluationProof';
-};
-
-const deriveResultClaimLabel = (
-    lifecycleState: LifecycleState,
-    claimBearing: boolean,
-    mobileClaimGatePassed: boolean,
-    mobileCertificatesPresent: boolean,
-): ResultClaimLabel | undefined => {
-    if (!claimBearing || !mobileClaimGatePassed || !mobileCertificatesPresent) {
-        return undefined;
-    }
-    if (lifecycleState === 'ResultComputedAuditable') {
-        return 'ResultComputedAuditable';
-    }
-    if (lifecycleState === 'FullyVerifiedResult') {
-        return 'FullyVerifiedResult';
-    }
-
-    return undefined;
+    return 'EvaluationProofOpen';
 };
 
 const deriveLocalPrimaryLabels = (
@@ -126,8 +178,8 @@ const deriveLocalPrimaryLabels = (
 ): PrimaryStatusLabel[] => {
     const labels: PrimaryStatusLabel[] = [];
 
-    if (input.rosterAudited === true) {
-        labels.push('RosterAudited');
+    if (input.localRosterExternallyAccepted === true) {
+        labels.push('RosterExternallyAccepted');
     }
     if (input.ownBallotIncluded === true) {
         labels.push('BallotIncluded');
@@ -135,17 +187,87 @@ const deriveLocalPrimaryLabels = (
     if (input.evaluationLocallyReplayed === true) {
         labels.push('EvaluationLocallyReplayed');
     }
-    if (input.bridgeProofPending === true) {
-        labels.push('BridgeProofPending');
-    }
-    if (input.bridgeProofLocallyVerified === true) {
-        labels.push('BridgeProofLocallyVerified');
-    }
     if (input.aggregateInputsBridgeVerified === true) {
         labels.push('AggregateInputsBridgeVerified');
     }
 
     return labels;
+};
+
+const pushFailure = (
+    failures: FailureStatusLabel[],
+    condition: boolean | undefined,
+    label: FailureStatusLabel,
+): void => {
+    if (condition === true) {
+        failures.push(label);
+    }
+};
+
+const resultPathIsFullyGated = (input: LifecycleLabelInput): boolean =>
+    input.localRosterExternallyAccepted === true &&
+    input.thresholdProfile.claimBearing &&
+    input.mobileClaimGatePassed === true &&
+    input.bridgeMobileCertificatePresent === true &&
+    input.bridgeProverCertificatePresent === true &&
+    input.evaluationProofCertificatePresent === true &&
+    input.oneShotDecryptionProofCertificatePresent === true &&
+    input.cpadCertificatePresent === true &&
+    input.thresholdDecryptionCertificatePresent === true &&
+    input.stageXClosureApplied === true &&
+    input.stageCClosureApplied === true &&
+    input.stageAClosureApplied === true &&
+    input.decodedResultLayoutVerified === true;
+
+const deriveResultClaimLabels = (
+    input: LifecycleLabelInput,
+): readonly ResultClaimLabel[] => {
+    if (
+        input.lifecycleState !== 'FullyVerifiedResult' ||
+        !resultPathIsFullyGated(input)
+    ) {
+        return [];
+    }
+
+    const labels: ResultClaimLabel[] = ['FullyVerifiedResult'];
+    if (input.localReplayCertificateVerified === true) {
+        labels.push('ResultLocallyReplayedAuditable');
+    }
+
+    return labels;
+};
+
+const securityProfileModeLabelsById = new Map<string, ModeStatusLabel>([
+    ['transcript-core-passive-mhe-prototype-profile-v1', 'PassiveMHEPrototype'],
+    ['PQEvalProof-STARK-BGVReplay-v1', 'StageXEvaluationProofClosure'],
+    ['BGV-RNS-AsyncThresholdDecryption-CPAD-v1', 'StageCCPADClosure'],
+    [
+        'transcript-core-active-malicious-mhe-profile-v1',
+        'StageAActiveMaliciousClosure',
+    ],
+]);
+
+const deriveSecurityProfileModes = (
+    input: LifecycleLabelInput,
+): readonly ModeStatusLabel[] => {
+    const labels: ModeStatusLabel[] = [];
+
+    for (const profileId of input.securityProfileIds ?? []) {
+        const label = securityProfileModeLabelsById.get(profileId);
+        if (label !== undefined) {
+            labels.push(label);
+        }
+    }
+    if (
+        (input.securityProfileIds === undefined ||
+            input.securityProfileIds.length === 0) &&
+        (input.mheSecurityStage ?? 'PassiveMHEPrototype') ===
+            'PassiveMHEPrototype'
+    ) {
+        labels.push('PassiveMHEPrototype');
+    }
+
+    return Array.from(new Set(labels));
 };
 
 export const deriveLifecycleLabels = (
@@ -156,22 +278,21 @@ export const deriveLifecycleLabels = (
     ];
     const modes: ModeStatusLabel[] = [];
     const evaluationProofMode = deriveEvaluationProofMode(input);
+    const resultClaimLabels = deriveResultClaimLabels(input);
     let primary: PrimaryStatusLabel[] = Array.from(
         new Set([
             ...deriveLocalPrimaryLabels(input),
             ...primaryLabelsByState[input.lifecycleState],
+            ...(resultClaimLabels.includes('ResultLocallyReplayedAuditable')
+                ? (['ResultLocallyReplayedAuditable'] as const)
+                : []),
         ]),
     );
 
     if (input.thresholdProfile.rosterProfileKind === 'UnsafeMicroRoster') {
         modes.push('UnsafeMicroRoster');
     }
-    if (
-        (input.mheSecurityStage ?? 'PassiveMHEPrototype') ===
-        'PassiveMHEPrototype'
-    ) {
-        modes.push('PassiveMHEPrototype');
-    }
+    modes.push(...deriveSecurityProfileModes(input));
     if (input.mobileFlagshipProfile === true) {
         modes.push('MobileFlagshipProfile');
     }
@@ -190,47 +311,59 @@ export const deriveLifecycleLabels = (
     if (input.longRunningCryptographicCheck === true) {
         modes.push('LongRunningCryptographicCheck');
     }
-    if (input.bridgeProofRejected === true) {
-        failures.push('BridgeProofRejected');
-    }
-    if (input.thresholdBackendProfileRejected === true) {
-        failures.push('ThresholdBackendProfileRejected');
-    }
-    if (input.bridgeMobileCertificateRejected === true) {
-        failures.push('BridgeMobileCertificateRejected');
-    }
-    if (input.unsupportedLowResourceDevice === true) {
-        failures.push('UnsupportedLowResourceDevice');
-    }
 
-    const mobileCertificatesPresent =
-        input.bridgeMobileCertificatePresent === true &&
-        input.bridgeProverCertificatePresent === true &&
-        input.oneShotDecryptionProofCertificatePresent === true;
-    const resultState =
-        input.lifecycleState === 'ResultComputedAuditable' ||
-        input.lifecycleState === 'FullyVerifiedResult';
+    pushFailure(failures, input.bridgeProofRejected, 'BridgeProofRejected');
+    pushFailure(
+        failures,
+        input.witnessEquivocationEvidence,
+        'WitnessEquivocationEvidence',
+    );
+    pushFailure(
+        failures,
+        input.targetFinalityNotReached,
+        'TargetFinalityNotReached',
+    );
+    pushFailure(
+        failures,
+        input.backendProfileRejected,
+        'BackendProfileRejected',
+    );
+    pushFailure(failures, input.bgvProfileRejected, 'BGVProfileRejected');
+    pushFailure(failures, input.cpadProfileRejected, 'CPADProfileRejected');
+    pushFailure(
+        failures,
+        input.decryptionThresholdNotReached,
+        'DecryptionThresholdNotReached',
+    );
+    pushFailure(
+        failures,
+        input.bridgeMobileCertRejected,
+        'BridgeMobileCertRejected',
+    );
+    pushFailure(
+        failures,
+        input.boardFinalityProfileRejected,
+        'BoardFinalityProfileRejected',
+    );
+    pushFailure(failures, input.mobileProfileRejected, 'MobileProfileRejected');
+    pushFailure(
+        failures,
+        input.unsupportedLowResourceDevice,
+        'UnsupportedLowResourceDevice',
+    );
+
     if (
-        resultState &&
-        (!input.thresholdProfile.claimBearing ||
-            input.mobileClaimGatePassed !== true ||
-            !mobileCertificatesPresent)
+        input.lifecycleState === 'FullyVerifiedResult' &&
+        resultClaimLabels.length === 0
     ) {
         primary = ['Unresolved'];
     }
 
-    const resultClaimLabel = deriveResultClaimLabel(
-        input.lifecycleState,
-        input.thresholdProfile.claimBearing,
-        input.mobileClaimGatePassed === true,
-        mobileCertificatesPresent,
-    );
-
     return {
         primary,
-        failures,
-        modes,
-        resultClaimLabel,
+        failures: Array.from(new Set(failures)),
+        modes: Array.from(new Set(modes)),
+        resultClaimLabels,
         evaluationProofMode,
     };
 };

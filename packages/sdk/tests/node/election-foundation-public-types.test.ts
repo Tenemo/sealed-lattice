@@ -5,7 +5,7 @@ import type * as publicTypes from '../../src/index.js';
 
 type BlockedTargetPhaseTypes = [
     // @ts-expect-error target-phase shell types are intentionally not public.
-    publicTypes.EvaluationReplayAttestation,
+    publicTypes.LocalReplayRecord,
     // @ts-expect-error target-phase shell types are intentionally not public.
     publicTypes.TargetAcceptedRecord,
     // @ts-expect-error target-phase shell types are intentionally not public.

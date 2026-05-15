@@ -34,9 +34,9 @@ const findFixture = <Fixture extends NamedFixture>(
     return fixture;
 };
 
-const resultComputedPassiveFixture = findFixture(
+const fullyVerifiedPassiveFixture = findFixture(
     goldenTranscriptCoreFixtures,
-    'result-computed-passive-mhe-transcript-core',
+    'fully-verified-passive-mhe-transcript-core',
 );
 const invalidEnumFixture = findFixture(malformedObjectFixtures, 'invalid-enum');
 
@@ -58,12 +58,12 @@ describe('transcript-core kernel in browsers', () => {
     it('verifies the golden transcript-core fixture', async () => {
         const kernel = await loadTranscriptCoreKernel();
 
-        expect(kernel.verifyFixture(resultComputedPassiveFixture)).toEqual({
+        expect(kernel.verifyFixture(fullyVerifiedPassiveFixture)).toEqual({
             verified: true,
-            caseName: 'result-computed-passive-mhe-transcript-core',
-            objectHash512: resultComputedPassiveFixture.expectedObjectHash512,
-            chunkRoot: resultComputedPassiveFixture.expectedChunkRoot,
-            statusLabels: resultComputedPassiveFixture.expectedStatusLabels,
+            caseName: 'fully-verified-passive-mhe-transcript-core',
+            objectHash512: fullyVerifiedPassiveFixture.expectedObjectHash512,
+            chunkRoot: fullyVerifiedPassiveFixture.expectedChunkRoot,
+            statusLabels: fullyVerifiedPassiveFixture.expectedStatusLabels,
         });
     });
 

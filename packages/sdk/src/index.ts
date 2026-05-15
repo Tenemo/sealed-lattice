@@ -1,5 +1,5 @@
 import {
-    deriveValidatedFirstComeOrder as deriveValidatedFirstComeOrderInternal,
+    deriveValidatedFirstValidOrder as deriveValidatedFirstValidOrderInternal,
     deriveLifecycleLabels as deriveLifecycleLabelsInternal,
     deriveThresholdProfile as deriveThresholdProfileInternal,
     evaluateActionCapability as evaluateActionCapabilityInternal,
@@ -9,8 +9,9 @@ import {
     isActionCurrentForRecoveryEpoch as isActionCurrentForRecoveryEpochInternal,
     validatePollSpec as validatePollSpecInternal,
     verifyBoardConsistency as verifyBoardConsistencyInternal,
-    verifyFirstComePolicy as verifyFirstComePolicyInternal,
+    verifyFirstValidPolicy as verifyFirstValidPolicyInternal,
     verifyRecoveryEpochUpdate as verifyRecoveryEpochUpdateInternal,
+    verifyRosterExternalAcceptance as verifyRosterExternalAcceptanceInternal,
     verifyRosterManifestTranscript as verifyRosterManifestTranscriptInternal,
     verifyTargetFinality as verifyTargetFinalityInternal,
 } from '@sealed-lattice/protocol';
@@ -25,8 +26,9 @@ import type {
     CapabilityDecision,
     CloseRecordVerification,
     CloseRecordVerificationInput,
-    FirstComeOrderingInput,
-    FirstComeOrderingVerification,
+    FirstValidOrderingInput,
+    FirstValidOrderingVerification,
+    FutureProtocolOperationResult,
     LifecycleLabelInput,
     LifecycleLabels,
     LifecycleTransition,
@@ -41,6 +43,8 @@ import type {
     TranscriptCoreVerificationResult,
     RosterManifestTranscriptInput,
     RosterManifestTranscriptVerification,
+    RosterExternalAcceptanceVerification,
+    RosterExternalAcceptanceVerificationInput,
     TargetFinalityVerification,
     TargetFinalityVerificationInput,
 } from '@sealed-lattice/types';
@@ -77,8 +81,9 @@ export type {
     DecryptionShareSelectionRule,
     EvaluationProofMode,
     FailureStatusLabel,
-    FirstComeOrderingInput,
-    FirstComeOrderingVerification,
+    FirstValidOrderingInput,
+    FirstValidOrderingVerification,
+    FutureProtocolOperationResult,
     GoldenTranscriptCoreFixture,
     GoldenTranscriptCoreFixtureVerification,
     HeBackendCorruptionModel,
@@ -117,6 +122,9 @@ export type {
     RefusalRecord,
     RegistrationEntry,
     ResultClaimLabel,
+    RosterExternalAcceptance,
+    RosterExternalAcceptanceVerification,
+    RosterExternalAcceptanceVerificationInput,
     RosterManifestTranscriptInput,
     RosterManifestTranscriptVerification,
     RosterProfileKind,
@@ -127,9 +135,11 @@ export type {
     SignerRole,
     StructuredProtocolVerificationResult,
     TargetFinalityPolicy,
+    TargetFinalityCheckpoint,
     TargetFinalityRecord,
     TargetFinalityVerification,
     TargetFinalityVerificationInput,
+    TargetProposal,
     ThresholdProfile,
     ThresholdProfileInput,
     ThresholdWarning,
@@ -143,7 +153,7 @@ export type {
     TranscriptCoreVerificationLabel,
     TranscriptCoreVerificationResult,
     TrusteeSetupEntry,
-    ValidatedFirstComeCandidate,
+    ValidatedFirstValidObject,
     WitnessCheckpoint,
     WitnessPolicy,
 } from '@sealed-lattice/types';
@@ -176,6 +186,38 @@ export const evaluateActionCapability = (
     context: CapabilityContext,
 ): CapabilityDecision => evaluateActionCapabilityInternal(action, context);
 
+const unavailableFutureProtocolOperation = (
+    operation: string,
+): FutureProtocolOperationResult => ({
+    ok: false,
+    statusLabels: [],
+    acceptedDigests: [],
+    refusedObjects: [
+        {
+            code: 'OperationUnavailable',
+            message: `${operation} is reserved for later protocol implementation and is not implemented in this package version.`,
+        },
+    ],
+    unresolvedReason: 'OperationUnavailable',
+    operation,
+});
+
+/** Reserved transcript verifier entry point for the future complete protocol path. */
+export const verifyTranscript = (): FutureProtocolOperationResult =>
+    unavailableFutureProtocolOperation('verifyTranscript');
+
+/** Reserved bridge-proof creation entry point for the future aggregate path. */
+export const createBridgeProof = (): FutureProtocolOperationResult =>
+    unavailableFutureProtocolOperation('createBridgeProof');
+
+/** Reserved bridge-proof verification entry point for the future aggregate path. */
+export const verifyBridgeProof = (): FutureProtocolOperationResult =>
+    unavailableFutureProtocolOperation('verifyBridgeProof');
+
+/** Reserved one-shot decryption-share policy verifier for the future target path. */
+export const verifyOneShotSharePolicy = (): FutureProtocolOperationResult =>
+    unavailableFutureProtocolOperation('verifyOneShotSharePolicy');
+
 /** Verifies signed board heads, inclusion proofs, and append-only evidence. */
 export const verifyBoardConsistency = (
     input: BoardConsistencyInput,
@@ -196,16 +238,22 @@ export const verifyTargetFinality = (
     input: TargetFinalityVerificationInput,
 ): TargetFinalityVerification => verifyTargetFinalityInternal(input);
 
-/** Derives the deterministic first-come order for validated candidates. */
-export const deriveValidatedFirstComeOrder = (
-    input: FirstComeOrderingInput,
-): FirstComeOrderingVerification =>
-    deriveValidatedFirstComeOrderInternal(input);
+/** Derives the deterministic first-valid order for validated objects. */
+export const deriveValidatedFirstValidOrder = (
+    input: FirstValidOrderingInput,
+): FirstValidOrderingVerification =>
+    deriveValidatedFirstValidOrderInternal(input);
 
-/** Verifies a first-come policy input and returns its deterministic ordering. */
-export const verifyFirstComePolicy = (
-    input: FirstComeOrderingInput,
-): FirstComeOrderingVerification => verifyFirstComePolicyInternal(input);
+/** Verifies a first-valid policy input and returns its deterministic ordering. */
+export const verifyFirstValidPolicy = (
+    input: FirstValidOrderingInput,
+): FirstValidOrderingVerification => verifyFirstValidPolicyInternal(input);
+
+/** Verifies one participant's local acceptance of the frozen public roster. */
+export const verifyRosterExternalAcceptance = (
+    input: RosterExternalAcceptanceVerificationInput,
+): RosterExternalAcceptanceVerification =>
+    verifyRosterExternalAcceptanceInternal(input);
 
 /** Verifies roster freeze inputs, manifest evidence, and setup uniqueness. */
 export const verifyRosterManifestTranscript = (

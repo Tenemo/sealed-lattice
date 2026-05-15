@@ -2,10 +2,10 @@ import { describe, expect, it } from 'vitest';
 
 import {
     type ActionContext,
-    type FirstComeOrderingInput,
+    type FirstValidOrderingInput,
     type RecoveryEpochMapEntry,
     type RecoveryEpochUpdate,
-    type ValidatedFirstComeCandidate,
+    type ValidatedFirstValidObject,
     ceremonyId,
     contextDigest,
     createBoardEvidence,
@@ -20,7 +20,7 @@ import {
     deriveProtocolDigest,
     deriveRecoveryEpochUpdateDigest,
     deriveRosterDigest,
-    deriveValidatedFirstComeOrder,
+    deriveValidatedFirstValidOrder,
     isActionCurrentForRecoveryEpoch,
     manifestOpaqueBindings,
     manifestPolicyDigests,
@@ -29,7 +29,7 @@ import {
     verifyRosterManifestTranscript,
 } from './election-foundation-test-helpers';
 
-describe('roster, manifest, first-come, and recovery shells', () => {
+describe('roster, manifest, first-valid, and recovery shells', () => {
     it('accepts an honest registration to manifest transcript', () => {
         const registrations = [
             createRegistrationEntry('participant-1', 1, 0),
@@ -97,6 +97,17 @@ describe('roster, manifest, first-come, and recovery shells', () => {
                 mobileProfileId: 'different-mobile-profile',
             },
         });
+        const wrongFixedProfileManifest = createElectionManifest(
+            registrations,
+            {
+                boardSequence: 4,
+                manifestOpaqueBindings: {
+                    ...manifestOpaqueBindings,
+                    evaluationProofProfileId:
+                        'unsupported-evaluation-proof-profile',
+                },
+            },
+        );
         const changedPollSpecManifest = createElectionManifest(registrations, {
             boardSequence: 4,
             pollSpecDigest: deriveProtocolDigest('PollSpecDigest', {
@@ -174,6 +185,16 @@ describe('roster, manifest, first-come, and recovery shells', () => {
         expect(
             verifyRosterManifestTranscript({
                 ...input,
+                electionManifest: wrongFixedProfileManifest,
+            }).refusedObjects,
+        ).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({ code: 'ManifestDigestMismatch' }),
+            ]),
+        );
+        expect(
+            verifyRosterManifestTranscript({
+                ...input,
                 suppliedElectionManifests: [changedManifest],
             }).refusedObjects,
         ).toEqual(
@@ -243,13 +264,13 @@ describe('roster, manifest, first-come, and recovery shells', () => {
         );
     });
 
-    it('orders validated first-come candidates and deduplicates retransmission', () => {
+    it('orders validated first-valid candidates and deduplicates retransmission', () => {
         const recoveryEpochState: RecoveryEpochMapEntry = {
             signerIdentity: 'participant-1',
             currentRecoveryEpoch: 0,
             currentDeviceEpoch: 0,
         };
-        const candidates: ValidatedFirstComeCandidate[] = [
+        const objects: ValidatedFirstValidObject[] = [
             {
                 objectDigest: 'object-b',
                 objectType: 'TargetFinalityRecord',
@@ -287,12 +308,12 @@ describe('roster, manifest, first-come, and recovery shells', () => {
                 isByteIdenticalRetransmission: true,
             },
         ];
-        const input: FirstComeOrderingInput = {
-            candidates,
+        const input: FirstValidOrderingInput = {
+            objects,
             requiredContextDigest: contextDigest,
-            selectionPolicyDigest: manifestPolicyDigests.firstComePolicyDigest,
+            selectionPolicyDigest: manifestPolicyDigests.firstValidPolicyDigest,
             expectedSelectionPolicyDigest:
-                manifestPolicyDigests.firstComePolicyDigest,
+                manifestPolicyDigests.firstValidPolicyDigest,
             currentRecoveryEpochMap: {
                 'participant-1': recoveryEpochState,
                 'participant-2': {
@@ -303,61 +324,61 @@ describe('roster, manifest, first-come, and recovery shells', () => {
             },
         };
 
-        expect(deriveValidatedFirstComeOrder(input)).toMatchObject({
+        expect(deriveValidatedFirstValidOrder(input)).toMatchObject({
             ok: true,
-            orderedCandidates: [
+            orderedObjects: [
                 expect.objectContaining({ objectDigest: 'object-a' }),
                 expect.objectContaining({ objectDigest: 'object-b' }),
             ],
         });
 
-        const badInput: FirstComeOrderingInput = {
+        const badInput: FirstValidOrderingInput = {
             ...input,
             selectionPolicyDigest: deriveProtocolDigest(
-                'FirstComePolicyDigest',
+                'FirstValidPolicyDigest',
                 { policy: 'wrong' },
             ),
-            candidates: [
+            objects: [
                 {
-                    ...candidates[0],
+                    ...objects[0],
                     contextDigest: deriveProtocolDigest('ActionContextDigest', {
                         context: 'wrong',
                     }),
                 },
-                candidates[1],
+                objects[1],
                 {
-                    ...candidates[1],
+                    ...objects[1],
                     objectDigest: 'object-stale',
                     recoveryEpoch: 9,
                     actionSequence: 1,
                 },
                 {
-                    ...candidates[1],
+                    ...objects[1],
                     objectDigest: 'object-c',
                 },
             ],
         };
 
-        expect(deriveValidatedFirstComeOrder(badInput).refusedObjects).toEqual(
+        expect(deriveValidatedFirstValidOrder(badInput).refusedObjects).toEqual(
             expect.arrayContaining([
-                expect.objectContaining({ code: 'FirstComePolicyMismatch' }),
-                expect.objectContaining({ code: 'FirstComeContextMismatch' }),
+                expect.objectContaining({ code: 'FirstValidPolicyMismatch' }),
+                expect.objectContaining({ code: 'FirstValidContextMismatch' }),
                 expect.objectContaining({ code: 'StaleRecoveryEpoch' }),
                 expect.objectContaining({
-                    code: 'ConflictingFirstComeCandidate',
+                    code: 'ConflictingFirstValidObject',
                 }),
             ]),
         );
     });
 
-    it('rejects same-identity first-come conflicts across action sequences', () => {
+    it('rejects same-identity first-valid conflicts across action sequences', () => {
         expect(
-            deriveValidatedFirstComeOrder({
+            deriveValidatedFirstValidOrder({
                 requiredContextDigest: contextDigest,
                 selectionPolicyDigest:
-                    manifestPolicyDigests.firstComePolicyDigest,
+                    manifestPolicyDigests.firstValidPolicyDigest,
                 expectedSelectionPolicyDigest:
-                    manifestPolicyDigests.firstComePolicyDigest,
+                    manifestPolicyDigests.firstValidPolicyDigest,
                 currentRecoveryEpochMap: {
                     'participant-1': {
                         signerIdentity: 'participant-1',
@@ -365,7 +386,7 @@ describe('roster, manifest, first-come, and recovery shells', () => {
                         currentDeviceEpoch: 0,
                     },
                 },
-                candidates: [
+                objects: [
                     {
                         objectDigest: 'object-a',
                         objectType: 'TargetFinalityRecord',
@@ -395,14 +416,14 @@ describe('roster, manifest, first-come, and recovery shells', () => {
         ).toEqual(
             expect.arrayContaining([
                 expect.objectContaining({
-                    code: 'ConflictingFirstComeCandidate',
+                    code: 'ConflictingFirstValidObject',
                 }),
             ]),
         );
     });
 
-    it('rejects malformed first-come candidate shape before ordering', () => {
-        const baseCandidate: ValidatedFirstComeCandidate = {
+    it('rejects malformed first-valid candidate shape before ordering', () => {
+        const baseCandidate: ValidatedFirstValidObject = {
             objectDigest: 'object-a',
             objectType: 'TargetFinalityRecord',
             boardSequence: 1,
@@ -414,11 +435,11 @@ describe('roster, manifest, first-come, and recovery shells', () => {
             contextDigest,
             isByteIdenticalRetransmission: false,
         };
-        const result = deriveValidatedFirstComeOrder({
+        const result = deriveValidatedFirstValidOrder({
             requiredContextDigest: contextDigest,
-            selectionPolicyDigest: manifestPolicyDigests.firstComePolicyDigest,
+            selectionPolicyDigest: manifestPolicyDigests.firstValidPolicyDigest,
             expectedSelectionPolicyDigest:
-                manifestPolicyDigests.firstComePolicyDigest,
+                manifestPolicyDigests.firstValidPolicyDigest,
             currentRecoveryEpochMap: {
                 'participant-1': {
                     signerIdentity: 'participant-1',
@@ -426,7 +447,7 @@ describe('roster, manifest, first-come, and recovery shells', () => {
                     currentDeviceEpoch: 0,
                 },
             },
-            candidates: [
+            objects: [
                 {
                     ...baseCandidate,
                     objectDigest: 'negative-position',
@@ -450,23 +471,23 @@ describe('roster, manifest, first-come, and recovery shells', () => {
         });
 
         expect(result.ok).toBe(false);
-        expect(result.orderedCandidates).toEqual([]);
+        expect(result.orderedObjects).toEqual([]);
         expect(result.refusedObjects).toEqual(
             expect.arrayContaining([
                 expect.objectContaining({
-                    code: 'FirstComePolicyMismatch',
+                    code: 'FirstValidPolicyMismatch',
                     message:
-                        'First-come candidate sequence and epoch fields must be non-negative safe integers.',
+                        'First-valid object sequence and epoch fields must be non-negative safe integers.',
                 }),
                 expect.objectContaining({
-                    code: 'FirstComePolicyMismatch',
+                    code: 'FirstValidPolicyMismatch',
                     message:
-                        'First-come candidate string fields must be non-empty canonical strings.',
+                        'First-valid object string fields must be non-empty canonical strings.',
                 }),
                 expect.objectContaining({
-                    code: 'FirstComePolicyMismatch',
+                    code: 'FirstValidPolicyMismatch',
                     message:
-                        'First-come candidate retransmission flag must be boolean.',
+                        'First-valid object retransmission flag must be boolean.',
                 }),
             ]),
         );
@@ -474,12 +495,12 @@ describe('roster, manifest, first-come, and recovery shells', () => {
 
     it('rejects mixed stale recovery and current device epochs before the old-action cutoff', () => {
         expect(
-            deriveValidatedFirstComeOrder({
+            deriveValidatedFirstValidOrder({
                 requiredContextDigest: contextDigest,
                 selectionPolicyDigest:
-                    manifestPolicyDigests.firstComePolicyDigest,
+                    manifestPolicyDigests.firstValidPolicyDigest,
                 expectedSelectionPolicyDigest:
-                    manifestPolicyDigests.firstComePolicyDigest,
+                    manifestPolicyDigests.firstValidPolicyDigest,
                 currentRecoveryEpochMap: {
                     'participant-1': {
                         signerIdentity: 'participant-1',
@@ -488,7 +509,7 @@ describe('roster, manifest, first-come, and recovery shells', () => {
                         oldActionCutoffBoardSequence: 10,
                     },
                 },
-                candidates: [
+                objects: [
                     {
                         objectDigest: 'object-mixed-epoch',
                         objectType: 'TargetFinalityRecord',
@@ -549,7 +570,7 @@ describe('roster, manifest, first-come, and recovery shells', () => {
                 { receiverState: 'restored' },
             ),
             newTrusteeSetupCommitment: deriveProtocolDigest(
-                'TrusteeSetupRoot',
+                'CollectivePublicKeyRoot',
                 { trusteeSetup: 'new' },
             ),
         } satisfies Omit<
@@ -796,6 +817,10 @@ describe('roster, manifest, first-come, and recovery shells', () => {
             actionSequence: 1,
             recoveryPolicyDigest: manifestPolicyDigests.recoveryPolicyDigest,
             acceptedRecoveryEpochUpdateDigest: recoveryEpochUpdateDigest,
+            rosterExternalAcceptanceDigest: deriveProtocolDigest(
+                'RosterExternalAcceptanceDigest',
+                { participant: 'participant-1', roster: 'main' },
+            ),
             contextDigest,
         };
         const staleActionContext: ActionContext = {
@@ -811,6 +836,23 @@ describe('roster, manifest, first-come, and recovery shells', () => {
         ).toEqual(
             expect.arrayContaining([
                 expect.objectContaining({ code: 'StaleRecoveryEpoch' }),
+            ]),
+        );
+
+        expect(
+            isActionCurrentForRecoveryEpoch({
+                actionContext: staleActionContext,
+                recoveryEpochState: currentEntry,
+                expectedRosterExternalAcceptanceDigest: deriveProtocolDigest(
+                    'RosterExternalAcceptanceDigest',
+                    { participant: 'participant-1', roster: 'different' },
+                ),
+            }).refusedObjects,
+        ).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    code: 'RosterExternalAcceptanceInvalid',
+                }),
             ]),
         );
     });

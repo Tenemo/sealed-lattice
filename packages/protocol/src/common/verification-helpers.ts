@@ -19,9 +19,9 @@ export const createRefusal = (
     objectType,
 });
 
-export const uniqueStrings = (values: readonly string[]): string[] => [
-    ...new Set(values),
-];
+export const uniqueStrings = <StringValue extends string>(
+    values: readonly StringValue[],
+): StringValue[] => [...new Set(values)];
 
 export const isNonNegativeInteger = (value: number): boolean =>
     Number.isSafeInteger(value) && value >= 0 && !Object.is(value, -0);

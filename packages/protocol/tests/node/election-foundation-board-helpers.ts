@@ -14,7 +14,9 @@ import {
     deriveInclusionProofDigest,
 } from '../../src/board/index';
 import {
+    deriveTargetFinalityCheckpointDigest,
     deriveTargetFinalityRecordDigest,
+    deriveTargetProposalDigest,
     deriveWitnessCheckpointDigest,
 } from '../../src/finality/index';
 
@@ -25,6 +27,7 @@ import {
     createKeyFixture,
     createSignature,
     defaultTopKEvaluationRecordDigest,
+    manifestOpaqueBindings,
     targetFinalityPolicyDigest,
     witnessIdentities,
     witnessPolicyDigest,
@@ -193,6 +196,18 @@ export const createTargetProposalHead = (
 export const createWitnessCheckpoint = (
     witnessIdentity: string,
     finalizedBoardHeadDigest: string,
+    targetProposalDigest = deriveProtocolDigest('TargetProposalDigest', {
+        finalizedBoardHeadDigest,
+        witnessIdentity,
+    }),
+    targetFinalityCheckpointDigest = deriveProtocolDigest(
+        'TargetFinalityCheckpointDigest',
+        {
+            finalizedBoardHeadDigest,
+            targetProposalDigest,
+            witnessIdentity,
+        },
+    ),
     overrides: Partial<WitnessCheckpoint> = {},
 ): WitnessCheckpoint => {
     const checkpointPayload = {
@@ -200,7 +215,8 @@ export const createWitnessCheckpoint = (
         objectVersion: 1,
         ceremonyId,
         targetPhase: 'target',
-        finalizedBoardHeadDigest,
+        targetProposalDigest,
+        targetFinalityCheckpointDigest,
         witnessPolicyDigest,
         targetFinalityPolicyDigest,
         witnessIdentity,
@@ -231,6 +247,53 @@ export const createTargetFinalityRecord = (
     topKEvaluationRecordDigest = defaultTopKEvaluationRecordDigest,
     witnessCount = 5,
 ): TargetFinalityRecord => {
+    const proposalPayload = {
+        ceremonyId,
+        electionManifestDigest: deriveProtocolDigest('ElectionManifestDigest', {
+            ceremonyId,
+            marker: 'default-manifest',
+        }),
+        evaluationContextDigest: deriveProtocolDigest(
+            'EvaluationContextDigest',
+            { ceremonyId, marker: 'top-k-evaluation' },
+        ),
+        topKEvaluationRecordDigest,
+        cTopKDigest: deriveProtocolDigest('CiphertextRoot', {
+            ceremonyId,
+            marker: 'c-top-k',
+        }),
+        publicSlotMaskDigest: deriveProtocolDigest('PublicSlotMaskDigest', {
+            ceremonyId,
+            marker: 'top-k-mask',
+        }),
+        cTargetDigest: deriveProtocolDigest('CiphertextRoot', {
+            ceremonyId,
+            marker: 'c-target',
+        }),
+        targetLayoutDigest: deriveProtocolDigest('TargetLayoutDigest', {
+            layout: 'WinnerRankTopK-v1',
+        }),
+        evaluationProofProfileDigest:
+            manifestOpaqueBindings.evaluationProofProfileDigest,
+        targetFinalityPolicyDigest,
+    };
+    const targetProposalDigest = deriveTargetProposalDigest(proposalPayload);
+    const targetFinalityCheckpointPayload = {
+        ...proposalPayload,
+        targetProposalDigest,
+        objectType: 'TargetFinalityCheckpoint',
+        objectVersion: 1,
+        boardPolicyDigest,
+        finalizedBoardHeadDigest: finalizedHead.headDigest,
+        witnessPolicyDigest,
+    } as const;
+    const targetFinalityCheckpointDigest = deriveTargetFinalityCheckpointDigest(
+        targetFinalityCheckpointPayload,
+    );
+    const targetFinalityCheckpoint = {
+        ...targetFinalityCheckpointPayload,
+        targetFinalityCheckpointDigest,
+    };
     const inclusionProof = createInclusionProof(
         finalizedHead,
         'TopKEvaluationRecord',
@@ -239,15 +302,20 @@ export const createTargetFinalityRecord = (
     const witnessCheckpoints = witnessIdentities
         .slice(0, witnessCount)
         .map((witnessIdentity) =>
-            createWitnessCheckpoint(witnessIdentity, finalizedHead.headDigest),
+            createWitnessCheckpoint(
+                witnessIdentity,
+                finalizedHead.headDigest,
+                targetProposalDigest,
+                targetFinalityCheckpointDigest,
+            ),
         );
     const payload = {
         objectType: 'TargetFinalityRecord',
         objectVersion: 1,
         ceremonyId,
         targetPhase: 'target',
-        finalizedBoardHeadDigest: finalizedHead.headDigest,
-        topKEvaluationRecordDigest,
+        targetProposalDigest,
+        targetFinalityCheckpoint,
         witnessPolicyDigest,
         targetFinalityPolicyDigest,
         inclusionProof,

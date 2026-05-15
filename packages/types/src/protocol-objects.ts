@@ -13,13 +13,16 @@ export type ProtocolObjectType =
     | 'CastReceipt'
     | 'CloseRecord'
     | 'ElectionManifest'
-    | 'EvaluationReplayAttestation'
-    | 'FirstComeOrder'
+    | 'EvaluationProofRecord'
+    | 'FirstValidOrder'
+    | 'LocalReplayRecord'
     | 'RecoveryEpochUpdate'
     | 'ReceiverKeyRegistration'
     | 'RegistrationEntry'
     | 'Roster'
+    | 'RosterExternalAcceptance'
     | 'TargetAcceptedRecord'
+    | 'TargetFinalityCheckpoint'
     | 'TargetFinalityRecord'
     | 'TopKDecryptionShare'
     | 'TopKEvaluationRecord'
@@ -32,10 +35,11 @@ export type SignedObjectType =
     | 'CastReceipt'
     | 'CloseRecord'
     | 'ElectionManifest'
-    | 'EvaluationReplayAttestation'
+    | 'LocalReplayRecord'
     | 'RecoveryEpochUpdate'
     | 'ReceiverKeyRegistration'
     | 'RegistrationEntry'
+    | 'RosterExternalAcceptance'
     | 'TargetAcceptedRecord'
     | 'TargetFinalityRecord'
     | 'TopKDecryptionShare'
@@ -107,17 +111,18 @@ export type ProtocolRefusalCode =
     | 'BoardForkDetected'
     | 'CastReceiptInvalid'
     | 'CloseRecordInvalid'
-    | 'ConflictingFirstComeCandidate'
+    | 'ConflictingFirstValidObject'
     | 'ConflictingManifest'
     | 'DecryptionShareInvalid'
     | 'DuplicateReceiverKeyRegistration'
-    | 'DuplicateFirstComeCandidate'
+    | 'DuplicateFirstValidObject'
     | 'DuplicateRegistration'
     | 'DuplicateTrusteeSetupEntry'
     | 'DuplicateWitness'
     | 'FieldElementInvalid'
-    | 'FirstComeContextMismatch'
-    | 'FirstComePolicyMismatch'
+    | 'EvaluationProofInvalid'
+    | 'FirstValidContextMismatch'
+    | 'FirstValidPolicyMismatch'
     | 'InclusionProofInvalid'
     | 'InvalidMlDsaContext'
     | 'InvalidSignature'
@@ -126,12 +131,14 @@ export type ProtocolRefusalCode =
     | 'ManifestDigestMismatch'
     | 'MissingReceiverKeyRegistration'
     | 'MissingTrusteeSetupEntry'
+    | 'OperationUnavailable'
     | 'PlaintextOracleInvalid'
     | 'RecoveryUpdateConflict'
     | 'RecoveryUpdateInvalid'
     | 'RecoveryUpdateStale'
-    | 'ReplayAttestationInvalid'
+    | 'LocalReplayRecordInvalid'
     | 'RosterDigestMismatch'
+    | 'RosterExternalAcceptanceInvalid'
     | 'ShamirInputInvalid'
     | 'SparseTargetInvalid'
     | 'TargetAcceptedRecordInvalid'
@@ -177,6 +184,12 @@ export type StructuredProtocolVerificationResult = {
     readonly forkEvidence?: ConflictingHeadEvidence;
     readonly unresolvedReason?: string;
 };
+
+/** Fail-closed result returned by safe API entries reserved for later implementation. */
+export type FutureProtocolOperationResult =
+    StructuredProtocolVerificationResult & {
+        readonly operation: string;
+    };
 
 /** Structured result shape returned by signature verification. */
 export type SignatureVerificationResult = StructuredProtocolVerificationResult;

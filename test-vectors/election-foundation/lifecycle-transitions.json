@@ -6,16 +6,60 @@
       "to": "RegistrationOpen"
     },
     {
+      "from": "RegistrationOpen",
+      "to": "TrusteeSetupOpen"
+    },
+    {
+      "from": "TrusteeSetupOpen",
+      "to": "RegistrationClosed"
+    },
+    {
+      "from": "RegistrationClosed",
+      "to": "RosterFrozen"
+    },
+    {
+      "from": "RosterFrozen",
+      "to": "VotingOpen"
+    },
+    {
+      "from": "VotingOpen",
+      "to": "VotingClosed"
+    },
+    {
       "from": "VotingClosed",
       "to": "AwaitingAggregateContributors"
     },
     {
-      "from": "EvaluationReplayOpen",
-      "to": "EvaluationReplayAttested"
+      "from": "AwaitingAggregateContributors",
+      "to": "AggregateInputsReady"
     },
     {
-      "from": "EvaluationReplayOpen",
-      "to": "OptionalEvaluationProofVerified"
+      "from": "AggregateInputsReady",
+      "to": "AggregateInputsBridgeVerified"
+    },
+    {
+      "from": "AggregateInputsBridgeVerified",
+      "to": "AwaitingEvaluation"
+    },
+    {
+      "from": "AwaitingEvaluation",
+      "to": "TopKEvaluated"
+    },
+    {
+      "from": "TopKEvaluated",
+      "to": "TargetFinalityReached"
+    },
+    {
+      "from": "TargetFinalityReached",
+      "to": "EvaluationProofOpen"
+    },
+    {
+      "from": "EvaluationProofOpen",
+      "to": "EvaluationProofVerified"
+    },
+    {
+      "from": "EvaluationProofVerified",
+      "to": "TargetAccepted"
     },
     {
       "from": "TargetAccepted",
@@ -23,15 +67,27 @@
     },
     {
       "from": "AwaitingFirstDecryptionShares",
-      "to": "ResultComputedAuditable"
+      "to": "FirstThresholdSharesReached"
     },
     {
-      "from": "AwaitingFirstDecryptionShares",
+      "from": "FirstThresholdSharesReached",
+      "to": "CPADProfileVerified"
+    },
+    {
+      "from": "CPADProfileVerified",
       "to": "FullyVerifiedResult"
     },
     {
-      "from": "ResultComputedAuditable",
-      "to": "FullyVerifiedResult"
+      "from": "EvaluationProofOpen",
+      "to": "EvaluationProofRejected"
+    },
+    {
+      "from": "EvaluationProofOpen",
+      "to": "EvaluationProofProfileRejected"
+    },
+    {
+      "from": "FirstThresholdSharesReached",
+      "to": "CPADProfileRejected"
     }
   ],
   "invalidTransitions": [
@@ -40,15 +96,27 @@
       "to": "TargetAccepted"
     },
     {
+      "from": "AggregateInputsReady",
+      "to": "AwaitingEvaluation"
+    },
+    {
+      "from": "AggregateInputsBridgeVerified",
+      "to": "FullyVerifiedResult"
+    },
+    {
       "from": "TopKEvaluated",
       "to": "AwaitingFirstDecryptionShares"
     },
     {
-      "from": "EvaluationReplayOpen",
-      "to": "ResultComputedAuditable"
+      "from": "TargetFinalityReached",
+      "to": "TargetAccepted"
     },
     {
-      "from": "TargetAccepted",
+      "from": "EvaluationProofOpen",
+      "to": "TargetAccepted"
+    },
+    {
+      "from": "FirstThresholdSharesReached",
       "to": "FullyVerifiedResult"
     },
     {

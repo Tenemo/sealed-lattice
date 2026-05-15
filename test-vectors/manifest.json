@@ -3,19 +3,19 @@
   "entries": [
     {
       "path": "election-foundation/board-finality.json",
-      "sha256": "2688d41553d4ba0858545b2bc26130dee80344e687658174ea8c8995dea15b00"
+      "sha256": "7f819d28db491ea52af0e6f6ebbc3d672c65f33915d298bb99dd671cafc79aa5"
     },
     {
       "path": "election-foundation/capability-refusals.json",
-      "sha256": "a8d25c76eb477212125a188f4c1f6561290b5137c7e875f1943b926fc70b7650"
+      "sha256": "0356a10b51cf25837910c5fb6d3b47dba93277b19937d25dc9dba75942d54dc9"
     },
     {
       "path": "election-foundation/deterministic-fixtures.json",
-      "sha256": "8ae102219f85846c57912f213c557dc8fc3f10ebb70d518ec89266c77c352136"
+      "sha256": "0be3386d88476112c9e669288e28dd2ead8e3e14c4ecbf3195c57a524e5b6e10"
     },
     {
       "path": "election-foundation/lifecycle-transitions.json",
-      "sha256": "c869885305100267445bd80ccd287757e45e8c5f6bd8dead21e47d577c39d2d8"
+      "sha256": "d58485606c405482022dff2f2bace3960cb4984b6da3b4d422cd151981a27556"
     },
     {
       "path": "election-foundation/poll-specs.json",
@@ -23,7 +23,7 @@
     },
     {
       "path": "election-foundation/threshold-profiles.json",
-      "sha256": "55c241bd0fc72301de6743581e9a8b6f709ea52b16aeb104680715cf343f46d9"
+      "sha256": "a66c0059704b5ca14a7b16e8558522ba050836de8cc086eae96e57b41f9f673e"
     },
     {
       "path": "plaintext-oracle/comparator-polynomials.json",
@@ -47,15 +47,15 @@
     },
     {
       "path": "transcript-core/golden-transcript-core.json",
-      "sha256": "10998026b126aa1e044a31888ecea48a2e2c4cb02dd86e767f3917d0b5d5a55e"
+      "sha256": "e1ffa1361eb2a582da2caa4babc6ce91a5c72234ad55726e45d77bd43d9c14d3"
     },
     {
       "path": "transcript-core/malformed-objects.json",
-      "sha256": "fb439a4d32ac53599f7f47c7dbabc30b53853bc094415582e667bc00245e9406"
+      "sha256": "3acbb35af24b3e1acc1536654e5505e21bb13d95ac2af8460bce4ebe8fcd66fb"
     },
     {
       "path": "transcript-core/transcript-core-replay.json",
-      "sha256": "7d6e6a57bb2c76b5774a7c9ca87f16cc968bba1dbcc0884ed725c65a310d6249"
+      "sha256": "c9616e54aa6e728159f450d6ce7703cf1597b1406f4ed1b7869ab77e99d86f12"
     }
   ]
 }

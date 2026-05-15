@@ -77,7 +77,7 @@ export const createReceiverKeyRegistration = (
         objectVersion: 1,
         ceremonyId,
         participantIdentity,
-        receiverKeyRoot: deriveProtocolDigest('ReceiverKeyRoot', {
+        receiverKeyRoot: deriveProtocolDigest('EncryptedEnvelopeRoot', {
             participantIdentity,
         }),
         boardSequence,
@@ -116,7 +116,7 @@ export const createTrusteeSetupEntry = (
         objectVersion: 1,
         ceremonyId,
         trusteeIdentity,
-        trusteeSetupRoot: deriveProtocolDigest('TrusteeSetupRoot', {
+        trusteeSetupRoot: deriveProtocolDigest('CollectivePublicKeyRoot', {
             trusteeIdentity,
         }),
         boardSequence,

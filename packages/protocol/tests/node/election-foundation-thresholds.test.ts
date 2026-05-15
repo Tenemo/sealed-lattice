@@ -29,18 +29,11 @@ const expectFeasibleThresholds = (rosterSize: number): void => {
         profile.pvssThreshold,
     );
     expect(rosterSize - profile.activeFaultBound).toBeGreaterThanOrEqual(
-        profile.evaluationReplayQuorum,
-    );
-    expect(rosterSize - profile.activeFaultBound).toBeGreaterThanOrEqual(
         profile.decryptionThreshold,
     );
     expect(profile.aggregateContributionQuorum).toBe(profile.pvssThreshold);
     expect(profile.decryptionShareQuorum).toBeGreaterThanOrEqual(
         profile.decryptionThreshold,
-    );
-    expect(profile.replayBadCorruptionBound).toBe(profile.activeFaultBound);
-    expect(profile.evaluationReplayQuorum).toBe(
-        profile.replayBadCorruptionBound + 1,
     );
     expect(profile.maximumRaceShares).toBe(rosterSize);
     expect(profile.setupCompletionQuorum).toBe(rosterSize);
@@ -53,7 +46,6 @@ describe('election foundation threshold profiles', () => {
             privacyCorruptionBound: 6,
             threshold: 7,
             activeFaultBound: 4,
-            evaluationReplayQuorum: 5,
             releaseQuorum: 14,
         },
         {
@@ -61,7 +53,6 @@ describe('election foundation threshold profiles', () => {
             privacyCorruptionBound: 9,
             threshold: 10,
             activeFaultBound: 6,
-            evaluationReplayQuorum: 7,
             releaseQuorum: 20,
         },
         {
@@ -69,7 +60,6 @@ describe('election foundation threshold profiles', () => {
             privacyCorruptionBound: 13,
             threshold: 14,
             activeFaultBound: 8,
-            evaluationReplayQuorum: 9,
             releaseQuorum: 27,
         },
         {
@@ -77,7 +67,6 @@ describe('election foundation threshold profiles', () => {
             privacyCorruptionBound: 16,
             threshold: 17,
             activeFaultBound: 10,
-            evaluationReplayQuorum: 11,
             releaseQuorum: 34,
         },
     ])(
@@ -87,7 +76,6 @@ describe('election foundation threshold profiles', () => {
             privacyCorruptionBound,
             threshold,
             activeFaultBound,
-            evaluationReplayQuorum,
             releaseQuorum,
         }) => {
             const profile = deriveThresholdProfile({ rosterSize });
@@ -96,13 +84,11 @@ describe('election foundation threshold profiles', () => {
                 rosterSize,
                 privacyCorruptionBound,
                 decryptionCorruptionBound: privacyCorruptionBound,
-                replayBadCorruptionBound: activeFaultBound,
                 pvssThreshold: threshold,
                 decryptionThreshold: threshold,
                 decryptionShareQuorum: null,
                 appendixCShareSelectionProfile: null,
                 activeFaultBound,
-                evaluationReplayQuorum,
                 releaseQuorum,
             });
             expect(profile.warnings).toContain('ShareSelectionProfileRequired');

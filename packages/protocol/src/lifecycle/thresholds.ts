@@ -222,7 +222,6 @@ export const deriveThresholdProfile = (
     );
     const decryptionCorruptionBound = privacyCorruptionBound;
     const activeFaultBound = Math.floor(rosterSize / 5);
-    const replayBadCorruptionBound = activeFaultBound;
     const pvssThreshold = privacyCorruptionBound + 1;
     const decryptionThreshold = decryptionCorruptionBound + 1;
     const appendixCShareSelectionProfile =
@@ -238,7 +237,6 @@ export const deriveThresholdProfile = (
     const aggregateContributionQuorum = pvssThreshold;
     const decryptionShareQuorum =
         appendixCShareSelectionProfile?.decryptionShareQuorum ?? null;
-    const evaluationReplayQuorum = activeFaultBound + 1;
     const maximumRaceShares = rosterSize;
     const setupCompletionQuorum = rosterSize;
     const warnings = [...rosterProfile.warnings];
@@ -263,14 +261,12 @@ export const deriveThresholdProfile = (
         privacyCorruptionBound,
         decryptionCorruptionBound,
         activeFaultBound,
-        replayBadCorruptionBound,
         pvssThreshold,
         decryptionThreshold,
         releaseQuorum,
         aggregateContributionQuorum,
         decryptionShareQuorum,
         appendixCShareSelectionProfile,
-        evaluationReplayQuorum,
         maximumRaceShares,
         setupCompletionQuorum,
         backendCorruptionModel,

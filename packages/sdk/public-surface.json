@@ -1,20 +1,25 @@
 {
   "schemaVersion": 1,
   "runtimeExports": [
+    "createBridgeProof",
     "deriveLifecycleLabels",
     "deriveThresholdProfile",
-    "deriveValidatedFirstComeOrder",
+    "deriveValidatedFirstValidOrder",
     "evaluateActionCapability",
     "isActionCurrentForRecoveryEpoch",
     "isValidLifecycleTransition",
     "validatePollSpec",
     "verifyBoardConsistency",
+    "verifyBridgeProof",
     "verifyCastReceiptShell",
     "verifyCloseRecordShell",
-    "verifyFirstComePolicy",
+    "verifyFirstValidPolicy",
+    "verifyOneShotSharePolicy",
     "verifyRecoveryEpochUpdate",
+    "verifyRosterExternalAcceptance",
     "verifyRosterManifestTranscript",
     "verifyTargetFinality",
+    "verifyTranscript",
     "verifyTranscriptCoreFixture"
   ],
   "forbiddenRuntimeExports": [
@@ -47,7 +52,7 @@
     "setSecretKey",
     "setSmudgingDistribution",
     "thresholdDecrypt",
-    "verifyEvaluationReplayAttestationShell",
+    "verifyLocalReplayRecordShell",
     "verifyTargetAcceptedRecordShell",
     "verifyTopKDecryptionShareShell"
   ],
@@ -81,8 +86,9 @@
     "ElectionManifest",
     "EvaluationProofMode",
     "FailureStatusLabel",
-    "FirstComeOrderingInput",
-    "FirstComeOrderingVerification",
+    "FirstValidOrderingInput",
+    "FirstValidOrderingVerification",
+    "FutureProtocolOperationResult",
     "GoldenTranscriptCoreFixture",
     "GoldenTranscriptCoreFixtureVerification",
     "HeBackendCorruptionModel",
@@ -121,6 +127,9 @@
     "RefusalRecord",
     "RegistrationEntry",
     "ResultClaimLabel",
+    "RosterExternalAcceptance",
+    "RosterExternalAcceptanceVerification",
+    "RosterExternalAcceptanceVerificationInput",
     "RosterManifestTranscriptInput",
     "RosterManifestTranscriptVerification",
     "RosterProfileKind",
@@ -130,10 +139,12 @@
     "SignedObjectType",
     "SignerRole",
     "StructuredProtocolVerificationResult",
+    "TargetFinalityCheckpoint",
     "TargetFinalityPolicy",
     "TargetFinalityRecord",
     "TargetFinalityVerification",
     "TargetFinalityVerificationInput",
+    "TargetProposal",
     "ThresholdProfile",
     "ThresholdProfileInput",
     "ThresholdWarning",
@@ -147,7 +158,7 @@
     "TranscriptCoreVerificationLabel",
     "TranscriptCoreVerificationResult",
     "TrusteeSetupEntry",
-    "ValidatedFirstComeCandidate",
+    "ValidatedFirstValidObject",
     "WitnessCheckpoint",
     "WitnessPolicy"
   ],
@@ -175,39 +186,59 @@
   "vendoredProtocolRuntimeEntryExports": [
     {
       "source": "board/index.js",
-      "exports": ["verifyBoardConsistency"]
+      "exports": [
+        "verifyBoardConsistency"
+      ]
     },
     {
       "source": "closing/index.js",
-      "exports": ["verifyCastReceiptShell", "verifyCloseRecordShell"]
+      "exports": [
+        "verifyCastReceiptShell",
+        "verifyCloseRecordShell"
+      ]
     },
     {
       "source": "finality/index.js",
-      "exports": ["verifyTargetFinality"]
+      "exports": [
+        "verifyTargetFinality"
+      ]
     },
     {
       "source": "lifecycle/capabilities.js",
-      "exports": ["evaluateActionCapability"]
+      "exports": [
+        "evaluateActionCapability"
+      ]
     },
     {
       "source": "lifecycle/labels.js",
-      "exports": ["deriveLifecycleLabels"]
+      "exports": [
+        "deriveLifecycleLabels"
+      ]
     },
     {
       "source": "lifecycle/lifecycle.js",
-      "exports": ["isValidLifecycleTransition"]
+      "exports": [
+        "isValidLifecycleTransition"
+      ]
     },
     {
       "source": "lifecycle/poll-spec.js",
-      "exports": ["validatePollSpec"]
+      "exports": [
+        "validatePollSpec"
+      ]
     },
     {
       "source": "lifecycle/thresholds.js",
-      "exports": ["deriveThresholdProfile"]
+      "exports": [
+        "deriveThresholdProfile"
+      ]
     },
     {
       "source": "ordering/index.js",
-      "exports": ["deriveValidatedFirstComeOrder", "verifyFirstComePolicy"]
+      "exports": [
+        "deriveValidatedFirstValidOrder",
+        "verifyFirstValidPolicy"
+      ]
     },
     {
       "source": "recovery/index.js",
@@ -218,7 +249,10 @@
     },
     {
       "source": "roster/index.js",
-      "exports": ["verifyRosterManifestTranscript"]
+      "exports": [
+        "verifyRosterExternalAcceptance",
+        "verifyRosterManifestTranscript"
+      ]
     }
   ]
 }

@@ -57,6 +57,22 @@ describe('crypto primitive boundary', () => {
         );
     });
 
+    it('rejects unreserved protocol digest namespaces', () => {
+        expect(() =>
+            resolveProtocolDigestDomain('AuxiliaryBridgeModulusDigest'),
+        ).toThrow('reserved');
+        expect(() =>
+            resolveProtocolDigestDomain(
+                'sealed-lattice-root/auxiliary-bridge-modulus-digest-v1',
+            ),
+        ).toThrow('reserved');
+        expect(() =>
+            deriveProtocolDigest('ReceiverKeyRoot', {
+                receiver: 'fixture',
+            }),
+        ).toThrow('reserved');
+    });
+
     it('canonicalizes JSON deterministically and rejects unsupported values', () => {
         expect(canonicalJson({ b: [2, 1], a: { z: true } })).toBe(
             '{"a":{"z":true},"b":[2,1]}',

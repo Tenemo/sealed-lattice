@@ -5,8 +5,8 @@ export {
     verifyCloseRecordShell,
 } from './closing/index.js';
 export {
-    deriveValidatedFirstComeOrder,
-    verifyFirstComePolicy,
+    deriveValidatedFirstValidOrder,
+    verifyFirstValidPolicy,
 } from './ordering/index.js';
 export { verifyTargetFinality } from './finality/index.js';
 export { deriveLifecycleLabels } from './lifecycle/labels.js';
@@ -16,5 +16,8 @@ export {
     isActionCurrentForRecoveryEpoch,
     verifyRecoveryEpochUpdate,
 } from './recovery/index.js';
-export { verifyRosterManifestTranscript } from './roster/index.js';
+export {
+    verifyRosterExternalAcceptance,
+    verifyRosterManifestTranscript,
+} from './roster/index.js';
 export { deriveThresholdProfile } from './lifecycle/thresholds.js';
