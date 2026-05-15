@@ -1,0 +1,319 @@
+import { deriveProtocolDigest } from '@sealed-lattice/crypto';
+import type {
+    BallotPackageCandidate,
+    CanonicalBallotSet,
+    CanonicalBallotSetInput,
+    CountedBallotPackage,
+    ProtocolDigest,
+    RefusalRecord,
+    RejectedBallotCandidate,
+    SignedBoardOrder,
+} from '@sealed-lattice/types';
+
+import {
+    verifyBoardConsistency,
+    verifyInclusionProof,
+} from '../board/index.js';
+import {
+    buildBoardHeadMap,
+    createRefusal,
+    isNonNegativeInteger,
+    uniqueStrings,
+} from '../common/verification-helpers.js';
+
+import { verifyBallotPackageShell } from './ballot-package.js';
+import {
+    compareSignedBoardOrder,
+    isBeforeSignedBoardOrder,
+    validatePollAndThreshold,
+    validateRosterEntries,
+} from './common.js';
+
+const deriveBallotSetDigest = (input: {
+    readonly base: CanonicalBallotSetInput;
+    readonly countedBallots: readonly CountedBallotPackage[];
+    readonly rejectedCandidates: readonly RejectedBallotCandidate[];
+}): ProtocolDigest =>
+    deriveProtocolDigest('BallotSetDigest', {
+        ceremonyId: input.base.ceremonyId,
+        closeRecordDigest: input.base.closeRecordDigest,
+        countedBallotPackageDigests: input.countedBallots.map(
+            (candidate) => candidate.ballotPackage.ballotPackageDigest,
+        ),
+        duplicateBallotPolicyDigest: input.base.duplicateBallotPolicyDigest,
+        electionManifestDigest: input.base.electionManifestDigest,
+        pollSpecDigest: input.base.pollSpecDigest,
+        rejectedCandidates:
+            input.base.includeRejectedCandidateSummariesInDigest === true
+                ? input.rejectedCandidates.map((candidate) => ({
+                      ballotPackageDigest: candidate.ballotPackageDigest,
+                      refusalCodes: candidate.refusalCodes,
+                      signedBoardOrder: candidate.signedBoardOrder ?? null,
+                      voterIdentity: candidate.voterIdentity ?? null,
+                  }))
+                : [],
+        rosterDigest: input.base.rosterDigest,
+        thresholdProfileDigest: input.base.thresholdProfileDigest,
+        votingClosedBoardHeadDigest: input.base.votingClosedBoardHeadDigest,
+    });
+
+const candidateSignedBoardOrder = (
+    candidate: BallotPackageCandidate,
+): SignedBoardOrder => ({
+    boardSequence: candidate.inclusionProof.boardSequence,
+    boardPosition: candidate.inclusionProof.boardPosition,
+});
+
+const deriveRejectedCandidate = (
+    candidate: BallotPackageCandidate,
+    refusedObjects: readonly RefusalRecord[],
+): RejectedBallotCandidate => ({
+    ballotPackageDigest: candidate.ballotPackage.ballotPackageDigest,
+    voterIdentity: candidate.ballotPackage.voterIdentity,
+    signedBoardOrder: candidateSignedBoardOrder(candidate),
+    refusalCodes: refusedObjects.map((refusal) => refusal.code),
+});
+
+const validateSetInput = (
+    input: CanonicalBallotSetInput,
+): readonly RefusalRecord[] => {
+    const refusedObjects: RefusalRecord[] = [
+        ...validatePollAndThreshold(input.pollSpec, input.thresholdProfile),
+        ...validateRosterEntries(input.rosterEntries, input.thresholdProfile),
+    ];
+
+    if (
+        !isNonNegativeInteger(input.closeRecordBoardOrder.boardSequence) ||
+        !isNonNegativeInteger(input.closeRecordBoardOrder.boardPosition)
+    ) {
+        refusedObjects.push(
+            createRefusal(
+                'BallotSetInvalid',
+                'Ballot-set selection requires a canonical voting-close board order.',
+                input.closeRecordDigest,
+            ),
+        );
+    }
+    if (
+        input.boardEvidence.ceremonyId !== input.ceremonyId ||
+        input.boardEvidence.signedBoardHeads.every(
+            (head) => head.headDigest !== input.votingClosedBoardHeadDigest,
+        )
+    ) {
+        refusedObjects.push(
+            createRefusal(
+                'BallotSetInvalid',
+                'Ballot-set selection requires board evidence for the voting-close head.',
+                input.votingClosedBoardHeadDigest,
+                'BoardHead',
+            ),
+        );
+    }
+
+    return refusedObjects;
+};
+
+const deriveCanonicalBallotSetUnchecked = (
+    input: CanonicalBallotSetInput,
+): CanonicalBallotSet => {
+    const boardResult = verifyBoardConsistency(input.boardEvidence);
+    const headsByDigest = buildBoardHeadMap(
+        input.boardEvidence.signedBoardHeads,
+    );
+    const fatalRefusals: RefusalRecord[] = [
+        ...boardResult.refusedObjects,
+        ...validateSetInput(input),
+    ];
+    const validCandidates: CountedBallotPackage[] = [];
+    const rejectedCandidates: RejectedBallotCandidate[] = [];
+    const seenBallotPackageDigests = new Set<ProtocolDigest>();
+    const occupiedBoardPositions = new Map<string, ProtocolDigest>();
+
+    for (const candidate of input.candidateBallots) {
+        const candidateRefusals: RefusalRecord[] = [];
+        const signedBoardOrder = candidateSignedBoardOrder(candidate);
+        const boardPositionKey = [
+            signedBoardOrder.boardSequence,
+            signedBoardOrder.boardPosition,
+        ].join('\u0000');
+        const previousDigest = occupiedBoardPositions.get(boardPositionKey);
+
+        if (
+            previousDigest !== undefined &&
+            previousDigest !== candidate.ballotPackage.ballotPackageDigest
+        ) {
+            candidateRefusals.push(
+                createRefusal(
+                    'ConflictingBallotPackage',
+                    'Two non-identical ballot package candidates claim the same board position.',
+                    candidate.ballotPackage.ballotPackageDigest,
+                    'BallotPackage',
+                ),
+            );
+        }
+        occupiedBoardPositions.set(
+            boardPositionKey,
+            candidate.ballotPackage.ballotPackageDigest,
+        );
+
+        if (
+            seenBallotPackageDigests.has(
+                candidate.ballotPackage.ballotPackageDigest,
+            )
+        ) {
+            continue;
+        }
+        seenBallotPackageDigests.add(
+            candidate.ballotPackage.ballotPackageDigest,
+        );
+
+        candidateRefusals.push(
+            ...verifyInclusionProof(candidate.inclusionProof, headsByDigest),
+        );
+        if (
+            candidate.inclusionProof.includedObjectType !== 'BallotPackage' ||
+            candidate.inclusionProof.includedObjectDigest !==
+                candidate.ballotPackage.ballotPackageDigest
+        ) {
+            candidateRefusals.push(
+                createRefusal(
+                    'InclusionProofInvalid',
+                    'Ballot package inclusion proof must bind the ballot package digest.',
+                    candidate.inclusionProof.inclusionProofDigest,
+                    'BallotPackage',
+                ),
+            );
+        }
+        if (
+            !isBeforeSignedBoardOrder(
+                signedBoardOrder,
+                input.closeRecordBoardOrder,
+            )
+        ) {
+            candidateRefusals.push(
+                createRefusal(
+                    'BallotPackageInvalid',
+                    'Ballot package was not included before voting closed.',
+                    candidate.ballotPackage.ballotPackageDigest,
+                    'BallotPackage',
+                ),
+            );
+        }
+        candidateRefusals.push(
+            ...verifyBallotPackageShell({
+                ballotPackage: candidate.ballotPackage,
+                ceremonyId: input.ceremonyId,
+                electionManifestDigest: input.electionManifestDigest,
+                rosterDigest: input.rosterDigest,
+                pollSpecDigest: input.pollSpecDigest,
+                thresholdProfileDigest: input.thresholdProfileDigest,
+                duplicateBallotPolicyDigest: input.duplicateBallotPolicyDigest,
+                optionCount: input.pollSpec.options.length,
+                rosterEntries: input.rosterEntries,
+                thresholdProfile: input.thresholdProfile,
+            }),
+        );
+
+        if (candidateRefusals.length > 0) {
+            rejectedCandidates.push(
+                deriveRejectedCandidate(candidate, candidateRefusals),
+            );
+            continue;
+        }
+
+        validCandidates.push({
+            ...candidate,
+            signedBoardOrder,
+        });
+    }
+
+    const selectedByVoter = new Map<string, CountedBallotPackage>();
+    for (const candidate of validCandidates.sort(
+        (left, right) =>
+            compareSignedBoardOrder(
+                left.signedBoardOrder,
+                right.signedBoardOrder,
+            ) ||
+            left.ballotPackage.ballotPackageDigest.localeCompare(
+                right.ballotPackage.ballotPackageDigest,
+            ),
+    )) {
+        selectedByVoter.set(candidate.ballotPackage.voterIdentity, candidate);
+    }
+    const countedBallots = [...selectedByVoter.values()].sort(
+        (left, right) =>
+            compareSignedBoardOrder(
+                left.signedBoardOrder,
+                right.signedBoardOrder,
+            ) ||
+            left.ballotPackage.ballotPackageDigest.localeCompare(
+                right.ballotPackage.ballotPackageDigest,
+            ),
+    );
+    const ok = fatalRefusals.length === 0;
+    const ballotSetDigest = ok
+        ? deriveBallotSetDigest({
+              base: input,
+              countedBallots,
+              rejectedCandidates,
+          })
+        : undefined;
+
+    return {
+        ok,
+        statusLabels: boardResult.statusLabels,
+        acceptedDigests:
+            ballotSetDigest === undefined
+                ? []
+                : uniqueStrings([
+                      ...boardResult.acceptedDigests,
+                      ballotSetDigest,
+                      ...countedBallots.map(
+                          (candidate) =>
+                              candidate.ballotPackage.ballotPackageDigest,
+                      ),
+                  ]),
+        refusedObjects: fatalRefusals,
+        ceremonyId: input.ceremonyId,
+        electionManifestDigest: input.electionManifestDigest,
+        rosterDigest: input.rosterDigest,
+        pollSpecDigest: input.pollSpecDigest,
+        thresholdProfileDigest: input.thresholdProfileDigest,
+        duplicateBallotPolicyDigest: input.duplicateBallotPolicyDigest,
+        votingClosedBoardHeadDigest: input.votingClosedBoardHeadDigest,
+        closeRecordDigest: input.closeRecordDigest,
+        countedBallots,
+        rejectedCandidates,
+        ballotSetDigest,
+    };
+};
+
+export const deriveCanonicalBallotSet = (
+    input: CanonicalBallotSetInput,
+): CanonicalBallotSet => {
+    try {
+        return deriveCanonicalBallotSetUnchecked(input);
+    } catch {
+        return {
+            ok: false,
+            statusLabels: [],
+            acceptedDigests: [],
+            refusedObjects: [
+                createRefusal(
+                    'BallotSetInvalid',
+                    'Canonical ballot-set input could not be canonicalized or validated.',
+                ),
+            ],
+            ceremonyId: input.ceremonyId,
+            electionManifestDigest: input.electionManifestDigest,
+            rosterDigest: input.rosterDigest,
+            pollSpecDigest: input.pollSpecDigest,
+            thresholdProfileDigest: input.thresholdProfileDigest,
+            duplicateBallotPolicyDigest: input.duplicateBallotPolicyDigest,
+            votingClosedBoardHeadDigest: input.votingClosedBoardHeadDigest,
+            closeRecordDigest: input.closeRecordDigest,
+            countedBallots: [],
+            rejectedCandidates: [],
+        };
+    }
+};

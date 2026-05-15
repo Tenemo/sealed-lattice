@@ -74,11 +74,28 @@ describe('crypto primitive boundary', () => {
     });
 
     it('canonicalizes JSON deterministically and rejects unsupported values', () => {
+        const objectWithPrototypeKey: Record<string, unknown> = {
+            safe: true,
+        };
+        Object.defineProperty(objectWithPrototypeKey, '__proto__', {
+            value: { polluted: true },
+            enumerable: true,
+            configurable: true,
+            writable: true,
+        });
+        const sparseArray = new Array<unknown>(1);
+
         expect(canonicalJson({ b: [2, 1], a: { z: true } })).toBe(
             '{"a":{"z":true},"b":[2,1]}',
         );
+        expect(canonicalJson(objectWithPrototypeKey)).toBe(
+            '{"__proto__":{"polluted":true},"safe":true}',
+        );
         expect(() => canonicalJson({ missing: undefined })).toThrow(
             'Canonical objects cannot contain undefined.',
+        );
+        expect(() => canonicalJson(sparseArray)).toThrow(
+            'Canonical arrays cannot be sparse.',
         );
         expect(() => canonicalJson(1.5)).toThrow(
             'Canonical numeric fields must be safe integers.',

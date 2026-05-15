@@ -100,9 +100,9 @@
   {
     "kind": "malformed-object",
     "fixtureVersion": 1,
-    "caseName": "unknown-mhe-security-stage",
+    "caseName": "unknown-mhe-security-closure",
     "canonicalBytesHex": "534c42450101010263",
-    "expectedErrorCode": "UnknownMheSecurityStage"
+    "expectedErrorCode": "UnknownMheSecurityClosure"
   },
   {
     "kind": "malformed-object",

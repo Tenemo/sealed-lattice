@@ -9,6 +9,7 @@ import type { ProtocolDigest } from './protocol-digest.js';
 /** Canonical object type covered by protocol digest and verification helpers. */
 export type ProtocolObjectType =
     | 'ActionContext'
+    | 'BallotPackage'
     | 'BoardHead'
     | 'CastReceipt'
     | 'CloseRecord'
@@ -31,6 +32,7 @@ export type ProtocolObjectType =
 
 /** Object type that is signed as a canonical signed root. */
 export type SignedObjectType =
+    | 'BallotPackage'
     | 'BoardHead'
     | 'CastReceipt'
     | 'CloseRecord'
@@ -107,13 +109,18 @@ export type ProtocolVerificationStatusLabel =
 
 /** Stable refusal code emitted by protocol verification helpers. */
 export type ProtocolRefusalCode =
+    | 'AggregateShareInvalid'
+    | 'BallotPackageInvalid'
+    | 'BallotSetInvalid'
     | 'BoardConsistencyFailure'
     | 'BoardForkDetected'
     | 'CastReceiptInvalid'
     | 'CloseRecordInvalid'
     | 'ConflictingFirstValidObject'
+    | 'ConflictingBallotPackage'
     | 'ConflictingManifest'
     | 'DecryptionShareInvalid'
+    | 'DuplicateBallotPackage'
     | 'DuplicateReceiverKeyRegistration'
     | 'DuplicateFirstValidObject'
     | 'DuplicateRegistration'

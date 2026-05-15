@@ -58,12 +58,12 @@ impl BaseClaimProfile {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-pub enum MheSecurityStage {
+pub enum MheSecurityClosure {
     PassiveMhePrototype,
     ActiveMalicious,
 }
 
-impl MheSecurityStage {
+impl MheSecurityClosure {
     pub fn code(self) -> u64 {
         match self {
             Self::PassiveMhePrototype => 1,
@@ -89,17 +89,17 @@ impl MheSecurityStage {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TranscriptCoreProfile {
     pub base_claim_profile: BaseClaimProfile,
-    pub mhe_security_stage: MheSecurityStage,
+    pub mhe_security_closure: MheSecurityClosure,
 }
 
 impl TranscriptCoreProfile {
     pub const fn new(
         base_claim_profile: BaseClaimProfile,
-        mhe_security_stage: MheSecurityStage,
+        mhe_security_closure: MheSecurityClosure,
     ) -> Self {
         Self {
             base_claim_profile,
-            mhe_security_stage,
+            mhe_security_closure,
         }
     }
 
@@ -107,19 +107,19 @@ impl TranscriptCoreProfile {
         format!(
             "{}:{}",
             self.base_claim_profile.label(),
-            self.mhe_security_stage.label()
+            self.mhe_security_closure.label()
         )
     }
 }
 
 pub const FULLY_VERIFIED_PASSIVE_MHE_PROFILE: TranscriptCoreProfile = TranscriptCoreProfile::new(
     BaseClaimProfile::FullyVerifiedResult,
-    MheSecurityStage::PassiveMhePrototype,
+    MheSecurityClosure::PassiveMhePrototype,
 );
 pub const FULLY_VERIFIED_ACTIVE_MALICIOUS_PROFILE: TranscriptCoreProfile =
     TranscriptCoreProfile::new(
         BaseClaimProfile::FullyVerifiedResult,
-        MheSecurityStage::ActiveMalicious,
+        MheSecurityClosure::ActiveMalicious,
     );
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -144,7 +144,7 @@ impl TranscriptCoreStatus {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TranscriptCoreObject {
     pub base_claim_profile: BaseClaimProfile,
-    pub mhe_security_stage: MheSecurityStage,
+    pub mhe_security_closure: MheSecurityClosure,
     pub base_claim_profile_id: String,
     pub mhe_security_profile_id: String,
     pub he_setup_proof_profile_id: String,
@@ -168,8 +168,8 @@ pub struct TranscriptCoreAnalysis {
     pub object_version: u64,
     #[serde(rename = "baseClaimProfile")]
     pub base_claim_profile: &'static str,
-    #[serde(rename = "mheSecurityStage")]
-    pub mhe_security_stage: &'static str,
+    #[serde(rename = "mheSecurityClosure")]
+    pub mhe_security_closure: &'static str,
     #[serde(rename = "baseClaimProfileId")]
     pub base_claim_profile_id: String,
     #[serde(rename = "mheSecurityProfileId")]

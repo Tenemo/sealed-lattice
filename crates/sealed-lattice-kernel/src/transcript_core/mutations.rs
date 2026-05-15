@@ -66,7 +66,7 @@ pub fn mutate_non_canonical_varuint_fixture() -> String {
     append_varuint(&mut bytes, TRANSCRIPT_CORE_OBJECT_TYPE);
     append_varuint(&mut bytes, TRANSCRIPT_CORE_OBJECT_VERSION);
     append_varuint(&mut bytes, object.base_claim_profile.code());
-    append_varuint(&mut bytes, object.mhe_security_stage.code());
+    append_varuint(&mut bytes, object.mhe_security_closure.code());
     append_string(&mut bytes, &object.base_claim_profile_id);
     append_string(&mut bytes, &object.mhe_security_profile_id);
     append_string(&mut bytes, &object.he_setup_proof_profile_id);
@@ -85,7 +85,7 @@ pub fn mutate_malformed_length_fixture() -> String {
     append_varuint(&mut bytes, TRANSCRIPT_CORE_OBJECT_TYPE);
     append_varuint(&mut bytes, TRANSCRIPT_CORE_OBJECT_VERSION);
     append_varuint(&mut bytes, object.base_claim_profile.code());
-    append_varuint(&mut bytes, object.mhe_security_stage.code());
+    append_varuint(&mut bytes, object.mhe_security_closure.code());
     append_varuint(&mut bytes, 10);
     bytes.extend(b"short");
 
@@ -157,7 +157,7 @@ pub fn mutate_unknown_base_claim_profile_fixture() -> String {
     encode_hex(&bytes)
 }
 
-pub fn mutate_unknown_mhe_security_stage_fixture() -> String {
+pub fn mutate_unknown_mhe_security_closure_fixture() -> String {
     let mut bytes = Vec::new();
     bytes.extend(MAGIC);
     append_varuint(&mut bytes, ENVELOPE_VERSION);

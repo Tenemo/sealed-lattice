@@ -1,5 +1,5 @@
 import type { ProtocolDigest } from './protocol-digest.js';
-import type { MheSecurityStage } from './transcript-core.js';
+import type { MheSecurityClosure } from './transcript-core.js';
 
 /** Result claim labels used after decryption and verification complete. */
 export type ResultClaimLabel =
@@ -230,9 +230,9 @@ export type FailureStatusLabel =
 export type ModeStatusLabel =
     | 'UnsafeMicroRoster'
     | 'PassiveMHEPrototype'
-    | 'StageXEvaluationProofClosure'
-    | 'StageCCPADClosure'
-    | 'StageAActiveMaliciousClosure'
+    | 'EvaluationProofClosure'
+    | 'CPADClosure'
+    | 'ActiveMaliciousClosure'
     | 'MobileFlagshipProfile'
     | 'ForegroundProofGenerationRequired'
     | 'ForegroundProofVerificationRequired'
@@ -250,7 +250,7 @@ export type LifecycleTransition = {
 export type LifecycleLabelInput = {
     readonly lifecycleState: LifecycleState;
     readonly thresholdProfile: ThresholdProfile;
-    readonly mheSecurityStage?: MheSecurityStage;
+    readonly mheSecurityClosure?: MheSecurityClosure;
     readonly securityProfileIds?: readonly string[];
     readonly evaluationProofMode?: EvaluationProofMode;
     readonly localRosterExternallyAccepted?: boolean;
@@ -281,9 +281,9 @@ export type LifecycleLabelInput = {
     readonly oneShotDecryptionProofCertificatePresent?: boolean;
     readonly cpadCertificatePresent?: boolean;
     readonly thresholdDecryptionCertificatePresent?: boolean;
-    readonly stageXClosureApplied?: boolean;
-    readonly stageCClosureApplied?: boolean;
-    readonly stageAClosureApplied?: boolean;
+    readonly evaluationProofClosureApplied?: boolean;
+    readonly cpadClosureApplied?: boolean;
+    readonly activeMaliciousClosureApplied?: boolean;
     readonly decodedResultLayoutVerified?: boolean;
     readonly mobileClaimGatePassed?: boolean;
 };
@@ -359,9 +359,9 @@ export type CapabilityContext = {
     readonly oneShotDecryptionProofCertificatePresent?: boolean;
     readonly cpadCertificatePresent?: boolean;
     readonly thresholdDecryptionCertificatePresent?: boolean;
-    readonly stageXClosureApplied?: boolean;
-    readonly stageCClosureApplied?: boolean;
-    readonly stageAClosureApplied?: boolean;
+    readonly evaluationProofClosureApplied?: boolean;
+    readonly cpadClosureApplied?: boolean;
+    readonly activeMaliciousClosureApplied?: boolean;
     readonly recoveryState?: RecoveryState;
 };
 
@@ -394,7 +394,7 @@ export type RefusalReason =
     | 'MissingCPADCertificate'
     | 'MissingThresholdDecryptionCertificate'
     | 'ThresholdDecryptionProfileNotCertified'
-    | 'StageClosureMissing'
+    | 'ClaimClosureMissing'
     | 'AmbiguousRecoveryState'
     | 'StaleRecoveryEpoch'
     | 'ClonedDeviceState'

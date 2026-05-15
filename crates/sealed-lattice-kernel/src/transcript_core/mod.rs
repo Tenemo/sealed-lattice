@@ -15,7 +15,7 @@ pub use mutations::{
     mutate_mhe_security_profile_mismatch_fixture, mutate_missing_field_fixture,
     mutate_non_canonical_varuint_fixture, mutate_trailing_bytes_fixture,
     mutate_unknown_base_claim_profile_fixture, mutate_unknown_evaluation_profile_fixture,
-    mutate_unknown_field_fixture, mutate_unknown_mhe_security_stage_fixture,
+    mutate_unknown_field_fixture, mutate_unknown_mhe_security_closure_fixture,
     mutate_unsupported_envelope_version_fixture, mutate_unsupported_object_type_fixture,
     mutate_unsupported_object_version_fixture, mutate_wrong_evaluation_profile_fixture,
 };
@@ -23,7 +23,7 @@ pub use rng::DeterministicFixtureRng;
 pub use types::{
     ACTIVE_MALICIOUS_MHE_PROFILE_ID, BaseClaimProfile, FULLY_VERIFIED_ACTIVE_MALICIOUS_PROFILE,
     FULLY_VERIFIED_PASSIVE_MHE_PROFILE, FULLY_VERIFIED_RESULT_PROFILE_ID,
-    MANDATORY_EVALUATION_PROOF_PROFILE_ID, MheSecurityStage, NO_DECRYPTION_PROOF_PROFILE_ID,
+    MANDATORY_EVALUATION_PROOF_PROFILE_ID, MheSecurityClosure, NO_DECRYPTION_PROOF_PROFILE_ID,
     NO_HE_SETUP_PROOF_PROFILE_ID, PASSIVE_MHE_PROTOTYPE_PROFILE_ID, TranscriptCoreAnalysis,
     TranscriptCoreObject, TranscriptCoreProfile, TranscriptCoreStatus, invalid_response,
 };
@@ -43,7 +43,7 @@ mod tests {
         mutate_mhe_security_profile_mismatch_fixture, mutate_missing_field_fixture,
         mutate_non_canonical_varuint_fixture, mutate_trailing_bytes_fixture,
         mutate_unknown_base_claim_profile_fixture, mutate_unknown_evaluation_profile_fixture,
-        mutate_unknown_field_fixture, mutate_unknown_mhe_security_stage_fixture,
+        mutate_unknown_field_fixture, mutate_unknown_mhe_security_closure_fixture,
         mutate_unsupported_envelope_version_fixture, mutate_unsupported_object_type_fixture,
         mutate_unsupported_object_version_fixture, mutate_wrong_evaluation_profile_fixture,
         parse_transcript_core_object, serialize_transcript_core_object,
@@ -175,8 +175,8 @@ mod tests {
                 CanonicalErrorCode::UnknownBaseClaimProfile,
             ),
             (
-                mutate_unknown_mhe_security_stage_fixture(),
-                CanonicalErrorCode::UnknownMheSecurityStage,
+                mutate_unknown_mhe_security_closure_fixture(),
+                CanonicalErrorCode::UnknownMheSecurityClosure,
             ),
             (
                 mutate_base_claim_profile_mismatch_fixture(),

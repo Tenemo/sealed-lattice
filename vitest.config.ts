@@ -159,7 +159,7 @@ export default defineConfig({
                         api: {
                             host: browserApiHost,
                             port: desktopBrowserApiPort,
-                            strictPort: true,
+                            strictPort: false,
                         },
                         provider: playwright(),
                         headless: true,
@@ -176,7 +176,7 @@ export default defineConfig({
                         api: {
                             host: browserApiHost,
                             port: mobileBrowserApiPort,
-                            strictPort: true,
+                            strictPort: false,
                         },
                         provider: playwright(),
                         headless: true,

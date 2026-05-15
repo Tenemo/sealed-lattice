@@ -6,8 +6,11 @@ selection, threshold profiles, lifecycle labels, and public refusal predicates.
 The current release establishes the election foundation with private crypto
 package-backed canonical signed-root verification, board-root-bound inclusion
 checks, roster, manifest, receiver-key, and trustee-setup shells, 5-of-7 target
-finality, recovery-epoch checks, and validated first-valid ordering. It still
-does not implement ballots, PVSS, BGV-RNS arithmetic, MHE setup, user-requested
-local replay generation, mandatory evaluation-proof verification, semantic
-target acceptance, Appendix-C-certified target-bound decryption, or
-decryption-share proofs.
+finality, recovery-epoch checks, validated first-valid ordering, and internal
+test-mode PVSS ballot algebra over `GF(65537)`.
+
+The PVSS ballot algebra is not a public ballot API and does not implement
+receiver encryption, lattice commitments, ballot proofs, BGV-RNS arithmetic, MHE
+setup, user-requested local replay generation, mandatory evaluation-proof
+verification, semantic target acceptance, Appendix-C-certified target-bound
+decryption, or decryption-share proofs.

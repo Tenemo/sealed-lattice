@@ -195,7 +195,7 @@ describe('transcript-core kernel in Node', () => {
         expect(fullyVerifiedPassiveAnalysis.evaluationProofProfileId).toBe(
             'PQEvalProof-STARK-BGVReplay-v1',
         );
-        expect(fullyVerifiedActiveAnalysis.mheSecurityStage).toBe(
+        expect(fullyVerifiedActiveAnalysis.mheSecurityClosure).toBe(
             'ActiveMalicious',
         );
         expect(fullyVerifiedActiveAnalysis.evaluationProofProfileId).toBe(

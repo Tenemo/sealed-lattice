@@ -113,6 +113,15 @@ describe('election foundation public package API in Node', () => {
     it('derives threshold, poll, lifecycle, label, and capability decisions', () => {
         const thresholdProfile = deriveThresholdProfile({
             rosterSize: 20,
+            appendixCShareSelectionProfile: {
+                profileId: 'appendix-c-certified-first-valid-v1',
+                certificateDigest: 'appendix-c-certificate-digest',
+                decryptionShareQuorum: 9,
+                minimumSharesForInterpolation: 7,
+                minimumArrivalsForRobustDecode: 9,
+                invalidShareFilteringMode: 'ProofVerifiedSharesOnly',
+                selectedShareRule: 'FirstValidSharesInCanonicalBoardOrder',
+            },
         });
 
         expect(thresholdProfile.privacyCorruptionBound).toBe(6);
@@ -133,7 +142,7 @@ describe('election foundation public package API in Node', () => {
         const labels = deriveLifecycleLabels({
             lifecycleState: 'FullyVerifiedResult',
             thresholdProfile,
-            mheSecurityStage: 'ActiveMalicious',
+            mheSecurityClosure: 'ActiveMalicious',
             localRosterExternallyAccepted: true,
             mobileClaimGatePassed: true,
             bridgeMobileCertificatePresent: true,
@@ -142,9 +151,9 @@ describe('election foundation public package API in Node', () => {
             oneShotDecryptionProofCertificatePresent: true,
             cpadCertificatePresent: true,
             thresholdDecryptionCertificatePresent: true,
-            stageXClosureApplied: true,
-            stageCClosureApplied: true,
-            stageAClosureApplied: true,
+            evaluationProofClosureApplied: true,
+            cpadClosureApplied: true,
+            activeMaliciousClosureApplied: true,
             decodedResultLayoutVerified: true,
         });
 

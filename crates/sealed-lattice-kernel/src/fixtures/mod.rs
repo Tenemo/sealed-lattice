@@ -14,7 +14,7 @@ use crate::{
         mutate_mhe_security_profile_mismatch_fixture, mutate_missing_field_fixture,
         mutate_non_canonical_varuint_fixture, mutate_trailing_bytes_fixture,
         mutate_unknown_base_claim_profile_fixture, mutate_unknown_evaluation_profile_fixture,
-        mutate_unknown_field_fixture, mutate_unknown_mhe_security_stage_fixture,
+        mutate_unknown_field_fixture, mutate_unknown_mhe_security_closure_fixture,
         mutate_unsupported_envelope_version_fixture, mutate_unsupported_object_type_fixture,
         mutate_unsupported_object_version_fixture, mutate_wrong_evaluation_profile_fixture,
         parse_transcript_core_object, serialize_transcript_core_object,
@@ -46,8 +46,8 @@ pub struct GoldenTranscriptCoreFixture {
     pub object_version: u64,
     #[serde(rename = "baseClaimProfile")]
     pub base_claim_profile: String,
-    #[serde(rename = "mheSecurityStage")]
-    pub mhe_security_stage: String,
+    #[serde(rename = "mheSecurityClosure")]
+    pub mhe_security_closure: String,
     #[serde(rename = "baseClaimProfileId")]
     pub base_claim_profile_id: String,
     #[serde(rename = "mheSecurityProfileId")]
@@ -172,9 +172,9 @@ pub fn canonical_fixture_set() -> CanonicalResult<Vec<TranscriptCoreFixture>> {
             CanonicalErrorCode::UnknownBaseClaimProfile,
         )),
         TranscriptCoreFixture::MalformedObject(build_malformed_fixture(
-            "unknown-mhe-security-stage",
-            mutate_unknown_mhe_security_stage_fixture(),
-            CanonicalErrorCode::UnknownMheSecurityStage,
+            "unknown-mhe-security-closure",
+            mutate_unknown_mhe_security_closure_fixture(),
+            CanonicalErrorCode::UnknownMheSecurityClosure,
         )),
         TranscriptCoreFixture::MalformedObject(build_malformed_fixture(
             "base-claim-profile-mismatch",
@@ -240,9 +240,9 @@ fn verify_golden_fixture(fixture: &GoldenTranscriptCoreFixture) -> CanonicalResu
         analysis.base_claim_profile,
     )?;
     compare_fixture_value(
-        "mheSecurityStage",
-        fixture.mhe_security_stage.as_str(),
-        analysis.mhe_security_stage,
+        "mheSecurityClosure",
+        fixture.mhe_security_closure.as_str(),
+        analysis.mhe_security_closure,
     )?;
     compare_fixture_value(
         "baseClaimProfileId",
@@ -344,7 +344,7 @@ fn build_golden_fixture(
         object_type: analysis.object_type.to_string(),
         object_version: analysis.object_version,
         base_claim_profile: analysis.base_claim_profile.to_string(),
-        mhe_security_stage: analysis.mhe_security_stage.to_string(),
+        mhe_security_closure: analysis.mhe_security_closure.to_string(),
         base_claim_profile_id: analysis.base_claim_profile_id,
         mhe_security_profile_id: analysis.mhe_security_profile_id,
         he_setup_proof_profile_id: analysis.he_setup_proof_profile_id,

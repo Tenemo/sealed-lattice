@@ -47,8 +47,13 @@ const countAtLeast = (actual: number | undefined, required: number): boolean =>
 
 const getCertifiedDecryptionShareQuorum = (
     context: CapabilityContext,
-): number | undefined =>
-    context.thresholdProfile.decryptionShareQuorum ?? undefined;
+): number | undefined => {
+    if (context.thresholdProfile.appendixCShareSelectionProfile === null) {
+        return undefined;
+    }
+
+    return context.thresholdProfile.decryptionShareQuorum ?? undefined;
+};
 
 const isRecoveryRefused = (
     recoveryState: RecoveryState | undefined,
@@ -232,6 +237,9 @@ const evaluateCPADProfile = (
     }
     if (context.cpadCertificatePresent !== true) {
         return refuseAction(action, 'MissingCPADCertificate');
+    }
+    if (getCertifiedDecryptionShareQuorum(context) === undefined) {
+        return refuseAction(action, 'ThresholdDecryptionProfileNotCertified');
     }
     if (context.thresholdDecryptionCertificatePresent !== true) {
         return refuseAction(action, 'MissingThresholdDecryptionCertificate');

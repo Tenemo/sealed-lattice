@@ -15,6 +15,9 @@ const isPlainObject = (
     !Array.isArray(value) &&
     Object.getPrototypeOf(value) === Object.prototype;
 
+const hasOwnProperty = (value: object, key: PropertyKey): boolean =>
+    Object.prototype.hasOwnProperty.call(value, key);
+
 const normalizeCanonicalValue = (value: unknown): unknown => {
     if (value === null) {
         return null;
@@ -32,10 +35,18 @@ const normalizeCanonicalValue = (value: unknown): unknown => {
         return value;
     }
     if (Array.isArray(value)) {
-        return value.map((entry) => normalizeCanonicalValue(entry));
+        const normalized: unknown[] = [];
+        for (let index = 0; index < value.length; index += 1) {
+            if (!hasOwnProperty(value, index)) {
+                throw new TypeError('Canonical arrays cannot be sparse.');
+            }
+            normalized.push(normalizeCanonicalValue(value[index]));
+        }
+
+        return normalized;
     }
     if (isPlainObject(value)) {
-        const normalized: Record<string, unknown> = {};
+        const normalized = Object.create(null) as Record<string, unknown>;
         for (const key of Object.keys(value).sort()) {
             const entry = value[key];
             if (entry === undefined) {

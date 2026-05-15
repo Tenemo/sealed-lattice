@@ -1,14 +1,14 @@
 /** Claim profile label attached to transcript-core fixtures and results. */
 export type BaseClaimProfile = 'FullyVerifiedResult';
 
-/** High-level malicious security stage claimed by transcript-core fixtures. */
-export type MheSecurityStage = 'PassiveMHEPrototype' | 'ActiveMalicious';
+/** High-level malicious security closure claimed by transcript-core fixtures. */
+export type MheSecurityClosure = 'PassiveMHEPrototype' | 'ActiveMalicious';
 
 /**
  * Alias retained for backward compatibility with consumers that read
- * the transcript-core fixture shape. Prefer {@link MheSecurityStage}.
+ * the transcript-core fixture shape. Prefer {@link MheSecurityClosure}.
  */
-export type TranscriptCoreMheSecurityStage = MheSecurityStage;
+export type TranscriptCoreMheSecurityClosure = MheSecurityClosure;
 
 /** Successful transcript-core status label returned by fixture verification. */
 export type TranscriptCoreStatusLabel = 'TranscriptCoreVerified';
@@ -36,7 +36,7 @@ export const canonicalErrorCodeValues = [
     'TrailingBytes',
     'UnknownBaseClaimProfile',
     'UnknownField',
-    'UnknownMheSecurityStage',
+    'UnknownMheSecurityClosure',
     'UnknownProofProfile',
     'UnsupportedCanonicalEnvelopeVersion',
     'UnsupportedObjectType',
@@ -61,7 +61,7 @@ export type GoldenTranscriptCoreFixture = {
     readonly objectType: 'TranscriptCore';
     readonly objectVersion: 1;
     readonly baseClaimProfile: BaseClaimProfile;
-    readonly mheSecurityStage: MheSecurityStage;
+    readonly mheSecurityClosure: MheSecurityClosure;
     readonly baseClaimProfileId: string;
     readonly mheSecurityProfileId: string;
     readonly heSetupProofProfileId: string;
@@ -101,7 +101,7 @@ export type TranscriptCoreAnalysis = {
     readonly objectType: 'TranscriptCore';
     readonly objectVersion: 1;
     readonly baseClaimProfile: BaseClaimProfile;
-    readonly mheSecurityStage: MheSecurityStage;
+    readonly mheSecurityClosure: MheSecurityClosure;
     readonly baseClaimProfileId: string;
     readonly mheSecurityProfileId: string;
     readonly heSetupProofProfileId: string;

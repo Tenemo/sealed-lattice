@@ -21,14 +21,28 @@ const expectValidPath = (states: readonly LifecycleState[]): void => {
     }
 };
 
-const thresholdProfile = deriveThresholdProfile({ rosterSize: 20 });
+const appendixCShareSelectionProfile = {
+    profileId: 'appendix-c-certified-first-valid-v1',
+    certificateDigest: 'appendix-c-certificate-digest',
+    decryptionShareQuorum: 9,
+    minimumSharesForInterpolation: 7,
+    minimumArrivalsForRobustDecode: 9,
+    invalidShareFilteringMode: 'ProofVerifiedSharesOnly',
+    selectedShareRule: 'FirstValidSharesInCanonicalBoardOrder',
+} as const;
+
+const uncertifiedThresholdProfile = deriveThresholdProfile({ rosterSize: 20 });
+const thresholdProfile = deriveThresholdProfile({
+    rosterSize: 20,
+    appendixCShareSelectionProfile,
+});
 
 const fullyVerifiedLabelInput = (
     overrides: Partial<LifecycleLabelInput> = {},
 ): LifecycleLabelInput => ({
     lifecycleState: 'FullyVerifiedResult',
     thresholdProfile,
-    mheSecurityStage: 'ActiveMalicious',
+    mheSecurityClosure: 'ActiveMalicious',
     localRosterExternallyAccepted: true,
     mobileClaimGatePassed: true,
     bridgeMobileCertificatePresent: true,
@@ -37,9 +51,9 @@ const fullyVerifiedLabelInput = (
     oneShotDecryptionProofCertificatePresent: true,
     cpadCertificatePresent: true,
     thresholdDecryptionCertificatePresent: true,
-    stageXClosureApplied: true,
-    stageCClosureApplied: true,
-    stageAClosureApplied: true,
+    evaluationProofClosureApplied: true,
+    cpadClosureApplied: true,
+    activeMaliciousClosureApplied: true,
     decodedResultLayoutVerified: true,
     ...overrides,
 });
@@ -121,11 +135,12 @@ describe('election foundation lifecycle', () => {
     it.each([
         { localRosterExternallyAccepted: false },
         { evaluationProofCertificatePresent: false },
+        { thresholdProfile: uncertifiedThresholdProfile },
         { cpadCertificatePresent: false },
         { thresholdDecryptionCertificatePresent: false },
-        { stageXClosureApplied: false },
-        { stageCClosureApplied: false },
-        { stageAClosureApplied: false },
+        { evaluationProofClosureApplied: false },
+        { cpadClosureApplied: false },
+        { activeMaliciousClosureApplied: false },
         { decodedResultLayoutVerified: false },
     ] satisfies readonly Partial<LifecycleLabelInput>[])(
         'withholds FullyVerifiedResult when a mandatory gate is missing',
@@ -160,7 +175,7 @@ describe('election foundation lifecycle', () => {
         ]);
     });
 
-    it('keeps unsafe profiles and passive stage out of claim-bearing results', () => {
+    it('keeps unsafe profiles and passive prototype out of claim-bearing results', () => {
         const unsafeProfile = deriveThresholdProfile({
             rosterSize: 19,
             unsafeMicroRosterAcknowledged: true,
@@ -172,8 +187,8 @@ describe('election foundation lifecycle', () => {
         );
         const passiveLabels = deriveLifecycleLabels(
             fullyVerifiedLabelInput({
-                mheSecurityStage: 'PassiveMHEPrototype',
-                stageAClosureApplied: false,
+                mheSecurityClosure: 'PassiveMHEPrototype',
+                activeMaliciousClosureApplied: false,
             }),
         );
 
@@ -184,11 +199,11 @@ describe('election foundation lifecycle', () => {
         expect(passiveLabels.modes).toContain('PassiveMHEPrototype');
     });
 
-    it('derives stage profile labels from transcript-visible profile IDs', () => {
+    it('derives closure profile labels from transcript-visible profile IDs', () => {
         const labels = deriveLifecycleLabels({
             lifecycleState: 'FullyVerifiedResult',
             thresholdProfile,
-            mheSecurityStage: 'ActiveMalicious',
+            mheSecurityClosure: 'ActiveMalicious',
             securityProfileIds: [
                 'PQEvalProof-STARK-BGVReplay-v1',
                 'BGV-RNS-AsyncThresholdDecryption-CPAD-v1',
@@ -202,17 +217,17 @@ describe('election foundation lifecycle', () => {
             oneShotDecryptionProofCertificatePresent: true,
             cpadCertificatePresent: true,
             thresholdDecryptionCertificatePresent: true,
-            stageXClosureApplied: true,
-            stageCClosureApplied: true,
-            stageAClosureApplied: true,
+            evaluationProofClosureApplied: true,
+            cpadClosureApplied: true,
+            activeMaliciousClosureApplied: true,
             decodedResultLayoutVerified: true,
         });
 
         expect(labels.modes).toEqual(
             expect.arrayContaining([
-                'StageXEvaluationProofClosure',
-                'StageCCPADClosure',
-                'StageAActiveMaliciousClosure',
+                'EvaluationProofClosure',
+                'CPADClosure',
+                'ActiveMaliciousClosure',
             ]),
         );
         expect(labels.modes).not.toContain('PassiveMHEPrototype');

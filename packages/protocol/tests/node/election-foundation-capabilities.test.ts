@@ -383,6 +383,19 @@ describe('election foundation capability evaluator', () => {
                 'VerifyCPADProfile',
                 createContext({
                     lifecycleState: 'FirstThresholdSharesReached',
+                    thresholdProfile,
+                    cpadCertificatePresent: true,
+                    thresholdDecryptionCertificatePresent: true,
+                }),
+            ),
+        ).toMatchObject({
+            reason: 'ThresholdDecryptionProfileNotCertified',
+        });
+        expect(
+            evaluateActionCapability(
+                'VerifyCPADProfile',
+                createContext({
+                    lifecycleState: 'FirstThresholdSharesReached',
                     thresholdProfile: certifiedThresholdProfile,
                     cpadCertificatePresent: false,
                     thresholdDecryptionCertificatePresent: true,

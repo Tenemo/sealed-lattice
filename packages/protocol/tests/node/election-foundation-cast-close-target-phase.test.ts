@@ -208,7 +208,7 @@ const createDecryptionShare = (
             { trustee: 'participant-1' },
         ),
         trusteeThresholdVerificationKeyDigest: deriveProtocolDigest(
-            'ThresholdShareVerificationKeyDigest',
+            'TrusteeThresholdVerificationKeyDigest',
             { trustee: 'participant-1', scope: 'trustee' },
         ),
         boardSequence: 4,

@@ -91,7 +91,7 @@ const bridgeCanonicalErrorCodeValues = [
     'TrailingBytes',
     'UnknownBaseClaimProfile',
     'UnknownField',
-    'UnknownMheSecurityStage',
+    'UnknownMheSecurityClosure',
     'UnknownProofProfile',
     'UnsupportedCanonicalEnvelopeVersion',
     'UnsupportedObjectType',

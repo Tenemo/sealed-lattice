@@ -207,6 +207,8 @@ const pushFailure = (
 const resultPathIsFullyGated = (input: LifecycleLabelInput): boolean =>
     input.localRosterExternallyAccepted === true &&
     input.thresholdProfile.claimBearing &&
+    input.thresholdProfile.appendixCShareSelectionProfile !== null &&
+    input.thresholdProfile.decryptionShareQuorum !== null &&
     input.mobileClaimGatePassed === true &&
     input.bridgeMobileCertificatePresent === true &&
     input.bridgeProverCertificatePresent === true &&
@@ -214,9 +216,9 @@ const resultPathIsFullyGated = (input: LifecycleLabelInput): boolean =>
     input.oneShotDecryptionProofCertificatePresent === true &&
     input.cpadCertificatePresent === true &&
     input.thresholdDecryptionCertificatePresent === true &&
-    input.stageXClosureApplied === true &&
-    input.stageCClosureApplied === true &&
-    input.stageAClosureApplied === true &&
+    input.evaluationProofClosureApplied === true &&
+    input.cpadClosureApplied === true &&
+    input.activeMaliciousClosureApplied === true &&
     input.decodedResultLayoutVerified === true;
 
 const deriveResultClaimLabels = (
@@ -239,11 +241,11 @@ const deriveResultClaimLabels = (
 
 const securityProfileModeLabelsById = new Map<string, ModeStatusLabel>([
     ['transcript-core-passive-mhe-prototype-profile-v1', 'PassiveMHEPrototype'],
-    ['PQEvalProof-STARK-BGVReplay-v1', 'StageXEvaluationProofClosure'],
-    ['BGV-RNS-AsyncThresholdDecryption-CPAD-v1', 'StageCCPADClosure'],
+    ['PQEvalProof-STARK-BGVReplay-v1', 'EvaluationProofClosure'],
+    ['BGV-RNS-AsyncThresholdDecryption-CPAD-v1', 'CPADClosure'],
     [
         'transcript-core-active-malicious-mhe-profile-v1',
-        'StageAActiveMaliciousClosure',
+        'ActiveMaliciousClosure',
     ],
 ]);
 
@@ -261,7 +263,7 @@ const deriveSecurityProfileModes = (
     if (
         (input.securityProfileIds === undefined ||
             input.securityProfileIds.length === 0) &&
-        (input.mheSecurityStage ?? 'PassiveMHEPrototype') ===
+        (input.mheSecurityClosure ?? 'PassiveMHEPrototype') ===
             'PassiveMHEPrototype'
     ) {
         labels.push('PassiveMHEPrototype');

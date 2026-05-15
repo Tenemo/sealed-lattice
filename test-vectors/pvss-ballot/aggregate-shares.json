@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "ballotSetDigest": "9cc13bc1d91d73bafec8d8e7116941ab4f2aa21e31cd7b5cefe397374415f6369755d5875aa12640049980addd5c7f0a8ed01705b1e36f01e810f81c42ac0fd0",
+  "firstAggregateShareCommitmentDigest": "094e6d73fe5703c7a8fb137fa68ed37df906e3c0e4863429fdef6c9b04c0e69fbb2f00556367f2c2616afb870149dd6f9e46b45ac006b8478177609fa601ba0d",
+  "firstAggregateShareVector": [
+    27504,
+    7728,
+    18785,
+    11865,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "reconstructedTally": [
+    19,
+    17,
+    15,
+    13
+  ]
+}

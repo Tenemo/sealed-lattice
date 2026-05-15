@@ -23,6 +23,17 @@ type BlockedPlaintextOracleTypes = [
     publicTypes.SparseTopKTarget,
 ];
 
+type BlockedPvssBallotTypes = [
+    // @ts-expect-error ballot package shells are intentionally not public.
+    publicTypes.BallotPackageShell,
+    // @ts-expect-error internal ballot-set types are intentionally not public.
+    publicTypes.CanonicalBallotSet,
+    // @ts-expect-error test commitments are intentionally not public.
+    publicTypes.TestShareCommitment,
+    // @ts-expect-error aggregate share witnesses are intentionally not public.
+    publicTypes.TestAggregateShare,
+];
+
 type PublicFoundationTypes = [
     publicTypes.BoardConsistencyInput,
     publicTypes.PollSpecInput,
@@ -32,6 +43,7 @@ type PublicFoundationTypes = [
 
 type PublicTypeSurfaceProbe = {
     readonly blockedPlaintextOracleTypes: BlockedPlaintextOracleTypes;
+    readonly blockedPvssBallotTypes: BlockedPvssBallotTypes;
     readonly blockedTargetPhaseTypes: BlockedTargetPhaseTypes;
     readonly publicFoundationTypes: PublicFoundationTypes;
 };
