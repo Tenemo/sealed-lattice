@@ -7,6 +7,8 @@
       "context": {
         "pollSpecValid": true,
         "localRosterExternallyAccepted": true,
+        "rosterExternalAcceptanceDigest": "accepted-roster-digest",
+        "actionContextRosterExternalAcceptanceDigest": "accepted-roster-digest",
         "lifecycleState": "VotingOpen"
       },
       "expected": {
@@ -21,6 +23,8 @@
       "context": {
         "pollSpecValid": true,
         "localRosterExternallyAccepted": true,
+        "rosterExternalAcceptanceDigest": "accepted-roster-digest",
+        "actionContextRosterExternalAcceptanceDigest": "accepted-roster-digest",
         "lifecycleState": "VotingClosed",
         "setupCompleteCount": 20,
         "turnoutCount": 13
@@ -37,6 +41,8 @@
       "context": {
         "pollSpecValid": true,
         "localRosterExternallyAccepted": true,
+        "rosterExternalAcceptanceDigest": "accepted-roster-digest",
+        "actionContextRosterExternalAcceptanceDigest": "accepted-roster-digest",
         "lifecycleState": "EvaluationProofOpen",
         "targetFinalityAccepted": true,
         "bridgeMobileCertificatePresent": true
@@ -84,6 +90,8 @@
       "context": {
         "pollSpecValid": true,
         "localRosterExternallyAccepted": true,
+        "rosterExternalAcceptanceDigest": "accepted-roster-digest",
+        "actionContextRosterExternalAcceptanceDigest": "accepted-roster-digest",
         "lifecycleState": "EvaluationProofVerified",
         "targetFinalityAccepted": true,
         "evaluationProofVerified": true,
@@ -99,9 +107,11 @@
       "action": "CreateTargetBoundDecryptionShare",
       "thresholdProfileInput": {
         "rosterSize": 20,
-        "appendixCShareSelectionProfile": {
-          "profileId": "appendix-c-certified-first-valid-v1",
-          "certificateDigest": "appendix-c-certificate-digest",
+        "targetBoundShareSelectionProfile": {
+          "profileId": "target-bound-first-valid-share-selection-v1",
+          "certificateDigest": "target-bound-certificate-digest",
+          "cpadProfileId": "CPAD-BGV-AsyncThreshold-v1",
+          "targetBasisDigest": "target-basis-digest",
           "decryptionShareQuorum": 9,
           "minimumSharesForInterpolation": 7,
           "minimumArrivalsForRobustDecode": 9,
@@ -112,6 +122,8 @@
       "context": {
         "pollSpecValid": true,
         "localRosterExternallyAccepted": true,
+        "rosterExternalAcceptanceDigest": "accepted-roster-digest",
+        "actionContextRosterExternalAcceptanceDigest": "accepted-roster-digest",
         "lifecycleState": "TargetAccepted",
         "targetFinalityAccepted": true,
         "targetAccepted": true,
@@ -132,6 +144,8 @@
       "context": {
         "pollSpecValid": true,
         "localRosterExternallyAccepted": true,
+        "rosterExternalAcceptanceDigest": "accepted-roster-digest",
+        "actionContextRosterExternalAcceptanceDigest": "accepted-roster-digest",
         "lifecycleState": "TargetAccepted",
         "targetFinalityAccepted": true,
         "targetAccepted": true,
@@ -148,9 +162,11 @@
       "action": "DecodeVerifiedTopK",
       "thresholdProfileInput": {
         "rosterSize": 20,
-        "appendixCShareSelectionProfile": {
-          "profileId": "appendix-c-certified-first-valid-v1",
-          "certificateDigest": "appendix-c-certificate-digest",
+        "targetBoundShareSelectionProfile": {
+          "profileId": "target-bound-first-valid-share-selection-v1",
+          "certificateDigest": "target-bound-certificate-digest",
+          "cpadProfileId": "CPAD-BGV-AsyncThreshold-v1",
+          "targetBasisDigest": "target-basis-digest",
           "decryptionShareQuorum": 9,
           "minimumSharesForInterpolation": 7,
           "minimumArrivalsForRobustDecode": 9,
@@ -161,6 +177,8 @@
       "context": {
         "pollSpecValid": true,
         "localRosterExternallyAccepted": true,
+        "rosterExternalAcceptanceDigest": "accepted-roster-digest",
+        "actionContextRosterExternalAcceptanceDigest": "accepted-roster-digest",
         "lifecycleState": "FullyVerifiedResult",
         "decryptionShareCount": 9
       },
@@ -179,6 +197,8 @@
       "context": {
         "pollSpecValid": true,
         "localRosterExternallyAccepted": true,
+        "rosterExternalAcceptanceDigest": "accepted-roster-digest",
+        "actionContextRosterExternalAcceptanceDigest": "accepted-roster-digest",
         "lifecycleState": "EvaluationProofVerified",
         "targetFinalityAccepted": true,
         "evaluationProofVerified": true,
@@ -196,6 +216,8 @@
       "context": {
         "pollSpecValid": true,
         "localRosterExternallyAccepted": true,
+        "rosterExternalAcceptanceDigest": "accepted-roster-digest",
+        "actionContextRosterExternalAcceptanceDigest": "accepted-roster-digest",
         "lifecycleState": "EvaluationProofVerified",
         "targetFinalityAccepted": true,
         "evaluationProofVerified": true,
@@ -214,6 +236,8 @@
       "context": {
         "pollSpecValid": true,
         "localRosterExternallyAccepted": true,
+        "rosterExternalAcceptanceDigest": "accepted-roster-digest",
+        "actionContextRosterExternalAcceptanceDigest": "accepted-roster-digest",
         "lifecycleState": "EvaluationProofVerified",
         "targetFinalityAccepted": true,
         "evaluationProofVerified": true,
@@ -232,6 +256,8 @@
       "context": {
         "pollSpecValid": true,
         "localRosterExternallyAccepted": true,
+        "rosterExternalAcceptanceDigest": "accepted-roster-digest",
+        "actionContextRosterExternalAcceptanceDigest": "accepted-roster-digest",
         "lifecycleState": "VotingClosed",
         "setupCompleteCount": 20,
         "turnoutCount": 14,
@@ -249,9 +275,11 @@
       "action": "VerifyCPADProfile",
       "thresholdProfileInput": {
         "rosterSize": 20,
-        "appendixCShareSelectionProfile": {
-          "profileId": "appendix-c-certified-first-valid-v1",
-          "certificateDigest": "appendix-c-certificate-digest",
+        "targetBoundShareSelectionProfile": {
+          "profileId": "target-bound-first-valid-share-selection-v1",
+          "certificateDigest": "target-bound-certificate-digest",
+          "cpadProfileId": "CPAD-BGV-AsyncThreshold-v1",
+          "targetBasisDigest": "target-basis-digest",
           "decryptionShareQuorum": 9,
           "minimumSharesForInterpolation": 7,
           "minimumArrivalsForRobustDecode": 9,
@@ -262,6 +290,8 @@
       "context": {
         "pollSpecValid": true,
         "localRosterExternallyAccepted": true,
+        "rosterExternalAcceptanceDigest": "accepted-roster-digest",
+        "actionContextRosterExternalAcceptanceDigest": "accepted-roster-digest",
         "lifecycleState": "FirstThresholdSharesReached",
         "cpadCertificatePresent": false,
         "thresholdDecryptionCertificatePresent": true

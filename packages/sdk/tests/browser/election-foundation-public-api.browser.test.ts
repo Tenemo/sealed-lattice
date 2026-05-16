@@ -79,6 +79,9 @@ describe('election foundation public package API in browsers', () => {
                 thresholdProfile,
                 pollSpecValid: true,
                 localRosterExternallyAccepted: true,
+                rosterExternalAcceptanceDigest: 'accepted-roster-digest',
+                actionContextRosterExternalAcceptanceDigest:
+                    'accepted-roster-digest',
                 setupCompleteCount: thresholdProfile.setupCompletionQuorum,
                 turnoutCount: thresholdProfile.releaseQuorum,
                 bridgeMobileCertificatePresent: true,

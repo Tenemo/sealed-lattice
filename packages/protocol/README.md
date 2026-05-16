@@ -12,5 +12,5 @@ test-mode PVSS ballot algebra over `GF(65537)`.
 The PVSS ballot algebra is not a public ballot API and does not implement
 receiver encryption, lattice commitments, ballot proofs, BGV-RNS arithmetic, MHE
 setup, user-requested local replay generation, mandatory evaluation-proof
-verification, semantic target acceptance, Appendix-C-certified target-bound
+verification, semantic target acceptance, target-bound
 decryption, or decryption-share proofs.

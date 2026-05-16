@@ -92,10 +92,10 @@ describe('roster, manifest, first-valid, and recovery shells', () => {
         ]);
         const changedManifest = createElectionManifest(registrations, {
             boardSequence: 4,
-            manifestOpaqueBindings: {
-                ...manifestOpaqueBindings,
-                mobileProfileId: 'different-mobile-profile',
-            },
+            thresholdProfileDigest: deriveProtocolDigest(
+                'ThresholdProfileDigest',
+                { profile: 'different-threshold-profile' },
+            ),
         });
         const wrongFixedProfileManifest = createElectionManifest(
             registrations,
@@ -623,6 +623,42 @@ describe('roster, manifest, first-valid, and recovery shells', () => {
             currentRecoveryEpoch: 1,
             currentDeviceEpoch: 1,
         });
+        const {
+            head: delayedRecoveryUpdateHead,
+            inclusionProofs: delayedRecoveryUpdateProofs,
+        } = createBoardHeadWithObjects(6, recoveryUpdateHead.headDigest, [
+            {
+                objectType: 'RecoveryEpochUpdate',
+                objectDigest: recoveryEpochUpdateDigest,
+                boardPosition: 0,
+            },
+        ]);
+        const delayedRecoveryUpdateResult = verifyRecoveryEpochUpdate({
+            update,
+            currentEntry,
+            expectedRecoveryRootPublicKeyDigest:
+                recoveryRootKeyFixture.publicKeyDigest,
+            expectedRecoveryPolicyDigest:
+                manifestPolicyDigests.recoveryPolicyDigest,
+            boardEvidence: createBoardEvidence([
+                recoveryGenesisHead,
+                recoveryHead1,
+                recoveryHead2,
+                recoveryHead3,
+                recoveryContextHead,
+                recoveryUpdateHead,
+                delayedRecoveryUpdateHead,
+            ]),
+            updateInclusionProof: delayedRecoveryUpdateProofs[0],
+        });
+
+        expect(delayedRecoveryUpdateResult.ok).toBe(false);
+        expect(delayedRecoveryUpdateResult.acceptedDigests).toEqual([]);
+        expect(delayedRecoveryUpdateResult.refusedObjects).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({ code: 'RecoveryUpdateInvalid' }),
+            ]),
+        );
         const conflictingPayload = {
             ...payload,
             newSigningPublicKeyDigest: createKeyFixture(

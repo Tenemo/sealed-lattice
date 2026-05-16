@@ -8,19 +8,6 @@ export {
     deriveValidatedFirstValidOrder,
     verifyFirstValidPolicy,
 } from './ordering/index.js';
-export {
-    deriveAggregateShareCommitmentDigest,
-    deriveBallotPackageDigest,
-    deriveBallotPolynomialSet,
-    deriveCanonicalBallotSet,
-    deriveReceiverShareVectors,
-    deriveTestAggregateShares,
-    deriveTestBallotPackage,
-    reconstructAggregateTallyFromShares,
-    verifyBallotPackageShell,
-    verifyTestAggregateShareOpening,
-    verifyTestShareCommitmentOpening,
-} from './pvss-ballot/index.js';
 export { verifyTargetFinality } from './finality/index.js';
 export { deriveLifecycleLabels } from './lifecycle/labels.js';
 export { isValidLifecycleTransition } from './lifecycle/lifecycle.js';

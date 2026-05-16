@@ -19,6 +19,12 @@ export type SignedBoardHead = {
     readonly signature: ProtocolSignatureEnvelope;
 };
 
+/** One sibling edge in a board-entry Merkle inclusion path. */
+export type BoardEntryMerklePathStep = {
+    readonly siblingPosition: 'Left' | 'Right';
+    readonly siblingDigest: ProtocolDigest;
+};
+
 /** Inclusion evidence for one protocol object under a signed board head. */
 export type InclusionProof = {
     readonly boardHeadDigest: ProtocolDigest;
@@ -28,7 +34,9 @@ export type InclusionProof = {
     readonly includedObjectDigest: ProtocolDigest;
     readonly boardEntryDigest: ProtocolDigest;
     readonly boardRoot: ProtocolDigest;
-    readonly boardEntryDigests: readonly ProtocolDigest[];
+    readonly boardEntryCount?: number;
+    readonly boardEntryMerklePath?: readonly BoardEntryMerklePathStep[];
+    readonly boardEntryDigests?: readonly ProtocolDigest[];
     readonly inclusionProofDigest: ProtocolDigest;
 };
 
@@ -131,10 +139,10 @@ export type WitnessPolicy = {
     readonly totalWitnesses: number;
 };
 
-/** Target finality policy for one deterministic target phase. */
+/** Target finality policy for one deterministic target acceptance. */
 export type TargetFinalityPolicy = {
     readonly targetFinalityPolicyDigest: ProtocolDigest;
-    readonly targetPhase: string;
+    readonly targetFinalityScope: string;
     readonly witnessQuorum: number;
     readonly totalWitnesses: number;
 };
@@ -146,9 +154,9 @@ export type TargetProposal = {
     readonly electionManifestDigest: ProtocolDigest;
     readonly evaluationContextDigest: ProtocolDigest;
     readonly topKEvaluationRecordDigest: ProtocolDigest;
-    readonly cTopKDigest: ProtocolDigest;
+    readonly topKCiphertextDigest: ProtocolDigest;
     readonly publicSlotMaskDigest: ProtocolDigest;
-    readonly cTargetDigest: ProtocolDigest;
+    readonly targetCiphertextDigest: ProtocolDigest;
     readonly targetLayoutDigest: ProtocolDigest;
     readonly evaluationProofProfileDigest: ProtocolDigest;
     readonly targetFinalityPolicyDigest: ProtocolDigest;
@@ -170,7 +178,7 @@ export type WitnessCheckpoint = {
     readonly objectVersion: 1;
     readonly checkpointDigest: ProtocolDigest;
     readonly ceremonyId: string;
-    readonly targetPhase: string;
+    readonly targetFinalityScope: string;
     readonly targetProposalDigest: ProtocolDigest;
     readonly targetFinalityCheckpointDigest: ProtocolDigest;
     readonly witnessPolicyDigest: ProtocolDigest;
@@ -179,13 +187,13 @@ export type WitnessCheckpoint = {
     readonly signature: ProtocolSignatureEnvelope;
 };
 
-/** Record proving that enough witnesses finalized one target phase. */
+/** Record proving that enough witnesses finalized one target acceptance. */
 export type TargetFinalityRecord = {
     readonly objectType: 'TargetFinalityRecord';
     readonly objectVersion: 1;
     readonly targetFinalityRecordDigest: ProtocolDigest;
     readonly ceremonyId: string;
-    readonly targetPhase: string;
+    readonly targetFinalityScope: string;
     readonly targetProposalDigest: ProtocolDigest;
     readonly targetFinalityCheckpoint: TargetFinalityCheckpoint;
     readonly witnessPolicyDigest: ProtocolDigest;
@@ -222,12 +230,12 @@ export type AcceptedTargetFinalityCheckpoint = {
     readonly finalizedBoardHeadDigest: ProtocolDigest;
     readonly topKEvaluationRecordDigest: ProtocolDigest;
     readonly evaluationContextDigest: ProtocolDigest;
-    readonly cTopKDigest: ProtocolDigest;
+    readonly topKCiphertextDigest: ProtocolDigest;
     readonly publicSlotMaskDigest: ProtocolDigest;
-    readonly cTargetDigest: ProtocolDigest;
+    readonly targetCiphertextDigest: ProtocolDigest;
     readonly targetLayoutDigest: ProtocolDigest;
     readonly evaluationProofProfileDigest: ProtocolDigest;
-    readonly targetPhase: string;
+    readonly targetFinalityScope: string;
     readonly witnessPolicyDigest: ProtocolDigest;
     readonly targetFinalityPolicyDigest: ProtocolDigest;
 };
@@ -243,9 +251,9 @@ export type EvaluationProofRecord = {
     readonly targetFinalityRecordDigest: ProtocolDigest;
     readonly evaluationProofProfileDigest: ProtocolDigest;
     readonly evaluationContextDigest: ProtocolDigest;
-    readonly cTopKDigest: ProtocolDigest;
+    readonly topKCiphertextDigest: ProtocolDigest;
     readonly publicSlotMaskDigest: ProtocolDigest;
-    readonly cTargetDigest: ProtocolDigest;
+    readonly targetCiphertextDigest: ProtocolDigest;
     readonly targetLayoutDigest: ProtocolDigest;
     readonly proofRoot: ProtocolDigest;
     readonly boardSequence: number;
@@ -275,7 +283,7 @@ export type TargetAcceptedRecord = {
     readonly targetAcceptedRecordDigest: ProtocolDigest;
     readonly ceremonyId: string;
     readonly electionManifestDigest: ProtocolDigest;
-    readonly targetPhase: string;
+    readonly targetFinalityScope: string;
     readonly targetProposalDigest: ProtocolDigest;
     readonly topKEvaluationRecordDigest: ProtocolDigest;
     readonly targetContextDigest: ProtocolDigest;
@@ -284,14 +292,14 @@ export type TargetAcceptedRecord = {
     readonly evaluationProofRecordDigest: ProtocolDigest;
     readonly evaluationProofProfileDigest: ProtocolDigest;
     readonly targetPreimageDigest: ProtocolDigest;
-    readonly cTargetDigest: ProtocolDigest;
+    readonly targetCiphertextDigest: ProtocolDigest;
     readonly targetLayoutDigest: ProtocolDigest;
     readonly cpadProfileDigest: ProtocolDigest;
     readonly cpadProfileId: string;
     readonly thresholdDecryptionProfileDigest: ProtocolDigest;
     readonly thresholdDecryptionProfileId: string;
     readonly bgvAsyncThresholdCPADProfileDigest: ProtocolDigest;
-    readonly qTargetDigest: ProtocolDigest;
+    readonly targetBasisDigest: ProtocolDigest;
     readonly acceptanceMode: 'evaluation-proof';
     readonly boardSequence: number;
     readonly boardPosition: number;
@@ -314,13 +322,13 @@ export type TopKDecryptionShareShell = {
     readonly evaluationProofRecordDigest: ProtocolDigest;
     readonly topKEvaluationRecordDigest: ProtocolDigest;
     readonly targetContextDigest: ProtocolDigest;
-    readonly cTargetDigest: ProtocolDigest;
+    readonly targetCiphertextDigest: ProtocolDigest;
     readonly cpadProfileDigest: ProtocolDigest;
     readonly thresholdDecryptionProfileDigest: ProtocolDigest;
     readonly bgvAsyncThresholdCPADProfileDigest: ProtocolDigest;
     readonly targetDecryptionPreparationRecordDigest: ProtocolDigest;
     readonly targetDecryptionCiphertextDigest: ProtocolDigest;
-    readonly qTargetDigest: ProtocolDigest;
+    readonly targetBasisDigest: ProtocolDigest;
     readonly thresholdShareVerificationKeyRoot: ProtocolDigest;
     readonly thresholdShareVerificationKeyDigest: ProtocolDigest;
     readonly trusteeThresholdVerificationKeyDigest: ProtocolDigest;

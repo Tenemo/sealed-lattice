@@ -20,25 +20,38 @@ pub fn encode_hex(bytes: &[u8]) -> String {
     to_hex(bytes)
 }
 
+fn decode_lower_hex_nibble(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        _ => None,
+    }
+}
+
 pub fn decode_hex(hex: &str) -> CanonicalResult<Vec<u8>> {
-    if !hex.len().is_multiple_of(2) {
+    let hex_bytes = hex.as_bytes();
+    if !hex_bytes.len().is_multiple_of(2) {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidHex,
             "hex string must have an even length",
         ));
     }
 
-    let mut bytes = Vec::with_capacity(hex.len() / 2);
-    let mut index = 0;
-    while index < hex.len() {
-        let byte = u8::from_str_radix(&hex[index..index + 2], 16).map_err(|_| {
+    let mut bytes = Vec::with_capacity(hex_bytes.len() / 2);
+    for pair in hex_bytes.chunks_exact(2) {
+        let high = decode_lower_hex_nibble(pair[0]).ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::InvalidHex,
-                "hex string contains a non-hexadecimal byte",
+                "hex string must use lowercase hexadecimal bytes",
             )
         })?;
-        bytes.push(byte);
-        index += 2;
+        let low = decode_lower_hex_nibble(pair[1]).ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidHex,
+                "hex string must use lowercase hexadecimal bytes",
+            )
+        })?;
+        bytes.push((high << 4) | low);
     }
 
     Ok(bytes)
@@ -391,14 +404,27 @@ fn validate_profiles(
     Ok(())
 }
 
-fn read_string_list(reader: &mut CanonicalReader<'_>) -> CanonicalResult<Vec<String>> {
+fn read_list_count(reader: &mut CanonicalReader<'_>, item_name: &str) -> CanonicalResult<usize> {
     let count = reader.read_varuint()?;
-    let mut items = Vec::with_capacity(usize::try_from(count).map_err(|_| {
+    let count_usize = usize::try_from(count).map_err(|_| {
         CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
             "list count does not fit usize",
         )
-    })?);
+    })?;
+    if count_usize > reader.remaining_len() {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            format!("{item_name} list count exceeds remaining encoded items"),
+        ));
+    }
+
+    Ok(count_usize)
+}
+
+fn read_string_list(reader: &mut CanonicalReader<'_>) -> CanonicalResult<Vec<String>> {
+    let count = read_list_count(reader, "string")?;
+    let mut items = Vec::with_capacity(count);
     for _ in 0..count {
         items.push(reader.read_string()?);
     }
@@ -407,13 +433,8 @@ fn read_string_list(reader: &mut CanonicalReader<'_>) -> CanonicalResult<Vec<Str
 }
 
 fn read_varuint_list(reader: &mut CanonicalReader<'_>) -> CanonicalResult<Vec<u64>> {
-    let count = reader.read_varuint()?;
-    let mut items = Vec::with_capacity(usize::try_from(count).map_err(|_| {
-        CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "list count does not fit usize",
-        )
-    })?);
+    let count = read_list_count(reader, "varuint")?;
+    let mut items = Vec::with_capacity(count);
     for _ in 0..count {
         items.push(reader.read_varuint()?);
     }

@@ -23,7 +23,11 @@ import {
 } from '../board/index.js';
 import {
     buildBoardHeadMap,
+    compareCanonicalStrings,
     createRefusal,
+    defaultSignedRootContextDigest,
+    isProtocolDigestString,
+    signedObjectRootByteLength,
     uniqueStrings,
 } from '../common/verification-helpers.js';
 
@@ -37,7 +41,7 @@ export const deriveWitnessCheckpointDigest = (
         targetFinalityCheckpointDigest:
             checkpoint.targetFinalityCheckpointDigest,
         targetFinalityPolicyDigest: checkpoint.targetFinalityPolicyDigest,
-        targetPhase: checkpoint.targetPhase,
+        targetFinalityScope: checkpoint.targetFinalityScope,
         targetProposalDigest: checkpoint.targetProposalDigest,
         witnessIdentity: checkpoint.witnessIdentity,
         witnessPolicyDigest: checkpoint.witnessPolicyDigest,
@@ -47,8 +51,8 @@ export const deriveTargetProposalDigest = (
     proposal: Omit<TargetProposal, 'targetProposalDigest'>,
 ): ProtocolDigest =>
     deriveProtocolDigest('TargetProposalDigest', {
-        cTargetDigest: proposal.cTargetDigest,
-        cTopKDigest: proposal.cTopKDigest,
+        targetCiphertextDigest: proposal.targetCiphertextDigest,
+        topKCiphertextDigest: proposal.topKCiphertextDigest,
         ceremonyId: proposal.ceremonyId,
         electionManifestDigest: proposal.electionManifestDigest,
         evaluationContextDigest: proposal.evaluationContextDigest,
@@ -67,8 +71,8 @@ export const deriveTargetFinalityCheckpointDigest = (
 ): ProtocolDigest =>
     deriveProtocolDigest('TargetFinalityCheckpointDigest', {
         boardPolicyDigest: checkpoint.boardPolicyDigest,
-        cTargetDigest: checkpoint.cTargetDigest,
-        cTopKDigest: checkpoint.cTopKDigest,
+        targetCiphertextDigest: checkpoint.targetCiphertextDigest,
+        topKCiphertextDigest: checkpoint.topKCiphertextDigest,
         ceremonyId: checkpoint.ceremonyId,
         electionManifestDigest: checkpoint.electionManifestDigest,
         evaluationContextDigest: checkpoint.evaluationContextDigest,
@@ -89,8 +93,8 @@ export const deriveWitnessPolicyDigest = (
 ): ProtocolDigest =>
     deriveProtocolDigest('WitnessPolicyDigest', {
         totalWitnesses: policy.totalWitnesses,
-        witnessIdentities: [...policy.witnessIdentities].sort((left, right) =>
-            left.localeCompare(right),
+        witnessIdentities: [...policy.witnessIdentities].sort(
+            compareCanonicalStrings,
         ),
         witnessQuorum: policy.witnessQuorum,
     });
@@ -99,7 +103,7 @@ export const deriveTargetFinalityPolicyDigest = (
     policy: Omit<TargetFinalityPolicy, 'targetFinalityPolicyDigest'>,
 ): ProtocolDigest =>
     deriveProtocolDigest('TargetFinalityPolicyDigest', {
-        targetPhase: policy.targetPhase,
+        targetFinalityScope: policy.targetFinalityScope,
         totalWitnesses: policy.totalWitnesses,
         witnessQuorum: policy.witnessQuorum,
     });
@@ -115,7 +119,7 @@ export const deriveTargetFinalityRecordDigest = (
         targetFinalityCheckpointDigest:
             record.targetFinalityCheckpoint.targetFinalityCheckpointDigest,
         targetFinalityPolicyDigest: record.targetFinalityPolicyDigest,
-        targetPhase: record.targetPhase,
+        targetFinalityScope: record.targetFinalityScope,
         targetProposalDigest: record.targetProposalDigest,
         witnessCheckpoints: record.witnessCheckpoints.map(
             (checkpoint) => checkpoint.checkpointDigest,
@@ -133,7 +137,7 @@ const deriveWitnessEquivocationEvidenceDigest = (
             evidence.equivocatingWitnessIdentities ?? [],
         leftBoardHeadDigest: evidence.leftBoardHeadDigest,
         rightBoardHeadDigest: evidence.rightBoardHeadDigest,
-        targetPhase: evidence.targetPhase ?? null,
+        targetFinalityScope: evidence.targetFinalityScope ?? null,
     });
 
 const verifyTargetRecordShape = (
@@ -150,14 +154,14 @@ const verifyTargetRecordShape = (
         objectVersion: record.objectVersion,
         targetFinalityCheckpoint: checkpoint,
         targetFinalityPolicyDigest: record.targetFinalityPolicyDigest,
-        targetPhase: record.targetPhase,
+        targetFinalityScope: record.targetFinalityScope,
         targetProposalDigest: record.targetProposalDigest,
         witnessCheckpoints: record.witnessCheckpoints,
         witnessPolicyDigest: record.witnessPolicyDigest,
     });
     const expectedProposalDigest = deriveTargetProposalDigest({
-        cTargetDigest: checkpoint.cTargetDigest,
-        cTopKDigest: checkpoint.cTopKDigest,
+        targetCiphertextDigest: checkpoint.targetCiphertextDigest,
+        topKCiphertextDigest: checkpoint.topKCiphertextDigest,
         ceremonyId: checkpoint.ceremonyId,
         electionManifestDigest: checkpoint.electionManifestDigest,
         evaluationContextDigest: checkpoint.evaluationContextDigest,
@@ -169,8 +173,8 @@ const verifyTargetRecordShape = (
     });
     const expectedCheckpointDigest = deriveTargetFinalityCheckpointDigest({
         boardPolicyDigest: checkpoint.boardPolicyDigest,
-        cTargetDigest: checkpoint.cTargetDigest,
-        cTopKDigest: checkpoint.cTopKDigest,
+        targetCiphertextDigest: checkpoint.targetCiphertextDigest,
+        topKCiphertextDigest: checkpoint.topKCiphertextDigest,
         ceremonyId: checkpoint.ceremonyId,
         electionManifestDigest: checkpoint.electionManifestDigest,
         evaluationContextDigest: checkpoint.evaluationContextDigest,
@@ -262,7 +266,8 @@ const verifyTargetRecordShape = (
     if (
         record.targetFinalityPolicyDigest !==
             targetFinalityPolicy.targetFinalityPolicyDigest ||
-        record.targetPhase !== targetFinalityPolicy.targetPhase ||
+        record.targetFinalityScope !==
+            targetFinalityPolicy.targetFinalityScope ||
         checkpoint.targetFinalityPolicyDigest !==
             targetFinalityPolicy.targetFinalityPolicyDigest
     ) {
@@ -308,7 +313,7 @@ const verifyTargetRecordShape = (
     if (
         targetFinalityPolicy.targetFinalityPolicyDigest !==
         deriveTargetFinalityPolicyDigest({
-            targetPhase: targetFinalityPolicy.targetPhase,
+            targetFinalityScope: targetFinalityPolicy.targetFinalityScope,
             totalWitnesses: targetFinalityPolicy.totalWitnesses,
             witnessQuorum: targetFinalityPolicy.witnessQuorum,
         })
@@ -350,6 +355,25 @@ const verifyTargetRecordShape = (
             ),
         );
     }
+    const witnessPublicKeyDigests = witnessPolicy.witnessIdentities.map(
+        (witnessIdentity) => input.witnessPublicKeyDigests[witnessIdentity],
+    );
+    if (
+        witnessPublicKeyDigests.some(
+            (publicKeyDigest) => !isProtocolDigestString(publicKeyDigest),
+        ) ||
+        new Set(witnessPublicKeyDigests).size !==
+            witnessPolicy.witnessIdentities.length
+    ) {
+        refusedObjects.push(
+            createRefusal(
+                'WitnessPolicyMismatch',
+                'Target finality requires seven distinct canonical witness public-key digests.',
+                record.targetFinalityRecordDigest,
+                'TargetFinalityRecord',
+            ),
+        );
+    }
     if (
         record.inclusionProof.boardHeadDigest !==
             checkpoint.finalizedBoardHeadDigest ||
@@ -385,7 +409,7 @@ const verifyWitnessCheckpoint = (
         targetFinalityCheckpointDigest:
             checkpoint.targetFinalityCheckpointDigest,
         targetFinalityPolicyDigest: checkpoint.targetFinalityPolicyDigest,
-        targetPhase: checkpoint.targetPhase,
+        targetFinalityScope: checkpoint.targetFinalityScope,
         targetProposalDigest: checkpoint.targetProposalDigest,
         witnessIdentity: checkpoint.witnessIdentity,
         witnessPolicyDigest: checkpoint.witnessPolicyDigest,
@@ -413,6 +437,19 @@ const verifyWitnessCheckpoint = (
             ),
         );
     }
+    if (
+        checkpoint.objectType !== 'WitnessCheckpoint' ||
+        checkpoint.objectVersion !== 1
+    ) {
+        refusedObjects.push(
+            createRefusal(
+                'InvalidSignedRoot',
+                'Witness checkpoint object shape is not canonical.',
+                checkpoint.checkpointDigest,
+                'WitnessCheckpoint',
+            ),
+        );
+    }
     if (expectedPublicKeyDigest === undefined) {
         refusedObjects.push(
             createRefusal(
@@ -431,7 +468,7 @@ const verifyWitnessCheckpoint = (
         checkpoint.witnessPolicyDigest !== witnessPolicy.witnessPolicyDigest ||
         checkpoint.targetFinalityPolicyDigest !==
             targetFinalityPolicy.targetFinalityPolicyDigest ||
-        checkpoint.targetPhase !== record.targetPhase
+        checkpoint.targetFinalityScope !== record.targetFinalityScope
     ) {
         refusedObjects.push(
             createRefusal(
@@ -450,9 +487,13 @@ const verifyWitnessCheckpoint = (
         signerIdentity: checkpoint.witnessIdentity,
         ceremonyId: record.ceremonyId,
         publicKeyDigest: expectedPublicKeyDigest,
-        manifestDigest: null,
+        manifestDigest: finalityCheckpoint.electionManifestDigest,
         objectRoot: checkpoint.checkpointDigest,
         boardHeadDigest: finalityCheckpoint.finalizedBoardHeadDigest,
+        byteLength: signedObjectRootByteLength,
+        recoveryEpoch: 0,
+        deviceEpoch: 0,
+        contextDigest: defaultSignedRootContextDigest,
     });
     refusedObjects.push(...signatureResult.refusedObjects);
 
@@ -519,7 +560,8 @@ const findFinalityForkEvidence = (
     for (const conflictingRecord of input.conflictingRecords ?? []) {
         if (
             conflictingRecord.ceremonyId !== input.record.ceremonyId ||
-            conflictingRecord.targetPhase !== input.record.targetPhase ||
+            conflictingRecord.targetFinalityScope !==
+                input.record.targetFinalityScope ||
             conflictingRecord.targetProposalDigest ===
                 input.record.targetProposalDigest
         ) {
@@ -550,7 +592,7 @@ const findFinalityForkEvidence = (
             rightBoardHeadDigest:
                 conflictingRecord.targetFinalityCheckpoint
                     .finalizedBoardHeadDigest,
-            targetPhase: input.record.targetPhase,
+            targetFinalityScope: input.record.targetFinalityScope,
             equivocatingWitnessIdentities,
         };
 
@@ -650,11 +692,13 @@ const verifyTargetFinalityUnchecked = (
             (checkpoint) => checkpoint.checkpointDigest,
         ),
     ]);
+    const finalityAccepted =
+        refusedObjects.length === 0 && forkEvidence === undefined;
 
     return {
-        ok: refusedObjects.length === 0 && forkEvidence === undefined,
+        ok: finalityAccepted,
         statusLabels,
-        acceptedDigests,
+        acceptedDigests: finalityAccepted ? acceptedDigests : [],
         refusedObjects:
             forkEvidence === undefined
                 ? refusedObjects

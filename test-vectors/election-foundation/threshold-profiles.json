@@ -20,7 +20,7 @@
         "releaseQuorum": 14,
         "aggregateContributionQuorum": 7,
         "decryptionShareQuorum": null,
-        "appendixCShareSelectionProfile": null,
+        "targetBoundShareSelectionProfile": null,
         "maximumRaceShares": 20,
         "setupCompletionQuorum": 20,
         "backendCorruptionModel": {
@@ -50,7 +50,7 @@
         "releaseQuorum": 20,
         "aggregateContributionQuorum": 10,
         "decryptionShareQuorum": null,
-        "appendixCShareSelectionProfile": null,
+        "targetBoundShareSelectionProfile": null,
         "maximumRaceShares": 30,
         "setupCompletionQuorum": 30,
         "backendCorruptionModel": {
@@ -82,7 +82,7 @@
         "releaseQuorum": 27,
         "aggregateContributionQuorum": 14,
         "decryptionShareQuorum": null,
-        "appendixCShareSelectionProfile": null,
+        "targetBoundShareSelectionProfile": null,
         "maximumRaceShares": 40,
         "setupCompletionQuorum": 40,
         "backendCorruptionModel": {
@@ -114,7 +114,7 @@
         "releaseQuorum": 34,
         "aggregateContributionQuorum": 17,
         "decryptionShareQuorum": null,
-        "appendixCShareSelectionProfile": null,
+        "targetBoundShareSelectionProfile": null,
         "maximumRaceShares": 50,
         "setupCompletionQuorum": 50,
         "backendCorruptionModel": {
@@ -147,7 +147,7 @@
         "releaseQuorum": 13,
         "aggregateContributionQuorum": 7,
         "decryptionShareQuorum": null,
-        "appendixCShareSelectionProfile": null,
+        "targetBoundShareSelectionProfile": null,
         "maximumRaceShares": 19,
         "setupCompletionQuorum": 19,
         "backendCorruptionModel": {
@@ -163,9 +163,11 @@
       "caseName": "n20-certified-cpad-share-selection",
       "input": {
         "rosterSize": 20,
-        "appendixCShareSelectionProfile": {
-          "profileId": "appendix-c-certified-first-valid-v1",
-          "certificateDigest": "appendix-c-certificate-digest",
+        "targetBoundShareSelectionProfile": {
+          "profileId": "target-bound-first-valid-share-selection-v1",
+          "certificateDigest": "target-bound-certificate-digest",
+          "cpadProfileId": "CPAD-BGV-AsyncThreshold-v1",
+          "targetBasisDigest": "target-basis-digest",
           "decryptionShareQuorum": 9,
           "minimumSharesForInterpolation": 7,
           "minimumArrivalsForRobustDecode": 9,
@@ -187,9 +189,11 @@
         "releaseQuorum": 14,
         "aggregateContributionQuorum": 7,
         "decryptionShareQuorum": 9,
-        "appendixCShareSelectionProfile": {
-          "profileId": "appendix-c-certified-first-valid-v1",
-          "certificateDigest": "appendix-c-certificate-digest",
+        "targetBoundShareSelectionProfile": {
+          "profileId": "target-bound-first-valid-share-selection-v1",
+          "certificateDigest": "target-bound-certificate-digest",
+          "cpadProfileId": "CPAD-BGV-AsyncThreshold-v1",
+          "targetBasisDigest": "target-basis-digest",
           "decryptionShareQuorum": 9,
           "minimumSharesForInterpolation": 7,
           "minimumArrivalsForRobustDecode": 9,

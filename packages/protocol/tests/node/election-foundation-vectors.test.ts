@@ -99,7 +99,7 @@ type BoardFinalityVectors = {
             | 'roster-manifest'
             | 'signed-root'
             | 'target-finality'
-            | 'target-phase';
+            | 'target-acceptance';
         readonly expectedOk: boolean;
         readonly expectedRefusalCodes: readonly string[];
         readonly expectedEquivocatingWitnessCount?: number;

@@ -2,9 +2,10 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-import type {
-    GoldenTranscriptCoreFixture,
-    MalformedObjectFixture,
+import {
+    evaluationProofProfileId,
+    type GoldenTranscriptCoreFixture,
+    type MalformedObjectFixture,
 } from '@sealed-lattice/types';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -27,10 +28,10 @@ type TranscriptCoreKernelExportsForTests = WebAssembly.Exports & {
     memory: WebAssembly.Memory;
     sealed_lattice_allocate: (length: number) => number;
     sealed_lattice_deallocate: (pointer: number, length: number) => void;
-    sealed_lattice_last_output_length: () => number;
-    sealed_lattice_transcript_core_command: (
+    sealed_lattice_transcript_core_command_with_length: (
         pointer: number,
         length: number,
+        outputLengthPointer: number,
     ) => number;
     sealed_lattice_roundtrip: (pointer: number, length: number) => number;
 };
@@ -63,6 +64,8 @@ const fullyVerifiedActiveFixture = findFixture(
     'fully-verified-active-malicious-transcript-core',
 );
 const invalidEnumFixture = findFixture(malformedObjectFixtures, 'invalid-enum');
+const singleZeroByteSha256Hex =
+    '6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d';
 
 const createMockKernelExports = ({
     allocationPointer = 12,
@@ -74,11 +77,15 @@ const createMockKernelExports = ({
             hash512: 'feedface',
         },
     },
+    expectedKernelSha256Hex = singleZeroByteSha256Hex,
+    outputLengthAllocationPointer = 512,
     roundTripPointer = allocationPointer,
 }: {
     readonly allocationPointer?: number;
     readonly commandPointer?: number;
     readonly commandResponse?: unknown;
+    readonly expectedKernelSha256Hex?: string;
+    readonly outputLengthAllocationPointer?: number;
     readonly roundTripPointer?: number;
 } = {}): {
     readonly deallocate: ReturnType<typeof vi.fn>;
@@ -92,6 +99,10 @@ const createMockKernelExports = ({
     );
     const deallocate = vi.fn();
     const memory = new WebAssembly.Memory({ initial: 1 });
+    const allocationPointers = [
+        allocationPointer,
+        outputLengthAllocationPointer,
+    ];
     const fakeModule = {} as WebAssembly.Module;
     const webAssemblyWithByteSourceInstantiate = WebAssembly as unknown as {
         instantiate: (
@@ -103,19 +114,29 @@ const createMockKernelExports = ({
         instance: {
             exports: {
                 memory,
-                sealed_lattice_allocate: vi.fn(() => allocationPointer),
-                sealed_lattice_deallocate: deallocate,
-                sealed_lattice_last_output_length: vi.fn(
-                    () => encodedCommandResponse.length,
+                sealed_lattice_allocate: vi.fn(
+                    () => allocationPointers.shift() ?? allocationPointer,
                 ),
-                sealed_lattice_transcript_core_command: vi.fn(() => {
-                    new Uint8Array(memory.buffer).set(
-                        encodedCommandResponse,
-                        commandPointer,
-                    );
+                sealed_lattice_deallocate: deallocate,
+                sealed_lattice_transcript_core_command_with_length: vi.fn(
+                    (
+                        _pointer: number,
+                        _length: number,
+                        outputLengthPointer: number,
+                    ) => {
+                        new Uint8Array(memory.buffer).set(
+                            encodedCommandResponse,
+                            commandPointer,
+                        );
+                        new DataView(memory.buffer).setUint32(
+                            outputLengthPointer,
+                            encodedCommandResponse.length,
+                            true,
+                        );
 
-                    return commandPointer;
-                }),
+                        return commandPointer;
+                    },
+                ),
                 sealed_lattice_roundtrip: vi.fn(() => roundTripPointer),
             } as TranscriptCoreKernelExportsForTests,
         } as WebAssembly.Instance,
@@ -130,8 +151,10 @@ const createMockKernelExports = ({
         { kind: 'memory', name: 'memory' },
         { kind: 'function', name: 'sealed_lattice_allocate' },
         { kind: 'function', name: 'sealed_lattice_deallocate' },
-        { kind: 'function', name: 'sealed_lattice_last_output_length' },
-        { kind: 'function', name: 'sealed_lattice_transcript_core_command' },
+        {
+            kind: 'function',
+            name: 'sealed_lattice_transcript_core_command_with_length',
+        },
         { kind: 'function', name: 'sealed_lattice_roundtrip' },
     ]);
 
@@ -141,6 +164,7 @@ const createMockKernelExports = ({
         getInstantiateCallCount: () => instantiate.mock.calls.length,
         loadMockKernel: createTranscriptCoreKernelLoader(
             pathToFileURL(path.resolve('mock-sealed-lattice-kernel.wasm')),
+            { expectedKernelSha256Hex },
         ),
         rejectNextInstantiation: (error: Error): void => {
             instantiate.mockRejectedValueOnce(error);
@@ -170,8 +194,7 @@ describe('transcript-core kernel in Node', () => {
                 'memory',
                 'sealed_lattice_allocate',
                 'sealed_lattice_deallocate',
-                'sealed_lattice_last_output_length',
-                'sealed_lattice_transcript_core_command',
+                'sealed_lattice_transcript_core_command_with_length',
                 'sealed_lattice_roundtrip',
             ]),
         );
@@ -193,17 +216,55 @@ describe('transcript-core kernel in Node', () => {
             'FullyVerifiedResult',
         );
         expect(fullyVerifiedPassiveAnalysis.evaluationProofProfileId).toBe(
-            'PQEvalProof-STARK-BGVReplay-v1',
+            evaluationProofProfileId,
         );
         expect(fullyVerifiedActiveAnalysis.mheSecurityClosure).toBe(
             'ActiveMalicious',
         );
         expect(fullyVerifiedActiveAnalysis.evaluationProofProfileId).toBe(
-            'PQEvalProof-STARK-BGVReplay-v1',
+            evaluationProofProfileId,
         );
         expect(fullyVerifiedPassiveAnalysis.objectHash512).not.toBe(
             fullyVerifiedActiveAnalysis.objectHash512,
         );
+    });
+
+    it('derives claim-bearing digests and field results through WASM', async () => {
+        const kernel = await loadTranscriptCoreKernel();
+
+        expect(
+            kernel.deriveProtocolDigest({
+                namespace: 'PollSpecDigest',
+                value: { poll: 'main' },
+            }),
+        ).toBe(
+            '423c71de65abadb5adc05d9b6b704252420bb738af888c62614c8afc53a2be808662585305e76738b23e4f20154f8779e3827c0c8f313455d84675924f4a2c83',
+        );
+        expect(
+            kernel.interpolateShamirConstantTerm({
+                sharePoints: [
+                    { rosterPosition: 1, value: 15 },
+                    { rosterPosition: 2, value: 25 },
+                ],
+            }),
+        ).toBe(5);
+        expect(
+            kernel.evaluatePlaintextComparison({
+                leftTotalScore: 41,
+                rightTotalScore: 40,
+                rosterSize: 5,
+            }),
+        ).toEqual({
+            greaterThan: 1,
+            equal: 0,
+            scoreDifference: 1,
+        });
+        expect(() =>
+            kernel.deriveProtocolDigest({
+                namespace: 'UnreservedDigest',
+                value: {},
+            }),
+        ).toThrow(TranscriptCoreKernelCommandError);
     });
 
     it('verifies golden and malformed fixtures with stable outputs', async () => {
@@ -286,6 +347,7 @@ describe('transcript-core kernel in Node', () => {
             encodedCommandResponseLength,
         );
         expect(deallocate).toHaveBeenCalledWith(12, expect.any(Number));
+        expect(deallocate).toHaveBeenCalledWith(512, 4);
     });
 
     it('deallocates aliased command pointers only once', async () => {
@@ -301,11 +363,15 @@ describe('transcript-core kernel in Node', () => {
                 chunkSize: 2,
             }),
         ).toBe('abc123');
-        expect(deallocate).toHaveBeenCalledTimes(1);
+        expect(deallocate).toHaveBeenCalledTimes(2);
         expect(deallocate).toHaveBeenCalledWith(
             12,
             encodedCommandResponseLength,
         );
+        expect(deallocate).toHaveBeenCalledWith(512, 4);
+        expect(
+            deallocate.mock.calls.filter(([pointer]) => pointer === 12),
+        ).toEqual([[12, encodedCommandResponseLength]]);
     });
 
     it('deallocates aliased round-trip pointers only once', async () => {
@@ -352,6 +418,19 @@ describe('transcript-core kernel in Node', () => {
         ).toThrow(
             'The transcript-core kernel returned a null pointer for a non-empty transcript-core command result.',
         );
+    });
+
+    it('rejects a transcript-core kernel with the wrong integrity digest', async () => {
+        const { getInstantiateCallCount, loadMockKernel } =
+            createMockKernelExports({
+                expectedKernelSha256Hex:
+                    '0000000000000000000000000000000000000000000000000000000000000000',
+            });
+
+        await expect(loadMockKernel()).rejects.toThrow(
+            'The transcript-core kernel failed integrity verification',
+        );
+        expect(getInstantiateCallCount()).toBe(0);
     });
 
     it('rejects invalid command response shapes', async () => {

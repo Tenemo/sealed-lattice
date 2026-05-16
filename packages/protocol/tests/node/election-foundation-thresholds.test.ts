@@ -1,10 +1,16 @@
+import {
+    cpadProfileId,
+    targetBoundShareSelectionProfileId,
+} from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
 import { deriveThresholdProfile } from '../../src/index';
 
-const appendixCShareSelectionProfile = {
-    profileId: 'appendix-c-certified-first-valid-v1',
-    certificateDigest: 'appendix-c-certificate-digest',
+const targetBoundShareSelectionProfile = {
+    profileId: targetBoundShareSelectionProfileId,
+    certificateDigest: 'target-bound-certificate-digest',
+    cpadProfileId,
+    targetBasisDigest: 'target-basis-digest',
     decryptionShareQuorum: 9,
     minimumSharesForInterpolation: 7,
     minimumArrivalsForRobustDecode: 9,
@@ -16,8 +22,8 @@ const expectFeasibleThresholds = (rosterSize: number): void => {
     const decryptionThreshold = Math.floor((rosterSize - 1) / 3) + 1;
     const profile = deriveThresholdProfile({
         rosterSize,
-        appendixCShareSelectionProfile: {
-            ...appendixCShareSelectionProfile,
+        targetBoundShareSelectionProfile: {
+            ...targetBoundShareSelectionProfile,
             decryptionShareQuorum: decryptionThreshold + 2,
             minimumSharesForInterpolation: decryptionThreshold,
             minimumArrivalsForRobustDecode: decryptionThreshold + 2,
@@ -87,7 +93,7 @@ describe('election foundation threshold profiles', () => {
                 pvssThreshold: threshold,
                 decryptionThreshold: threshold,
                 decryptionShareQuorum: null,
-                appendixCShareSelectionProfile: null,
+                targetBoundShareSelectionProfile: null,
                 activeFaultBound,
                 releaseQuorum,
             });
@@ -177,55 +183,93 @@ describe('election foundation threshold profiles', () => {
         expect(profile.warnings).toContain('BackendCorruptionBoundTooHigh');
     });
 
-    it('uses Appendix-C-certified share-selection output for decryption share quorum', () => {
+    it('uses target-bound share-selection output for decryption share quorum', () => {
         const profile = deriveThresholdProfile({
             rosterSize: 20,
-            appendixCShareSelectionProfile,
+            targetBoundShareSelectionProfile,
         });
 
         expect(profile.decryptionThreshold).toBe(7);
         expect(profile.decryptionShareQuorum).toBe(9);
-        expect(profile.appendixCShareSelectionProfile).toEqual(
-            appendixCShareSelectionProfile,
+        expect(profile.targetBoundShareSelectionProfile).toEqual(
+            targetBoundShareSelectionProfile,
         );
         expect(profile.warnings).not.toContain('ShareSelectionProfileRequired');
     });
 
-    it('rejects Appendix C share-selection profiles that cannot certify safe recombination', () => {
+    it('rejects unsupported target-bound share-selection profile and target-basis bindings', () => {
         expect(() =>
             deriveThresholdProfile({
                 rosterSize: 20,
-                appendixCShareSelectionProfile: {
-                    ...appendixCShareSelectionProfile,
+                targetBoundShareSelectionProfile: {
+                    ...targetBoundShareSelectionProfile,
+                    profileId: 'arbitrary-profile',
+                },
+            }),
+        ).toThrow(
+            'Target-bound share-selection profile uses an unsupported ID.',
+        );
+
+        expect(() =>
+            deriveThresholdProfile({
+                rosterSize: 20,
+                targetBoundShareSelectionProfile: {
+                    ...targetBoundShareSelectionProfile,
+                    cpadProfileId: 'arbitrary-cpad-profile',
+                },
+            }),
+        ).toThrow(
+            'Target-bound share-selection profile uses an unsupported CPAD profile ID.',
+        );
+
+        expect(() =>
+            deriveThresholdProfile({
+                rosterSize: 20,
+                targetBoundShareSelectionProfile: {
+                    ...targetBoundShareSelectionProfile,
+                    targetBasisDigest: '',
+                },
+            }),
+        ).toThrow(
+            'Target-bound share-selection profile requires a target-basis digest.',
+        );
+    });
+
+    it('rejects target-bound share-selection profiles that cannot certify safe recombination', () => {
+        expect(() =>
+            deriveThresholdProfile({
+                rosterSize: 20,
+                targetBoundShareSelectionProfile: {
+                    ...targetBoundShareSelectionProfile,
                     decryptionShareQuorum: 6,
                 },
             }),
         ).toThrow(
-            'Appendix C decryption share quorum must be at least the decryption threshold.',
+            'Target-bound decryption share quorum must be at least the decryption threshold.',
         );
 
         expect(() =>
             deriveThresholdProfile({
                 rosterSize: 20,
-                appendixCShareSelectionProfile: {
-                    ...appendixCShareSelectionProfile,
+                targetBoundShareSelectionProfile: {
+                    ...targetBoundShareSelectionProfile,
                     certificateDigest: '',
                 },
             }),
         ).toThrow(
-            'Appendix C share-selection profile requires a certificate digest.',
+            'Target-bound share-selection profile requires a certificate digest.',
         );
 
         expect(() =>
             deriveThresholdProfile({
                 rosterSize: 20,
-                appendixCShareSelectionProfile: {
-                    ...appendixCShareSelectionProfile,
+                targetBoundShareSelectionProfile: {
+                    ...targetBoundShareSelectionProfile,
                     minimumArrivalsForRobustDecode: 8,
                 },
             }),
         ).toThrow(
-            'Appendix C robust-decode arrival count must be at least the decryption share quorum.',
+            'Target-bound robust-decode arrival count must be at least the decryption share quorum.',
         );
     });
 });

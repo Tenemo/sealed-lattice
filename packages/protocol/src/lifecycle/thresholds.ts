@@ -1,5 +1,5 @@
 import type {
-    AppendixCShareSelectionProfile,
+    TargetBoundShareSelectionProfile,
     DecryptionShareFilteringMode,
     DecryptionShareSelectionRule,
     HeBackendCorruptionModel,
@@ -12,6 +12,8 @@ import type {
 import { isNonNegativeInteger } from '../common/verification-helpers.js';
 
 import {
+    targetBoundShareSelectionProfileId,
+    cpadProfileId,
     mandatoryClaimRosterSize,
     maximumCertificateGatedRosterSize,
     minimumUnsafeRosterSize,
@@ -62,68 +64,80 @@ const supportedDecryptionShareSelectionRules =
         'FirstValidSharesInCanonicalBoardOrder',
     ]);
 
-const normalizeAppendixCShareSelectionProfile = (
+const normalizeTargetBoundShareSelectionProfile = (
     rosterSize: number,
     decryptionThreshold: number,
-    profile: AppendixCShareSelectionProfile | undefined,
-): AppendixCShareSelectionProfile | null => {
+    profile: TargetBoundShareSelectionProfile | undefined,
+): TargetBoundShareSelectionProfile | null => {
     if (profile === undefined) {
         return null;
     }
 
-    if (profile.profileId.trim().length === 0) {
-        throw new Error('Appendix C share-selection profile requires an ID.');
+    if (profile.profileId !== targetBoundShareSelectionProfileId) {
+        throw new Error(
+            'Target-bound share-selection profile uses an unsupported ID.',
+        );
     }
     if (profile.certificateDigest.trim().length === 0) {
         throw new Error(
-            'Appendix C share-selection profile requires a certificate digest.',
+            'Target-bound share-selection profile requires a certificate digest.',
+        );
+    }
+    if (profile.cpadProfileId !== cpadProfileId) {
+        throw new Error(
+            'Target-bound share-selection profile uses an unsupported CPAD profile ID.',
+        );
+    }
+    if (profile.targetBasisDigest.trim().length === 0) {
+        throw new Error(
+            'Target-bound share-selection profile requires a target-basis digest.',
         );
     }
     if (!isNonNegativeInteger(profile.decryptionShareQuorum)) {
         throw new RangeError(
-            'Appendix C decryption share quorum must be a non-negative integer.',
+            'Target-bound decryption share quorum must be a non-negative integer.',
         );
     }
     if (profile.decryptionShareQuorum < decryptionThreshold) {
         throw new RangeError(
-            'Appendix C decryption share quorum must be at least the decryption threshold.',
+            'Target-bound decryption share quorum must be at least the decryption threshold.',
         );
     }
     if (profile.decryptionShareQuorum > rosterSize) {
         throw new RangeError(
-            'Appendix C decryption share quorum must not exceed rosterSize.',
+            'Target-bound decryption share quorum must not exceed rosterSize.',
         );
     }
     if (!isNonNegativeInteger(profile.minimumSharesForInterpolation)) {
         throw new RangeError(
-            'Appendix C interpolation share count must be a non-negative integer.',
+            'Target-bound interpolation share count must be a non-negative integer.',
         );
     }
     if (profile.minimumSharesForInterpolation < decryptionThreshold) {
         throw new RangeError(
-            'Appendix C interpolation share count must be at least the decryption threshold.',
+            'Target-bound interpolation share count must be at least the decryption threshold.',
         );
     }
     if (profile.minimumSharesForInterpolation > profile.decryptionShareQuorum) {
         throw new RangeError(
-            'Appendix C interpolation share count must not exceed the decryption share quorum.',
+            'Target-bound interpolation share count must not exceed the decryption share quorum.',
         );
     }
     if (!isNonNegativeInteger(profile.minimumArrivalsForRobustDecode)) {
         throw new RangeError(
-            'Appendix C robust-decode arrival count must be a non-negative integer.',
+            'Target-bound robust-decode arrival count must be a non-negative integer.',
         );
     }
     if (
         profile.minimumArrivalsForRobustDecode < profile.decryptionShareQuorum
     ) {
         throw new RangeError(
-            'Appendix C robust-decode arrival count must be at least the decryption share quorum.',
+            'Target-bound robust-decode arrival count must be at least the decryption share quorum.',
         );
     }
     if (profile.minimumArrivalsForRobustDecode > rosterSize) {
         throw new RangeError(
-            'Appendix C robust-decode arrival count must not exceed rosterSize.',
+            'Target-bound robust-decode arrival count must not exceed rosterSize.',
         );
     }
     if (
@@ -132,20 +146,22 @@ const normalizeAppendixCShareSelectionProfile = (
         )
     ) {
         throw new Error(
-            'Appendix C share-selection profile uses an unsupported invalid-share filtering mode.',
+            'Target-bound share-selection profile uses an unsupported invalid-share filtering mode.',
         );
     }
     if (
         !supportedDecryptionShareSelectionRules.has(profile.selectedShareRule)
     ) {
         throw new Error(
-            'Appendix C share-selection profile uses an unsupported selected-share rule.',
+            'Target-bound share-selection profile uses an unsupported selected-share rule.',
         );
     }
 
     return {
         profileId: profile.profileId,
         certificateDigest: profile.certificateDigest,
+        cpadProfileId: profile.cpadProfileId,
+        targetBasisDigest: profile.targetBasisDigest,
         decryptionShareQuorum: profile.decryptionShareQuorum,
         minimumSharesForInterpolation: profile.minimumSharesForInterpolation,
         minimumArrivalsForRobustDecode: profile.minimumArrivalsForRobustDecode,
@@ -224,11 +240,11 @@ export const deriveThresholdProfile = (
     const activeFaultBound = Math.floor(rosterSize / 5);
     const pvssThreshold = privacyCorruptionBound + 1;
     const decryptionThreshold = decryptionCorruptionBound + 1;
-    const appendixCShareSelectionProfile =
-        normalizeAppendixCShareSelectionProfile(
+    const targetBoundShareSelectionProfile =
+        normalizeTargetBoundShareSelectionProfile(
             rosterSize,
             decryptionThreshold,
-            input.appendixCShareSelectionProfile,
+            input.targetBoundShareSelectionProfile,
         );
     const releaseQuorum = Math.min(
         rosterSize,
@@ -236,7 +252,7 @@ export const deriveThresholdProfile = (
     );
     const aggregateContributionQuorum = pvssThreshold;
     const decryptionShareQuorum =
-        appendixCShareSelectionProfile?.decryptionShareQuorum ?? null;
+        targetBoundShareSelectionProfile?.decryptionShareQuorum ?? null;
     const maximumRaceShares = rosterSize;
     const setupCompletionQuorum = rosterSize;
     const warnings = [...rosterProfile.warnings];
@@ -248,7 +264,7 @@ export const deriveThresholdProfile = (
     ) {
         warnings.push('BackendCorruptionBoundTooHigh');
     }
-    if (appendixCShareSelectionProfile === null) {
+    if (targetBoundShareSelectionProfile === null) {
         warnings.push('ShareSelectionProfileRequired');
     }
 
@@ -266,7 +282,7 @@ export const deriveThresholdProfile = (
         releaseQuorum,
         aggregateContributionQuorum,
         decryptionShareQuorum,
-        appendixCShareSelectionProfile,
+        targetBoundShareSelectionProfile,
         maximumRaceShares,
         setupCompletionQuorum,
         backendCorruptionModel,

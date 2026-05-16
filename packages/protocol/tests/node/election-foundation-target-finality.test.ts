@@ -72,7 +72,7 @@ describe('target finality', () => {
                     duplicateWitnessRecord.targetFinalityCheckpoint,
                 targetFinalityPolicyDigest:
                     duplicateWitnessRecord.targetFinalityPolicyDigest,
-                targetPhase: duplicateWitnessRecord.targetPhase,
+                targetFinalityScope: duplicateWitnessRecord.targetFinalityScope,
                 targetProposalDigest:
                     duplicateWitnessRecord.targetProposalDigest,
                 witnessCheckpoints: duplicateWitnessRecord.witnessCheckpoints,
@@ -168,12 +168,13 @@ describe('target finality', () => {
         });
 
         expect(forkedVerification.ok).toBe(false);
+        expect(forkedVerification.acceptedDigests).toEqual([]);
         expect(forkedVerification.targetFinalityRecordDigest).toBeUndefined();
         expect(forkedVerification.equivocatingWitnessIdentities).toEqual(
             witnessIdentities.slice(0, 5),
         );
         expect(forkedVerification.forkEvidence).toMatchObject({
-            targetPhase: 'target',
+            targetFinalityScope: 'target',
             equivocatingWitnessIdentities: witnessIdentities.slice(0, 5),
         });
         expect(forkedVerification.refusedObjects).toEqual(
@@ -210,7 +211,7 @@ describe('target finality', () => {
             objectVersion: record.objectVersion,
             targetFinalityCheckpoint: record.targetFinalityCheckpoint,
             targetFinalityPolicyDigest: record.targetFinalityPolicyDigest,
-            targetPhase: record.targetPhase,
+            targetFinalityScope: record.targetFinalityScope,
             targetProposalDigest: record.targetProposalDigest,
             witnessCheckpoints: [
                 createWitnessCheckpoint(
@@ -294,6 +295,7 @@ describe('target finality', () => {
         });
 
         expect(verification.ok).toBe(false);
+        expect(verification.acceptedDigests).toEqual([]);
         expect(verification.targetFinalityRecordDigest).toBeUndefined();
         expect(verification.statusLabels).toEqual(
             expect.arrayContaining(['WitnessEquivocationEvidence']),
@@ -304,7 +306,7 @@ describe('target finality', () => {
         expect(verification.forkEvidence).toMatchObject({
             leftBoardHeadDigest: firstTargetHead.headDigest,
             rightBoardHeadDigest: secondTargetHead.headDigest,
-            targetPhase: 'target',
+            targetFinalityScope: 'target',
             equivocatingWitnessIdentities: witnessIdentities.slice(0, 5),
         });
         expect(verification.refusedObjects).toEqual(

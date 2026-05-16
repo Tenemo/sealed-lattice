@@ -74,10 +74,10 @@
     "ActionCurrentForRecoveryEpochInput",
     "ActionCurrentForRecoveryEpochResult",
     "AppendOnlyConsistencyProof",
-    "AppendixCShareSelectionProfile",
     "BaseClaimProfile",
     "BoardConsistencyInput",
     "BoardConsistencyVerification",
+    "BoardEntryMerklePathStep",
     "CanonicalError",
     "CanonicalErrorCode",
     "CanonicalSignedRootObject",
@@ -151,6 +151,7 @@
     "SignedObjectType",
     "SignerRole",
     "StructuredProtocolVerificationResult",
+    "TargetBoundShareSelectionProfile",
     "TargetFinalityCheckpoint",
     "TargetFinalityPolicy",
     "TargetFinalityRecord",
@@ -175,6 +176,7 @@
     "WitnessPolicy"
   ],
   "vendoredProtocolRuntimeModules": [
+    "board/digests.ts",
     "board/index.ts",
     "board/shell-evidence.ts",
     "closing/index.ts",

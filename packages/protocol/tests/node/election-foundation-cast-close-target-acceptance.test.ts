@@ -1,4 +1,5 @@
 import type {
+    CloseRecord,
     EvaluationProofRecord,
     LocalReplayRecord,
     TargetAcceptedRecord,
@@ -14,13 +15,16 @@ import {
     createSignature,
     createTargetFinalityRecord,
     createTargetProposalHead,
+    deriveCloseRecordDigest,
     deriveLocalReplayRecordDigest,
+    derivePostVotingClosedContextDigest,
     deriveProtocolDigest,
     deriveTargetAcceptedRecordDigest,
     deriveTopKDecryptionShareDigest,
     getParticipantSigningPublicKeyDigest,
     manifestOpaqueBindings,
     organizerPublicKeyDigest,
+    verifyCloseRecordShell,
     verifyLocalReplayRecordShell,
     verifyTargetAcceptedRecordShell,
     verifyTargetFinality,
@@ -30,12 +34,98 @@ import {
     witnessPublicKeyDigests,
 } from './election-foundation-test-helpers';
 
+const closeRecordElectionManifestDigest = deriveProtocolDigest(
+    'ElectionManifestDigest',
+    { manifest: 'close-record-shell' },
+);
+
+const createVotingCloseScenario = (input?: {
+    readonly useGenesisAsClosedHead?: boolean;
+}): {
+    readonly boardEvidence: ReturnType<typeof createBoardEvidence>;
+    readonly closeRecord: CloseRecord;
+    readonly closeRecordInclusionProof: ReturnType<
+        typeof createBoardHeadWithObjects
+    >['inclusionProofs'][number];
+    readonly closedHead: ReturnType<typeof createBoardHead>;
+    readonly closeHead: ReturnType<typeof createBoardHead>;
+    readonly genesisHead: ReturnType<typeof createBoardHead>;
+} => {
+    const genesisHead = createBoardHead(0, null);
+    const closedHead = createBoardHead(1, genesisHead.headDigest);
+    const closedBoardHeadDigest = input?.useGenesisAsClosedHead
+        ? genesisHead.headDigest
+        : closedHead.headDigest;
+    const closeRecordPayload = {
+        objectType: 'CloseRecord',
+        objectVersion: 1,
+        ceremonyId,
+        electionManifestDigest: closeRecordElectionManifestDigest,
+        closeKind: 'VotingClosed',
+        closedBoardHeadDigest,
+        boardSequence: 2,
+        boardPosition: 0,
+        organizerIdentity: 'organizer',
+    } satisfies Omit<
+        CloseRecord,
+        'closeRecordDigest' | 'postVotingClosedContextDigest' | 'signature'
+    >;
+    const closeRecordDigest = deriveCloseRecordDigest(closeRecordPayload);
+    const { head: closeHead, inclusionProofs } = createBoardHeadWithObjects(
+        2,
+        closedHead.headDigest,
+        [
+            {
+                objectType: 'CloseRecord',
+                objectDigest: closeRecordDigest,
+                boardPosition: closeRecordPayload.boardPosition,
+            },
+        ],
+    );
+    const postVotingClosedContextDigest = derivePostVotingClosedContextDigest({
+        ceremonyId,
+        closeRecordDigest,
+        electionManifestDigest: closeRecordElectionManifestDigest,
+        votingClosedBoardHeadDigest: closeHead.headDigest,
+    });
+    const closeRecord: CloseRecord = {
+        ...closeRecordPayload,
+        closeRecordDigest,
+        postVotingClosedContextDigest,
+        signature: createSignature(
+            'CloseRecord',
+            'Organizer',
+            'organizer',
+            organizerPublicKeyDigest,
+            closeRecordDigest,
+            {
+                boardHeadDigest: closeHead.headDigest,
+                contextDigest: postVotingClosedContextDigest,
+                manifestDigest: closeRecordElectionManifestDigest,
+            },
+        ),
+    };
+
+    return {
+        boardEvidence: createBoardEvidence([
+            genesisHead,
+            closedHead,
+            closeHead,
+        ]),
+        closeRecord,
+        closeRecordInclusionProof: inclusionProofs[0],
+        closedHead,
+        closeHead,
+        genesisHead,
+    };
+};
+
 const deriveEvaluationProofRecordDigest = (
     proofRecord: Omit<EvaluationProofRecord, 'evaluationProofRecordDigest'>,
 ): string =>
     deriveProtocolDigest('EvaluationProofRecordDigest', {
-        cTargetDigest: proofRecord.cTargetDigest,
-        cTopKDigest: proofRecord.cTopKDigest,
+        targetCiphertextDigest: proofRecord.targetCiphertextDigest,
+        topKCiphertextDigest: proofRecord.topKCiphertextDigest,
         ceremonyId: proofRecord.ceremonyId,
         electionManifestDigest: proofRecord.electionManifestDigest,
         evaluationContextDigest: proofRecord.evaluationContextDigest,
@@ -65,9 +155,9 @@ const createEvaluationProofRecord = (
             targetFinalityRecord.targetFinalityRecordDigest,
         evaluationProofProfileDigest: checkpoint.evaluationProofProfileDigest,
         evaluationContextDigest: checkpoint.evaluationContextDigest,
-        cTopKDigest: checkpoint.cTopKDigest,
+        topKCiphertextDigest: checkpoint.topKCiphertextDigest,
         publicSlotMaskDigest: checkpoint.publicSlotMaskDigest,
-        cTargetDigest: checkpoint.cTargetDigest,
+        targetCiphertextDigest: checkpoint.targetCiphertextDigest,
         targetLayoutDigest: checkpoint.targetLayoutDigest,
         proofRoot: deriveProtocolDigest('EvaluationProofRecordDigest', {
             proof: 'mandatory-pq-evaluation-proof',
@@ -92,7 +182,7 @@ const createTargetAcceptedRecord = (
         objectVersion: 1,
         ceremonyId,
         electionManifestDigest: checkpoint.electionManifestDigest,
-        targetPhase: 'target',
+        targetFinalityScope: 'target',
         targetProposalDigest: targetFinalityRecord.targetProposalDigest,
         topKEvaluationRecordDigest: checkpoint.topKEvaluationRecordDigest,
         targetContextDigest: deriveProtocolDigest('TargetContextDigest', {
@@ -109,12 +199,12 @@ const createTargetAcceptedRecord = (
         targetPreimageDigest: deriveProtocolDigest('TargetPreimageDigest', {
             target: 'accepted-target-preimage',
         }),
-        cTargetDigest: evaluationProofRecord.cTargetDigest,
+        targetCiphertextDigest: evaluationProofRecord.targetCiphertextDigest,
         targetLayoutDigest: evaluationProofRecord.targetLayoutDigest,
         acceptanceMode: 'evaluation-proof',
         bgvAsyncThresholdCPADProfileDigest:
             manifestOpaqueBindings.bgvAsyncThresholdCPADProfileDigest,
-        qTargetDigest: manifestOpaqueBindings.qTargetDigest,
+        targetBasisDigest: manifestOpaqueBindings.targetBasisDigest,
         cpadProfileId: manifestOpaqueBindings.cpadProfileId,
         cpadProfileDigest: manifestOpaqueBindings.cpadProfileDigest,
         thresholdDecryptionProfileId:
@@ -138,6 +228,7 @@ const createTargetAcceptedRecord = (
             organizerPublicKeyDigest,
             targetAcceptedRecordDigest,
             {
+                contextDigest: payload.targetContextDigest,
                 manifestDigest: payload.electionManifestDigest,
             },
         ),
@@ -157,6 +248,7 @@ const signTargetAcceptedRecord = (
         targetAcceptedRecord.targetAcceptedRecordDigest,
         {
             boardHeadDigest,
+            contextDigest: targetAcceptedRecord.targetContextDigest,
             manifestDigest: targetAcceptedRecord.electionManifestDigest,
         },
     ),
@@ -184,7 +276,7 @@ const createDecryptionShare = (
         topKEvaluationRecordDigest:
             targetAcceptedRecord.topKEvaluationRecordDigest,
         targetContextDigest: targetAcceptedRecord.targetContextDigest,
-        cTargetDigest: targetAcceptedRecord.cTargetDigest,
+        targetCiphertextDigest: targetAcceptedRecord.targetCiphertextDigest,
         cpadProfileDigest: targetAcceptedRecord.cpadProfileDigest,
         thresholdDecryptionProfileDigest:
             targetAcceptedRecord.thresholdDecryptionProfileDigest,
@@ -198,7 +290,7 @@ const createDecryptionShare = (
             'TargetDecryptionCiphertextDigest',
             { target: 'accepted-target-decryption-ciphertext' },
         ),
-        qTargetDigest: targetAcceptedRecord.qTargetDigest,
+        targetBasisDigest: targetAcceptedRecord.targetBasisDigest,
         thresholdShareVerificationKeyRoot: deriveProtocolDigest(
             'ThresholdShareVerificationKeyRoot',
             { trustee: 'participant-1' },
@@ -231,6 +323,7 @@ const createDecryptionShare = (
             getParticipantSigningPublicKeyDigest('participant-1'),
             topKDecryptionShareDigest,
             {
+                contextDigest: payload.targetContextDigest,
                 manifestDigest: payload.electionManifestDigest,
             },
         ),
@@ -250,6 +343,7 @@ const signDecryptionShare = (
         decryptionShare.topKDecryptionShareDigest,
         {
             boardHeadDigest,
+            contextDigest: decryptionShare.targetContextDigest,
             manifestDigest: decryptionShare.electionManifestDigest,
         },
     ),
@@ -419,6 +513,53 @@ const createAcceptedTargetScenario = (): AcceptedTargetScenario => {
     };
 };
 
+describe('close record shells', () => {
+    it('accepts voting close records bound to the successor close head', () => {
+        const scenario = createVotingCloseScenario();
+
+        expect(
+            verifyCloseRecordShell({
+                boardEvidence: scenario.boardEvidence,
+                closeRecord: scenario.closeRecord,
+                closeRecordInclusionProof: scenario.closeRecordInclusionProof,
+                expectedElectionManifestDigest:
+                    closeRecordElectionManifestDigest,
+                expectedOrganizerIdentity: 'organizer',
+                expectedOrganizerPublicKeyDigest: organizerPublicKeyDigest,
+            }),
+        ).toMatchObject({
+            ok: true,
+            closeRecordDigest: scenario.closeRecord.closeRecordDigest,
+            postVotingClosedContextDigest:
+                scenario.closeRecord.postVotingClosedContextDigest,
+        });
+    });
+
+    it('rejects close records whose closed head is not the predecessor of the close publication head', () => {
+        const scenario = createVotingCloseScenario({
+            useGenesisAsClosedHead: true,
+        });
+
+        const result = verifyCloseRecordShell({
+            boardEvidence: scenario.boardEvidence,
+            closeRecord: scenario.closeRecord,
+            closeRecordInclusionProof: scenario.closeRecordInclusionProof,
+            expectedElectionManifestDigest: closeRecordElectionManifestDigest,
+            expectedOrganizerIdentity: 'organizer',
+            expectedOrganizerPublicKeyDigest: organizerPublicKeyDigest,
+        });
+
+        expect(result.ok).toBe(false);
+        expect(result.acceptedDigests).toEqual([]);
+        expect(result.closeRecordDigest).toBeUndefined();
+        expect(result.refusedObjects).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({ code: 'CloseRecordInvalid' }),
+            ]),
+        );
+    });
+});
+
 describe('target acceptance and local replay shells', () => {
     it('accepts a target only with exact finality and mandatory evaluation proof evidence', () => {
         const scenario = createAcceptedTargetScenario();
@@ -437,9 +578,12 @@ describe('target acceptance and local replay shells', () => {
                 ...scenario,
                 evaluationProofRecord: {
                     ...scenario.evaluationProofRecord,
-                    cTargetDigest: deriveProtocolDigest('CiphertextRoot', {
-                        target: 'wrong',
-                    }),
+                    targetCiphertextDigest: deriveProtocolDigest(
+                        'CiphertextRoot',
+                        {
+                            target: 'wrong',
+                        },
+                    ),
                 },
                 expectedOrganizerPublicKeyDigest: organizerPublicKeyDigest,
             }).refusedObjects,
@@ -448,6 +592,54 @@ describe('target acceptance and local replay shells', () => {
                 expect.objectContaining({
                     code: 'TargetAcceptedRecordInvalid',
                 }),
+            ]),
+        );
+
+        const unsignedMisplacedTargetAcceptedRecord =
+            createTargetAcceptedRecord(
+                scenario.targetFinalityRecord,
+                scenario.evaluationProofRecord,
+            );
+        const {
+            head: misplacedAcceptedHead,
+            inclusionProofs: misplacedAcceptedProofs,
+        } = createBoardHeadWithObjects(
+            3,
+            scenario.evaluationProofHead.headDigest,
+            [
+                {
+                    objectType: 'TargetAcceptedRecord',
+                    objectDigest:
+                        unsignedMisplacedTargetAcceptedRecord.targetAcceptedRecordDigest,
+                    boardPosition:
+                        unsignedMisplacedTargetAcceptedRecord.boardPosition + 1,
+                },
+            ],
+        );
+        const misplacedTargetAcceptedRecord = signTargetAcceptedRecord(
+            unsignedMisplacedTargetAcceptedRecord,
+            misplacedAcceptedHead.headDigest,
+        );
+        const misplacedTargetResult = verifyTargetAcceptedRecordShell({
+            boardEvidence: createBoardEvidence([
+                scenario.head0,
+                scenario.head1,
+                scenario.evaluationProofHead,
+                misplacedAcceptedHead,
+            ]),
+            targetAcceptedRecord: misplacedTargetAcceptedRecord,
+            targetAcceptedRecordInclusionProof: misplacedAcceptedProofs[0],
+            targetFinalityRecord: scenario.targetFinalityRecord,
+            targetFinalityVerification: scenario.targetFinalityVerification,
+            evaluationProofRecord: scenario.evaluationProofRecord,
+            expectedOrganizerPublicKeyDigest: organizerPublicKeyDigest,
+        });
+
+        expect(misplacedTargetResult.ok).toBe(false);
+        expect(misplacedTargetResult.acceptedDigests).toEqual([]);
+        expect(misplacedTargetResult.refusedObjects).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({ code: 'InclusionProofInvalid' }),
             ]),
         );
     });
@@ -623,6 +815,65 @@ describe('target acceptance and local replay shells', () => {
                         'ThresholdShareVerificationKeyRoot',
                         { trustee: 'wrong' },
                     ),
+                },
+                decryptionShareInclusionProof: inclusionProofs[0],
+                targetAcceptedRecord: scenario.targetAcceptedRecord,
+                targetAcceptedRecordVerification:
+                    scenario.targetAcceptedRecordVerification,
+                expectedTrusteePublicKeyDigest:
+                    getParticipantSigningPublicKeyDigest('participant-1'),
+            }).refusedObjects,
+        ).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({ code: 'DecryptionShareInvalid' }),
+            ]),
+        );
+
+        const {
+            head: misplacedShareHead,
+            inclusionProofs: misplacedShareProofs,
+        } = createBoardHeadWithObjects(4, scenario.acceptedHead.headDigest, [
+            {
+                objectType: 'TopKDecryptionShare',
+                objectDigest: decryptionShare.topKDecryptionShareDigest,
+                boardPosition: decryptionShare.boardPosition + 1,
+            },
+        ]);
+        const misplacedSignedDecryptionShare = signDecryptionShare(
+            decryptionShare,
+            misplacedShareHead.headDigest,
+        );
+        const misplacedShareResult = verifyTopKDecryptionShareShell({
+            boardEvidence: createBoardEvidence([
+                scenario.head0,
+                scenario.head1,
+                scenario.evaluationProofHead,
+                scenario.acceptedHead,
+                misplacedShareHead,
+            ]),
+            decryptionShare: misplacedSignedDecryptionShare,
+            decryptionShareInclusionProof: misplacedShareProofs[0],
+            targetAcceptedRecord: scenario.targetAcceptedRecord,
+            targetAcceptedRecordVerification:
+                scenario.targetAcceptedRecordVerification,
+            expectedTrusteePublicKeyDigest:
+                getParticipantSigningPublicKeyDigest('participant-1'),
+        });
+
+        expect(misplacedShareResult.ok).toBe(false);
+        expect(misplacedShareResult.acceptedDigests).toEqual([]);
+        expect(misplacedShareResult.refusedObjects).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({ code: 'InclusionProofInvalid' }),
+            ]),
+        );
+
+        expect(
+            verifyTopKDecryptionShareShell({
+                boardEvidence,
+                decryptionShare: {
+                    ...signedDecryptionShare,
+                    recoveryEpoch: -1,
                 },
                 decryptionShareInclusionProof: inclusionProofs[0],
                 targetAcceptedRecord: scenario.targetAcceptedRecord,

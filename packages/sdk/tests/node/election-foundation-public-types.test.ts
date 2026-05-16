@@ -3,12 +3,12 @@ import { describe, expect, it } from 'vitest';
 import publicSurface from '../../public-surface.json' with { type: 'json' };
 import type * as publicTypes from '../../src/index.js';
 
-type BlockedTargetPhaseTypes = [
-    // @ts-expect-error target-phase shell types are intentionally not public.
+type BlockedTargetAcceptanceTypes = [
+    // @ts-expect-error target-acceptance shell types are intentionally not public.
     publicTypes.LocalReplayRecord,
-    // @ts-expect-error target-phase shell types are intentionally not public.
+    // @ts-expect-error target-acceptance shell types are intentionally not public.
     publicTypes.TargetAcceptedRecord,
-    // @ts-expect-error target-phase shell types are intentionally not public.
+    // @ts-expect-error target-acceptance shell types are intentionally not public.
     publicTypes.TopKDecryptionShareShell,
 ];
 
@@ -44,7 +44,7 @@ type PublicFoundationTypes = [
 type PublicTypeSurfaceProbe = {
     readonly blockedPlaintextOracleTypes: BlockedPlaintextOracleTypes;
     readonly blockedPvssBallotTypes: BlockedPvssBallotTypes;
-    readonly blockedTargetPhaseTypes: BlockedTargetPhaseTypes;
+    readonly blockedTargetAcceptanceTypes: BlockedTargetAcceptanceTypes;
     readonly publicFoundationTypes: PublicFoundationTypes;
 };
 

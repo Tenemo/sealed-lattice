@@ -48,7 +48,7 @@ const countAtLeast = (actual: number | undefined, required: number): boolean =>
 const getCertifiedDecryptionShareQuorum = (
     context: CapabilityContext,
 ): number | undefined => {
-    if (context.thresholdProfile.appendixCShareSelectionProfile === null) {
+    if (context.thresholdProfile.targetBoundShareSelectionProfile === null) {
         return undefined;
     }
 
@@ -198,7 +198,10 @@ const evaluateDecryptionShare = (
     action: ProtocolAction,
     context: CapabilityContext,
 ): CapabilityDecision => {
-    if (context.lifecycleState !== 'TargetAccepted') {
+    if (
+        context.lifecycleState !== 'TargetAccepted' &&
+        context.lifecycleState !== 'AwaitingFirstDecryptionShares'
+    ) {
         return refuseAction(action, 'InvalidLifecycleState');
     }
     if (context.targetFinalityAccepted !== true) {
@@ -238,8 +241,18 @@ const evaluateCPADProfile = (
     if (context.cpadCertificatePresent !== true) {
         return refuseAction(action, 'MissingCPADCertificate');
     }
-    if (getCertifiedDecryptionShareQuorum(context) === undefined) {
+    const certifiedDecryptionShareQuorum =
+        getCertifiedDecryptionShareQuorum(context);
+    if (certifiedDecryptionShareQuorum === undefined) {
         return refuseAction(action, 'ThresholdDecryptionProfileNotCertified');
+    }
+    if (
+        !countAtLeast(
+            context.decryptionShareCount,
+            certifiedDecryptionShareQuorum,
+        )
+    ) {
+        return refuseAction(action, 'FirstThresholdSharesNotReached');
     }
     if (context.thresholdDecryptionCertificatePresent !== true) {
         return refuseAction(action, 'MissingThresholdDecryptionCertificate');
@@ -301,25 +314,20 @@ const evaluateClaimBearingEnvironment = (
     if (context.localRosterExternallyAccepted !== true) {
         return refuseAction(action, 'LocalRosterNotAccepted');
     }
-    if (context.rosterExternalAcceptanceDigest !== undefined) {
-        if (
-            context.actionContextRosterExternalAcceptanceDigest === undefined ||
-            context.actionContextRosterExternalAcceptanceDigest === null
-        ) {
-            return refuseAction(
-                action,
-                'RosterExternalAcceptanceDigestMissing',
-            );
-        }
-        if (
-            context.actionContextRosterExternalAcceptanceDigest !==
-            context.rosterExternalAcceptanceDigest
-        ) {
-            return refuseAction(
-                action,
-                'RosterExternalAcceptanceDigestMismatch',
-            );
-        }
+    if (
+        context.rosterExternalAcceptanceDigest === undefined ||
+        context.rosterExternalAcceptanceDigest.length === 0 ||
+        context.actionContextRosterExternalAcceptanceDigest === undefined ||
+        context.actionContextRosterExternalAcceptanceDigest === null ||
+        context.actionContextRosterExternalAcceptanceDigest.length === 0
+    ) {
+        return refuseAction(action, 'RosterExternalAcceptanceDigestMissing');
+    }
+    if (
+        context.actionContextRosterExternalAcceptanceDigest !==
+        context.rosterExternalAcceptanceDigest
+    ) {
+        return refuseAction(action, 'RosterExternalAcceptanceDigestMismatch');
     }
     if (!context.thresholdProfile.claimBearing) {
         return refuseAction(action, 'ProfileNotClaimBearing');
@@ -430,5 +438,7 @@ export const evaluateActionCapability = (
             return evaluateUnavailableFutureAction(action, context);
         case 'VerifyEncryptedEnvelope':
             return refuseAction(action, 'OperationUnavailable');
+        default:
+            return refuseAction(action as ProtocolAction, 'ForbiddenOperation');
     }
 };

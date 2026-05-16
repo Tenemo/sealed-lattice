@@ -48,7 +48,8 @@ mod tests {
         mutate_unsupported_object_version_fixture, mutate_wrong_evaluation_profile_fixture,
         parse_transcript_core_object, serialize_transcript_core_object,
     };
-    use crate::encoding::CanonicalErrorCode;
+    use crate::encoding::{CanonicalErrorCode, append_varuint};
+    use crate::transcript_core::types::FIELD_TAGS;
 
     #[test]
     fn canonical_object_round_trips_byte_identically() {
@@ -57,6 +58,27 @@ mod tests {
         let parsed = parse_transcript_core_object(&canonical_bytes).expect("object should parse");
 
         assert_eq!(serialize_transcript_core_object(&parsed), canonical_bytes);
+    }
+
+    #[test]
+    fn decode_hex_rejects_uppercase_hex() {
+        let error = decode_hex("AB").expect_err("uppercase hex must be non-canonical");
+
+        assert_eq!(error.code, CanonicalErrorCode::InvalidHex);
+    }
+
+    #[test]
+    fn malformed_list_count_rejects_without_allocation() {
+        let object = canonical_transcript_core_object(FULLY_VERIFIED_PASSIVE_MHE_PROFILE);
+        let mut bytes = Vec::new();
+        super::codec::append_transcript_core_header(&mut bytes, &object);
+        append_varuint(&mut bytes, 1);
+        append_varuint(&mut bytes, FIELD_TAGS);
+        append_varuint(&mut bytes, u64::from(u32::MAX));
+
+        let error = parse_transcript_core_object(&bytes).expect_err("malformed list should reject");
+
+        assert_eq!(error.code, CanonicalErrorCode::MalformedLength);
     }
 
     #[test]

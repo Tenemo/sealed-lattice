@@ -25,6 +25,14 @@ type BoardInclusionEvidence = {
     readonly refusedObjects: RefusalRecord[];
 };
 
+type SignedBoardShellVerificationBase = {
+    readonly ok: boolean;
+    readonly statusLabels: BoardConsistencyVerification['statusLabels'];
+    readonly acceptedDigests: readonly ProtocolDigest[];
+    readonly refusedObjects: readonly RefusalRecord[];
+    readonly forkEvidence: BoardConsistencyVerification['forkEvidence'];
+};
+
 const collectBoardInclusionEvidence = (input: {
     readonly boardEvidence: BoardConsistencyInput;
     readonly inclusionProof: InclusionProof;
@@ -80,3 +88,16 @@ export const collectSignedBoardInclusionEvidence = (input: {
         refusedObjects,
     };
 };
+
+export const buildSignedBoardShellVerificationBase = (
+    evidence: BoardInclusionEvidence & {
+        readonly acceptedDigests: readonly ProtocolDigest[];
+    },
+): SignedBoardShellVerificationBase => ({
+    ok: evidence.refusedObjects.length === 0,
+    statusLabels: evidence.boardResult.statusLabels,
+    acceptedDigests:
+        evidence.refusedObjects.length === 0 ? evidence.acceptedDigests : [],
+    refusedObjects: evidence.refusedObjects,
+    forkEvidence: evidence.boardResult.forkEvidence,
+});

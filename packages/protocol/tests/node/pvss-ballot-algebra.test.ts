@@ -5,6 +5,7 @@ import type {
     BallotPackageWitness,
     CanonicalBallotSetInput,
     PollSpec,
+    TestAggregateShare,
 } from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
@@ -13,6 +14,7 @@ import ballotAlgebraVectorJson from '../../../../test-vectors/pvss-ballot/ballot
 import canonicalBallotSetVectorJson from '../../../../test-vectors/pvss-ballot/canonical-ballot-set.json' with { type: 'json' };
 import { deriveThresholdProfile } from '../../src/lifecycle/thresholds';
 import { derivePlaintextTopKOracle } from '../../src/plaintext-oracle/index';
+import { deriveBallotPolynomialSetDigest } from '../../src/pvss-ballot/ballot-polynomials';
 import {
     deriveCanonicalBallotSet,
     deriveTestAggregateShares,
@@ -22,6 +24,7 @@ import {
     verifyTestAggregateShareOpening,
     verifyTestShareCommitmentOpening,
 } from '../../src/pvss-ballot/index';
+import { deriveReceiverShareVectors } from '../../src/pvss-ballot/receiver-shares';
 
 import {
     createBoardEvidence,
@@ -236,6 +239,108 @@ const mutateBallotPackage = (
     ...overrides,
 });
 
+const deriveBallotPackageDigestForTest = (
+    ballotPackage: Omit<
+        BallotPackageShell,
+        'ballotPackageDigest' | 'signature'
+    >,
+): string =>
+    deriveProtocolDigest('BallotPackageDigest', {
+        ballotPolynomialSetDigest: ballotPackage.ballotPolynomialSetDigest,
+        ceremonyId: ballotPackage.ceremonyId,
+        duplicateBallotPolicyDigest: ballotPackage.duplicateBallotPolicyDigest,
+        electionManifestDigest: ballotPackage.electionManifestDigest,
+        objectType: ballotPackage.objectType,
+        objectVersion: ballotPackage.objectVersion,
+        optionCount: ballotPackage.optionCount,
+        pollSpecDigest: ballotPackage.pollSpecDigest,
+        receiverPayloadDigests: ballotPackage.receiverPayloadDigests,
+        receiverShareCommitments: ballotPackage.receiverShareCommitments,
+        rosterDigest: ballotPackage.rosterDigest,
+        shareVectorWidth: ballotPackage.shareVectorWidth,
+        thresholdProfileDigest: ballotPackage.thresholdProfileDigest,
+        voterIdentity: ballotPackage.voterIdentity,
+        voterRosterPosition: ballotPackage.voterRosterPosition,
+    });
+
+const stripBallotPackageSignatureForTest = (
+    ballotPackage: BallotPackageShell,
+): Omit<BallotPackageShell, 'ballotPackageDigest' | 'signature'> => ({
+    objectType: ballotPackage.objectType,
+    objectVersion: ballotPackage.objectVersion,
+    ceremonyId: ballotPackage.ceremonyId,
+    electionManifestDigest: ballotPackage.electionManifestDigest,
+    rosterDigest: ballotPackage.rosterDigest,
+    pollSpecDigest: ballotPackage.pollSpecDigest,
+    thresholdProfileDigest: ballotPackage.thresholdProfileDigest,
+    duplicateBallotPolicyDigest: ballotPackage.duplicateBallotPolicyDigest,
+    voterIdentity: ballotPackage.voterIdentity,
+    voterRosterPosition: ballotPackage.voterRosterPosition,
+    optionCount: ballotPackage.optionCount,
+    shareVectorWidth: ballotPackage.shareVectorWidth,
+    ballotPolynomialSetDigest: ballotPackage.ballotPolynomialSetDigest,
+    receiverShareCommitments: ballotPackage.receiverShareCommitments,
+    receiverPayloadDigests: ballotPackage.receiverPayloadDigests,
+});
+
+const resignBallotPackageForTest = (
+    ballotPackage: Omit<
+        BallotPackageShell,
+        'ballotPackageDigest' | 'signature'
+    >,
+): BallotPackageShell => {
+    const ballotPackageDigest = deriveBallotPackageDigestForTest(ballotPackage);
+
+    return {
+        ...ballotPackage,
+        ballotPackageDigest,
+        signature: createSignature(
+            'BallotPackage',
+            'Voter',
+            ballotPackage.voterIdentity,
+            getParticipantSigningPublicKeyDigest(ballotPackage.voterIdentity),
+            ballotPackageDigest,
+            {
+                manifestDigest: ballotPackage.electionManifestDigest,
+                boardHeadDigest: null,
+            },
+        ),
+    };
+};
+
+const deriveAggregateShareCommitmentDigestForTest = (
+    aggregateShare: Omit<TestAggregateShare, 'aggregateShareCommitmentDigest'>,
+): string =>
+    deriveProtocolDigest('AggregateShareCommitmentDigest', {
+        aggregateCommitmentValues: aggregateShare.aggregateCommitmentValues,
+        aggregateShareVector: aggregateShare.aggregateShareVector,
+        ballotSetDigest: aggregateShare.ballotSetDigest,
+        objectType: aggregateShare.objectType,
+        shareVectorWidth: aggregateShare.shareVectorWidth,
+        trusteeIdentity: aggregateShare.trusteeIdentity,
+        trusteeRosterPosition: aggregateShare.trusteeRosterPosition,
+    });
+
+const rehashAggregateShareForTest = (
+    aggregateShare: Omit<TestAggregateShare, 'aggregateShareCommitmentDigest'>,
+): TestAggregateShare => ({
+    ...aggregateShare,
+    aggregateShareCommitmentDigest:
+        deriveAggregateShareCommitmentDigestForTest(aggregateShare),
+});
+
+const stripAggregateShareCommitmentDigestForTest = (
+    aggregateShare: TestAggregateShare,
+): Omit<TestAggregateShare, 'aggregateShareCommitmentDigest'> => ({
+    objectType: aggregateShare.objectType,
+    ballotSetDigest: aggregateShare.ballotSetDigest,
+    trusteeIdentity: aggregateShare.trusteeIdentity,
+    trusteeRosterPosition: aggregateShare.trusteeRosterPosition,
+    shareVectorWidth: aggregateShare.shareVectorWidth,
+    aggregateShareVector: aggregateShare.aggregateShareVector,
+    aggregateCommitmentValues: aggregateShare.aggregateCommitmentValues,
+});
+
 const incrementFieldElement = (fieldElement: number): number =>
     (fieldElement + 1) % 65_537;
 
@@ -299,6 +404,114 @@ describe('internal PVSS ballot algebra', () => {
                 thresholdProfile,
             }),
         ).toEqual([]);
+    });
+
+    it('rejects malformed test helper witnesses and digest references', () => {
+        const witness = createBallotWitness(1, [1, 2, 3, 4], 'guarded');
+        const commitmentWitness = witness.shareCommitmentWitnesses[0];
+        const unsignedMalformedPackage = {
+            ...witness.ballotPackage,
+            receiverShareCommitments:
+                witness.ballotPackage.receiverShareCommitments.map(
+                    (commitment, commitmentIndex) =>
+                        commitmentIndex === 0
+                            ? {
+                                  ...commitment,
+                                  shareCommitmentDigest: 'not-a-digest',
+                              }
+                            : commitment,
+                ),
+            receiverPayloadDigests:
+                witness.ballotPackage.receiverPayloadDigests.map(
+                    (payload, payloadIndex) =>
+                        payloadIndex === 0
+                            ? {
+                                  ...payload,
+                                  payloadDigest: 'not-a-digest',
+                              }
+                            : payload,
+                ),
+        };
+        const malformedPackage = resignBallotPackageForTest(
+            stripBallotPackageSignatureForTest(unsignedMalformedPackage),
+        );
+        const malformedPolynomialSet = {
+            ...witness.polynomialSet,
+            optionPolynomials: witness.polynomialSet.optionPolynomials.map(
+                (optionPolynomial, optionIndex) =>
+                    optionIndex === 0
+                        ? {
+                              ...optionPolynomial,
+                              optionOrdinal: 99,
+                          }
+                        : optionPolynomial,
+            ),
+        };
+        const malformedPolynomialSetWithDigest = {
+            ...malformedPolynomialSet,
+            ballotPolynomialSetDigest: deriveBallotPolynomialSetDigest({
+                normalizedBallot: malformedPolynomialSet.normalizedBallot,
+                optionPolynomials: malformedPolynomialSet.optionPolynomials,
+                pvssThreshold: malformedPolynomialSet.pvssThreshold,
+            }),
+        };
+
+        expect(() => createBallotWitness(1, [1, 2, 3, 4], '')).toThrow(
+            'fixture entropy',
+        );
+        expect(
+            verifyTestShareCommitmentOpening({
+                ...commitmentWitness,
+                commitment: {
+                    ...commitmentWitness.commitment,
+                    objectType: 'WrongCommitment' as 'TestShareCommitment',
+                },
+            }),
+        ).toBe(false);
+        expect(
+            verifyTestShareCommitmentOpening({
+                ...commitmentWitness,
+                commitment: {
+                    ...commitmentWitness.commitment,
+                    shareCommitmentDigest: 'not-a-digest',
+                },
+            }),
+        ).toBe(false);
+        expect(
+            verifyBallotPackageShell({
+                ballotPackage: malformedPackage,
+                ceremonyId,
+                electionManifestDigest,
+                rosterDigest,
+                pollSpecDigest,
+                thresholdProfileDigest,
+                duplicateBallotPolicyDigest:
+                    manifestPolicyDigests.duplicateBallotPolicyDigest,
+                optionCount: pollSpec.options.length,
+                rosterEntries,
+                thresholdProfile,
+            }).map((refusal) => refusal.code),
+        ).toContain('BallotPackageInvalid');
+        expect(() =>
+            deriveReceiverShareVectors({
+                polynomialSet: {
+                    ...witness.polynomialSet,
+                    ballotPolynomialSetDigest: deriveProtocolDigest(
+                        'BallotPolynomialSetDigest',
+                        { stale: true },
+                    ),
+                },
+                rosterEntries,
+                thresholdProfile,
+            }),
+        ).toThrow('canonical ballot polynomial set digest');
+        expect(() =>
+            deriveReceiverShareVectors({
+                polynomialSet: malformedPolynomialSetWithDigest,
+                rosterEntries,
+                thresholdProfile,
+            }),
+        ).toThrow('canonical option polynomial slots');
     });
 
     it('selects the last valid ballot before close and records invalid or late candidates', () => {
@@ -413,16 +626,29 @@ describe('internal PVSS ballot algebra', () => {
         const ballotSet = deriveCanonicalBallotSet(
             createBallotSetInput(witnesses),
         );
+        expect(() =>
+            deriveTestAggregateShares({
+                ballotSet: {
+                    ...ballotSet,
+                    countedBallots: ballotSet.countedBallots.slice(1),
+                },
+                ballotWitnesses: witnesses,
+                rosterEntries,
+                thresholdProfile,
+            }),
+        ).toThrow('canonical ballot-set digest');
         const aggregateShareSet = deriveTestAggregateShares({
             ballotSet,
             ballotWitnesses: [...witnesses].reverse(),
             rosterEntries,
             thresholdProfile,
         });
+        const selectedAggregateShares = aggregateShareSet.aggregateShares
+            .slice(0, thresholdProfile.pvssThreshold)
+            .map((witness) => witness.aggregateShare);
         const reconstructedTally = reconstructAggregateTallyFromShares({
-            aggregateShares: aggregateShareSet.aggregateShares
-                .slice(0, thresholdProfile.pvssThreshold)
-                .map((witness) => witness.aggregateShare),
+            aggregateShares: selectedAggregateShares,
+            ballotSetDigest: aggregateShareSet.ballotSetDigest,
             optionCount: pollSpec.options.length,
             thresholdProfile,
         });
@@ -470,9 +696,10 @@ describe('internal PVSS ballot algebra', () => {
         );
         expect(() =>
             reconstructAggregateTallyFromShares({
-                aggregateShares: aggregateShareSet.aggregateShares
-                    .slice(0, thresholdProfile.pvssThreshold - 1)
-                    .map((witness) => witness.aggregateShare),
+                aggregateShares: selectedAggregateShares.slice(
+                    0,
+                    thresholdProfile.pvssThreshold - 1,
+                ),
                 optionCount: pollSpec.options.length,
                 thresholdProfile,
             }),
@@ -490,20 +717,101 @@ describe('internal PVSS ballot algebra', () => {
         ).toBe(false);
         expect(() =>
             reconstructAggregateTallyFromShares({
-                aggregateShares: aggregateShareSet.aggregateShares
-                    .slice(0, thresholdProfile.pvssThreshold)
-                    .map((aggregateWitness, aggregateWitnessIndex) =>
-                        aggregateWitnessIndex === 0
-                            ? {
-                                  ...aggregateWitness.aggregateShare,
-                                  trusteeRosterPosition: 999,
-                              }
-                            : aggregateWitness.aggregateShare,
-                    ),
+                aggregateShares: selectedAggregateShares.map(
+                    (aggregateShare, aggregateShareIndex) => {
+                        if (aggregateShareIndex !== 0) {
+                            return aggregateShare;
+                        }
+                        return rehashAggregateShareForTest({
+                            ...stripAggregateShareCommitmentDigestForTest(
+                                aggregateShare,
+                            ),
+                            trusteeRosterPosition: 999,
+                        });
+                    },
+                ),
                 optionCount: pollSpec.options.length,
                 thresholdProfile,
             }),
         ).toThrow('within the frozen roster');
+        expect(() =>
+            reconstructAggregateTallyFromShares({
+                aggregateShares: selectedAggregateShares,
+                ballotSetDigest: deriveProtocolDigest('BallotSetDigest', {
+                    marker: 'wrong-ballot-set',
+                }),
+                optionCount: pollSpec.options.length,
+                thresholdProfile,
+            }),
+        ).toThrow('expected ballot set');
+        expect(() =>
+            reconstructAggregateTallyFromShares({
+                aggregateShares: selectedAggregateShares.map(
+                    (aggregateShare, aggregateShareIndex) => {
+                        if (aggregateShareIndex !== 0) {
+                            return aggregateShare;
+                        }
+                        return rehashAggregateShareForTest({
+                            ...stripAggregateShareCommitmentDigestForTest(
+                                aggregateShare,
+                            ),
+                            ballotSetDigest: deriveProtocolDigest(
+                                'BallotSetDigest',
+                                { marker: 'mixed-ballot-set' },
+                            ),
+                        });
+                    },
+                ),
+                optionCount: pollSpec.options.length,
+                thresholdProfile,
+            }),
+        ).toThrow('same ballot set');
+        expect(() =>
+            reconstructAggregateTallyFromShares({
+                aggregateShares: selectedAggregateShares.map(
+                    (aggregateShare, aggregateShareIndex) => {
+                        if (aggregateShareIndex !== 0) {
+                            return aggregateShare;
+                        }
+                        return rehashAggregateShareForTest({
+                            ...stripAggregateShareCommitmentDigestForTest(
+                                aggregateShare,
+                            ),
+                            aggregateShareVector:
+                                aggregateShare.aggregateShareVector.map(
+                                    (fieldElement, fieldIndex) =>
+                                        fieldIndex === pollSpec.options.length
+                                            ? incrementFieldElement(
+                                                  fieldElement,
+                                              )
+                                            : fieldElement,
+                                ),
+                        });
+                    },
+                ),
+                optionCount: pollSpec.options.length,
+                thresholdProfile,
+            }),
+        ).toThrow('zero-padded');
+        expect(() =>
+            reconstructAggregateTallyFromShares({
+                aggregateShares: selectedAggregateShares.map(
+                    (aggregateShare, aggregateShareIndex) =>
+                        aggregateShareIndex === 0
+                            ? {
+                                  ...aggregateShare,
+                                  aggregateShareCommitmentDigest:
+                                      deriveProtocolDigest(
+                                          'AggregateShareCommitmentDigest',
+                                          { marker: 'stale' },
+                                      ),
+                              }
+                            : aggregateShare,
+                ),
+                optionCount: pollSpec.options.length,
+                thresholdProfile,
+            }),
+        ).toThrow('canonical aggregate share commitment');
     });
 
     it('rejects aggregate witnesses whose private shares no longer match the counted package', () => {

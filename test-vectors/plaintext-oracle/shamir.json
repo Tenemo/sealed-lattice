@@ -1,43 +1,147 @@
 {
   "schemaVersion": 1,
   "polynomial": {
-    "coefficients": [42, 5, 7, 9, 11, 13, 15]
+    "coefficients": [
+      42,
+      5,
+      7,
+      9,
+      11,
+      13,
+      15
+    ]
   },
   "shares": [
-    { "rosterPosition": 1, "value": 102 },
-    { "rosterPosition": 2, "value": 1704 },
-    { "rosterPosition": 3, "value": 15348 },
-    { "rosterPosition": 4, "value": 12781 },
-    { "rosterPosition": 5, "value": 21094 },
-    { "rosterPosition": 6, "value": 31008 },
-    { "rosterPosition": 7, "value": 47034 },
-    { "rosterPosition": 8, "value": 17359 },
-    { "rosterPosition": 9, "value": 36680 },
-    { "rosterPosition": 10, "value": 35542 },
-    { "rosterPosition": 11, "value": 4772 },
-    { "rosterPosition": 12, "value": 34102 },
-    { "rosterPosition": 13, "value": 33907 },
-    { "rosterPosition": 14, "value": 57576 },
-    { "rosterPosition": 15, "value": 44850 },
-    { "rosterPosition": 16, "value": 34719 },
-    { "rosterPosition": 17, "value": 61434 },
-    { "rosterPosition": 18, "value": 61319 },
-    { "rosterPosition": 19, "value": 52531 },
-    { "rosterPosition": 20, "value": 63472 }
+    {
+      "rosterPosition": 1,
+      "value": 102
+    },
+    {
+      "rosterPosition": 2,
+      "value": 1704
+    },
+    {
+      "rosterPosition": 3,
+      "value": 15348
+    },
+    {
+      "rosterPosition": 4,
+      "value": 12781
+    },
+    {
+      "rosterPosition": 5,
+      "value": 21094
+    },
+    {
+      "rosterPosition": 6,
+      "value": 31008
+    },
+    {
+      "rosterPosition": 7,
+      "value": 47034
+    },
+    {
+      "rosterPosition": 8,
+      "value": 17359
+    },
+    {
+      "rosterPosition": 9,
+      "value": 36680
+    },
+    {
+      "rosterPosition": 10,
+      "value": 35542
+    },
+    {
+      "rosterPosition": 11,
+      "value": 4772
+    },
+    {
+      "rosterPosition": 12,
+      "value": 34102
+    },
+    {
+      "rosterPosition": 13,
+      "value": 33907
+    },
+    {
+      "rosterPosition": 14,
+      "value": 57576
+    },
+    {
+      "rosterPosition": 15,
+      "value": 44850
+    },
+    {
+      "rosterPosition": 16,
+      "value": 34719
+    },
+    {
+      "rosterPosition": 17,
+      "value": 61434
+    },
+    {
+      "rosterPosition": 18,
+      "value": 61319
+    },
+    {
+      "rosterPosition": 19,
+      "value": 52531
+    },
+    {
+      "rosterPosition": 20,
+      "value": 63472
+    }
   ],
-  "selectedContributorRosterPositions": [1, 3, 5, 8, 13, 17, 20],
+  "selectedContributorRosterPositions": [
+    1,
+    3,
+    5,
+    8,
+    13,
+    17,
+    20
+  ],
   "selectedContributorReport": {
     "centeredL1CoefficientSum": 116861,
     "maxCenteredAbsCoefficient": 28091,
-    "reportDigest": "8c61a0055ae4b7982537ab025e466a2d803563891689a52c9ec0436d3961b95a0d665e112593c15498705e11c3612fb4a4277156a34dfb70dd5d19bac5b50377",
+    "reportDigest": "69e9686cdf0e3259667289c613eefb51681c2c01d68903c43e02b257df0d9ba6b9d0050fb67ef4c5de0689ed773a34c77c309010ee2958210d7e453a4dddbc9b",
     "coefficients": [
-      { "rosterPosition": 1, "coefficient": 7240, "centeredCoefficient": 7240 },
-      { "rosterPosition": 3, "coefficient": 37446, "centeredCoefficient": -28091 },
-      { "rosterPosition": 5, "coefficient": 53707, "centeredCoefficient": -11830 },
-      { "rosterPosition": 8, "coefficient": 48198, "centeredCoefficient": -17339 },
-      { "rosterPosition": 13, "coefficient": 64367, "centeredCoefficient": -1170 },
-      { "rosterPosition": 17, "coefficient": 26115, "centeredCoefficient": 26115 },
-      { "rosterPosition": 20, "coefficient": 25076, "centeredCoefficient": 25076 }
+      {
+        "coefficient": 7240,
+        "centeredCoefficient": 7240,
+        "rosterPosition": 1
+      },
+      {
+        "coefficient": 37446,
+        "centeredCoefficient": -28091,
+        "rosterPosition": 3
+      },
+      {
+        "coefficient": 53707,
+        "centeredCoefficient": -11830,
+        "rosterPosition": 5
+      },
+      {
+        "coefficient": 48198,
+        "centeredCoefficient": -17339,
+        "rosterPosition": 8
+      },
+      {
+        "coefficient": 64367,
+        "centeredCoefficient": -1170,
+        "rosterPosition": 13
+      },
+      {
+        "coefficient": 26115,
+        "centeredCoefficient": 26115,
+        "rosterPosition": 17
+      },
+      {
+        "coefficient": 25076,
+        "centeredCoefficient": 25076,
+        "rosterPosition": 20
+      }
     ]
   },
   "mandatoryWorstCaseReport": {
@@ -45,9 +149,25 @@
     "threshold": 7,
     "exhaustiveSubsetCount": 77520,
     "maxCenteredAbsCoefficient": 32768,
-    "maxCenteredAbsContributorRosterPositions": [1, 2, 3, 4, 6, 14, 20],
+    "maxCenteredAbsContributorRosterPositions": [
+      1,
+      2,
+      3,
+      4,
+      6,
+      14,
+      20
+    ],
     "maxCenteredL1CoefficientSum": 196612,
-    "maxCenteredL1ContributorRosterPositions": [2, 10, 11, 12, 14, 17, 20],
-    "reportDigest": "0bda217d09f5d4cabfc2dc3c6be7135246ec20b4ea4c50e87d98eb3fb493917800afd1f495dd70f43080eee3b37667238063c77629cce2be69ebd62a91e604e7"
+    "maxCenteredL1ContributorRosterPositions": [
+      2,
+      10,
+      11,
+      12,
+      14,
+      17,
+      20
+    ],
+    "reportDigest": "1e8de522899f281b8de3a07b608ee220b6770212a1b9d504ff999aea7c2172aa3553e3e9a268becd63fd4e640b1140011a2665499f8b46256175ca3d2b123f5e"
   }
 }

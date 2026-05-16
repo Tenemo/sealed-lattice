@@ -8,6 +8,7 @@ import type {
 } from '@sealed-lattice/types';
 
 import {
+    deriveBoardEntryMerklePath,
     deriveBoardEntryDigest,
     deriveBoardHeadDigest,
     deriveBoardRootDigest,
@@ -109,7 +110,11 @@ export const createInclusionProof = (
         includedObjectDigest,
         boardEntryDigest,
         boardRoot: deriveBoardRootDigest(resolvedBoardEntryDigests),
-        boardEntryDigests: resolvedBoardEntryDigests,
+        boardEntryCount: resolvedBoardEntryDigests.length,
+        boardEntryMerklePath: deriveBoardEntryMerklePath(
+            resolvedBoardEntryDigests,
+            boardPosition,
+        ),
     };
 
     return {
@@ -208,13 +213,14 @@ export const createWitnessCheckpoint = (
             witnessIdentity,
         },
     ),
+    electionManifestDigest: string | null = null,
     overrides: Partial<WitnessCheckpoint> = {},
 ): WitnessCheckpoint => {
     const checkpointPayload = {
         objectType: 'WitnessCheckpoint',
         objectVersion: 1,
         ceremonyId,
-        targetPhase: 'target',
+        targetFinalityScope: 'target',
         targetProposalDigest,
         targetFinalityCheckpointDigest,
         witnessPolicyDigest,
@@ -237,6 +243,7 @@ export const createWitnessCheckpoint = (
             checkpointDigest,
             {
                 boardHeadDigest: finalizedBoardHeadDigest,
+                manifestDigest: electionManifestDigest,
             },
         ),
     };
@@ -258,7 +265,7 @@ export const createTargetFinalityRecord = (
             { ceremonyId, marker: 'top-k-evaluation' },
         ),
         topKEvaluationRecordDigest,
-        cTopKDigest: deriveProtocolDigest('CiphertextRoot', {
+        topKCiphertextDigest: deriveProtocolDigest('CiphertextRoot', {
             ceremonyId,
             marker: 'c-top-k',
         }),
@@ -266,7 +273,7 @@ export const createTargetFinalityRecord = (
             ceremonyId,
             marker: 'top-k-mask',
         }),
-        cTargetDigest: deriveProtocolDigest('CiphertextRoot', {
+        targetCiphertextDigest: deriveProtocolDigest('CiphertextRoot', {
             ceremonyId,
             marker: 'c-target',
         }),
@@ -307,13 +314,14 @@ export const createTargetFinalityRecord = (
                 finalizedHead.headDigest,
                 targetProposalDigest,
                 targetFinalityCheckpointDigest,
+                proposalPayload.electionManifestDigest,
             ),
         );
     const payload = {
         objectType: 'TargetFinalityRecord',
         objectVersion: 1,
         ceremonyId,
-        targetPhase: 'target',
+        targetFinalityScope: 'target',
         targetProposalDigest,
         targetFinalityCheckpoint,
         witnessPolicyDigest,

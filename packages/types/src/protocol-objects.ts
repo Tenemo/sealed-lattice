@@ -150,7 +150,7 @@ export type ProtocolRefusalCode =
     | 'SparseTargetInvalid'
     | 'TargetAcceptedRecordInvalid'
     | 'TargetFinalityPolicyMismatch'
-    | 'TargetPhaseAuthorizationFailure'
+    | 'TargetAcceptanceAuthorizationFailure'
     | 'TopKEvaluationRecordNotIncluded'
     | 'StaleRecoveryEpoch'
     | 'UnknownBoardHead'
@@ -178,7 +178,7 @@ export type ConflictingHeadEvidence = {
     readonly boardPolicyDigest: ProtocolDigest;
     readonly leftBoardHeadDigest: ProtocolDigest;
     readonly rightBoardHeadDigest: ProtocolDigest;
-    readonly targetPhase?: string;
+    readonly targetFinalityScope?: string;
     readonly equivocatingWitnessIdentities?: readonly string[];
 };
 

@@ -13,7 +13,12 @@ import type {
     ThresholdProfile,
 } from '@sealed-lattice/types';
 
-import { createRefusal } from '../common/verification-helpers.js';
+import {
+    createRefusal,
+    defaultSignedRootContextDigest,
+    isProtocolDigestString,
+    signedObjectRootByteLength,
+} from '../common/verification-helpers.js';
 
 import { deriveBallotPolynomialSet } from './ballot-polynomials.js';
 import {
@@ -32,7 +37,7 @@ type BallotPackageShellPayload = Omit<
     'ballotPackageDigest' | 'signature'
 >;
 
-export const deriveBallotPackageDigest = (
+const deriveBallotPackageDigest = (
     ballotPackage: BallotPackageShellPayload,
 ): ProtocolDigest =>
     deriveProtocolDigest('BallotPackageDigest', {
@@ -186,6 +191,16 @@ const collectReceiverReferenceRefusals = (input: {
             );
         }
         if (commitment !== undefined) {
+            if (!isProtocolDigestString(commitment.shareCommitmentDigest)) {
+                refusedObjects.push(
+                    createRefusal(
+                        'BallotPackageInvalid',
+                        'Ballot package receiver commitments must bind canonical digest references.',
+                        input.ballotPackage.ballotPackageDigest,
+                        'BallotPackage',
+                    ),
+                );
+            }
             const commitmentKey = [
                 commitment.trusteeIdentity,
                 commitment.trusteeRosterPosition,
@@ -203,6 +218,16 @@ const collectReceiverReferenceRefusals = (input: {
             commitmentKeys.add(commitmentKey);
         }
         if (payload !== undefined) {
+            if (!isProtocolDigestString(payload.payloadDigest)) {
+                refusedObjects.push(
+                    createRefusal(
+                        'BallotPackageInvalid',
+                        'Ballot package receiver payloads must bind canonical digest references.',
+                        input.ballotPackage.ballotPackageDigest,
+                        'BallotPackage',
+                    ),
+                );
+            }
             const payloadKey = [
                 payload.receiverIdentity,
                 payload.receiverRosterPosition,
@@ -351,6 +376,10 @@ export const verifyBallotPackageShell = (input: {
                 manifestDigest: ballotPackage.electionManifestDigest,
                 objectRoot: ballotPackage.ballotPackageDigest,
                 boardHeadDigest: null,
+                byteLength: signedObjectRootByteLength,
+                recoveryEpoch: 0,
+                deviceEpoch: 0,
+                contextDigest: defaultSignedRootContextDigest,
             },
         );
 

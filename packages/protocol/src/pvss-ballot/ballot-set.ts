@@ -18,6 +18,7 @@ import {
 } from '../board/index.js';
 import {
     buildBoardHeadMap,
+    compareCanonicalStrings,
     createRefusal,
     isNonNegativeInteger,
     uniqueStrings,
@@ -45,6 +46,8 @@ const deriveBallotSetDigest = (input: {
         duplicateBallotPolicyDigest: input.base.duplicateBallotPolicyDigest,
         electionManifestDigest: input.base.electionManifestDigest,
         pollSpecDigest: input.base.pollSpecDigest,
+        includeRejectedCandidateSummariesInDigest:
+            input.base.includeRejectedCandidateSummariesInDigest === true,
         rejectedCandidates:
             input.base.includeRejectedCandidateSummariesInDigest === true
                 ? input.rejectedCandidates.map((candidate) => ({
@@ -57,6 +60,47 @@ const deriveBallotSetDigest = (input: {
         rosterDigest: input.base.rosterDigest,
         thresholdProfileDigest: input.base.thresholdProfileDigest,
         votingClosedBoardHeadDigest: input.base.votingClosedBoardHeadDigest,
+    });
+
+export const deriveBallotSetDigestFromCanonicalSet = (
+    ballotSet: Pick<
+        CanonicalBallotSet,
+        | 'ceremonyId'
+        | 'closeRecordDigest'
+        | 'countedBallots'
+        | 'duplicateBallotPolicyDigest'
+        | 'electionManifestDigest'
+        | 'includeRejectedCandidateSummariesInDigest'
+        | 'pollSpecDigest'
+        | 'rejectedCandidates'
+        | 'rosterDigest'
+        | 'thresholdProfileDigest'
+        | 'votingClosedBoardHeadDigest'
+    >,
+): ProtocolDigest =>
+    deriveProtocolDigest('BallotSetDigest', {
+        ceremonyId: ballotSet.ceremonyId,
+        closeRecordDigest: ballotSet.closeRecordDigest,
+        countedBallotPackageDigests: ballotSet.countedBallots.map(
+            (candidate) => candidate.ballotPackage.ballotPackageDigest,
+        ),
+        duplicateBallotPolicyDigest: ballotSet.duplicateBallotPolicyDigest,
+        electionManifestDigest: ballotSet.electionManifestDigest,
+        includeRejectedCandidateSummariesInDigest:
+            ballotSet.includeRejectedCandidateSummariesInDigest,
+        pollSpecDigest: ballotSet.pollSpecDigest,
+        rejectedCandidates:
+            ballotSet.includeRejectedCandidateSummariesInDigest === true
+                ? ballotSet.rejectedCandidates.map((candidate) => ({
+                      ballotPackageDigest: candidate.ballotPackageDigest,
+                      refusalCodes: candidate.refusalCodes,
+                      signedBoardOrder: candidate.signedBoardOrder ?? null,
+                      voterIdentity: candidate.voterIdentity ?? null,
+                  }))
+                : [],
+        rosterDigest: ballotSet.rosterDigest,
+        thresholdProfileDigest: ballotSet.thresholdProfileDigest,
+        votingClosedBoardHeadDigest: ballotSet.votingClosedBoardHeadDigest,
     });
 
 const candidateSignedBoardOrder = (
@@ -89,10 +133,12 @@ const sortCandidateBallots = (
                 leftSignedBoardOrder,
                 rightSignedBoardOrder,
             ) ||
-            left.ballotPackage.ballotPackageDigest.localeCompare(
+            compareCanonicalStrings(
+                left.ballotPackage.ballotPackageDigest,
                 right.ballotPackage.ballotPackageDigest,
             ) ||
-            left.inclusionProof.inclusionProofDigest.localeCompare(
+            compareCanonicalStrings(
+                left.inclusionProof.inclusionProofDigest,
                 right.inclusionProof.inclusionProofDigest,
             )
         );
@@ -347,7 +393,8 @@ const deriveCanonicalBallotSetUnchecked = (
                 left.signedBoardOrder,
                 right.signedBoardOrder,
             ) ||
-            left.ballotPackage.ballotPackageDigest.localeCompare(
+            compareCanonicalStrings(
+                left.ballotPackage.ballotPackageDigest,
                 right.ballotPackage.ballotPackageDigest,
             ),
     )) {
@@ -359,7 +406,8 @@ const deriveCanonicalBallotSetUnchecked = (
                 left.signedBoardOrder,
                 right.signedBoardOrder,
             ) ||
-            left.ballotPackage.ballotPackageDigest.localeCompare(
+            compareCanonicalStrings(
+                left.ballotPackage.ballotPackageDigest,
                 right.ballotPackage.ballotPackageDigest,
             ),
     );
@@ -395,6 +443,8 @@ const deriveCanonicalBallotSetUnchecked = (
         duplicateBallotPolicyDigest: input.duplicateBallotPolicyDigest,
         votingClosedBoardHeadDigest: input.votingClosedBoardHeadDigest,
         closeRecordDigest: input.closeRecordDigest,
+        includeRejectedCandidateSummariesInDigest:
+            input.includeRejectedCandidateSummariesInDigest === true,
         countedBallots,
         rejectedCandidates,
         ballotSetDigest,
@@ -425,6 +475,8 @@ export const deriveCanonicalBallotSet = (
             duplicateBallotPolicyDigest: input.duplicateBallotPolicyDigest,
             votingClosedBoardHeadDigest: input.votingClosedBoardHeadDigest,
             closeRecordDigest: input.closeRecordDigest,
+            includeRejectedCandidateSummariesInDigest:
+                input.includeRejectedCandidateSummariesInDigest === true,
             countedBallots: [],
             rejectedCandidates: [],
         };

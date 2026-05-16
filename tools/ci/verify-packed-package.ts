@@ -38,7 +38,7 @@ type PackDryRunMetadataEntry = {
 const supportedPackageManagers = new Set<PackageManager>(['npm', 'pnpm']);
 const forbiddenPublishedRuntimePathFragments = [
     'dist/internal/election-foundation/plaintext-oracle/',
-    'dist/internal/election-foundation/target-phase/',
+    'dist/internal/election-foundation/target-acceptance/',
 ] as const;
 const requiredPublishedPackageFilePaths = [
     'LICENSE',

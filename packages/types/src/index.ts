@@ -1,6 +1,7 @@
 export * from './board-target.js';
 export * from './lifecycle.js';
 export * from './plaintext-oracle.js';
+export * from './profile-identifiers.js';
 export * from './pvss-ballot.js';
 export * from './protocol-digest.js';
 export * from './protocol-objects.js';

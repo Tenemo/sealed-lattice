@@ -64,13 +64,18 @@ export type ManifestPolicyDigests = {
 /** Opaque cryptographic implementation bindings embedded in a manifest. */
 export type ManifestOpaqueBindings = {
     readonly bridgeProofProfileId: string;
-    readonly directQDataBridgeProfileId: string;
+    readonly directTargetBasisDataBridgeProfileId: string;
+    readonly heParamDigest: ProtocolDigest;
     readonly bgvProfileDigest: ProtocolDigest;
     readonly bgvPublicKeyRoot: ProtocolDigest;
     readonly collectivePublicKeyRoot: ProtocolDigest;
     readonly canonicalCiphertextConventionDigest: ProtocolDigest;
+    readonly bridgeProofProfileDigest: ProtocolDigest;
     readonly bgvBatchEncoderDigest: ProtocolDigest;
     readonly bridgeLayoutDigest: ProtocolDigest;
+    readonly evaluationNoiseProfileDigest: ProtocolDigest;
+    readonly heEvaluationNoiseCertDigest: ProtocolDigest;
+    readonly allowedEvaluatorOpsDigest: ProtocolDigest;
     readonly evaluationProofProfileId: string;
     readonly evaluationProofProfileDigest: ProtocolDigest;
     readonly thresholdDecryptionProfileId: string;
@@ -78,7 +83,7 @@ export type ManifestOpaqueBindings = {
     readonly bgvAsyncThresholdCPADProfileDigest: ProtocolDigest;
     readonly cpadProfileId: string;
     readonly cpadProfileDigest: ProtocolDigest;
-    readonly qTargetDigest: ProtocolDigest;
+    readonly targetBasisDigest: ProtocolDigest;
     readonly mobileProfileId: string;
     readonly bridgeMobileCertificatePolicyDigest: ProtocolDigest;
 };

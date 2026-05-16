@@ -24,7 +24,7 @@ export type HeBackendCorruptionModel =
           readonly certificateDigest: string;
       };
 
-/** How Appendix C filters invalid target-bound decryption shares. */
+/** How target-bound share selection filters invalid decryption shares. */
 export type DecryptionShareFilteringMode =
     | 'ProofVerifiedSharesOnly'
     | 'RobustDecodeAfterInvalidShareFiltering';
@@ -33,10 +33,12 @@ export type DecryptionShareFilteringMode =
 export type DecryptionShareSelectionRule =
     'FirstValidSharesInCanonicalBoardOrder';
 
-/** Appendix-C-certified target-bound decryption share-selection profile. */
-export type AppendixCShareSelectionProfile = {
+/** Certified target-bound decryption share-selection profile. */
+export type TargetBoundShareSelectionProfile = {
     readonly profileId: string;
     readonly certificateDigest: string;
+    readonly cpadProfileId: string;
+    readonly targetBasisDigest: ProtocolDigest;
     readonly decryptionShareQuorum: number;
     readonly minimumSharesForInterpolation: number;
     readonly minimumArrivalsForRobustDecode: number;
@@ -48,7 +50,7 @@ export type AppendixCShareSelectionProfile = {
 export type ThresholdProfileInput = {
     readonly rosterSize: number;
     readonly heBackendCorruptionModel?: HeBackendCorruptionModel;
-    readonly appendixCShareSelectionProfile?: AppendixCShareSelectionProfile;
+    readonly targetBoundShareSelectionProfile?: TargetBoundShareSelectionProfile;
     readonly unsafeMicroRosterAcknowledged?: boolean;
 };
 
@@ -81,7 +83,7 @@ export type ThresholdProfile = {
     readonly releaseQuorum: number;
     readonly aggregateContributionQuorum: number;
     readonly decryptionShareQuorum: number | null;
-    readonly appendixCShareSelectionProfile: AppendixCShareSelectionProfile | null;
+    readonly targetBoundShareSelectionProfile: TargetBoundShareSelectionProfile | null;
     readonly maximumRaceShares: number;
     readonly setupCompletionQuorum: number;
     readonly backendCorruptionModel: HeBackendCorruptionModel;

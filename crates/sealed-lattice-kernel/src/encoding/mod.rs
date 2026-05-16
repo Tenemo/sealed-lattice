@@ -3,7 +3,8 @@ use serde_json::{Value, json};
 
 use crate::{
     fixtures::{TranscriptCoreFixture, verify_fixture},
-    hashing::{RESERVED_ROOT_NAMESPACES, chunk_root, hash512_hex},
+    hashing::{RESERVED_ROOT_NAMESPACES, chunk_root, derive_protocol_digest, hash512_hex},
+    ring::{ShamirSharePoint, evaluate_plaintext_comparison, interpolate_shamir_constant_term},
     transcript_core::{analyze_canonical_object_hex, invalid_response},
 };
 
@@ -381,6 +382,39 @@ fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult<Value> {
                 "hash512": hash512_hex("transcript-core/raw", &[&bytes]),
             }))
         }
+        "DeriveProtocolDigest" => {
+            let namespace = read_string_field(&request, "namespace")?;
+            let value = request.get("value").ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::InvalidFixture,
+                    "value field is required",
+                )
+            })?;
+
+            Ok(json!({
+                "protocolDigest": derive_protocol_digest(namespace, value)?,
+            }))
+        }
+        "InterpolateShamirConstantTerm" => {
+            let share_points = read_share_points(&request)?;
+
+            Ok(json!({
+                "fieldElement": interpolate_shamir_constant_term(&share_points)?,
+            }))
+        }
+        "EvaluatePlaintextComparison" => {
+            let left_total_score = read_u64_field(&request, "leftTotalScore")?;
+            let right_total_score = read_u64_field(&request, "rightTotalScore")?;
+            let roster_size = read_u64_field(&request, "rosterSize")?;
+            let comparison =
+                evaluate_plaintext_comparison(left_total_score, right_total_score, roster_size)?;
+
+            Ok(json!({
+                "greaterThan": comparison.greater_than,
+                "equal": comparison.equal,
+                "scoreDifference": comparison.score_difference,
+            }))
+        }
         "VerifyFixture" => {
             let fixture_value = request.get("fixture").ok_or_else(|| {
                 CanonicalError::new(CanonicalErrorCode::InvalidFixture, "fixture is required")
@@ -400,6 +434,71 @@ fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult<Value> {
             format!("unsupported command: {command}"),
         ),
     }
+}
+
+fn read_string_field<'a>(request: &'a Value, field_name: &str) -> CanonicalResult<&'a str> {
+    request
+        .get(field_name)
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                format!("{field_name} must be a string"),
+            )
+        })
+}
+
+fn read_u64_field(request: &Value, field_name: &str) -> CanonicalResult<u64> {
+    request
+        .get(field_name)
+        .and_then(Value::as_u64)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                format!("{field_name} must be a non-negative integer"),
+            )
+        })
+}
+
+fn read_share_points(request: &Value) -> CanonicalResult<Vec<ShamirSharePoint>> {
+    let share_points = request
+        .get("sharePoints")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "sharePoints must be an array",
+            )
+        })?;
+
+    share_points
+        .iter()
+        .map(|share_point| {
+            let roster_position = share_point
+                .get("rosterPosition")
+                .and_then(Value::as_u64)
+                .ok_or_else(|| {
+                    CanonicalError::new(
+                        CanonicalErrorCode::InvalidFixture,
+                        "share point rosterPosition must be a non-negative integer",
+                    )
+                })?;
+            let value = share_point
+                .get("value")
+                .and_then(Value::as_u64)
+                .ok_or_else(|| {
+                    CanonicalError::new(
+                        CanonicalErrorCode::InvalidFixture,
+                        "share point value must be a non-negative integer",
+                    )
+                })?;
+
+            Ok(ShamirSharePoint {
+                roster_position,
+                value,
+            })
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -447,6 +546,64 @@ mod tests {
 
         assert!(response.contains("\"success\":false"));
         assert!(response.contains("\"InvalidFixture\""));
+    }
+
+    #[test]
+    fn command_derives_protocol_digest_with_kernel_canonical_json() {
+        let response = super::run_transcript_core_command_inner(
+            serde_json::json!({
+                "command": "DeriveProtocolDigest",
+                "namespace": "PollSpecDigest",
+                "value": {
+                    "poll": "main"
+                }
+            })
+            .to_string()
+            .as_bytes(),
+        )
+        .expect("protocol digest command should succeed");
+
+        assert_eq!(
+            response["protocolDigest"],
+            "423c71de65abadb5adc05d9b6b704252420bb738af888c62614c8afc53a2be808662585305e76738b23e4f20154f8779e3827c0c8f313455d84675924f4a2c83"
+        );
+    }
+
+    #[test]
+    fn command_exposes_kernel_field_interpolation() {
+        let response = super::run_transcript_core_command_inner(
+            serde_json::json!({
+                "command": "InterpolateShamirConstantTerm",
+                "sharePoints": [
+                    { "rosterPosition": 1, "value": 15 },
+                    { "rosterPosition": 2, "value": 25 }
+                ]
+            })
+            .to_string()
+            .as_bytes(),
+        )
+        .expect("field interpolation command should succeed");
+
+        assert_eq!(response["fieldElement"], 5);
+    }
+
+    #[test]
+    fn command_exposes_plaintext_comparison() {
+        let response = super::run_transcript_core_command_inner(
+            serde_json::json!({
+                "command": "EvaluatePlaintextComparison",
+                "leftTotalScore": 41,
+                "rightTotalScore": 40,
+                "rosterSize": 5
+            })
+            .to_string()
+            .as_bytes(),
+        )
+        .expect("plaintext comparison command should succeed");
+
+        assert_eq!(response["greaterThan"], 1);
+        assert_eq!(response["equal"], 0);
+        assert_eq!(response["scoreDifference"], 1);
     }
 
     #[test]

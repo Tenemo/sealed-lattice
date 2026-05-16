@@ -2,16 +2,34 @@
   "schemaVersion": 1,
   "layoutId": "WinnerRankTopK-v1",
   "layoutDigest": "916d8c90b291d37bd7a2854a23b52c3dbb3eb79ec53e8e9067907d3c30bb39f213758e3f5318e0594ed8e5eaebde690cc418b440736a177bc9fe1d63989a4e6f",
-  "targetDigest": "e9c99a95417070c74f45716823556c5a5013c526851aa4b9e9b1afe79f02dd2d305bef7dbfc33367c9c6cbb0d9c970f3caca26f95ea96a27502c9b86123adf3c",
+  "targetDigest": "fb6b11e44a6eeccb4a4828832d286e9d3d5fc1fb3092869b74b2a001cbcadad062309d54af1d09fec935357325c13df9486b9f21526ff0b3a485a919e416dc99",
   "target": {
-    "forbiddenSemanticSlots": [0, 0, 0, 0],
+    "forbiddenSemanticSlots": [
+      0,
+      0,
+      0,
+      0
+    ],
     "layoutDigest": "916d8c90b291d37bd7a2854a23b52c3dbb3eb79ec53e8e9067907d3c30bb39f213758e3f5318e0594ed8e5eaebde690cc418b440736a177bc9fe1d63989a4e6f",
     "layoutId": "WinnerRankTopK-v1",
     "optionCount": 4,
-    "targetIdSlots": [1, 2, 0, 0],
-    "targetOrderSlots": [2, 1, 0, 0],
+    "targetIdSlots": [
+      1,
+      2,
+      0,
+      0
+    ],
+    "targetOrderSlots": [
+      2,
+      1,
+      0,
+      0
+    ],
     "topOptionCount": 2,
-    "targetDigest": "e9c99a95417070c74f45716823556c5a5013c526851aa4b9e9b1afe79f02dd2d305bef7dbfc33367c9c6cbb0d9c970f3caca26f95ea96a27502c9b86123adf3c"
+    "targetDigest": "fb6b11e44a6eeccb4a4828832d286e9d3d5fc1fb3092869b74b2a001cbcadad062309d54af1d09fec935357325c13df9486b9f21526ff0b3a485a919e416dc99"
   },
-  "expectedSelectedOptionOrdinals": [2, 1]
+  "expectedSelectedOptionOrdinals": [
+    2,
+    1
+  ]
 }

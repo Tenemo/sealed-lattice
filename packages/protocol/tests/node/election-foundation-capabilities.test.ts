@@ -1,4 +1,8 @@
-import type { CapabilityContext } from '@sealed-lattice/types';
+import {
+    cpadProfileId,
+    targetBoundShareSelectionProfileId,
+    type CapabilityContext,
+} from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -6,9 +10,11 @@ import {
     evaluateActionCapability,
 } from '../../src/index';
 
-const appendixCShareSelectionProfile = {
-    profileId: 'appendix-c-certified-first-valid-v1',
-    certificateDigest: 'appendix-c-certificate-digest',
+const targetBoundShareSelectionProfile = {
+    profileId: targetBoundShareSelectionProfileId,
+    certificateDigest: 'target-bound-certificate-digest',
+    cpadProfileId,
+    targetBasisDigest: 'target-basis-digest',
     decryptionShareQuorum: 9,
     minimumSharesForInterpolation: 7,
     minimumArrivalsForRobustDecode: 9,
@@ -19,7 +25,7 @@ const appendixCShareSelectionProfile = {
 const thresholdProfile = deriveThresholdProfile({ rosterSize: 20 });
 const certifiedThresholdProfile = deriveThresholdProfile({
     rosterSize: 20,
-    appendixCShareSelectionProfile,
+    targetBoundShareSelectionProfile,
 });
 
 const createContext = (
@@ -30,6 +36,8 @@ const createContext = (
     pollSpecValid: true,
     browserSupported: true,
     localRosterExternallyAccepted: true,
+    rosterExternalAcceptanceDigest: 'accepted-roster-digest',
+    actionContextRosterExternalAcceptanceDigest: 'accepted-roster-digest',
     ...overrides,
 });
 
@@ -69,7 +77,21 @@ describe('election foundation capability evaluator', () => {
                 'SubmitVote',
                 createContext({
                     lifecycleState: 'VotingOpen',
+                    rosterExternalAcceptanceDigest: undefined,
+                    actionContextRosterExternalAcceptanceDigest: undefined,
+                }),
+            ),
+        ).toMatchObject({
+            reason: 'RosterExternalAcceptanceDigestMissing',
+        });
+
+        expect(
+            evaluateActionCapability(
+                'SubmitVote',
+                createContext({
+                    lifecycleState: 'VotingOpen',
                     rosterExternalAcceptanceDigest: 'accepted-roster-digest',
+                    actionContextRosterExternalAcceptanceDigest: undefined,
                 }),
             ),
         ).toMatchObject({
@@ -359,6 +381,20 @@ describe('election foundation capability evaluator', () => {
         },
     );
 
+    it('allows target-bound decryption shares while awaiting first threshold shares', () => {
+        expect(
+            evaluateActionCapability(
+                'CreateTargetBoundDecryptionShare',
+                targetAcceptedContext({
+                    lifecycleState: 'AwaitingFirstDecryptionShares',
+                }),
+            ),
+        ).toEqual({
+            allowed: true,
+            action: 'CreateTargetBoundDecryptionShare',
+        });
+    });
+
     it('requires decryption and CPAD certificates for the target decryption path', () => {
         expect(
             evaluateActionCapability(
@@ -385,6 +421,7 @@ describe('election foundation capability evaluator', () => {
                     lifecycleState: 'FirstThresholdSharesReached',
                     thresholdProfile,
                     cpadCertificatePresent: true,
+                    decryptionShareCount: thresholdProfile.decryptionThreshold,
                     thresholdDecryptionCertificatePresent: true,
                 }),
             ),
@@ -398,6 +435,8 @@ describe('election foundation capability evaluator', () => {
                     lifecycleState: 'FirstThresholdSharesReached',
                     thresholdProfile: certifiedThresholdProfile,
                     cpadCertificatePresent: false,
+                    decryptionShareCount:
+                        certifiedThresholdProfile.decryptionShareQuorum ?? 0,
                     thresholdDecryptionCertificatePresent: true,
                 }),
             ),
@@ -412,10 +451,26 @@ describe('election foundation capability evaluator', () => {
                     lifecycleState: 'FirstThresholdSharesReached',
                     thresholdProfile: certifiedThresholdProfile,
                     cpadCertificatePresent: true,
+                    decryptionShareCount:
+                        certifiedThresholdProfile.decryptionShareQuorum ?? 0,
                     thresholdDecryptionCertificatePresent: true,
                 }),
             ),
         ).toEqual({ allowed: true, action: 'VerifyCPADProfile' });
+        expect(
+            evaluateActionCapability(
+                'VerifyCPADProfile',
+                createContext({
+                    lifecycleState: 'FirstThresholdSharesReached',
+                    thresholdProfile: certifiedThresholdProfile,
+                    cpadCertificatePresent: true,
+                    decryptionShareCount:
+                        (certifiedThresholdProfile.decryptionShareQuorum ?? 0) -
+                        1,
+                    thresholdDecryptionCertificatePresent: true,
+                }),
+            ),
+        ).toMatchObject({ reason: 'FirstThresholdSharesNotReached' });
         expect(
             evaluateActionCapability(
                 'RecombineAcceptedTarget',
@@ -526,5 +581,18 @@ describe('election foundation capability evaluator', () => {
                 }),
             ),
         ).toMatchObject({ reason: 'OperationUnavailable' });
+    });
+
+    it('refuses unknown runtime actions with a structured decision', () => {
+        expect(
+            evaluateActionCapability(
+                'NotAProtocolAction' as never,
+                createContext(),
+            ),
+        ).toEqual({
+            allowed: false,
+            action: 'NotAProtocolAction',
+            reason: 'ForbiddenOperation',
+        });
     });
 });

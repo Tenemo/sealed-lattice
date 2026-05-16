@@ -30,8 +30,12 @@ export type SignatureExpectation = {
     readonly publicKeyDigest?: ProtocolDigest;
     readonly manifestDigest?: ProtocolDigest | null;
     readonly objectRoot?: ProtocolDigest | null;
+    readonly chunkMerkleRoot?: ProtocolDigest | null;
     readonly boardHeadDigest?: ProtocolDigest | null;
     readonly contextDigest?: ProtocolDigest;
+    readonly byteLength?: number;
+    readonly recoveryEpoch?: number;
+    readonly deviceEpoch?: number;
 };
 
 export type MlDsaKeyPairFixture = {
@@ -74,6 +78,9 @@ const isNonNegativeInteger = (value: number): boolean =>
 
 const isLowercaseHex = (value: string): boolean =>
     /^[0-9a-f]*$/u.test(value) && value.length % 2 === 0;
+
+const isProtocolDigestString = (value: string): boolean =>
+    /^[0-9a-f]{128}$/u.test(value);
 
 const canonicalProtocolSignatureMessage = (
     signature: Pick<
@@ -155,7 +162,7 @@ export const deriveMlDsaPublicKeyDigest = (
 export const createMlDsaKeyPairFixture = (
     seedLabel: string,
 ): MlDsaKeyPairFixture => {
-    const seed = deriveProtocolDigest('ProviderBuildDigest', {
+    const seed = deriveProtocolDigest('MlDsaFixtureSeedDigest', {
         purpose: 'ml-dsa-fixture-seed',
         seedLabel,
     }).slice(0, 64);
@@ -244,13 +251,13 @@ const validateProfile = (
     if (
         signature.profile.providerName.length === 0 ||
         signature.profile.providerVersion.length === 0 ||
-        signature.profile.providerBuildHash.length === 0 ||
+        !isProtocolDigestString(signature.profile.providerBuildHash) ||
         signature.profile.fips204Version.length === 0 ||
         signature.profile.errataStatus.length === 0
     ) {
         return emptySignatureVerificationResult(
             'InvalidSignature',
-            'Signature profile metadata must be fully bound.',
+            'Signature profile metadata must be fully bound with canonical provider build material.',
             signature.signatureDigest,
         );
     }
@@ -486,12 +493,52 @@ const validateExpectation = (
         );
     }
     if (
+        expectation.chunkMerkleRoot !== undefined &&
+        signedRoot.chunkMerkleRoot !== expectation.chunkMerkleRoot
+    ) {
+        return emptySignatureVerificationResult(
+            'InvalidSignedRoot',
+            'Signature root chunk Merkle root does not match the expected object.',
+            signature.signatureDigest,
+        );
+    }
+    if (
         expectation.boardHeadDigest !== undefined &&
         signedRoot.boardHeadDigest !== expectation.boardHeadDigest
     ) {
         return emptySignatureVerificationResult(
             'InvalidSignedRoot',
             'Signature root board-head digest does not match the expected head.',
+            signature.signatureDigest,
+        );
+    }
+    if (
+        expectation.byteLength !== undefined &&
+        signedRoot.byteLength !== expectation.byteLength
+    ) {
+        return emptySignatureVerificationResult(
+            'InvalidSignedRoot',
+            'Signature root byte length does not match the expected object.',
+            signature.signatureDigest,
+        );
+    }
+    if (
+        expectation.recoveryEpoch !== undefined &&
+        signedRoot.recoveryEpoch !== expectation.recoveryEpoch
+    ) {
+        return emptySignatureVerificationResult(
+            'InvalidSignedRoot',
+            'Signature root recovery epoch does not match the expected object.',
+            signature.signatureDigest,
+        );
+    }
+    if (
+        expectation.deviceEpoch !== undefined &&
+        signedRoot.deviceEpoch !== expectation.deviceEpoch
+    ) {
+        return emptySignatureVerificationResult(
+            'InvalidSignedRoot',
+            'Signature root device epoch does not match the expected object.',
             signature.signatureDigest,
         );
     }

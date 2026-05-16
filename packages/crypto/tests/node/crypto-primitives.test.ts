@@ -96,10 +96,35 @@ describe('crypto primitive boundary', () => {
             configurable: true,
             writable: true,
         });
+        const objectWithEquivalentUnicodeKeys: Record<string, unknown> = {};
+        Object.defineProperty(objectWithEquivalentUnicodeKeys, '\u0065\u0301', {
+            value: 'first',
+            enumerable: true,
+            configurable: true,
+            writable: true,
+        });
+        Object.defineProperty(objectWithEquivalentUnicodeKeys, '\u00e9', {
+            value: 'second',
+            enumerable: true,
+            configurable: true,
+            writable: true,
+        });
         const sparseArray = new Array<unknown>(1);
 
         expect(canonicalJson({ b: [2, 1], a: { z: true } })).toBe(
             '{"a":{"z":true},"b":[2,1]}',
+        );
+        expect(canonicalJson({ value: '\u0065\u0301' })).toBe(
+            '{"value":"\u00e9"}',
+        );
+        expect(() => canonicalJson(objectWithEquivalentUnicodeKeys)).toThrow(
+            'NFC normalization',
+        );
+        expect(() => canonicalJson({ value: '\ud800' })).toThrow(
+            'lone UTF-16 surrogates',
+        );
+        expect(() => canonicalJson({ '\udc00': true })).toThrow(
+            'lone UTF-16 surrogates',
         );
         expect(canonicalJson(objectWithPrototypeKey)).toBe(
             '{"__proto__":{"polluted":true},"safe":true}',

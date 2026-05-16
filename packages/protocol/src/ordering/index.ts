@@ -7,6 +7,7 @@ import type {
 } from '@sealed-lattice/types';
 
 import {
+    compareCanonicalStrings,
     createRefusal,
     isNonNegativeInteger,
     uniqueStrings,
@@ -21,7 +22,7 @@ const compareCandidates = (
     left.boardSequence - right.boardSequence ||
     left.boardPosition - right.boardPosition ||
     left.actionSequence - right.actionSequence ||
-    left.objectDigest.localeCompare(right.objectDigest);
+    compareCanonicalStrings(left.objectDigest, right.objectDigest);
 
 const candidateConflictKey = (candidate: ValidatedFirstValidObject): string =>
     [

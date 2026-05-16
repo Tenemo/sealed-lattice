@@ -1,6 +1,11 @@
-import type {
-    LifecycleLabelInput,
-    LifecycleState,
+import {
+    activeMaliciousMheProfileId,
+    cpadProfileId,
+    evaluationProofProfileId,
+    targetBoundShareSelectionProfileId,
+    thresholdDecryptionProfileId,
+    type LifecycleLabelInput,
+    type LifecycleState,
 } from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
@@ -21,9 +26,11 @@ const expectValidPath = (states: readonly LifecycleState[]): void => {
     }
 };
 
-const appendixCShareSelectionProfile = {
-    profileId: 'appendix-c-certified-first-valid-v1',
-    certificateDigest: 'appendix-c-certificate-digest',
+const targetBoundShareSelectionProfile = {
+    profileId: targetBoundShareSelectionProfileId,
+    certificateDigest: 'target-bound-certificate-digest',
+    cpadProfileId,
+    targetBasisDigest: 'target-basis-digest',
     decryptionShareQuorum: 9,
     minimumSharesForInterpolation: 7,
     minimumArrivalsForRobustDecode: 9,
@@ -34,7 +41,7 @@ const appendixCShareSelectionProfile = {
 const uncertifiedThresholdProfile = deriveThresholdProfile({ rosterSize: 20 });
 const thresholdProfile = deriveThresholdProfile({
     rosterSize: 20,
-    appendixCShareSelectionProfile,
+    targetBoundShareSelectionProfile,
 });
 
 const fullyVerifiedLabelInput = (
@@ -99,6 +106,15 @@ describe('election foundation lifecycle', () => {
             expect(isValidLifecycleTransition({ from, to })).toBe(false);
         },
     );
+
+    it('returns false for unknown runtime lifecycle states', () => {
+        expect(
+            isValidLifecycleTransition({
+                from: 'NotAState' as never,
+                to: 'VotingOpen',
+            }),
+        ).toBe(false);
+    });
 
     it('keeps external roster acceptance as a local label', () => {
         expect(
@@ -205,9 +221,9 @@ describe('election foundation lifecycle', () => {
             thresholdProfile,
             mheSecurityClosure: 'ActiveMalicious',
             securityProfileIds: [
-                'PQEvalProof-STARK-BGVReplay-v1',
-                'BGV-RNS-AsyncThresholdDecryption-CPAD-v1',
-                'transcript-core-active-malicious-mhe-profile-v1',
+                evaluationProofProfileId,
+                thresholdDecryptionProfileId,
+                activeMaliciousMheProfileId,
             ],
             localRosterExternallyAccepted: true,
             mobileClaimGatePassed: true,
@@ -292,5 +308,21 @@ describe('election foundation lifecycle', () => {
                 'LongRunningCryptographicCheck',
             ]),
         );
+    });
+
+    it('does not emit decryption-threshold failure after first shares are reached', () => {
+        expect(
+            deriveLifecycleLabels({
+                lifecycleState: 'AwaitingFirstDecryptionShares',
+                thresholdProfile,
+            }).failures,
+        ).toContain('DecryptionThresholdNotReached');
+
+        expect(
+            deriveLifecycleLabels({
+                lifecycleState: 'FirstThresholdSharesReached',
+                thresholdProfile,
+            }).failures,
+        ).not.toContain('DecryptionThresholdNotReached');
     });
 });

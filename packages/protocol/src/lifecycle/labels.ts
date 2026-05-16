@@ -1,3 +1,9 @@
+import {
+    activeMaliciousMheProfileId,
+    evaluationProofProfileId,
+    passiveMhePrototypeProfileId,
+    thresholdDecryptionProfileId,
+} from '@sealed-lattice/types';
 import type {
     EvaluationProofMode,
     FailureStatusLabel,
@@ -134,8 +140,8 @@ const failureLabelsByState = {
     EvaluationProofRejected: ['EvaluationProofRejected'],
     EvaluationProofProfileRejected: ['EvaluationProofProfileRejected'],
     TargetAccepted: [],
-    AwaitingFirstDecryptionShares: [],
-    FirstThresholdSharesReached: ['DecryptionThresholdNotReached'],
+    AwaitingFirstDecryptionShares: ['DecryptionThresholdNotReached'],
+    FirstThresholdSharesReached: [],
     CPADProfileVerified: [],
     CPADProfileRejected: ['CPADProfileRejected'],
     FullyVerifiedResult: [],
@@ -207,7 +213,7 @@ const pushFailure = (
 const resultPathIsFullyGated = (input: LifecycleLabelInput): boolean =>
     input.localRosterExternallyAccepted === true &&
     input.thresholdProfile.claimBearing &&
-    input.thresholdProfile.appendixCShareSelectionProfile !== null &&
+    input.thresholdProfile.targetBoundShareSelectionProfile !== null &&
     input.thresholdProfile.decryptionShareQuorum !== null &&
     input.mobileClaimGatePassed === true &&
     input.bridgeMobileCertificatePresent === true &&
@@ -240,13 +246,10 @@ const deriveResultClaimLabels = (
 };
 
 const securityProfileModeLabelsById = new Map<string, ModeStatusLabel>([
-    ['transcript-core-passive-mhe-prototype-profile-v1', 'PassiveMHEPrototype'],
-    ['PQEvalProof-STARK-BGVReplay-v1', 'EvaluationProofClosure'],
-    ['BGV-RNS-AsyncThresholdDecryption-CPAD-v1', 'CPADClosure'],
-    [
-        'transcript-core-active-malicious-mhe-profile-v1',
-        'ActiveMaliciousClosure',
-    ],
+    [passiveMhePrototypeProfileId, 'PassiveMHEPrototype'],
+    [evaluationProofProfileId, 'EvaluationProofClosure'],
+    [thresholdDecryptionProfileId, 'CPADClosure'],
+    [activeMaliciousMheProfileId, 'ActiveMaliciousClosure'],
 ]);
 
 const deriveSecurityProfileModes = (

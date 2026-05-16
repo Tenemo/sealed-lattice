@@ -32,3 +32,4 @@ boundary.
 - Node tests, browser tests, public package behavior checks, vector manifest verification, docs verification, pack smoke checks, and release-smoke checks must all continue to pass.
 - The Rust transcript core must keep building for native tests and `wasm32-unknown-unknown`.
 - The internal WASM loader must keep loading the transcript core artifact in both Node and browser tests.
+- Reserved protocol digest derivation and `GF(65537)` field checks exposed through the internal WASM loader must remain covered by Node and browser tests.

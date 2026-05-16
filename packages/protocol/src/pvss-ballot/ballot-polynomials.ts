@@ -62,7 +62,7 @@ const deriveDeterministicCoefficient = (
 export const deriveBallotPolynomialSetDigest = (
     polynomialSet: Omit<BallotPolynomialSet, 'ballotPolynomialSetDigest'>,
 ): string =>
-    deriveProtocolDigest('BallotPackageDigest', {
+    deriveProtocolDigest('BallotPolynomialSetDigest', {
         objectType: 'BallotPolynomialSet',
         normalizedBallot: polynomialSet.normalizedBallot,
         optionPolynomials: polynomialSet.optionPolynomials,
@@ -72,6 +72,12 @@ export const deriveBallotPolynomialSetDigest = (
 export const deriveBallotPolynomialSet = (
     input: PvssBallotAlgebraInput,
 ): BallotPolynomialSet => {
+    if (input.fixtureEntropy.length === 0) {
+        throw new RangeError(
+            'Ballot polynomial fixture entropy must be explicit and non-empty.',
+        );
+    }
+
     requireNoRefusals([
         ...validatePollAndThreshold(input.pollSpec, input.thresholdProfile),
         ...validateRosterEntries(input.rosterEntries, input.thresholdProfile),

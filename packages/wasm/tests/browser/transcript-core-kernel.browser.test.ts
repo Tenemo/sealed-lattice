@@ -49,8 +49,7 @@ describe('transcript-core kernel in browsers', () => {
                 'memory',
                 'sealed_lattice_allocate',
                 'sealed_lattice_deallocate',
-                'sealed_lattice_last_output_length',
-                'sealed_lattice_transcript_core_command',
+                'sealed_lattice_transcript_core_command_with_length',
             ]),
         );
     });
@@ -65,6 +64,27 @@ describe('transcript-core kernel in browsers', () => {
             chunkRoot: fullyVerifiedPassiveFixture.expectedChunkRoot,
             statusLabels: fullyVerifiedPassiveFixture.expectedStatusLabels,
         });
+    });
+
+    it('derives protocol digest and field checks through WASM', async () => {
+        const kernel = await loadTranscriptCoreKernel();
+
+        expect(
+            kernel.deriveProtocolDigest({
+                namespace: 'PollSpecDigest',
+                value: { poll: 'main' },
+            }),
+        ).toBe(
+            '423c71de65abadb5adc05d9b6b704252420bb738af888c62614c8afc53a2be808662585305e76738b23e4f20154f8779e3827c0c8f313455d84675924f4a2c83',
+        );
+        expect(
+            kernel.interpolateShamirConstantTerm({
+                sharePoints: [
+                    { rosterPosition: 1, value: 15 },
+                    { rosterPosition: 2, value: 25 },
+                ],
+            }),
+        ).toBe(5);
     });
 
     it('rejects malformed canonical bytes with the same error code', async () => {

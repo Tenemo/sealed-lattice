@@ -60,7 +60,10 @@ const transitionMap = {
 
 export const isValidLifecycleTransition = (
     transition: LifecycleTransition,
-): boolean =>
-    (transitionMap[transition.from] as readonly LifecycleState[]).includes(
-        transition.to,
-    );
+): boolean => {
+    const allowedTargets = transitionMap[transition.from] as
+        | readonly LifecycleState[]
+        | undefined;
+
+    return allowedTargets?.includes(transition.to) ?? false;
+};

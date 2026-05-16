@@ -73,6 +73,12 @@ const evaluateShamirPolynomial = (
     polynomial: ShamirPolynomial,
     rosterPosition: number,
 ): FieldElement => {
+    if (polynomial.coefficients.length === 0) {
+        throw new RangeError(
+            'Shamir polynomial must contain at least the constant coefficient.',
+        );
+    }
+
     const point = assertPositiveRosterPosition(rosterPosition);
     let evaluation: FieldElement = 0;
 
@@ -273,7 +279,10 @@ export const deriveInterpolationCoefficientReport = (input: {
 
     return {
         ...reportPayload,
-        reportDigest: deriveProtocolDigest('PlaintextRoot', reportPayload),
+        reportDigest: deriveProtocolDigest(
+            'InterpolationCoefficientReportDigest',
+            reportPayload,
+        ),
     };
 };
 
@@ -388,6 +397,9 @@ export const deriveWorstCaseInterpolationCoefficientReport = (input: {
 
     return {
         ...reportPayload,
-        reportDigest: deriveProtocolDigest('PlaintextRoot', reportPayload),
+        reportDigest: deriveProtocolDigest(
+            'WorstCaseInterpolationCoefficientReportDigest',
+            reportPayload,
+        ),
     };
 };

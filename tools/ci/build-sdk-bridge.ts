@@ -435,9 +435,12 @@ const ensureTypesPackageBuilt = async (): Promise<void> => {
     }
 };
 
+const stripJavaScriptSourceMapComment = (sourceText: string): string =>
+    sourceText.replace(/\r?\n\/\/# sourceMappingURL=.*(?:\r?\n)?$/u, '\n');
+
 const copyTypesPackageSupportFiles = async (): Promise<void> => {
     const supportFilePaths = await collectFiles(typesBuildOutputDirectoryPath, {
-        fileNamePattern: /\.(?:d\.ts|js|js\.map)$/u,
+        fileNamePattern: /\.(?:d\.ts|js)$/u,
     });
 
     await Promise.all(
@@ -461,6 +464,17 @@ const copyTypesPackageSupportFiles = async (): Promise<void> => {
             );
 
             await mkdir(path.dirname(outputPath), { recursive: true });
+            if (sourcePath.endsWith('.js')) {
+                await writeFile(
+                    outputPath,
+                    stripJavaScriptSourceMapComment(
+                        await readFile(sourcePath, 'utf8'),
+                    ),
+                    'utf8',
+                );
+                return;
+            }
+
             await copyFile(sourcePath, outputPath);
         }),
     );

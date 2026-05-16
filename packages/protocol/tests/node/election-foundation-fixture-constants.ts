@@ -5,6 +5,15 @@ import {
     deriveProtocolDigest,
     deriveProtocolSignatureDigest,
 } from '@sealed-lattice/crypto';
+import {
+    bridgeProofProfileId,
+    cpadProfileId,
+    directTargetBasisDataBridgeProfileId,
+    evaluationNoiseProfileId,
+    evaluationProofProfileId,
+    mobileProfileId,
+    thresholdDecryptionProfileId,
+} from '@sealed-lattice/types';
 import type {
     CanonicalSignedRootObject,
     ManifestOpaqueBindings,
@@ -77,7 +86,7 @@ export const witnessPolicyDigest = deriveWitnessPolicyDigest({
     totalWitnesses: 7,
 });
 export const targetFinalityPolicyDigest = deriveTargetFinalityPolicyDigest({
-    targetPhase: 'target',
+    targetFinalityScope: 'target',
     witnessQuorum: 5,
     totalWitnesses: 7,
 });
@@ -99,7 +108,7 @@ export const witnessPolicy: WitnessPolicy = {
 };
 export const targetFinalityPolicy = {
     targetFinalityPolicyDigest,
-    targetPhase: 'target',
+    targetFinalityScope: 'target',
     witnessQuorum: 5,
     totalWitnesses: 7,
 };
@@ -123,9 +132,11 @@ export const manifestPolicyDigests: ManifestPolicyDigests = {
     witnessPolicyDigest,
 };
 export const manifestOpaqueBindings: ManifestOpaqueBindings = {
-    bridgeProofProfileId:
-        'CommittedAggregateShare-DirectQData-HwangPiEnc-BGV-v1',
-    directQDataBridgeProfileId: 'CommittedAggregateShare-DirectQData-BGV-v1',
+    bridgeProofProfileId,
+    directTargetBasisDataBridgeProfileId,
+    heParamDigest: deriveProtocolDigest('HEParamDigest', {
+        profile: 'BGV-RNS-v1',
+    }),
     bgvProfileDigest: deriveProtocolDigest('BGVProfileDigest', {
         profile: 'BGV-RNS-v1',
     }),
@@ -139,34 +150,51 @@ export const manifestOpaqueBindings: ManifestOpaqueBindings = {
         'CanonicalCiphertextConventionDigest',
         { convention: 'bgv-rns-coefficient-domain-c0-plus-c1-s' },
     ),
+    bridgeProofProfileDigest: deriveProtocolDigest('BridgeProofProfileDigest', {
+        profile: bridgeProofProfileId,
+    }),
     bgvBatchEncoderDigest: deriveProtocolDigest('BGVBatchEncoderDigest', {
         layout: 'WinnerRankTopK-v1',
     }),
     bridgeLayoutDigest: deriveProtocolDigest('BridgeLayoutDigest', {
         layout: 'aggregate-share-layout-v1',
     }),
-    evaluationProofProfileId: 'PQEvalProof-STARK-BGVReplay-v1',
+    evaluationNoiseProfileDigest: deriveProtocolDigest(
+        'EvaluationNoiseProfileDigest',
+        {
+            profile: evaluationNoiseProfileId,
+        },
+    ),
+    heEvaluationNoiseCertDigest: deriveProtocolDigest(
+        'HEEvaluationNoiseCertDigest',
+        { certificate: 'he-evaluation-noise-v1' },
+    ),
+    allowedEvaluatorOpsDigest: deriveProtocolDigest(
+        'AllowedEvaluatorOpsDigest',
+        { operations: 'packed-bgv-top-k-v1' },
+    ),
+    evaluationProofProfileId,
     evaluationProofProfileDigest: deriveProtocolDigest(
         'EvaluationProofProfileDigest',
-        { profile: 'PQEvalProof-STARK-BGVReplay-v1' },
+        { profile: evaluationProofProfileId },
     ),
-    thresholdDecryptionProfileId: 'BGV-RNS-AsyncThresholdDecryption-CPAD-v1',
+    thresholdDecryptionProfileId,
     thresholdDecryptionProfileDigest: deriveProtocolDigest(
         'ThresholdDecryptionProfileDigest',
-        { profile: 'BGV-RNS-AsyncThresholdDecryption-CPAD-v1' },
+        { profile: thresholdDecryptionProfileId },
     ),
     bgvAsyncThresholdCPADProfileDigest: deriveProtocolDigest(
         'BGVAsyncThresholdCPADProfileDigest',
-        { profile: 'BGV-RNS-AsyncThresholdDecryption-CPAD-v1' },
+        { profile: thresholdDecryptionProfileId },
     ),
-    cpadProfileId: 'CPAD-BGV-AsyncThreshold-v1',
+    cpadProfileId,
     cpadProfileDigest: deriveProtocolDigest('CPADProfileDigest', {
-        profile: 'CPAD-BGV-AsyncThreshold-v1',
+        profile: cpadProfileId,
     }),
-    qTargetDigest: deriveProtocolDigest('QTargetDigest', {
-        profile: 'Appendix-C-target-basis-v1',
+    targetBasisDigest: deriveProtocolDigest('TargetBasisDigest', {
+        profile: 'target-basis-v1',
     }),
-    mobileProfileId: 'mobile-flagship-profile-v1',
+    mobileProfileId,
     bridgeMobileCertificatePolicyDigest: deriveProtocolDigest(
         'BridgeMobileCertDigest',
         { policy: 'mobile-bridge-cert' },

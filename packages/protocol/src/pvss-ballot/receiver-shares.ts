@@ -12,6 +12,7 @@ import {
 } from '../plaintext-oracle/field.js';
 import { evaluateShamirPolynomialForRoster } from '../plaintext-oracle/shamir.js';
 
+import { deriveBallotPolynomialSetDigest } from './ballot-polynomials.js';
 import {
     pvssBallotShareVectorWidth,
     requireNoRefusals,
@@ -44,6 +45,47 @@ export const deriveReceiverShareVectors = (input: {
             'Receiver share vectors require the threshold profile used by the ballot polynomial set.',
         );
     }
+    const recomputedPolynomialSetDigest = deriveBallotPolynomialSetDigest({
+        normalizedBallot: input.polynomialSet.normalizedBallot,
+        optionPolynomials: input.polynomialSet.optionPolynomials,
+        pvssThreshold: input.polynomialSet.pvssThreshold,
+    });
+    if (
+        input.polynomialSet.ballotPolynomialSetDigest !==
+        recomputedPolynomialSetDigest
+    ) {
+        throw new RangeError(
+            'Receiver share vectors require a canonical ballot polynomial set digest.',
+        );
+    }
+
+    const seenOptionIndexes = new Set<number>();
+    const seenOptionOrdinals = new Set<number>();
+    input.polynomialSet.optionPolynomials.forEach(
+        (optionPolynomial, optionIndex) => {
+            if (
+                optionPolynomial.optionIndex !== optionIndex ||
+                optionPolynomial.optionOrdinal !== optionIndex + 1 ||
+                seenOptionIndexes.has(optionPolynomial.optionIndex) ||
+                seenOptionOrdinals.has(optionPolynomial.optionOrdinal) ||
+                optionPolynomial.polynomial.coefficients.length !==
+                    input.thresholdProfile.pvssThreshold
+            ) {
+                throw new RangeError(
+                    'Receiver share vectors require canonical option polynomial slots.',
+                );
+            }
+            seenOptionIndexes.add(optionPolynomial.optionIndex);
+            seenOptionOrdinals.add(optionPolynomial.optionOrdinal);
+            optionPolynomial.polynomial.coefficients.forEach(
+                (coefficient, coefficientIndex) =>
+                    assertCanonicalFieldElement(
+                        coefficient,
+                        `option polynomial coefficient ${String(coefficientIndex)}`,
+                    ),
+            );
+        },
+    );
 
     const sharesByOption = input.polynomialSet.optionPolynomials.map(
         (optionPolynomial) =>

@@ -25,6 +25,7 @@ import { assertCanonicalReceiverShareVector } from './receiver-shares.js';
 const textEncoder = new TextEncoder();
 const openingDerivationDomain =
     'sealed-lattice-internal/pvss-ballot-fixture-opening-v1';
+const protocolDigestPattern = /^[0-9a-f]{128}$/u;
 
 type PvssBallotDigestContext = Pick<
     PvssBallotAlgebraInput,
@@ -94,7 +95,7 @@ export const deriveTestReceiverShareOpeningPayloadDigest = (input: {
     readonly context: PvssBallotDigestContext;
     readonly payload: Omit<TestReceiverShareOpeningPayload, 'payloadDigest'>;
 }): string =>
-    deriveProtocolDigest('ShareCommitmentDigest', {
+    deriveProtocolDigest('TestReceiverShareOpeningPayloadDigest', {
         ceremonyId: input.context.ceremonyId,
         duplicateBallotPolicyDigest: input.context.duplicateBallotPolicyDigest,
         electionManifestDigest: input.context.electionManifestDigest,
@@ -176,6 +177,8 @@ export const verifyTestShareCommitmentOpening = (
     witness: TestShareCommitmentWitness,
 ): boolean => {
     if (
+        witness.commitment.objectType !== 'TestShareCommitment' ||
+        !protocolDigestPattern.test(witness.commitment.shareCommitmentDigest) ||
         witness.openingVector.length !== pvssBallotShareVectorWidth ||
         witness.shareVector.length !== pvssBallotShareVectorWidth ||
         witness.commitment.commitmentValues.length !==

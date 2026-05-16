@@ -1,4 +1,12 @@
 import { verifySignedObjectSignature } from '@sealed-lattice/crypto';
+import {
+    bridgeProofProfileId,
+    cpadProfileId,
+    directTargetBasisDataBridgeProfileId,
+    evaluationProofProfileId,
+    mobileProfileId,
+    thresholdDecryptionProfileId,
+} from '@sealed-lattice/types';
 import type {
     ElectionManifest,
     InclusionProof,
@@ -14,7 +22,9 @@ import type {
 
 import {
     createRefusal,
+    defaultSignedRootContextDigest,
     isNonNegativeInteger,
+    signedObjectRootByteLength,
 } from '../common/verification-helpers.js';
 
 import {
@@ -24,6 +34,75 @@ import {
     deriveRosterExternalAcceptanceDigest,
     deriveTrusteeSetupEntryDigest,
 } from './digests.js';
+
+const protocolDigestPattern = /^[0-9a-f]{128}$/u;
+
+const isProtocolDigestString = (value: ProtocolDigest): boolean =>
+    protocolDigestPattern.test(value);
+
+const collectManifestOpaqueBindingRefusals = (
+    manifest: ElectionManifest,
+): readonly RefusalRecord[] => {
+    const refusedObjects: RefusalRecord[] = [];
+    const bindings = manifest.manifestOpaqueBindings;
+
+    if (
+        bindings.bridgeProofProfileId !== bridgeProofProfileId ||
+        bindings.directTargetBasisDataBridgeProfileId !==
+            directTargetBasisDataBridgeProfileId ||
+        bindings.evaluationProofProfileId !== evaluationProofProfileId ||
+        bindings.thresholdDecryptionProfileId !==
+            thresholdDecryptionProfileId ||
+        bindings.cpadProfileId !== cpadProfileId ||
+        bindings.mobileProfileId !== mobileProfileId
+    ) {
+        refusedObjects.push(
+            createRefusal(
+                'ManifestDigestMismatch',
+                'Election manifest must bind the fixed v53 BGV bridge, evaluation-proof, threshold-decryption, CPAD, and mobile profile identifiers.',
+                manifest.electionManifestDigest,
+                'ElectionManifest',
+            ),
+        );
+    }
+
+    const requiredDigestFields = [
+        bindings.heParamDigest,
+        bindings.bgvProfileDigest,
+        bindings.bgvPublicKeyRoot,
+        bindings.collectivePublicKeyRoot,
+        bindings.canonicalCiphertextConventionDigest,
+        bindings.bridgeProofProfileDigest,
+        bindings.bgvBatchEncoderDigest,
+        bindings.bridgeLayoutDigest,
+        bindings.evaluationNoiseProfileDigest,
+        bindings.heEvaluationNoiseCertDigest,
+        bindings.allowedEvaluatorOpsDigest,
+        bindings.evaluationProofProfileDigest,
+        bindings.thresholdDecryptionProfileDigest,
+        bindings.bgvAsyncThresholdCPADProfileDigest,
+        bindings.cpadProfileDigest,
+        bindings.targetBasisDigest,
+        bindings.bridgeMobileCertificatePolicyDigest,
+    ];
+
+    if (
+        requiredDigestFields.some(
+            (digestField) => !isProtocolDigestString(digestField),
+        )
+    ) {
+        refusedObjects.push(
+            createRefusal(
+                'ManifestDigestMismatch',
+                'Election manifest opaque bindings must include canonical downstream profile and certificate digests.',
+                manifest.electionManifestDigest,
+                'ElectionManifest',
+            ),
+        );
+    }
+
+    return refusedObjects;
+};
 
 export const verifyRegistrationEntry = (
     input: RosterManifestTranscriptInput,
@@ -99,6 +178,10 @@ export const verifyRegistrationEntry = (
         manifestDigest: null,
         objectRoot: entry.registrationEntryDigest,
         boardHeadDigest: null,
+        byteLength: signedObjectRootByteLength,
+        recoveryEpoch: entry.recoveryEpoch,
+        deviceEpoch: entry.deviceEpoch,
+        contextDigest: defaultSignedRootContextDigest,
         publicKeyDigest: entry.signingPublicKeyDigest,
     });
     refusedObjects.push(...signatureResult.refusedObjects);
@@ -191,6 +274,10 @@ export const verifyReceiverKeyRegistration = (
         manifestDigest: null,
         objectRoot: entry.receiverKeyRegistrationDigest,
         boardHeadDigest: null,
+        byteLength: signedObjectRootByteLength,
+        recoveryEpoch: entry.recoveryEpoch,
+        deviceEpoch: entry.deviceEpoch,
+        contextDigest: defaultSignedRootContextDigest,
         publicKeyDigest: expectedPublicKeyDigest,
     });
     refusedObjects.push(...signatureResult.refusedObjects);
@@ -283,6 +370,10 @@ export const verifyTrusteeSetupEntry = (
         manifestDigest: null,
         objectRoot: entry.trusteeSetupEntryDigest,
         boardHeadDigest: null,
+        byteLength: signedObjectRootByteLength,
+        recoveryEpoch: entry.recoveryEpoch,
+        deviceEpoch: entry.deviceEpoch,
+        contextDigest: defaultSignedRootContextDigest,
         publicKeyDigest: expectedPublicKeyDigest,
     });
     refusedObjects.push(...signatureResult.refusedObjects);
@@ -335,23 +426,7 @@ export const verifyManifest = (
             ),
         );
     }
-    if (
-        manifest.manifestOpaqueBindings.bridgeProofProfileId !==
-            'CommittedAggregateShare-DirectQData-HwangPiEnc-BGV-v1' ||
-        manifest.manifestOpaqueBindings.evaluationProofProfileId !==
-            'PQEvalProof-STARK-BGVReplay-v1' ||
-        manifest.manifestOpaqueBindings.thresholdDecryptionProfileId !==
-            'BGV-RNS-AsyncThresholdDecryption-CPAD-v1'
-    ) {
-        refusedObjects.push(
-            createRefusal(
-                'ManifestDigestMismatch',
-                'Election manifest must bind the fixed v53 BGV bridge, evaluation-proof, and threshold-decryption profile identifiers.',
-                manifest.electionManifestDigest,
-                'ElectionManifest',
-            ),
-        );
-    }
+    refusedObjects.push(...collectManifestOpaqueBindingRefusals(manifest));
     if (manifest.ceremonyId !== input.ceremonyId) {
         refusedObjects.push(
             createRefusal(
@@ -405,6 +480,10 @@ export const verifyManifest = (
         manifestDigest: null,
         objectRoot: manifest.electionManifestDigest,
         boardHeadDigest: null,
+        byteLength: signedObjectRootByteLength,
+        recoveryEpoch: 0,
+        deviceEpoch: 0,
+        contextDigest: defaultSignedRootContextDigest,
         publicKeyDigest: input.organizerPublicKeyDigest,
     });
     refusedObjects.push(...signatureResult.refusedObjects);
@@ -471,6 +550,10 @@ export const verifyRosterExternalAcceptance = (
                 manifestDigest: acceptance.electionManifestDigest,
                 objectRoot: acceptance.rosterExternalAcceptanceDigest,
                 boardHeadDigest: acceptance.acceptedBoardHeadDigest,
+                byteLength: signedObjectRootByteLength,
+                recoveryEpoch: 0,
+                deviceEpoch: 0,
+                contextDigest: defaultSignedRootContextDigest,
                 publicKeyDigest: input.expectedParticipantPublicKeyDigest,
             },
         );

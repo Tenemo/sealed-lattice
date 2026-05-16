@@ -34,7 +34,10 @@ and five private internal packages:
 - `@sealed-lattice/testkit`
 
 The workspace also contains `crates/sealed-lattice-kernel`, the Rust transcript
-core used by the native test and WASM loading path.
+core used by the native test and WASM loading path. The internal WASM command
+surface covers transcript fixture verification, protocol digest derivation, and
+the current `GF(65537)` interpolation/comparison checks used to keep the
+TypeScript reference path pinned to the kernel behavior.
 
 ## Current public boundary
 
@@ -45,6 +48,10 @@ and recovery-epoch election foundation helpers.
 
 This keeps packaging, documentation, smoke checks, transcript fixtures, and
 release flow stable while the broader voting API remains future implementation.
+
+Internal PVSS ballot-algebra helpers are deterministic test infrastructure only:
+they are not exported by the public package and must not be used for real ballot
+confidentiality.
 
 - workspace layout and package boundaries
 - packaging and tarball smoke checks

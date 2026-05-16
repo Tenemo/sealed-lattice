@@ -8,6 +8,8 @@ import type {
     TrusteeSetupEntry,
 } from '@sealed-lattice/types';
 
+import { compareCanonicalStrings } from '../common/verification-helpers.js';
+
 export const deriveRegistrationEntryDigest = (
     entry: Omit<RegistrationEntry, 'registrationEntryDigest' | 'signature'>,
 ): ProtocolDigest =>
@@ -68,7 +70,8 @@ export const deriveRosterDigest = (
                 signingPublicKeyDigest: entry.signingPublicKeyDigest,
             }))
             .sort((left, right) =>
-                left.participantIdentity.localeCompare(
+                compareCanonicalStrings(
+                    left.participantIdentity,
                     right.participantIdentity,
                 ),
             ),

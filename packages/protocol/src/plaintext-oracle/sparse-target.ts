@@ -37,7 +37,7 @@ const deriveSparseTopKTargetLayoutDigest = (input: {
 export const deriveSparseTopKTargetDigest = (
     target: Omit<SparseTopKTarget, 'targetDigest'>,
 ): string =>
-    deriveProtocolDigest('PlaintextRoot', {
+    deriveProtocolDigest('SparseTopKTargetDigest', {
         forbiddenSemanticSlots: target.forbiddenSemanticSlots,
         layoutDigest: target.layoutDigest,
         layoutId: target.layoutId,
@@ -109,6 +109,27 @@ export const deriveSparseTopKTarget = (input: {
 
         seenOptionIndexes.add(rankingEntry.optionIndex);
         seenRanks.add(rankingEntry.rank);
+    }
+
+    const canonicalRanking = [...input.ranking]
+        .sort(
+            (left, right) =>
+                right.totalScore - left.totalScore ||
+                left.optionIndex - right.optionIndex,
+        )
+        .map((entry, rank) => ({
+            optionIndex: entry.optionIndex,
+            rank,
+        }));
+    for (const expectedEntry of canonicalRanking) {
+        const actualEntry = input.ranking.find(
+            (entry) => entry.optionIndex === expectedEntry.optionIndex,
+        );
+        if (actualEntry?.rank !== expectedEntry.rank) {
+            throw new RangeError(
+                'Sparse target ranking must match the higher-score-then-lower-option-index order.',
+            );
+        }
     }
 
     const rankByOptionIndex = new Map(

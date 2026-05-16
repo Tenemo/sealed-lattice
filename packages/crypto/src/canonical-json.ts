@@ -18,11 +18,45 @@ const isPlainObject = (
 const hasOwnProperty = (value: object, key: PropertyKey): boolean =>
     Object.prototype.hasOwnProperty.call(value, key);
 
+const containsLoneSurrogate = (value: string): boolean => {
+    for (let index = 0; index < value.length; index += 1) {
+        const codeUnit = value.charCodeAt(index);
+        if (codeUnit >= 0xd800 && codeUnit <= 0xdbff) {
+            const nextCodeUnit = value.charCodeAt(index + 1);
+            if (
+                index + 1 >= value.length ||
+                nextCodeUnit < 0xdc00 ||
+                nextCodeUnit > 0xdfff
+            ) {
+                return true;
+            }
+            index += 1;
+        } else if (codeUnit >= 0xdc00 && codeUnit <= 0xdfff) {
+            return true;
+        }
+    }
+
+    return false;
+};
+
+const normalizeCanonicalString = (value: string): string => {
+    if (containsLoneSurrogate(value)) {
+        throw new TypeError(
+            'Canonical strings cannot contain lone UTF-16 surrogates.',
+        );
+    }
+
+    return value.normalize('NFC');
+};
+
 const normalizeCanonicalValue = (value: unknown): unknown => {
     if (value === null) {
         return null;
     }
-    if (typeof value === 'string' || typeof value === 'boolean') {
+    if (typeof value === 'string') {
+        return normalizeCanonicalString(value);
+    }
+    if (typeof value === 'boolean') {
         return value;
     }
     if (typeof value === 'number') {
@@ -48,13 +82,19 @@ const normalizeCanonicalValue = (value: unknown): unknown => {
     if (isPlainObject(value)) {
         const normalized = Object.create(null) as Record<string, unknown>;
         for (const key of Object.keys(value).sort()) {
+            const normalizedKey = normalizeCanonicalString(key);
+            if (hasOwnProperty(normalized, normalizedKey)) {
+                throw new TypeError(
+                    'Canonical object keys must be unique after NFC normalization.',
+                );
+            }
             const entry = value[key];
             if (entry === undefined) {
                 throw new TypeError(
                     'Canonical objects cannot contain undefined.',
                 );
             }
-            normalized[key] = normalizeCanonicalValue(entry);
+            normalized[normalizedKey] = normalizeCanonicalValue(entry);
         }
 
         return normalized;

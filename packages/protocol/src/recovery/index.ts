@@ -19,7 +19,9 @@ import {
 import {
     buildBoardHeadMap,
     createRefusal,
+    defaultSignedRootContextDigest,
     isNonNegativeInteger,
+    signedObjectRootByteLength,
 } from '../common/verification-helpers.js';
 
 export const deriveActionContextDigest = (
@@ -222,6 +224,9 @@ const verifyRecoveryEpochUpdateUnchecked = (
     const headsByDigest = buildBoardHeadMap(
         input.boardEvidence.signedBoardHeads,
     );
+    const updateInclusionHead = headsByDigest.get(
+        input.updateInclusionProof.boardHeadDigest,
+    );
     const refusedObjects: RefusalRecord[] = [...boardResult.refusedObjects];
     const expectedDigest = deriveRecoveryEpochUpdateDigest({
         boardHeadDigest: update.boardHeadDigest,
@@ -360,6 +365,20 @@ const verifyRecoveryEpochUpdateUnchecked = (
             ),
         );
     }
+    if (
+        input.updateInclusionProof.boardSequence !==
+            update.oldActionCutoffBoardSequence ||
+        updateInclusionHead?.previousHeadDigest !== update.boardHeadDigest
+    ) {
+        refusedObjects.push(
+            createRefusal(
+                'RecoveryUpdateInvalid',
+                'Recovery epoch update inclusion must extend the signed recovery context head at the old-action cutoff.',
+                update.recoveryEpochUpdateDigest,
+                'RecoveryEpochUpdate',
+            ),
+        );
+    }
     if (!headsByDigest.has(update.boardHeadDigest)) {
         refusedObjects.push(
             createRefusal(
@@ -403,6 +422,10 @@ const verifyRecoveryEpochUpdateUnchecked = (
         manifestDigest: null,
         objectRoot: update.recoveryEpochUpdateDigest,
         boardHeadDigest: update.boardHeadDigest,
+        byteLength: signedObjectRootByteLength,
+        recoveryEpoch: update.previousRecoveryEpoch,
+        deviceEpoch: update.previousDeviceEpoch,
+        contextDigest: defaultSignedRootContextDigest,
         publicKeyDigest: input.expectedRecoveryRootPublicKeyDigest,
     });
     refusedObjects.push(...signatureResult.refusedObjects);

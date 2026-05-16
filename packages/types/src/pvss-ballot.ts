@@ -193,6 +193,7 @@ export type CanonicalBallotSet = {
     readonly duplicateBallotPolicyDigest: ProtocolDigest;
     readonly votingClosedBoardHeadDigest: ProtocolDigest;
     readonly closeRecordDigest: ProtocolDigest;
+    readonly includeRejectedCandidateSummariesInDigest: boolean;
     readonly countedBallots: readonly CountedBallotPackage[];
     readonly rejectedCandidates: readonly RejectedBallotCandidate[];
     readonly ballotSetDigest?: ProtocolDigest;
@@ -201,6 +202,7 @@ export type CanonicalBallotSet = {
 /** Aggregate share and commitment for one trustee in the internal fixture path. */
 export type TestAggregateShare = {
     readonly objectType: 'TestAggregateShare';
+    readonly ballotSetDigest: ProtocolDigest;
     readonly trusteeIdentity: string;
     readonly trusteeRosterPosition: number;
     readonly shareVectorWidth: PvssBallotShareVectorWidth;

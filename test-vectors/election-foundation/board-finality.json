@@ -85,15 +85,15 @@
     },
     {
       "caseName": "local-replay-without-finality",
-      "category": "target-phase",
+      "category": "target-acceptance",
       "expectedOk": false,
       "expectedRefusalCodes": [
-        "TargetPhaseAuthorizationFailure"
+        "TargetAcceptanceAuthorizationFailure"
       ]
     },
     {
       "caseName": "target-accepted-record-missing-evaluation-proof",
-      "category": "target-phase",
+      "category": "target-acceptance",
       "expectedOk": false,
       "expectedRefusalCodes": [
         "TargetAcceptedRecordInvalid"
@@ -101,7 +101,7 @@
     },
     {
       "caseName": "decryption-share-wrong-accepted-target",
-      "category": "target-phase",
+      "category": "target-acceptance",
       "expectedOk": false,
       "expectedRefusalCodes": [
         "DecryptionShareInvalid"
@@ -165,7 +165,7 @@
     "BGVPublicKeyRoot",
     "CollectivePublicKeyRoot",
     "BGVBatchEncoderDigest",
-    "AppendixDProfileDigest",
+    "EvaluationNoiseProfileDigest",
     "HEEvaluationNoiseCertDigest",
     "AllowedEvaluatorOpsDigest",
     "EvaluatorProgramDigest",
@@ -188,7 +188,7 @@
     "ShareReplayEvidenceDigest",
     "ShareReplayRefusalDigest",
     "BGVAsyncThresholdCPADProfileDigest",
-    "QTargetDigest"
+    "TargetBasisDigest"
   ],
   "firstValidOrdering": {
     "objects": [

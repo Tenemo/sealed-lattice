@@ -11,6 +11,8 @@ import type {
     PollSpec,
 } from '@sealed-lattice/types';
 
+import { validatePollSpec } from '../lifecycle/poll-spec.js';
+
 import {
     addFieldElements,
     divideFieldElements,
@@ -31,6 +33,12 @@ const toPlaintextScore = (score: number): PlaintextScore => {
 };
 
 const assertPollSpecShape = (pollSpec: PollSpec): void => {
+    const validation = validatePollSpec(pollSpec);
+    if (!validation.ok) {
+        throw new RangeError(
+            'Plaintext oracle poll specification must pass lifecycle validation.',
+        );
+    }
     if (
         pollSpec.scoreDomain.min !== 1 ||
         pollSpec.scoreDomain.max !== 10 ||
@@ -139,7 +147,7 @@ const derivePlaintextTally = (input: {
 
     return {
         ...tallyPayload,
-        tallyDigest: deriveProtocolDigest('PlaintextRoot', tallyPayload),
+        tallyDigest: deriveProtocolDigest('PlaintextTallyDigest', tallyPayload),
     };
 };
 
@@ -332,7 +340,10 @@ export const derivePlaintextTopKOracle = (input: {
 
     return {
         ...oraclePayload,
-        oracleDigest: deriveProtocolDigest('PlaintextRoot', oraclePayload),
+        oracleDigest: deriveProtocolDigest(
+            'PlaintextTopKOracleDigest',
+            oraclePayload,
+        ),
         tally,
     };
 };

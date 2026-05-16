@@ -22,6 +22,7 @@ import {
 import { interpolateShamirConstantTerm } from '../plaintext-oracle/shamir.js';
 
 import { deriveBallotPolynomialSetDigest } from './ballot-polynomials.js';
+import { deriveBallotSetDigestFromCanonicalSet } from './ballot-set.js';
 import {
     pvssBallotShareVectorWidth,
     requireNoRefusals,
@@ -37,6 +38,8 @@ import {
     deriveTestShareCommitmentDigest,
     verifyTestShareCommitmentOpening,
 } from './test-share-commitments.js';
+
+const protocolDigestPattern = /^[0-9a-f]{128}$/u;
 
 const zeroShareVector = (): readonly FieldElement[] =>
     Array.from({ length: pvssBallotShareVectorWidth }, () => 0 as FieldElement);
@@ -364,7 +367,7 @@ const buildWitnessByDigest = (
     return witnessByDigest;
 };
 
-export const deriveAggregateShareCommitmentDigest = (input: {
+const deriveAggregateShareCommitmentDigest = (input: {
     readonly aggregateShare: Omit<
         TestAggregateShare,
         'aggregateShareCommitmentDigest'
@@ -382,6 +385,25 @@ export const deriveAggregateShareCommitmentDigest = (input: {
         trusteeRosterPosition: input.aggregateShare.trusteeRosterPosition,
     });
 
+const assertAcceptedBallotSetDigestMatchesPayload = (
+    ballotSet: CanonicalBallotSet,
+): string => {
+    if (!ballotSet.ok || ballotSet.ballotSetDigest === undefined) {
+        throw new RangeError(
+            'Aggregate share derivation requires an accepted canonical ballot set.',
+        );
+    }
+
+    const expectedDigest = deriveBallotSetDigestFromCanonicalSet(ballotSet);
+    if (ballotSet.ballotSetDigest !== expectedDigest) {
+        throw new RangeError(
+            'Aggregate share derivation requires the counted ballots to match the canonical ballot-set digest.',
+        );
+    }
+
+    return ballotSet.ballotSetDigest;
+};
+
 export const deriveTestAggregateShares = (input: {
     readonly ballotSet: CanonicalBallotSet;
     readonly ballotWitnesses: readonly BallotPackageWitness[];
@@ -391,12 +413,9 @@ export const deriveTestAggregateShares = (input: {
     requireNoRefusals(
         validateRosterEntries(input.rosterEntries, input.thresholdProfile),
     );
-    if (!input.ballotSet.ok || input.ballotSet.ballotSetDigest === undefined) {
-        throw new RangeError(
-            'Aggregate share derivation requires an accepted canonical ballot set.',
-        );
-    }
-    const ballotSetDigest = input.ballotSet.ballotSetDigest;
+    const ballotSetDigest = assertAcceptedBallotSetDigestMatchesPayload(
+        input.ballotSet,
+    );
 
     const witnessByDigest = buildWitnessByDigest(input.ballotWitnesses);
     const countedWitnesses = input.ballotSet.countedBallots.map((candidate) => {
@@ -468,6 +487,7 @@ export const deriveTestAggregateShares = (input: {
 
             const aggregateShareWithoutDigest = {
                 objectType: 'TestAggregateShare' as const,
+                ballotSetDigest,
                 trusteeIdentity: entry.participantIdentity,
                 trusteeRosterPosition: entry.rosterPosition,
                 shareVectorWidth: pvssBallotShareVectorWidth,
@@ -499,6 +519,11 @@ export const verifyTestAggregateShareOpening = (
     witness: TestAggregateShareWitness,
 ): boolean => {
     if (
+        witness.aggregateShare.objectType !== 'TestAggregateShare' ||
+        !protocolDigestPattern.test(witness.aggregateShare.ballotSetDigest) ||
+        !protocolDigestPattern.test(
+            witness.aggregateShare.aggregateShareCommitmentDigest,
+        ) ||
         witness.aggregateOpeningVector.length !== pvssBallotShareVectorWidth ||
         witness.aggregateShare.aggregateShareVector.length !==
             pvssBallotShareVectorWidth ||
@@ -544,12 +569,21 @@ export const verifyTestAggregateShareOpening = (
 
 export const reconstructAggregateTallyFromShares = (input: {
     readonly aggregateShares: readonly TestAggregateShare[];
+    readonly ballotSetDigest?: string;
     readonly optionCount: number;
     readonly thresholdProfile: ThresholdProfile;
 }): readonly FieldElement[] => {
     if (input.aggregateShares.length !== input.thresholdProfile.pvssThreshold) {
         throw new RangeError(
             'Aggregate reconstruction requires exactly the PVSS threshold number of shares.',
+        );
+    }
+    if (
+        input.ballotSetDigest !== undefined &&
+        !protocolDigestPattern.test(input.ballotSetDigest)
+    ) {
+        throw new RangeError(
+            'Aggregate reconstruction requires a canonical expected ballot-set digest.',
         );
     }
     if (
@@ -562,7 +596,48 @@ export const reconstructAggregateTallyFromShares = (input: {
     }
 
     const seenRosterPositions = new Set<number>();
+    const ballotSetDigests = new Set<string>();
     for (const aggregateShare of input.aggregateShares) {
+        if (
+            aggregateShare.objectType !== 'TestAggregateShare' ||
+            !protocolDigestPattern.test(aggregateShare.ballotSetDigest) ||
+            !protocolDigestPattern.test(
+                aggregateShare.aggregateShareCommitmentDigest,
+            )
+        ) {
+            throw new RangeError(
+                'Aggregate reconstruction requires shares bound to a canonical ballot set digest.',
+            );
+        }
+        const aggregateShareWithoutDigest = {
+            objectType: aggregateShare.objectType,
+            ballotSetDigest: aggregateShare.ballotSetDigest,
+            trusteeIdentity: aggregateShare.trusteeIdentity,
+            trusteeRosterPosition: aggregateShare.trusteeRosterPosition,
+            shareVectorWidth: aggregateShare.shareVectorWidth,
+            aggregateShareVector: aggregateShare.aggregateShareVector,
+            aggregateCommitmentValues: aggregateShare.aggregateCommitmentValues,
+        };
+        if (
+            aggregateShare.aggregateShareCommitmentDigest !==
+            deriveAggregateShareCommitmentDigest({
+                aggregateShare: aggregateShareWithoutDigest,
+                ballotSetDigest: aggregateShare.ballotSetDigest,
+            })
+        ) {
+            throw new RangeError(
+                'Aggregate reconstruction requires canonical aggregate share commitment digests.',
+            );
+        }
+        ballotSetDigests.add(aggregateShare.ballotSetDigest);
+        if (
+            input.ballotSetDigest !== undefined &&
+            aggregateShare.ballotSetDigest !== input.ballotSetDigest
+        ) {
+            throw new RangeError(
+                'Aggregate reconstruction requires shares for the expected ballot set.',
+            );
+        }
         if (
             !Number.isSafeInteger(aggregateShare.trusteeRosterPosition) ||
             aggregateShare.trusteeRosterPosition < 1 ||
@@ -594,6 +669,20 @@ export const reconstructAggregateTallyFromShares = (input: {
                     fieldElement,
                     `aggregate share field ${String(fieldIndex)}`,
                 ),
+        );
+        if (
+            aggregateShare.aggregateShareVector
+                .slice(input.optionCount)
+                .some((fieldElement) => fieldElement !== 0)
+        ) {
+            throw new RangeError(
+                'Aggregate reconstruction requires zero-padded aggregate share vectors.',
+            );
+        }
+    }
+    if (ballotSetDigests.size !== 1) {
+        throw new RangeError(
+            'Aggregate reconstruction requires all shares to bind the same ballot set.',
         );
     }
 

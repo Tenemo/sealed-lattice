@@ -1,16 +1,18 @@
-import type {
-    CapabilityContext,
-    CapabilityDecision,
-    FirstValidOrderingInput,
-    FirstValidOrderingVerification,
-    LifecycleLabelInput,
-    LifecycleLabels,
-    LifecycleTransition,
-    PollSpecInput,
-    PollSpecValidation,
-    ProtocolAction,
-    ThresholdProfile,
-    ThresholdProfileInput,
+import {
+    cpadProfileId,
+    targetBoundShareSelectionProfileId,
+    type CapabilityContext,
+    type CapabilityDecision,
+    type FirstValidOrderingInput,
+    type FirstValidOrderingVerification,
+    type LifecycleLabelInput,
+    type LifecycleLabels,
+    type LifecycleTransition,
+    type PollSpecInput,
+    type PollSpecValidation,
+    type ProtocolAction,
+    type ThresholdProfile,
+    type ThresholdProfileInput,
 } from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
@@ -113,9 +115,11 @@ describe('election foundation public package API in Node', () => {
     it('derives threshold, poll, lifecycle, label, and capability decisions', () => {
         const thresholdProfile = deriveThresholdProfile({
             rosterSize: 20,
-            appendixCShareSelectionProfile: {
-                profileId: 'appendix-c-certified-first-valid-v1',
-                certificateDigest: 'appendix-c-certificate-digest',
+            targetBoundShareSelectionProfile: {
+                profileId: targetBoundShareSelectionProfileId,
+                certificateDigest: 'target-bound-certificate-digest',
+                cpadProfileId,
+                targetBasisDigest: 'target-basis-digest',
                 decryptionShareQuorum: 9,
                 minimumSharesForInterpolation: 7,
                 minimumArrivalsForRobustDecode: 9,
@@ -165,6 +169,9 @@ describe('election foundation public package API in Node', () => {
                 thresholdProfile,
                 pollSpecValid: true,
                 localRosterExternallyAccepted: true,
+                rosterExternalAcceptanceDigest: 'accepted-roster-digest',
+                actionContextRosterExternalAcceptanceDigest:
+                    'accepted-roster-digest',
                 targetFinalityAccepted: true,
                 evaluationProofVerified: true,
                 bridgeMobileCertificatePresent: true,

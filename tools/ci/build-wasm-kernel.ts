@@ -1,5 +1,6 @@
 import { spawnSync } from 'node:child_process';
-import { copyFile, mkdir } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { copyFile, mkdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -7,6 +8,15 @@ import { isWithinDirectory } from '../internal/files.js';
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const cargoTargetDirectory = path.resolve(repoRoot, 'target');
+const bridgeSourcePath = path.resolve(
+    repoRoot,
+    'packages',
+    'wasm',
+    'src',
+    'transcript-core-bridge.ts',
+);
+const expectedKernelDigestPattern =
+    /const transcriptCoreKernelSha256Hex =\s*['"]([a-f0-9]{64})['"]/u;
 
 export const resolveOutputFilePath = (
     commandLineArguments: readonly string[],
@@ -89,6 +99,43 @@ const resolveSourceFilePath = (): string =>
         'sealed_lattice_kernel.wasm',
     );
 
+const hashFileSha256Hex = async (filePath: string): Promise<string> => {
+    const bytes = await readFile(filePath);
+
+    return createHash('sha256').update(bytes).digest('hex');
+};
+
+const readExpectedKernelSha256Hex = async (): Promise<string> => {
+    const sourceText = await readFile(bridgeSourcePath, 'utf8');
+    const match = expectedKernelDigestPattern.exec(sourceText);
+    if (match?.[1] === undefined) {
+        throw new Error(
+            'Could not find transcriptCoreKernelSha256Hex in the WASM bridge source.',
+        );
+    }
+
+    return match[1];
+};
+
+const verifyKernelDigest = async (outputFilePath: string): Promise<string> => {
+    const [actualSha256Hex, expectedSha256Hex] = await Promise.all([
+        hashFileSha256Hex(outputFilePath),
+        readExpectedKernelSha256Hex(),
+    ]);
+    if (actualSha256Hex !== expectedSha256Hex) {
+        throw new Error(
+            [
+                'Transcript-core WASM digest mismatch.',
+                `Expected ${expectedSha256Hex}.`,
+                `Received ${actualSha256Hex}.`,
+                'Update transcriptCoreKernelSha256Hex in packages/wasm/src/transcript-core-bridge.ts after reviewing the kernel change.',
+            ].join(' '),
+        );
+    }
+
+    return actualSha256Hex;
+};
+
 export const buildWasmKernel = async (): Promise<void> => {
     const outputFilePath = resolveOutputFilePath(process.argv.slice(2));
     const outputDirectory = path.dirname(outputFilePath);
@@ -96,9 +143,10 @@ export const buildWasmKernel = async (): Promise<void> => {
     runCargoBuild();
     await mkdir(outputDirectory, { recursive: true });
     await copyFile(resolveSourceFilePath(), outputFilePath);
+    const sha256Hex = await verifyKernelDigest(outputFilePath);
 
     console.log(
-        `transcript-core kernel copied to ${path.relative(repoRoot, outputFilePath)}`,
+        `transcript-core kernel copied to ${path.relative(repoRoot, outputFilePath)} (${sha256Hex})`,
     );
 };
 

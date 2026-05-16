@@ -13,6 +13,7 @@ export {
     verifyRecoveryEpochUpdate,
 } from '../../src/recovery/index';
 export {
+    deriveBoardEntryMerklePath,
     deriveBoardEntryDigest,
     deriveBoardHeadDigest,
     deriveBoardRootDigest,
@@ -52,7 +53,7 @@ export {
     verifyLocalReplayRecordShell,
     verifyTargetAcceptedRecordShell,
     verifyTopKDecryptionShareShell,
-} from '../../src/target-phase/index';
+} from '../../src/target-acceptance/index';
 export type {
     ActionContext,
     BoardConsistencyInput,

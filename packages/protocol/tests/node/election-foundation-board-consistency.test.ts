@@ -26,6 +26,7 @@ import {
     createTargetFinalityRecord,
     createTargetProposalHead,
     deriveConflictingHeadEvidenceDigest,
+    deriveInclusionProofDigest,
     deriveProtocolDigest,
     getParticipantSigningPublicKeyDigest,
     profile,
@@ -79,6 +80,9 @@ describe('board consistency', () => {
         });
 
         expect(result.ok).toBe(true);
+        expect(inclusionProof.boardEntryDigests).toBeUndefined();
+        expect(inclusionProof.boardEntryCount).toBe(3);
+        expect(inclusionProof.boardEntryMerklePath).toHaveLength(1);
         expect(result.verifiedHeadDigests).toEqual([
             head0.headDigest,
             head1.headDigest,
@@ -102,6 +106,60 @@ describe('board consistency', () => {
         ).toEqual(
             expect.arrayContaining([
                 expect.objectContaining({ code: 'WrongPublicKey' }),
+            ]),
+        );
+    });
+
+    it('rejects a board-entry Merkle path with a substituted sibling', () => {
+        const head0 = createBoardHead(0, null);
+        const topKEvaluationRecordDigest = deriveProtocolDigest(
+            'TopKEvaluationRecordDigest',
+            { proposal: 'target' },
+        );
+        const { head, inclusionProofs } = createBoardHeadWithObjects(
+            1,
+            head0.headDigest,
+            [
+                {
+                    objectType: 'TopKEvaluationRecord',
+                    objectDigest: topKEvaluationRecordDigest,
+                    boardPosition: 2,
+                },
+            ],
+        );
+        const inclusionProof = inclusionProofs[0];
+        const tamperedPayload = {
+            ...inclusionProof,
+            boardEntryMerklePath: (
+                inclusionProof.boardEntryMerklePath ?? []
+            ).map((pathStep, pathStepIndex) =>
+                pathStepIndex === 0
+                    ? {
+                          ...pathStep,
+                          siblingDigest: deriveProtocolDigest(
+                              'BoardEntryDigest',
+                              {
+                                  pathStepIndex,
+                                  tampered: true,
+                              },
+                          ),
+                      }
+                    : pathStep,
+            ),
+        };
+        const tamperedProof = {
+            ...tamperedPayload,
+            inclusionProofDigest: deriveInclusionProofDigest(tamperedPayload),
+        };
+
+        expect(
+            verifyBoardConsistency({
+                ...createBoardEvidence([head0, head]),
+                inclusionProofs: [tamperedProof],
+            }).refusedObjects,
+        ).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({ code: 'InclusionProofInvalid' }),
             ]),
         );
     });
@@ -195,10 +253,12 @@ describe('board consistency', () => {
                 expect.objectContaining({ code: 'BoardConsistencyFailure' }),
             ]),
         );
-        expect(
-            verifyBoardConsistency(createBoardEvidence([head0, head1, fork]))
-                .refusedObjects,
-        ).toEqual(
+        const forkedBoardResult = verifyBoardConsistency(
+            createBoardEvidence([head0, head1, fork]),
+        );
+
+        expect(forkedBoardResult.acceptedDigests).toEqual([]);
+        expect(forkedBoardResult.refusedObjects).toEqual(
             expect.arrayContaining([
                 expect.objectContaining({ code: 'BoardForkDetected' }),
             ]),
