@@ -1,13 +1,16 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { copyFile, mkdir, readFile } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { normalizeTranscriptCoreKernelBytesForDigest } from '../../packages/wasm/src/transcript-core-bridge.js';
 import { isWithinDirectory } from '../internal/files.js';
 
-const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
+const repoRoot = path.resolve(
+    fileURLToPath(new URL('../../', import.meta.url)),
+);
 const cargoTargetDirectory = path.resolve(repoRoot, 'target');
 const bridgeSourcePath = path.resolve(
     repoRoot,
@@ -18,6 +21,7 @@ const bridgeSourcePath = path.resolve(
 );
 const expectedKernelDigestPattern =
     /const transcriptCoreKernelNormalizedSha256Hex =\s*['"]([a-f0-9]{64})['"]/u;
+const encodedRustflagSeparator = '\x1f';
 
 export const resolveOutputFilePath = (
     commandLineArguments: readonly string[],
@@ -50,6 +54,20 @@ export const resolveOutputFilePath = (
 };
 
 const runCargoBuild = (): void => {
+    const cargoHome = path.resolve(
+        process.env.CARGO_HOME ?? path.join(os.homedir(), '.cargo'),
+    );
+    const existingEncodedRustflags =
+        process.env.CARGO_ENCODED_RUSTFLAGS?.split(
+            encodedRustflagSeparator,
+        ).filter(Boolean) ?? [];
+    const deterministicRustflags = [
+        ...existingEncodedRustflags,
+        '--remap-path-prefix',
+        `${repoRoot}=/workspace`,
+        '--remap-path-prefix',
+        `${cargoHome}=/cargo`,
+    ];
     const result = spawnSync(
         'cargo',
         [
@@ -65,6 +83,9 @@ const runCargoBuild = (): void => {
             cwd: repoRoot,
             env: {
                 ...process.env,
+                CARGO_ENCODED_RUSTFLAGS: deterministicRustflags.join(
+                    encodedRustflagSeparator,
+                ),
                 CARGO_TARGET_DIR: cargoTargetDirectory,
             },
             encoding: 'utf8',

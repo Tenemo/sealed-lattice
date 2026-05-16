@@ -71,6 +71,7 @@ const singleZeroByteSha256Hex =
     '6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d';
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
+const wasmHeader = Uint8Array.from([0x00, 0x61, 0x73, 0x6d, 1, 0, 0, 0]);
 
 const createMockKernelExports = ({
     allocationPointer = 12,
@@ -227,6 +228,64 @@ describe('transcript-core kernel in Node', () => {
                 'crates/sealed-lattice-kernel/src/lib.rs',
                 'suffix',
             ].join('\0'),
+        );
+    });
+
+    it('ignores WASM custom sections before digesting', () => {
+        const leftCustomSection = Uint8Array.from([0, 4, 3, 111, 110, 101]);
+        const rightCustomSection = Uint8Array.from([0, 4, 3, 116, 119, 111]);
+        const emptyTypeSection = Uint8Array.from([1, 1, 0]);
+
+        const leftBytes = Uint8Array.from([
+            ...wasmHeader,
+            ...leftCustomSection,
+            ...emptyTypeSection,
+        ]);
+        const rightBytes = Uint8Array.from([
+            ...wasmHeader,
+            ...rightCustomSection,
+            ...emptyTypeSection,
+        ]);
+
+        expect(
+            Array.from(normalizeTranscriptCoreKernelBytesForDigest(leftBytes)),
+        ).toEqual(
+            Array.from(normalizeTranscriptCoreKernelBytesForDigest(rightBytes)),
+        );
+        expect(
+            Array.from(normalizeTranscriptCoreKernelBytesForDigest(leftBytes)),
+        ).toEqual(
+            Array.from(Uint8Array.from([...wasmHeader, ...emptyTypeSection])),
+        );
+    });
+
+    it('rejects malformed WASM sections before digesting', () => {
+        const invalidLengthBytes = Uint8Array.from([
+            ...wasmHeader,
+            1,
+            0x80,
+            0x80,
+            0x80,
+            0x80,
+            0x80,
+        ]);
+        const truncatedLengthBytes = Uint8Array.from([...wasmHeader, 1, 0x80]);
+        const truncatedSectionBytes = Uint8Array.from([...wasmHeader, 1, 2, 0]);
+
+        expect(() =>
+            normalizeTranscriptCoreKernelBytesForDigest(invalidLengthBytes),
+        ).toThrow(
+            'The transcript-core kernel contains an invalid WASM section length.',
+        );
+        expect(() =>
+            normalizeTranscriptCoreKernelBytesForDigest(truncatedLengthBytes),
+        ).toThrow(
+            'The transcript-core kernel contains a truncated WASM section length.',
+        );
+        expect(() =>
+            normalizeTranscriptCoreKernelBytesForDigest(truncatedSectionBytes),
+        ).toThrow(
+            'The transcript-core kernel contains a truncated WASM section.',
         );
     });
 

@@ -114,7 +114,7 @@ type KernelFailureResponse = {
 };
 
 const transcriptCoreKernelNormalizedSha256Hex =
-    '11fcbd3b6f45fc26db27d48e9956b0d6e33ff65adffa51ba793a2b196da29883';
+    '7fb272f285f98a378ee53fc3f857a922415897da7abd93ff12bd42395629db84';
 
 const bridgeCanonicalErrorCodeValues = [
     'DuplicateField',
@@ -146,6 +146,8 @@ export const canonicalErrorCodes: ReadonlySet<CanonicalErrorCode> = new Set(
 );
 
 const wasm32UsizeByteLength = 4;
+const wasmHeaderByteLength = 8;
+const wasmCustomSectionId = 0;
 const textDecoder = new TextDecoder('utf-8', { fatal: true });
 const textEncoder = new TextEncoder();
 
@@ -194,9 +196,7 @@ const normalizeDigestChunk = (chunk: Uint8Array): Uint8Array => {
     return textEncoder.encode(normalizedText);
 };
 
-export const normalizeTranscriptCoreKernelBytesForDigest = (
-    bytes: Uint8Array,
-): Uint8Array => {
+const normalizeRustSourcePathsForDigest = (bytes: Uint8Array): Uint8Array => {
     const normalizedChunks: Uint8Array[] = [];
     let totalByteLength = 0;
     let chunkStart = 0;
@@ -228,6 +228,105 @@ export const normalizeTranscriptCoreKernelBytesForDigest = (
 
     return normalizedBytes;
 };
+
+const hasWasmHeader = (bytes: Uint8Array): boolean =>
+    bytes.length >= wasmHeaderByteLength &&
+    bytes[0] === 0x00 &&
+    bytes[1] === 0x61 &&
+    bytes[2] === 0x73 &&
+    bytes[3] === 0x6d &&
+    bytes[4] === 0x01 &&
+    bytes[5] === 0x00 &&
+    bytes[6] === 0x00 &&
+    bytes[7] === 0x00;
+
+const readWasmVarUint32 = (
+    bytes: Uint8Array,
+    startOffset: number,
+): { readonly nextOffset: number; readonly value: number } => {
+    let value = 0;
+    let multiplier = 1;
+
+    for (
+        let byteOffset = startOffset;
+        byteOffset < bytes.length;
+        byteOffset += 1
+    ) {
+        const byte = bytes[byteOffset];
+        value += (byte & 0x7f) * multiplier;
+        if (byte < 0x80) {
+            return {
+                nextOffset: byteOffset + 1,
+                value,
+            };
+        }
+        multiplier *= 0x80;
+        if (multiplier > 0x1_0000_0000) {
+            throw new Error(
+                'The transcript-core kernel contains an invalid WASM section length.',
+            );
+        }
+    }
+
+    throw new Error(
+        'The transcript-core kernel contains a truncated WASM section length.',
+    );
+};
+
+const concatenateByteChunks = (
+    chunks: readonly Uint8Array[],
+    totalByteLength: number,
+): Uint8Array => {
+    const output = new Uint8Array(totalByteLength);
+    let writeOffset = 0;
+
+    for (const chunk of chunks) {
+        output.set(chunk, writeOffset);
+        writeOffset += chunk.length;
+    }
+
+    return output;
+};
+
+const stripWasmCustomSectionsForDigest = (bytes: Uint8Array): Uint8Array => {
+    if (!hasWasmHeader(bytes)) {
+        return bytes;
+    }
+
+    const chunks: Uint8Array[] = [bytes.subarray(0, wasmHeaderByteLength)];
+    let totalByteLength = wasmHeaderByteLength;
+    let sectionOffset = wasmHeaderByteLength;
+
+    while (sectionOffset < bytes.length) {
+        const sectionId = bytes[sectionOffset];
+        const sectionSize = readWasmVarUint32(bytes, sectionOffset + 1);
+        const sectionPayloadOffset = sectionSize.nextOffset;
+        const nextSectionOffset = sectionPayloadOffset + sectionSize.value;
+        if (nextSectionOffset > bytes.length) {
+            throw new Error(
+                'The transcript-core kernel contains a truncated WASM section.',
+            );
+        }
+
+        if (sectionId !== wasmCustomSectionId) {
+            const sectionBytes = bytes.subarray(
+                sectionOffset,
+                nextSectionOffset,
+            );
+            chunks.push(sectionBytes);
+            totalByteLength += sectionBytes.length;
+        }
+
+        sectionOffset = nextSectionOffset;
+    }
+
+    return concatenateByteChunks(chunks, totalByteLength);
+};
+
+export const normalizeTranscriptCoreKernelBytesForDigest = (
+    bytes: Uint8Array,
+): Uint8Array =>
+    stripWasmCustomSectionsForDigest(normalizeRustSourcePathsForDigest(bytes));
 
 const hashSha256Hex = async (bytes: Uint8Array): Promise<string> => {
     const subtleCrypto = globalThis.crypto?.subtle;
