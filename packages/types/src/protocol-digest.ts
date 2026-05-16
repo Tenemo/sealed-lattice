@@ -103,6 +103,17 @@ export const protocolDigestNamespaceValues = [
     'BridgeBatchingCertDigest',
     'AggregateBridgeProverCertDigest',
     'EncryptedEnvelopeRoot',
+    'ReceiverEncryptionProfileDigest',
+    'ShareCommitmentProfileDigest',
+    'BallotProofProfileDigest',
+    'ScoreMembershipProfileDigest',
+    'ShareCommitmentMessageBoundCertDigest',
+    'ReceiverPayloadDigest',
+    'ReceiverPayloadCiphertextRoot',
+    'ReceiverKeyProofRoot',
+    'BallotProofStatementDigest',
+    'BallotProofRecordDigest',
+    'ChallengeDomainDigest',
 ] as const;
 
 export type ProtocolDigestNamespace =

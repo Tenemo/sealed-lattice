@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "profileIds": {
+    "receiverEncryptionProfileId": "linear-module-lwe-receiver-encryption-v1",
+    "shareCommitmentProfileId": "module-sis-additive-share-commitment-v1",
+    "scoreMembershipProfileId": "one-hot-score-membership-v1",
+    "ballotProofProfileId": "lazer-linear-ballot-privacy-proof-v1"
+  },
+  "profileDigests": {
+    "receiverEncryptionProfileDigest": "5de80d6b0eaf3d6e32c95a65985651732176fcf390195595dd76d64615ca03034b71d9757e5d70dc370cdeafeaa341cadeafa2ebe8c19d7fd2a74c5b163650b9",
+    "shareCommitmentProfileDigest": "afa50d4f9d1ba1820cdb66d17aae060d04d411be4115120da16d3449ddc65d37b42dc8550482cb05bfc1559fca105592450e98c646499f5f9d95c795d3f2e6af",
+    "scoreMembershipProfileDigest": "d2c6448460e46c81b849d8a2a7391830d0ffbe908fb0916a5a687a9f1bc9400c6d9af6bc668dcc98d081953a50059c00a3ed41c528fe0311cafac8ef1608b548",
+    "ballotProofProfileDigest": "e87fa767de12a5dcbeca30859f7d4f7903746ef390a10186d374752537bb77e7cc6d2bceedbf40523f59439a96d7d035a9e5ce2c9a018db5913b706b571dc14d"
+  },
+  "mandatoryBoundCert": {
+    "shareCommitmentMessageBoundCertDigest": "8355fd1145b81d18aafcdf39d04106e9b7c935070787203b245c8ab8f5e85b6662215e506e5b6d55d21600868363319d09c37c24db8f688a3efc1d123ca5eba2",
+    "maximumCanonicalTurnout": 20,
+    "maximumAggregateInteger": 1310720,
+    "openingRandomnessAggregateBound": 20480
+  },
+  "certificateGatedBoundCert": {
+    "shareCommitmentMessageBoundCertDigest": "d1b6e85ede97c9d678ea553e7d0808032e1959503ac6ea9d5c490c7f0f0494668ef270c2685e3605f028aa714d8fd44cc3741f3e63b4b4f501cdb9dbe1e32954",
+    "maximumCanonicalTurnout": 50,
+    "maximumAggregateInteger": 3276800,
+    "openingRandomnessAggregateBound": 51200
+  }
+}

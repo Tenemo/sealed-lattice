@@ -2,6 +2,10 @@
   "schemaVersion": 1,
   "entries": [
     {
+      "path": "ballot-privacy/proof-stack-profile.json",
+      "sha256": "64705a7bb7b4bd5c8bc06588c03a0a1229946481e6a457d89fe03f3ba16651e0"
+    },
+    {
       "path": "election-foundation/board-finality.json",
       "sha256": "0da688f0f5c81ba00e2efbd98b7a5489b38bef4863449396dedf117ae7fb34ce"
     },

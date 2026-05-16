@@ -1,3 +1,4 @@
+export * from './ballot-privacy.js';
 export * from './board-target.js';
 export * from './lifecycle.js';
 export * from './plaintext-oracle.js';

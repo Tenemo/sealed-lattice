@@ -117,6 +117,7 @@ const transcriptCoreKernelNormalizedSha256HexValues = [
     '7fb272f285f98a378ee53fc3f857a922415897da7abd93ff12bd42395629db84',
     'e68ad9a15a76ecff354d4f14ecf0554f5e8e556665b12041f9de4159f43e967f',
     'e2640736eb4b7985fe20760cb6de0061dc4aa49690c47a05e3bb172670d1c1f2',
+    '203e2ace56c4f4b55d477fcaf15bda338fb8a9ca2a25097a469c1dd06d358146',
 ] as const;
 const defaultTranscriptCoreKernelNormalizedSha256HexValues = new Set<string>(
     transcriptCoreKernelNormalizedSha256HexValues,

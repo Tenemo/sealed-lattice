@@ -44,3 +44,25 @@ export const evaluationNoiseProfileId = 'he-evaluation-noise-profile-v1';
 
 /** Mobile profile required by accepted manifests. */
 export const mobileProfileId = 'mobile-flagship-profile-v1';
+
+/** Receiver encryption profile used by claim-bearing ballot privacy proofs. */
+export const receiverEncryptionProfileId =
+    'linear-module-lwe-receiver-encryption-v1';
+
+/** Share commitment profile used by ballot and aggregate privacy proofs. */
+export const shareCommitmentProfileId =
+    'module-sis-additive-share-commitment-v1';
+
+/** Ballot privacy proof profile used for the local lattice relation. */
+export const ballotProofProfileId = 'lazer-linear-ballot-privacy-proof-v1';
+
+/** Score membership profile for score values in the supported score domain. */
+export const scoreMembershipProfileId = 'one-hot-score-membership-v1';
+
+/** Field encoding profile for canonical GF(65537) representatives. */
+export const fieldEncodingProfileId =
+    'gf65537-canonical-representative-quotient-v1';
+
+/** Share commitment message-bound certificate profile. */
+export const shareCommitmentMessageBoundProfileId =
+    'share-commitment-message-bound-v1';

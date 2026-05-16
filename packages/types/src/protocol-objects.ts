@@ -112,6 +112,7 @@ export type ProtocolRefusalCode =
     | 'AggregateShareInvalid'
     | 'BallotPackageInvalid'
     | 'BallotSetInvalid'
+    | 'BallotPrivacyProfileInvalid'
     | 'BoardConsistencyFailure'
     | 'BoardForkDetected'
     | 'CastReceiptInvalid'
