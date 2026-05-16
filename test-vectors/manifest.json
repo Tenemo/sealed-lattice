@@ -2,6 +2,10 @@
   "schemaVersion": 1,
   "entries": [
     {
+      "path": "ballot-privacy/proof-backend-linear-vectors.json",
+      "sha256": "3c6f961b6c2cfac9871e4ac300c1354c5fac4670a5605a81ce31aeb36726edc0"
+    },
+    {
       "path": "ballot-privacy/proof-stack-profile.json",
       "sha256": "64705a7bb7b4bd5c8bc06588c03a0a1229946481e6a457d89fe03f3ba16651e0"
     },

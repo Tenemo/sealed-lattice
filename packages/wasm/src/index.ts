@@ -8,6 +8,7 @@ import {
     createTranscriptCoreKernelLoader,
     TranscriptCoreKernelCommandError,
     type BallotPrivacyKernelVerification,
+    type BallotPrivacyLinearProofVectorVerification,
     type BallotPrivacyProofBackendStatus,
     type TranscriptCoreKernelSharePoint,
     type TranscriptCorePlaintextComparison,
@@ -27,6 +28,7 @@ export {
 export type {
     TranscriptCoreKernel,
     BallotPrivacyKernelVerification,
+    BallotPrivacyLinearProofVectorVerification,
     BallotPrivacyProofBackendStatus,
     TranscriptCoreKernelSharePoint,
     TranscriptCorePlaintextComparison,

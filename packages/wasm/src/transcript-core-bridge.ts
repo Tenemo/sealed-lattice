@@ -38,11 +38,18 @@ export type BallotPrivacyKernelVerification = {
     readonly statusLabels: readonly string[];
     readonly acceptedDigests: readonly string[];
     readonly refusedObjects: readonly {
-        readonly code: 'OperationUnavailable';
+        readonly code: string;
         readonly message: string;
     }[];
-    readonly unresolvedReason: 'OperationUnavailable';
+    readonly unresolvedReason: string;
 };
+
+export type BallotPrivacyLinearProofVectorVerification =
+    BallotPrivacyKernelVerification & {
+        readonly caseName?: string;
+        readonly vectorAvailable?: boolean;
+        readonly expectedOutcome?: string;
+    };
 
 export type TranscriptCoreKernel = {
     readonly exportedFunctionNames: readonly string[];
@@ -74,6 +81,9 @@ export type TranscriptCoreKernel = {
         fixture: TranscriptCoreFixture,
     ): TranscriptCoreFixtureVerification;
     describeBallotPrivacyProofBackend(): BallotPrivacyProofBackendStatus;
+    verifyBallotPrivacyLinearProofVector(input: {
+        readonly vectorCase: unknown;
+    }): BallotPrivacyLinearProofVectorVerification;
     verifyReceiverKeyProof(input: {
         readonly receiverKeyProof: unknown;
     }): BallotPrivacyKernelVerification;
@@ -130,6 +140,10 @@ type TranscriptCoreKernelCommand =
           readonly command: 'DescribeBallotPrivacyProofBackend';
       }
     | {
+          readonly command: 'VerifyBallotPrivacyLinearProofVector';
+          readonly vectorCase: unknown;
+      }
+    | {
           readonly command: 'VerifyReceiverKeyProof';
           readonly receiverKeyProof: unknown;
       }
@@ -172,6 +186,9 @@ const transcriptCoreKernelNormalizedSha256HexValues = [
     '203e2ace56c4f4b55d477fcaf15bda338fb8a9ca2a25097a469c1dd06d358146',
     '390b1d16a23c50225995a49427fb2db54ebe87bec4f9835c9706722fd22aebf3',
     'd70e11274e11dffc3c500ab3a8acd2df817909edc85a6c3e266674dfdf071a8c',
+    '637c519e4fe1648cc7c366c86e159d3f9b04d08fcebb38bac380690fc31aa995',
+    'eb8e34683e6d6ceb778628e253a8067128a90f95f8351357c6b84f45c7ca33bc',
+    '9b0600143d67d29c44784d99e993972585d588da6eff718917d433947b842ab2',
 ] as const;
 const defaultTranscriptCoreKernelNormalizedSha256HexValues = new Set<string>(
     transcriptCoreKernelNormalizedSha256HexValues,
@@ -813,6 +830,13 @@ export const createTranscriptCoreKernelLoader = (
                         executeCommand<BallotPrivacyProofBackendStatus>({
                             command: 'DescribeBallotPrivacyProofBackend',
                         }),
+                verifyBallotPrivacyLinearProofVector: (
+                    input,
+                ): BallotPrivacyLinearProofVectorVerification =>
+                    executeCommand<BallotPrivacyLinearProofVectorVerification>({
+                        command: 'VerifyBallotPrivacyLinearProofVector',
+                        vectorCase: input.vectorCase,
+                    }),
                 verifyReceiverKeyProof: (
                     input,
                 ): BallotPrivacyKernelVerification =>

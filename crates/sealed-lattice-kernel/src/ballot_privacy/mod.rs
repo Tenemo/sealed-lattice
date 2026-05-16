@@ -1,3 +1,10 @@
+pub mod linear_proof_parameters;
+pub mod linear_proof_verifier;
+pub mod polynomial_matrix;
+pub mod polynomial_ring;
+pub mod polynomial_vector;
+pub mod proof_coder;
+
 use serde_json::{Value, json};
 
 pub const MODULE_MARKER: &str = "ballot-privacy";
@@ -84,6 +91,10 @@ pub fn verify_ballot_proof() -> Value {
 
 pub fn verify_claim_bearing_ballot_package() -> Value {
     fail_closed("verifyClaimBearingBallotPackage")
+}
+
+pub fn verify_linear_proof_vector_case(vector_case: &Value) -> Value {
+    linear_proof_verifier::verify_linear_proof_vector_case_value(vector_case)
 }
 
 #[cfg(test)]
