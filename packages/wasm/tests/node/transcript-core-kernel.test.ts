@@ -440,12 +440,29 @@ describe('transcript-core kernel in Node', () => {
 
     it('keeps ballot privacy proof commands fail-closed until the backend is available', async () => {
         const kernel = await loadTranscriptCoreKernel();
+        const backendStatus = kernel.describeBallotPrivacyProofBackend();
+
+        expect(backendStatus).toMatchObject({
+            backendAvailable: false,
+            portableRustWasmPortRequired: true,
+            upstreamDirectDependencyUsableInBrowser: false,
+        });
+        expect(backendStatus.requiredComponents).toEqual(
+            expect.arrayContaining([
+                'ABDLop commitment key generation, commitment, and commitment hashing',
+                'tbox proof generation and verification',
+                'browser-safe prover randomness source',
+            ]),
+        );
 
         expect(
             kernel.verifyReceiverKeyProof({ receiverKeyProof: {} }),
         ).toMatchObject({
             ok: false,
             backendAvailable: false,
+            backendStatus: {
+                portableRustWasmPortRequired: true,
+            },
             operation: 'verifyReceiverKeyProof',
             unresolvedReason: 'OperationUnavailable',
         });
@@ -454,6 +471,9 @@ describe('transcript-core kernel in Node', () => {
         ).toMatchObject({
             ok: false,
             backendAvailable: false,
+            backendStatus: {
+                portableRustWasmPortRequired: true,
+            },
             operation: 'verifyBallotProof',
             unresolvedReason: 'OperationUnavailable',
         });
@@ -462,6 +482,9 @@ describe('transcript-core kernel in Node', () => {
         ).toMatchObject({
             ok: false,
             backendAvailable: false,
+            backendStatus: {
+                portableRustWasmPortRequired: true,
+            },
             operation: 'verifyClaimBearingBallotPackage',
             unresolvedReason: 'OperationUnavailable',
         });

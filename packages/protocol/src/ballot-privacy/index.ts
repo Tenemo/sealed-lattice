@@ -12,6 +12,7 @@ export {
     createReceiverKeyProofShell,
     createReceiverPayloadShell,
     createShareCommitmentShell,
+    describeBallotPrivacyProofBackend,
     verifyBallotProof,
     verifyClaimBearingBallotPackage,
     verifyReceiverKeyProof,

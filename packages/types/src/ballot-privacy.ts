@@ -271,6 +271,18 @@ export type ClaimBearingBallotPackage = {
     readonly shareCommitments: readonly ShareCommitment[];
 };
 
+export type BallotPrivacyProofBackendStatus = {
+    readonly backendName: 'LaZer-style linear lattice proof backend';
+    readonly backendAvailable: false;
+    readonly upstreamReference: 'lazer-crypto/lazer';
+    readonly upstreamDirectDependencyUsableInBrowser: false;
+    readonly portableRustWasmPortRequired: true;
+    readonly requiredComponents: readonly string[];
+    readonly upstreamReferenceFiles: readonly string[];
+    readonly blockedReason: string;
+};
+
 export type BallotPrivacyVerification = StructuredProtocolVerificationResult & {
     readonly backendAvailable: boolean;
+    readonly backendStatus?: BallotPrivacyProofBackendStatus;
 };

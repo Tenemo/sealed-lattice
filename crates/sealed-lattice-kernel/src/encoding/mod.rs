@@ -429,6 +429,7 @@ fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult<Value> {
 
             verify_fixture(&fixture)
         }
+        "DescribeBallotPrivacyProofBackend" => Ok(crate::ballot_privacy::describe_proof_backend()),
         "VerifyReceiverKeyProof" => Ok(crate::ballot_privacy::verify_receiver_key_proof()),
         "VerifyBallotProof" => Ok(crate::ballot_privacy::verify_ballot_proof()),
         "VerifyClaimBearingBallotPackage" => {

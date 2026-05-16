@@ -19,9 +19,21 @@ export type TranscriptCorePlaintextComparison = {
     readonly scoreDifference: number;
 };
 
+export type BallotPrivacyProofBackendStatus = {
+    readonly backendName: string;
+    readonly backendAvailable: false;
+    readonly upstreamReference: string;
+    readonly upstreamDirectDependencyUsableInBrowser: false;
+    readonly portableRustWasmPortRequired: true;
+    readonly requiredComponents: readonly string[];
+    readonly upstreamReferenceFiles: readonly string[];
+    readonly blockedReason: string;
+};
+
 export type BallotPrivacyKernelVerification = {
     readonly ok: false;
     readonly backendAvailable: false;
+    readonly backendStatus: BallotPrivacyProofBackendStatus;
     readonly operation: string;
     readonly statusLabels: readonly string[];
     readonly acceptedDigests: readonly string[];
@@ -61,6 +73,7 @@ export type TranscriptCoreKernel = {
     verifyFixture(
         fixture: TranscriptCoreFixture,
     ): TranscriptCoreFixtureVerification;
+    describeBallotPrivacyProofBackend(): BallotPrivacyProofBackendStatus;
     verifyReceiverKeyProof(input: {
         readonly receiverKeyProof: unknown;
     }): BallotPrivacyKernelVerification;
@@ -114,6 +127,9 @@ type TranscriptCoreKernelCommand =
           readonly fixture: TranscriptCoreFixture;
       }
     | {
+          readonly command: 'DescribeBallotPrivacyProofBackend';
+      }
+    | {
           readonly command: 'VerifyReceiverKeyProof';
           readonly receiverKeyProof: unknown;
       }
@@ -155,6 +171,7 @@ const transcriptCoreKernelNormalizedSha256HexValues = [
     'e2640736eb4b7985fe20760cb6de0061dc4aa49690c47a05e3bb172670d1c1f2',
     '203e2ace56c4f4b55d477fcaf15bda338fb8a9ca2a25097a469c1dd06d358146',
     '390b1d16a23c50225995a49427fb2db54ebe87bec4f9835c9706722fd22aebf3',
+    'd70e11274e11dffc3c500ab3a8acd2df817909edc85a6c3e266674dfdf071a8c',
 ] as const;
 const defaultTranscriptCoreKernelNormalizedSha256HexValues = new Set<string>(
     transcriptCoreKernelNormalizedSha256HexValues,
@@ -791,6 +808,11 @@ export const createTranscriptCoreKernelLoader = (
                         command: 'VerifyFixture',
                         fixture,
                     }),
+                describeBallotPrivacyProofBackend:
+                    (): BallotPrivacyProofBackendStatus =>
+                        executeCommand<BallotPrivacyProofBackendStatus>({
+                            command: 'DescribeBallotPrivacyProofBackend',
+                        }),
                 verifyReceiverKeyProof: (
                     input,
                 ): BallotPrivacyKernelVerification =>

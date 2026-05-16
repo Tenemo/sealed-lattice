@@ -1,5 +1,6 @@
 import { deriveProtocolDigest } from '@sealed-lattice/crypto';
 import type {
+    BallotPrivacyProofBackendStatus,
     BallotPrivacyVerification,
     BallotProofRecord,
     BallotProofStatement,
@@ -66,6 +67,54 @@ type ShareCommitmentInput = Omit<
 
 const unavailableProofBackendMessage =
     'Ballot privacy proof verification requires the frozen LaZer-style lattice proof backend, which is not implemented in this build.';
+
+const requiredLazerPortComponents = [
+    'generated linear proof parameters from lin-codegen.sage',
+    'portable polynomial ring arithmetic for Z_q[X]/(X^d + 1)',
+    'portable polynomial vector and matrix arithmetic',
+    'sparse polynomial vector and matrix arithmetic',
+    'ABDLop commitment key generation, commitment, and commitment hashing',
+    'linear relation statement mapping for A*w + t = 0',
+    'linear witness decomposition into short and message coordinates',
+    'tbox proof generation and verification',
+    'quadratic-to-linear helper relations used by the tbox backend',
+    'proof byte coder and decoder',
+    'SHAKE128 transcript and expansion path',
+    'rejection sampling and bounded short-vector checks',
+    'browser-safe prover randomness source',
+] as const;
+
+const upstreamLazerReferenceFiles = [
+    'src/lin-proofs.c',
+    'src/lnp.c',
+    'src/lnp-tbox.c',
+    'src/lnp-quad.c',
+    'src/lnp-quad-many.c',
+    'src/lnp-quad-eval.c',
+    'src/abdlop.c',
+    'src/poly.c',
+    'src/polyvec.c',
+    'src/polymat.c',
+    'src/spolyvec.c',
+    'src/spolymat.c',
+    'src/coder.c',
+    'src/rejection.c',
+    'src/rng.c',
+    'src/shake128.c',
+    'scripts/lin-codegen.sage',
+] as const;
+
+export const describeBallotPrivacyProofBackend =
+    (): BallotPrivacyProofBackendStatus => ({
+        backendName: 'LaZer-style linear lattice proof backend',
+        backendAvailable: false,
+        upstreamReference: 'lazer-crypto/lazer',
+        upstreamDirectDependencyUsableInBrowser: false,
+        portableRustWasmPortRequired: true,
+        requiredComponents: requiredLazerPortComponents,
+        upstreamReferenceFiles: upstreamLazerReferenceFiles,
+        blockedReason: unavailableProofBackendMessage,
+    });
 
 type BallotProofStatementInput = Omit<
     BallotProofStatement,
@@ -307,6 +356,7 @@ const createUnavailableProofBackendVerification = (
     return {
         ok: false,
         backendAvailable: false,
+        backendStatus: describeBallotPrivacyProofBackend(),
         statusLabels: [],
         acceptedDigests: [],
         refusedObjects,

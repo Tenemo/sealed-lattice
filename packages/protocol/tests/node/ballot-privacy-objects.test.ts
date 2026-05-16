@@ -14,6 +14,7 @@ import {
     createReceiverPayloadShell,
     createShareCommitmentMessageBoundCert,
     createShareCommitmentShell,
+    describeBallotPrivacyProofBackend,
     verifyBallotProof,
     verifyClaimBearingBallotPackage,
     verifyReceiverKeyProof,
@@ -250,8 +251,16 @@ describe('ballot privacy proof object boundary', () => {
         ).toMatchObject({
             ok: false,
             backendAvailable: false,
+            backendStatus: {
+                portableRustWasmPortRequired: true,
+                upstreamDirectDependencyUsableInBrowser: false,
+            },
             unresolvedReason: 'OperationUnavailable',
         });
+        expect(
+            verifyBallotProof({ statement, ballotProof: proofRecord })
+                .backendStatus?.requiredComponents,
+        ).toContain('tbox proof generation and verification');
         expect(verifyReceiverKeyProof({ receiverKeyProof })).toMatchObject({
             ok: false,
             backendAvailable: false,
@@ -274,5 +283,31 @@ describe('ballot privacy proof object boundary', () => {
             backendAvailable: false,
             unresolvedReason: 'OperationUnavailable',
         });
+    });
+
+    it('describes the exact portable proof backend gap', () => {
+        const backendStatus = describeBallotPrivacyProofBackend();
+
+        expect(backendStatus.backendAvailable).toBe(false);
+        expect(backendStatus.portableRustWasmPortRequired).toBe(true);
+        expect(backendStatus.upstreamDirectDependencyUsableInBrowser).toBe(
+            false,
+        );
+        expect(backendStatus.requiredComponents).toEqual(
+            expect.arrayContaining([
+                'generated linear proof parameters from lin-codegen.sage',
+                'ABDLop commitment key generation, commitment, and commitment hashing',
+                'proof byte coder and decoder',
+                'browser-safe prover randomness source',
+            ]),
+        );
+        expect(backendStatus.upstreamReferenceFiles).toEqual(
+            expect.arrayContaining([
+                'src/lin-proofs.c',
+                'src/lnp-tbox.c',
+                'src/abdlop.c',
+                'scripts/lin-codegen.sage',
+            ]),
+        );
     });
 });
