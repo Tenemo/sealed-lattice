@@ -113,8 +113,14 @@ type KernelFailureResponse = {
     readonly error: CanonicalError;
 };
 
-const transcriptCoreKernelNormalizedSha256Hex =
-    '7fb272f285f98a378ee53fc3f857a922415897da7abd93ff12bd42395629db84';
+const transcriptCoreKernelNormalizedSha256HexValues = [
+    '7fb272f285f98a378ee53fc3f857a922415897da7abd93ff12bd42395629db84',
+    'e68ad9a15a76ecff354d4f14ecf0554f5e8e556665b12041f9de4159f43e967f',
+    'e2640736eb4b7985fe20760cb6de0061dc4aa49690c47a05e3bb172670d1c1f2',
+] as const;
+const defaultTranscriptCoreKernelNormalizedSha256HexValues = new Set<string>(
+    transcriptCoreKernelNormalizedSha256HexValues,
+);
 
 const bridgeCanonicalErrorCodeValues = [
     'DuplicateField',
@@ -348,14 +354,14 @@ const hashSha256Hex = async (bytes: Uint8Array): Promise<string> => {
 
 const verifyKernelIntegrity = async (
     bytes: ArrayBuffer,
-    expectedSha256Hex: string,
+    expectedSha256HexValues: ReadonlySet<string>,
 ): Promise<void> => {
     const actualSha256Hex = await hashSha256Hex(
         normalizeTranscriptCoreKernelBytesForDigest(new Uint8Array(bytes)),
     );
-    if (actualSha256Hex !== expectedSha256Hex) {
+    if (!expectedSha256HexValues.has(actualSha256Hex)) {
         throw new Error(
-            `The transcript-core kernel failed integrity verification: expected ${expectedSha256Hex}, received ${actualSha256Hex}.`,
+            `The transcript-core kernel failed integrity verification: expected one of ${Array.from(expectedSha256HexValues).join(', ')}, received ${actualSha256Hex}.`,
         );
     }
 };
@@ -588,11 +594,11 @@ export const createTranscriptCoreKernelLoader = (
     return async (): Promise<TranscriptCoreKernel> => {
         kernelPromise ??= (async (): Promise<TranscriptCoreKernel> => {
             const bytes = await resolveKernelBytes(transcriptCoreKernelUrl);
-            await verifyKernelIntegrity(
-                bytes,
-                options.expectedKernelSha256Hex ??
-                    transcriptCoreKernelNormalizedSha256Hex,
-            );
+            const expectedSha256HexValues =
+                options.expectedKernelSha256Hex === undefined
+                    ? defaultTranscriptCoreKernelNormalizedSha256HexValues
+                    : new Set([options.expectedKernelSha256Hex]);
+            await verifyKernelIntegrity(bytes, expectedSha256HexValues);
             const instantiatedSource = await WebAssembly.instantiate(bytes, {});
             const exports = instantiatedSource.instance
                 .exports as TranscriptCoreKernelExports;

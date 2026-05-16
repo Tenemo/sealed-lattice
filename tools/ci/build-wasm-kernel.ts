@@ -19,8 +19,9 @@ const bridgeSourcePath = path.resolve(
     'src',
     'transcript-core-bridge.ts',
 );
-const expectedKernelDigestPattern =
-    /const transcriptCoreKernelNormalizedSha256Hex =\s*['"]([a-f0-9]{64})['"]/u;
+const expectedKernelDigestListPattern =
+    /const transcriptCoreKernelNormalizedSha256HexValues\s*=\s*\[([\s\S]*?)\]\s*as const/u;
+const expectedKernelDigestPattern = /['"]([a-f0-9]{64})['"]/gu;
 const encodedRustflagSeparator = '\x1f';
 
 export const resolveOutputFilePath = (
@@ -129,30 +130,46 @@ const hashFileSha256Hex = async (filePath: string): Promise<string> => {
         .digest('hex');
 };
 
-const readExpectedKernelSha256Hex = async (): Promise<string> => {
+const readExpectedKernelSha256HexValues = async (): Promise<
+    ReadonlySet<string>
+> => {
     const sourceText = await readFile(bridgeSourcePath, 'utf8');
-    const match = expectedKernelDigestPattern.exec(sourceText);
-    if (match?.[1] === undefined) {
+    const listMatch = expectedKernelDigestListPattern.exec(sourceText);
+    if (listMatch?.[1] === undefined) {
         throw new Error(
-            'Could not find transcriptCoreKernelSha256Hex in the WASM bridge source.',
+            'Could not find transcriptCoreKernelNormalizedSha256HexValues in the WASM bridge source.',
+        );
+    }
+    const expectedSha256HexValues = new Set<string>();
+    for (const digestMatch of listMatch[1].matchAll(
+        expectedKernelDigestPattern,
+    )) {
+        const expectedSha256Hex = digestMatch[1];
+        if (expectedSha256Hex !== undefined) {
+            expectedSha256HexValues.add(expectedSha256Hex);
+        }
+    }
+    if (expectedSha256HexValues.size === 0) {
+        throw new Error(
+            'Could not find any transcript-core kernel digest values in the WASM bridge source.',
         );
     }
 
-    return match[1];
+    return expectedSha256HexValues;
 };
 
 const verifyKernelDigest = async (outputFilePath: string): Promise<string> => {
-    const [actualSha256Hex, expectedSha256Hex] = await Promise.all([
+    const [actualSha256Hex, expectedSha256HexValues] = await Promise.all([
         hashFileSha256Hex(outputFilePath),
-        readExpectedKernelSha256Hex(),
+        readExpectedKernelSha256HexValues(),
     ]);
-    if (actualSha256Hex !== expectedSha256Hex) {
+    if (!expectedSha256HexValues.has(actualSha256Hex)) {
         throw new Error(
             [
                 'Transcript-core WASM normalized digest mismatch.',
-                `Expected ${expectedSha256Hex}.`,
+                `Expected one of ${Array.from(expectedSha256HexValues).join(', ')}.`,
                 `Received ${actualSha256Hex}.`,
-                'Update transcriptCoreKernelNormalizedSha256Hex in packages/wasm/src/transcript-core-bridge.ts after reviewing the kernel change.',
+                'Update transcriptCoreKernelNormalizedSha256HexValues in packages/wasm/src/transcript-core-bridge.ts after reviewing the kernel change.',
             ].join(' '),
         );
     }
