@@ -14,6 +14,7 @@ import type {
 
 import {
     addFieldElements,
+    assertCanonicalFieldElement,
     fieldModulus,
     normalizeFieldElement,
 } from '../plaintext-oracle/field.js';
@@ -24,6 +25,18 @@ import { assertCanonicalReceiverShareVector } from './receiver-shares.js';
 const textEncoder = new TextEncoder();
 const openingDerivationDomain =
     'sealed-lattice-internal/pvss-ballot-fixture-opening-v1';
+
+type PvssBallotDigestContext = Pick<
+    PvssBallotAlgebraInput,
+    | 'ceremonyId'
+    | 'duplicateBallotPolicyDigest'
+    | 'electionManifestDigest'
+    | 'pollSpecDigest'
+    | 'rosterDigest'
+    | 'thresholdProfileDigest'
+    | 'voterIdentity'
+    | 'voterRosterPosition'
+>;
 
 const deriveFieldElementFromDigest = (digestHex: string): FieldElement =>
     Number(BigInt(`0x${digestHex}`) % BigInt(fieldModulus));
@@ -56,9 +69,9 @@ const deriveOpeningFieldElement = (
         ]),
     );
 
-const deriveTestShareCommitmentDigest = (input: {
+export const deriveTestShareCommitmentDigest = (input: {
     readonly commitment: Omit<TestShareCommitment, 'shareCommitmentDigest'>;
-    readonly context: PvssBallotAlgebraInput;
+    readonly context: PvssBallotDigestContext;
     readonly ballotPolynomialSetDigest: string;
 }): string =>
     deriveProtocolDigest('ShareCommitmentDigest', {
@@ -77,8 +90,8 @@ const deriveTestShareCommitmentDigest = (input: {
         voterRosterPosition: input.context.voterRosterPosition,
     });
 
-const deriveTestReceiverShareOpeningPayloadDigest = (input: {
-    readonly context: PvssBallotAlgebraInput;
+export const deriveTestReceiverShareOpeningPayloadDigest = (input: {
+    readonly context: PvssBallotDigestContext;
     readonly payload: Omit<TestReceiverShareOpeningPayload, 'payloadDigest'>;
 }): string =>
     deriveProtocolDigest('ShareCommitmentDigest', {
@@ -171,11 +184,31 @@ export const verifyTestShareCommitmentOpening = (
         return false;
     }
 
-    return witness.shareVector.every(
-        (fieldElement, fieldIndex) =>
-            addFieldElements(
+    try {
+        return witness.shareVector.every((fieldElement, fieldIndex) => {
+            assertCanonicalFieldElement(
                 fieldElement,
-                normalizeFieldElement(witness.openingVector[fieldIndex] ?? 0),
-            ) === witness.commitment.commitmentValues[fieldIndex],
-    );
+                `test share field ${String(fieldIndex)}`,
+            );
+            assertCanonicalFieldElement(
+                witness.openingVector[fieldIndex] ?? 0,
+                `test opening field ${String(fieldIndex)}`,
+            );
+            assertCanonicalFieldElement(
+                witness.commitment.commitmentValues[fieldIndex] ?? 0,
+                `test commitment field ${String(fieldIndex)}`,
+            );
+
+            return (
+                addFieldElements(
+                    fieldElement,
+                    normalizeFieldElement(
+                        witness.openingVector[fieldIndex] ?? 0,
+                    ),
+                ) === witness.commitment.commitmentValues[fieldIndex]
+            );
+        });
+    } catch {
+        return false;
+    }
 };

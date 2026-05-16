@@ -1,9 +1,13 @@
-import { deriveProtocolDigest } from '@sealed-lattice/crypto';
+import { canonicalJson, deriveProtocolDigest } from '@sealed-lattice/crypto';
 import type {
     BallotPackageWitness,
     CanonicalBallotSet,
+    CountedBallotPackage,
     FieldElement,
     PvssBallotRosterEntry,
+    ReceiverShareVector,
+    TestReceiverShareOpeningPayload,
+    TestShareCommitmentWitness,
     TestAggregateShare,
     TestAggregateShareSet,
     TestAggregateShareWitness,
@@ -17,17 +21,348 @@ import {
 } from '../plaintext-oracle/field.js';
 import { interpolateShamirConstantTerm } from '../plaintext-oracle/shamir.js';
 
+import { deriveBallotPolynomialSetDigest } from './ballot-polynomials.js';
 import {
     pvssBallotShareVectorWidth,
     requireNoRefusals,
     sortRosterEntries,
     validateRosterEntries,
 } from './common.js';
-import { addShareVectors } from './receiver-shares.js';
-import { verifyTestShareCommitmentOpening } from './test-share-commitments.js';
+import {
+    addShareVectors,
+    deriveReceiverShareVectors,
+} from './receiver-shares.js';
+import {
+    deriveTestReceiverShareOpeningPayloadDigest,
+    deriveTestShareCommitmentDigest,
+    verifyTestShareCommitmentOpening,
+} from './test-share-commitments.js';
 
 const zeroShareVector = (): readonly FieldElement[] =>
     Array.from({ length: pvssBallotShareVectorWidth }, () => 0 as FieldElement);
+
+const fieldVectorsEqual = (
+    left: readonly FieldElement[],
+    right: readonly FieldElement[],
+): boolean =>
+    left.length === right.length &&
+    left.every(
+        (fieldElement, fieldIndex) => fieldElement === right[fieldIndex],
+    );
+
+const sameCanonicalObject = (left: unknown, right: unknown): boolean =>
+    canonicalJson(left) === canonicalJson(right);
+
+const receiverKey = (
+    trusteeIdentity: string,
+    trusteeRosterPosition: number,
+): string => [trusteeIdentity, trusteeRosterPosition].join('\u0000');
+
+const buildUniqueMap = <Value>(
+    values: readonly Value[],
+    keyForValue: (value: Value) => string,
+    duplicateMessage: string,
+): Map<string, Value> => {
+    const mappedValues = new Map<string, Value>();
+
+    for (const value of values) {
+        const key = keyForValue(value);
+        if (mappedValues.has(key)) {
+            throw new RangeError(duplicateMessage);
+        }
+        mappedValues.set(key, value);
+    }
+
+    return mappedValues;
+};
+
+const assertPolynomialSetMatchesPackage = (
+    candidate: CountedBallotPackage,
+    witness: BallotPackageWitness,
+    thresholdProfile: ThresholdProfile,
+): void => {
+    const polynomialSet = witness.polynomialSet;
+    const recomputedPolynomialSetDigest = deriveBallotPolynomialSetDigest({
+        normalizedBallot: polynomialSet.normalizedBallot,
+        optionPolynomials: polynomialSet.optionPolynomials,
+        pvssThreshold: polynomialSet.pvssThreshold,
+    });
+
+    if (
+        polynomialSet.ballotPolynomialSetDigest !==
+            recomputedPolynomialSetDigest ||
+        polynomialSet.ballotPolynomialSetDigest !==
+            candidate.ballotPackage.ballotPolynomialSetDigest
+    ) {
+        throw new RangeError(
+            'Counted ballot witness polynomial set does not match the counted package digest.',
+        );
+    }
+    if (
+        polynomialSet.pvssThreshold !== thresholdProfile.pvssThreshold ||
+        polynomialSet.normalizedBallot.scores.length !==
+            candidate.ballotPackage.optionCount ||
+        polynomialSet.optionPolynomials.length !==
+            candidate.ballotPackage.optionCount
+    ) {
+        throw new RangeError(
+            'Counted ballot witness polynomial set does not match the counted package shape.',
+        );
+    }
+
+    polynomialSet.optionPolynomials.forEach((optionPolynomial, optionIndex) => {
+        const expectedScore =
+            polynomialSet.normalizedBallot.scores[optionIndex];
+
+        if (
+            optionPolynomial.optionIndex !== optionIndex ||
+            optionPolynomial.optionOrdinal !== optionIndex + 1 ||
+            optionPolynomial.polynomial.coefficients.length !==
+                thresholdProfile.pvssThreshold ||
+            optionPolynomial.polynomial.coefficients[0] !== expectedScore
+        ) {
+            throw new RangeError(
+                'Counted ballot witness polynomial set is not canonical for the counted package.',
+            );
+        }
+        optionPolynomial.polynomial.coefficients.forEach(
+            (coefficient, coefficientIndex) =>
+                assertCanonicalFieldElement(
+                    coefficient,
+                    `ballot polynomial coefficient ${String(coefficientIndex)}`,
+                ),
+        );
+    });
+};
+
+const assertReceiverWitnessesMatchPackage = (input: {
+    readonly candidate: CountedBallotPackage;
+    readonly witness: BallotPackageWitness;
+    readonly rosterEntries: readonly PvssBallotRosterEntry[];
+    readonly thresholdProfile: ThresholdProfile;
+}): void => {
+    const { candidate, witness } = input;
+    const expectedReceiverShareVectors = deriveReceiverShareVectors({
+        polynomialSet: witness.polynomialSet,
+        rosterEntries: input.rosterEntries,
+        thresholdProfile: input.thresholdProfile,
+    });
+    const shareVectorsByReceiver = buildUniqueMap<ReceiverShareVector>(
+        witness.receiverShareVectors,
+        (shareVector) =>
+            receiverKey(
+                shareVector.trusteeIdentity,
+                shareVector.trusteeRosterPosition,
+            ),
+        'Counted ballot witness receiver shares must be unique.',
+    );
+    const commitmentWitnessesByReceiver =
+        buildUniqueMap<TestShareCommitmentWitness>(
+            witness.shareCommitmentWitnesses,
+            (commitmentWitness) =>
+                receiverKey(
+                    commitmentWitness.commitment.trusteeIdentity,
+                    commitmentWitness.commitment.trusteeRosterPosition,
+                ),
+            'Counted ballot witness commitment openings must be unique.',
+        );
+    const receiverPayloadsByReceiver =
+        buildUniqueMap<TestReceiverShareOpeningPayload>(
+            witness.receiverPayloads,
+            (payload) =>
+                receiverKey(
+                    payload.receiverIdentity,
+                    payload.receiverRosterPosition,
+                ),
+            'Counted ballot witness receiver payloads must be unique.',
+        );
+    const digestContext = {
+        ceremonyId: candidate.ballotPackage.ceremonyId,
+        duplicateBallotPolicyDigest:
+            candidate.ballotPackage.duplicateBallotPolicyDigest,
+        electionManifestDigest: candidate.ballotPackage.electionManifestDigest,
+        pollSpecDigest: candidate.ballotPackage.pollSpecDigest,
+        rosterDigest: candidate.ballotPackage.rosterDigest,
+        thresholdProfileDigest: candidate.ballotPackage.thresholdProfileDigest,
+        voterIdentity: candidate.ballotPackage.voterIdentity,
+        voterRosterPosition: candidate.ballotPackage.voterRosterPosition,
+    };
+
+    if (
+        witness.receiverShareVectors.length !== input.rosterEntries.length ||
+        witness.shareCommitmentWitnesses.length !==
+            input.rosterEntries.length ||
+        witness.receiverPayloads.length !== input.rosterEntries.length
+    ) {
+        throw new RangeError(
+            'Counted ballot witness must carry exactly one receiver witness for every roster entry.',
+        );
+    }
+
+    expectedReceiverShareVectors.forEach(
+        (expectedShareVector, receiverIndex) => {
+            const key = receiverKey(
+                expectedShareVector.trusteeIdentity,
+                expectedShareVector.trusteeRosterPosition,
+            );
+            const shareVector = shareVectorsByReceiver.get(key);
+            const commitmentWitness = commitmentWitnessesByReceiver.get(key);
+            const payload = receiverPayloadsByReceiver.get(key);
+            const commitmentReference =
+                candidate.ballotPackage.receiverShareCommitments[receiverIndex];
+            const payloadReference =
+                candidate.ballotPackage.receiverPayloadDigests[receiverIndex];
+
+            if (
+                shareVector === undefined ||
+                commitmentWitness === undefined ||
+                payload === undefined ||
+                commitmentReference === undefined ||
+                payloadReference === undefined
+            ) {
+                throw new RangeError(
+                    'Counted ballot witness is missing receiver material for a counted package.',
+                );
+            }
+            if (
+                shareVector.optionCount !== expectedShareVector.optionCount ||
+                shareVector.shareVectorWidth !==
+                    expectedShareVector.shareVectorWidth ||
+                !fieldVectorsEqual(
+                    shareVector.shareVector,
+                    expectedShareVector.shareVector,
+                )
+            ) {
+                throw new RangeError(
+                    'Counted ballot witness receiver shares do not match the counted package polynomial set.',
+                );
+            }
+            if (
+                commitmentReference.trusteeIdentity !==
+                    expectedShareVector.trusteeIdentity ||
+                commitmentReference.trusteeRosterPosition !==
+                    expectedShareVector.trusteeRosterPosition ||
+                payloadReference.receiverIdentity !==
+                    expectedShareVector.trusteeIdentity ||
+                payloadReference.receiverRosterPosition !==
+                    expectedShareVector.trusteeRosterPosition
+            ) {
+                throw new RangeError(
+                    'Counted ballot package receiver references do not match the frozen roster order.',
+                );
+            }
+
+            const commitmentWithoutDigest = {
+                objectType: commitmentWitness.commitment.objectType,
+                trusteeIdentity: commitmentWitness.commitment.trusteeIdentity,
+                trusteeRosterPosition:
+                    commitmentWitness.commitment.trusteeRosterPosition,
+                commitmentValues: commitmentWitness.commitment.commitmentValues,
+            };
+            const payloadWithoutDigest = {
+                objectType: payload.objectType,
+                receiverIdentity: payload.receiverIdentity,
+                receiverRosterPosition: payload.receiverRosterPosition,
+                shareVector: payload.shareVector,
+                openingVector: payload.openingVector,
+            };
+
+            if (
+                commitmentWitness.commitment.objectType !==
+                    'TestShareCommitment' ||
+                payload.objectType !== 'TestReceiverShareOpeningPayload' ||
+                commitmentWitness.commitment.shareCommitmentDigest !==
+                    deriveTestShareCommitmentDigest({
+                        commitment: commitmentWithoutDigest,
+                        context: digestContext,
+                        ballotPolynomialSetDigest:
+                            witness.polynomialSet.ballotPolynomialSetDigest,
+                    }) ||
+                payload.payloadDigest !==
+                    deriveTestReceiverShareOpeningPayloadDigest({
+                        context: digestContext,
+                        payload: payloadWithoutDigest,
+                    }) ||
+                commitmentWitness.commitment.shareCommitmentDigest !==
+                    commitmentReference.shareCommitmentDigest ||
+                payload.payloadDigest !== payloadReference.payloadDigest ||
+                !fieldVectorsEqual(
+                    commitmentWitness.shareVector,
+                    shareVector.shareVector,
+                ) ||
+                !fieldVectorsEqual(
+                    payload.shareVector,
+                    shareVector.shareVector,
+                ) ||
+                !fieldVectorsEqual(
+                    payload.openingVector,
+                    commitmentWitness.openingVector,
+                ) ||
+                !verifyTestShareCommitmentOpening(commitmentWitness)
+            ) {
+                throw new RangeError(
+                    'Counted ballot witness receiver commitment material does not match the counted package digest references.',
+                );
+            }
+        },
+    );
+};
+
+const assertCountedWitnessMatchesPackage = (input: {
+    readonly candidate: CountedBallotPackage;
+    readonly witness: BallotPackageWitness;
+    readonly rosterEntries: readonly PvssBallotRosterEntry[];
+    readonly thresholdProfile: ThresholdProfile;
+}): void => {
+    if (
+        input.witness.ballotPackage.ballotPackageDigest !==
+            input.candidate.ballotPackage.ballotPackageDigest ||
+        !sameCanonicalObject(
+            input.witness.ballotPackage,
+            input.candidate.ballotPackage,
+        )
+    ) {
+        throw new RangeError(
+            'Counted ballot witness package shell does not match the counted ballot package.',
+        );
+    }
+
+    assertPolynomialSetMatchesPackage(
+        input.candidate,
+        input.witness,
+        input.thresholdProfile,
+    );
+    assertReceiverWitnessesMatchPackage(input);
+};
+
+const buildWitnessByDigest = (
+    ballotWitnesses: readonly BallotPackageWitness[],
+): Map<string, BallotPackageWitness> => {
+    const witnessByDigest = new Map<string, BallotPackageWitness>();
+    const canonicalShellByDigest = new Map<string, string>();
+
+    for (const witness of ballotWitnesses) {
+        const ballotPackageDigest = witness.ballotPackage.ballotPackageDigest;
+        const canonicalShell = canonicalJson(witness.ballotPackage);
+        const previousCanonicalShell =
+            canonicalShellByDigest.get(ballotPackageDigest);
+
+        if (
+            previousCanonicalShell !== undefined &&
+            previousCanonicalShell !== canonicalShell
+        ) {
+            throw new RangeError(
+                'Aggregate share derivation rejects non-identical witness package shells with the same digest.',
+            );
+        }
+        canonicalShellByDigest.set(ballotPackageDigest, canonicalShell);
+        if (!witnessByDigest.has(ballotPackageDigest)) {
+            witnessByDigest.set(ballotPackageDigest, witness);
+        }
+    }
+
+    return witnessByDigest;
+};
 
 export const deriveAggregateShareCommitmentDigest = (input: {
     readonly aggregateShare: Omit<
@@ -63,12 +398,7 @@ export const deriveTestAggregateShares = (input: {
     }
     const ballotSetDigest = input.ballotSet.ballotSetDigest;
 
-    const witnessByDigest = new Map(
-        input.ballotWitnesses.map((witness) => [
-            witness.ballotPackage.ballotPackageDigest,
-            witness,
-        ]),
-    );
+    const witnessByDigest = buildWitnessByDigest(input.ballotWitnesses);
     const countedWitnesses = input.ballotSet.countedBallots.map((candidate) => {
         const witness = witnessByDigest.get(
             candidate.ballotPackage.ballotPackageDigest,
@@ -78,6 +408,13 @@ export const deriveTestAggregateShares = (input: {
                 'Aggregate share derivation requires witnesses for every counted ballot.',
             );
         }
+
+        assertCountedWitnessMatchesPackage({
+            candidate,
+            witness,
+            rosterEntries: input.rosterEntries,
+            thresholdProfile: input.thresholdProfile,
+        });
 
         return witness;
     });

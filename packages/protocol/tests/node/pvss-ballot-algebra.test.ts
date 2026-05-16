@@ -234,6 +234,9 @@ const mutateBallotPackage = (
     ...overrides,
 });
 
+const incrementFieldElement = (fieldElement: number): number =>
+    (fieldElement + 1) % 65_537;
+
 describe('internal PVSS ballot algebra', () => {
     it('derives deterministic receiver shares and test commitments for one ballot', () => {
         const witness = createBallotWitness(
@@ -344,6 +347,42 @@ describe('internal PVSS ballot algebra', () => {
         expect(ballotSet.ballotSetDigest).toMatch(/^[a-f0-9]{128}$/u);
     });
 
+    it('deduplicates retransmitted packages in canonical board order', () => {
+        const first = createBallotWitness(1, [1, 2, 3, 4], 'first');
+        const replacement = createBallotWitness(1, [9, 8, 7, 6], 'replacement');
+        const ballotSetInput = createBallotSetInput([
+            first,
+            replacement,
+            first,
+        ]);
+        const shuffledBallotSetInput = {
+            ...ballotSetInput,
+            candidateBallots: [
+                ballotSetInput.candidateBallots[2],
+                ballotSetInput.candidateBallots[1],
+                ballotSetInput.candidateBallots[0],
+            ],
+        };
+        const boardOrderResult = deriveCanonicalBallotSet(ballotSetInput);
+        const shuffledResult = deriveCanonicalBallotSet(shuffledBallotSetInput);
+
+        expect(boardOrderResult.ok).toBe(true);
+        expect(shuffledResult.ok).toBe(true);
+        expect(
+            boardOrderResult.countedBallots.map(
+                (candidate) => candidate.ballotPackage.ballotPackageDigest,
+            ),
+        ).toEqual([replacement.ballotPackage.ballotPackageDigest]);
+        expect(
+            shuffledResult.countedBallots.map(
+                (candidate) => candidate.ballotPackage.ballotPackageDigest,
+            ),
+        ).toEqual([replacement.ballotPackage.ballotPackageDigest]);
+        expect(shuffledResult.ballotSetDigest).toBe(
+            boardOrderResult.ballotSetDigest,
+        );
+    });
+
     it('reconstructs aggregate shares to the plaintext oracle tally', () => {
         const witnesses = [
             createBallotWitness(1, [10, 1, 1, 1], 'vector-1'),
@@ -418,6 +457,72 @@ describe('internal PVSS ballot algebra', () => {
                 thresholdProfile,
             }),
         ).toThrow('exactly');
+    });
+
+    it('rejects aggregate witnesses whose private shares no longer match the counted package', () => {
+        const witnesses = [
+            createBallotWitness(1, [10, 1, 1, 1], 'vector-1'),
+            createBallotWitness(2, [2, 9, 2, 2], 'vector-2'),
+            createBallotWitness(3, [3, 3, 8, 3], 'vector-3'),
+            createBallotWitness(4, [4, 4, 4, 7], 'vector-4'),
+        ];
+        const ballotSet = deriveCanonicalBallotSet(
+            createBallotSetInput(witnesses),
+        );
+        const firstWitness = witnesses[0];
+        const mutatedShareVector =
+            firstWitness.receiverShareVectors[0].shareVector.map(
+                (fieldElement, fieldIndex) =>
+                    fieldIndex === 0
+                        ? incrementFieldElement(fieldElement)
+                        : fieldElement,
+            );
+        const mutatedCommitmentValues =
+            firstWitness.shareCommitmentWitnesses[0].commitment.commitmentValues.map(
+                (fieldElement, fieldIndex) =>
+                    fieldIndex === 0
+                        ? incrementFieldElement(fieldElement)
+                        : fieldElement,
+            );
+        const mutatedWitness: BallotPackageWitness = {
+            ...firstWitness,
+            receiverShareVectors: firstWitness.receiverShareVectors.map(
+                (receiverShareVector, receiverIndex) =>
+                    receiverIndex === 0
+                        ? {
+                              ...receiverShareVector,
+                              shareVector: mutatedShareVector,
+                          }
+                        : receiverShareVector,
+            ),
+            shareCommitmentWitnesses: firstWitness.shareCommitmentWitnesses.map(
+                (commitmentWitness, receiverIndex) =>
+                    receiverIndex === 0
+                        ? {
+                              ...commitmentWitness,
+                              shareVector: mutatedShareVector,
+                              commitment: {
+                                  ...commitmentWitness.commitment,
+                                  commitmentValues: mutatedCommitmentValues,
+                              },
+                          }
+                        : commitmentWitness,
+            ),
+        };
+
+        expect(
+            verifyTestShareCommitmentOpening(
+                mutatedWitness.shareCommitmentWitnesses[0],
+            ),
+        ).toBe(true);
+        expect(() =>
+            deriveTestAggregateShares({
+                ballotSet,
+                ballotWitnesses: [mutatedWitness, ...witnesses.slice(1)],
+                rosterEntries,
+                thresholdProfile,
+            }),
+        ).toThrow('Counted ballot witness');
     });
 
     it('rejects wrong package context, receiver order, and score shape', () => {

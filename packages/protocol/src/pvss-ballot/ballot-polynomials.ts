@@ -59,7 +59,7 @@ const deriveDeterministicCoefficient = (
         ]),
     );
 
-const deriveBallotPolynomialSetDigest = (
+export const deriveBallotPolynomialSetDigest = (
     polynomialSet: Omit<BallotPolynomialSet, 'ballotPolynomialSetDigest'>,
 ): string =>
     deriveProtocolDigest('BallotPackageDigest', {

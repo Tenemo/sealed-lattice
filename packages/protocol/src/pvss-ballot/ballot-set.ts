@@ -1,4 +1,4 @@
-import { deriveProtocolDigest } from '@sealed-lattice/crypto';
+import { canonicalJson, deriveProtocolDigest } from '@sealed-lattice/crypto';
 import type {
     BallotPackageCandidate,
     CanonicalBallotSet,
@@ -64,6 +64,80 @@ const candidateSignedBoardOrder = (
     boardPosition: candidate.inclusionProof.boardPosition,
 });
 
+const candidateBoardPositionKey = (
+    candidate: BallotPackageCandidate,
+): string => {
+    const signedBoardOrder = candidateSignedBoardOrder(candidate);
+
+    return [
+        signedBoardOrder.boardSequence,
+        signedBoardOrder.boardPosition,
+    ].join('\u0000');
+};
+
+const sortCandidateBallots = (
+    candidateBallots: readonly BallotPackageCandidate[],
+): readonly BallotPackageCandidate[] =>
+    [...candidateBallots].sort((left, right) => {
+        const leftSignedBoardOrder = candidateSignedBoardOrder(left);
+        const rightSignedBoardOrder = candidateSignedBoardOrder(right);
+
+        return (
+            compareSignedBoardOrder(
+                leftSignedBoardOrder,
+                rightSignedBoardOrder,
+            ) ||
+            left.ballotPackage.ballotPackageDigest.localeCompare(
+                right.ballotPackage.ballotPackageDigest,
+            ) ||
+            left.inclusionProof.inclusionProofDigest.localeCompare(
+                right.inclusionProof.inclusionProofDigest,
+            )
+        );
+    });
+
+const findConflictingBoardPositionKeys = (
+    candidateBallots: readonly BallotPackageCandidate[],
+): ReadonlySet<string> => {
+    const digestsByBoardPosition = new Map<string, Set<ProtocolDigest>>();
+
+    for (const candidate of candidateBallots) {
+        const key = candidateBoardPositionKey(candidate);
+        const digests =
+            digestsByBoardPosition.get(key) ?? new Set<ProtocolDigest>();
+
+        digests.add(candidate.ballotPackage.ballotPackageDigest);
+        digestsByBoardPosition.set(key, digests);
+    }
+
+    return new Set(
+        [...digestsByBoardPosition.entries()]
+            .filter((entry) => entry[1].size > 1)
+            .map(([key]) => key),
+    );
+};
+
+const findConflictingBallotPackageDigests = (
+    candidateBallots: readonly BallotPackageCandidate[],
+): ReadonlySet<ProtocolDigest> => {
+    const shellsByDigest = new Map<ProtocolDigest, Set<string>>();
+
+    for (const candidate of candidateBallots) {
+        const shells =
+            shellsByDigest.get(candidate.ballotPackage.ballotPackageDigest) ??
+            new Set<string>();
+
+        shells.add(canonicalJson(candidate.ballotPackage));
+        shellsByDigest.set(candidate.ballotPackage.ballotPackageDigest, shells);
+    }
+
+    return new Set(
+        [...shellsByDigest.entries()]
+            .filter((entry) => entry[1].size > 1)
+            .map(([digest]) => digest),
+    );
+};
+
 const deriveRejectedCandidate = (
     candidate: BallotPackageCandidate,
     refusedObjects: readonly RefusalRecord[],
@@ -126,22 +200,20 @@ const deriveCanonicalBallotSetUnchecked = (
     ];
     const validCandidates: CountedBallotPackage[] = [];
     const rejectedCandidates: RejectedBallotCandidate[] = [];
-    const seenBallotPackageDigests = new Set<ProtocolDigest>();
-    const occupiedBoardPositions = new Map<string, ProtocolDigest>();
+    const seenValidBallotPackageDigests = new Set<ProtocolDigest>();
+    const conflictingBoardPositionKeys = findConflictingBoardPositionKeys(
+        input.candidateBallots,
+    );
+    const conflictingBallotPackageDigests = findConflictingBallotPackageDigests(
+        input.candidateBallots,
+    );
 
-    for (const candidate of input.candidateBallots) {
+    for (const candidate of sortCandidateBallots(input.candidateBallots)) {
         const candidateRefusals: RefusalRecord[] = [];
         const signedBoardOrder = candidateSignedBoardOrder(candidate);
-        const boardPositionKey = [
-            signedBoardOrder.boardSequence,
-            signedBoardOrder.boardPosition,
-        ].join('\u0000');
-        const previousDigest = occupiedBoardPositions.get(boardPositionKey);
+        const boardPositionKey = candidateBoardPositionKey(candidate);
 
-        if (
-            previousDigest !== undefined &&
-            previousDigest !== candidate.ballotPackage.ballotPackageDigest
-        ) {
+        if (conflictingBoardPositionKeys.has(boardPositionKey)) {
             candidateRefusals.push(
                 createRefusal(
                     'ConflictingBallotPackage',
@@ -151,21 +223,20 @@ const deriveCanonicalBallotSetUnchecked = (
                 ),
             );
         }
-        occupiedBoardPositions.set(
-            boardPositionKey,
-            candidate.ballotPackage.ballotPackageDigest,
-        );
-
         if (
-            seenBallotPackageDigests.has(
+            conflictingBallotPackageDigests.has(
                 candidate.ballotPackage.ballotPackageDigest,
             )
         ) {
-            continue;
+            candidateRefusals.push(
+                createRefusal(
+                    'ConflictingBallotPackage',
+                    'Two non-identical ballot package candidates claim the same package digest.',
+                    candidate.ballotPackage.ballotPackageDigest,
+                    'BallotPackage',
+                ),
+            );
         }
-        seenBallotPackageDigests.add(
-            candidate.ballotPackage.ballotPackageDigest,
-        );
 
         candidateRefusals.push(
             ...verifyInclusionProof(candidate.inclusionProof, headsByDigest),
@@ -220,6 +291,16 @@ const deriveCanonicalBallotSetUnchecked = (
             );
             continue;
         }
+        if (
+            seenValidBallotPackageDigests.has(
+                candidate.ballotPackage.ballotPackageDigest,
+            )
+        ) {
+            continue;
+        }
+        seenValidBallotPackageDigests.add(
+            candidate.ballotPackage.ballotPackageDigest,
+        );
 
         validCandidates.push({
             ...candidate,
