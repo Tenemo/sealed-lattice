@@ -1,7 +1,9 @@
 import { deriveProtocolDigest } from '@sealed-lattice/crypto';
 import type {
     BallotProofStatement,
+    ReceiverPayload,
     ProtocolDigest,
+    ShareCommitment,
 } from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
@@ -102,6 +104,121 @@ const createStatement = (
         ballotPackageDigest: digest('ballot-package'),
         ...overrides,
     });
+};
+
+const createStructurallyBoundObjects = (): {
+    readonly statement: BallotProofStatement;
+    readonly receiverPayloads: readonly ReceiverPayload[];
+    readonly shareCommitments: readonly ShareCommitment[];
+} => {
+    const profileSet = createBallotPrivacyProfileSet();
+    const boundCertificate = createShareCommitmentMessageBoundCert({
+        maximumCanonicalTurnout: 20,
+        shareCommitmentProfile: profileSet.shareCommitmentProfile,
+    });
+    const receiverPublicKeyReferences = [
+        {
+            receiverIdentity: 'receiver-1',
+            receiverRosterPosition: 1,
+            receiverPublicKeyDigest: digest('receiver-public-key-1'),
+        },
+        {
+            receiverIdentity: 'receiver-2',
+            receiverRosterPosition: 2,
+            receiverPublicKeyDigest: digest('receiver-public-key-2'),
+        },
+    ];
+    const receiverPayloads = receiverPublicKeyReferences.map(
+        (receiverPublicKeyReference) =>
+            createReceiverPayloadShell({
+                ceremonyId: 'ceremony-1',
+                ciphertextBodyDigest: digest(
+                    `ciphertext-body-${receiverPublicKeyReference.receiverRosterPosition}`,
+                ),
+                manifestDigest: digest('manifest'),
+                payloadContextDigest: digest(
+                    `payload-context-${receiverPublicKeyReference.receiverRosterPosition}`,
+                ),
+                pollSpecDigest: digest('poll-spec'),
+                receiverEncryptionProfileDigest:
+                    profileSet.receiverEncryptionProfile
+                        .receiverEncryptionProfileDigest,
+                receiverIdentity: receiverPublicKeyReference.receiverIdentity,
+                receiverPublicKeyDigest:
+                    receiverPublicKeyReference.receiverPublicKeyDigest,
+                receiverRosterPosition:
+                    receiverPublicKeyReference.receiverRosterPosition,
+                rosterDigest: digest('roster'),
+                voterIdentityDigest: digest('voter-1'),
+            }),
+    );
+    const shareCommitments = receiverPublicKeyReferences.map(
+        (receiverPublicKeyReference) =>
+            createShareCommitmentShell({
+                ceremonyId: 'ceremony-1',
+                commitmentBodyDigest: digest(
+                    `commitment-body-${receiverPublicKeyReference.receiverRosterPosition}`,
+                ),
+                manifestDigest: digest('manifest'),
+                receiverIdentity: receiverPublicKeyReference.receiverIdentity,
+                receiverRosterPosition:
+                    receiverPublicKeyReference.receiverRosterPosition,
+                rosterDigest: digest('roster'),
+                shareCommitmentProfileDigest:
+                    profileSet.shareCommitmentProfile
+                        .shareCommitmentProfileDigest,
+            }),
+    );
+    const statement = buildBallotProofStatement({
+        ceremonyId: 'ceremony-1',
+        manifestDigest: digest('manifest'),
+        rosterDigest: digest('roster'),
+        pollSpecDigest: digest('poll-spec'),
+        thresholdProfileDigest: digest('threshold-profile'),
+        duplicateBallotPolicyDigest: digest('duplicate-policy'),
+        scoreDomainDigest: digest('score-domain'),
+        tiePolicyDigest: digest('tie-policy'),
+        topOptionCount: 3,
+        optionCount: 20,
+        voterIdentityDigest: digest('voter-1'),
+        voterRosterPosition: 1,
+        voterSigningKeyDigest: digest('voter-signing-key'),
+        actionContextDigest: digest('action-context'),
+        rosterExternalAcceptanceDigest: digest('external-acceptance'),
+        receiverKeyRoot: digest('receiver-key-root'),
+        receiverKeyProofRoot: digest('receiver-key-proof-root'),
+        receiverPublicKeys: receiverPublicKeyReferences,
+        receiverPayloads: receiverPayloads.map((receiverPayload) => ({
+            receiverIdentity: receiverPayload.receiverIdentity,
+            receiverPayloadCiphertextRoot:
+                receiverPayload.receiverPayloadCiphertextRoot,
+            receiverPayloadDigest: receiverPayload.receiverPayloadDigest,
+            receiverRosterPosition: receiverPayload.receiverRosterPosition,
+        })),
+        shareCommitments: shareCommitments.map((shareCommitment) => ({
+            receiverIdentity: shareCommitment.receiverIdentity,
+            receiverRosterPosition: shareCommitment.receiverRosterPosition,
+            shareCommitmentDigest: shareCommitment.shareCommitmentDigest,
+        })),
+        shareCommitmentProfileDigest:
+            profileSet.shareCommitmentProfile.shareCommitmentProfileDigest,
+        receiverEncryptionProfileDigest:
+            profileSet.receiverEncryptionProfile
+                .receiverEncryptionProfileDigest,
+        ballotProofProfileDigest:
+            profileSet.ballotProofProfile.ballotProofProfileDigest,
+        scoreMembershipProfileDigest:
+            profileSet.scoreMembershipProfile.scoreMembershipProfileDigest,
+        shareCommitmentMessageBoundCertDigest:
+            boundCertificate.shareCommitmentMessageBoundCertDigest,
+        ballotPackageDigest: digest('ballot-package'),
+    });
+
+    return {
+        receiverPayloads,
+        shareCommitments,
+        statement,
+    };
 };
 
 describe('ballot privacy proof object boundary', () => {
@@ -229,9 +346,7 @@ describe('ballot privacy proof object boundary', () => {
             proofBytesDigest: digest('proof-bytes'),
             proofSizeBytes: 1_024,
         });
-        const receiverKeyProof = {
-            objectType: 'ReceiverKeyProof' as const,
-            objectVersion: 1 as const,
+        const receiverKeyProof = createReceiverKeyProofShell({
             ceremonyId: statement.ceremonyId,
             manifestDigest: statement.manifestDigest,
             rosterDigest: statement.rosterDigest,
@@ -243,8 +358,14 @@ describe('ballot privacy proof object boundary', () => {
                 statement.receiverEncryptionProfileDigest,
             proofBackend: 'LaZerStyleLocalLatticeRelation' as const,
             proofRoot: digest('receiver-key-proof'),
-            receiverKeyProofRoot: statement.receiverKeyProofRoot,
-        };
+        });
+        const structurallyBoundObjects = createStructurallyBoundObjects();
+        const structurallyBoundProofRecord = createBallotProofRecordShell({
+            proofBytesDigest: digest('bound-proof-bytes'),
+            proofRoot: digest('bound-proof-root'),
+            proofSizeBytes: 1_024,
+            statement: structurallyBoundObjects.statement,
+        });
 
         expect(
             verifyBallotProof({ statement, ballotProof: proofRecord }),
@@ -271,17 +392,102 @@ describe('ballot privacy proof object boundary', () => {
                 ballotPackage: {
                     objectType: 'BallotPackage',
                     objectVersion: 1,
-                    ballotPackageDigest: statement.ballotPackageDigest,
-                    ballotProofStatement: statement,
-                    ballotProof: proofRecord,
-                    receiverPayloads: [],
-                    shareCommitments: [],
+                    ballotPackageDigest:
+                        structurallyBoundObjects.statement.ballotPackageDigest,
+                    ballotProofStatement: structurallyBoundObjects.statement,
+                    ballotProof: structurallyBoundProofRecord,
+                    receiverPayloads: structurallyBoundObjects.receiverPayloads,
+                    shareCommitments: structurallyBoundObjects.shareCommitments,
                 },
             }),
         ).toMatchObject({
             ok: false,
             backendAvailable: false,
             unresolvedReason: 'OperationUnavailable',
+        });
+    });
+
+    it('rejects malformed claim-bearing package shells before the backend gate', () => {
+        const structurallyBoundObjects = createStructurallyBoundObjects();
+        const firstReceiverPayload =
+            structurallyBoundObjects.receiverPayloads[0];
+        const firstReceiverPayloadReference =
+            structurallyBoundObjects.statement.receiverPayloads[0];
+        if (
+            firstReceiverPayload === undefined ||
+            firstReceiverPayloadReference === undefined
+        ) {
+            throw new Error('receiver fixture should contain a first receiver');
+        }
+        const proofRecord = createBallotProofRecordShell({
+            proofBytesDigest: digest('bound-proof-bytes'),
+            proofRoot: digest('bound-proof-root'),
+            proofSizeBytes: 1_024,
+            statement: structurallyBoundObjects.statement,
+        });
+        const changedChallengeProofRecord = {
+            ...proofRecord,
+            challengeDigest: digest('changed-challenge'),
+        };
+        const packageWithChangedChallenge = verifyClaimBearingBallotPackage({
+            ballotPackage: {
+                objectType: 'BallotPackage',
+                objectVersion: 1,
+                ballotPackageDigest:
+                    structurallyBoundObjects.statement.ballotPackageDigest,
+                ballotProofStatement: structurallyBoundObjects.statement,
+                ballotProof: changedChallengeProofRecord,
+                receiverPayloads: structurallyBoundObjects.receiverPayloads,
+                shareCommitments: structurallyBoundObjects.shareCommitments,
+            },
+        });
+        const packageWithLeakedWitness = verifyClaimBearingBallotPackage({
+            ballotPackage: {
+                objectType: 'BallotPackage',
+                objectVersion: 1,
+                ballotPackageDigest:
+                    structurallyBoundObjects.statement.ballotPackageDigest,
+                ballotProofStatement: structurallyBoundObjects.statement,
+                ballotProof: proofRecord,
+                receiverPayloads: [
+                    {
+                        ...firstReceiverPayload,
+                        receiverShareVector: [1, 2, 3],
+                    } as unknown as ReceiverPayload,
+                    ...structurallyBoundObjects.receiverPayloads.slice(1),
+                ],
+                shareCommitments: structurallyBoundObjects.shareCommitments,
+            },
+        });
+        const duplicateReceiverStatement = createStatement({
+            receiverPayloads: [
+                firstReceiverPayloadReference,
+                firstReceiverPayloadReference,
+            ],
+        });
+        const duplicateReceiverProofRecord = createBallotProofRecordShell({
+            proofBytesDigest: digest('duplicate-proof-bytes'),
+            proofRoot: digest('duplicate-proof-root'),
+            proofSizeBytes: 1_024,
+            statement: duplicateReceiverStatement,
+        });
+
+        expect(packageWithChangedChallenge).toMatchObject({
+            ok: false,
+            unresolvedReason: 'BallotPackageInvalid',
+        });
+        expect(packageWithLeakedWitness).toMatchObject({
+            ok: false,
+            unresolvedReason: 'BallotPackageInvalid',
+        });
+        expect(
+            verifyBallotProof({
+                ballotProof: duplicateReceiverProofRecord,
+                statement: duplicateReceiverStatement,
+            }),
+        ).toMatchObject({
+            ok: false,
+            unresolvedReason: 'BallotPackageInvalid',
         });
     });
 

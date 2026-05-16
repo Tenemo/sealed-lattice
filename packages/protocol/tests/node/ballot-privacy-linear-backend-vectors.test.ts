@@ -6,6 +6,9 @@ type LinearProofBackendVectorCase = {
     readonly caseName: string;
     readonly expectedOutcome: string;
     readonly upstreamVectorAvailable: boolean;
+    readonly proofEncoding?: {
+        readonly profileId: string;
+    };
     readonly proofHex: string | null;
     readonly publicRandomnessHex: string | null;
     readonly statementMatrixCoefficients?: readonly (readonly (readonly number[])[])[];
@@ -13,6 +16,24 @@ type LinearProofBackendVectorCase = {
     readonly trace?: {
         readonly expectedLogicalRejectionLayer?: string;
         readonly upstreamVerifierAccepted?: boolean;
+        readonly decodedProofFieldLengths?: {
+            readonly fullProofBytes: number;
+            readonly fields?: readonly {
+                readonly name: string;
+                readonly bitOffset: number;
+                readonly bitLength: number;
+                readonly byteStart: number;
+                readonly byteEndExclusive: number;
+            }[];
+            readonly terminalPadding?: {
+                readonly name: string;
+                readonly bitOffset: number;
+                readonly bitLength: number;
+                readonly byteStart: number;
+                readonly byteEndExclusive: number;
+            };
+            readonly decoderError?: string;
+        };
     };
 };
 
@@ -22,10 +43,15 @@ type LinearProofBackendVectorFile = {
     readonly parameterSet: {
         readonly coefficientModulus: number;
     };
+    readonly proofEncoding: {
+        readonly profileId: string;
+    };
     readonly provenance: {
         readonly upstreamRepositoryUrl: string;
         readonly upstreamCommitHash: string;
         readonly dockerfileSha256: string;
+        readonly oracleDriverSha256: string;
+        readonly oracleRunnerSha256: string;
         readonly vectorEmitterSha256: string;
         readonly licenseNote: string;
     };
@@ -79,6 +105,12 @@ describe('ballot privacy linear proof backend vectors', () => {
         expect(linearProofBackendVectors.provenance.dockerfileSha256).toMatch(
             /^[a-f0-9]{64}$/u,
         );
+        expect(linearProofBackendVectors.provenance.oracleDriverSha256).toMatch(
+            /^[a-f0-9]{64}$/u,
+        );
+        expect(linearProofBackendVectors.provenance.oracleRunnerSha256).toMatch(
+            /^[a-f0-9]{64}$/u,
+        );
         expect(
             linearProofBackendVectors.provenance.vectorEmitterSha256,
         ).toMatch(/^[a-f0-9]{64}$/u);
@@ -100,6 +132,9 @@ describe('ballot privacy linear proof backend vectors', () => {
         for (const vectorCase of linearProofBackendVectors.cases) {
             expect(vectorCase.upstreamVectorAvailable).toBe(true);
             expect(vectorCase.expectedOutcome).toMatch(/^(accept|reject)$/u);
+            expect(vectorCase.proofEncoding?.profileId).toBe(
+                linearProofBackendVectors.proofEncoding.profileId,
+            );
             expect(vectorCase.proofHex).toMatch(/^[a-f0-9]+$/u);
             expect(vectorCase.publicRandomnessHex).toMatch(/^[a-f0-9]{64}$/u);
             expect(vectorCase.statementMatrixCoefficients).toHaveLength(4);
@@ -118,6 +153,9 @@ describe('ballot privacy linear proof backend vectors', () => {
             expectedLogicalRejectionLayer: 'proof-decoder',
             upstreamVerifierAccepted: true,
         });
+        expect(
+            extendedProofCase?.trace?.decodedProofFieldLengths?.decoderError,
+        ).toBe('proof encoding contains trailing data');
     });
 
     it('records upstream rejection for proof, statement, target, randomness, and truncation mutations', () => {
@@ -151,5 +189,44 @@ describe('ballot privacy linear proof backend vectors', () => {
         expect(
             noncanonicalCase?.statementMatrixCoefficients?.[0]?.[0]?.[0],
         ).toBe(linearProofBackendVectors.parameterSet.coefficientModulus);
+    });
+
+    it('records structured decoder spans for canonical proof bytes', () => {
+        const validCase = linearProofBackendVectors.cases.find(
+            (vectorCase) => vectorCase.caseName === 'valid-small-linear-proof',
+        );
+
+        expect(validCase).toBeDefined();
+        expect(validCase?.trace?.decodedProofFieldLengths).toMatchObject({
+            fullProofBytes: 22923,
+            terminalPadding: {
+                name: 'terminalPadding',
+            },
+        });
+        expect(
+            validCase?.trace?.decodedProofFieldLengths?.fields?.map(
+                (field) => field.name,
+            ),
+        ).toEqual([
+            'commitmentTargetVector',
+            'hashMaskVector',
+            'compressedCommitmentVector',
+            'challengePolynomial',
+            'hintVector',
+            'shortResponseVector',
+            'randomnessResponseVector',
+            'euclideanResponseVector',
+            'infinityResponseVector',
+        ]);
+        const fields = validCase?.trace?.decodedProofFieldLengths?.fields ?? [];
+        for (const [fieldIndex, field] of fields.entries()) {
+            expect(field.bitLength).toBeGreaterThan(0);
+            if (fieldIndex > 0) {
+                expect(field.bitOffset).toBe(
+                    fields[fieldIndex - 1]?.bitOffset +
+                        (fields[fieldIndex - 1]?.bitLength ?? 0),
+                );
+            }
+        }
     });
 });

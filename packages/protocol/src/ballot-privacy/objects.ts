@@ -173,6 +173,69 @@ const deriveBallotProofChallengeDigest = (input: {
         proofRoot: input.proofRoot,
     });
 
+const hasOwnProperty = (value: object, key: PropertyKey): boolean =>
+    Object.prototype.hasOwnProperty.call(value, key);
+
+const omitProperty = <InputValue extends object, Key extends keyof InputValue>(
+    value: InputValue,
+    propertyKey: Key,
+): Omit<InputValue, Key> => {
+    const { [propertyKey]: omittedValue, ...remainingProperties } = value;
+    void omittedValue;
+
+    return remainingProperties;
+};
+
+type ReceiverReference = {
+    readonly receiverIdentity: string;
+    readonly receiverRosterPosition: number;
+};
+
+const createReceiverReferenceKey = (
+    receiverReference: ReceiverReference,
+): string =>
+    `${receiverReference.receiverRosterPosition}:${receiverReference.receiverIdentity}`;
+
+const collectReceiverReferenceRefusals = (input: {
+    readonly references: readonly ReceiverReference[];
+    readonly objectDigest: ProtocolDigest;
+    readonly label: string;
+}): readonly RefusalRecord[] => {
+    const refusedObjects: RefusalRecord[] = [];
+    const seenReceiverReferences = new Set<string>();
+
+    for (const receiverReference of input.references) {
+        const receiverReferenceKey =
+            createReceiverReferenceKey(receiverReference);
+        if (
+            receiverReference.receiverIdentity.length === 0 ||
+            !Number.isSafeInteger(receiverReference.receiverRosterPosition) ||
+            receiverReference.receiverRosterPosition <= 0
+        ) {
+            refusedObjects.push(
+                createRefusal(
+                    'BallotPackageInvalid',
+                    `${input.label} contains an invalid receiver identity or roster position.`,
+                    input.objectDigest,
+                ),
+            );
+            continue;
+        }
+        if (seenReceiverReferences.has(receiverReferenceKey)) {
+            refusedObjects.push(
+                createRefusal(
+                    'BallotPackageInvalid',
+                    `${input.label} contains a duplicate receiver reference.`,
+                    input.objectDigest,
+                ),
+            );
+        }
+        seenReceiverReferences.add(receiverReferenceKey);
+    }
+
+    return refusedObjects;
+};
+
 export const createReceiverEncryptionPublicKeyShell = (
     input: ReceiverEncryptionPublicKeyInput,
 ): ReceiverEncryptionPublicKey => {
@@ -364,27 +427,501 @@ const createUnavailableProofBackendVerification = (
     };
 };
 
+const createBallotPrivacyStructuralRejection = (
+    refusedObjects: readonly RefusalRecord[],
+): BallotPrivacyVerification => ({
+    ok: false,
+    backendAvailable: false,
+    backendStatus: describeBallotPrivacyProofBackend(),
+    statusLabels: [],
+    acceptedDigests: [],
+    refusedObjects,
+    unresolvedReason: refusedObjects[0]?.code ?? 'BallotPackageInvalid',
+});
+
+const collectReceiverKeyProofStructuralRefusals = (
+    receiverKeyProof: ReceiverKeyProof,
+): readonly RefusalRecord[] => {
+    const refusedObjects: RefusalRecord[] = [];
+    const receiverKeyProofPayload = omitProperty(
+        receiverKeyProof,
+        'receiverKeyProofRoot',
+    );
+    const expectedReceiverKeyProofRoot = deriveReceiverKeyProofRoot(
+        receiverKeyProofPayload,
+    );
+
+    if (
+        receiverKeyProof.objectType !== 'ReceiverKeyProof' ||
+        receiverKeyProof.objectVersion !== 1 ||
+        receiverKeyProof.proofBackend !== 'LaZerStyleLocalLatticeRelation'
+    ) {
+        refusedObjects.push(
+            createRefusal(
+                'BallotPackageInvalid',
+                'Receiver key proof shell has an invalid canonical shape.',
+                receiverKeyProof.receiverKeyProofRoot,
+            ),
+        );
+    }
+    if (
+        receiverKeyProof.receiverKeyProofRoot !== expectedReceiverKeyProofRoot
+    ) {
+        refusedObjects.push(
+            createRefusal(
+                'BallotPackageInvalid',
+                'Receiver key proof root does not match its canonical payload.',
+                receiverKeyProof.receiverKeyProofRoot,
+            ),
+        );
+    }
+
+    return refusedObjects;
+};
+
+const collectBallotProofStructuralRefusals = (
+    statement: BallotProofStatement,
+    ballotProof: BallotProofRecord,
+): readonly RefusalRecord[] => {
+    const refusedObjects: RefusalRecord[] = [];
+    const statementPayload = omitProperty(
+        statement,
+        'ballotProofStatementDigest',
+    );
+    const expectedStatementDigest =
+        deriveBallotProofStatementDigest(statementPayload);
+    const proofPayload = omitProperty(ballotProof, 'ballotProofRecordDigest');
+    const expectedProofRecordDigest =
+        deriveBallotProofRecordDigest(proofPayload);
+    const expectedChallengeDigest = deriveBallotProofChallengeDigest({
+        proofBytesDigest: ballotProof.proofBytesDigest,
+        proofRoot: ballotProof.proofRoot,
+        statement,
+    });
+
+    if (
+        statement.objectType !== 'BallotProofStatement' ||
+        statement.objectVersion !== 1 ||
+        statement.shareVectorWidth !== pvssBallotShareVectorWidth
+    ) {
+        refusedObjects.push(
+            createRefusal(
+                'BallotPackageInvalid',
+                'Ballot proof statement has an invalid canonical shape.',
+                statement.ballotProofStatementDigest,
+            ),
+        );
+    }
+    if (statement.ballotProofStatementDigest !== expectedStatementDigest) {
+        refusedObjects.push(
+            createRefusal(
+                'BallotPackageInvalid',
+                'Ballot proof statement digest does not match its canonical payload.',
+                statement.ballotProofStatementDigest,
+            ),
+        );
+    }
+    refusedObjects.push(
+        ...collectReceiverReferenceRefusals({
+            label: 'Ballot proof receiver-key references',
+            objectDigest: statement.ballotProofStatementDigest,
+            references: statement.receiverPublicKeys,
+        }),
+        ...collectReceiverReferenceRefusals({
+            label: 'Ballot proof receiver-payload references',
+            objectDigest: statement.ballotProofStatementDigest,
+            references: statement.receiverPayloads,
+        }),
+        ...collectReceiverReferenceRefusals({
+            label: 'Ballot proof share-commitment references',
+            objectDigest: statement.ballotProofStatementDigest,
+            references: statement.shareCommitments,
+        }),
+    );
+    if (
+        statement.receiverPublicKeys.length === 0 ||
+        statement.receiverPublicKeys.length !==
+            statement.receiverPayloads.length ||
+        statement.receiverPublicKeys.length !==
+            statement.shareCommitments.length
+    ) {
+        refusedObjects.push(
+            createRefusal(
+                'BallotPackageInvalid',
+                'Ballot proof statement must bind the same non-empty receiver set across keys, payloads, and commitments.',
+                statement.ballotProofStatementDigest,
+            ),
+        );
+    }
+    if (
+        ballotProof.objectType !== 'BallotProofRecord' ||
+        ballotProof.objectVersion !== 1 ||
+        ballotProof.proofBackend !== 'LaZerStyleLocalLatticeRelation' ||
+        !Number.isSafeInteger(ballotProof.proofSizeBytes) ||
+        ballotProof.proofSizeBytes <= 0
+    ) {
+        refusedObjects.push(
+            createRefusal(
+                'BallotPackageInvalid',
+                'Ballot proof record has an invalid canonical shape.',
+                ballotProof.ballotProofRecordDigest,
+            ),
+        );
+    }
+    if (
+        ballotProof.ballotProofStatementDigest !==
+        statement.ballotProofStatementDigest
+    ) {
+        refusedObjects.push(
+            createRefusal(
+                'BallotPackageInvalid',
+                'Ballot proof record is not bound to the supplied statement.',
+                ballotProof.ballotProofRecordDigest,
+            ),
+        );
+    }
+    if (
+        ballotProof.ballotProofProfileDigest !==
+        statement.ballotProofProfileDigest
+    ) {
+        refusedObjects.push(
+            createRefusal(
+                'BallotPackageInvalid',
+                'Ballot proof record is not bound to the statement proof profile.',
+                ballotProof.ballotProofRecordDigest,
+            ),
+        );
+    }
+    if (ballotProof.challengeDigest !== expectedChallengeDigest) {
+        refusedObjects.push(
+            createRefusal(
+                'BallotPackageInvalid',
+                'Ballot proof challenge digest does not match the statement and proof roots.',
+                ballotProof.ballotProofRecordDigest,
+            ),
+        );
+    }
+    if (ballotProof.ballotProofRecordDigest !== expectedProofRecordDigest) {
+        refusedObjects.push(
+            createRefusal(
+                'BallotPackageInvalid',
+                'Ballot proof record digest does not match its canonical payload.',
+                ballotProof.ballotProofRecordDigest,
+            ),
+        );
+    }
+
+    return refusedObjects;
+};
+
+const collectReceiverPayloadStructuralRefusals = (
+    payload: ReceiverPayload,
+): readonly RefusalRecord[] => {
+    const refusedObjects: RefusalRecord[] = [];
+    const payloadWithoutDigest = omitProperty(payload, 'receiverPayloadDigest');
+    const payloadWithoutRoots = omitProperty(
+        payloadWithoutDigest,
+        'receiverPayloadCiphertextRoot',
+    );
+    const expectedCiphertextRoot = deriveReceiverPayloadCiphertextRoot({
+        ceremonyId: payload.ceremonyId,
+        ciphertextBodyDigest: payload.ciphertextBodyDigest,
+        manifestDigest: payload.manifestDigest,
+        payloadContextDigest: payload.payloadContextDigest,
+        receiverEncryptionProfileDigest:
+            payload.receiverEncryptionProfileDigest,
+        receiverIdentity: payload.receiverIdentity,
+        receiverPublicKeyDigest: payload.receiverPublicKeyDigest,
+        receiverRosterPosition: payload.receiverRosterPosition,
+    });
+    const expectedPayloadDigest = deriveReceiverPayloadDigest({
+        ...payloadWithoutRoots,
+        receiverPayloadCiphertextRoot: payload.receiverPayloadCiphertextRoot,
+    });
+    const forbiddenWitnessFields = [
+        'receiverShareVector',
+        'shareCommitmentOpening',
+        'receiverEncryptionRandomness',
+        'receiverEncryptionNoise',
+        'proofWitness',
+    ];
+
+    if (
+        payload.objectType !== 'ReceiverPayload' ||
+        payload.objectVersion !== 1 ||
+        payload.receiverPayloadCiphertextRoot !== expectedCiphertextRoot ||
+        payload.receiverPayloadDigest !== expectedPayloadDigest
+    ) {
+        refusedObjects.push(
+            createRefusal(
+                'BallotPackageInvalid',
+                'Receiver payload shell digest or shape is invalid.',
+                payload.receiverPayloadDigest,
+            ),
+        );
+    }
+    for (const forbiddenField of forbiddenWitnessFields) {
+        if (hasOwnProperty(payload, forbiddenField)) {
+            refusedObjects.push(
+                createRefusal(
+                    'BallotPackageInvalid',
+                    'Receiver payload shell must not expose witness material.',
+                    payload.receiverPayloadDigest,
+                ),
+            );
+            break;
+        }
+    }
+
+    return refusedObjects;
+};
+
+const collectShareCommitmentStructuralRefusals = (
+    shareCommitment: ShareCommitment,
+): readonly RefusalRecord[] => {
+    const refusedObjects: RefusalRecord[] = [];
+    const shareCommitmentPayload = omitProperty(
+        shareCommitment,
+        'shareCommitmentDigest',
+    );
+    const expectedShareCommitmentDigest = deriveShareCommitmentDigest(
+        shareCommitmentPayload,
+    );
+
+    if (
+        shareCommitment.objectType !== 'ShareCommitment' ||
+        shareCommitment.objectVersion !== 1 ||
+        shareCommitment.shareVectorWidth !== pvssBallotShareVectorWidth ||
+        shareCommitment.shareCommitmentDigest !== expectedShareCommitmentDigest
+    ) {
+        refusedObjects.push(
+            createRefusal(
+                'BallotPackageInvalid',
+                'Share commitment shell digest or shape is invalid.',
+                shareCommitment.shareCommitmentDigest,
+            ),
+        );
+    }
+    if (
+        hasOwnProperty(shareCommitment, 'openingRandomness') ||
+        hasOwnProperty(shareCommitment, 'receiverShareVector') ||
+        hasOwnProperty(shareCommitment, 'proofWitness')
+    ) {
+        refusedObjects.push(
+            createRefusal(
+                'BallotPackageInvalid',
+                'Share commitment shell must not expose witness material.',
+                shareCommitment.shareCommitmentDigest,
+            ),
+        );
+    }
+
+    return refusedObjects;
+};
+
+const collectClaimBearingPackageStructuralRefusals = (
+    ballotPackage: ClaimBearingBallotPackage,
+): readonly RefusalRecord[] => {
+    const refusedObjects: RefusalRecord[] = [
+        ...collectBallotProofStructuralRefusals(
+            ballotPackage.ballotProofStatement,
+            ballotPackage.ballotProof,
+        ),
+    ];
+    const statement = ballotPackage.ballotProofStatement;
+    const statementReceiverKeyReferences = new Map(
+        statement.receiverPublicKeys.map((receiverKeyReference) => [
+            createReceiverReferenceKey(receiverKeyReference),
+            receiverKeyReference,
+        ]),
+    );
+    const statementPayloadReferences = new Map(
+        statement.receiverPayloads.map((payloadReference) => [
+            createReceiverReferenceKey(payloadReference),
+            payloadReference,
+        ]),
+    );
+    const statementCommitmentReferences = new Map(
+        statement.shareCommitments.map((commitmentReference) => [
+            createReceiverReferenceKey(commitmentReference),
+            commitmentReference,
+        ]),
+    );
+
+    if (
+        ballotPackage.objectType !== 'BallotPackage' ||
+        ballotPackage.objectVersion !== 1 ||
+        ballotPackage.ballotPackageDigest !== statement.ballotPackageDigest
+    ) {
+        refusedObjects.push(
+            createRefusal(
+                'BallotPackageInvalid',
+                'Claim-bearing ballot package shell digest or shape is invalid.',
+                ballotPackage.ballotPackageDigest,
+            ),
+        );
+    }
+    if (
+        ballotPackage.receiverPayloads.length !==
+        statement.receiverPayloads.length
+    ) {
+        refusedObjects.push(
+            createRefusal(
+                'BallotPackageInvalid',
+                'Claim-bearing ballot package must include every receiver payload referenced by the statement.',
+                ballotPackage.ballotPackageDigest,
+            ),
+        );
+    }
+    if (
+        ballotPackage.shareCommitments.length !==
+        statement.shareCommitments.length
+    ) {
+        refusedObjects.push(
+            createRefusal(
+                'BallotPackageInvalid',
+                'Claim-bearing ballot package must include every share commitment referenced by the statement.',
+                ballotPackage.ballotPackageDigest,
+            ),
+        );
+    }
+    for (const receiverPayload of ballotPackage.receiverPayloads) {
+        refusedObjects.push(
+            ...collectReceiverPayloadStructuralRefusals(receiverPayload),
+        );
+        const receiverReferenceKey =
+            createReceiverReferenceKey(receiverPayload);
+        const payloadReference =
+            statementPayloadReferences.get(receiverReferenceKey);
+        const receiverKeyReference =
+            statementReceiverKeyReferences.get(receiverReferenceKey);
+        if (
+            payloadReference?.receiverPayloadDigest !==
+                receiverPayload.receiverPayloadDigest ||
+            payloadReference.receiverPayloadCiphertextRoot !==
+                receiverPayload.receiverPayloadCiphertextRoot
+        ) {
+            refusedObjects.push(
+                createRefusal(
+                    'BallotPackageInvalid',
+                    'Receiver payload shell is not bound to the ballot proof statement reference.',
+                    receiverPayload.receiverPayloadDigest,
+                ),
+            );
+        }
+        if (
+            receiverKeyReference?.receiverPublicKeyDigest !==
+                receiverPayload.receiverPublicKeyDigest ||
+            receiverPayload.ceremonyId !== statement.ceremonyId ||
+            receiverPayload.manifestDigest !== statement.manifestDigest ||
+            receiverPayload.rosterDigest !== statement.rosterDigest ||
+            receiverPayload.pollSpecDigest !== statement.pollSpecDigest ||
+            receiverPayload.voterIdentityDigest !==
+                statement.voterIdentityDigest ||
+            receiverPayload.receiverEncryptionProfileDigest !==
+                statement.receiverEncryptionProfileDigest
+        ) {
+            refusedObjects.push(
+                createRefusal(
+                    'BallotPackageInvalid',
+                    'Receiver payload shell is not bound to the statement context or receiver key.',
+                    receiverPayload.receiverPayloadDigest,
+                ),
+            );
+        }
+    }
+    for (const shareCommitment of ballotPackage.shareCommitments) {
+        refusedObjects.push(
+            ...collectShareCommitmentStructuralRefusals(shareCommitment),
+        );
+        const receiverReferenceKey =
+            createReceiverReferenceKey(shareCommitment);
+        const commitmentReference =
+            statementCommitmentReferences.get(receiverReferenceKey);
+        const receiverKeyReference =
+            statementReceiverKeyReferences.get(receiverReferenceKey);
+        if (
+            commitmentReference?.shareCommitmentDigest !==
+            shareCommitment.shareCommitmentDigest
+        ) {
+            refusedObjects.push(
+                createRefusal(
+                    'BallotPackageInvalid',
+                    'Share commitment shell is not bound to the ballot proof statement reference.',
+                    shareCommitment.shareCommitmentDigest,
+                ),
+            );
+        }
+        if (
+            receiverKeyReference?.receiverIdentity !==
+                shareCommitment.receiverIdentity ||
+            receiverKeyReference?.receiverRosterPosition !==
+                shareCommitment.receiverRosterPosition ||
+            shareCommitment.ceremonyId !== statement.ceremonyId ||
+            shareCommitment.manifestDigest !== statement.manifestDigest ||
+            shareCommitment.rosterDigest !== statement.rosterDigest ||
+            shareCommitment.shareCommitmentProfileDigest !==
+                statement.shareCommitmentProfileDigest
+        ) {
+            refusedObjects.push(
+                createRefusal(
+                    'BallotPackageInvalid',
+                    'Share commitment shell is not bound to the statement context or receiver set.',
+                    shareCommitment.shareCommitmentDigest,
+                ),
+            );
+        }
+    }
+
+    return refusedObjects;
+};
+
 export const verifyReceiverKeyProof = (input: {
     readonly receiverKeyProof: ReceiverKeyProof;
-}): BallotPrivacyVerification =>
-    createUnavailableProofBackendVerification(
+}): BallotPrivacyVerification => {
+    const structuralRefusals = collectReceiverKeyProofStructuralRefusals(
+        input.receiverKeyProof,
+    );
+    if (structuralRefusals.length > 0) {
+        return createBallotPrivacyStructuralRejection(structuralRefusals);
+    }
+
+    return createUnavailableProofBackendVerification(
         'verifyReceiverKeyProof',
         input.receiverKeyProof.receiverKeyProofRoot,
     );
+};
 
 export const verifyBallotProof = (input: {
     readonly statement: BallotProofStatement;
     readonly ballotProof: BallotProofRecord;
-}): BallotPrivacyVerification =>
-    createUnavailableProofBackendVerification(
+}): BallotPrivacyVerification => {
+    const structuralRefusals = collectBallotProofStructuralRefusals(
+        input.statement,
+        input.ballotProof,
+    );
+    if (structuralRefusals.length > 0) {
+        return createBallotPrivacyStructuralRejection(structuralRefusals);
+    }
+
+    return createUnavailableProofBackendVerification(
         'verifyBallotProof',
         input.ballotProof.ballotProofRecordDigest,
     );
+};
 
 export const verifyClaimBearingBallotPackage = (input: {
     readonly ballotPackage: ClaimBearingBallotPackage;
-}): BallotPrivacyVerification =>
-    createUnavailableProofBackendVerification(
+}): BallotPrivacyVerification => {
+    const structuralRefusals = collectClaimBearingPackageStructuralRefusals(
+        input.ballotPackage,
+    );
+    if (structuralRefusals.length > 0) {
+        return createBallotPrivacyStructuralRejection(structuralRefusals);
+    }
+
+    return createUnavailableProofBackendVerification(
         'verifyClaimBearingBallotPackage',
         input.ballotPackage.ballotPackageDigest,
     );
+};

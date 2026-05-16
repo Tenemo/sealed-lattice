@@ -10,12 +10,14 @@
         "upstreamRepositoryUrl": "https://github.com/lazer-crypto/lazer",
         "upstreamCommitHash": "10eafeca4cd53ff4fc54193dce904dbd0026fefd",
         "dockerfileSha256": "36cce66333279e4c33ca6d8c0f0a768e512c596bb5e8af4f32952cb9fec374ae",
-        "vectorEmitterSha256": "2d762276f4b0bda21726be690148665a03bb5573a0e8301cf8c178e35dcf9fd5",
+        "oracleDriverSha256": "a78d140b29236658bf1bdfdc7c133b869be6c0a78152010a7aacca1e2a6e700b",
+        "oracleRunnerSha256": "1adfa6cccce98f257d2bacbb798653f1e2e15dc443113a2bfdbd41aa21fb8085",
+        "vectorEmitterSha256": "6339daa18b7443e1f2589c3e48e25e1bd7a2ad9c4e0582106e86534a546c2bf2",
         "pythonVersion": "3.12.3",
         "sageVersion": "not installed; committed demo_params.h used",
         "compilerVersion": "gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
-        "buildCommand": "make -B lazer.h && make liblazer.so && cd python && make && cd demo && python3 ../params_cffi_build.py demo_params.h ../..",
-        "testCommand": "python3 tools/lazer-oracle/vector-emitter/emit_linear_vectors.py",
+        "buildCommand": "tsx tools/lazer-oracle/generate-linear-vectors.ts",
+        "testCommand": "python3 tools/lazer-oracle/run_oracle.py followed by python3 tools/lazer-oracle/vector-emitter/emit_linear_vectors.py inside Docker",
         "parameterGenerationCommand": "cd temp/lazer/scripts && sage lin-codegen.sage ../python/demo/demo_params.py > ../python/demo/demo_params.h",
         "licenseNote": "LaZer is used only as an offline vector oracle; no upstream C library is shipped in sealed-lattice."
     },
@@ -30,6 +32,28 @@
         "statementColumns": 8,
         "witnessL2BoundSquared": 2048,
         "expectedProofSizeBytes": 22923
+    },
+    "proofEncoding": {
+        "profileId": "lazer-demo-linear-proof-encoding-v1",
+        "ringDegree": 64,
+        "coefficientModulus": 36028797018964597,
+        "fullSizeCoefficientBitLength": 56,
+        "compressedCoefficientBitLength": 46,
+        "targetCommitmentVectorLength": 12,
+        "hashMaskVectorLength": 2,
+        "compressedCommitmentVectorLength": 13,
+        "challengeCoefficientModulus": 17,
+        "challengeCoefficientBitLength": 5,
+        "hintVectorLength": 13,
+        "shortResponseVectorLength": 33,
+        "randomnessResponseVectorLength": 47,
+        "euclideanResponseVectorLength": 4,
+        "infinityResponseVectorLength": 4,
+        "shortResponseLog2StandardDeviation": 16,
+        "randomnessResponseLog2StandardDeviation": 12,
+        "euclideanResponseLog2StandardDeviation": 11,
+        "infinityResponseLog2StandardDeviation": 16,
+        "source": "temp/lazer/python/demo/demo_params.h:_param"
     },
     "requiredCaseNames": [
         "valid-small-linear-proof",
@@ -59,6 +83,28 @@
                 "statementColumns": 8,
                 "witnessL2BoundSquared": 2048,
                 "expectedProofSizeBytes": 22923
+            },
+            "proofEncoding": {
+                "profileId": "lazer-demo-linear-proof-encoding-v1",
+                "ringDegree": 64,
+                "coefficientModulus": 36028797018964597,
+                "fullSizeCoefficientBitLength": 56,
+                "compressedCoefficientBitLength": 46,
+                "targetCommitmentVectorLength": 12,
+                "hashMaskVectorLength": 2,
+                "compressedCommitmentVectorLength": 13,
+                "challengeCoefficientModulus": 17,
+                "challengeCoefficientBitLength": 5,
+                "hintVectorLength": 13,
+                "shortResponseVectorLength": 33,
+                "randomnessResponseVectorLength": 47,
+                "euclideanResponseVectorLength": 4,
+                "infinityResponseVectorLength": 4,
+                "shortResponseLog2StandardDeviation": 16,
+                "randomnessResponseLog2StandardDeviation": 12,
+                "euclideanResponseLog2StandardDeviation": 11,
+                "infinityResponseLog2StandardDeviation": 16,
+                "source": "temp/lazer/python/demo/demo_params.h:_param"
             },
             "publicRandomnessHex": "0000000000000000000000000000000000000000000000000000000000000000",
             "statementMatrixCoefficients": [
@@ -9371,7 +9417,79 @@
                 "proofSizeBytes": 22923,
                 "publicRandomnessSha256": "66687aadf862bd776c8fc18b8e9f8e20089714856ee233b3902a591d0d5f2925",
                 "decodedProofFieldLengths": {
-                    "fullProofBytes": 22923
+                    "fullProofBytes": 22923,
+                    "fields": [
+                        {
+                            "name": "commitmentTargetVector",
+                            "bitOffset": 0,
+                            "bitLength": 43008,
+                            "byteStart": 0,
+                            "byteEndExclusive": 5376
+                        },
+                        {
+                            "name": "hashMaskVector",
+                            "bitOffset": 43008,
+                            "bitLength": 7168,
+                            "byteStart": 5376,
+                            "byteEndExclusive": 6272
+                        },
+                        {
+                            "name": "compressedCommitmentVector",
+                            "bitOffset": 50176,
+                            "bitLength": 38272,
+                            "byteStart": 6272,
+                            "byteEndExclusive": 11056
+                        },
+                        {
+                            "name": "challengePolynomial",
+                            "bitOffset": 88448,
+                            "bitLength": 320,
+                            "byteStart": 11056,
+                            "byteEndExclusive": 11096
+                        },
+                        {
+                            "name": "hintVector",
+                            "bitOffset": 88768,
+                            "bitLength": 1664,
+                            "byteStart": 11096,
+                            "byteEndExclusive": 11304
+                        },
+                        {
+                            "name": "shortResponseVector",
+                            "bitOffset": 90432,
+                            "bitLength": 39881,
+                            "byteStart": 11304,
+                            "byteEndExclusive": 16290
+                        },
+                        {
+                            "name": "randomnessResponseVector",
+                            "bitOffset": 130313,
+                            "bitLength": 44698,
+                            "byteStart": 16289,
+                            "byteEndExclusive": 21877
+                        },
+                        {
+                            "name": "euclideanResponseVector",
+                            "bitOffset": 175011,
+                            "bitLength": 3535,
+                            "byteStart": 21876,
+                            "byteEndExclusive": 22319
+                        },
+                        {
+                            "name": "infinityResponseVector",
+                            "bitOffset": 178546,
+                            "bitLength": 4832,
+                            "byteStart": 22318,
+                            "byteEndExclusive": 22923
+                        }
+                    ],
+                    "terminalPadding": {
+                        "name": "terminalPadding",
+                        "bitOffset": 183378,
+                        "bitLength": 6,
+                        "byteStart": 22922,
+                        "byteEndExclusive": 22923
+                    }
                 },
                 "expectedLogicalRejectionLayer": "accept",
                 "upstreamVerifierAccepted": true
@@ -9394,6 +9512,28 @@
                 "statementColumns": 8,
                 "witnessL2BoundSquared": 2048,
                 "expectedProofSizeBytes": 22923
+            },
+            "proofEncoding": {
+                "profileId": "lazer-demo-linear-proof-encoding-v1",
+                "ringDegree": 64,
+                "coefficientModulus": 36028797018964597,
+                "fullSizeCoefficientBitLength": 56,
+                "compressedCoefficientBitLength": 46,
+                "targetCommitmentVectorLength": 12,
+                "hashMaskVectorLength": 2,
+                "compressedCommitmentVectorLength": 13,
+                "challengeCoefficientModulus": 17,
+                "challengeCoefficientBitLength": 5,
+                "hintVectorLength": 13,
+                "shortResponseVectorLength": 33,
+                "randomnessResponseVectorLength": 47,
+                "euclideanResponseVectorLength": 4,
+                "infinityResponseVectorLength": 4,
+                "shortResponseLog2StandardDeviation": 16,
+                "randomnessResponseLog2StandardDeviation": 12,
+                "euclideanResponseLog2StandardDeviation": 11,
+                "infinityResponseLog2StandardDeviation": 16,
+                "source": "temp/lazer/python/demo/demo_params.h:_param"
             },
             "publicRandomnessHex": "0000000000000000000000000000000000000000000000000000000000000000",
             "statementMatrixCoefficients": [
@@ -18706,7 +18846,79 @@
                 "proofSizeBytes": 22923,
                 "publicRandomnessSha256": "66687aadf862bd776c8fc18b8e9f8e20089714856ee233b3902a591d0d5f2925",
                 "decodedProofFieldLengths": {
-                    "fullProofBytes": 22923
+                    "fullProofBytes": 22923,
+                    "fields": [
+                        {
+                            "name": "commitmentTargetVector",
+                            "bitOffset": 0,
+                            "bitLength": 43008,
+                            "byteStart": 0,
+                            "byteEndExclusive": 5376
+                        },
+                        {
+                            "name": "hashMaskVector",
+                            "bitOffset": 43008,
+                            "bitLength": 7168,
+                            "byteStart": 5376,
+                            "byteEndExclusive": 6272
+                        },
+                        {
+                            "name": "compressedCommitmentVector",
+                            "bitOffset": 50176,
+                            "bitLength": 38272,
+                            "byteStart": 6272,
+                            "byteEndExclusive": 11056
+                        },
+                        {
+                            "name": "challengePolynomial",
+                            "bitOffset": 88448,
+                            "bitLength": 320,
+                            "byteStart": 11056,
+                            "byteEndExclusive": 11096
+                        },
+                        {
+                            "name": "hintVector",
+                            "bitOffset": 88768,
+                            "bitLength": 1664,
+                            "byteStart": 11096,
+                            "byteEndExclusive": 11304
+                        },
+                        {
+                            "name": "shortResponseVector",
+                            "bitOffset": 90432,
+                            "bitLength": 39881,
+                            "byteStart": 11304,
+                            "byteEndExclusive": 16290
+                        },
+                        {
+                            "name": "randomnessResponseVector",
+                            "bitOffset": 130313,
+                            "bitLength": 44698,
+                            "byteStart": 16289,
+                            "byteEndExclusive": 21877
+                        },
+                        {
+                            "name": "euclideanResponseVector",
+                            "bitOffset": 175011,
+                            "bitLength": 3535,
+                            "byteStart": 21876,
+                            "byteEndExclusive": 22319
+                        },
+                        {
+                            "name": "infinityResponseVector",
+                            "bitOffset": 178546,
+                            "bitLength": 4832,
+                            "byteStart": 22318,
+                            "byteEndExclusive": 22923
+                        }
+                    ],
+                    "terminalPadding": {
+                        "name": "terminalPadding",
+                        "bitOffset": 183378,
+                        "bitLength": 6,
+                        "byteStart": 22922,
+                        "byteEndExclusive": 22923
+                    }
                 },
                 "expectedLogicalRejectionLayer": "statement-binding",
                 "upstreamVerifierAccepted": false
@@ -18729,6 +18941,28 @@
                 "statementColumns": 8,
                 "witnessL2BoundSquared": 2048,
                 "expectedProofSizeBytes": 22923
+            },
+            "proofEncoding": {
+                "profileId": "lazer-demo-linear-proof-encoding-v1",
+                "ringDegree": 64,
+                "coefficientModulus": 36028797018964597,
+                "fullSizeCoefficientBitLength": 56,
+                "compressedCoefficientBitLength": 46,
+                "targetCommitmentVectorLength": 12,
+                "hashMaskVectorLength": 2,
+                "compressedCommitmentVectorLength": 13,
+                "challengeCoefficientModulus": 17,
+                "challengeCoefficientBitLength": 5,
+                "hintVectorLength": 13,
+                "shortResponseVectorLength": 33,
+                "randomnessResponseVectorLength": 47,
+                "euclideanResponseVectorLength": 4,
+                "infinityResponseVectorLength": 4,
+                "shortResponseLog2StandardDeviation": 16,
+                "randomnessResponseLog2StandardDeviation": 12,
+                "euclideanResponseLog2StandardDeviation": 11,
+                "infinityResponseLog2StandardDeviation": 16,
+                "source": "temp/lazer/python/demo/demo_params.h:_param"
             },
             "publicRandomnessHex": "0000000000000000000000000000000000000000000000000000000000000000",
             "statementMatrixCoefficients": [
@@ -28041,7 +28275,79 @@
                 "proofSizeBytes": 22923,
                 "publicRandomnessSha256": "66687aadf862bd776c8fc18b8e9f8e20089714856ee233b3902a591d0d5f2925",
                 "decodedProofFieldLengths": {
-                    "fullProofBytes": 22923
+                    "fullProofBytes": 22923,
+                    "fields": [
+                        {
+                            "name": "commitmentTargetVector",
+                            "bitOffset": 0,
+                            "bitLength": 43008,
+                            "byteStart": 0,
+                            "byteEndExclusive": 5376
+                        },
+                        {
+                            "name": "hashMaskVector",
+                            "bitOffset": 43008,
+                            "bitLength": 7168,
+                            "byteStart": 5376,
+                            "byteEndExclusive": 6272
+                        },
+                        {
+                            "name": "compressedCommitmentVector",
+                            "bitOffset": 50176,
+                            "bitLength": 38272,
+                            "byteStart": 6272,
+                            "byteEndExclusive": 11056
+                        },
+                        {
+                            "name": "challengePolynomial",
+                            "bitOffset": 88448,
+                            "bitLength": 320,
+                            "byteStart": 11056,
+                            "byteEndExclusive": 11096
+                        },
+                        {
+                            "name": "hintVector",
+                            "bitOffset": 88768,
+                            "bitLength": 1664,
+                            "byteStart": 11096,
+                            "byteEndExclusive": 11304
+                        },
+                        {
+                            "name": "shortResponseVector",
+                            "bitOffset": 90432,
+                            "bitLength": 39881,
+                            "byteStart": 11304,
+                            "byteEndExclusive": 16290
+                        },
+                        {
+                            "name": "randomnessResponseVector",
+                            "bitOffset": 130313,
+                            "bitLength": 44698,
+                            "byteStart": 16289,
+                            "byteEndExclusive": 21877
+                        },
+                        {
+                            "name": "euclideanResponseVector",
+                            "bitOffset": 175011,
+                            "bitLength": 3535,
+                            "byteStart": 21876,
+                            "byteEndExclusive": 22319
+                        },
+                        {
+                            "name": "infinityResponseVector",
+                            "bitOffset": 178546,
+                            "bitLength": 4832,
+                            "byteStart": 22318,
+                            "byteEndExclusive": 22923
+                        }
+                    ],
+                    "terminalPadding": {
+                        "name": "terminalPadding",
+                        "bitOffset": 183378,
+                        "bitLength": 6,
+                        "byteStart": 22922,
+                        "byteEndExclusive": 22923
+                    }
                 },
                 "expectedLogicalRejectionLayer": "statement-binding",
                 "upstreamVerifierAccepted": false
@@ -28064,6 +28370,28 @@
                 "statementColumns": 8,
                 "witnessL2BoundSquared": 2048,
                 "expectedProofSizeBytes": 22923
+            },
+            "proofEncoding": {
+                "profileId": "lazer-demo-linear-proof-encoding-v1",
+                "ringDegree": 64,
+                "coefficientModulus": 36028797018964597,
+                "fullSizeCoefficientBitLength": 56,
+                "compressedCoefficientBitLength": 46,
+                "targetCommitmentVectorLength": 12,
+                "hashMaskVectorLength": 2,
+                "compressedCommitmentVectorLength": 13,
+                "challengeCoefficientModulus": 17,
+                "challengeCoefficientBitLength": 5,
+                "hintVectorLength": 13,
+                "shortResponseVectorLength": 33,
+                "randomnessResponseVectorLength": 47,
+                "euclideanResponseVectorLength": 4,
+                "infinityResponseVectorLength": 4,
+                "shortResponseLog2StandardDeviation": 16,
+                "randomnessResponseLog2StandardDeviation": 12,
+                "euclideanResponseLog2StandardDeviation": 11,
+                "infinityResponseLog2StandardDeviation": 16,
+                "source": "temp/lazer/python/demo/demo_params.h:_param"
             },
             "publicRandomnessHex": "0000000000000000000000000000000000000000000000000000000000000000",
             "statementMatrixCoefficients": [
@@ -37376,7 +37704,79 @@
                 "proofSizeBytes": 22923,
                 "publicRandomnessSha256": "66687aadf862bd776c8fc18b8e9f8e20089714856ee233b3902a591d0d5f2925",
                 "decodedProofFieldLengths": {
-                    "fullProofBytes": 22923
+                    "fullProofBytes": 22923,
+                    "fields": [
+                        {
+                            "name": "commitmentTargetVector",
+                            "bitOffset": 0,
+                            "bitLength": 43008,
+                            "byteStart": 0,
+                            "byteEndExclusive": 5376
+                        },
+                        {
+                            "name": "hashMaskVector",
+                            "bitOffset": 43008,
+                            "bitLength": 7168,
+                            "byteStart": 5376,
+                            "byteEndExclusive": 6272
+                        },
+                        {
+                            "name": "compressedCommitmentVector",
+                            "bitOffset": 50176,
+                            "bitLength": 38272,
+                            "byteStart": 6272,
+                            "byteEndExclusive": 11056
+                        },
+                        {
+                            "name": "challengePolynomial",
+                            "bitOffset": 88448,
+                            "bitLength": 320,
+                            "byteStart": 11056,
+                            "byteEndExclusive": 11096
+                        },
+                        {
+                            "name": "hintVector",
+                            "bitOffset": 88768,
+                            "bitLength": 1664,
+                            "byteStart": 11096,
+                            "byteEndExclusive": 11304
+                        },
+                        {
+                            "name": "shortResponseVector",
+                            "bitOffset": 90432,
+                            "bitLength": 39881,
+                            "byteStart": 11304,
+                            "byteEndExclusive": 16290
+                        },
+                        {
+                            "name": "randomnessResponseVector",
+                            "bitOffset": 130313,
+                            "bitLength": 44698,
+                            "byteStart": 16289,
+                            "byteEndExclusive": 21877
+                        },
+                        {
+                            "name": "euclideanResponseVector",
+                            "bitOffset": 175011,
+                            "bitLength": 3535,
+                            "byteStart": 21876,
+                            "byteEndExclusive": 22319
+                        },
+                        {
+                            "name": "infinityResponseVector",
+                            "bitOffset": 178546,
+                            "bitLength": 4832,
+                            "byteStart": 22318,
+                            "byteEndExclusive": 22923
+                        }
+                    ],
+                    "terminalPadding": {
+                        "name": "terminalPadding",
+                        "bitOffset": 183378,
+                        "bitLength": 6,
+                        "byteStart": 22922,
+                        "byteEndExclusive": 22923
+                    }
                 },
                 "expectedLogicalRejectionLayer": "proof-body",
                 "upstreamVerifierAccepted": false
@@ -37399,6 +37799,28 @@
                 "statementColumns": 8,
                 "witnessL2BoundSquared": 2048,
                 "expectedProofSizeBytes": 22923
+            },
+            "proofEncoding": {
+                "profileId": "lazer-demo-linear-proof-encoding-v1",
+                "ringDegree": 64,
+                "coefficientModulus": 36028797018964597,
+                "fullSizeCoefficientBitLength": 56,
+                "compressedCoefficientBitLength": 46,
+                "targetCommitmentVectorLength": 12,
+                "hashMaskVectorLength": 2,
+                "compressedCommitmentVectorLength": 13,
+                "challengeCoefficientModulus": 17,
+                "challengeCoefficientBitLength": 5,
+                "hintVectorLength": 13,
+                "shortResponseVectorLength": 33,
+                "randomnessResponseVectorLength": 47,
+                "euclideanResponseVectorLength": 4,
+                "infinityResponseVectorLength": 4,
+                "shortResponseLog2StandardDeviation": 16,
+                "randomnessResponseLog2StandardDeviation": 12,
+                "euclideanResponseLog2StandardDeviation": 11,
+                "infinityResponseLog2StandardDeviation": 16,
+                "source": "temp/lazer/python/demo/demo_params.h:_param"
             },
             "publicRandomnessHex": "0100000000000000000000000000000000000000000000000000000000000000",
             "statementMatrixCoefficients": [
@@ -46711,7 +47133,79 @@
                 "proofSizeBytes": 22923,
                 "publicRandomnessSha256": "01d0fabd251fcbbe2b93b4b927b26ad2a1a99077152e45ded1e678afa45dbec5",
                 "decodedProofFieldLengths": {
-                    "fullProofBytes": 22923
+                    "fullProofBytes": 22923,
+                    "fields": [
+                        {
+                            "name": "commitmentTargetVector",
+                            "bitOffset": 0,
+                            "bitLength": 43008,
+                            "byteStart": 0,
+                            "byteEndExclusive": 5376
+                        },
+                        {
+                            "name": "hashMaskVector",
+                            "bitOffset": 43008,
+                            "bitLength": 7168,
+                            "byteStart": 5376,
+                            "byteEndExclusive": 6272
+                        },
+                        {
+                            "name": "compressedCommitmentVector",
+                            "bitOffset": 50176,
+                            "bitLength": 38272,
+                            "byteStart": 6272,
+                            "byteEndExclusive": 11056
+                        },
+                        {
+                            "name": "challengePolynomial",
+                            "bitOffset": 88448,
+                            "bitLength": 320,
+                            "byteStart": 11056,
+                            "byteEndExclusive": 11096
+                        },
+                        {
+                            "name": "hintVector",
+                            "bitOffset": 88768,
+                            "bitLength": 1664,
+                            "byteStart": 11096,
+                            "byteEndExclusive": 11304
+                        },
+                        {
+                            "name": "shortResponseVector",
+                            "bitOffset": 90432,
+                            "bitLength": 39881,
+                            "byteStart": 11304,
+                            "byteEndExclusive": 16290
+                        },
+                        {
+                            "name": "randomnessResponseVector",
+                            "bitOffset": 130313,
+                            "bitLength": 44698,
+                            "byteStart": 16289,
+                            "byteEndExclusive": 21877
+                        },
+                        {
+                            "name": "euclideanResponseVector",
+                            "bitOffset": 175011,
+                            "bitLength": 3535,
+                            "byteStart": 21876,
+                            "byteEndExclusive": 22319
+                        },
+                        {
+                            "name": "infinityResponseVector",
+                            "bitOffset": 178546,
+                            "bitLength": 4832,
+                            "byteStart": 22318,
+                            "byteEndExclusive": 22923
+                        }
+                    ],
+                    "terminalPadding": {
+                        "name": "terminalPadding",
+                        "bitOffset": 183378,
+                        "bitLength": 6,
+                        "byteStart": 22922,
+                        "byteEndExclusive": 22923
+                    }
                 },
                 "expectedLogicalRejectionLayer": "public-parameter-binding",
                 "upstreamVerifierAccepted": false
@@ -46734,6 +47228,28 @@
                 "statementColumns": 8,
                 "witnessL2BoundSquared": 2048,
                 "expectedProofSizeBytes": 22923
+            },
+            "proofEncoding": {
+                "profileId": "lazer-demo-linear-proof-encoding-v1",
+                "ringDegree": 64,
+                "coefficientModulus": 36028797018964597,
+                "fullSizeCoefficientBitLength": 56,
+                "compressedCoefficientBitLength": 46,
+                "targetCommitmentVectorLength": 12,
+                "hashMaskVectorLength": 2,
+                "compressedCommitmentVectorLength": 13,
+                "challengeCoefficientModulus": 17,
+                "challengeCoefficientBitLength": 5,
+                "hintVectorLength": 13,
+                "shortResponseVectorLength": 33,
+                "randomnessResponseVectorLength": 47,
+                "euclideanResponseVectorLength": 4,
+                "infinityResponseVectorLength": 4,
+                "shortResponseLog2StandardDeviation": 16,
+                "randomnessResponseLog2StandardDeviation": 12,
+                "euclideanResponseLog2StandardDeviation": 11,
+                "infinityResponseLog2StandardDeviation": 16,
+                "source": "temp/lazer/python/demo/demo_params.h:_param"
             },
             "publicRandomnessHex": "0000000000000000000000000000000000000000000000000000000000000000",
             "statementMatrixCoefficients": [
@@ -56046,7 +56562,8 @@
                 "proofSizeBytes": 22922,
                 "publicRandomnessSha256": "66687aadf862bd776c8fc18b8e9f8e20089714856ee233b3902a591d0d5f2925",
                 "decodedProofFieldLengths": {
-                    "fullProofBytes": 22922
+                    "fullProofBytes": 22922,
+                    "decoderError": "proof encoding ended before the current field was complete"
                 },
                 "expectedLogicalRejectionLayer": "proof-decoder",
                 "upstreamVerifierAccepted": false
@@ -56069,6 +56586,28 @@
                 "statementColumns": 8,
                 "witnessL2BoundSquared": 2048,
                 "expectedProofSizeBytes": 22923
+            },
+            "proofEncoding": {
+                "profileId": "lazer-demo-linear-proof-encoding-v1",
+                "ringDegree": 64,
+                "coefficientModulus": 36028797018964597,
+                "fullSizeCoefficientBitLength": 56,
+                "compressedCoefficientBitLength": 46,
+                "targetCommitmentVectorLength": 12,
+                "hashMaskVectorLength": 2,
+                "compressedCommitmentVectorLength": 13,
+                "challengeCoefficientModulus": 17,
+                "challengeCoefficientBitLength": 5,
+                "hintVectorLength": 13,
+                "shortResponseVectorLength": 33,
+                "randomnessResponseVectorLength": 47,
+                "euclideanResponseVectorLength": 4,
+                "infinityResponseVectorLength": 4,
+                "shortResponseLog2StandardDeviation": 16,
+                "randomnessResponseLog2StandardDeviation": 12,
+                "euclideanResponseLog2StandardDeviation": 11,
+                "infinityResponseLog2StandardDeviation": 16,
+                "source": "temp/lazer/python/demo/demo_params.h:_param"
             },
             "publicRandomnessHex": "0000000000000000000000000000000000000000000000000000000000000000",
             "statementMatrixCoefficients": [
@@ -65381,7 +65920,8 @@
                 "proofSizeBytes": 22924,
                 "publicRandomnessSha256": "66687aadf862bd776c8fc18b8e9f8e20089714856ee233b3902a591d0d5f2925",
                 "decodedProofFieldLengths": {
-                    "fullProofBytes": 22924
+                    "fullProofBytes": 22924,
+                    "decoderError": "proof encoding contains trailing data"
                 },
                 "expectedLogicalRejectionLayer": "proof-decoder",
                 "upstreamVerifierAccepted": true
@@ -65404,6 +65944,28 @@
                 "statementColumns": 8,
                 "witnessL2BoundSquared": 2048,
                 "expectedProofSizeBytes": 22923
+            },
+            "proofEncoding": {
+                "profileId": "lazer-demo-linear-proof-encoding-v1",
+                "ringDegree": 64,
+                "coefficientModulus": 36028797018964597,
+                "fullSizeCoefficientBitLength": 56,
+                "compressedCoefficientBitLength": 46,
+                "targetCommitmentVectorLength": 12,
+                "hashMaskVectorLength": 2,
+                "compressedCommitmentVectorLength": 13,
+                "challengeCoefficientModulus": 17,
+                "challengeCoefficientBitLength": 5,
+                "hintVectorLength": 13,
+                "shortResponseVectorLength": 33,
+                "randomnessResponseVectorLength": 47,
+                "euclideanResponseVectorLength": 4,
+                "infinityResponseVectorLength": 4,
+                "shortResponseLog2StandardDeviation": 16,
+                "randomnessResponseLog2StandardDeviation": 12,
+                "euclideanResponseLog2StandardDeviation": 11,
+                "infinityResponseLog2StandardDeviation": 16,
+                "source": "temp/lazer/python/demo/demo_params.h:_param"
             },
             "publicRandomnessHex": "0000000000000000000000000000000000000000000000000000000000000000",
             "statementMatrixCoefficients": [
@@ -74716,7 +75278,79 @@
                 "proofSizeBytes": 22923,
                 "publicRandomnessSha256": "66687aadf862bd776c8fc18b8e9f8e20089714856ee233b3902a591d0d5f2925",
                 "decodedProofFieldLengths": {
-                    "fullProofBytes": 22923
+                    "fullProofBytes": 22923,
+                    "fields": [
+                        {
+                            "name": "commitmentTargetVector",
+                            "bitOffset": 0,
+                            "bitLength": 43008,
+                            "byteStart": 0,
+                            "byteEndExclusive": 5376
+                        },
+                        {
+                            "name": "hashMaskVector",
+                            "bitOffset": 43008,
+                            "bitLength": 7168,
+                            "byteStart": 5376,
+                            "byteEndExclusive": 6272
+                        },
+                        {
+                            "name": "compressedCommitmentVector",
+                            "bitOffset": 50176,
+                            "bitLength": 38272,
+                            "byteStart": 6272,
+                            "byteEndExclusive": 11056
+                        },
+                        {
+                            "name": "challengePolynomial",
+                            "bitOffset": 88448,
+                            "bitLength": 320,
+                            "byteStart": 11056,
+                            "byteEndExclusive": 11096
+                        },
+                        {
+                            "name": "hintVector",
+                            "bitOffset": 88768,
+                            "bitLength": 1664,
+                            "byteStart": 11096,
+                            "byteEndExclusive": 11304
+                        },
+                        {
+                            "name": "shortResponseVector",
+                            "bitOffset": 90432,
+                            "bitLength": 39881,
+                            "byteStart": 11304,
+                            "byteEndExclusive": 16290
+                        },
+                        {
+                            "name": "randomnessResponseVector",
+                            "bitOffset": 130313,
+                            "bitLength": 44698,
+                            "byteStart": 16289,
+                            "byteEndExclusive": 21877
+                        },
+                        {
+                            "name": "euclideanResponseVector",
+                            "bitOffset": 175011,
+                            "bitLength": 3535,
+                            "byteStart": 21876,
+                            "byteEndExclusive": 22319
+                        },
+                        {
+                            "name": "infinityResponseVector",
+                            "bitOffset": 178546,
+                            "bitLength": 4832,
+                            "byteStart": 22318,
+                            "byteEndExclusive": 22923
+                        }
+                    ],
+                    "terminalPadding": {
+                        "name": "terminalPadding",
+                        "bitOffset": 183378,
+                        "bitLength": 6,
+                        "byteStart": 22922,
+                        "byteEndExclusive": 22923
+                    }
                 },
                 "expectedLogicalRejectionLayer": "canonical-statement-decoder"
             }

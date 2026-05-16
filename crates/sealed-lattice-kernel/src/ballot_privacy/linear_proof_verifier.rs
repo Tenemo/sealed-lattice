@@ -8,9 +8,11 @@ use crate::{
 
 use super::{
     BALLOT_PRIVACY_PROOF_BACKEND_AVAILABLE, describe_proof_backend,
-    linear_proof_parameters::LinearProofParameterSet, polynomial_matrix::PolynomialMatrix,
-    polynomial_ring::PolynomialRing, polynomial_vector::PolynomialVector,
-    proof_coder::LinearProofBytes,
+    linear_proof_parameters::{LazerDemoProofEncoding, LinearProofParameterSet},
+    polynomial_matrix::PolynomialMatrix,
+    polynomial_ring::PolynomialRing,
+    polynomial_vector::PolynomialVector,
+    proof_coder::{LinearProofBytes, decode_lazer_demo_linear_proof_fields},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -22,11 +24,19 @@ pub struct LinearProofVectorCase {
     pub expected_outcome: String,
     pub upstream_vector_available: bool,
     pub parameter_set: Option<LinearProofParameterSet>,
+    pub proof_encoding: Option<LazerDemoProofEncoding>,
     pub public_randomness_hex: Option<String>,
     pub statement_matrix_coefficients: Option<Vec<Vec<Vec<u64>>>>,
     pub target_vector_coefficients: Option<Vec<Vec<u64>>>,
     pub proof_hex: Option<String>,
     pub expected_proof_size_bytes: Option<usize>,
+    pub trace: Option<LinearProofVectorTrace>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LinearProofVectorTrace {
+    pub decoded_proof_field_lengths: Option<Value>,
 }
 
 impl LinearProofVectorCase {
@@ -68,7 +78,29 @@ impl LinearProofVectorCase {
                 .proof_hex
                 .as_deref()
                 .ok_or_else(|| invalid_vector("available vectors require proofHex"))?;
-            LinearProofBytes::from_hex(proof_hex, self.expected_proof_size_bytes)?;
+            let proof_bytes =
+                LinearProofBytes::from_hex(proof_hex, self.expected_proof_size_bytes)?;
+            if let Some(proof_encoding) = self.proof_encoding.as_ref() {
+                proof_encoding.validate()?;
+                let decoded_field_lengths =
+                    decode_lazer_demo_linear_proof_fields(proof_bytes.bytes(), proof_encoding)?;
+                if let Some(expected_field_lengths) = self
+                    .trace
+                    .as_ref()
+                    .and_then(|trace| trace.decoded_proof_field_lengths.as_ref())
+                    && expected_field_lengths.get("decoderError").is_none()
+                    && *expected_field_lengths
+                        != serde_json::to_value(decoded_field_lengths).map_err(|error| {
+                            invalid_vector(format!(
+                                "decoded proof field lengths could not be serialized: {error}"
+                            ))
+                        })?
+                {
+                    return Err(invalid_vector(
+                        "decoded proof field lengths do not match the upstream trace",
+                    ));
+                }
+            }
             let statement_matrix_coefficients = self
                 .statement_matrix_coefficients
                 .as_deref()
@@ -270,5 +302,25 @@ mod tests {
                 .expect("message should be a string")
                 .contains("32 bytes")
         );
+    }
+
+    #[test]
+    fn generated_upstream_vector_decodes_and_fails_closed() {
+        let vectors: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../test-vectors/ballot-privacy/proof-backend-linear-vectors.json"
+        ))
+        .expect("generated vector file should parse");
+        let vector_case = vectors["cases"]
+            .as_array()
+            .expect("generated vector file should contain cases")
+            .iter()
+            .find(|vector_case| vector_case["caseName"] == "valid-small-linear-proof")
+            .expect("valid generated vector should exist");
+
+        let verification = verify_linear_proof_vector_case_value(vector_case);
+
+        assert_eq!(verification["ok"], false);
+        assert_eq!(verification["vectorAvailable"], true);
+        assert_eq!(verification["unresolvedReason"], "OperationUnavailable");
     }
 }

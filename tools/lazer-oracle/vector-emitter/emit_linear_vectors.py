@@ -6,7 +6,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import os
 import platform
 import shutil
 import subprocess
@@ -62,6 +61,237 @@ def canonical_json_digest(value: Any) -> str:
     canonical = json.dumps(value, sort_keys=True, separators=(",", ":"))
 
     return sha256_text(canonical)
+
+
+def ceil_divide(dividend: int, divisor: int) -> int:
+    return (dividend + divisor - 1) // divisor
+
+
+class ProofBitReader:
+    def __init__(self, proof: bytes) -> None:
+        self.proof = proof
+        self.bit_offset = 0
+
+    def read_bit(self) -> int:
+        if self.bit_offset >= len(self.proof) * 8:
+            raise ValueError("proof encoding ended before the current field was complete")
+
+        byte_value = self.proof[self.bit_offset // 8]
+        bit_index = self.bit_offset % 8
+        self.bit_offset += 1
+
+        return (byte_value >> bit_index) & 1
+
+    def read_unsigned_little_endian_bits(self, bit_count: int) -> int:
+        value = 0
+        for bit_index in range(bit_count):
+            value |= self.read_bit() << bit_index
+
+        return value
+
+    def finish(self) -> None:
+        if self.bit_offset >= len(self.proof) * 8:
+            raise ValueError("proof encoding has no terminal padding bit")
+
+        byte_index = self.bit_offset // 8
+        bit_index = self.bit_offset % 8
+        high_mask = (0xFF << bit_index) & 0xFF
+        expected = 1 << bit_index
+        if self.proof[byte_index] & high_mask != expected:
+            raise ValueError("proof encoding has noncanonical terminal padding")
+
+        self.bit_offset = (byte_index + 1) * 8
+        if self.bit_offset != len(self.proof) * 8:
+            raise ValueError("proof encoding contains trailing data")
+
+
+def decode_uniform_polynomial_vector(
+    reader: ProofBitReader,
+    *,
+    vector_length: int,
+    ring_degree: int,
+    modulus: int,
+    coefficient_bit_length: int,
+) -> None:
+    for _ in range(vector_length * ring_degree):
+        coefficient = reader.read_unsigned_little_endian_bits(coefficient_bit_length)
+        if coefficient >= modulus:
+            raise ValueError("uniform polynomial coefficient is not canonical")
+
+
+def decode_hint_polynomial_vector(
+    reader: ProofBitReader,
+    *,
+    vector_length: int,
+    ring_degree: int,
+) -> None:
+    for _ in range(vector_length * ring_degree):
+        first_bit = reader.read_bit()
+        second_bit = reader.read_bit()
+        if first_bit == 1 and second_bit == 1:
+            while reader.read_bit() == 0:
+                pass
+
+
+def decode_gaussian_polynomial_vector(
+    reader: ProofBitReader,
+    *,
+    vector_length: int,
+    ring_degree: int,
+    log2_standard_deviation: int,
+) -> None:
+    binary_tail_bit_length = log2_standard_deviation + 1
+    for _ in range(vector_length * ring_degree):
+        while reader.read_bit() == 1:
+            pass
+        reader.read_unsigned_little_endian_bits(binary_tail_bit_length)
+
+
+def record_decoded_field(
+    *,
+    reader: ProofBitReader,
+    field_name: str,
+    decode: Any,
+) -> dict[str, int | str]:
+    start_bit = reader.bit_offset
+    decode()
+    end_bit = reader.bit_offset
+
+    return {
+        "name": field_name,
+        "bitOffset": start_bit,
+        "bitLength": end_bit - start_bit,
+        "byteStart": start_bit // 8,
+        "byteEndExclusive": ceil_divide(end_bit, 8),
+    }
+
+
+def decode_proof_field_trace(
+    *, proof: bytes, proof_encoding: dict[str, Any]
+) -> dict[str, Any]:
+    reader = ProofBitReader(proof)
+    ring_degree = int(proof_encoding["ringDegree"])
+    coefficient_modulus = int(proof_encoding["coefficientModulus"])
+    full_size_bit_length = int(proof_encoding["fullSizeCoefficientBitLength"])
+    compressed_bit_length = int(proof_encoding["compressedCoefficientBitLength"])
+
+    fields = [
+        record_decoded_field(
+            reader=reader,
+            field_name="commitmentTargetVector",
+            decode=lambda: decode_uniform_polynomial_vector(
+                reader,
+                vector_length=int(proof_encoding["targetCommitmentVectorLength"]),
+                ring_degree=ring_degree,
+                modulus=coefficient_modulus,
+                coefficient_bit_length=full_size_bit_length,
+            ),
+        ),
+        record_decoded_field(
+            reader=reader,
+            field_name="hashMaskVector",
+            decode=lambda: decode_uniform_polynomial_vector(
+                reader,
+                vector_length=int(proof_encoding["hashMaskVectorLength"]),
+                ring_degree=ring_degree,
+                modulus=coefficient_modulus,
+                coefficient_bit_length=full_size_bit_length,
+            ),
+        ),
+        record_decoded_field(
+            reader=reader,
+            field_name="compressedCommitmentVector",
+            decode=lambda: decode_uniform_polynomial_vector(
+                reader,
+                vector_length=int(proof_encoding["compressedCommitmentVectorLength"]),
+                ring_degree=ring_degree,
+                modulus=1 << compressed_bit_length,
+                coefficient_bit_length=compressed_bit_length,
+            ),
+        ),
+        record_decoded_field(
+            reader=reader,
+            field_name="challengePolynomial",
+            decode=lambda: decode_uniform_polynomial_vector(
+                reader,
+                vector_length=1,
+                ring_degree=ring_degree,
+                modulus=int(proof_encoding["challengeCoefficientModulus"]),
+                coefficient_bit_length=int(proof_encoding["challengeCoefficientBitLength"]),
+            ),
+        ),
+        record_decoded_field(
+            reader=reader,
+            field_name="hintVector",
+            decode=lambda: decode_hint_polynomial_vector(
+                reader,
+                vector_length=int(proof_encoding["hintVectorLength"]),
+                ring_degree=ring_degree,
+            ),
+        ),
+        record_decoded_field(
+            reader=reader,
+            field_name="shortResponseVector",
+            decode=lambda: decode_gaussian_polynomial_vector(
+                reader,
+                vector_length=int(proof_encoding["shortResponseVectorLength"]),
+                ring_degree=ring_degree,
+                log2_standard_deviation=int(
+                    proof_encoding["shortResponseLog2StandardDeviation"]
+                ),
+            ),
+        ),
+        record_decoded_field(
+            reader=reader,
+            field_name="randomnessResponseVector",
+            decode=lambda: decode_gaussian_polynomial_vector(
+                reader,
+                vector_length=int(proof_encoding["randomnessResponseVectorLength"]),
+                ring_degree=ring_degree,
+                log2_standard_deviation=int(
+                    proof_encoding["randomnessResponseLog2StandardDeviation"]
+                ),
+            ),
+        ),
+        record_decoded_field(
+            reader=reader,
+            field_name="euclideanResponseVector",
+            decode=lambda: decode_gaussian_polynomial_vector(
+                reader,
+                vector_length=int(proof_encoding["euclideanResponseVectorLength"]),
+                ring_degree=ring_degree,
+                log2_standard_deviation=int(
+                    proof_encoding["euclideanResponseLog2StandardDeviation"]
+                ),
+            ),
+        ),
+        record_decoded_field(
+            reader=reader,
+            field_name="infinityResponseVector",
+            decode=lambda: decode_gaussian_polynomial_vector(
+                reader,
+                vector_length=int(proof_encoding["infinityResponseVectorLength"]),
+                ring_degree=ring_degree,
+                log2_standard_deviation=int(
+                    proof_encoding["infinityResponseLog2StandardDeviation"]
+                ),
+            ),
+        ),
+    ]
+    padding_start_bit = reader.bit_offset
+    reader.finish()
+
+    return {
+        "fullProofBytes": len(proof),
+        "fields": fields,
+        "terminalPadding": {
+            "name": "terminalPadding",
+            "bitOffset": padding_start_bit,
+            "bitLength": reader.bit_offset - padding_start_bit,
+            "byteStart": padding_start_bit // 8,
+            "byteEndExclusive": len(proof),
+        },
+    }
 
 
 def import_lazer_python(lazer_root: Path) -> None:
@@ -176,6 +406,7 @@ def require_upstream_rejection(
 def build_trace(
     *,
     parameter_set: dict[str, Any],
+    proof_encoding: dict[str, Any],
     statement_matrix_coefficients: list[list[list[int]]],
     target_vector_coefficients: list[list[int]],
     proof: bytes,
@@ -183,6 +414,16 @@ def build_trace(
     expected_logical_rejection_layer: str,
     upstream_verifier_accepted: bool | None,
 ) -> dict[str, Any]:
+    try:
+        decoded_proof_field_lengths = decode_proof_field_trace(
+            proof=proof, proof_encoding=proof_encoding
+        )
+    except ValueError as error:
+        decoded_proof_field_lengths = {
+            "fullProofBytes": len(proof),
+            "decoderError": str(error),
+        }
+
     trace = {
         "parameterDigest": canonical_json_digest(parameter_set),
         "statementDigest": canonical_json_digest(statement_matrix_coefficients),
@@ -190,9 +431,7 @@ def build_trace(
         "proofBytesSha256": hashlib.sha256(proof).hexdigest(),
         "proofSizeBytes": len(proof),
         "publicRandomnessSha256": hashlib.sha256(public_randomness).hexdigest(),
-        "decodedProofFieldLengths": {
-            "fullProofBytes": len(proof),
-        },
+        "decodedProofFieldLengths": decoded_proof_field_lengths,
         "expectedLogicalRejectionLayer": expected_logical_rejection_layer,
     }
     if upstream_verifier_accepted is not None:
@@ -208,6 +447,7 @@ def build_case(
     mutation: str,
     expected_outcome: str,
     parameter_set: dict[str, Any],
+    proof_encoding: dict[str, Any],
     public_randomness_hex: str,
     proof_hex: str,
     expected_proof_size_bytes: int,
@@ -222,6 +462,7 @@ def build_case(
         "expectedOutcome": expected_outcome,
         "upstreamVectorAvailable": True,
         "parameterSet": parameter_set,
+        "proofEncoding": proof_encoding,
         "publicRandomnessHex": public_randomness_hex,
         "statementMatrixCoefficients": statement_matrix_coefficients,
         "targetVectorCoefficients": target_vector_coefficients,
@@ -275,6 +516,28 @@ def emit_vectors(repo_root: Path, lazer_root: Path, out_path: Path) -> None:
         "statementColumns": int(columns),
         "witnessL2BoundSquared": 2048,
         "expectedProofSizeBytes": len(proof),
+    }
+    proof_encoding = {
+        "profileId": "lazer-demo-linear-proof-encoding-v1",
+        "ringDegree": 64,
+        "coefficientModulus": 36028797018964597,
+        "fullSizeCoefficientBitLength": 56,
+        "compressedCoefficientBitLength": 46,
+        "targetCommitmentVectorLength": 12,
+        "hashMaskVectorLength": 2,
+        "compressedCommitmentVectorLength": 13,
+        "challengeCoefficientModulus": 17,
+        "challengeCoefficientBitLength": 5,
+        "hintVectorLength": 13,
+        "shortResponseVectorLength": 33,
+        "randomnessResponseVectorLength": 47,
+        "euclideanResponseVectorLength": 4,
+        "infinityResponseVectorLength": 4,
+        "shortResponseLog2StandardDeviation": 16,
+        "randomnessResponseLog2StandardDeviation": 12,
+        "euclideanResponseLog2StandardDeviation": 11,
+        "infinityResponseLog2StandardDeviation": 16,
+        "source": "temp/lazer/python/demo/demo_params.h:_param",
     }
     proof_hex = bytes_hex(proof)
     public_randomness_hex = bytes_hex(public_randomness)
@@ -358,6 +621,7 @@ def emit_vectors(repo_root: Path, lazer_root: Path, out_path: Path) -> None:
             mutation="none",
             expected_outcome="accept",
             parameter_set=parameter_set,
+            proof_encoding=proof_encoding,
             public_randomness_hex=public_randomness_hex,
             statement_matrix_coefficients=matrix_coefficients,
             target_vector_coefficients=target_coefficients,
@@ -365,6 +629,7 @@ def emit_vectors(repo_root: Path, lazer_root: Path, out_path: Path) -> None:
             expected_proof_size_bytes=len(proof),
             trace=build_trace(
                 parameter_set=parameter_set,
+                proof_encoding=proof_encoding,
                 statement_matrix_coefficients=matrix_coefficients,
                 target_vector_coefficients=target_coefficients,
                 proof=proof,
@@ -379,6 +644,7 @@ def emit_vectors(repo_root: Path, lazer_root: Path, out_path: Path) -> None:
             mutation="statement-matrix-coefficient",
             expected_outcome="reject",
             parameter_set=parameter_set,
+            proof_encoding=proof_encoding,
             public_randomness_hex=public_randomness_hex,
             statement_matrix_coefficients=mutated_matrix_coefficients,
             target_vector_coefficients=target_coefficients,
@@ -386,6 +652,7 @@ def emit_vectors(repo_root: Path, lazer_root: Path, out_path: Path) -> None:
             expected_proof_size_bytes=len(proof),
             trace=build_trace(
                 parameter_set=parameter_set,
+                proof_encoding=proof_encoding,
                 statement_matrix_coefficients=mutated_matrix_coefficients,
                 target_vector_coefficients=target_coefficients,
                 proof=proof,
@@ -400,6 +667,7 @@ def emit_vectors(repo_root: Path, lazer_root: Path, out_path: Path) -> None:
             mutation="target-vector-coefficient",
             expected_outcome="reject",
             parameter_set=parameter_set,
+            proof_encoding=proof_encoding,
             public_randomness_hex=public_randomness_hex,
             statement_matrix_coefficients=matrix_coefficients,
             target_vector_coefficients=mutated_target_coefficients,
@@ -407,6 +675,7 @@ def emit_vectors(repo_root: Path, lazer_root: Path, out_path: Path) -> None:
             expected_proof_size_bytes=len(proof),
             trace=build_trace(
                 parameter_set=parameter_set,
+                proof_encoding=proof_encoding,
                 statement_matrix_coefficients=matrix_coefficients,
                 target_vector_coefficients=mutated_target_coefficients,
                 proof=proof,
@@ -421,6 +690,7 @@ def emit_vectors(repo_root: Path, lazer_root: Path, out_path: Path) -> None:
             mutation="proof-byte",
             expected_outcome="reject",
             parameter_set=parameter_set,
+            proof_encoding=proof_encoding,
             public_randomness_hex=public_randomness_hex,
             statement_matrix_coefficients=matrix_coefficients,
             target_vector_coefficients=target_coefficients,
@@ -428,6 +698,7 @@ def emit_vectors(repo_root: Path, lazer_root: Path, out_path: Path) -> None:
             expected_proof_size_bytes=len(proof),
             trace=build_trace(
                 parameter_set=parameter_set,
+                proof_encoding=proof_encoding,
                 statement_matrix_coefficients=matrix_coefficients,
                 target_vector_coefficients=target_coefficients,
                 proof=mutated_proof,
@@ -442,6 +713,7 @@ def emit_vectors(repo_root: Path, lazer_root: Path, out_path: Path) -> None:
             mutation="public-randomness",
             expected_outcome="reject",
             parameter_set=parameter_set,
+            proof_encoding=proof_encoding,
             public_randomness_hex=bytes(wrong_public_randomness).hex(),
             statement_matrix_coefficients=matrix_coefficients,
             target_vector_coefficients=target_coefficients,
@@ -449,6 +721,7 @@ def emit_vectors(repo_root: Path, lazer_root: Path, out_path: Path) -> None:
             expected_proof_size_bytes=len(proof),
             trace=build_trace(
                 parameter_set=parameter_set,
+                proof_encoding=proof_encoding,
                 statement_matrix_coefficients=matrix_coefficients,
                 target_vector_coefficients=target_coefficients,
                 proof=proof,
@@ -463,6 +736,7 @@ def emit_vectors(repo_root: Path, lazer_root: Path, out_path: Path) -> None:
             mutation="proof-truncation",
             expected_outcome="reject",
             parameter_set=parameter_set,
+            proof_encoding=proof_encoding,
             public_randomness_hex=public_randomness_hex,
             statement_matrix_coefficients=matrix_coefficients,
             target_vector_coefficients=target_coefficients,
@@ -470,6 +744,7 @@ def emit_vectors(repo_root: Path, lazer_root: Path, out_path: Path) -> None:
             expected_proof_size_bytes=len(proof),
             trace=build_trace(
                 parameter_set=parameter_set,
+                proof_encoding=proof_encoding,
                 statement_matrix_coefficients=matrix_coefficients,
                 target_vector_coefficients=target_coefficients,
                 proof=truncated_proof,
@@ -484,6 +759,7 @@ def emit_vectors(repo_root: Path, lazer_root: Path, out_path: Path) -> None:
             mutation="proof-extension",
             expected_outcome="reject",
             parameter_set=parameter_set,
+            proof_encoding=proof_encoding,
             public_randomness_hex=public_randomness_hex,
             statement_matrix_coefficients=matrix_coefficients,
             target_vector_coefficients=target_coefficients,
@@ -491,6 +767,7 @@ def emit_vectors(repo_root: Path, lazer_root: Path, out_path: Path) -> None:
             expected_proof_size_bytes=len(proof),
             trace=build_trace(
                 parameter_set=parameter_set,
+                proof_encoding=proof_encoding,
                 statement_matrix_coefficients=matrix_coefficients,
                 target_vector_coefficients=target_coefficients,
                 proof=extended_proof,
@@ -505,6 +782,7 @@ def emit_vectors(repo_root: Path, lazer_root: Path, out_path: Path) -> None:
             mutation="coefficient-encoding",
             expected_outcome="reject",
             parameter_set=parameter_set,
+            proof_encoding=proof_encoding,
             public_randomness_hex=public_randomness_hex,
             statement_matrix_coefficients=noncanonical_matrix_coefficients,
             target_vector_coefficients=target_coefficients,
@@ -512,6 +790,7 @@ def emit_vectors(repo_root: Path, lazer_root: Path, out_path: Path) -> None:
             expected_proof_size_bytes=len(proof),
             trace=build_trace(
                 parameter_set=parameter_set,
+                proof_encoding=proof_encoding,
                 statement_matrix_coefficients=noncanonical_matrix_coefficients,
                 target_vector_coefficients=target_coefficients,
                 proof=proof,
@@ -533,12 +812,18 @@ def emit_vectors(repo_root: Path, lazer_root: Path, out_path: Path) -> None:
         "upstreamRepositoryUrl": "https://github.com/lazer-crypto/lazer",
         "upstreamCommitHash": run_command(["git", "rev-parse", "HEAD"], cwd=lazer_root),
         "dockerfileSha256": sha256_file(repo_root / "tools" / "lazer-oracle" / "Dockerfile"),
+        "oracleDriverSha256": sha256_file(
+            repo_root / "tools" / "lazer-oracle" / "generate-linear-vectors.ts"
+        ),
+        "oracleRunnerSha256": sha256_file(
+            repo_root / "tools" / "lazer-oracle" / "run_oracle.py"
+        ),
         "vectorEmitterSha256": sha256_file(Path(__file__)),
         "pythonVersion": platform.python_version(),
         "sageVersion": sage_version,
         "compilerVersion": run_command(["gcc", "--version"]).splitlines()[0],
-        "buildCommand": "make -B lazer.h && make liblazer.so && cd python && make && cd demo && python3 ../params_cffi_build.py demo_params.h ../..",
-        "testCommand": "python3 tools/lazer-oracle/vector-emitter/emit_linear_vectors.py",
+        "buildCommand": "tsx tools/lazer-oracle/generate-linear-vectors.ts",
+        "testCommand": "python3 tools/lazer-oracle/run_oracle.py followed by python3 tools/lazer-oracle/vector-emitter/emit_linear_vectors.py inside Docker",
         "parameterGenerationCommand": "cd temp/lazer/scripts && sage lin-codegen.sage ../python/demo/demo_params.py > ../python/demo/demo_params.h",
         "licenseNote": "LaZer is used only as an offline vector oracle; no upstream C library is shipped in sealed-lattice.",
     }
@@ -553,6 +838,7 @@ def emit_vectors(repo_root: Path, lazer_root: Path, out_path: Path) -> None:
         "generationStatus": "generated",
         "provenance": provenance,
         "parameterSet": parameter_set,
+        "proofEncoding": proof_encoding,
         "requiredCaseNames": REQUIRED_CASE_NAMES,
         "cases": cases,
     }

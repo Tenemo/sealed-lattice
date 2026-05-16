@@ -1,0 +1,303 @@
+import { deriveProtocolDigest } from '@sealed-lattice/crypto';
+import type { ProtocolDigest } from '@sealed-lattice/types';
+import { describe, expect, it } from 'vitest';
+
+import {
+    addShareCommitmentOpenings,
+    addShareCommitmentPolynomialVectors,
+    assertNoFixtureRandomnessInProduction,
+    createFixtureRandomnessSource,
+    createShareCommitment,
+    encodeReceiverPayloadPlaintextForTests,
+    encryptReceiverPayload,
+    generateReceiverState,
+    verifyReceiverPayloadWitness,
+    verifyShareCommitmentWitness,
+    type ReceiverPayloadPlaintextWitness,
+    type ShareCommitmentOpeningWitness,
+} from '../../src/ballot-privacy/lattice-primitives';
+import { createBallotPrivacyProfileSet } from '../../src/ballot-privacy/profiles';
+
+const digest = (label: string): ProtocolDigest =>
+    deriveProtocolDigest('ActionContextDigest', { label });
+
+const fixtureRandomness = createFixtureRandomnessSource(
+    'ballot-privacy-lattice-primitives',
+);
+
+const shareVector = (
+    firstShare: number,
+    secondShare: number,
+): readonly number[] => [
+    firstShare,
+    secondShare,
+    ...Array.from({ length: 18 }, () => 0),
+];
+
+const opening = (seed: number): ShareCommitmentOpeningWitness => ({
+    openingRandomness: Array.from(
+        { length: 64 },
+        (_unusedValue, coordinateIndex) => ((seed + coordinateIndex) % 17) - 8,
+    ),
+});
+
+const createReceiverPlaintext = (
+    receiverShareVector: readonly number[],
+    shareCommitmentOpening: ShareCommitmentOpeningWitness,
+): ReceiverPayloadPlaintextWitness => ({
+    ballotPackageContextDigest: digest('ballot-package-context'),
+    ceremonyId: 'ceremony-1',
+    manifestDigest: digest('manifest'),
+    pollSpecDigest: digest('poll-spec'),
+    receiverIdentity: 'receiver-1',
+    receiverRosterPosition: 1,
+    receiverShareVector,
+    rosterDigest: digest('roster'),
+    shareCommitmentOpening,
+    voterIdentityDigest: digest('voter-1'),
+});
+
+describe('ballot privacy lattice primitives', () => {
+    it('generates deterministic receiver encryption state for fixture inputs', () => {
+        const profileSet = createBallotPrivacyProfileSet();
+        const firstState = generateReceiverState({
+            ceremonyId: 'ceremony-1',
+            manifestDigest: digest('manifest'),
+            randomnessSource: fixtureRandomness,
+            receiverEncryptionProfile: profileSet.receiverEncryptionProfile,
+            receiverIdentity: 'receiver-1',
+            receiverRosterPosition: 1,
+            recoveryEpoch: 0,
+            rosterDigest: digest('roster'),
+        });
+        const secondState = generateReceiverState({
+            ceremonyId: 'ceremony-1',
+            manifestDigest: digest('manifest'),
+            randomnessSource: fixtureRandomness,
+            receiverEncryptionProfile: profileSet.receiverEncryptionProfile,
+            receiverIdentity: 'receiver-1',
+            receiverRosterPosition: 1,
+            recoveryEpoch: 0,
+            rosterDigest: digest('roster'),
+        });
+        const changedState = generateReceiverState({
+            ceremonyId: 'ceremony-1',
+            manifestDigest: digest('manifest'),
+            randomnessSource: fixtureRandomness,
+            receiverEncryptionProfile: profileSet.receiverEncryptionProfile,
+            receiverIdentity: 'receiver-2',
+            receiverRosterPosition: 2,
+            recoveryEpoch: 0,
+            rosterDigest: digest('roster'),
+        });
+
+        expect(firstState.receiverPublicKey).toEqual(
+            secondState.receiverPublicKey,
+        );
+        expect(firstState.publicKeyMaterial).toEqual(
+            secondState.publicKeyMaterial,
+        );
+        expect(firstState.secretState).toEqual(secondState.secretState);
+        expect(firstState.receiverPublicKey.receiverPublicKeyDigest).not.toBe(
+            changedState.receiverPublicKey.receiverPublicKeyDigest,
+        );
+        expect(firstState.receiverPublicKey).not.toHaveProperty('secretVector');
+        expect(firstState.receiverPublicKey).not.toHaveProperty('errorVector');
+    });
+
+    it('computes additively homomorphic share commitments', () => {
+        const profileSet = createBallotPrivacyProfileSet();
+        const firstOpening = opening(1);
+        const secondOpening = opening(9);
+        const firstCommitment = createShareCommitment({
+            ceremonyId: 'ceremony-1',
+            manifestDigest: digest('manifest'),
+            opening: firstOpening,
+            receiverIdentity: 'receiver-1',
+            receiverRosterPosition: 1,
+            receiverShareVector: shareVector(5, 7),
+            rosterDigest: digest('roster'),
+            shareCommitmentProfile: profileSet.shareCommitmentProfile,
+        });
+        const secondCommitment = createShareCommitment({
+            ceremonyId: 'ceremony-1',
+            manifestDigest: digest('manifest'),
+            opening: secondOpening,
+            receiverIdentity: 'receiver-1',
+            receiverRosterPosition: 1,
+            receiverShareVector: shareVector(11, 13),
+            rosterDigest: digest('roster'),
+            shareCommitmentProfile: profileSet.shareCommitmentProfile,
+        });
+        const summedCommitment = createShareCommitment({
+            ceremonyId: 'ceremony-1',
+            manifestDigest: digest('manifest'),
+            opening: addShareCommitmentOpenings(firstOpening, secondOpening),
+            receiverIdentity: 'receiver-1',
+            receiverRosterPosition: 1,
+            receiverShareVector: shareVector(16, 20),
+            rosterDigest: digest('roster'),
+            shareCommitmentProfile: profileSet.shareCommitmentProfile,
+        });
+
+        expect(
+            addShareCommitmentPolynomialVectors(
+                firstCommitment.commitmentPolynomialVector,
+                secondCommitment.commitmentPolynomialVector,
+            ),
+        ).toEqual(summedCommitment.commitmentPolynomialVector);
+        expect(firstCommitment.shareCommitment).not.toHaveProperty(
+            'openingRandomness',
+        );
+        expect(
+            verifyShareCommitmentWitness({
+                ceremonyId: 'ceremony-1',
+                expectedCommitmentPolynomialVector:
+                    firstCommitment.commitmentPolynomialVector,
+                expectedShareCommitment: firstCommitment.shareCommitment,
+                manifestDigest: digest('manifest'),
+                opening: firstOpening,
+                receiverIdentity: 'receiver-1',
+                receiverRosterPosition: 1,
+                receiverShareVector: shareVector(5, 7),
+                rosterDigest: digest('roster'),
+                shareCommitmentProfile: profileSet.shareCommitmentProfile,
+            }),
+        ).toEqual([]);
+        expect(
+            verifyShareCommitmentWitness({
+                ceremonyId: 'ceremony-1',
+                expectedCommitmentPolynomialVector:
+                    firstCommitment.commitmentPolynomialVector,
+                expectedShareCommitment: firstCommitment.shareCommitment,
+                manifestDigest: digest('manifest'),
+                opening: opening(2),
+                receiverIdentity: 'receiver-1',
+                receiverRosterPosition: 1,
+                receiverShareVector: shareVector(5, 7),
+                rosterDigest: digest('roster'),
+                shareCommitmentProfile: profileSet.shareCommitmentProfile,
+            }).map((refusal) => refusal.code),
+        ).toContain('BallotPackageInvalid');
+    });
+
+    it('encrypts receiver payload plaintext with per-chunk randomness and context binding', () => {
+        const profileSet = createBallotPrivacyProfileSet();
+        const receiverState = generateReceiverState({
+            ceremonyId: 'ceremony-1',
+            manifestDigest: digest('manifest'),
+            randomnessSource: fixtureRandomness,
+            receiverEncryptionProfile: profileSet.receiverEncryptionProfile,
+            receiverIdentity: 'receiver-1',
+            receiverRosterPosition: 1,
+            recoveryEpoch: 0,
+            rosterDigest: digest('roster'),
+        });
+        const plaintext = createReceiverPlaintext(
+            shareVector(21, 34),
+            opening(4),
+        );
+        const encryptedPayload = encryptReceiverPayload({
+            plaintext,
+            publicKeyMaterial: receiverState.publicKeyMaterial,
+            randomnessSource: fixtureRandomness,
+            receiverEncryptionProfile: profileSet.receiverEncryptionProfile,
+            receiverPublicKey: receiverState.receiverPublicKey,
+            shareCommitmentProfile: profileSet.shareCommitmentProfile,
+        });
+        const changedPlaintext = {
+            ...plaintext,
+            shareCommitmentOpening: opening(5),
+        };
+        const changedPayload = encryptReceiverPayload({
+            plaintext: changedPlaintext,
+            publicKeyMaterial: receiverState.publicKeyMaterial,
+            randomnessSource: fixtureRandomness,
+            receiverEncryptionProfile: profileSet.receiverEncryptionProfile,
+            receiverPublicKey: receiverState.receiverPublicKey,
+            shareCommitmentProfile: profileSet.shareCommitmentProfile,
+        });
+
+        expect(encryptedPayload.ciphertextChunks.length).toBeGreaterThan(1);
+        expect(encryptedPayload.witness.chunkWitnesses).toHaveLength(
+            encryptedPayload.ciphertextChunks.length,
+        );
+        expect(
+            encryptedPayload.witness.chunkWitnesses[0]
+                ?.encryptionRandomnessVector,
+        ).not.toEqual(
+            encryptedPayload.witness.chunkWitnesses[1]
+                ?.encryptionRandomnessVector,
+        );
+        expect(encryptedPayload.receiverPayload).not.toHaveProperty(
+            'receiverShareVector',
+        );
+        expect(encryptedPayload.receiverPayload).not.toHaveProperty(
+            'shareCommitmentOpening',
+        );
+        expect(encryptedPayload.receiverPayload.receiverPayloadDigest).not.toBe(
+            changedPayload.receiverPayload.receiverPayloadDigest,
+        );
+        expect(
+            encodeReceiverPayloadPlaintextForTests({
+                plaintext,
+                shareCommitmentProfile: profileSet.shareCommitmentProfile,
+            }),
+        ).toMatch(/^[0-1]+$/u);
+        expect(
+            verifyReceiverPayloadWitness({
+                expectedCiphertextChunks: encryptedPayload.ciphertextChunks,
+                expectedReceiverPayload: encryptedPayload.receiverPayload,
+                plaintext,
+                publicKeyMaterial: receiverState.publicKeyMaterial,
+                receiverEncryptionProfile: profileSet.receiverEncryptionProfile,
+                receiverPublicKey: receiverState.receiverPublicKey,
+                shareCommitmentProfile: profileSet.shareCommitmentProfile,
+                witness: encryptedPayload.witness,
+            }),
+        ).toEqual([]);
+        expect(
+            verifyReceiverPayloadWitness({
+                expectedCiphertextChunks: encryptedPayload.ciphertextChunks,
+                expectedReceiverPayload: encryptedPayload.receiverPayload,
+                plaintext: changedPlaintext,
+                publicKeyMaterial: receiverState.publicKeyMaterial,
+                receiverEncryptionProfile: profileSet.receiverEncryptionProfile,
+                receiverPublicKey: receiverState.receiverPublicKey,
+                shareCommitmentProfile: profileSet.shareCommitmentProfile,
+                witness: encryptedPayload.witness,
+            }).map((refusal) => refusal.code),
+        ).toContain('BallotPackageInvalid');
+    });
+
+    it('rejects fixture randomness outside explicit test construction and mismatched receiver keys', () => {
+        const profileSet = createBallotPrivacyProfileSet();
+        const receiverState = generateReceiverState({
+            ceremonyId: 'ceremony-1',
+            manifestDigest: digest('manifest'),
+            randomnessSource: fixtureRandomness,
+            receiverEncryptionProfile: profileSet.receiverEncryptionProfile,
+            receiverIdentity: 'receiver-1',
+            receiverRosterPosition: 1,
+            recoveryEpoch: 0,
+            rosterDigest: digest('roster'),
+        });
+
+        expect(() =>
+            assertNoFixtureRandomnessInProduction(fixtureRandomness),
+        ).toThrow(/fixture randomness/u);
+        expect(() =>
+            encryptReceiverPayload({
+                plaintext: {
+                    ...createReceiverPlaintext(shareVector(1, 2), opening(3)),
+                    receiverRosterPosition: 2,
+                },
+                publicKeyMaterial: receiverState.publicKeyMaterial,
+                randomnessSource: fixtureRandomness,
+                receiverEncryptionProfile: profileSet.receiverEncryptionProfile,
+                receiverPublicKey: receiverState.receiverPublicKey,
+                shareCommitmentProfile: profileSet.shareCommitmentProfile,
+            }),
+        ).toThrow(/frozen receiver key/u);
+    });
+});

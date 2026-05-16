@@ -439,10 +439,45 @@ fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult<Value> {
                 vector_case,
             ))
         }
-        "VerifyReceiverKeyProof" => Ok(crate::ballot_privacy::verify_receiver_key_proof()),
-        "VerifyBallotProof" => Ok(crate::ballot_privacy::verify_ballot_proof()),
+        "VerifyReceiverKeyProof" => {
+            let receiver_key_proof = request.get("receiverKeyProof").ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::InvalidFixture,
+                    "receiverKeyProof is required",
+                )
+            })?;
+
+            Ok(crate::ballot_privacy::verify_receiver_key_proof(
+                receiver_key_proof,
+            ))
+        }
+        "VerifyBallotProof" => {
+            let statement = request.get("statement").ok_or_else(|| {
+                CanonicalError::new(CanonicalErrorCode::InvalidFixture, "statement is required")
+            })?;
+            let ballot_proof = request.get("ballotProof").ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::InvalidFixture,
+                    "ballotProof is required",
+                )
+            })?;
+
+            Ok(crate::ballot_privacy::verify_ballot_proof(
+                statement,
+                ballot_proof,
+            ))
+        }
         "VerifyClaimBearingBallotPackage" => {
-            Ok(crate::ballot_privacy::verify_claim_bearing_ballot_package())
+            let ballot_package = request.get("ballotPackage").ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::InvalidFixture,
+                    "ballotPackage is required",
+                )
+            })?;
+
+            Ok(crate::ballot_privacy::verify_claim_bearing_ballot_package(
+                ballot_package,
+            ))
         }
         _ => invalid_response(
             CanonicalErrorCode::InvalidFixture,

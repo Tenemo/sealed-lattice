@@ -3,7 +3,7 @@
   "entries": [
     {
       "path": "ballot-privacy/proof-backend-linear-vectors.json",
-      "sha256": "3c6f961b6c2cfac9871e4ac300c1354c5fac4670a5605a81ce31aeb36726edc0"
+      "sha256": "3912f276d2872ee59bd5387d2a855ed785c763a99d910c47388d9156eae27623"
     },
     {
       "path": "ballot-privacy/proof-stack-profile.json",

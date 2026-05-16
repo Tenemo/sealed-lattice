@@ -469,7 +469,7 @@ describe('transcript-core kernel in Node', () => {
                 portableRustWasmPortRequired: true,
             },
             operation: 'verifyReceiverKeyProof',
-            unresolvedReason: 'OperationUnavailable',
+            unresolvedReason: 'BallotPackageInvalid',
         });
         expect(
             kernel.verifyBallotProof({ statement: {}, ballotProof: {} }),
@@ -480,7 +480,7 @@ describe('transcript-core kernel in Node', () => {
                 portableRustWasmPortRequired: true,
             },
             operation: 'verifyBallotProof',
-            unresolvedReason: 'OperationUnavailable',
+            unresolvedReason: 'BallotPackageInvalid',
         });
         expect(
             kernel.verifyClaimBearingBallotPackage({ ballotPackage: {} }),
@@ -491,7 +491,7 @@ describe('transcript-core kernel in Node', () => {
                 portableRustWasmPortRequired: true,
             },
             operation: 'verifyClaimBearingBallotPackage',
-            unresolvedReason: 'OperationUnavailable',
+            unresolvedReason: 'BallotPackageInvalid',
         });
     });
 
