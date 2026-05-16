@@ -26,14 +26,28 @@ type BlockedPlaintextOracleTypes = [
 type BlockedPvssBallotTypes = [
     // @ts-expect-error ballot package shells are intentionally not public.
     publicTypes.BallotPackageShell,
+    // @ts-expect-error ballot proof records are intentionally not public.
+    publicTypes.BallotProofRecord,
     // @ts-expect-error ballot privacy proof profiles are intentionally not public.
     publicTypes.BallotProofProfile,
+    // @ts-expect-error ballot proof statements are intentionally not public.
+    publicTypes.BallotProofStatement,
+    // @ts-expect-error claim-bearing ballot packages are intentionally not public.
+    publicTypes.ClaimBearingBallotPackage,
     // @ts-expect-error internal ballot-set types are intentionally not public.
     publicTypes.CanonicalBallotSet,
+    // @ts-expect-error receiver encryption public keys are intentionally not public.
+    publicTypes.ReceiverEncryptionPublicKey,
     // @ts-expect-error receiver encryption profiles are intentionally not public.
     publicTypes.ReceiverEncryptionProfile,
+    // @ts-expect-error receiver key proofs are intentionally not public.
+    publicTypes.ReceiverKeyProof,
+    // @ts-expect-error receiver payloads are intentionally not public.
+    publicTypes.ReceiverPayload,
     // @ts-expect-error share commitment bound certificates are intentionally not public.
     publicTypes.ShareCommitmentMessageBoundCert,
+    // @ts-expect-error share commitments are intentionally not public.
+    publicTypes.ShareCommitment,
     // @ts-expect-error share commitment profiles are intentionally not public.
     publicTypes.ShareCommitmentProfile,
     // @ts-expect-error test commitments are intentionally not public.

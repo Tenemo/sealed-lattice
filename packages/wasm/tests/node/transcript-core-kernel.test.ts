@@ -438,6 +438,35 @@ describe('transcript-core kernel in Node', () => {
         );
     });
 
+    it('keeps ballot privacy proof commands fail-closed until the backend is available', async () => {
+        const kernel = await loadTranscriptCoreKernel();
+
+        expect(
+            kernel.verifyReceiverKeyProof({ receiverKeyProof: {} }),
+        ).toMatchObject({
+            ok: false,
+            backendAvailable: false,
+            operation: 'verifyReceiverKeyProof',
+            unresolvedReason: 'OperationUnavailable',
+        });
+        expect(
+            kernel.verifyBallotProof({ statement: {}, ballotProof: {} }),
+        ).toMatchObject({
+            ok: false,
+            backendAvailable: false,
+            operation: 'verifyBallotProof',
+            unresolvedReason: 'OperationUnavailable',
+        });
+        expect(
+            kernel.verifyClaimBearingBallotPackage({ ballotPackage: {} }),
+        ).toMatchObject({
+            ok: false,
+            backendAvailable: false,
+            operation: 'verifyClaimBearingBallotPackage',
+            unresolvedReason: 'OperationUnavailable',
+        });
+    });
+
     it('deallocates command inputs and outputs', async () => {
         const { deallocate, encodedCommandResponseLength, loadMockKernel } =
             createMockKernelExports();

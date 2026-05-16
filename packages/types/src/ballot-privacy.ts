@@ -132,3 +132,145 @@ export type ShareCommitmentMessageBoundCertVerification =
     StructuredProtocolVerificationResult & {
         readonly shareCommitmentMessageBoundCertDigest?: ProtocolDigest;
     };
+
+export type BallotProofReceiverPublicKeyReference = {
+    readonly receiverIdentity: string;
+    readonly receiverRosterPosition: number;
+    readonly receiverPublicKeyDigest: ProtocolDigest;
+};
+
+export type BallotProofReceiverPayloadReference = {
+    readonly receiverIdentity: string;
+    readonly receiverRosterPosition: number;
+    readonly receiverPayloadDigest: ProtocolDigest;
+    readonly receiverPayloadCiphertextRoot: ProtocolDigest;
+};
+
+export type BallotProofShareCommitmentReference = {
+    readonly receiverIdentity: string;
+    readonly receiverRosterPosition: number;
+    readonly shareCommitmentDigest: ProtocolDigest;
+};
+
+export type ReceiverEncryptionPublicKey = {
+    readonly objectType: 'ReceiverEncryptionPublicKey';
+    readonly objectVersion: 1;
+    readonly ceremonyId: string;
+    readonly manifestDigest: ProtocolDigest;
+    readonly rosterDigest: ProtocolDigest;
+    readonly receiverIdentity: string;
+    readonly receiverRosterPosition: number;
+    readonly recoveryEpoch: number;
+    readonly receiverEncryptionProfileDigest: ProtocolDigest;
+    readonly keyMaterialDigest: ProtocolDigest;
+    readonly receiverPublicKeyDigest: ProtocolDigest;
+};
+
+export type ReceiverKeyProof = {
+    readonly objectType: 'ReceiverKeyProof';
+    readonly objectVersion: 1;
+    readonly ceremonyId: string;
+    readonly manifestDigest: ProtocolDigest;
+    readonly rosterDigest: ProtocolDigest;
+    readonly receiverIdentity: string;
+    readonly receiverRosterPosition: number;
+    readonly recoveryEpoch: number;
+    readonly receiverPublicKeyDigest: ProtocolDigest;
+    readonly receiverEncryptionProfileDigest: ProtocolDigest;
+    readonly proofBackend: 'LaZerStyleLocalLatticeRelation';
+    readonly proofRoot: ProtocolDigest;
+    readonly receiverKeyProofRoot: ProtocolDigest;
+};
+
+export type ReceiverPayload = {
+    readonly objectType: 'ReceiverPayload';
+    readonly objectVersion: 1;
+    readonly ceremonyId: string;
+    readonly manifestDigest: ProtocolDigest;
+    readonly rosterDigest: ProtocolDigest;
+    readonly pollSpecDigest: ProtocolDigest;
+    readonly voterIdentityDigest: ProtocolDigest;
+    readonly receiverIdentity: string;
+    readonly receiverRosterPosition: number;
+    readonly receiverPublicKeyDigest: ProtocolDigest;
+    readonly receiverEncryptionProfileDigest: ProtocolDigest;
+    readonly payloadContextDigest: ProtocolDigest;
+    readonly ciphertextBodyDigest: ProtocolDigest;
+    readonly receiverPayloadCiphertextRoot: ProtocolDigest;
+    readonly receiverPayloadDigest: ProtocolDigest;
+};
+
+export type ShareCommitment = {
+    readonly objectType: 'ShareCommitment';
+    readonly objectVersion: 1;
+    readonly ceremonyId: string;
+    readonly manifestDigest: ProtocolDigest;
+    readonly rosterDigest: ProtocolDigest;
+    readonly receiverIdentity: string;
+    readonly receiverRosterPosition: number;
+    readonly shareCommitmentProfileDigest: ProtocolDigest;
+    readonly shareVectorWidth: 20;
+    readonly commitmentBodyDigest: ProtocolDigest;
+    readonly shareCommitmentDigest: ProtocolDigest;
+};
+
+export type BallotProofStatement = {
+    readonly objectType: 'BallotProofStatement';
+    readonly objectVersion: 1;
+    readonly ballotProofStatementDigest: ProtocolDigest;
+    readonly ceremonyId: string;
+    readonly manifestDigest: ProtocolDigest;
+    readonly rosterDigest: ProtocolDigest;
+    readonly pollSpecDigest: ProtocolDigest;
+    readonly thresholdProfileDigest: ProtocolDigest;
+    readonly duplicateBallotPolicyDigest: ProtocolDigest;
+    readonly scoreDomainDigest: ProtocolDigest;
+    readonly tiePolicyDigest: ProtocolDigest;
+    readonly topOptionCount: number;
+    readonly optionCount: number;
+    readonly shareVectorWidth: 20;
+    readonly voterIdentityDigest: ProtocolDigest;
+    readonly voterRosterPosition: number;
+    readonly voterSigningKeyDigest: ProtocolDigest;
+    readonly actionContextDigest: ProtocolDigest;
+    readonly rosterExternalAcceptanceDigest: ProtocolDigest;
+    readonly receiverKeyRoot: ProtocolDigest;
+    readonly receiverKeyProofRoot: ProtocolDigest;
+    readonly receiverPublicKeys: readonly BallotProofReceiverPublicKeyReference[];
+    readonly receiverPayloads: readonly BallotProofReceiverPayloadReference[];
+    readonly shareCommitments: readonly BallotProofShareCommitmentReference[];
+    readonly shareCommitmentProfileDigest: ProtocolDigest;
+    readonly receiverEncryptionProfileDigest: ProtocolDigest;
+    readonly ballotProofProfileDigest: ProtocolDigest;
+    readonly scoreMembershipProfileDigest: ProtocolDigest;
+    readonly shareCommitmentMessageBoundCertDigest: ProtocolDigest;
+    readonly ballotPackageDigest: ProtocolDigest;
+    readonly challengeDomainDigest: ProtocolDigest;
+};
+
+export type BallotProofRecord = {
+    readonly objectType: 'BallotProofRecord';
+    readonly objectVersion: 1;
+    readonly ballotProofRecordDigest: ProtocolDigest;
+    readonly ballotProofStatementDigest: ProtocolDigest;
+    readonly ballotProofProfileDigest: ProtocolDigest;
+    readonly proofBackend: 'LaZerStyleLocalLatticeRelation';
+    readonly challengeDigest: ProtocolDigest;
+    readonly proofRoot: ProtocolDigest;
+    readonly proofBytesDigest: ProtocolDigest;
+    readonly proofSizeBytes: number;
+};
+
+export type ClaimBearingBallotPackage = {
+    readonly objectType: 'BallotPackage';
+    readonly objectVersion: 1;
+    readonly ballotPackageDigest: ProtocolDigest;
+    readonly ballotProofStatement: BallotProofStatement;
+    readonly ballotProof: BallotProofRecord;
+    readonly receiverPayloads: readonly ReceiverPayload[];
+    readonly shareCommitments: readonly ShareCommitment[];
+};
+
+export type BallotPrivacyVerification = StructuredProtocolVerificationResult & {
+    readonly backendAvailable: boolean;
+};

@@ -7,6 +7,7 @@ import {
     canonicalErrorCodes,
     createTranscriptCoreKernelLoader,
     TranscriptCoreKernelCommandError,
+    type BallotPrivacyKernelVerification,
     type TranscriptCoreKernelSharePoint,
     type TranscriptCorePlaintextComparison,
     type TranscriptCoreKernel,
@@ -24,6 +25,7 @@ export {
 };
 export type {
     TranscriptCoreKernel,
+    BallotPrivacyKernelVerification,
     TranscriptCoreKernelSharePoint,
     TranscriptCorePlaintextComparison,
 };

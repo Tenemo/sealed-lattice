@@ -19,6 +19,19 @@ export type TranscriptCorePlaintextComparison = {
     readonly scoreDifference: number;
 };
 
+export type BallotPrivacyKernelVerification = {
+    readonly ok: false;
+    readonly backendAvailable: false;
+    readonly operation: string;
+    readonly statusLabels: readonly string[];
+    readonly acceptedDigests: readonly string[];
+    readonly refusedObjects: readonly {
+        readonly code: 'OperationUnavailable';
+        readonly message: string;
+    }[];
+    readonly unresolvedReason: 'OperationUnavailable';
+};
+
 export type TranscriptCoreKernel = {
     readonly exportedFunctionNames: readonly string[];
     analyzeCanonicalObject(input: {
@@ -48,6 +61,16 @@ export type TranscriptCoreKernel = {
     verifyFixture(
         fixture: TranscriptCoreFixture,
     ): TranscriptCoreFixtureVerification;
+    verifyReceiverKeyProof(input: {
+        readonly receiverKeyProof: unknown;
+    }): BallotPrivacyKernelVerification;
+    verifyBallotProof(input: {
+        readonly statement: unknown;
+        readonly ballotProof: unknown;
+    }): BallotPrivacyKernelVerification;
+    verifyClaimBearingBallotPackage(input: {
+        readonly ballotPackage: unknown;
+    }): BallotPrivacyKernelVerification;
 };
 
 type TranscriptCoreKernelCommand =
@@ -89,6 +112,19 @@ type TranscriptCoreKernelCommand =
     | {
           readonly command: 'VerifyFixture';
           readonly fixture: TranscriptCoreFixture;
+      }
+    | {
+          readonly command: 'VerifyReceiverKeyProof';
+          readonly receiverKeyProof: unknown;
+      }
+    | {
+          readonly command: 'VerifyBallotProof';
+          readonly statement: unknown;
+          readonly ballotProof: unknown;
+      }
+    | {
+          readonly command: 'VerifyClaimBearingBallotPackage';
+          readonly ballotPackage: unknown;
       };
 
 type TranscriptCoreKernelExports = WebAssembly.Exports & {
@@ -118,6 +154,7 @@ const transcriptCoreKernelNormalizedSha256HexValues = [
     'e68ad9a15a76ecff354d4f14ecf0554f5e8e556665b12041f9de4159f43e967f',
     'e2640736eb4b7985fe20760cb6de0061dc4aa49690c47a05e3bb172670d1c1f2',
     '203e2ace56c4f4b55d477fcaf15bda338fb8a9ca2a25097a469c1dd06d358146',
+    '390b1d16a23c50225995a49427fb2db54ebe87bec4f9835c9706722fd22aebf3',
 ] as const;
 const defaultTranscriptCoreKernelNormalizedSha256HexValues = new Set<string>(
     transcriptCoreKernelNormalizedSha256HexValues,
@@ -753,6 +790,26 @@ export const createTranscriptCoreKernelLoader = (
                     executeCommand<TranscriptCoreFixtureVerification>({
                         command: 'VerifyFixture',
                         fixture,
+                    }),
+                verifyReceiverKeyProof: (
+                    input,
+                ): BallotPrivacyKernelVerification =>
+                    executeCommand<BallotPrivacyKernelVerification>({
+                        command: 'VerifyReceiverKeyProof',
+                        receiverKeyProof: input.receiverKeyProof,
+                    }),
+                verifyBallotProof: (input): BallotPrivacyKernelVerification =>
+                    executeCommand<BallotPrivacyKernelVerification>({
+                        command: 'VerifyBallotProof',
+                        statement: input.statement,
+                        ballotProof: input.ballotProof,
+                    }),
+                verifyClaimBearingBallotPackage: (
+                    input,
+                ): BallotPrivacyKernelVerification =>
+                    executeCommand<BallotPrivacyKernelVerification>({
+                        command: 'VerifyClaimBearingBallotPackage',
+                        ballotPackage: input.ballotPackage,
                     }),
             };
         })().catch((error: unknown) => {
