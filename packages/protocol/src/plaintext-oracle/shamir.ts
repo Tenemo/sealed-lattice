@@ -1,3 +1,4 @@
+import { deriveProtocolDigest } from '@sealed-lattice/crypto';
 import type {
     FieldElement,
     InterpolationCoefficientReport,
@@ -6,8 +7,6 @@ import type {
     ShamirSharePoint,
     WorstCaseInterpolationCoefficientReport,
 } from '@sealed-lattice/types';
-
-import { deriveProtocolDigest } from '../common/digests.js';
 
 import {
     addFieldElements,
@@ -20,6 +19,7 @@ import {
 } from './field.js';
 
 const defaultMaximumExhaustiveSubsetCount = 250_000;
+const maximumSupportedRosterSize = 50;
 
 const assertPositiveRosterPosition = (rosterPosition: number): number => {
     if (
@@ -39,8 +39,12 @@ const assertSupportedRosterAndThreshold = (
     rosterSize: number,
     threshold: number,
 ): void => {
-    if (!Number.isSafeInteger(rosterSize) || rosterSize < 1) {
-        throw new RangeError('Roster size must be a positive integer.');
+    if (
+        !Number.isSafeInteger(rosterSize) ||
+        rosterSize < 1 ||
+        rosterSize > maximumSupportedRosterSize
+    ) {
+        throw new RangeError('Roster size must be an integer in 1..50.');
     }
     if (
         !Number.isSafeInteger(threshold) ||
@@ -65,10 +69,16 @@ export const createShamirPolynomial = (
     ],
 });
 
-export const evaluateShamirPolynomial = (
+const evaluateShamirPolynomial = (
     polynomial: ShamirPolynomial,
     rosterPosition: number,
 ): FieldElement => {
+    if (polynomial.coefficients.length === 0) {
+        throw new RangeError(
+            'Shamir polynomial must contain at least the constant coefficient.',
+        );
+    }
+
     const point = assertPositiveRosterPosition(rosterPosition);
     let evaluation: FieldElement = 0;
 
@@ -94,8 +104,12 @@ export const evaluateShamirPolynomialForRoster = (
     polynomial: ShamirPolynomial,
     rosterSize: number,
 ): readonly ShamirSharePoint[] => {
-    if (!Number.isSafeInteger(rosterSize) || rosterSize < 1) {
-        throw new RangeError('Roster size must be a positive integer.');
+    if (
+        !Number.isSafeInteger(rosterSize) ||
+        rosterSize < 1 ||
+        rosterSize > maximumSupportedRosterSize
+    ) {
+        throw new RangeError('Roster size must be an integer in 1..50.');
     }
 
     return Array.from({ length: rosterSize }, (_unused, rosterIndex) => {
@@ -161,7 +175,7 @@ const validateContributorRosterPositions = (
     return validatedRosterPositions;
 };
 
-export const deriveLagrangeCoefficientsAtZero = (
+const deriveLagrangeCoefficientsAtZero = (
     contributorRosterPositions: readonly number[],
 ): readonly LagrangeCoefficient[] => {
     const seenRosterPositions = new Set<number>();
@@ -265,7 +279,10 @@ export const deriveInterpolationCoefficientReport = (input: {
 
     return {
         ...reportPayload,
-        reportDigest: deriveProtocolDigest('PlaintextRoot', reportPayload),
+        reportDigest: deriveProtocolDigest(
+            'InterpolationCoefficientReportDigest',
+            reportPayload,
+        ),
     };
 };
 
@@ -380,6 +397,9 @@ export const deriveWorstCaseInterpolationCoefficientReport = (input: {
 
     return {
         ...reportPayload,
-        reportDigest: deriveProtocolDigest('PlaintextRoot', reportPayload),
+        reportDigest: deriveProtocolDigest(
+            'WorstCaseInterpolationCoefficientReportDigest',
+            reportPayload,
+        ),
     };
 };

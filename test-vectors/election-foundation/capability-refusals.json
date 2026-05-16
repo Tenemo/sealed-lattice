@@ -5,8 +5,11 @@
       "caseName": "aggregate-before-voting-closed",
       "action": "DeriveAggregateContribution",
       "context": {
-        "lifecycleState": "VotingOpen",
-        "pollSpecValid": true
+        "pollSpecValid": true,
+        "localRosterExternallyAccepted": true,
+        "rosterExternalAcceptanceDigest": "accepted-roster-digest",
+        "actionContextRosterExternalAcceptanceDigest": "accepted-roster-digest",
+        "lifecycleState": "VotingOpen"
       },
       "expected": {
         "allowed": false,
@@ -18,8 +21,11 @@
       "caseName": "aggregate-turnout-below-release-floor",
       "action": "DeriveAggregateContribution",
       "context": {
-        "lifecycleState": "VotingClosed",
         "pollSpecValid": true,
+        "localRosterExternallyAccepted": true,
+        "rosterExternalAcceptanceDigest": "accepted-roster-digest",
+        "actionContextRosterExternalAcceptanceDigest": "accepted-roster-digest",
+        "lifecycleState": "VotingClosed",
         "setupCompleteCount": 20,
         "turnoutCount": 13
       },
@@ -30,13 +36,66 @@
       }
     },
     {
-      "caseName": "accept-target-at-replay-threshold",
+      "caseName": "verify-evaluation-proof-missing-certificate",
+      "action": "VerifyEvaluationProof",
+      "context": {
+        "pollSpecValid": true,
+        "localRosterExternallyAccepted": true,
+        "rosterExternalAcceptanceDigest": "accepted-roster-digest",
+        "actionContextRosterExternalAcceptanceDigest": "accepted-roster-digest",
+        "lifecycleState": "EvaluationProofOpen",
+        "targetFinalityAccepted": true,
+        "bridgeMobileCertificatePresent": true
+      },
+      "expected": {
+        "allowed": false,
+        "action": "VerifyEvaluationProof",
+        "reason": "MissingEvaluationProofCertificate"
+      }
+    },
+    {
+      "caseName": "submit-vote-missing-roster-acceptance-context-binding",
+      "action": "SubmitVote",
+      "context": {
+        "pollSpecValid": true,
+        "localRosterExternallyAccepted": true,
+        "lifecycleState": "VotingOpen",
+        "rosterExternalAcceptanceDigest": "accepted-roster-digest"
+      },
+      "expected": {
+        "allowed": false,
+        "action": "SubmitVote",
+        "reason": "RosterExternalAcceptanceDigestMissing"
+      }
+    },
+    {
+      "caseName": "submit-vote-mismatched-roster-acceptance-context-binding",
+      "action": "SubmitVote",
+      "context": {
+        "pollSpecValid": true,
+        "localRosterExternallyAccepted": true,
+        "lifecycleState": "VotingOpen",
+        "rosterExternalAcceptanceDigest": "accepted-roster-digest",
+        "actionContextRosterExternalAcceptanceDigest": "different-roster-digest"
+      },
+      "expected": {
+        "allowed": false,
+        "action": "SubmitVote",
+        "reason": "RosterExternalAcceptanceDigestMismatch"
+      }
+    },
+    {
+      "caseName": "accept-target-after-evaluation-proof",
       "action": "AcceptTarget",
       "context": {
-        "lifecycleState": "EvaluationReplayOpen",
         "pollSpecValid": true,
+        "localRosterExternallyAccepted": true,
+        "rosterExternalAcceptanceDigest": "accepted-roster-digest",
+        "actionContextRosterExternalAcceptanceDigest": "accepted-roster-digest",
+        "lifecycleState": "EvaluationProofVerified",
         "targetFinalityAccepted": true,
-        "replayAttestationCount": 5
+        "evaluationProofVerified": true,
+        "bridgeMobileCertificatePresent": true
       },
       "expected": {
         "allowed": true,
@@ -46,12 +105,32 @@
     {
       "caseName": "decryption-share-ambiguous-recovery",
       "action": "CreateTargetBoundDecryptionShare",
+      "thresholdProfileInput": {
+        "rosterSize": 20,
+        "targetBoundShareSelectionProfile": {
+          "profileId": "target-bound-first-valid-share-selection-v1",
+          "certificateDigest": "target-bound-certificate-digest",
+          "cpadProfileId": "CPAD-BGV-AsyncThreshold-v1",
+          "targetBasisDigest": "target-basis-digest",
+          "decryptionShareQuorum": 9,
+          "minimumSharesForInterpolation": 7,
+          "minimumArrivalsForRobustDecode": 9,
+          "invalidShareFilteringMode": "ProofVerifiedSharesOnly",
+          "selectedShareRule": "FirstValidSharesInCanonicalBoardOrder"
+        }
+      },
       "context": {
-        "lifecycleState": "TargetAccepted",
         "pollSpecValid": true,
+        "localRosterExternallyAccepted": true,
+        "rosterExternalAcceptanceDigest": "accepted-roster-digest",
+        "actionContextRosterExternalAcceptanceDigest": "accepted-roster-digest",
+        "lifecycleState": "TargetAccepted",
         "targetFinalityAccepted": true,
         "targetAccepted": true,
-        "recoveryState": "Ambiguous"
+        "evaluationProofVerified": true,
+        "recoveryState": "Ambiguous",
+        "oneShotDecryptionProofCertificatePresent": true,
+        "thresholdDecryptionCertificatePresent": true
       },
       "expected": {
         "allowed": false,
@@ -60,26 +139,48 @@
       }
     },
     {
-      "caseName": "decryption-share-target-not-locally-accepted",
+      "caseName": "decryption-share-profile-not-certified",
       "action": "CreateTargetBoundDecryptionShare",
       "context": {
-        "lifecycleState": "TargetAccepted",
         "pollSpecValid": true,
-        "targetFinalityAccepted": true
+        "localRosterExternallyAccepted": true,
+        "rosterExternalAcceptanceDigest": "accepted-roster-digest",
+        "actionContextRosterExternalAcceptanceDigest": "accepted-roster-digest",
+        "lifecycleState": "TargetAccepted",
+        "targetFinalityAccepted": true,
+        "targetAccepted": true,
+        "evaluationProofVerified": true
       },
       "expected": {
         "allowed": false,
         "action": "CreateTargetBoundDecryptionShare",
-        "reason": "TargetNotAccepted"
+        "reason": "ThresholdDecryptionProfileNotCertified"
       }
     },
     {
       "caseName": "decode-top-k-unavailable",
       "action": "DecodeVerifiedTopK",
+      "thresholdProfileInput": {
+        "rosterSize": 20,
+        "targetBoundShareSelectionProfile": {
+          "profileId": "target-bound-first-valid-share-selection-v1",
+          "certificateDigest": "target-bound-certificate-digest",
+          "cpadProfileId": "CPAD-BGV-AsyncThreshold-v1",
+          "targetBasisDigest": "target-basis-digest",
+          "decryptionShareQuorum": 9,
+          "minimumSharesForInterpolation": 7,
+          "minimumArrivalsForRobustDecode": 9,
+          "invalidShareFilteringMode": "ProofVerifiedSharesOnly",
+          "selectedShareRule": "FirstValidSharesInCanonicalBoardOrder"
+        }
+      },
       "context": {
-        "lifecycleState": "FullyVerifiedResult",
         "pollSpecValid": true,
-        "decryptionShareCount": 7
+        "localRosterExternallyAccepted": true,
+        "rosterExternalAcceptanceDigest": "accepted-roster-digest",
+        "actionContextRosterExternalAcceptanceDigest": "accepted-roster-digest",
+        "lifecycleState": "FullyVerifiedResult",
+        "decryptionShareCount": 9
       },
       "expected": {
         "allowed": false,
@@ -94,10 +195,14 @@
         "rosterSize": 21
       },
       "context": {
-        "lifecycleState": "EvaluationReplayOpen",
         "pollSpecValid": true,
+        "localRosterExternallyAccepted": true,
+        "rosterExternalAcceptanceDigest": "accepted-roster-digest",
+        "actionContextRosterExternalAcceptanceDigest": "accepted-roster-digest",
+        "lifecycleState": "EvaluationProofVerified",
         "targetFinalityAccepted": true,
-        "replayAttestationCount": 5
+        "evaluationProofVerified": true,
+        "bridgeMobileCertificatePresent": true
       },
       "expected": {
         "allowed": false,
@@ -109,10 +214,14 @@
       "caseName": "accept-target-unsupported-mobile-profile",
       "action": "AcceptTarget",
       "context": {
-        "lifecycleState": "EvaluationReplayOpen",
         "pollSpecValid": true,
+        "localRosterExternallyAccepted": true,
+        "rosterExternalAcceptanceDigest": "accepted-roster-digest",
+        "actionContextRosterExternalAcceptanceDigest": "accepted-roster-digest",
+        "lifecycleState": "EvaluationProofVerified",
         "targetFinalityAccepted": true,
-        "replayAttestationCount": 5,
+        "evaluationProofVerified": true,
+        "bridgeMobileCertificatePresent": true,
         "mobileProfileSupported": false
       },
       "expected": {
@@ -125,10 +234,14 @@
       "caseName": "accept-target-insufficient-storage-quota",
       "action": "AcceptTarget",
       "context": {
-        "lifecycleState": "EvaluationReplayOpen",
         "pollSpecValid": true,
+        "localRosterExternallyAccepted": true,
+        "rosterExternalAcceptanceDigest": "accepted-roster-digest",
+        "actionContextRosterExternalAcceptanceDigest": "accepted-roster-digest",
+        "lifecycleState": "EvaluationProofVerified",
         "targetFinalityAccepted": true,
-        "replayAttestationCount": 5,
+        "evaluationProofVerified": true,
+        "bridgeMobileCertificatePresent": true,
         "storageQuotaSufficient": false
       },
       "expected": {
@@ -138,28 +251,17 @@
       }
     },
     {
-      "caseName": "replay-missing-bridge-mobile-certificate",
-      "action": "ReplayEvaluation",
-      "context": {
-        "lifecycleState": "TopKEvaluated",
-        "pollSpecValid": true,
-        "targetFinalityAccepted": true,
-        "bridgeMobileCertificatePresent": false
-      },
-      "expected": {
-        "allowed": false,
-        "action": "ReplayEvaluation",
-        "reason": "MissingBridgeMobileCertificate"
-      }
-    },
-    {
       "caseName": "aggregate-missing-bridge-prover-certificate",
       "action": "DeriveAggregateContribution",
       "context": {
-        "lifecycleState": "VotingClosed",
         "pollSpecValid": true,
+        "localRosterExternallyAccepted": true,
+        "rosterExternalAcceptanceDigest": "accepted-roster-digest",
+        "actionContextRosterExternalAcceptanceDigest": "accepted-roster-digest",
+        "lifecycleState": "VotingClosed",
         "setupCompleteCount": 20,
         "turnoutCount": 14,
+        "bridgeMobileCertificatePresent": true,
         "bridgeProverCertificatePresent": false
       },
       "expected": {
@@ -169,19 +271,35 @@
       }
     },
     {
-      "caseName": "decryption-share-missing-brakerski-mobile-proof-certificate",
-      "action": "CreateTargetBoundDecryptionShare",
+      "caseName": "cpad-profile-missing-certificate",
+      "action": "VerifyCPADProfile",
+      "thresholdProfileInput": {
+        "rosterSize": 20,
+        "targetBoundShareSelectionProfile": {
+          "profileId": "target-bound-first-valid-share-selection-v1",
+          "certificateDigest": "target-bound-certificate-digest",
+          "cpadProfileId": "CPAD-BGV-AsyncThreshold-v1",
+          "targetBasisDigest": "target-basis-digest",
+          "decryptionShareQuorum": 9,
+          "minimumSharesForInterpolation": 7,
+          "minimumArrivalsForRobustDecode": 9,
+          "invalidShareFilteringMode": "ProofVerifiedSharesOnly",
+          "selectedShareRule": "FirstValidSharesInCanonicalBoardOrder"
+        }
+      },
       "context": {
-        "lifecycleState": "TargetAccepted",
         "pollSpecValid": true,
-        "targetFinalityAccepted": true,
-        "targetAccepted": true,
-        "brakerskiMobileProofCertificatePresent": false
+        "localRosterExternallyAccepted": true,
+        "rosterExternalAcceptanceDigest": "accepted-roster-digest",
+        "actionContextRosterExternalAcceptanceDigest": "accepted-roster-digest",
+        "lifecycleState": "FirstThresholdSharesReached",
+        "cpadCertificatePresent": false,
+        "thresholdDecryptionCertificatePresent": true
       },
       "expected": {
         "allowed": false,
-        "action": "CreateTargetBoundDecryptionShare",
-        "reason": "MissingBrakerskiMobileProofCertificate"
+        "action": "VerifyCPADProfile",
+        "reason": "MissingCPADCertificate"
       }
     }
   ]

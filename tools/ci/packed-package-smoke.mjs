@@ -1,3 +1,7 @@
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 const assert = (condition, message) => {
     if (!condition) {
         throw new Error(message);
@@ -5,68 +9,29 @@ const assert = (condition, message) => {
 };
 
 const publicApi = await import('sealed-lattice');
+const packageMainPath = fileURLToPath(import.meta.resolve('sealed-lattice'));
+const publicSurface = JSON.parse(
+    await readFile(
+        path.resolve(
+            path.dirname(packageMainPath),
+            '..',
+            'public-surface.json',
+        ),
+        'utf8',
+    ),
+);
 const {
     deriveThresholdProfile,
-    deriveValidatedFirstComeOrder,
+    deriveValidatedFirstValidOrder,
     verifyTranscriptCoreFixture,
 } = publicApi;
-const expectedPublicKeys = [
-    'deriveLifecycleLabels',
-    'deriveThresholdProfile',
-    'deriveValidatedFirstComeOrder',
-    'evaluateActionCapability',
-    'isActionCurrentForRecoveryEpoch',
-    'isValidLifecycleTransition',
-    'validatePollSpec',
-    'verifyBoardConsistency',
-    'verifyCastReceiptShell',
-    'verifyCloseRecordShell',
-    'verifyFirstComePolicy',
-    'verifyRecoveryEpochUpdate',
-    'verifyRosterManifestTranscript',
-    'verifyTargetFinality',
-    'verifyTranscriptCoreFixture',
-];
-const forbiddenPublicKeys = [
-    'getShare',
-    'exportShare',
-    'exportSecretKey',
-    'importSecretKey',
-    'setSecretKey',
-    'thresholdDecrypt',
-    'partialDecrypt',
-    'partialDecryptWithoutTarget',
-    'decryptToFile',
-    'decryptToString',
-    'rawHEAdd',
-    'rawHEMul',
-    'rawHERelin',
-    'rawHERotate',
-    'rawNTT',
-    'rawRNSLimbAccess',
-    'setNoiseFloodSigma',
-    'setSmudgingDistribution',
-    'bootstrap',
-    'decryptAggregateShare',
-    'decryptComparisonBit',
-    'decryptExactSum',
-    'decryptIntermediateWire',
-    'decryptRank',
-    'verifyEvaluationReplayAttestationShell',
-    'verifyTargetAcceptedRecordShell',
-    'verifyTopKDecryptionShareShell',
-    'createShamirPolynomial',
-    'derivePlaintextTopKOracle',
-    'decodeSparseTopKTarget',
-    'fieldModulus',
-];
 
 assert(
     JSON.stringify(Object.keys(publicApi).sort()) ===
-        JSON.stringify(expectedPublicKeys),
+        JSON.stringify([...publicSurface.runtimeExports].sort()),
     'Packed package public exports changed unexpectedly',
 );
-for (const publicKey of forbiddenPublicKeys) {
+for (const publicKey of publicSurface.forbiddenRuntimeExports) {
     assert(
         !(publicKey in publicApi),
         `Packed package must not export ${publicKey}`,
@@ -86,7 +51,7 @@ assert(
     'Threshold profile calculator must be exported and deterministic',
 );
 assert(
-    deriveValidatedFirstComeOrder({
+    deriveValidatedFirstValidOrder({
         requiredContextDigest: 'context',
         selectionPolicyDigest: 'policy',
         expectedSelectionPolicyDigest: 'policy',
@@ -97,11 +62,11 @@ assert(
                 currentDeviceEpoch: 0,
             },
         },
-        candidates: [
+        objects: [
             {
                 objectDigest: 'candidate',
                 objectType: 'TargetFinalityRecord',
-                boardSeq: 1,
+                boardSequence: 1,
                 boardPosition: 0,
                 signerIdentity: 'participant',
                 recoveryEpoch: 0,
@@ -111,8 +76,8 @@ assert(
                 isByteIdenticalRetransmission: false,
             },
         ],
-    }).orderedCandidates[0]?.objectDigest === 'candidate',
-    'First-come ordering helper must be exported and deterministic',
+    }).orderedObjects[0]?.objectDigest === 'candidate',
+    'First-valid ordering helper must be exported and deterministic',
 );
 const verification = await verifyTranscriptCoreFixture({
     kind: 'malformed-object',

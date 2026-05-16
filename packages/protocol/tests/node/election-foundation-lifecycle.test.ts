@@ -1,3 +1,12 @@
+import {
+    activeMaliciousMheProfileId,
+    cpadProfileId,
+    evaluationProofProfileId,
+    targetBoundShareSelectionProfileId,
+    thresholdDecryptionProfileId,
+    type LifecycleLabelInput,
+    type LifecycleState,
+} from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -5,7 +14,6 @@ import {
     deriveThresholdProfile,
     isValidLifecycleTransition,
 } from '../../src/index';
-import type { LifecycleState } from '../../src/index';
 
 const expectValidPath = (states: readonly LifecycleState[]): void => {
     for (let index = 0; index < states.length - 1; index += 1) {
@@ -18,8 +26,47 @@ const expectValidPath = (states: readonly LifecycleState[]): void => {
     }
 };
 
+const targetBoundShareSelectionProfile = {
+    profileId: targetBoundShareSelectionProfileId,
+    certificateDigest: 'target-bound-certificate-digest',
+    cpadProfileId,
+    targetBasisDigest: 'target-basis-digest',
+    decryptionShareQuorum: 9,
+    minimumSharesForInterpolation: 7,
+    minimumArrivalsForRobustDecode: 9,
+    invalidShareFilteringMode: 'ProofVerifiedSharesOnly',
+    selectedShareRule: 'FirstValidSharesInCanonicalBoardOrder',
+} as const;
+
+const uncertifiedThresholdProfile = deriveThresholdProfile({ rosterSize: 20 });
+const thresholdProfile = deriveThresholdProfile({
+    rosterSize: 20,
+    targetBoundShareSelectionProfile,
+});
+
+const fullyVerifiedLabelInput = (
+    overrides: Partial<LifecycleLabelInput> = {},
+): LifecycleLabelInput => ({
+    lifecycleState: 'FullyVerifiedResult',
+    thresholdProfile,
+    mheSecurityClosure: 'ActiveMalicious',
+    localRosterExternallyAccepted: true,
+    mobileClaimGatePassed: true,
+    bridgeMobileCertificatePresent: true,
+    bridgeProverCertificatePresent: true,
+    evaluationProofCertificatePresent: true,
+    oneShotDecryptionProofCertificatePresent: true,
+    cpadCertificatePresent: true,
+    thresholdDecryptionCertificatePresent: true,
+    evaluationProofClosureApplied: true,
+    cpadClosureApplied: true,
+    activeMaliciousClosureApplied: true,
+    decodedResultLayoutVerified: true,
+    ...overrides,
+});
+
 describe('election foundation lifecycle', () => {
-    it('accepts the primary v46 lifecycle path', () => {
+    it('accepts the primary v53 BGV lifecycle path', () => {
         expectValidPath([
             'DraftPoll',
             'RegistrationOpen',
@@ -30,41 +77,28 @@ describe('election foundation lifecycle', () => {
             'VotingClosed',
             'AwaitingAggregateContributors',
             'AggregateInputsReady',
-            'AwaitingMobileEvaluation',
+            'AggregateInputsBridgeVerified',
+            'AwaitingEvaluation',
             'TopKEvaluated',
-            'EvaluationReplayOpen',
-            'EvaluationReplayAttested',
+            'TargetFinalityReached',
+            'EvaluationProofOpen',
+            'EvaluationProofVerified',
             'TargetAccepted',
             'AwaitingFirstDecryptionShares',
-            'ResultComputedAuditable',
-        ]);
-    });
-
-    it('accepts the optional evaluation-proof branch', () => {
-        expectValidPath([
-            'EvaluationReplayOpen',
-            'OptionalEvaluationProofVerified',
-            'TargetAccepted',
-            'AwaitingFirstDecryptionShares',
+            'FirstThresholdSharesReached',
+            'CPADProfileVerified',
             'FullyVerifiedResult',
         ]);
     });
 
-    it('accepts a late optional-proof upgrade after auditable results', () => {
-        expect(
-            isValidLifecycleTransition({
-                from: 'ResultComputedAuditable',
-                to: 'FullyVerifiedResult',
-            }),
-        ).toBe(true);
-    });
-
     it.each([
         ['VotingOpen', 'TargetAccepted'],
-        ['AggregateInputsReady', 'ResultComputedAuditable'],
+        ['AggregateInputsReady', 'FullyVerifiedResult'],
+        ['AggregateInputsReady', 'AwaitingEvaluation'],
         ['TopKEvaluated', 'AwaitingFirstDecryptionShares'],
-        ['EvaluationReplayOpen', 'ResultComputedAuditable'],
-        ['TargetAccepted', 'FullyVerifiedResult'],
+        ['TargetFinalityReached', 'TargetAccepted'],
+        ['EvaluationProofOpen', 'TargetAccepted'],
+        ['FirstThresholdSharesReached', 'FullyVerifiedResult'],
         ['DraftPoll', 'VotingOpen'],
     ] satisfies readonly (readonly [LifecycleState, LifecycleState])[])(
         'rejects invalid transition %s -> %s',
@@ -73,115 +107,165 @@ describe('election foundation lifecycle', () => {
         },
     );
 
-    it('derives claim-bearing result labels only for claim-bearing profiles', () => {
-        const mandatoryProfile = deriveThresholdProfile({ rosterSize: 20 });
+    it('returns false for unknown runtime lifecycle states', () => {
+        expect(
+            isValidLifecycleTransition({
+                from: 'NotAState' as never,
+                to: 'VotingOpen',
+            }),
+        ).toBe(false);
+    });
+
+    it('keeps external roster acceptance as a local label', () => {
+        expect(
+            isValidLifecycleTransition({
+                from: 'RosterFrozen',
+                to: 'VotingOpen',
+            }),
+        ).toBe(true);
+
+        expect(
+            deriveLifecycleLabels({
+                lifecycleState: 'RosterFrozen',
+                thresholdProfile,
+            }).primary,
+        ).not.toContain('RosterExternallyAccepted');
+
+        expect(
+            deriveLifecycleLabels({
+                lifecycleState: 'RosterFrozen',
+                thresholdProfile,
+                localRosterExternallyAccepted: true,
+            }).primary,
+        ).toContain('RosterExternallyAccepted');
+    });
+
+    it('emits FullyVerifiedResult only after all v53 theorem gates close', () => {
+        const labels = deriveLifecycleLabels(fullyVerifiedLabelInput());
+
+        expect(labels.primary).toContain('FullyVerifiedResult');
+        expect(labels.resultClaimLabels).toEqual(['FullyVerifiedResult']);
+        expect(labels.evaluationProofMode).toBe('EvaluationProofVerified');
+    });
+
+    it.each([
+        { localRosterExternallyAccepted: false },
+        { evaluationProofCertificatePresent: false },
+        { thresholdProfile: uncertifiedThresholdProfile },
+        { cpadCertificatePresent: false },
+        { thresholdDecryptionCertificatePresent: false },
+        { evaluationProofClosureApplied: false },
+        { cpadClosureApplied: false },
+        { activeMaliciousClosureApplied: false },
+        { decodedResultLayoutVerified: false },
+    ] satisfies readonly Partial<LifecycleLabelInput>[])(
+        'withholds FullyVerifiedResult when a mandatory gate is missing',
+        (missingGate) => {
+            const labels = deriveLifecycleLabels(
+                fullyVerifiedLabelInput(missingGate),
+            );
+
+            expect(labels.primary).toEqual(['Unresolved']);
+            expect(labels.resultClaimLabels).toEqual([]);
+        },
+    );
+
+    it('keeps opt-in local replay additive to the fully verified result', () => {
+        const labels = deriveLifecycleLabels(
+            fullyVerifiedLabelInput({
+                evaluationLocallyReplayed: true,
+                localReplayCertificateVerified: true,
+            }),
+        );
+
+        expect(labels.primary).toEqual(
+            expect.arrayContaining([
+                'FullyVerifiedResult',
+                'EvaluationLocallyReplayed',
+                'ResultLocallyReplayedAuditable',
+            ]),
+        );
+        expect(labels.resultClaimLabels).toEqual([
+            'FullyVerifiedResult',
+            'ResultLocallyReplayedAuditable',
+        ]);
+    });
+
+    it('keeps unsafe profiles and passive prototype out of claim-bearing results', () => {
         const unsafeProfile = deriveThresholdProfile({
             rosterSize: 19,
             unsafeMicroRosterAcknowledged: true,
         });
-
-        const mandatoryLabels = deriveLifecycleLabels({
-            lifecycleState: 'ResultComputedAuditable',
-            thresholdProfile: mandatoryProfile,
-            mheSecurityStage: 'ActiveMalicious',
-            mobileClaimGatePassed: true,
-        });
-        const unsafeLabels = deriveLifecycleLabels({
-            lifecycleState: 'ResultComputedAuditable',
-            thresholdProfile: unsafeProfile,
-            mheSecurityStage: 'ActiveMalicious',
-        });
-
-        expect(mandatoryLabels.primary).toContain('ResultComputedAuditable');
-        expect(mandatoryLabels.resultClaimLabel).toBe(
-            'ResultComputedAuditable',
+        const unsafeLabels = deriveLifecycleLabels(
+            fullyVerifiedLabelInput({
+                thresholdProfile: unsafeProfile,
+            }),
         );
+        const passiveLabels = deriveLifecycleLabels(
+            fullyVerifiedLabelInput({
+                mheSecurityClosure: 'PassiveMHEPrototype',
+                activeMaliciousClosureApplied: false,
+            }),
+        );
+
         expect(unsafeLabels.primary).toEqual(['Unresolved']);
         expect(unsafeLabels.modes).toContain('UnsafeMicroRoster');
-        expect(unsafeLabels.resultClaimLabel).toBeUndefined();
+        expect(unsafeLabels.resultClaimLabels).toEqual([]);
+        expect(passiveLabels.primary).toEqual(['Unresolved']);
+        expect(passiveLabels.modes).toContain('PassiveMHEPrototype');
     });
 
-    it('does not emit result labels before the mobile claim gate passes', () => {
-        const profile = deriveThresholdProfile({ rosterSize: 20 });
-
+    it('derives closure profile labels from transcript-visible profile IDs', () => {
         const labels = deriveLifecycleLabels({
-            lifecycleState: 'ResultComputedAuditable',
-            thresholdProfile: profile,
-            mheSecurityStage: 'ActiveMalicious',
+            lifecycleState: 'FullyVerifiedResult',
+            thresholdProfile,
+            mheSecurityClosure: 'ActiveMalicious',
+            securityProfileIds: [
+                evaluationProofProfileId,
+                thresholdDecryptionProfileId,
+                activeMaliciousMheProfileId,
+            ],
+            localRosterExternallyAccepted: true,
+            mobileClaimGatePassed: true,
+            bridgeMobileCertificatePresent: true,
+            bridgeProverCertificatePresent: true,
+            evaluationProofCertificatePresent: true,
+            oneShotDecryptionProofCertificatePresent: true,
+            cpadCertificatePresent: true,
+            thresholdDecryptionCertificatePresent: true,
+            evaluationProofClosureApplied: true,
+            cpadClosureApplied: true,
+            activeMaliciousClosureApplied: true,
+            decodedResultLayoutVerified: true,
         });
 
-        expect(labels.primary).toEqual(['Unresolved']);
-        expect(labels.primary).not.toContain('ResultComputedAuditable');
-        expect(labels.resultClaimLabel).toBeUndefined();
-    });
-
-    it('does not emit result labels when required mobile certificates are missing', () => {
-        const profile = deriveThresholdProfile({ rosterSize: 20 });
-
-        for (const missingCertificate of [
-            { bridgeMobileCertificatePresent: false },
-            { bridgeProverCertificatePresent: false },
-            { brakerskiMobileProofCertificatePresent: false },
-        ] as const) {
-            const labels = deriveLifecycleLabels({
-                lifecycleState: 'ResultComputedAuditable',
-                thresholdProfile: profile,
-                mobileClaimGatePassed: true,
-                ...missingCertificate,
-            });
-
-            expect(labels.primary).toEqual(['Unresolved']);
-            expect(labels.resultClaimLabel).toBeUndefined();
-        }
-    });
-
-    it('requires local verification context for user-specific labels', () => {
-        const profile = deriveThresholdProfile({ rosterSize: 20 });
-
-        expect(
-            deriveLifecycleLabels({
-                lifecycleState: 'VotingClosed',
-                thresholdProfile: profile,
-            }).primary,
-        ).not.toEqual(
-            expect.arrayContaining(['RosterAudited', 'BallotIncluded']),
-        );
-
-        expect(
-            deriveLifecycleLabels({
-                lifecycleState: 'EvaluationReplayOpen',
-                thresholdProfile: profile,
-            }).primary,
-        ).not.toContain('EvaluationLocallyReplayed');
-
-        expect(
-            deriveLifecycleLabels({
-                lifecycleState: 'EvaluationReplayOpen',
-                thresholdProfile: profile,
-                rosterAudited: true,
-                ownBallotIncluded: true,
-                evaluationLocallyReplayed: true,
-            }).primary,
-        ).toEqual(
+        expect(labels.modes).toEqual(
             expect.arrayContaining([
-                'RosterAudited',
-                'BallotIncluded',
-                'EvaluationLocallyReplayed',
+                'EvaluationProofClosure',
+                'CPADClosure',
+                'ActiveMaliciousClosure',
             ]),
         );
+        expect(labels.modes).not.toContain('PassiveMHEPrototype');
+        expect(labels.resultClaimLabels).toEqual(['FullyVerifiedResult']);
     });
 
-    it('derives v46 bridge, Brakerski, and mobile execution labels from local context', () => {
-        const profile = deriveThresholdProfile({ rosterSize: 20 });
+    it('derives BGV, CPAD, bridge, and mobile execution labels from local context', () => {
         const labels = deriveLifecycleLabels({
-            lifecycleState: 'EvaluationReplayOpen',
-            thresholdProfile: profile,
-            bridgeProofPending: true,
-            bridgeProofLocallyVerified: true,
+            lifecycleState: 'EvaluationProofOpen',
+            thresholdProfile,
+            localRosterExternallyAccepted: true,
             aggregateInputsBridgeVerified: true,
             bridgeProofRejected: true,
-            brakerskiBackendProfileRejected: true,
+            witnessEquivocationEvidence: true,
+            targetFinalityNotReached: true,
+            backendProfileRejected: true,
+            bgvProfileRejected: true,
+            cpadProfileRejected: true,
+            decryptionThresholdNotReached: true,
             bridgeMobileCertRejected: true,
+            boardFinalityProfileRejected: true,
+            mobileProfileRejected: true,
             unsupportedLowResourceDevice: true,
             mobileFlagshipProfile: true,
             foregroundProofGenerationRequired: true,
@@ -193,16 +277,24 @@ describe('election foundation lifecycle', () => {
 
         expect(labels.primary).toEqual(
             expect.arrayContaining([
-                'BridgeProofPending',
-                'BridgeProofLocallyVerified',
+                'RosterExternallyAccepted',
                 'AggregateInputsBridgeVerified',
+                'AwaitingEvaluation',
+                'EvaluationProofOpen',
             ]),
         );
         expect(labels.failures).toEqual(
             expect.arrayContaining([
                 'BridgeProofRejected',
-                'BrakerskiBackendProfileRejected',
+                'WitnessEquivocationEvidence',
+                'TargetFinalityNotReached',
+                'BackendProfileRejected',
+                'BGVProfileRejected',
+                'CPADProfileRejected',
+                'DecryptionThresholdNotReached',
                 'BridgeMobileCertRejected',
+                'BoardFinalityProfileRejected',
+                'MobileProfileRejected',
                 'UnsupportedLowResourceDevice',
             ]),
         );
@@ -218,24 +310,19 @@ describe('election foundation lifecycle', () => {
         );
     });
 
-    it('marks passive MHE prototype and optional proof status explicitly', () => {
-        const profile = deriveThresholdProfile({ rosterSize: 20 });
-        const labels = deriveLifecycleLabels({
-            lifecycleState: 'FullyVerifiedResult',
-            thresholdProfile: profile,
-            mobileClaimGatePassed: true,
-        });
+    it('does not emit decryption-threshold failure after first shares are reached', () => {
+        expect(
+            deriveLifecycleLabels({
+                lifecycleState: 'AwaitingFirstDecryptionShares',
+                thresholdProfile,
+            }).failures,
+        ).toContain('DecryptionThresholdNotReached');
 
-        expect(labels.primary).toEqual(
-            expect.arrayContaining([
-                'OptionalEvaluationProofVerified',
-                'FullyVerifiedResult',
-            ]),
-        );
-        expect(labels.modes).toContain('PassiveMHEPrototype');
-        expect(labels.evaluationProofMode).toBe(
-            'OptionalEvaluationProofVerified',
-        );
-        expect(labels.resultClaimLabel).toBe('FullyVerifiedResult');
+        expect(
+            deriveLifecycleLabels({
+                lifecycleState: 'FirstThresholdSharesReached',
+                thresholdProfile,
+            }).failures,
+        ).not.toContain('DecryptionThresholdNotReached');
     });
 });

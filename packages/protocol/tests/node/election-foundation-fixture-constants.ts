@@ -4,9 +4,16 @@ import {
     createProtocolSignatureFixture,
     deriveProtocolDigest,
     deriveProtocolSignatureDigest,
-    deriveTargetFinalityPolicyDigest,
-    deriveWitnessPolicyDigest,
-} from '../../src/index';
+} from '@sealed-lattice/crypto';
+import {
+    bridgeProofProfileId,
+    cpadProfileId,
+    directTargetBasisDataBridgeProfileId,
+    evaluationNoiseProfileId,
+    evaluationProofProfileId,
+    mobileProfileId,
+    thresholdDecryptionProfileId,
+} from '@sealed-lattice/types';
 import type {
     CanonicalSignedRootObject,
     ManifestOpaqueBindings,
@@ -15,7 +22,12 @@ import type {
     SignedObjectType,
     SignerRole,
     WitnessPolicy,
-} from '../../src/index';
+} from '@sealed-lattice/types';
+
+import {
+    deriveTargetFinalityPolicyDigest,
+    deriveWitnessPolicyDigest,
+} from '../../src/finality/index';
 
 export const ceremonyId = 'ceremony-main';
 export const boardPolicyDigest = deriveProtocolDigest('BoardPolicyDigest', {
@@ -74,7 +86,7 @@ export const witnessPolicyDigest = deriveWitnessPolicyDigest({
     totalWitnesses: 7,
 });
 export const targetFinalityPolicyDigest = deriveTargetFinalityPolicyDigest({
-    targetPhase: 'target',
+    targetFinalityScope: 'target',
     witnessQuorum: 5,
     totalWitnesses: 7,
 });
@@ -96,7 +108,7 @@ export const witnessPolicy: WitnessPolicy = {
 };
 export const targetFinalityPolicy = {
     targetFinalityPolicyDigest,
-    targetPhase: 'target',
+    targetFinalityScope: 'target',
     witnessQuorum: 5,
     totalWitnesses: 7,
 };
@@ -110,8 +122,8 @@ export const manifestPolicyDigests: ManifestPolicyDigests = {
         'DuplicateBallotPolicyDigest',
         { policy: 'last-valid-before-close' },
     ),
-    firstComePolicyDigest: deriveProtocolDigest('FirstComePolicyDigest', {
-        policy: 'board-order-current-epoch',
+    firstValidPolicyDigest: deriveProtocolDigest('FirstValidPolicyDigest', {
+        policy: 'canonical-signed-board-order-current-epoch',
     }),
     recoveryPolicyDigest: deriveProtocolDigest('RecoveryPolicyDigest', {
         policy: 'same-slot-recovery-v1',
@@ -120,35 +132,69 @@ export const manifestPolicyDigests: ManifestPolicyDigests = {
     witnessPolicyDigest,
 };
 export const manifestOpaqueBindings: ManifestOpaqueBindings = {
-    bridgeProofProfileId: 'CommittedAggregateShare-HwangPiEnc-v1',
-    proofPrimeParamId: 'proof-prime-param-v1',
-    proofPrimePublicKeyRoot: deriveProtocolDigest('ProofPrimePublicKeyRoot', {
-        key: 'proof-prime',
+    bridgeProofProfileId,
+    directTargetBasisDataBridgeProfileId,
+    heParamDigest: deriveProtocolDigest('HEParamDigest', {
+        profile: 'BGV-RNS-v1',
     }),
-    proofPrimeToQDataKeyConsistencyDigest: deriveProtocolDigest(
-        'ProofPrimeToQDataKeyConsistencyDigest',
-        { rule: 'same-setup' },
-    ),
-    proofPrimeToQDataKeyConsistencyEvidence: deriveProtocolDigest(
-        'ProofPrimeToQDataKeyConsistencyDigest',
-        { evidence: 'same-setup' },
-    ),
+    bgvProfileDigest: deriveProtocolDigest('BGVProfileDigest', {
+        profile: 'BGV-RNS-v1',
+    }),
+    bgvPublicKeyRoot: deriveProtocolDigest('BGVPublicKeyRoot', {
+        key: 'bgv-collective',
+    }),
+    collectivePublicKeyRoot: deriveProtocolDigest('CollectivePublicKeyRoot', {
+        key: 'bgv-collective',
+    }),
     canonicalCiphertextConventionDigest: deriveProtocolDigest(
         'CanonicalCiphertextConventionDigest',
-        { convention: 'bfv-c0-plus-c1-s' },
+        { convention: 'bgv-rns-coefficient-domain-c0-plus-c1-s' },
     ),
-    bfvBatchEncoderDigest: deriveProtocolDigest('BFVBatchEncoderDigest', {
+    bridgeProofProfileDigest: deriveProtocolDigest('BridgeProofProfileDigest', {
+        profile: bridgeProofProfileId,
+    }),
+    bgvBatchEncoderDigest: deriveProtocolDigest('BGVBatchEncoderDigest', {
         layout: 'WinnerRankTopK-v1',
     }),
     bridgeLayoutDigest: deriveProtocolDigest('BridgeLayoutDigest', {
         layout: 'aggregate-share-layout-v1',
     }),
-    brakerskiBackendProfileId: 'Brakerski25-PQAsync-RingShamir-BFVHPS-RNS-v1',
-    brakerskiShareVerificationKeyRoot: deriveProtocolDigest(
-        'BrakerskiShareVerificationKeyRoot',
-        { root: 'share-verification' },
+    evaluationNoiseProfileDigest: deriveProtocolDigest(
+        'EvaluationNoiseProfileDigest',
+        {
+            profile: evaluationNoiseProfileId,
+        },
     ),
-    mobileProfileId: 'mobile-flagship-profile-v1',
+    heEvaluationNoiseCertDigest: deriveProtocolDigest(
+        'HEEvaluationNoiseCertDigest',
+        { certificate: 'he-evaluation-noise-v1' },
+    ),
+    allowedEvaluatorOpsDigest: deriveProtocolDigest(
+        'AllowedEvaluatorOpsDigest',
+        { operations: 'packed-bgv-top-k-v1' },
+    ),
+    evaluationProofProfileId,
+    evaluationProofProfileDigest: deriveProtocolDigest(
+        'EvaluationProofProfileDigest',
+        { profile: evaluationProofProfileId },
+    ),
+    thresholdDecryptionProfileId,
+    thresholdDecryptionProfileDigest: deriveProtocolDigest(
+        'ThresholdDecryptionProfileDigest',
+        { profile: thresholdDecryptionProfileId },
+    ),
+    bgvAsyncThresholdCPADProfileDigest: deriveProtocolDigest(
+        'BGVAsyncThresholdCPADProfileDigest',
+        { profile: thresholdDecryptionProfileId },
+    ),
+    cpadProfileId,
+    cpadProfileDigest: deriveProtocolDigest('CPADProfileDigest', {
+        profile: cpadProfileId,
+    }),
+    targetBasisDigest: deriveProtocolDigest('TargetBasisDigest', {
+        profile: 'target-basis-v1',
+    }),
+    mobileProfileId,
     bridgeMobileCertificatePolicyDigest: deriveProtocolDigest(
         'BridgeMobileCertDigest',
         { policy: 'mobile-bridge-cert' },
@@ -177,8 +223,8 @@ export const createSignature = (
             objectType,
             objectVersion: 1,
             ceremonyId,
-            manifestHash: null,
-            boardHeadHash: null,
+            manifestDigest: null,
+            boardHeadDigest: null,
             objectRoot,
             chunkMerkleRoot: null,
             byteLength: 64,

@@ -1,3 +1,7 @@
+import {
+    deriveProtocolDigest,
+    verifySignedObjectSignature,
+} from '@sealed-lattice/crypto';
 import type {
     ActionCurrentForRecoveryEpochInput,
     ActionCurrentForRecoveryEpochResult,
@@ -12,12 +16,12 @@ import {
     verifyBoardConsistency,
     verifyInclusionProof,
 } from '../board/index.js';
-import { deriveProtocolDigest } from '../common/digests.js';
-import { verifySignedObjectSignature } from '../common/signatures.js';
 import {
     buildBoardHeadMap,
     createRefusal,
+    defaultSignedRootContextDigest,
     isNonNegativeInteger,
+    signedObjectRootByteLength,
 } from '../common/verification-helpers.js';
 
 export const deriveActionContextDigest = (
@@ -31,13 +35,15 @@ export const deriveActionContextDigest = (
             actionContext.acceptedRecoveryEpochUpdateDigest,
         actionSequence: actionContext.actionSequence,
         boardHeadDigest: actionContext.boardHeadDigest,
-        boardSeq: actionContext.boardSeq,
+        boardSequence: actionContext.boardSequence,
         ceremonyId: actionContext.ceremonyId,
         contextDigest: actionContext.contextDigest,
         deviceEpoch: actionContext.deviceEpoch,
         electionManifestDigest: actionContext.electionManifestDigest,
         recoveryEpoch: actionContext.recoveryEpoch,
         recoveryPolicyDigest: actionContext.recoveryPolicyDigest,
+        rosterExternalAcceptanceDigest:
+            actionContext.rosterExternalAcceptanceDigest,
         signerIdentity: actionContext.signerIdentity,
     });
 
@@ -56,7 +62,7 @@ export const deriveRecoveryEpochUpdateDigest = (
         newTrusteeSetupCommitment: update.newTrusteeSetupCommitment,
         objectType: update.objectType,
         objectVersion: update.objectVersion,
-        oldActionCutoffBoardSeq: update.oldActionCutoffBoardSeq,
+        oldActionCutoffBoardSequence: update.oldActionCutoffBoardSequence,
         previousDeviceEpoch: update.previousDeviceEpoch,
         previousRecoveryEpoch: update.previousRecoveryEpoch,
         recoveryPolicyDigest: update.recoveryPolicyDigest,
@@ -72,13 +78,15 @@ const isActionCurrentForRecoveryEpochUnchecked = (
     const expectedActionContextDigest = deriveActionContextDigest({
         actionSequence: input.actionContext.actionSequence,
         boardHeadDigest: input.actionContext.boardHeadDigest,
-        boardSeq: input.actionContext.boardSeq,
+        boardSequence: input.actionContext.boardSequence,
         ceremonyId: input.actionContext.ceremonyId,
         contextDigest: input.actionContext.contextDigest,
         deviceEpoch: input.actionContext.deviceEpoch,
         electionManifestDigest: input.actionContext.electionManifestDigest,
         recoveryEpoch: input.actionContext.recoveryEpoch,
         recoveryPolicyDigest: input.actionContext.recoveryPolicyDigest,
+        rosterExternalAcceptanceDigest:
+            input.actionContext.rosterExternalAcceptanceDigest,
         acceptedRecoveryEpochUpdateDigest:
             input.actionContext.acceptedRecoveryEpochUpdateDigest,
         signerIdentity: input.actionContext.signerIdentity,
@@ -111,7 +119,7 @@ const isActionCurrentForRecoveryEpochUnchecked = (
         );
     }
     if (
-        !isNonNegativeInteger(input.actionContext.boardSeq) ||
+        !isNonNegativeInteger(input.actionContext.boardSequence) ||
         !isNonNegativeInteger(input.actionContext.recoveryEpoch) ||
         !isNonNegativeInteger(input.actionContext.deviceEpoch) ||
         !isNonNegativeInteger(input.actionContext.actionSequence)
@@ -120,6 +128,20 @@ const isActionCurrentForRecoveryEpochUnchecked = (
             createRefusal(
                 'InvalidSignedRoot',
                 'Action context sequence and epoch fields must be non-negative integers.',
+                input.actionContext.actionContextDigest,
+                'ActionContext',
+            ),
+        );
+    }
+    if (
+        input.expectedRosterExternalAcceptanceDigest !== undefined &&
+        input.actionContext.rosterExternalAcceptanceDigest !==
+            input.expectedRosterExternalAcceptanceDigest
+    ) {
+        refusedObjects.push(
+            createRefusal(
+                'RosterExternalAcceptanceInvalid',
+                'Action context must bind the expected local roster external acceptance digest.',
                 input.actionContext.actionContextDigest,
                 'ActionContext',
             ),
@@ -139,9 +161,9 @@ const isActionCurrentForRecoveryEpochUnchecked = (
         };
     }
     if (
-        input.recoveryEpochState.oldActionCutoffBoardSeq !== undefined &&
-        input.actionContext.boardSeq <
-            input.recoveryEpochState.oldActionCutoffBoardSeq &&
+        input.recoveryEpochState.oldActionCutoffBoardSequence !== undefined &&
+        input.actionContext.boardSequence <
+            input.recoveryEpochState.oldActionCutoffBoardSequence &&
         input.actionContext.recoveryEpoch <
             input.recoveryEpochState.currentRecoveryEpoch &&
         input.actionContext.deviceEpoch <
@@ -202,6 +224,9 @@ const verifyRecoveryEpochUpdateUnchecked = (
     const headsByDigest = buildBoardHeadMap(
         input.boardEvidence.signedBoardHeads,
     );
+    const updateInclusionHead = headsByDigest.get(
+        input.updateInclusionProof.boardHeadDigest,
+    );
     const refusedObjects: RefusalRecord[] = [...boardResult.refusedObjects];
     const expectedDigest = deriveRecoveryEpochUpdateDigest({
         boardHeadDigest: update.boardHeadDigest,
@@ -212,7 +237,7 @@ const verifyRecoveryEpochUpdateUnchecked = (
         newTrusteeSetupCommitment: update.newTrusteeSetupCommitment,
         objectType: update.objectType,
         objectVersion: update.objectVersion,
-        oldActionCutoffBoardSeq: update.oldActionCutoffBoardSeq,
+        oldActionCutoffBoardSequence: update.oldActionCutoffBoardSequence,
         previousDeviceEpoch: update.previousDeviceEpoch,
         previousRecoveryEpoch: update.previousRecoveryEpoch,
         recoveryPolicyDigest: update.recoveryPolicyDigest,
@@ -299,7 +324,7 @@ const verifyRecoveryEpochUpdateUnchecked = (
     if (
         update.newRecoveryEpoch !== update.previousRecoveryEpoch + 1 ||
         update.newDeviceEpoch !== update.previousDeviceEpoch + 1 ||
-        !isNonNegativeInteger(update.oldActionCutoffBoardSeq)
+        !isNonNegativeInteger(update.oldActionCutoffBoardSequence)
     ) {
         refusedObjects.push(
             createRefusal(
@@ -336,6 +361,20 @@ const verifyRecoveryEpochUpdateUnchecked = (
                 'InclusionProofInvalid',
                 'Recovery epoch update inclusion proof does not bind the update.',
                 input.updateInclusionProof.inclusionProofDigest,
+                'RecoveryEpochUpdate',
+            ),
+        );
+    }
+    if (
+        input.updateInclusionProof.boardSequence !==
+            update.oldActionCutoffBoardSequence ||
+        updateInclusionHead?.previousHeadDigest !== update.boardHeadDigest
+    ) {
+        refusedObjects.push(
+            createRefusal(
+                'RecoveryUpdateInvalid',
+                'Recovery epoch update inclusion must extend the signed recovery context head at the old-action cutoff.',
+                update.recoveryEpochUpdateDigest,
                 'RecoveryEpochUpdate',
             ),
         );
@@ -380,9 +419,13 @@ const verifyRecoveryEpochUpdateUnchecked = (
         signerRole: 'RecoveryRoot',
         signerIdentity: update.signerIdentity,
         ceremonyId: update.ceremonyId,
-        manifestHash: null,
+        manifestDigest: null,
         objectRoot: update.recoveryEpochUpdateDigest,
-        boardHeadHash: update.boardHeadDigest,
+        boardHeadDigest: update.boardHeadDigest,
+        byteLength: signedObjectRootByteLength,
+        recoveryEpoch: update.previousRecoveryEpoch,
+        deviceEpoch: update.previousDeviceEpoch,
+        contextDigest: defaultSignedRootContextDigest,
         publicKeyDigest: input.expectedRecoveryRootPublicKeyDigest,
     });
     refusedObjects.push(...signatureResult.refusedObjects);
@@ -406,7 +449,8 @@ const verifyRecoveryEpochUpdateUnchecked = (
                       signerIdentity: update.signerIdentity,
                       currentRecoveryEpoch: update.newRecoveryEpoch,
                       currentDeviceEpoch: update.newDeviceEpoch,
-                      oldActionCutoffBoardSeq: update.oldActionCutoffBoardSeq,
+                      oldActionCutoffBoardSequence:
+                          update.oldActionCutoffBoardSequence,
                   }
                 : undefined,
     };

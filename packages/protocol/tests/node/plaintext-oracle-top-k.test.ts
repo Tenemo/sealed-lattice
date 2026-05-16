@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
     decodeSparseTopKTarget,
     derivePlaintextTopKOracle,
-} from '../../src/index';
+} from '../../src/plaintext-oracle/index';
 
 import {
     assertValidPollSpec,
@@ -104,6 +104,75 @@ describe('plaintext tally and top-k oracle', () => {
         expect(oracle.oracleDigest).toBe(
             topKVectors.topOneClearWinnerCase.expectedOracleDigest,
         );
+    });
+
+    it('supports every K_top for a 20-option poll', () => {
+        const options = Array.from(
+            { length: 20 },
+            (_unused, optionIndex) => `Option ${String(optionIndex + 1)}`,
+        );
+        const ballots = [
+            {
+                scores: options.map(
+                    (_option, optionIndex) => 10 - (optionIndex % 10),
+                ),
+            },
+            {
+                scores: options.map(
+                    (_option, optionIndex) => (optionIndex % 5) + 1,
+                ),
+            },
+            {
+                scores: options.map(
+                    (_option, optionIndex) => (optionIndex % 4) + 3,
+                ),
+            },
+        ];
+
+        for (
+            let topOptionCount = 1;
+            topOptionCount <= options.length;
+            topOptionCount += 1
+        ) {
+            const pollSpec = assertValidPollSpec({
+                pollId: `all-k-${String(topOptionCount)}`,
+                question: 'Question',
+                options,
+                topOptionCount,
+            });
+            const oracle = derivePlaintextTopKOracle({
+                ballots,
+                maximumRosterSize: 20,
+                pollSpec: pollSpec.normalized,
+            });
+            const decoding = decodeSparseTopKTarget({
+                expectedLayoutDigest: oracle.sparseTarget.layoutDigest,
+                target: oracle.sparseTarget,
+            });
+            const expectedSelectedOrdinals = oracle.ranking
+                .slice(0, topOptionCount)
+                .map((entry) => entry.optionOrdinal);
+
+            expect(decoding.ok, `K_top=${String(topOptionCount)}`).toBe(true);
+            expect(decoding.selectedOptionOrdinals).toEqual(
+                expectedSelectedOrdinals,
+            );
+            expect(
+                oracle.sparseTarget.targetIdSlots.filter(
+                    (optionOrdinal) => optionOrdinal !== 0,
+                ),
+            ).toHaveLength(topOptionCount);
+            expect(
+                oracle.sparseTarget.targetOrderSlots
+                    .filter((orderPosition) => orderPosition !== 0)
+                    .sort((left, right) => left - right),
+            ).toEqual(
+                Array.from(
+                    { length: topOptionCount },
+                    (_unused, orderIndex) => orderIndex + 1,
+                ),
+            );
+        }
     });
 
     it('covers the maximum n=50, m=20 no-wrap tally and full ranking', () => {

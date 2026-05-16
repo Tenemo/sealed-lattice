@@ -1,81 +1,44 @@
+import { verifySignedObjectSignature } from '@sealed-lattice/crypto';
 import type {
     BoardConsistencyInput,
     BoardConsistencyVerification,
     ConflictingHeadEvidence,
     InclusionProof,
     ProtocolDigest,
-    ProtocolObjectType,
     ProtocolVerificationStatusLabel,
     RefusalRecord,
     SignedBoardHead,
 } from '@sealed-lattice/types';
 
-import { deriveProtocolDigest } from '../common/digests.js';
-import { verifySignedObjectSignature } from '../common/signatures.js';
 import {
     buildBoardHeadMap,
     createRefusal,
+    defaultSignedRootContextDigest,
     isNonNegativeInteger,
+    signedObjectRootByteLength,
     uniqueStrings,
 } from '../common/verification-helpers.js';
 
-type BoardEntryDigestInput = {
-    readonly boardPosition: number;
-    readonly includedObjectType: ProtocolObjectType;
-    readonly includedObjectDigest: ProtocolDigest;
-};
-
-export const deriveBoardEntryDigest = (
-    entry: BoardEntryDigestInput,
-): ProtocolDigest =>
-    deriveProtocolDigest('BoardEntryDigest', {
-        boardPosition: entry.boardPosition,
-        includedObjectDigest: entry.includedObjectDigest,
-        includedObjectType: entry.includedObjectType,
-    });
-
-export const deriveBoardRootDigest = (
-    boardEntryDigests: readonly ProtocolDigest[],
-): ProtocolDigest =>
-    deriveProtocolDigest('BoardRootDigest', { boardEntryDigests });
-
-export const deriveBoardHeadDigest = (head: SignedBoardHead): ProtocolDigest =>
-    deriveProtocolDigest('BoardHeadDigest', {
-        boardPolicyDigest: head.boardPolicyDigest,
-        boardRoot: head.boardRoot,
-        boardSeq: head.boardSeq,
-        ceremonyId: head.ceremonyId,
-        objectType: head.objectType,
-        objectVersion: head.objectVersion,
-        previousHeadDigest: head.previousHeadDigest,
-    });
-
-export const deriveInclusionProofDigest = (
-    inclusionProof: Omit<InclusionProof, 'inclusionProofDigest'>,
-): ProtocolDigest =>
-    deriveProtocolDigest('InclusionProofDigest', {
-        boardHeadDigest: inclusionProof.boardHeadDigest,
-        boardEntryDigest: inclusionProof.boardEntryDigest,
-        boardEntryDigests: inclusionProof.boardEntryDigests,
-        boardPosition: inclusionProof.boardPosition,
-        boardRoot: inclusionProof.boardRoot,
-        boardSeq: inclusionProof.boardSeq,
-        includedObjectDigest: inclusionProof.includedObjectDigest,
-        includedObjectType: inclusionProof.includedObjectType,
-    });
-
-export const deriveConflictingHeadEvidenceDigest = (
-    evidence: Omit<ConflictingHeadEvidence, 'evidenceDigest'>,
-): ProtocolDigest =>
-    deriveProtocolDigest('ConflictingHeadEvidenceDigest', {
-        boardPolicyDigest: evidence.boardPolicyDigest,
-        ceremonyId: evidence.ceremonyId,
-        equivocatingWitnessIdentities:
-            evidence.equivocatingWitnessIdentities ?? [],
-        leftBoardHeadDigest: evidence.leftBoardHeadDigest,
-        rightBoardHeadDigest: evidence.rightBoardHeadDigest,
-        targetPhase: evidence.targetPhase ?? null,
-    });
+import {
+    deriveBoardBranchNodeDigest,
+    deriveBoardEntryDigest,
+    deriveBoardEntryListRootDigest,
+    deriveBoardHeadDigest,
+    deriveBoardLeafNodeDigest,
+    deriveBoardRootFromNodeDigest,
+    deriveConflictingHeadEvidenceDigest,
+    deriveInclusionProofDigest,
+    inclusionProofUsesMerklePath,
+    isBoardEntryMerklePath,
+} from './digests.js';
+export {
+    deriveBoardEntryDigest,
+    deriveBoardEntryMerklePath,
+    deriveBoardHeadDigest,
+    deriveBoardRootDigest,
+    deriveConflictingHeadEvidenceDigest,
+    deriveInclusionProofDigest,
+} from './digests.js';
 
 const verifyBoardHead = (
     input: BoardConsistencyInput,
@@ -115,7 +78,7 @@ const verifyBoardHead = (
         );
     }
     if (
-        !isNonNegativeInteger(head.boardSeq) ||
+        !isNonNegativeInteger(head.boardSequence) ||
         head.objectType !== 'BoardHead' ||
         head.objectVersion !== 1
     ) {
@@ -128,7 +91,7 @@ const verifyBoardHead = (
             ),
         );
     }
-    if (head.previousHeadDigest === null && head.boardSeq !== 0) {
+    if (head.previousHeadDigest === null && head.boardSequence !== 0) {
         refusedObjects.push(
             createRefusal(
                 'BoardConsistencyFailure',
@@ -138,7 +101,7 @@ const verifyBoardHead = (
             ),
         );
     }
-    if (head.previousHeadDigest !== null && head.boardSeq === 0) {
+    if (head.previousHeadDigest !== null && head.boardSequence === 0) {
         refusedObjects.push(
             createRefusal(
                 'BoardConsistencyFailure',
@@ -153,10 +116,15 @@ const verifyBoardHead = (
         objectType: 'BoardHead',
         objectVersion: 1,
         signerRole: 'Board',
+        signerIdentity: 'board',
         ceremonyId: input.ceremonyId,
-        manifestHash: null,
+        manifestDigest: null,
         objectRoot: head.headDigest,
-        boardHeadHash: null,
+        boardHeadDigest: null,
+        byteLength: signedObjectRootByteLength,
+        recoveryEpoch: 0,
+        deviceEpoch: 0,
+        contextDigest: defaultSignedRootContextDigest,
         publicKeyDigest: input.expectedBoardPublicKeyDigest,
     });
     refusedObjects.push(...signatureResult.refusedObjects);
@@ -164,7 +132,7 @@ const verifyBoardHead = (
     return refusedObjects;
 };
 
-export const isVerifiedAncestor = (
+const isVerifiedAncestor = (
     ancestorDigest: ProtocolDigest,
     descendantDigest: ProtocolDigest,
     headsByDigest: ReadonlyMap<ProtocolDigest, SignedBoardHead>,
@@ -262,7 +230,7 @@ const verifyPreviousHeadLinks = (
             );
             continue;
         }
-        if (previousHead.boardSeq + 1 !== head.boardSeq) {
+        if (previousHead.boardSequence + 1 !== head.boardSequence) {
             refusedObjects.push(
                 createRefusal(
                     'BoardConsistencyFailure',
@@ -290,7 +258,7 @@ const verifySuppliedForkEvidence = (
             evidence.equivocatingWitnessIdentities ?? [],
         leftBoardHeadDigest: evidence.leftBoardHeadDigest,
         rightBoardHeadDigest: evidence.rightBoardHeadDigest,
-        targetPhase: evidence.targetPhase,
+        targetFinalityScope: evidence.targetFinalityScope,
     });
 
     if (evidence.evidenceDigest !== expectedDigest) {
@@ -360,6 +328,70 @@ const verifySuppliedForkEvidence = (
     return refusedObjects;
 };
 
+const deriveBoardRootFromMerkleInclusionProof = (
+    inclusionProof: InclusionProof,
+): ProtocolDigest | undefined => {
+    const { boardEntryCount, boardEntryMerklePath } = inclusionProof;
+    if (
+        typeof boardEntryCount !== 'number' ||
+        !isNonNegativeInteger(boardEntryCount) ||
+        boardEntryCount === 0 ||
+        !isNonNegativeInteger(inclusionProof.boardPosition) ||
+        inclusionProof.boardPosition >= boardEntryCount ||
+        !isBoardEntryMerklePath(boardEntryMerklePath)
+    ) {
+        return undefined;
+    }
+
+    let computedNodeDigest = deriveBoardLeafNodeDigest(
+        inclusionProof.boardPosition,
+        inclusionProof.boardEntryDigest,
+    );
+    let levelIndex = inclusionProof.boardPosition;
+    let levelWidth = boardEntryCount;
+    let pathStepIndex = 0;
+
+    while (levelWidth > 1) {
+        const pathStep = boardEntryMerklePath[pathStepIndex];
+        if (levelIndex % 2 === 0) {
+            if (levelIndex + 1 < levelWidth) {
+                if (
+                    pathStep?.siblingPosition !== 'Right' ||
+                    typeof pathStep.siblingDigest !== 'string'
+                ) {
+                    return undefined;
+                }
+                computedNodeDigest = deriveBoardBranchNodeDigest(
+                    computedNodeDigest,
+                    pathStep.siblingDigest,
+                );
+                pathStepIndex += 1;
+            }
+        } else {
+            if (
+                pathStep?.siblingPosition !== 'Left' ||
+                typeof pathStep.siblingDigest !== 'string'
+            ) {
+                return undefined;
+            }
+            computedNodeDigest = deriveBoardBranchNodeDigest(
+                pathStep.siblingDigest,
+                computedNodeDigest,
+            );
+            pathStepIndex += 1;
+        }
+
+        levelIndex = Math.floor(levelIndex / 2);
+        levelWidth = Math.ceil(levelWidth / 2);
+    }
+
+    if (pathStepIndex !== boardEntryMerklePath.length) {
+        return undefined;
+    }
+
+    return deriveBoardRootFromNodeDigest(boardEntryCount, computedNodeDigest);
+};
+
 export const verifyInclusionProof = (
     inclusionProof: InclusionProof,
     headsByDigest: ReadonlyMap<ProtocolDigest, SignedBoardHead>,
@@ -371,16 +403,23 @@ export const verifyInclusionProof = (
         includedObjectDigest: inclusionProof.includedObjectDigest,
         includedObjectType: inclusionProof.includedObjectType,
     });
-    const expectedBoardRoot = deriveBoardRootDigest(
-        inclusionProof.boardEntryDigests,
-    );
+    const usesMerklePath = inclusionProofUsesMerklePath(inclusionProof);
+    const usesBoardEntryDigestList =
+        inclusionProof.boardEntryDigests !== undefined;
+    const expectedBoardRoot = usesMerklePath
+        ? deriveBoardRootFromMerkleInclusionProof(inclusionProof)
+        : Array.isArray(inclusionProof.boardEntryDigests)
+          ? deriveBoardEntryListRootDigest(inclusionProof.boardEntryDigests)
+          : undefined;
     const expectedDigest = deriveInclusionProofDigest({
         boardHeadDigest: inclusionProof.boardHeadDigest,
         boardEntryDigest: inclusionProof.boardEntryDigest,
+        boardEntryCount: inclusionProof.boardEntryCount,
+        boardEntryMerklePath: inclusionProof.boardEntryMerklePath,
         boardEntryDigests: inclusionProof.boardEntryDigests,
         boardPosition: inclusionProof.boardPosition,
         boardRoot: inclusionProof.boardRoot,
-        boardSeq: inclusionProof.boardSeq,
+        boardSequence: inclusionProof.boardSequence,
         includedObjectDigest: inclusionProof.includedObjectDigest,
         includedObjectType: inclusionProof.includedObjectType,
     });
@@ -403,11 +442,37 @@ export const verifyInclusionProof = (
             ),
         );
     }
-    if (inclusionProof.boardRoot !== expectedBoardRoot) {
+    if (usesMerklePath && usesBoardEntryDigestList) {
         refusedObjects.push(
             createRefusal(
                 'InclusionProofInvalid',
-                'Inclusion proof board root does not match its board-entry digest list.',
+                'Inclusion proof must use exactly one board inclusion witness model.',
+                inclusionProof.inclusionProofDigest,
+            ),
+        );
+    }
+    if (!usesMerklePath && !usesBoardEntryDigestList) {
+        refusedObjects.push(
+            createRefusal(
+                'InclusionProofInvalid',
+                'Inclusion proof must include a board inclusion witness.',
+                inclusionProof.inclusionProofDigest,
+            ),
+        );
+    }
+    if (expectedBoardRoot === undefined) {
+        refusedObjects.push(
+            createRefusal(
+                'InclusionProofInvalid',
+                'Inclusion proof board witness is malformed.',
+                inclusionProof.inclusionProofDigest,
+            ),
+        );
+    } else if (inclusionProof.boardRoot !== expectedBoardRoot) {
+        refusedObjects.push(
+            createRefusal(
+                'InclusionProofInvalid',
+                'Inclusion proof board root does not match its board inclusion witness.',
                 inclusionProof.inclusionProofDigest,
             ),
         );
@@ -421,7 +486,7 @@ export const verifyInclusionProof = (
                 inclusionProof.includedObjectType,
             ),
         );
-    } else if (head.boardSeq !== inclusionProof.boardSeq) {
+    } else if (head.boardSequence !== inclusionProof.boardSequence) {
         refusedObjects.push(
             createRefusal(
                 'InclusionProofInvalid',
@@ -447,8 +512,9 @@ export const verifyInclusionProof = (
             ),
         );
     } else if (
+        Array.isArray(inclusionProof.boardEntryDigests) &&
         inclusionProof.boardEntryDigests[inclusionProof.boardPosition] !==
-        inclusionProof.boardEntryDigest
+            inclusionProof.boardEntryDigest
     ) {
         refusedObjects.push(
             createRefusal(
@@ -607,6 +673,8 @@ const verifyBoardConsistencyUnchecked = (
     const suppliedForkEvidence = validSuppliedForkEvidence[0];
     const discoveredForkEvidence =
         suppliedForkEvidence ?? findConflictingHeads(input.signedBoardHeads);
+    const boardAccepted =
+        refusedObjects.length === 0 && discoveredForkEvidence === undefined;
     const statusLabels: readonly ProtocolVerificationStatusLabel[] =
         discoveredForkEvidence === undefined
             ? []
@@ -619,12 +687,14 @@ const verifyBoardConsistencyUnchecked = (
     return {
         ok: refusedObjects.length === 0 && discoveredForkEvidence === undefined,
         statusLabels,
-        acceptedDigests: uniqueStrings([
-            ...input.signedBoardHeads.map((head) => head.headDigest),
-            ...(input.inclusionProofs ?? []).map(
-                (proof) => proof.inclusionProofDigest,
-            ),
-        ]),
+        acceptedDigests: boardAccepted
+            ? uniqueStrings([
+                  ...input.signedBoardHeads.map((head) => head.headDigest),
+                  ...(input.inclusionProofs ?? []).map(
+                      (proof) => proof.inclusionProofDigest,
+                  ),
+              ])
+            : [],
         refusedObjects:
             discoveredForkEvidence === undefined
                 ? refusedObjects

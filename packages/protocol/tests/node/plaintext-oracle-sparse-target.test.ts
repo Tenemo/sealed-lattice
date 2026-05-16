@@ -1,13 +1,13 @@
+import type {
+    PlaintextTopKRankingEntry,
+    SparseTopKTarget,
+} from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
 import {
     decodeSparseTopKTarget,
     deriveSparseTopKTarget,
-} from '../../src/index';
-import type {
-    PlaintextTopKRankingEntry,
-    SparseTopKTarget,
-} from '../../src/index';
+} from '../../src/plaintext-oracle/index';
 
 import {
     mutateSparseTarget,

@@ -1,20 +1,23 @@
-import type {
-    CapabilityContext,
-    CapabilityDecision,
-    FirstComeOrderingInput,
-    FirstComeOrderingVerification,
-    LifecycleLabelInput,
-    LifecycleLabels,
-    LifecycleTransition,
-    PollSpecInput,
-    PollSpecValidation,
-    ProtocolAction,
-    ThresholdProfile,
-    ThresholdProfileInput,
+import {
+    cpadProfileId,
+    targetBoundShareSelectionProfileId,
+    type CapabilityContext,
+    type CapabilityDecision,
+    type FirstValidOrderingInput,
+    type FirstValidOrderingVerification,
+    type LifecycleLabelInput,
+    type LifecycleLabels,
+    type LifecycleTransition,
+    type PollSpecInput,
+    type PollSpecValidation,
+    type ProtocolAction,
+    type ThresholdProfile,
+    type ThresholdProfileInput,
 } from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
 import * as publicApiRuntime from '../../dist/index.js';
+import publicSurface from '../../public-surface.json' with { type: 'json' };
 
 type DeriveThresholdProfile = (
     input: ThresholdProfileInput,
@@ -26,9 +29,9 @@ type EvaluateActionCapability = (
     action: ProtocolAction,
     context: CapabilityContext,
 ) => CapabilityDecision;
-type DeriveValidatedFirstComeOrder = (
-    input: FirstComeOrderingInput,
-) => FirstComeOrderingVerification;
+type DeriveValidatedFirstValidOrder = (
+    input: FirstValidOrderingInput,
+) => FirstValidOrderingVerification;
 
 const publicApiRuntimeRecord = publicApiRuntime as Record<string, unknown>;
 const deriveThresholdProfile =
@@ -41,13 +44,14 @@ const deriveLifecycleLabels =
     publicApiRuntimeRecord.deriveLifecycleLabels as DeriveLifecycleLabels;
 const evaluateActionCapability =
     publicApiRuntimeRecord.evaluateActionCapability as EvaluateActionCapability;
-const deriveValidatedFirstComeOrder =
-    publicApiRuntimeRecord.deriveValidatedFirstComeOrder as DeriveValidatedFirstComeOrder;
+const deriveValidatedFirstValidOrder =
+    publicApiRuntimeRecord.deriveValidatedFirstValidOrder as DeriveValidatedFirstValidOrder;
 
 const requiredPublicFunctions = [
-    ['deriveValidatedFirstComeOrder', deriveValidatedFirstComeOrder],
+    ['createBridgeProof', publicApiRuntimeRecord.createBridgeProof],
     ['deriveLifecycleLabels', deriveLifecycleLabels],
     ['deriveThresholdProfile', deriveThresholdProfile],
+    ['deriveValidatedFirstValidOrder', deriveValidatedFirstValidOrder],
     ['evaluateActionCapability', evaluateActionCapability],
     [
         'isActionCurrentForRecoveryEpoch',
@@ -56,64 +60,44 @@ const requiredPublicFunctions = [
     ['isValidLifecycleTransition', isValidLifecycleTransition],
     ['validatePollSpec', validatePollSpec],
     ['verifyBoardConsistency', publicApiRuntimeRecord.verifyBoardConsistency],
+    ['verifyBridgeProof', publicApiRuntimeRecord.verifyBridgeProof],
     ['verifyCastReceiptShell', publicApiRuntimeRecord.verifyCastReceiptShell],
     ['verifyCloseRecordShell', publicApiRuntimeRecord.verifyCloseRecordShell],
-    ['verifyFirstComePolicy', publicApiRuntimeRecord.verifyFirstComePolicy],
+    ['verifyFirstValidPolicy', publicApiRuntimeRecord.verifyFirstValidPolicy],
+    [
+        'verifyOneShotSharePolicy',
+        publicApiRuntimeRecord.verifyOneShotSharePolicy,
+    ],
     [
         'verifyRecoveryEpochUpdate',
         publicApiRuntimeRecord.verifyRecoveryEpochUpdate,
+    ],
+    [
+        'verifyRosterExternalAcceptance',
+        publicApiRuntimeRecord.verifyRosterExternalAcceptance,
     ],
     [
         'verifyRosterManifestTranscript',
         publicApiRuntimeRecord.verifyRosterManifestTranscript,
     ],
     ['verifyTargetFinality', publicApiRuntimeRecord.verifyTargetFinality],
+    ['verifyTranscript', publicApiRuntimeRecord.verifyTranscript],
     [
         'verifyTranscriptCoreFixture',
         publicApiRuntimeRecord.verifyTranscriptCoreFixture,
     ],
 ] as const;
 
-const allowedRuntimeExports = requiredPublicFunctions
-    .map(([publicFunctionName]) => publicFunctionName)
-    .sort();
-
-const forbiddenPublicKeys = [
-    'getShare',
-    'exportShare',
-    'exportSecretKey',
-    'importSecretKey',
-    'setSecretKey',
-    'thresholdDecrypt',
-    'partialDecrypt',
-    'partialDecryptWithoutTarget',
-    'decryptToFile',
-    'decryptToString',
-    'rawHEAdd',
-    'rawHEMul',
-    'rawHERelin',
-    'rawHERotate',
-    'rawNTT',
-    'rawRNSLimbAccess',
-    'setNoiseFloodSigma',
-    'setSmudgingDistribution',
-    'bootstrap',
-    'decryptAggregateShare',
-    'decryptExactSum',
-    'decryptRank',
-    'decryptComparisonBit',
-    'decryptIntermediateWire',
-    'verifyEvaluationReplayAttestationShell',
-    'verifyTargetAcceptedRecordShell',
-    'verifyTopKDecryptionShareShell',
-    'createShamirPolynomial',
-    'derivePlaintextTopKOracle',
-    'decodeSparseTopKTarget',
-    'fieldModulus',
-];
+const allowedRuntimeExports = [...publicSurface.runtimeExports].sort();
+const forbiddenPublicKeys = publicSurface.forbiddenRuntimeExports;
 
 describe('election foundation public package API in Node', () => {
     it('exposes only the safe runtime functions and keeps forbidden operations absent', () => {
+        expect(
+            requiredPublicFunctions.map(
+                ([publicFunctionName]) => publicFunctionName,
+            ),
+        ).toEqual(publicSurface.runtimeExports);
         expect(Object.keys(publicApiRuntimeRecord).sort()).toEqual(
             allowedRuntimeExports,
         );
@@ -131,6 +115,17 @@ describe('election foundation public package API in Node', () => {
     it('derives threshold, poll, lifecycle, label, and capability decisions', () => {
         const thresholdProfile = deriveThresholdProfile({
             rosterSize: 20,
+            targetBoundShareSelectionProfile: {
+                profileId: targetBoundShareSelectionProfileId,
+                certificateDigest: 'target-bound-certificate-digest',
+                cpadProfileId,
+                targetBasisDigest: 'target-basis-digest',
+                decryptionShareQuorum: 9,
+                minimumSharesForInterpolation: 7,
+                minimumArrivalsForRobustDecode: 9,
+                invalidShareFilteringMode: 'ProofVerifiedSharesOnly',
+                selectedShareRule: 'FirstValidSharesInCanonicalBoardOrder',
+            },
         });
 
         expect(thresholdProfile.privacyCorruptionBound).toBe(6);
@@ -149,25 +144,64 @@ describe('election foundation public package API in Node', () => {
             }),
         ).toBe(true);
         const labels = deriveLifecycleLabels({
-            lifecycleState: 'ResultComputedAuditable',
+            lifecycleState: 'FullyVerifiedResult',
             thresholdProfile,
-            mheSecurityStage: 'ActiveMalicious',
+            mheSecurityClosure: 'ActiveMalicious',
+            localRosterExternallyAccepted: true,
             mobileClaimGatePassed: true,
+            bridgeMobileCertificatePresent: true,
+            bridgeProverCertificatePresent: true,
+            evaluationProofCertificatePresent: true,
+            oneShotDecryptionProofCertificatePresent: true,
+            cpadCertificatePresent: true,
+            thresholdDecryptionCertificatePresent: true,
+            evaluationProofClosureApplied: true,
+            cpadClosureApplied: true,
+            activeMaliciousClosureApplied: true,
+            decodedResultLayoutVerified: true,
         });
 
-        expect(labels.resultClaimLabel).toBe('ResultComputedAuditable');
+        expect(labels.resultClaimLabels).toEqual(['FullyVerifiedResult']);
         expect(labels.modes).toEqual([]);
         expect(
             evaluateActionCapability('AcceptTarget', {
-                lifecycleState: 'EvaluationReplayOpen',
+                lifecycleState: 'EvaluationProofVerified',
                 thresholdProfile,
                 pollSpecValid: true,
+                localRosterExternallyAccepted: true,
+                rosterExternalAcceptanceDigest: 'accepted-roster-digest',
+                actionContextRosterExternalAcceptanceDigest:
+                    'accepted-roster-digest',
                 targetFinalityAccepted: true,
-                replayAttestationCount: thresholdProfile.evaluationReplayQuorum,
+                evaluationProofVerified: true,
+                bridgeMobileCertificatePresent: true,
             }),
         ).toEqual({ allowed: true, action: 'AcceptTarget' });
         expect(
-            deriveValidatedFirstComeOrder({
+            publicApiRuntimeRecord.createBridgeProof as () => {
+                readonly ok: boolean;
+                readonly refusedObjects: readonly {
+                    readonly code: string;
+                }[];
+            },
+        ).toBeTypeOf('function');
+        expect(
+            (
+                publicApiRuntimeRecord.createBridgeProof as () => {
+                    readonly ok: boolean;
+                    readonly refusedObjects: readonly {
+                        readonly code: string;
+                    }[];
+                }
+            )(),
+        ).toMatchObject({
+            ok: false,
+            refusedObjects: [
+                expect.objectContaining({ code: 'OperationUnavailable' }),
+            ],
+        });
+        expect(
+            deriveValidatedFirstValidOrder({
                 requiredContextDigest: 'context',
                 selectionPolicyDigest: 'policy',
                 expectedSelectionPolicyDigest: 'policy',
@@ -178,11 +212,11 @@ describe('election foundation public package API in Node', () => {
                         currentDeviceEpoch: 0,
                     },
                 },
-                candidates: [
+                objects: [
                     {
                         objectDigest: 'candidate',
                         objectType: 'TargetFinalityRecord',
-                        boardSeq: 1,
+                        boardSequence: 1,
                         boardPosition: 0,
                         signerIdentity: 'participant',
                         recoveryEpoch: 0,
@@ -195,7 +229,7 @@ describe('election foundation public package API in Node', () => {
             }),
         ).toMatchObject({
             ok: true,
-            orderedCandidates: [
+            orderedObjects: [
                 expect.objectContaining({ objectDigest: 'candidate' }),
             ],
         });

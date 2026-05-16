@@ -12,23 +12,31 @@ export type SignedBoardHead = {
     readonly objectVersion: 1;
     readonly headDigest: ProtocolDigest;
     readonly ceremonyId: string;
-    readonly boardSeq: number;
+    readonly boardSequence: number;
     readonly boardRoot: ProtocolDigest;
     readonly previousHeadDigest: ProtocolDigest | null;
     readonly boardPolicyDigest: ProtocolDigest;
     readonly signature: ProtocolSignatureEnvelope;
 };
 
+/** One sibling edge in a board-entry Merkle inclusion path. */
+export type BoardEntryMerklePathStep = {
+    readonly siblingPosition: 'Left' | 'Right';
+    readonly siblingDigest: ProtocolDigest;
+};
+
 /** Inclusion evidence for one protocol object under a signed board head. */
 export type InclusionProof = {
     readonly boardHeadDigest: ProtocolDigest;
-    readonly boardSeq: number;
+    readonly boardSequence: number;
     readonly boardPosition: number;
     readonly includedObjectType: ProtocolObjectType;
     readonly includedObjectDigest: ProtocolDigest;
     readonly boardEntryDigest: ProtocolDigest;
     readonly boardRoot: ProtocolDigest;
-    readonly boardEntryDigests: readonly ProtocolDigest[];
+    readonly boardEntryCount?: number;
+    readonly boardEntryMerklePath?: readonly BoardEntryMerklePathStep[];
+    readonly boardEntryDigests?: readonly ProtocolDigest[];
     readonly inclusionProofDigest: ProtocolDigest;
 };
 
@@ -66,7 +74,7 @@ export type CastReceipt = {
     readonly electionManifestDigest: ProtocolDigest;
     readonly voterIdentity: string;
     readonly ballotPackageDigest: ProtocolDigest;
-    readonly boardSeq: number;
+    readonly boardSequence: number;
     readonly boardPosition: number;
     readonly recoveryEpoch: number;
     readonly deviceEpoch: number;
@@ -87,7 +95,7 @@ export type CloseRecord = {
     readonly closeKind: CloseRecordKind;
     readonly closedBoardHeadDigest: ProtocolDigest;
     readonly postVotingClosedContextDigest: ProtocolDigest | null;
-    readonly boardSeq: number;
+    readonly boardSequence: number;
     readonly boardPosition: number;
     readonly organizerIdentity: string;
     readonly signature: ProtocolSignatureEnvelope;
@@ -131,12 +139,37 @@ export type WitnessPolicy = {
     readonly totalWitnesses: number;
 };
 
-/** Target finality policy for one deterministic target phase. */
+/** Target finality policy for one deterministic target acceptance. */
 export type TargetFinalityPolicy = {
     readonly targetFinalityPolicyDigest: ProtocolDigest;
-    readonly targetPhase: string;
+    readonly targetFinalityScope: string;
     readonly witnessQuorum: number;
     readonly totalWitnesses: number;
+};
+
+/** Exact target proposal authorized by target-finality witnesses. */
+export type TargetProposal = {
+    readonly targetProposalDigest: ProtocolDigest;
+    readonly ceremonyId: string;
+    readonly electionManifestDigest: ProtocolDigest;
+    readonly evaluationContextDigest: ProtocolDigest;
+    readonly topKEvaluationRecordDigest: ProtocolDigest;
+    readonly topKCiphertextDigest: ProtocolDigest;
+    readonly publicSlotMaskDigest: ProtocolDigest;
+    readonly targetCiphertextDigest: ProtocolDigest;
+    readonly targetLayoutDigest: ProtocolDigest;
+    readonly evaluationProofProfileDigest: ProtocolDigest;
+    readonly targetFinalityPolicyDigest: ProtocolDigest;
+};
+
+/** Full checkpoint whose digest is signed by target-finality witnesses. */
+export type TargetFinalityCheckpoint = TargetProposal & {
+    readonly objectType: 'TargetFinalityCheckpoint';
+    readonly objectVersion: 1;
+    readonly targetFinalityCheckpointDigest: ProtocolDigest;
+    readonly boardPolicyDigest: ProtocolDigest;
+    readonly finalizedBoardHeadDigest: ProtocolDigest;
+    readonly witnessPolicyDigest: ProtocolDigest;
 };
 
 /** Signed witness checkpoint over a finalized board head and target policy. */
@@ -145,23 +178,24 @@ export type WitnessCheckpoint = {
     readonly objectVersion: 1;
     readonly checkpointDigest: ProtocolDigest;
     readonly ceremonyId: string;
-    readonly targetPhase: string;
-    readonly finalizedBoardHeadDigest: ProtocolDigest;
+    readonly targetFinalityScope: string;
+    readonly targetProposalDigest: ProtocolDigest;
+    readonly targetFinalityCheckpointDigest: ProtocolDigest;
     readonly witnessPolicyDigest: ProtocolDigest;
     readonly targetFinalityPolicyDigest: ProtocolDigest;
     readonly witnessIdentity: string;
     readonly signature: ProtocolSignatureEnvelope;
 };
 
-/** Record proving that enough witnesses finalized one target phase. */
+/** Record proving that enough witnesses finalized one target acceptance. */
 export type TargetFinalityRecord = {
     readonly objectType: 'TargetFinalityRecord';
     readonly objectVersion: 1;
     readonly targetFinalityRecordDigest: ProtocolDigest;
     readonly ceremonyId: string;
-    readonly targetPhase: string;
-    readonly finalizedBoardHeadDigest: ProtocolDigest;
-    readonly topKEvaluationRecordDigest: ProtocolDigest;
+    readonly targetFinalityScope: string;
+    readonly targetProposalDigest: ProtocolDigest;
+    readonly targetFinalityCheckpoint: TargetFinalityCheckpoint;
     readonly witnessPolicyDigest: ProtocolDigest;
     readonly targetFinalityPolicyDigest: ProtocolDigest;
     readonly inclusionProof: InclusionProof;
@@ -182,7 +216,8 @@ export type TargetFinalityVerificationInput = {
 export type TargetFinalityVerification =
     StructuredProtocolVerificationResult & {
         readonly targetFinalityRecordDigest?: ProtocolDigest;
-        readonly finalizedBoardHeadDigest?: ProtocolDigest;
+        readonly targetProposalDigest?: ProtocolDigest;
+        readonly targetFinalityCheckpointDigest?: ProtocolDigest;
         readonly validWitnessIdentities: readonly string[];
         readonly equivocatingWitnessIdentities: readonly string[];
     };
@@ -190,28 +225,55 @@ export type TargetFinalityVerification =
 /** Minimal checkpoint values carried forward after target finality is accepted. */
 export type AcceptedTargetFinalityCheckpoint = {
     readonly targetFinalityRecordDigest: ProtocolDigest;
+    readonly targetProposalDigest: ProtocolDigest;
+    readonly targetFinalityCheckpointDigest: ProtocolDigest;
     readonly finalizedBoardHeadDigest: ProtocolDigest;
     readonly topKEvaluationRecordDigest: ProtocolDigest;
-    readonly targetPhase: string;
+    readonly evaluationContextDigest: ProtocolDigest;
+    readonly topKCiphertextDigest: ProtocolDigest;
+    readonly publicSlotMaskDigest: ProtocolDigest;
+    readonly targetCiphertextDigest: ProtocolDigest;
+    readonly targetLayoutDigest: ProtocolDigest;
+    readonly evaluationProofProfileDigest: ProtocolDigest;
+    readonly targetFinalityScope: string;
     readonly witnessPolicyDigest: ProtocolDigest;
     readonly targetFinalityPolicyDigest: ProtocolDigest;
 };
 
-export type EvaluationReplayAttestation = {
-    readonly objectType: 'EvaluationReplayAttestation';
+export type EvaluationProofRecord = {
+    readonly objectType: 'EvaluationProofRecord';
     readonly objectVersion: 1;
-    readonly evaluationReplayAttestationDigest: ProtocolDigest;
+    readonly evaluationProofRecordDigest: ProtocolDigest;
     readonly ceremonyId: string;
     readonly electionManifestDigest: ProtocolDigest;
-    readonly signerIdentity: string;
+    readonly targetProposalDigest: ProtocolDigest;
     readonly topKEvaluationRecordDigest: ProtocolDigest;
     readonly targetFinalityRecordDigest: ProtocolDigest;
-    readonly finalizedBoardHeadDigest: ProtocolDigest;
-    readonly replayContextDigest: ProtocolDigest;
-    readonly boardSeq: number;
+    readonly evaluationProofProfileDigest: ProtocolDigest;
+    readonly evaluationContextDigest: ProtocolDigest;
+    readonly topKCiphertextDigest: ProtocolDigest;
+    readonly publicSlotMaskDigest: ProtocolDigest;
+    readonly targetCiphertextDigest: ProtocolDigest;
+    readonly targetLayoutDigest: ProtocolDigest;
+    readonly proofRoot: ProtocolDigest;
+    readonly boardSequence: number;
     readonly boardPosition: number;
+};
+
+export type LocalReplayRecord = {
+    readonly objectType: 'LocalReplayRecord';
+    readonly objectVersion: 1;
+    readonly localReplayRecordDigest: ProtocolDigest;
+    readonly ceremonyId: string;
+    readonly electionManifestDigest: ProtocolDigest;
+    readonly participantIdentity: string;
+    readonly targetProposalDigest: ProtocolDigest;
+    readonly targetFinalityRecordDigest: ProtocolDigest;
+    readonly evaluationProofRecordDigest: ProtocolDigest;
+    readonly replayContextDigest: ProtocolDigest;
     readonly recoveryEpoch: number;
     readonly deviceEpoch: number;
+    readonly mobileReplayCertDigest: ProtocolDigest;
     readonly signature: ProtocolSignatureEnvelope;
 };
 
@@ -221,12 +283,25 @@ export type TargetAcceptedRecord = {
     readonly targetAcceptedRecordDigest: ProtocolDigest;
     readonly ceremonyId: string;
     readonly electionManifestDigest: ProtocolDigest;
-    readonly targetPhase: string;
+    readonly targetFinalityScope: string;
+    readonly targetProposalDigest: ProtocolDigest;
     readonly topKEvaluationRecordDigest: ProtocolDigest;
+    readonly targetContextDigest: ProtocolDigest;
     readonly targetFinalityRecordDigest: ProtocolDigest;
-    readonly replayAttestationDigests: readonly ProtocolDigest[];
-    readonly optionalEvaluationProofRoot: ProtocolDigest | null;
-    readonly boardSeq: number;
+    readonly targetFinalityCheckpointDigest: ProtocolDigest;
+    readonly evaluationProofRecordDigest: ProtocolDigest;
+    readonly evaluationProofProfileDigest: ProtocolDigest;
+    readonly targetPreimageDigest: ProtocolDigest;
+    readonly targetCiphertextDigest: ProtocolDigest;
+    readonly targetLayoutDigest: ProtocolDigest;
+    readonly cpadProfileDigest: ProtocolDigest;
+    readonly cpadProfileId: string;
+    readonly thresholdDecryptionProfileDigest: ProtocolDigest;
+    readonly thresholdDecryptionProfileId: string;
+    readonly bgvAsyncThresholdCPADProfileDigest: ProtocolDigest;
+    readonly targetBasisDigest: ProtocolDigest;
+    readonly acceptanceMode: 'evaluation-proof';
+    readonly boardSequence: number;
     readonly boardPosition: number;
     readonly organizerIdentity: string;
     readonly signature: ProtocolSignatureEnvelope;
@@ -240,9 +315,24 @@ export type TopKDecryptionShareShell = {
     readonly electionManifestDigest: ProtocolDigest;
     readonly trusteeIdentity: string;
     readonly targetAcceptedRecordDigest: ProtocolDigest;
+    readonly targetProposalDigest: ProtocolDigest;
+    readonly targetPreimageDigest: ProtocolDigest;
     readonly targetFinalityRecordDigest: ProtocolDigest;
+    readonly targetFinalityCheckpointDigest: ProtocolDigest;
+    readonly evaluationProofRecordDigest: ProtocolDigest;
     readonly topKEvaluationRecordDigest: ProtocolDigest;
-    readonly boardSeq: number;
+    readonly targetContextDigest: ProtocolDigest;
+    readonly targetCiphertextDigest: ProtocolDigest;
+    readonly cpadProfileDigest: ProtocolDigest;
+    readonly thresholdDecryptionProfileDigest: ProtocolDigest;
+    readonly bgvAsyncThresholdCPADProfileDigest: ProtocolDigest;
+    readonly targetDecryptionPreparationRecordDigest: ProtocolDigest;
+    readonly targetDecryptionCiphertextDigest: ProtocolDigest;
+    readonly targetBasisDigest: ProtocolDigest;
+    readonly thresholdShareVerificationKeyRoot: ProtocolDigest;
+    readonly thresholdShareVerificationKeyDigest: ProtocolDigest;
+    readonly trusteeThresholdVerificationKeyDigest: ProtocolDigest;
+    readonly boardSequence: number;
     readonly boardPosition: number;
     readonly recoveryEpoch: number;
     readonly deviceEpoch: number;
@@ -250,18 +340,19 @@ export type TopKDecryptionShareShell = {
     readonly signature: ProtocolSignatureEnvelope;
 };
 
-export type EvaluationReplayAttestationVerificationInput = {
+export type LocalReplayRecordVerificationInput = {
     readonly boardEvidence: BoardConsistencyInput;
-    readonly attestation: EvaluationReplayAttestation;
-    readonly attestationInclusionProof: InclusionProof;
+    readonly record: LocalReplayRecord;
+    readonly recordInclusionProof: InclusionProof;
     readonly targetFinalityRecord: TargetFinalityRecord;
     readonly targetFinalityVerification: TargetFinalityVerification;
+    readonly evaluationProofRecord: EvaluationProofRecord;
     readonly expectedSignerPublicKeyDigest: ProtocolDigest;
 };
 
-export type EvaluationReplayAttestationVerification =
+export type LocalReplayRecordVerification =
     StructuredProtocolVerificationResult & {
-        readonly evaluationReplayAttestationDigest?: ProtocolDigest;
+        readonly localReplayRecordDigest?: ProtocolDigest;
         readonly targetFinalityRecordDigest?: ProtocolDigest;
     };
 
@@ -271,7 +362,7 @@ export type TargetAcceptedRecordVerificationInput = {
     readonly targetAcceptedRecordInclusionProof: InclusionProof;
     readonly targetFinalityRecord: TargetFinalityRecord;
     readonly targetFinalityVerification: TargetFinalityVerification;
-    readonly acceptedReplayAttestationDigests: readonly ProtocolDigest[];
+    readonly evaluationProofRecord: EvaluationProofRecord;
     readonly expectedOrganizerPublicKeyDigest: ProtocolDigest;
 };
 

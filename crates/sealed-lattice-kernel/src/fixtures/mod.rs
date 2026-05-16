@@ -5,7 +5,6 @@ use crate::{
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
     transcript_core::{
         FULLY_VERIFIED_ACTIVE_MALICIOUS_PROFILE, FULLY_VERIFIED_PASSIVE_MHE_PROFILE,
-        RESULT_COMPUTED_ACTIVE_MALICIOUS_PROFILE, RESULT_COMPUTED_PASSIVE_MHE_PROFILE,
         TranscriptCoreProfile, analyze_canonical_object, canonical_transcript_core_object,
         decode_hex, encode_hex, mutate_base_claim_profile_mismatch_fixture,
         mutate_duplicate_field_fixture, mutate_field_order_fixture,
@@ -13,13 +12,12 @@ use crate::{
         mutate_invalid_profile_fixture, mutate_invalid_utf8_fixture,
         mutate_malformed_length_fixture, mutate_malformed_magic_fixture,
         mutate_mhe_security_profile_mismatch_fixture, mutate_missing_field_fixture,
-        mutate_non_canonical_varuint_fixture,
-        mutate_result_computed_optional_evaluation_profile_fixture, mutate_trailing_bytes_fixture,
+        mutate_non_canonical_varuint_fixture, mutate_trailing_bytes_fixture,
         mutate_unknown_base_claim_profile_fixture, mutate_unknown_evaluation_profile_fixture,
-        mutate_unknown_field_fixture, mutate_unknown_mhe_security_stage_fixture,
+        mutate_unknown_field_fixture, mutate_unknown_mhe_security_closure_fixture,
         mutate_unsupported_envelope_version_fixture, mutate_unsupported_object_type_fixture,
-        mutate_unsupported_object_version_fixture, parse_transcript_core_object,
-        serialize_transcript_core_object,
+        mutate_unsupported_object_version_fixture, mutate_wrong_evaluation_profile_fixture,
+        parse_transcript_core_object, serialize_transcript_core_object,
     },
 };
 
@@ -48,8 +46,8 @@ pub struct GoldenTranscriptCoreFixture {
     pub object_version: u64,
     #[serde(rename = "baseClaimProfile")]
     pub base_claim_profile: String,
-    #[serde(rename = "mheSecurityStage")]
-    pub mhe_security_stage: String,
+    #[serde(rename = "mheSecurityClosure")]
+    pub mhe_security_closure: String,
     #[serde(rename = "baseClaimProfileId")]
     pub base_claim_profile_id: String,
     #[serde(rename = "mheSecurityProfileId")]
@@ -96,16 +94,8 @@ pub fn verify_fixture(fixture: &TranscriptCoreFixture) -> CanonicalResult<Value>
 pub fn canonical_fixture_set() -> CanonicalResult<Vec<TranscriptCoreFixture>> {
     Ok(vec![
         TranscriptCoreFixture::GoldenTranscriptCore(Box::new(build_golden_fixture(
-            "result-computed-passive-mhe-transcript-core",
-            RESULT_COMPUTED_PASSIVE_MHE_PROFILE,
-        )?)),
-        TranscriptCoreFixture::GoldenTranscriptCore(Box::new(build_golden_fixture(
             "fully-verified-passive-mhe-transcript-core",
             FULLY_VERIFIED_PASSIVE_MHE_PROFILE,
-        )?)),
-        TranscriptCoreFixture::GoldenTranscriptCore(Box::new(build_golden_fixture(
-            "result-computed-active-malicious-transcript-core",
-            RESULT_COMPUTED_ACTIVE_MALICIOUS_PROFILE,
         )?)),
         TranscriptCoreFixture::GoldenTranscriptCore(Box::new(build_golden_fixture(
             "fully-verified-active-malicious-transcript-core",
@@ -154,7 +144,7 @@ pub fn canonical_fixture_set() -> CanonicalResult<Vec<TranscriptCoreFixture>> {
         TranscriptCoreFixture::MalformedObject(build_malformed_fixture(
             "unknown-evaluation-proof-profile",
             mutate_unknown_evaluation_profile_fixture(),
-            CanonicalErrorCode::UnknownProofProfile,
+            CanonicalErrorCode::ProfileComponentMismatch,
         )),
         TranscriptCoreFixture::MalformedObject(build_malformed_fixture(
             "malformed-magic",
@@ -182,14 +172,14 @@ pub fn canonical_fixture_set() -> CanonicalResult<Vec<TranscriptCoreFixture>> {
             CanonicalErrorCode::UnknownBaseClaimProfile,
         )),
         TranscriptCoreFixture::MalformedObject(build_malformed_fixture(
-            "unknown-mhe-security-stage",
-            mutate_unknown_mhe_security_stage_fixture(),
-            CanonicalErrorCode::UnknownMheSecurityStage,
+            "unknown-mhe-security-closure",
+            mutate_unknown_mhe_security_closure_fixture(),
+            CanonicalErrorCode::UnknownMheSecurityClosure,
         )),
         TranscriptCoreFixture::MalformedObject(build_malformed_fixture(
             "base-claim-profile-mismatch",
             mutate_base_claim_profile_mismatch_fixture(),
-            CanonicalErrorCode::ProfileComponentMismatch,
+            CanonicalErrorCode::UnknownProofProfile,
         )),
         TranscriptCoreFixture::MalformedObject(build_malformed_fixture(
             "mhe-security-profile-mismatch",
@@ -197,8 +187,8 @@ pub fn canonical_fixture_set() -> CanonicalResult<Vec<TranscriptCoreFixture>> {
             CanonicalErrorCode::ProfileComponentMismatch,
         )),
         TranscriptCoreFixture::MalformedObject(build_malformed_fixture(
-            "result-computed-optional-evaluation-profile",
-            mutate_result_computed_optional_evaluation_profile_fixture(),
+            "wrong-evaluation-proof-profile",
+            mutate_wrong_evaluation_profile_fixture(),
             CanonicalErrorCode::ProfileComponentMismatch,
         )),
         TranscriptCoreFixture::MalformedObject(build_malformed_fixture(
@@ -250,9 +240,9 @@ fn verify_golden_fixture(fixture: &GoldenTranscriptCoreFixture) -> CanonicalResu
         analysis.base_claim_profile,
     )?;
     compare_fixture_value(
-        "mheSecurityStage",
-        fixture.mhe_security_stage.as_str(),
-        analysis.mhe_security_stage,
+        "mheSecurityClosure",
+        fixture.mhe_security_closure.as_str(),
+        analysis.mhe_security_closure,
     )?;
     compare_fixture_value(
         "baseClaimProfileId",
@@ -354,7 +344,7 @@ fn build_golden_fixture(
         object_type: analysis.object_type.to_string(),
         object_version: analysis.object_version,
         base_claim_profile: analysis.base_claim_profile.to_string(),
-        mhe_security_stage: analysis.mhe_security_stage.to_string(),
+        mhe_security_closure: analysis.mhe_security_closure.to_string(),
         base_claim_profile_id: analysis.base_claim_profile_id,
         mhe_security_profile_id: analysis.mhe_security_profile_id,
         he_setup_proof_profile_id: analysis.he_setup_proof_profile_id,

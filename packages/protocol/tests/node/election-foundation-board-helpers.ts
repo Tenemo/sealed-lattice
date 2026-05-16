@@ -1,19 +1,25 @@
-import {
-    deriveBoardEntryDigest,
-    deriveBoardHeadDigest,
-    deriveBoardRootDigest,
-    deriveInclusionProofDigest,
-    deriveProtocolDigest,
-    deriveTargetFinalityRecordDigest,
-    deriveWitnessCheckpointDigest,
-} from '../../src/index';
+import { deriveProtocolDigest } from '@sealed-lattice/crypto';
 import type {
     BoardConsistencyInput,
     InclusionProof,
     SignedBoardHead,
     TargetFinalityRecord,
     WitnessCheckpoint,
-} from '../../src/index';
+} from '@sealed-lattice/types';
+
+import {
+    deriveBoardEntryMerklePath,
+    deriveBoardEntryDigest,
+    deriveBoardHeadDigest,
+    deriveBoardRootDigest,
+    deriveInclusionProofDigest,
+} from '../../src/board/index';
+import {
+    deriveTargetFinalityCheckpointDigest,
+    deriveTargetFinalityRecordDigest,
+    deriveTargetProposalDigest,
+    deriveWitnessCheckpointDigest,
+} from '../../src/finality/index';
 
 import {
     boardPolicyDigest,
@@ -22,6 +28,7 @@ import {
     createKeyFixture,
     createSignature,
     defaultTopKEvaluationRecordDigest,
+    manifestOpaqueBindings,
     targetFinalityPolicyDigest,
     witnessIdentities,
     witnessPolicyDigest,
@@ -29,7 +36,7 @@ import {
 } from './election-foundation-fixture-constants';
 
 export const createBoardHead = (
-    boardSeq: number,
+    boardSequence: number,
     previousHeadDigest: string | null,
     branchName = 'main',
     boardEntryDigests?: readonly string[],
@@ -38,7 +45,7 @@ export const createBoardHead = (
         deriveProtocolDigest('BoardEntryDigest', {
             branchName,
             marker: 'empty-board-head',
-            boardSeq,
+            boardSequence,
         }),
     ];
     const unsignedHead: SignedBoardHead = {
@@ -46,7 +53,7 @@ export const createBoardHead = (
         objectVersion: 1,
         headDigest: '',
         ceremonyId,
-        boardSeq,
+        boardSequence,
         boardRoot: deriveBoardRootDigest(resolvedBoardEntryDigests),
         previousHeadDigest,
         boardPolicyDigest,
@@ -97,13 +104,17 @@ export const createInclusionProof = (
         );
     const payload = {
         boardHeadDigest: head.headDigest,
-        boardSeq: head.boardSeq,
+        boardSequence: head.boardSequence,
         boardPosition,
         includedObjectType,
         includedObjectDigest,
         boardEntryDigest,
         boardRoot: deriveBoardRootDigest(resolvedBoardEntryDigests),
-        boardEntryDigests: resolvedBoardEntryDigests,
+        boardEntryCount: resolvedBoardEntryDigests.length,
+        boardEntryMerklePath: deriveBoardEntryMerklePath(
+            resolvedBoardEntryDigests,
+            boardPosition,
+        ),
     };
 
     return {
@@ -113,7 +124,7 @@ export const createInclusionProof = (
 };
 
 export const createBoardHeadWithObjects = (
-    boardSeq: number,
+    boardSequence: number,
     previousHeadDigest: string | null,
     objects: readonly {
         readonly objectType: InclusionProof['includedObjectType'];
@@ -140,7 +151,7 @@ export const createBoardHeadWithObjects = (
                 ? deriveProtocolDigest('BoardEntryDigest', {
                       filler: boardPosition,
                       branchName,
-                      boardSeq,
+                      boardSequence,
                   })
                 : deriveBoardEntryDigest({
                       boardPosition: object.boardPosition,
@@ -150,7 +161,7 @@ export const createBoardHeadWithObjects = (
         },
     );
     const head = createBoardHead(
-        boardSeq,
+        boardSequence,
         previousHeadDigest,
         branchName,
         boardEntryDigests,
@@ -169,13 +180,13 @@ export const createBoardHeadWithObjects = (
 };
 
 export const createTargetProposalHead = (
-    boardSeq: number,
+    boardSequence: number,
     previousHeadDigest: string | null,
     branchName = 'main',
     topKEvaluationRecordDigest = defaultTopKEvaluationRecordDigest,
 ): SignedBoardHead =>
     createBoardHeadWithObjects(
-        boardSeq,
+        boardSequence,
         previousHeadDigest,
         [
             {
@@ -190,14 +201,28 @@ export const createTargetProposalHead = (
 export const createWitnessCheckpoint = (
     witnessIdentity: string,
     finalizedBoardHeadDigest: string,
+    targetProposalDigest = deriveProtocolDigest('TargetProposalDigest', {
+        finalizedBoardHeadDigest,
+        witnessIdentity,
+    }),
+    targetFinalityCheckpointDigest = deriveProtocolDigest(
+        'TargetFinalityCheckpointDigest',
+        {
+            finalizedBoardHeadDigest,
+            targetProposalDigest,
+            witnessIdentity,
+        },
+    ),
+    electionManifestDigest: string | null = null,
     overrides: Partial<WitnessCheckpoint> = {},
 ): WitnessCheckpoint => {
     const checkpointPayload = {
         objectType: 'WitnessCheckpoint',
         objectVersion: 1,
         ceremonyId,
-        targetPhase: 'target',
-        finalizedBoardHeadDigest,
+        targetFinalityScope: 'target',
+        targetProposalDigest,
+        targetFinalityCheckpointDigest,
         witnessPolicyDigest,
         targetFinalityPolicyDigest,
         witnessIdentity,
@@ -217,7 +242,8 @@ export const createWitnessCheckpoint = (
                     .publicKeyDigest,
             checkpointDigest,
             {
-                boardHeadHash: finalizedBoardHeadDigest,
+                boardHeadDigest: finalizedBoardHeadDigest,
+                manifestDigest: electionManifestDigest,
             },
         ),
     };
@@ -228,6 +254,53 @@ export const createTargetFinalityRecord = (
     topKEvaluationRecordDigest = defaultTopKEvaluationRecordDigest,
     witnessCount = 5,
 ): TargetFinalityRecord => {
+    const proposalPayload = {
+        ceremonyId,
+        electionManifestDigest: deriveProtocolDigest('ElectionManifestDigest', {
+            ceremonyId,
+            marker: 'default-manifest',
+        }),
+        evaluationContextDigest: deriveProtocolDigest(
+            'EvaluationContextDigest',
+            { ceremonyId, marker: 'top-k-evaluation' },
+        ),
+        topKEvaluationRecordDigest,
+        topKCiphertextDigest: deriveProtocolDigest('CiphertextRoot', {
+            ceremonyId,
+            marker: 'c-top-k',
+        }),
+        publicSlotMaskDigest: deriveProtocolDigest('PublicSlotMaskDigest', {
+            ceremonyId,
+            marker: 'top-k-mask',
+        }),
+        targetCiphertextDigest: deriveProtocolDigest('CiphertextRoot', {
+            ceremonyId,
+            marker: 'c-target',
+        }),
+        targetLayoutDigest: deriveProtocolDigest('TargetLayoutDigest', {
+            layout: 'WinnerRankTopK-v1',
+        }),
+        evaluationProofProfileDigest:
+            manifestOpaqueBindings.evaluationProofProfileDigest,
+        targetFinalityPolicyDigest,
+    };
+    const targetProposalDigest = deriveTargetProposalDigest(proposalPayload);
+    const targetFinalityCheckpointPayload = {
+        ...proposalPayload,
+        targetProposalDigest,
+        objectType: 'TargetFinalityCheckpoint',
+        objectVersion: 1,
+        boardPolicyDigest,
+        finalizedBoardHeadDigest: finalizedHead.headDigest,
+        witnessPolicyDigest,
+    } as const;
+    const targetFinalityCheckpointDigest = deriveTargetFinalityCheckpointDigest(
+        targetFinalityCheckpointPayload,
+    );
+    const targetFinalityCheckpoint = {
+        ...targetFinalityCheckpointPayload,
+        targetFinalityCheckpointDigest,
+    };
     const inclusionProof = createInclusionProof(
         finalizedHead,
         'TopKEvaluationRecord',
@@ -236,15 +309,21 @@ export const createTargetFinalityRecord = (
     const witnessCheckpoints = witnessIdentities
         .slice(0, witnessCount)
         .map((witnessIdentity) =>
-            createWitnessCheckpoint(witnessIdentity, finalizedHead.headDigest),
+            createWitnessCheckpoint(
+                witnessIdentity,
+                finalizedHead.headDigest,
+                targetProposalDigest,
+                targetFinalityCheckpointDigest,
+                proposalPayload.electionManifestDigest,
+            ),
         );
     const payload = {
         objectType: 'TargetFinalityRecord',
         objectVersion: 1,
         ceremonyId,
-        targetPhase: 'target',
-        finalizedBoardHeadDigest: finalizedHead.headDigest,
-        topKEvaluationRecordDigest,
+        targetFinalityScope: 'target',
+        targetProposalDigest,
+        targetFinalityCheckpoint,
         witnessPolicyDigest,
         targetFinalityPolicyDigest,
         inclusionProof,

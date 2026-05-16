@@ -15,12 +15,24 @@ export const mapInclusionProofsByObjectDigest = (
         inclusionProofs.map((proof) => [proof.includedObjectDigest, proof]),
     );
 
-export const verifyRequiredInclusionProof = (
-    proofByDigest: ReadonlyMap<ProtocolDigest, InclusionProof>,
-    objectDigest: ProtocolDigest,
-    expectedObjectType: InclusionProof['includedObjectType'],
-    headsByDigest: ReadonlyMap<ProtocolDigest, SignedBoardHead>,
-): readonly RefusalRecord[] => {
+export const verifyRequiredIncludedObjectPlacement = (input: {
+    readonly expectedObjectType: InclusionProof['includedObjectType'];
+    readonly headsByDigest: ReadonlyMap<ProtocolDigest, SignedBoardHead>;
+    readonly objectBoardPosition: number;
+    readonly objectBoardSequence: number;
+    readonly objectDigest: ProtocolDigest;
+    readonly proofByDigest: ReadonlyMap<ProtocolDigest, InclusionProof>;
+    readonly rosterFreezeBoardSequence?: number;
+}): readonly RefusalRecord[] => {
+    const {
+        expectedObjectType,
+        headsByDigest,
+        objectBoardPosition,
+        objectBoardSequence,
+        objectDigest,
+        proofByDigest,
+        rosterFreezeBoardSequence,
+    } = input;
     const proof = proofByDigest.get(objectDigest);
     if (proof === undefined) {
         return [
@@ -33,10 +45,11 @@ export const verifyRequiredInclusionProof = (
         ];
     }
     const refusedObjects: RefusalRecord[] = [];
-    if (
-        proof.includedObjectType !== expectedObjectType ||
-        proof.includedObjectDigest !== objectDigest
-    ) {
+    const proofBindsExpectedObject =
+        proof.includedObjectType === expectedObjectType &&
+        proof.includedObjectDigest === objectDigest;
+
+    if (!proofBindsExpectedObject) {
         refusedObjects.push(
             createRefusal(
                 'InclusionProofInvalid',
@@ -48,31 +61,11 @@ export const verifyRequiredInclusionProof = (
     }
     refusedObjects.push(...verifyInclusionProof(proof, headsByDigest));
 
-    return refusedObjects;
-};
-
-export const verifyIncludedBoardPlacement = (
-    proofByDigest: ReadonlyMap<ProtocolDigest, InclusionProof>,
-    objectDigest: ProtocolDigest,
-    expectedObjectType: InclusionProof['includedObjectType'],
-    objectBoardSeq: number,
-    objectBoardPosition: number,
-    rosterFreezeBoardSeq: number | undefined,
-): readonly RefusalRecord[] => {
-    const proof = proofByDigest.get(objectDigest);
-    if (proof === undefined) {
-        return [];
-    }
-    const refusedObjects: RefusalRecord[] = [];
-
-    if (
-        proof.includedObjectType !== expectedObjectType ||
-        proof.includedObjectDigest !== objectDigest
-    ) {
+    if (!proofBindsExpectedObject) {
         return refusedObjects;
     }
     if (
-        proof.boardSeq !== objectBoardSeq ||
+        proof.boardSequence !== objectBoardSequence ||
         proof.boardPosition !== objectBoardPosition
     ) {
         refusedObjects.push(
@@ -85,8 +78,8 @@ export const verifyIncludedBoardPlacement = (
         );
     }
     if (
-        rosterFreezeBoardSeq !== undefined &&
-        proof.boardSeq >= rosterFreezeBoardSeq
+        rosterFreezeBoardSequence !== undefined &&
+        proof.boardSequence >= rosterFreezeBoardSequence
     ) {
         refusedObjects.push(
             createRefusal(

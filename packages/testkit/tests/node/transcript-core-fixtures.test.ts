@@ -15,7 +15,7 @@ import {
 describe('transcript-core fixtures', () => {
     it('loads transcript-core fixture groups from test vectors', async () => {
         await expect(loadGoldenTranscriptCoreFixtures()).resolves.toHaveLength(
-            4,
+            2,
         );
         await expect(loadMalformedObjectFixtures()).resolves.toHaveLength(21);
     });
@@ -27,7 +27,7 @@ describe('transcript-core fixtures', () => {
             process.chdir('packages/testkit');
             await expect(
                 loadGoldenTranscriptCoreFixtures(),
-            ).resolves.toHaveLength(4);
+            ).resolves.toHaveLength(2);
         } finally {
             process.chdir(originalWorkingDirectory);
         }
@@ -39,7 +39,7 @@ describe('transcript-core fixtures', () => {
         await expect(
             verifyTranscriptCoreFixture(replayFixture.fixture),
         ).resolves.toEqual({
-            caseName: 'result-computed-passive-mhe-transcript-core',
+            caseName: 'fully-verified-passive-mhe-transcript-core',
             label: 'TranscriptCoreVerified',
             objectHash512: replayFixture.fixture.expectedObjectHash512,
             chunkRoot: replayFixture.fixture.expectedChunkRoot,

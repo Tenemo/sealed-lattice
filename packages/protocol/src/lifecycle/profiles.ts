@@ -4,6 +4,10 @@ import type {
     ScoreDomain,
     TiePolicy,
 } from '@sealed-lattice/types';
+export {
+    cpadProfileId,
+    targetBoundShareSelectionProfileId,
+} from '@sealed-lattice/types';
 
 export const strictLessThanOneThirdModel = {
     kind: 'StrictLessThanOneThird',

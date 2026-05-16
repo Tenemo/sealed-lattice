@@ -9,6 +9,7 @@ import {
     deriveMlDsaPublicKeyDigest,
     deriveProtocolDigest,
     deriveProtocolSignatureDigest,
+    hash512,
     hash512Hex,
     resolveProtocolDigestDomain,
     verifySignedObjectSignature,
@@ -24,8 +25,8 @@ const createSignedRoot = (
     objectType: 'BoardHead',
     objectVersion: 1,
     ceremonyId: 'ceremony',
-    manifestHash: null,
-    boardHeadHash: null,
+    manifestDigest: null,
+    boardHeadDigest: null,
     objectRoot,
     chunkMerkleRoot: null,
     byteLength: 64,
@@ -57,12 +58,82 @@ describe('crypto primitive boundary', () => {
         );
     });
 
+    it('hashes large byte parts without argument spreading', () => {
+        const largeCanonicalPart = new Uint8Array(200_000);
+
+        largeCanonicalPart.fill(7);
+
+        expect(
+            hash512('sealed-lattice-root/plaintext-root-v1', [
+                largeCanonicalPart,
+            ]),
+        ).toHaveLength(64);
+    });
+
+    it('rejects unreserved protocol digest namespaces', () => {
+        expect(() =>
+            resolveProtocolDigestDomain('AuxiliaryBridgeModulusDigest'),
+        ).toThrow('reserved');
+        expect(() =>
+            resolveProtocolDigestDomain(
+                'sealed-lattice-root/auxiliary-bridge-modulus-digest-v1',
+            ),
+        ).toThrow('reserved');
+        expect(() =>
+            deriveProtocolDigest('ReceiverKeyRoot', {
+                receiver: 'fixture',
+            }),
+        ).toThrow('reserved');
+    });
+
     it('canonicalizes JSON deterministically and rejects unsupported values', () => {
+        const objectWithPrototypeKey: Record<string, unknown> = {
+            safe: true,
+        };
+        Object.defineProperty(objectWithPrototypeKey, '__proto__', {
+            value: { polluted: true },
+            enumerable: true,
+            configurable: true,
+            writable: true,
+        });
+        const objectWithEquivalentUnicodeKeys: Record<string, unknown> = {};
+        Object.defineProperty(objectWithEquivalentUnicodeKeys, '\u0065\u0301', {
+            value: 'first',
+            enumerable: true,
+            configurable: true,
+            writable: true,
+        });
+        Object.defineProperty(objectWithEquivalentUnicodeKeys, '\u00e9', {
+            value: 'second',
+            enumerable: true,
+            configurable: true,
+            writable: true,
+        });
+        const sparseArray = new Array<unknown>(1);
+
         expect(canonicalJson({ b: [2, 1], a: { z: true } })).toBe(
             '{"a":{"z":true},"b":[2,1]}',
         );
+        expect(canonicalJson({ value: '\u0065\u0301' })).toBe(
+            '{"value":"\u00e9"}',
+        );
+        expect(() => canonicalJson(objectWithEquivalentUnicodeKeys)).toThrow(
+            'NFC normalization',
+        );
+        expect(() => canonicalJson({ value: '\ud800' })).toThrow(
+            'lone UTF-16 surrogates',
+        );
+        expect(() => canonicalJson({ '\udc00': true })).toThrow(
+            'lone UTF-16 surrogates',
+        );
+        expect(canonicalJson(objectWithPrototypeKey)).toBe(
+            '{"__proto__":{"polluted":true},"safe":true}',
+        );
         expect(() => canonicalJson({ missing: undefined })).toThrow(
             'Canonical objects cannot contain undefined.',
+        );
+        expect(() => canonicalJson(sparseArray)).toThrow(
+            'Canonical arrays cannot be sparse.',
         );
         expect(() => canonicalJson(1.5)).toThrow(
             'Canonical numeric fields must be safe integers.',
@@ -100,8 +171,8 @@ describe('crypto primitive boundary', () => {
                 ceremonyId: 'ceremony',
                 publicKeyDigest: keyPair.publicKeyDigest,
                 objectRoot: signedRoot.objectRoot,
-                boardHeadHash: null,
-                manifestHash: null,
+                boardHeadDigest: null,
+                manifestDigest: null,
                 contextDigest,
             }).ok,
         ).toBe(true);
@@ -116,8 +187,8 @@ describe('crypto primitive boundary', () => {
                     key: 'wrong',
                 }),
                 objectRoot: signedRoot.objectRoot,
-                boardHeadHash: null,
-                manifestHash: null,
+                boardHeadDigest: null,
+                manifestDigest: null,
                 contextDigest,
             }).refusedObjects,
         ).toEqual(
@@ -177,8 +248,8 @@ describe('crypto primitive boundary', () => {
                     ceremonyId: 'ceremony',
                     publicKeyDigest: keyPair.publicKeyDigest,
                     objectRoot: signedRoot.objectRoot,
-                    boardHeadHash: null,
-                    manifestHash: null,
+                    boardHeadDigest: null,
+                    manifestDigest: null,
                     contextDigest,
                 }).refusedObjects,
             ).toEqual(

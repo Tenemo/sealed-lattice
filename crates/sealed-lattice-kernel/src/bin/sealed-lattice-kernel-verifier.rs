@@ -1,4 +1,4 @@
-use sealed_lattice_kernel::{TRANSCRIPT_CORE_COMMAND_CONTRACT_VERSION, fixtures, verifier};
+use sealed_lattice_kernel::{TRANSCRIPT_CORE_COMMAND_CONTRACT_VERSION, fixtures};
 
 fn main() {
     if std::env::args().any(|argument| argument == "--emit-transcript-core-fixtures") {
@@ -13,7 +13,6 @@ fn main() {
     }
 
     println!(
-        "sealed-lattice kernel verifier future implementation ({TRANSCRIPT_CORE_COMMAND_CONTRACT_VERSION})"
+        "sealed-lattice kernel verifier command contract {TRANSCRIPT_CORE_COMMAND_CONTRACT_VERSION}"
     );
-    println!("{}", verifier::future_implementation_summary());
 }

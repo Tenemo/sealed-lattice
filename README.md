@@ -34,24 +34,31 @@ and five private internal packages:
 - `@sealed-lattice/testkit`
 
 The workspace also contains `crates/sealed-lattice-kernel`, the Rust transcript
-core used by the native test and WASM loading path.
+core used by the native test and WASM loading path. The internal WASM command
+surface covers transcript fixture verification, protocol digest derivation, and
+the current `GF(65537)` interpolation/comparison checks used to keep the
+TypeScript reference path pinned to the kernel behavior.
 
 ## Current public boundary
 
 The published `sealed-lattice` package currently exposes a safe transcript core
 fixture verifier plus the threshold, lifecycle, poll specification, capability,
-board/finality, roster-manifest, cast receipt, close record, first-come, and
-recovery-epoch election foundation helpers.
+board/finality, roster-manifest, cast receipt, close record, validated ordering,
+and recovery-epoch election foundation helpers.
 
 This keeps packaging, documentation, smoke checks, transcript fixtures, and
 release flow stable while the broader voting API remains future implementation.
+
+Internal PVSS ballot-algebra helpers are deterministic test infrastructure only:
+they are not exported by the public package and must not be used for real ballot
+confidentiality.
 
 - workspace layout and package boundaries
 - packaging and tarball smoke checks
 - TypeScript, ESLint, browser, and Node verification
 - Astro documentation and TypeDoc generation
 - transcript core test vector manifest verification
-- election foundation board/finality, roster-manifest, ML-DSA-65 signed-root, cast receipt, close record, first-come, and recovery-epoch checks
+- election foundation board/finality, roster-manifest, ML-DSA-65 signed-root, cast receipt, close record, validated ordering, and recovery-epoch checks
 - the Rust-to-WASM transcript core toolchain
 
 ## Documentation

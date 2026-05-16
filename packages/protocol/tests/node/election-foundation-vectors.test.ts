@@ -1,28 +1,11 @@
-import { describe, expect, it } from 'vitest';
-
-import boardFinalityJson from '../../../../test-vectors/election-foundation/board-finality.json';
-import capabilityRefusalsJson from '../../../../test-vectors/election-foundation/capability-refusals.json';
-import deterministicFixturesJson from '../../../../test-vectors/election-foundation/deterministic-fixtures.json';
-import lifecycleTransitionsJson from '../../../../test-vectors/election-foundation/lifecycle-transitions.json';
-import pollSpecsJson from '../../../../test-vectors/election-foundation/poll-specs.json';
-import thresholdProfilesJson from '../../../../test-vectors/election-foundation/threshold-profiles.json';
 import {
-    deriveValidatedFirstComeOrder,
-    deriveThresholdProfile,
-    evaluateActionCapability,
-    isValidLifecycleTransition,
     protocolDigestNamespaceValues,
-    validatePollSpec,
-    verifyBoardConsistency,
-    verifyRecoveryEpochUpdate,
-    verifyRosterManifestTranscript,
     verifySignedObjectSignature,
-    verifyTargetFinality,
-} from '../../src/index';
+} from '@sealed-lattice/crypto';
 import type {
     BoardConsistencyInput,
     CapabilityContext,
-    FirstComeOrderingInput,
+    FirstValidOrderingInput,
     PollSpecInput,
     ProtocolAction,
     ProtocolSignatureEnvelope,
@@ -33,6 +16,25 @@ import type {
     TargetFinalityVerificationInput,
     ThresholdProfile,
     ThresholdProfileInput,
+} from '@sealed-lattice/types';
+import { describe, expect, it } from 'vitest';
+
+import boardFinalityJson from '../../../../test-vectors/election-foundation/board-finality.json';
+import capabilityRefusalsJson from '../../../../test-vectors/election-foundation/capability-refusals.json';
+import deterministicFixturesJson from '../../../../test-vectors/election-foundation/deterministic-fixtures.json';
+import lifecycleTransitionsJson from '../../../../test-vectors/election-foundation/lifecycle-transitions.json';
+import pollSpecsJson from '../../../../test-vectors/election-foundation/poll-specs.json';
+import thresholdProfilesJson from '../../../../test-vectors/election-foundation/threshold-profiles.json';
+import {
+    deriveValidatedFirstValidOrder,
+    deriveThresholdProfile,
+    evaluateActionCapability,
+    isValidLifecycleTransition,
+    validatePollSpec,
+    verifyBoardConsistency,
+    verifyRecoveryEpochUpdate,
+    verifyRosterManifestTranscript,
+    verifyTargetFinality,
 } from '../../src/index';
 
 type ThresholdProfileVector = {
@@ -97,16 +99,16 @@ type BoardFinalityVectors = {
             | 'roster-manifest'
             | 'signed-root'
             | 'target-finality'
-            | 'target-phase';
+            | 'target-acceptance';
         readonly expectedOk: boolean;
         readonly expectedRefusalCodes: readonly string[];
         readonly expectedEquivocatingWitnessCount?: number;
     }[];
     readonly requiredDigestNamespaces: readonly string[];
-    readonly firstComeOrdering: FirstComeOrderingInput & {
+    readonly firstValidOrdering: FirstValidOrderingInput & {
         readonly expectedOrderedObjectDigests: readonly string[];
     };
-    readonly negativeFirstComeOrderings: readonly (FirstComeOrderingInput & {
+    readonly negativeFirstValidOrderings: readonly (FirstValidOrderingInput & {
         readonly caseName: string;
         readonly expectedRefusalCodes: readonly string[];
     })[];
@@ -147,10 +149,11 @@ type DeterministicFixtureVectors = {
             ReturnType<typeof verifyTargetFinality>,
             | 'acceptedDigests'
             | 'equivocatingWitnessIdentities'
-            | 'finalizedBoardHeadDigest'
             | 'ok'
             | 'refusedObjects'
+            | 'targetFinalityCheckpointDigest'
             | 'targetFinalityRecordDigest'
+            | 'targetProposalDigest'
             | 'validWitnessIdentities'
         >;
     };
@@ -168,9 +171,9 @@ const pollSpecs = pollSpecsJson as PollSpecVectors;
 const lifecycleTransitions =
     lifecycleTransitionsJson as LifecycleTransitionVectors;
 const capabilityRefusals = capabilityRefusalsJson as CapabilityVectors;
-const boardFinality = boardFinalityJson as BoardFinalityVectors;
+const boardFinality = boardFinalityJson as unknown as BoardFinalityVectors;
 const deterministicFixtures =
-    deterministicFixturesJson as DeterministicFixtureVectors;
+    deterministicFixturesJson as unknown as DeterministicFixtureVectors;
 
 describe('election foundation test vectors', () => {
     it('matches deterministic threshold-profile vectors', () => {
@@ -220,7 +223,7 @@ describe('election foundation test vectors', () => {
         }
     });
 
-    it('matches board-finality and first-come vectors', () => {
+    it('matches board-finality and first-valid vectors', () => {
         expect(boardFinality.mandatoryTargetFinalityPolicy).toEqual({
             witnessTotal: 7,
             witnessQuorum: 5,
@@ -239,8 +242,9 @@ describe('election foundation test vectors', () => {
             'target-finality-duplicate-witness',
             'target-finality-unknown-witness',
             'target-finality-conflicting-finalized-heads',
-            'replay-attestation-without-finality',
-            'decryption-share-wrong-finality',
+            'local-replay-without-finality',
+            'target-accepted-record-missing-evaluation-proof',
+            'decryption-share-wrong-accepted-target',
             'honest-roster-manifest',
             'duplicate-registration',
             'late-registration',
@@ -263,18 +267,16 @@ describe('election foundation test vectors', () => {
         }
 
         const { expectedOrderedObjectDigests, ...orderingInput } =
-            boardFinality.firstComeOrdering;
-        const ordering = deriveValidatedFirstComeOrder(orderingInput);
+            boardFinality.firstValidOrdering;
+        const ordering = deriveValidatedFirstValidOrder(orderingInput);
 
         expect(ordering.ok).toBe(true);
         expect(
-            ordering.orderedCandidates.map(
-                (candidate) => candidate.objectDigest,
-            ),
+            ordering.orderedObjects.map((object) => object.objectDigest),
         ).toEqual(expectedOrderedObjectDigests);
 
-        for (const vector of boardFinality.negativeFirstComeOrderings) {
-            const result = deriveValidatedFirstComeOrder(vector);
+        for (const vector of boardFinality.negativeFirstValidOrderings) {
+            const result = deriveValidatedFirstValidOrder(vector);
 
             expect(
                 result.refusedObjects.map((refusal) => refusal.code),
@@ -300,9 +302,9 @@ describe('election foundation test vectors', () => {
                 signerIdentity: envelope.signedRoot.signerIdentity,
                 ceremonyId: envelope.signedRoot.ceremonyId,
                 publicKeyDigest: envelope.publicKeyDigest,
-                manifestHash: envelope.signedRoot.manifestHash,
+                manifestDigest: envelope.signedRoot.manifestDigest,
                 objectRoot: envelope.signedRoot.objectRoot,
-                boardHeadHash: envelope.signedRoot.boardHeadHash,
+                boardHeadDigest: envelope.signedRoot.boardHeadDigest,
                 contextDigest: envelope.signedRoot.contextDigest,
             }),
         ).toMatchObject(deterministicFixtures.signature.expectedVerification);

@@ -142,7 +142,7 @@ describe('packed package smoke helpers', () => {
                 'README.md',
                 'dist/index.js',
                 'dist/internal/election-foundation/plaintext-oracle/index.js',
-                'dist/internal/election-foundation/target-phase/index.js',
+                'dist/internal/election-foundation/target-acceptance/index.js',
                 'dist/tsconfig.tsbuildinfo',
             ]),
         ).toEqual([
@@ -155,9 +155,10 @@ describe('packed package smoke helpers', () => {
             'Published package is missing required file: dist/internal/protocol-objects.d.ts',
             'Published package is missing required file: dist/internal/roster-recovery.d.ts',
             'Published package is missing required file: dist/internal/transcript-core.d.ts',
+            'Published package is missing required file: public-surface.json',
             'Published package must not include TypeScript build metadata: dist/tsconfig.tsbuildinfo',
             'Published package must not include internal protocol runtime: dist/internal/election-foundation/plaintext-oracle/index.js',
-            'Published package must not include internal protocol runtime: dist/internal/election-foundation/target-phase/index.js',
+            'Published package must not include internal protocol runtime: dist/internal/election-foundation/target-acceptance/index.js',
         ]);
     });
 
@@ -178,6 +179,7 @@ describe('packed package smoke helpers', () => {
                 'dist/internal/transcript-core.d.ts',
                 'dist/sealed-lattice-kernel.wasm',
                 'package.json',
+                'public-surface.json',
             ]),
         ).toEqual([]);
     });

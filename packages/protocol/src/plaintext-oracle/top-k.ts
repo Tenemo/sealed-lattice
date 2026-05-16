@@ -1,3 +1,4 @@
+import { deriveProtocolDigest } from '@sealed-lattice/crypto';
 import type {
     ComparatorPolynomialSet,
     FieldElement,
@@ -10,7 +11,7 @@ import type {
     PollSpec,
 } from '@sealed-lattice/types';
 
-import { deriveProtocolDigest } from '../common/digests.js';
+import { validatePollSpec } from '../lifecycle/poll-spec.js';
 
 import {
     addFieldElements,
@@ -32,6 +33,12 @@ const toPlaintextScore = (score: number): PlaintextScore => {
 };
 
 const assertPollSpecShape = (pollSpec: PollSpec): void => {
+    const validation = validatePollSpec(pollSpec);
+    if (!validation.ok) {
+        throw new RangeError(
+            'Plaintext oracle poll specification must pass lifecycle validation.',
+        );
+    }
     if (
         pollSpec.scoreDomain.min !== 1 ||
         pollSpec.scoreDomain.max !== 10 ||
@@ -81,7 +88,7 @@ export const normalizePlaintextScoreBallot = (
           };
 };
 
-export const derivePlaintextTally = (input: {
+const derivePlaintextTally = (input: {
     readonly ballots: readonly PlaintextScoreBallotInput[];
     readonly maximumRosterSize?: number;
     readonly pollSpec: PollSpec;
@@ -140,11 +147,11 @@ export const derivePlaintextTally = (input: {
 
     return {
         ...tallyPayload,
-        tallyDigest: deriveProtocolDigest('PlaintextRoot', tallyPayload),
+        tallyDigest: deriveProtocolDigest('PlaintextTallyDigest', tallyPayload),
     };
 };
 
-export const derivePlaintextTopKRanking = (
+const derivePlaintextTopKRanking = (
     tally: Pick<PlaintextTally, 'optionTallies'>,
 ): readonly PlaintextTopKRankingEntry[] =>
     tally.optionTallies
@@ -187,7 +194,7 @@ const multiplyPolynomialByLinearTerm = (
     return output;
 };
 
-export const interpolateFieldPolynomial = (
+const interpolateFieldPolynomial = (
     points: readonly {
         readonly xValue: FieldElement;
         readonly y: FieldElement;
@@ -333,7 +340,10 @@ export const derivePlaintextTopKOracle = (input: {
 
     return {
         ...oraclePayload,
-        oracleDigest: deriveProtocolDigest('PlaintextRoot', oraclePayload),
+        oracleDigest: deriveProtocolDigest(
+            'PlaintextTopKOracleDigest',
+            oraclePayload,
+        ),
         tally,
     };
 };

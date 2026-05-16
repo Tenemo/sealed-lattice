@@ -16,25 +16,33 @@
       "caseName": "fabricated-inclusion-proof",
       "category": "board-consistency",
       "expectedOk": false,
-      "expectedRefusalCodes": ["InclusionProofInvalid"]
+      "expectedRefusalCodes": [
+        "InclusionProofInvalid"
+      ]
     },
     {
       "caseName": "non-ancestor-consistency-proof",
       "category": "board-consistency",
       "expectedOk": false,
-      "expectedRefusalCodes": ["BoardConsistencyFailure"]
+      "expectedRefusalCodes": [
+        "BoardConsistencyFailure"
+      ]
     },
     {
       "caseName": "forked-board-heads",
       "category": "board-consistency",
       "expectedOk": false,
-      "expectedRefusalCodes": ["BoardForkDetected"]
+      "expectedRefusalCodes": [
+        "BoardForkDetected"
+      ]
     },
     {
       "caseName": "signed-root-missing-required-field",
       "category": "signed-root",
       "expectedOk": false,
-      "expectedRefusalCodes": ["InvalidSignedRoot"]
+      "expectedRefusalCodes": [
+        "InvalidSignedRoot"
+      ]
     },
     {
       "caseName": "honest-target-finality-5-of-7",
@@ -46,38 +54,58 @@
       "caseName": "target-finality-too-few-witnesses",
       "category": "target-finality",
       "expectedOk": false,
-      "expectedRefusalCodes": ["WitnessQuorumNotReached"]
+      "expectedRefusalCodes": [
+        "WitnessQuorumNotReached"
+      ]
     },
     {
       "caseName": "target-finality-duplicate-witness",
       "category": "target-finality",
       "expectedOk": false,
-      "expectedRefusalCodes": ["DuplicateWitness"]
+      "expectedRefusalCodes": [
+        "DuplicateWitness"
+      ]
     },
     {
       "caseName": "target-finality-unknown-witness",
       "category": "target-finality",
       "expectedOk": false,
-      "expectedRefusalCodes": ["UnknownWitness"]
+      "expectedRefusalCodes": [
+        "UnknownWitness"
+      ]
     },
     {
       "caseName": "target-finality-conflicting-finalized-heads",
       "category": "target-finality",
       "expectedOk": false,
-      "expectedRefusalCodes": ["BoardForkDetected"],
+      "expectedRefusalCodes": [
+        "BoardForkDetected"
+      ],
       "expectedEquivocatingWitnessCount": 5
     },
     {
-      "caseName": "replay-attestation-without-finality",
-      "category": "target-phase",
+      "caseName": "local-replay-without-finality",
+      "category": "target-acceptance",
       "expectedOk": false,
-      "expectedRefusalCodes": ["TargetPhaseAuthorizationFailure"]
+      "expectedRefusalCodes": [
+        "TargetAcceptanceAuthorizationFailure"
+      ]
     },
     {
-      "caseName": "decryption-share-wrong-finality",
-      "category": "target-phase",
+      "caseName": "target-accepted-record-missing-evaluation-proof",
+      "category": "target-acceptance",
       "expectedOk": false,
-      "expectedRefusalCodes": ["DecryptionShareInvalid"]
+      "expectedRefusalCodes": [
+        "TargetAcceptedRecordInvalid"
+      ]
+    },
+    {
+      "caseName": "decryption-share-wrong-accepted-target",
+      "category": "target-acceptance",
+      "expectedOk": false,
+      "expectedRefusalCodes": [
+        "DecryptionShareInvalid"
+      ]
     },
     {
       "caseName": "honest-roster-manifest",
@@ -89,74 +117,121 @@
       "caseName": "duplicate-registration",
       "category": "roster-manifest",
       "expectedOk": false,
-      "expectedRefusalCodes": ["DuplicateRegistration"]
+      "expectedRefusalCodes": [
+        "DuplicateRegistration"
+      ]
     },
     {
       "caseName": "late-registration",
       "category": "roster-manifest",
       "expectedOk": false,
-      "expectedRefusalCodes": ["LateRegistration"]
+      "expectedRefusalCodes": [
+        "LateRegistration"
+      ]
     },
     {
       "caseName": "conflicting-board-included-manifest",
       "category": "roster-manifest",
       "expectedOk": false,
-      "expectedRefusalCodes": ["ConflictingManifest"]
+      "expectedRefusalCodes": [
+        "ConflictingManifest"
+      ]
     },
     {
       "caseName": "recovery-update-conflict",
       "category": "recovery",
       "expectedOk": false,
-      "expectedRefusalCodes": ["RecoveryUpdateConflict"]
+      "expectedRefusalCodes": [
+        "RecoveryUpdateConflict"
+      ]
     },
     {
       "caseName": "stale-recovery-action",
       "category": "recovery",
       "expectedOk": false,
-      "expectedRefusalCodes": ["StaleRecoveryEpoch"]
+      "expectedRefusalCodes": [
+        "StaleRecoveryEpoch"
+      ]
     }
   ],
   "requiredDigestNamespaces": [
-    "BoardEntryDigest",
-    "BoardHeadDigest",
-    "BoardPolicyDigest",
-    "BoardRootDigest",
-    "CastReceiptDigest",
-    "CloseRecordDigest",
-    "ConflictingHeadEvidenceDigest",
-    "DuplicateBallotPolicyDigest",
-    "ElectionManifestDigest",
-    "EvaluationReplayAttestationDigest",
-    "FirstComeOrderDigest",
-    "FirstComePolicyDigest",
-    "InclusionProofDigest",
-    "PollSpecDigest",
-    "PublicKeyDigest",
-    "ReceiverKeyRegistrationDigest",
-    "RegistrationEntryDigest",
-    "RecoveryEpochUpdateDigest",
-    "RecoveryPolicyDigest",
-    "RosterDigest",
+    "RosterExternalAcceptanceDigest",
+    "FirstValidOrderDigest",
+    "FirstValidPolicyDigest",
+    "WitnessEquivocationEvidenceDigest",
+    "HEParamDigest",
+    "BGVProfileDigest",
+    "CanonicalCiphertextConventionDigest",
+    "BGVPublicKeyRoot",
+    "CollectivePublicKeyRoot",
+    "BGVBatchEncoderDigest",
+    "EvaluationNoiseProfileDigest",
+    "HEEvaluationNoiseCertDigest",
+    "AllowedEvaluatorOpsDigest",
+    "EvaluatorProgramDigest",
+    "BridgeLayoutDigest",
+    "TargetProposalDigest",
+    "TargetFinalityCheckpointDigest",
+    "EvaluationProofRecordDigest",
+    "EvaluationProofProfileDigest",
     "TargetAcceptedRecordDigest",
-    "TargetFinalityPolicyDigest",
-    "TargetFinalityRecordDigest",
-    "ThresholdProfileDigest",
-    "TopKDecryptionShareDigest",
-    "TrusteeSetupEntryDigest",
-    "WitnessPolicyDigest",
-    "WitnessCheckpointDigest",
-    "SignedRootDigest",
-    "ProtocolSignatureEnvelopeDigest",
-    "ProviderBuildDigest",
-    "AggregateSelectionPolicyDigest",
-    "PostVotingClosedContextDigest",
-    "ProofPrimeToQDataKeyConsistencyDigest",
-    "TargetDecryptionPreparationRecordDigest"
+    "TargetPreimageDigest",
+    "TargetContextDigest",
+    "LocalReplayRecordDigest",
+    "CPADProfileDigest",
+    "ThresholdDecryptionProfileDigest",
+    "ThresholdShareVerificationKeyRoot",
+    "ThresholdShareVerificationKeyDigest",
+    "TrusteeThresholdVerificationKeyDigest",
+    "TargetDecryptionPreparationRecordDigest",
+    "TargetDecryptionCiphertextDigest",
+    "ShareReplayEvidenceDigest",
+    "ShareReplayRefusalDigest",
+    "BGVAsyncThresholdCPADProfileDigest",
+    "TargetBasisDigest"
   ],
-  "firstComeOrdering": {
-    "requiredContextDigest": "context-digest",
-    "selectionPolicyDigest": "selection-policy-digest",
-    "expectedSelectionPolicyDigest": "selection-policy-digest",
+  "firstValidOrdering": {
+    "objects": [
+      {
+        "objectDigest": "object-b",
+        "objectType": "TargetFinalityRecord",
+        "boardSequence": 2,
+        "boardPosition": 1,
+        "signerIdentity": "participant-2",
+        "recoveryEpoch": 0,
+        "deviceEpoch": 0,
+        "actionSequence": 0,
+        "contextDigest": "5a26f4e0d3f67e33f69766521e3e573104d273ad9eafeafbdba2499d9b38d58fd7c47ead554f03f6ec8cb358356d8572b539b03012d1043e28c6be7231724ec0",
+        "isByteIdenticalRetransmission": false
+      },
+      {
+        "objectDigest": "object-a",
+        "objectType": "TargetFinalityRecord",
+        "boardSequence": 1,
+        "boardPosition": 0,
+        "signerIdentity": "participant-1",
+        "recoveryEpoch": 0,
+        "deviceEpoch": 0,
+        "actionSequence": 0,
+        "contextDigest": "5a26f4e0d3f67e33f69766521e3e573104d273ad9eafeafbdba2499d9b38d58fd7c47ead554f03f6ec8cb358356d8572b539b03012d1043e28c6be7231724ec0",
+        "isByteIdenticalRetransmission": false
+      },
+      {
+        "objectDigest": "object-a",
+        "objectType": "TargetFinalityRecord",
+        "boardSequence": 3,
+        "boardPosition": 0,
+        "signerIdentity": "participant-1",
+        "recoveryEpoch": 0,
+        "deviceEpoch": 0,
+        "actionSequence": 0,
+        "contextDigest": "5a26f4e0d3f67e33f69766521e3e573104d273ad9eafeafbdba2499d9b38d58fd7c47ead554f03f6ec8cb358356d8572b539b03012d1043e28c6be7231724ec0",
+        "isByteIdenticalRetransmission": true
+      }
+    ],
+    "requiredContextDigest": "5a26f4e0d3f67e33f69766521e3e573104d273ad9eafeafbdba2499d9b38d58fd7c47ead554f03f6ec8cb358356d8572b539b03012d1043e28c6be7231724ec0",
+    "selectionPolicyDigest": "bcf7f07eab3987510aefb37ed92bf1304824e34bcea4e706867f93b53f9e8f36d2dba2c3419f9a937c72a152727f79764d47e7805feab18fde21b3662f4be317",
+    "expectedSelectionPolicyDigest": "bcf7f07eab3987510aefb37ed92bf1304824e34bcea4e706867f93b53f9e8f36d2dba2c3419f9a937c72a152727f79764d47e7805feab18fde21b3662f4be317",
     "currentRecoveryEpochMap": {
       "participant-1": {
         "signerIdentity": "participant-1",
@@ -169,121 +244,142 @@
         "currentDeviceEpoch": 0
       }
     },
-    "candidates": [
-      {
-        "objectDigest": "candidate-b",
-        "objectType": "TargetFinalityRecord",
-        "boardSeq": 2,
-        "boardPosition": 0,
-        "signerIdentity": "participant-2",
-        "recoveryEpoch": 0,
-        "deviceEpoch": 0,
-        "actionSequence": 0,
-        "contextDigest": "context-digest",
-        "isByteIdenticalRetransmission": false
-      },
-      {
-        "objectDigest": "candidate-a",
-        "objectType": "TargetFinalityRecord",
-        "boardSeq": 1,
-        "boardPosition": 0,
-        "signerIdentity": "participant-1",
-        "recoveryEpoch": 0,
-        "deviceEpoch": 0,
-        "actionSequence": 0,
-        "contextDigest": "context-digest",
-        "isByteIdenticalRetransmission": false
-      },
-      {
-        "objectDigest": "candidate-a",
-        "objectType": "TargetFinalityRecord",
-        "boardSeq": 3,
-        "boardPosition": 0,
-        "signerIdentity": "participant-1",
-        "recoveryEpoch": 0,
-        "deviceEpoch": 0,
-        "actionSequence": 0,
-        "contextDigest": "context-digest",
-        "isByteIdenticalRetransmission": true
-      }
-    ],
     "expectedOrderedObjectDigests": [
-      "candidate-a",
-      "candidate-b"
+      "object-a",
+      "object-b"
     ]
   },
-  "negativeFirstComeOrderings": [
+  "negativeFirstValidOrderings": [
     {
-      "caseName": "mixed-stale-recovery-current-device-before-cutoff",
-      "requiredContextDigest": "context-digest",
-      "selectionPolicyDigest": "selection-policy-digest",
-      "expectedSelectionPolicyDigest": "selection-policy-digest",
-      "currentRecoveryEpochMap": {
-        "participant-1": {
-          "signerIdentity": "participant-1",
-          "currentRecoveryEpoch": 1,
-          "currentDeviceEpoch": 1,
-          "oldActionCutoffBoardSeq": 10
-        }
-      },
-      "candidates": [
+      "caseName": "policy-mismatch",
+      "objects": [
         {
-          "objectDigest": "candidate-stale-mixed-epoch",
+          "objectDigest": "object-b",
           "objectType": "TargetFinalityRecord",
-          "boardSeq": 9,
+          "boardSequence": 2,
+          "boardPosition": 1,
+          "signerIdentity": "participant-2",
+          "recoveryEpoch": 0,
+          "deviceEpoch": 0,
+          "actionSequence": 0,
+          "contextDigest": "5a26f4e0d3f67e33f69766521e3e573104d273ad9eafeafbdba2499d9b38d58fd7c47ead554f03f6ec8cb358356d8572b539b03012d1043e28c6be7231724ec0",
+          "isByteIdenticalRetransmission": false
+        },
+        {
+          "objectDigest": "object-a",
+          "objectType": "TargetFinalityRecord",
+          "boardSequence": 1,
           "boardPosition": 0,
           "signerIdentity": "participant-1",
           "recoveryEpoch": 0,
-          "deviceEpoch": 1,
+          "deviceEpoch": 0,
           "actionSequence": 0,
-          "contextDigest": "context-digest",
+          "contextDigest": "5a26f4e0d3f67e33f69766521e3e573104d273ad9eafeafbdba2499d9b38d58fd7c47ead554f03f6ec8cb358356d8572b539b03012d1043e28c6be7231724ec0",
           "isByteIdenticalRetransmission": false
+        },
+        {
+          "objectDigest": "object-a",
+          "objectType": "TargetFinalityRecord",
+          "boardSequence": 3,
+          "boardPosition": 0,
+          "signerIdentity": "participant-1",
+          "recoveryEpoch": 0,
+          "deviceEpoch": 0,
+          "actionSequence": 0,
+          "contextDigest": "5a26f4e0d3f67e33f69766521e3e573104d273ad9eafeafbdba2499d9b38d58fd7c47ead554f03f6ec8cb358356d8572b539b03012d1043e28c6be7231724ec0",
+          "isByteIdenticalRetransmission": true
         }
       ],
-      "expectedRefusalCodes": [
-        "StaleRecoveryEpoch"
-      ]
-    },
-    {
-      "caseName": "non-identical-same-identity-same-context",
-      "requiredContextDigest": "context-digest",
-      "selectionPolicyDigest": "selection-policy-digest",
-      "expectedSelectionPolicyDigest": "selection-policy-digest",
+      "requiredContextDigest": "5a26f4e0d3f67e33f69766521e3e573104d273ad9eafeafbdba2499d9b38d58fd7c47ead554f03f6ec8cb358356d8572b539b03012d1043e28c6be7231724ec0",
+      "selectionPolicyDigest": "e15080b957c722a401ec25ddc902686c2c8cef37a0eb36999d6d82baa59456ef61f0eedba2b54d1a698638549f03ada592ff250c43ed4ee5a4ac8f42b4aa19fb",
+      "expectedSelectionPolicyDigest": "bcf7f07eab3987510aefb37ed92bf1304824e34bcea4e706867f93b53f9e8f36d2dba2c3419f9a937c72a152727f79764d47e7805feab18fde21b3662f4be317",
       "currentRecoveryEpochMap": {
         "participant-1": {
           "signerIdentity": "participant-1",
           "currentRecoveryEpoch": 0,
           "currentDeviceEpoch": 0
+        },
+        "participant-2": {
+          "signerIdentity": "participant-2",
+          "currentRecoveryEpoch": 0,
+          "currentDeviceEpoch": 0
         }
       },
-      "candidates": [
+      "expectedRefusalCodes": [
+        "FirstValidPolicyMismatch"
+      ]
+    },
+    {
+      "caseName": "context-stale-and-conflict",
+      "objects": [
         {
-          "objectDigest": "candidate-a",
+          "objectDigest": "object-b",
           "objectType": "TargetFinalityRecord",
-          "boardSeq": 1,
+          "boardSequence": 2,
+          "boardPosition": 1,
+          "signerIdentity": "participant-2",
+          "recoveryEpoch": 0,
+          "deviceEpoch": 0,
+          "actionSequence": 0,
+          "contextDigest": "35d7b655cd19fa558700d99f3993a229ef5e6f8ccc4a25cc86c87c1cfb01bbd82b57d524cdf0260abb7ba01bf933e657a49451c8a0b184646e1f0258ebf6284f",
+          "isByteIdenticalRetransmission": false
+        },
+        {
+          "objectDigest": "object-a",
+          "objectType": "TargetFinalityRecord",
+          "boardSequence": 1,
           "boardPosition": 0,
           "signerIdentity": "participant-1",
           "recoveryEpoch": 0,
           "deviceEpoch": 0,
           "actionSequence": 0,
-          "contextDigest": "context-digest",
+          "contextDigest": "5a26f4e0d3f67e33f69766521e3e573104d273ad9eafeafbdba2499d9b38d58fd7c47ead554f03f6ec8cb358356d8572b539b03012d1043e28c6be7231724ec0",
           "isByteIdenticalRetransmission": false
         },
         {
-          "objectDigest": "candidate-conflict",
+          "objectDigest": "object-stale",
           "objectType": "TargetFinalityRecord",
-          "boardSeq": 1,
-          "boardPosition": 1,
+          "boardSequence": 1,
+          "boardPosition": 0,
+          "signerIdentity": "participant-1",
+          "recoveryEpoch": 9,
+          "deviceEpoch": 0,
+          "actionSequence": 1,
+          "contextDigest": "5a26f4e0d3f67e33f69766521e3e573104d273ad9eafeafbdba2499d9b38d58fd7c47ead554f03f6ec8cb358356d8572b539b03012d1043e28c6be7231724ec0",
+          "isByteIdenticalRetransmission": false
+        },
+        {
+          "objectDigest": "object-c",
+          "objectType": "TargetFinalityRecord",
+          "boardSequence": 1,
+          "boardPosition": 0,
           "signerIdentity": "participant-1",
           "recoveryEpoch": 0,
           "deviceEpoch": 0,
-          "actionSequence": 1,
-          "contextDigest": "context-digest",
+          "actionSequence": 0,
+          "contextDigest": "5a26f4e0d3f67e33f69766521e3e573104d273ad9eafeafbdba2499d9b38d58fd7c47ead554f03f6ec8cb358356d8572b539b03012d1043e28c6be7231724ec0",
           "isByteIdenticalRetransmission": false
         }
       ],
+      "requiredContextDigest": "5a26f4e0d3f67e33f69766521e3e573104d273ad9eafeafbdba2499d9b38d58fd7c47ead554f03f6ec8cb358356d8572b539b03012d1043e28c6be7231724ec0",
+      "selectionPolicyDigest": "bcf7f07eab3987510aefb37ed92bf1304824e34bcea4e706867f93b53f9e8f36d2dba2c3419f9a937c72a152727f79764d47e7805feab18fde21b3662f4be317",
+      "expectedSelectionPolicyDigest": "bcf7f07eab3987510aefb37ed92bf1304824e34bcea4e706867f93b53f9e8f36d2dba2c3419f9a937c72a152727f79764d47e7805feab18fde21b3662f4be317",
+      "currentRecoveryEpochMap": {
+        "participant-1": {
+          "signerIdentity": "participant-1",
+          "currentRecoveryEpoch": 0,
+          "currentDeviceEpoch": 0
+        },
+        "participant-2": {
+          "signerIdentity": "participant-2",
+          "currentRecoveryEpoch": 0,
+          "currentDeviceEpoch": 0
+        }
+      },
       "expectedRefusalCodes": [
-        "ConflictingFirstComeCandidate"
+        "FirstValidContextMismatch",
+        "StaleRecoveryEpoch",
+        "ConflictingFirstValidObject"
       ]
     }
   ]

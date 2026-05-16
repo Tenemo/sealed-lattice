@@ -1,4 +1,7 @@
 import type {
+    TargetBoundShareSelectionProfile,
+    DecryptionShareFilteringMode,
+    DecryptionShareSelectionRule,
     HeBackendCorruptionModel,
     RosterProfileKind,
     ThresholdProfile,
@@ -9,6 +12,8 @@ import type {
 import { isNonNegativeInteger } from '../common/verification-helpers.js';
 
 import {
+    targetBoundShareSelectionProfileId,
+    cpadProfileId,
     mandatoryClaimRosterSize,
     maximumCertificateGatedRosterSize,
     minimumUnsafeRosterSize,
@@ -45,6 +50,123 @@ const normalizeBackendCorruptionModel = (
         kind: 'CertifiedCustom',
         backendCorruptionBound: model.backendCorruptionBound,
         certificateDigest: model.certificateDigest,
+    };
+};
+
+const supportedDecryptionShareFilteringModes =
+    new Set<DecryptionShareFilteringMode>([
+        'ProofVerifiedSharesOnly',
+        'RobustDecodeAfterInvalidShareFiltering',
+    ]);
+
+const supportedDecryptionShareSelectionRules =
+    new Set<DecryptionShareSelectionRule>([
+        'FirstValidSharesInCanonicalBoardOrder',
+    ]);
+
+const normalizeTargetBoundShareSelectionProfile = (
+    rosterSize: number,
+    decryptionThreshold: number,
+    profile: TargetBoundShareSelectionProfile | undefined,
+): TargetBoundShareSelectionProfile | null => {
+    if (profile === undefined) {
+        return null;
+    }
+
+    if (profile.profileId !== targetBoundShareSelectionProfileId) {
+        throw new Error(
+            'Target-bound share-selection profile uses an unsupported ID.',
+        );
+    }
+    if (profile.certificateDigest.trim().length === 0) {
+        throw new Error(
+            'Target-bound share-selection profile requires a certificate digest.',
+        );
+    }
+    if (profile.cpadProfileId !== cpadProfileId) {
+        throw new Error(
+            'Target-bound share-selection profile uses an unsupported CPAD profile ID.',
+        );
+    }
+    if (profile.targetBasisDigest.trim().length === 0) {
+        throw new Error(
+            'Target-bound share-selection profile requires a target-basis digest.',
+        );
+    }
+    if (!isNonNegativeInteger(profile.decryptionShareQuorum)) {
+        throw new RangeError(
+            'Target-bound decryption share quorum must be a non-negative integer.',
+        );
+    }
+    if (profile.decryptionShareQuorum < decryptionThreshold) {
+        throw new RangeError(
+            'Target-bound decryption share quorum must be at least the decryption threshold.',
+        );
+    }
+    if (profile.decryptionShareQuorum > rosterSize) {
+        throw new RangeError(
+            'Target-bound decryption share quorum must not exceed rosterSize.',
+        );
+    }
+    if (!isNonNegativeInteger(profile.minimumSharesForInterpolation)) {
+        throw new RangeError(
+            'Target-bound interpolation share count must be a non-negative integer.',
+        );
+    }
+    if (profile.minimumSharesForInterpolation < decryptionThreshold) {
+        throw new RangeError(
+            'Target-bound interpolation share count must be at least the decryption threshold.',
+        );
+    }
+    if (profile.minimumSharesForInterpolation > profile.decryptionShareQuorum) {
+        throw new RangeError(
+            'Target-bound interpolation share count must not exceed the decryption share quorum.',
+        );
+    }
+    if (!isNonNegativeInteger(profile.minimumArrivalsForRobustDecode)) {
+        throw new RangeError(
+            'Target-bound robust-decode arrival count must be a non-negative integer.',
+        );
+    }
+    if (
+        profile.minimumArrivalsForRobustDecode < profile.decryptionShareQuorum
+    ) {
+        throw new RangeError(
+            'Target-bound robust-decode arrival count must be at least the decryption share quorum.',
+        );
+    }
+    if (profile.minimumArrivalsForRobustDecode > rosterSize) {
+        throw new RangeError(
+            'Target-bound robust-decode arrival count must not exceed rosterSize.',
+        );
+    }
+    if (
+        !supportedDecryptionShareFilteringModes.has(
+            profile.invalidShareFilteringMode,
+        )
+    ) {
+        throw new Error(
+            'Target-bound share-selection profile uses an unsupported invalid-share filtering mode.',
+        );
+    }
+    if (
+        !supportedDecryptionShareSelectionRules.has(profile.selectedShareRule)
+    ) {
+        throw new Error(
+            'Target-bound share-selection profile uses an unsupported selected-share rule.',
+        );
+    }
+
+    return {
+        profileId: profile.profileId,
+        certificateDigest: profile.certificateDigest,
+        cpadProfileId: profile.cpadProfileId,
+        targetBasisDigest: profile.targetBasisDigest,
+        decryptionShareQuorum: profile.decryptionShareQuorum,
+        minimumSharesForInterpolation: profile.minimumSharesForInterpolation,
+        minimumArrivalsForRobustDecode: profile.minimumArrivalsForRobustDecode,
+        invalidShareFilteringMode: profile.invalidShareFilteringMode,
+        selectedShareRule: profile.selectedShareRule,
     };
 };
 
@@ -116,16 +238,21 @@ export const deriveThresholdProfile = (
     );
     const decryptionCorruptionBound = privacyCorruptionBound;
     const activeFaultBound = Math.floor(rosterSize / 5);
-    const replayBadCorruptionBound = activeFaultBound;
     const pvssThreshold = privacyCorruptionBound + 1;
     const decryptionThreshold = decryptionCorruptionBound + 1;
+    const targetBoundShareSelectionProfile =
+        normalizeTargetBoundShareSelectionProfile(
+            rosterSize,
+            decryptionThreshold,
+            input.targetBoundShareSelectionProfile,
+        );
     const releaseQuorum = Math.min(
         rosterSize,
         Math.max(10, Math.ceil((2 * rosterSize) / 3)),
     );
     const aggregateContributionQuorum = pvssThreshold;
-    const decryptionShareQuorum = decryptionThreshold;
-    const evaluationReplayQuorum = activeFaultBound + 1;
+    const decryptionShareQuorum =
+        targetBoundShareSelectionProfile?.decryptionShareQuorum ?? null;
     const maximumRaceShares = rosterSize;
     const setupCompletionQuorum = rosterSize;
     const warnings = [...rosterProfile.warnings];
@@ -137,6 +264,9 @@ export const deriveThresholdProfile = (
     ) {
         warnings.push('BackendCorruptionBoundTooHigh');
     }
+    if (targetBoundShareSelectionProfile === null) {
+        warnings.push('ShareSelectionProfileRequired');
+    }
 
     return {
         rosterSize,
@@ -147,13 +277,12 @@ export const deriveThresholdProfile = (
         privacyCorruptionBound,
         decryptionCorruptionBound,
         activeFaultBound,
-        replayBadCorruptionBound,
         pvssThreshold,
         decryptionThreshold,
         releaseQuorum,
         aggregateContributionQuorum,
         decryptionShareQuorum,
-        evaluationReplayQuorum,
+        targetBoundShareSelectionProfile,
         maximumRaceShares,
         setupCompletionQuorum,
         backendCorruptionModel,

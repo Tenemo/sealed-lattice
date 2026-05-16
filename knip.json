@@ -30,8 +30,12 @@
       ]
     },
     "packages/protocol": {
+      "entry": [
+        "tests/**/*.ts"
+      ],
       "project": [
-        "src/**/*.ts"
+        "src/**/*.ts",
+        "tests/**/*.ts"
       ]
     },
     "packages/crypto": {

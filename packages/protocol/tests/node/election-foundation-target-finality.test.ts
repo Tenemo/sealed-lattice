@@ -65,16 +65,16 @@ describe('target finality', () => {
             ...duplicateWitnessRecord,
             targetFinalityRecordDigest: deriveTargetFinalityRecordDigest({
                 ceremonyId: duplicateWitnessRecord.ceremonyId,
-                finalizedBoardHeadDigest:
-                    duplicateWitnessRecord.finalizedBoardHeadDigest,
                 inclusionProof: duplicateWitnessRecord.inclusionProof,
                 objectType: duplicateWitnessRecord.objectType,
                 objectVersion: duplicateWitnessRecord.objectVersion,
+                targetFinalityCheckpoint:
+                    duplicateWitnessRecord.targetFinalityCheckpoint,
                 targetFinalityPolicyDigest:
                     duplicateWitnessRecord.targetFinalityPolicyDigest,
-                targetPhase: duplicateWitnessRecord.targetPhase,
-                topKEvaluationRecordDigest:
-                    duplicateWitnessRecord.topKEvaluationRecordDigest,
+                targetFinalityScope: duplicateWitnessRecord.targetFinalityScope,
+                targetProposalDigest:
+                    duplicateWitnessRecord.targetProposalDigest,
                 witnessCheckpoints: duplicateWitnessRecord.witnessCheckpoints,
                 witnessPolicyDigest: duplicateWitnessRecord.witnessPolicyDigest,
             }),
@@ -115,7 +115,7 @@ describe('target finality', () => {
             inclusionProof: createInclusionProof(
                 head1,
                 'ElectionManifest',
-                record.topKEvaluationRecordDigest,
+                record.targetFinalityCheckpoint.topKEvaluationRecordDigest,
             ),
         };
         const unknownWitnessRecord = {
@@ -168,12 +168,13 @@ describe('target finality', () => {
         });
 
         expect(forkedVerification.ok).toBe(false);
+        expect(forkedVerification.acceptedDigests).toEqual([]);
         expect(forkedVerification.targetFinalityRecordDigest).toBeUndefined();
         expect(forkedVerification.equivocatingWitnessIdentities).toEqual(
             witnessIdentities.slice(0, 5),
         );
         expect(forkedVerification.forkEvidence).toMatchObject({
-            targetPhase: 'target',
+            targetFinalityScope: 'target',
             equivocatingWitnessIdentities: witnessIdentities.slice(0, 5),
         });
         expect(forkedVerification.refusedObjects).toEqual(
@@ -205,13 +206,13 @@ describe('target finality', () => {
         };
         const wrongHeadWitnessRecordPayload = {
             ceremonyId: record.ceremonyId,
-            finalizedBoardHeadDigest: record.finalizedBoardHeadDigest,
             inclusionProof: record.inclusionProof,
             objectType: record.objectType,
             objectVersion: record.objectVersion,
+            targetFinalityCheckpoint: record.targetFinalityCheckpoint,
             targetFinalityPolicyDigest: record.targetFinalityPolicyDigest,
-            targetPhase: record.targetPhase,
-            topKEvaluationRecordDigest: record.topKEvaluationRecordDigest,
+            targetFinalityScope: record.targetFinalityScope,
+            targetProposalDigest: record.targetProposalDigest,
             witnessCheckpoints: [
                 createWitnessCheckpoint(
                     witnessIdentities[0],
@@ -254,6 +255,63 @@ describe('target finality', () => {
                 expect.objectContaining({
                     code: 'TargetFinalityPolicyMismatch',
                 }),
+            ]),
+        );
+    });
+
+    it('rejects conflicting accepted targets even on one linear board chain', () => {
+        const head0 = createBoardHead(0, null);
+        const firstTargetHead = createTargetProposalHead(
+            1,
+            head0.headDigest,
+            'first-target',
+        );
+        const secondTopKEvaluationRecordDigest = deriveProtocolDigest(
+            'TopKEvaluationRecordDigest',
+            { proposal: 'second-linear-target' },
+        );
+        const secondTargetHead = createTargetProposalHead(
+            2,
+            firstTargetHead.headDigest,
+            'second-target',
+            secondTopKEvaluationRecordDigest,
+        );
+        const firstRecord = createTargetFinalityRecord(firstTargetHead);
+        const secondRecord = createTargetFinalityRecord(
+            secondTargetHead,
+            secondTopKEvaluationRecordDigest,
+        );
+        const verification = verifyTargetFinality({
+            boardEvidence: createBoardEvidence([
+                head0,
+                firstTargetHead,
+                secondTargetHead,
+            ]),
+            record: firstRecord,
+            witnessPolicy,
+            targetFinalityPolicy,
+            witnessPublicKeyDigests,
+            conflictingRecords: [secondRecord],
+        });
+
+        expect(verification.ok).toBe(false);
+        expect(verification.acceptedDigests).toEqual([]);
+        expect(verification.targetFinalityRecordDigest).toBeUndefined();
+        expect(verification.statusLabels).toEqual(
+            expect.arrayContaining(['WitnessEquivocationEvidence']),
+        );
+        expect(verification.equivocatingWitnessIdentities).toEqual(
+            witnessIdentities.slice(0, 5),
+        );
+        expect(verification.forkEvidence).toMatchObject({
+            leftBoardHeadDigest: firstTargetHead.headDigest,
+            rightBoardHeadDigest: secondTargetHead.headDigest,
+            targetFinalityScope: 'target',
+            equivocatingWitnessIdentities: witnessIdentities.slice(0, 5),
+        });
+        expect(verification.refusedObjects).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({ code: 'BoardForkDetected' }),
             ]),
         );
     });

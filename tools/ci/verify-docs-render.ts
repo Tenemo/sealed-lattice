@@ -246,6 +246,33 @@ const verifyDesktopRails = async (page: Page, route: string): Promise<void> => {
     }
 };
 
+const verifyViewportFit = async (
+    page: Page,
+    route: string,
+    viewportName: string,
+): Promise<void> => {
+    const overflow = await page.evaluate(() => {
+        const viewportWidth = document.documentElement.clientWidth;
+        const scrollWidth = Math.max(
+            document.documentElement.scrollWidth,
+            document.body.scrollWidth,
+        );
+
+        return {
+            scrollWidth,
+            viewportWidth,
+        };
+    });
+
+    if (overflow.scrollWidth > overflow.viewportWidth + 1) {
+        throw new Error(
+            `${route} overflows horizontally on ${viewportName}: ${String(
+                overflow.scrollWidth,
+            )}px content in ${String(overflow.viewportWidth)}px viewport`,
+        );
+    }
+};
+
 const verifyRoute = async (
     page: Page,
     origin: string,
@@ -281,6 +308,7 @@ const verifyRoute = async (
 
         await requireVisibleElement(page, 'main', route);
         await requireVisibleElement(page, 'a[href]', route);
+        await verifyViewportFit(page, route, viewportName);
         await verifyThemeToggle(
             page,
             route,

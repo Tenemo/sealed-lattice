@@ -7,6 +7,8 @@ import {
     canonicalErrorCodes,
     createTranscriptCoreKernelLoader,
     TranscriptCoreKernelCommandError,
+    type TranscriptCoreKernelSharePoint,
+    type TranscriptCorePlaintextComparison,
     type TranscriptCoreKernel,
 } from './transcript-core-bridge.js';
 
@@ -20,7 +22,11 @@ export {
     createTranscriptCoreKernelLoader,
     TranscriptCoreKernelCommandError,
 };
-export type { TranscriptCoreKernel };
+export type {
+    TranscriptCoreKernel,
+    TranscriptCoreKernelSharePoint,
+    TranscriptCorePlaintextComparison,
+};
 
 export const loadTranscriptCoreKernel: () => Promise<TranscriptCoreKernel> =
     createTranscriptCoreKernelLoader(transcriptCoreKernelUrl);

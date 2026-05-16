@@ -1,13 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
+import publicSurface from '../../public-surface.json' with { type: 'json' };
 import type * as publicTypes from '../../src/index.js';
 
-type BlockedTargetPhaseTypes = [
-    // @ts-expect-error target-phase shell types are intentionally not public.
-    publicTypes.EvaluationReplayAttestation,
-    // @ts-expect-error target-phase shell types are intentionally not public.
+type BlockedTargetAcceptanceTypes = [
+    // @ts-expect-error target-acceptance shell types are intentionally not public.
+    publicTypes.LocalReplayRecord,
+    // @ts-expect-error target-acceptance shell types are intentionally not public.
     publicTypes.TargetAcceptedRecord,
-    // @ts-expect-error target-phase shell types are intentionally not public.
+    // @ts-expect-error target-acceptance shell types are intentionally not public.
     publicTypes.TopKDecryptionShareShell,
 ];
 
@@ -22,6 +23,17 @@ type BlockedPlaintextOracleTypes = [
     publicTypes.SparseTopKTarget,
 ];
 
+type BlockedPvssBallotTypes = [
+    // @ts-expect-error ballot package shells are intentionally not public.
+    publicTypes.BallotPackageShell,
+    // @ts-expect-error internal ballot-set types are intentionally not public.
+    publicTypes.CanonicalBallotSet,
+    // @ts-expect-error test commitments are intentionally not public.
+    publicTypes.TestShareCommitment,
+    // @ts-expect-error aggregate share witnesses are intentionally not public.
+    publicTypes.TestAggregateShare,
+];
+
 type PublicFoundationTypes = [
     publicTypes.BoardConsistencyInput,
     publicTypes.PollSpecInput,
@@ -31,7 +43,8 @@ type PublicFoundationTypes = [
 
 type PublicTypeSurfaceProbe = {
     readonly blockedPlaintextOracleTypes: BlockedPlaintextOracleTypes;
-    readonly blockedTargetPhaseTypes: BlockedTargetPhaseTypes;
+    readonly blockedPvssBallotTypes: BlockedPvssBallotTypes;
+    readonly blockedTargetAcceptanceTypes: BlockedTargetAcceptanceTypes;
     readonly publicFoundationTypes: PublicFoundationTypes;
 };
 
@@ -49,5 +62,24 @@ const publicFoundationTypeNames = [
 describe('election foundation public type surface', () => {
     it('keeps safe election foundation types available', () => {
         expect(publicFoundationTypeNames).toHaveLength(4);
+        for (const publicTypeName of publicFoundationTypeNames) {
+            expect(publicSurface.publicTypeExports).toContain(publicTypeName);
+        }
+    });
+
+    it('keeps runtime and type export manifests disjoint and deterministic', () => {
+        const runtimeExports = new Set(publicSurface.runtimeExports);
+        const typeExports = new Set(publicSurface.publicTypeExports);
+        const overlap = [...runtimeExports].filter((exportName) =>
+            typeExports.has(exportName),
+        );
+
+        expect(overlap).toEqual([]);
+        expect(publicSurface.runtimeExports).toEqual(
+            [...publicSurface.runtimeExports].sort(),
+        );
+        expect(publicSurface.publicTypeExports).toEqual(
+            [...publicSurface.publicTypeExports].sort(),
+        );
     });
 });

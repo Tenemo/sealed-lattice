@@ -2,22 +2,26 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-import type {
-    GoldenTranscriptCoreFixture,
-    MalformedObjectFixture,
+import {
+    evaluationProofProfileId,
+    type GoldenTranscriptCoreFixture,
+    type MalformedObjectFixture,
 } from '@sealed-lattice/types';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import goldenTranscriptCoreFixturesJson from '../../../../test-vectors/transcript-core/golden-transcript-core.json';
 import malformedObjectFixturesJson from '../../../../test-vectors/transcript-core/malformed-objects.json';
 import {
-    createTranscriptCoreKernelLoader,
     loadTranscriptCoreKernel,
-    TranscriptCoreKernelCommandError,
     roundTripBytesThroughKernel,
-    type TranscriptCoreKernel,
     verifyTranscriptCoreFixture,
 } from '../../src/index';
+import {
+    createTranscriptCoreKernelLoader,
+    normalizeTranscriptCoreKernelBytesForDigest,
+    TranscriptCoreKernelCommandError,
+    type TranscriptCoreKernel,
+} from '../../src/transcript-core-bridge';
 
 type NamedFixture = {
     readonly caseName: string;
@@ -27,10 +31,10 @@ type TranscriptCoreKernelExportsForTests = WebAssembly.Exports & {
     memory: WebAssembly.Memory;
     sealed_lattice_allocate: (length: number) => number;
     sealed_lattice_deallocate: (pointer: number, length: number) => void;
-    sealed_lattice_last_output_length: () => number;
-    sealed_lattice_transcript_core_command: (
+    sealed_lattice_transcript_core_command_with_length: (
         pointer: number,
         length: number,
+        outputLengthPointer: number,
     ) => number;
     sealed_lattice_roundtrip: (pointer: number, length: number) => number;
 };
@@ -54,23 +58,20 @@ const findFixture = <Fixture extends NamedFixture>(
     return fixture;
 };
 
-const resultComputedPassiveFixture = findFixture(
-    goldenTranscriptCoreFixtures,
-    'result-computed-passive-mhe-transcript-core',
-);
 const fullyVerifiedPassiveFixture = findFixture(
     goldenTranscriptCoreFixtures,
     'fully-verified-passive-mhe-transcript-core',
-);
-const resultComputedActiveFixture = findFixture(
-    goldenTranscriptCoreFixtures,
-    'result-computed-active-malicious-transcript-core',
 );
 const fullyVerifiedActiveFixture = findFixture(
     goldenTranscriptCoreFixtures,
     'fully-verified-active-malicious-transcript-core',
 );
 const invalidEnumFixture = findFixture(malformedObjectFixtures, 'invalid-enum');
+const singleZeroByteSha256Hex =
+    '6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d';
+const textEncoder = new TextEncoder();
+const textDecoder = new TextDecoder();
+const wasmHeader = Uint8Array.from([0x00, 0x61, 0x73, 0x6d, 1, 0, 0, 0]);
 
 const createMockKernelExports = ({
     allocationPointer = 12,
@@ -82,11 +83,17 @@ const createMockKernelExports = ({
             hash512: 'feedface',
         },
     },
+    expectedKernelSha256Hex = singleZeroByteSha256Hex,
+    onCommand,
+    outputLengthAllocationPointer = 512,
     roundTripPointer = allocationPointer,
 }: {
     readonly allocationPointer?: number;
     readonly commandPointer?: number;
     readonly commandResponse?: unknown;
+    readonly expectedKernelSha256Hex?: string;
+    readonly onCommand?: () => void;
+    readonly outputLengthAllocationPointer?: number;
     readonly roundTripPointer?: number;
 } = {}): {
     readonly deallocate: ReturnType<typeof vi.fn>;
@@ -100,6 +107,10 @@ const createMockKernelExports = ({
     );
     const deallocate = vi.fn();
     const memory = new WebAssembly.Memory({ initial: 1 });
+    const allocationPointers = [
+        allocationPointer,
+        outputLengthAllocationPointer,
+    ];
     const fakeModule = {} as WebAssembly.Module;
     const webAssemblyWithByteSourceInstantiate = WebAssembly as unknown as {
         instantiate: (
@@ -111,19 +122,30 @@ const createMockKernelExports = ({
         instance: {
             exports: {
                 memory,
-                sealed_lattice_allocate: vi.fn(() => allocationPointer),
-                sealed_lattice_deallocate: deallocate,
-                sealed_lattice_last_output_length: vi.fn(
-                    () => encodedCommandResponse.length,
+                sealed_lattice_allocate: vi.fn(
+                    () => allocationPointers.shift() ?? allocationPointer,
                 ),
-                sealed_lattice_transcript_core_command: vi.fn(() => {
-                    new Uint8Array(memory.buffer).set(
-                        encodedCommandResponse,
-                        commandPointer,
-                    );
+                sealed_lattice_deallocate: deallocate,
+                sealed_lattice_transcript_core_command_with_length: vi.fn(
+                    (
+                        _pointer: number,
+                        _length: number,
+                        outputLengthPointer: number,
+                    ) => {
+                        onCommand?.();
+                        new Uint8Array(memory.buffer).set(
+                            encodedCommandResponse,
+                            commandPointer,
+                        );
+                        new DataView(memory.buffer).setUint32(
+                            outputLengthPointer,
+                            encodedCommandResponse.length,
+                            true,
+                        );
 
-                    return commandPointer;
-                }),
+                        return commandPointer;
+                    },
+                ),
                 sealed_lattice_roundtrip: vi.fn(() => roundTripPointer),
             } as TranscriptCoreKernelExportsForTests,
         } as WebAssembly.Instance,
@@ -138,8 +160,10 @@ const createMockKernelExports = ({
         { kind: 'memory', name: 'memory' },
         { kind: 'function', name: 'sealed_lattice_allocate' },
         { kind: 'function', name: 'sealed_lattice_deallocate' },
-        { kind: 'function', name: 'sealed_lattice_last_output_length' },
-        { kind: 'function', name: 'sealed_lattice_transcript_core_command' },
+        {
+            kind: 'function',
+            name: 'sealed_lattice_transcript_core_command_with_length',
+        },
         { kind: 'function', name: 'sealed_lattice_roundtrip' },
     ]);
 
@@ -149,6 +173,7 @@ const createMockKernelExports = ({
         getInstantiateCallCount: () => instantiate.mock.calls.length,
         loadMockKernel: createTranscriptCoreKernelLoader(
             pathToFileURL(path.resolve('mock-sealed-lattice-kernel.wasm')),
+            { expectedKernelSha256Hex },
         ),
         rejectNextInstantiation: (error: Error): void => {
             instantiate.mockRejectedValueOnce(error);
@@ -170,6 +195,100 @@ afterEach(() => {
 });
 
 describe('transcript-core kernel in Node', () => {
+    it('normalizes host-specific Rust source paths before digesting', () => {
+        const windowsBytes = textEncoder.encode(
+            [
+                'prefix',
+                'C:\\Users\\Piotr\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\serde_json-1.0.149\\src\\error.rs',
+                'crates\\sealed-lattice-kernel\\src\\lib.rs',
+                'suffix',
+            ].join('\0'),
+        );
+        const linuxBytes = textEncoder.encode(
+            [
+                'prefix',
+                '/home/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.149/src/error.rs',
+                'crates/sealed-lattice-kernel/src/lib.rs',
+                'suffix',
+            ].join('\0'),
+        );
+
+        const normalizedWindowsBytes =
+            normalizeTranscriptCoreKernelBytesForDigest(windowsBytes);
+        const normalizedLinuxBytes =
+            normalizeTranscriptCoreKernelBytesForDigest(linuxBytes);
+
+        expect(Array.from(normalizedWindowsBytes)).toEqual(
+            Array.from(normalizedLinuxBytes),
+        );
+        expect(textDecoder.decode(normalizedWindowsBytes)).toBe(
+            [
+                'prefix',
+                '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.149/src/error.rs',
+                'crates/sealed-lattice-kernel/src/lib.rs',
+                'suffix',
+            ].join('\0'),
+        );
+    });
+
+    it('ignores WASM custom sections before digesting', () => {
+        const leftCustomSection = Uint8Array.from([0, 4, 3, 111, 110, 101]);
+        const rightCustomSection = Uint8Array.from([0, 4, 3, 116, 119, 111]);
+        const emptyTypeSection = Uint8Array.from([1, 1, 0]);
+
+        const leftBytes = Uint8Array.from([
+            ...wasmHeader,
+            ...leftCustomSection,
+            ...emptyTypeSection,
+        ]);
+        const rightBytes = Uint8Array.from([
+            ...wasmHeader,
+            ...rightCustomSection,
+            ...emptyTypeSection,
+        ]);
+
+        expect(
+            Array.from(normalizeTranscriptCoreKernelBytesForDigest(leftBytes)),
+        ).toEqual(
+            Array.from(normalizeTranscriptCoreKernelBytesForDigest(rightBytes)),
+        );
+        expect(
+            Array.from(normalizeTranscriptCoreKernelBytesForDigest(leftBytes)),
+        ).toEqual(
+            Array.from(Uint8Array.from([...wasmHeader, ...emptyTypeSection])),
+        );
+    });
+
+    it('rejects malformed WASM sections before digesting', () => {
+        const invalidLengthBytes = Uint8Array.from([
+            ...wasmHeader,
+            1,
+            0x80,
+            0x80,
+            0x80,
+            0x80,
+            0x80,
+        ]);
+        const truncatedLengthBytes = Uint8Array.from([...wasmHeader, 1, 0x80]);
+        const truncatedSectionBytes = Uint8Array.from([...wasmHeader, 1, 2, 0]);
+
+        expect(() =>
+            normalizeTranscriptCoreKernelBytesForDigest(invalidLengthBytes),
+        ).toThrow(
+            'The transcript-core kernel contains an invalid WASM section length.',
+        );
+        expect(() =>
+            normalizeTranscriptCoreKernelBytesForDigest(truncatedLengthBytes),
+        ).toThrow(
+            'The transcript-core kernel contains a truncated WASM section length.',
+        );
+        expect(() =>
+            normalizeTranscriptCoreKernelBytesForDigest(truncatedSectionBytes),
+        ).toThrow(
+            'The transcript-core kernel contains a truncated WASM section.',
+        );
+    });
+
     it('loads the transcript-core module and exposes command exports', async () => {
         const kernel = await loadTranscriptCoreKernel();
 
@@ -178,8 +297,7 @@ describe('transcript-core kernel in Node', () => {
                 'memory',
                 'sealed_lattice_allocate',
                 'sealed_lattice_deallocate',
-                'sealed_lattice_last_output_length',
-                'sealed_lattice_transcript_core_command',
+                'sealed_lattice_transcript_core_command_with_length',
                 'sealed_lattice_roundtrip',
             ]),
         );
@@ -188,14 +306,6 @@ describe('transcript-core kernel in Node', () => {
     it('analyzes golden transcript-core fixtures through WASM', async () => {
         const kernel = await loadTranscriptCoreKernel();
 
-        const resultComputedPassiveAnalysis = kernel.analyzeCanonicalObject({
-            canonicalBytesHex: resultComputedPassiveFixture.canonicalBytesHex,
-            chunkSize: resultComputedPassiveFixture.chunkSize,
-        });
-        const resultComputedActiveAnalysis = kernel.analyzeCanonicalObject({
-            canonicalBytesHex: resultComputedActiveFixture.canonicalBytesHex,
-            chunkSize: resultComputedActiveFixture.chunkSize,
-        });
         const fullyVerifiedPassiveAnalysis = kernel.analyzeCanonicalObject({
             canonicalBytesHex: fullyVerifiedPassiveFixture.canonicalBytesHex,
             chunkSize: fullyVerifiedPassiveFixture.chunkSize,
@@ -205,53 +315,70 @@ describe('transcript-core kernel in Node', () => {
             chunkSize: fullyVerifiedActiveFixture.chunkSize,
         });
 
-        expect(resultComputedPassiveAnalysis.objectHash512).toBe(
-            resultComputedPassiveFixture.expectedObjectHash512,
-        );
-        expect(resultComputedPassiveAnalysis.chunkRoot).toBe(
-            resultComputedPassiveFixture.expectedChunkRoot,
-        );
-        expect(resultComputedPassiveAnalysis.statusLabels).toEqual(
-            resultComputedPassiveFixture.expectedStatusLabels,
-        );
-        expect(resultComputedActiveAnalysis.baseClaimProfile).toBe(
-            'ResultComputedAuditable',
-        );
-        expect(resultComputedActiveAnalysis.mheSecurityStage).toBe(
-            'ActiveMalicious',
-        );
-        expect(resultComputedActiveAnalysis.objectHash512).toBe(
-            resultComputedActiveFixture.expectedObjectHash512,
-        );
         expect(fullyVerifiedPassiveAnalysis.baseClaimProfile).toBe(
             'FullyVerifiedResult',
         );
         expect(fullyVerifiedPassiveAnalysis.evaluationProofProfileId).toBe(
-            'transcript-core-optional-evaluation-proof-profile-v1',
+            evaluationProofProfileId,
         );
-        expect(fullyVerifiedActiveAnalysis.mheSecurityStage).toBe(
+        expect(fullyVerifiedActiveAnalysis.mheSecurityClosure).toBe(
             'ActiveMalicious',
         );
         expect(fullyVerifiedActiveAnalysis.evaluationProofProfileId).toBe(
-            'transcript-core-optional-evaluation-proof-profile-v1',
-        );
-        expect(resultComputedActiveAnalysis.objectHash512).not.toBe(
-            resultComputedPassiveAnalysis.objectHash512,
+            evaluationProofProfileId,
         );
         expect(fullyVerifiedPassiveAnalysis.objectHash512).not.toBe(
-            resultComputedPassiveAnalysis.objectHash512,
+            fullyVerifiedActiveAnalysis.objectHash512,
         );
+    });
+
+    it('derives claim-bearing digests and field results through WASM', async () => {
+        const kernel = await loadTranscriptCoreKernel();
+
+        expect(
+            kernel.deriveProtocolDigest({
+                namespace: 'PollSpecDigest',
+                value: { poll: 'main' },
+            }),
+        ).toBe(
+            '423c71de65abadb5adc05d9b6b704252420bb738af888c62614c8afc53a2be808662585305e76738b23e4f20154f8779e3827c0c8f313455d84675924f4a2c83',
+        );
+        expect(
+            kernel.interpolateShamirConstantTerm({
+                sharePoints: [
+                    { rosterPosition: 1, value: 15 },
+                    { rosterPosition: 2, value: 25 },
+                ],
+            }),
+        ).toBe(5);
+        expect(
+            kernel.evaluatePlaintextComparison({
+                leftTotalScore: 41,
+                rightTotalScore: 40,
+                rosterSize: 5,
+            }),
+        ).toEqual({
+            greaterThan: 1,
+            equal: 0,
+            scoreDifference: 1,
+        });
+        expect(() =>
+            kernel.deriveProtocolDigest({
+                namespace: 'UnreservedDigest',
+                value: {},
+            }),
+        ).toThrow(TranscriptCoreKernelCommandError);
     });
 
     it('verifies golden and malformed fixtures with stable outputs', async () => {
         const kernel = await loadTranscriptCoreKernel();
 
-        expect(kernel.verifyFixture(resultComputedPassiveFixture)).toEqual({
+        expect(kernel.verifyFixture(fullyVerifiedPassiveFixture)).toEqual({
             verified: true,
-            caseName: 'result-computed-passive-mhe-transcript-core',
-            objectHash512: resultComputedPassiveFixture.expectedObjectHash512,
-            chunkRoot: resultComputedPassiveFixture.expectedChunkRoot,
-            statusLabels: resultComputedPassiveFixture.expectedStatusLabels,
+            caseName: 'fully-verified-passive-mhe-transcript-core',
+            objectHash512: fullyVerifiedPassiveFixture.expectedObjectHash512,
+            chunkRoot: fullyVerifiedPassiveFixture.expectedChunkRoot,
+            statusLabels: fullyVerifiedPassiveFixture.expectedStatusLabels,
         });
         expect(kernel.verifyFixture(invalidEnumFixture)).toEqual({
             verified: true,
@@ -291,13 +418,13 @@ describe('transcript-core kernel in Node', () => {
 
     it('verifies fixtures through the public WASM wrapper', async () => {
         await expect(
-            verifyTranscriptCoreFixture(resultComputedPassiveFixture),
+            verifyTranscriptCoreFixture(fullyVerifiedPassiveFixture),
         ).resolves.toEqual({
             verified: true,
-            caseName: 'result-computed-passive-mhe-transcript-core',
-            objectHash512: resultComputedPassiveFixture.expectedObjectHash512,
-            chunkRoot: resultComputedPassiveFixture.expectedChunkRoot,
-            statusLabels: resultComputedPassiveFixture.expectedStatusLabels,
+            caseName: 'fully-verified-passive-mhe-transcript-core',
+            objectHash512: fullyVerifiedPassiveFixture.expectedObjectHash512,
+            chunkRoot: fullyVerifiedPassiveFixture.expectedChunkRoot,
+            statusLabels: fullyVerifiedPassiveFixture.expectedStatusLabels,
         });
     });
 
@@ -305,6 +432,10 @@ describe('transcript-core kernel in Node', () => {
         const kernel = await loadTranscriptCoreKernel();
 
         expect(kernel.hashRaw('00')).toMatch(/^[a-f0-9]{128}$/u);
+        expect(kernel.listCanonicalErrorCodes()).toContain('InvalidEnum');
+        expect(kernel.listReservedRootNamespaces()).toContain(
+            'sealed-lattice-root/poll-spec-digest-v1',
+        );
     });
 
     it('deallocates command inputs and outputs', async () => {
@@ -323,6 +454,7 @@ describe('transcript-core kernel in Node', () => {
             encodedCommandResponseLength,
         );
         expect(deallocate).toHaveBeenCalledWith(12, expect.any(Number));
+        expect(deallocate).toHaveBeenCalledWith(512, 4);
     });
 
     it('deallocates aliased command pointers only once', async () => {
@@ -338,11 +470,15 @@ describe('transcript-core kernel in Node', () => {
                 chunkSize: 2,
             }),
         ).toBe('abc123');
-        expect(deallocate).toHaveBeenCalledTimes(1);
+        expect(deallocate).toHaveBeenCalledTimes(2);
         expect(deallocate).toHaveBeenCalledWith(
             12,
             encodedCommandResponseLength,
         );
+        expect(deallocate).toHaveBeenCalledWith(512, 4);
+        expect(
+            deallocate.mock.calls.filter(([pointer]) => pointer === 12),
+        ).toEqual([[12, encodedCommandResponseLength]]);
     });
 
     it('deallocates aliased round-trip pointers only once', async () => {
@@ -389,6 +525,54 @@ describe('transcript-core kernel in Node', () => {
         ).toThrow(
             'The transcript-core kernel returned a null pointer for a non-empty transcript-core command result.',
         );
+    });
+
+    it('rejects null command output-length allocations', async () => {
+        const { loadMockKernel } = createMockKernelExports({
+            outputLengthAllocationPointer: 0,
+        });
+        const kernel = await loadMockKernel();
+
+        expect(() =>
+            kernel.computeChunkRoot({
+                inputHex: '00ff',
+                chunkSize: 2,
+            }),
+        ).toThrow(
+            'The transcript-core kernel returned a null pointer for the output-length allocation.',
+        );
+    });
+
+    it('rejects overlapping kernel commands on one instance', async () => {
+        const loadedKernelReference: { current?: TranscriptCoreKernel } = {};
+        const { loadMockKernel } = createMockKernelExports({
+            onCommand: () => {
+                loadedKernelReference.current?.hashRaw('00');
+            },
+        });
+        loadedKernelReference.current = await loadMockKernel();
+
+        expect(() =>
+            loadedKernelReference.current?.computeChunkRoot({
+                inputHex: '00ff',
+                chunkSize: 2,
+            }),
+        ).toThrow(
+            'The transcript-core kernel cannot run overlapping command operations on one instance.',
+        );
+    });
+
+    it('rejects a transcript-core kernel with the wrong integrity digest', async () => {
+        const { getInstantiateCallCount, loadMockKernel } =
+            createMockKernelExports({
+                expectedKernelSha256Hex:
+                    '0000000000000000000000000000000000000000000000000000000000000000',
+            });
+
+        await expect(loadMockKernel()).rejects.toThrow(
+            'The transcript-core kernel failed integrity verification',
+        );
+        expect(getInstantiateCallCount()).toBe(0);
     });
 
     it('rejects invalid command response shapes', async () => {

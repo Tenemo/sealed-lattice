@@ -34,9 +34,9 @@ const findFixture = <Fixture extends NamedFixture>(
     return fixture;
 };
 
-const resultComputedPassiveFixture = findFixture(
+const fullyVerifiedPassiveFixture = findFixture(
     goldenTranscriptCoreFixtures,
-    'result-computed-passive-mhe-transcript-core',
+    'fully-verified-passive-mhe-transcript-core',
 );
 const invalidEnumFixture = findFixture(malformedObjectFixtures, 'invalid-enum');
 
@@ -49,8 +49,7 @@ describe('transcript-core kernel in browsers', () => {
                 'memory',
                 'sealed_lattice_allocate',
                 'sealed_lattice_deallocate',
-                'sealed_lattice_last_output_length',
-                'sealed_lattice_transcript_core_command',
+                'sealed_lattice_transcript_core_command_with_length',
             ]),
         );
     });
@@ -58,13 +57,34 @@ describe('transcript-core kernel in browsers', () => {
     it('verifies the golden transcript-core fixture', async () => {
         const kernel = await loadTranscriptCoreKernel();
 
-        expect(kernel.verifyFixture(resultComputedPassiveFixture)).toEqual({
+        expect(kernel.verifyFixture(fullyVerifiedPassiveFixture)).toEqual({
             verified: true,
-            caseName: 'result-computed-passive-mhe-transcript-core',
-            objectHash512: resultComputedPassiveFixture.expectedObjectHash512,
-            chunkRoot: resultComputedPassiveFixture.expectedChunkRoot,
-            statusLabels: resultComputedPassiveFixture.expectedStatusLabels,
+            caseName: 'fully-verified-passive-mhe-transcript-core',
+            objectHash512: fullyVerifiedPassiveFixture.expectedObjectHash512,
+            chunkRoot: fullyVerifiedPassiveFixture.expectedChunkRoot,
+            statusLabels: fullyVerifiedPassiveFixture.expectedStatusLabels,
         });
+    });
+
+    it('derives protocol digest and field checks through WASM', async () => {
+        const kernel = await loadTranscriptCoreKernel();
+
+        expect(
+            kernel.deriveProtocolDigest({
+                namespace: 'PollSpecDigest',
+                value: { poll: 'main' },
+            }),
+        ).toBe(
+            '423c71de65abadb5adc05d9b6b704252420bb738af888c62614c8afc53a2be808662585305e76738b23e4f20154f8779e3827c0c8f313455d84675924f4a2c83',
+        );
+        expect(
+            kernel.interpolateShamirConstantTerm({
+                sharePoints: [
+                    { rosterPosition: 1, value: 15 },
+                    { rosterPosition: 2, value: 25 },
+                ],
+            }),
+        ).toBe(5);
     });
 
     it('rejects malformed canonical bytes with the same error code', async () => {

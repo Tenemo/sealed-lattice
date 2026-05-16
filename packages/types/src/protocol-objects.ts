@@ -9,17 +9,21 @@ import type { ProtocolDigest } from './protocol-digest.js';
 /** Canonical object type covered by protocol digest and verification helpers. */
 export type ProtocolObjectType =
     | 'ActionContext'
+    | 'BallotPackage'
     | 'BoardHead'
     | 'CastReceipt'
     | 'CloseRecord'
     | 'ElectionManifest'
-    | 'EvaluationReplayAttestation'
-    | 'FirstComeOrder'
+    | 'EvaluationProofRecord'
+    | 'FirstValidOrder'
+    | 'LocalReplayRecord'
     | 'RecoveryEpochUpdate'
     | 'ReceiverKeyRegistration'
     | 'RegistrationEntry'
     | 'Roster'
+    | 'RosterExternalAcceptance'
     | 'TargetAcceptedRecord'
+    | 'TargetFinalityCheckpoint'
     | 'TargetFinalityRecord'
     | 'TopKDecryptionShare'
     | 'TopKEvaluationRecord'
@@ -28,14 +32,16 @@ export type ProtocolObjectType =
 
 /** Object type that is signed as a canonical signed root. */
 export type SignedObjectType =
+    | 'BallotPackage'
     | 'BoardHead'
     | 'CastReceipt'
     | 'CloseRecord'
     | 'ElectionManifest'
-    | 'EvaluationReplayAttestation'
+    | 'LocalReplayRecord'
     | 'RecoveryEpochUpdate'
     | 'ReceiverKeyRegistration'
     | 'RegistrationEntry'
+    | 'RosterExternalAcceptance'
     | 'TargetAcceptedRecord'
     | 'TargetFinalityRecord'
     | 'TopKDecryptionShare'
@@ -73,8 +79,8 @@ export type CanonicalSignedRootObject = {
     readonly objectType: SignedObjectType;
     readonly objectVersion: number;
     readonly ceremonyId: string;
-    readonly manifestHash: ProtocolDigest | null;
-    readonly boardHeadHash: ProtocolDigest | null;
+    readonly manifestDigest: ProtocolDigest | null;
+    readonly boardHeadDigest: ProtocolDigest | null;
     readonly objectRoot: ProtocolDigest | null;
     readonly chunkMerkleRoot: ProtocolDigest | null;
     readonly byteLength: number;
@@ -103,21 +109,27 @@ export type ProtocolVerificationStatusLabel =
 
 /** Stable refusal code emitted by protocol verification helpers. */
 export type ProtocolRefusalCode =
+    | 'AggregateShareInvalid'
+    | 'BallotPackageInvalid'
+    | 'BallotSetInvalid'
     | 'BoardConsistencyFailure'
     | 'BoardForkDetected'
     | 'CastReceiptInvalid'
     | 'CloseRecordInvalid'
-    | 'ConflictingFirstComeCandidate'
+    | 'ConflictingFirstValidObject'
+    | 'ConflictingBallotPackage'
     | 'ConflictingManifest'
     | 'DecryptionShareInvalid'
+    | 'DuplicateBallotPackage'
     | 'DuplicateReceiverKeyRegistration'
-    | 'DuplicateFirstComeCandidate'
+    | 'DuplicateFirstValidObject'
     | 'DuplicateRegistration'
     | 'DuplicateTrusteeSetupEntry'
     | 'DuplicateWitness'
     | 'FieldElementInvalid'
-    | 'FirstComeContextMismatch'
-    | 'FirstComePolicyMismatch'
+    | 'EvaluationProofInvalid'
+    | 'FirstValidContextMismatch'
+    | 'FirstValidPolicyMismatch'
     | 'InclusionProofInvalid'
     | 'InvalidMlDsaContext'
     | 'InvalidSignature'
@@ -126,17 +138,19 @@ export type ProtocolRefusalCode =
     | 'ManifestDigestMismatch'
     | 'MissingReceiverKeyRegistration'
     | 'MissingTrusteeSetupEntry'
+    | 'OperationUnavailable'
     | 'PlaintextOracleInvalid'
     | 'RecoveryUpdateConflict'
     | 'RecoveryUpdateInvalid'
     | 'RecoveryUpdateStale'
-    | 'ReplayAttestationInvalid'
+    | 'LocalReplayRecordInvalid'
     | 'RosterDigestMismatch'
+    | 'RosterExternalAcceptanceInvalid'
     | 'ShamirInputInvalid'
     | 'SparseTargetInvalid'
     | 'TargetAcceptedRecordInvalid'
     | 'TargetFinalityPolicyMismatch'
-    | 'TargetPhaseAuthorizationFailure'
+    | 'TargetAcceptanceAuthorizationFailure'
     | 'TopKEvaluationRecordNotIncluded'
     | 'StaleRecoveryEpoch'
     | 'UnknownBoardHead'
@@ -164,7 +178,7 @@ export type ConflictingHeadEvidence = {
     readonly boardPolicyDigest: ProtocolDigest;
     readonly leftBoardHeadDigest: ProtocolDigest;
     readonly rightBoardHeadDigest: ProtocolDigest;
-    readonly targetPhase?: string;
+    readonly targetFinalityScope?: string;
     readonly equivocatingWitnessIdentities?: readonly string[];
 };
 
@@ -177,6 +191,12 @@ export type StructuredProtocolVerificationResult = {
     readonly forkEvidence?: ConflictingHeadEvidence;
     readonly unresolvedReason?: string;
 };
+
+/** Fail-closed result returned by safe API entries reserved for later implementation. */
+export type FutureProtocolOperationResult =
+    StructuredProtocolVerificationResult & {
+        readonly operation: string;
+    };
 
 /** Structured result shape returned by signature verification. */
 export type SignatureVerificationResult = StructuredProtocolVerificationResult;

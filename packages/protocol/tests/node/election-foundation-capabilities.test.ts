@@ -1,12 +1,32 @@
+import {
+    cpadProfileId,
+    targetBoundShareSelectionProfileId,
+    type CapabilityContext,
+} from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
 import {
     deriveThresholdProfile,
     evaluateActionCapability,
 } from '../../src/index';
-import type { CapabilityContext } from '../../src/index';
+
+const targetBoundShareSelectionProfile = {
+    profileId: targetBoundShareSelectionProfileId,
+    certificateDigest: 'target-bound-certificate-digest',
+    cpadProfileId,
+    targetBasisDigest: 'target-basis-digest',
+    decryptionShareQuorum: 9,
+    minimumSharesForInterpolation: 7,
+    minimumArrivalsForRobustDecode: 9,
+    invalidShareFilteringMode: 'ProofVerifiedSharesOnly',
+    selectedShareRule: 'FirstValidSharesInCanonicalBoardOrder',
+} as const;
 
 const thresholdProfile = deriveThresholdProfile({ rosterSize: 20 });
+const certifiedThresholdProfile = deriveThresholdProfile({
+    rosterSize: 20,
+    targetBoundShareSelectionProfile,
+});
 
 const createContext = (
     overrides: Partial<CapabilityContext> = {},
@@ -15,24 +35,103 @@ const createContext = (
     thresholdProfile,
     pollSpecValid: true,
     browserSupported: true,
+    localRosterExternallyAccepted: true,
+    rosterExternalAcceptanceDigest: 'accepted-roster-digest',
+    actionContextRosterExternalAcceptanceDigest: 'accepted-roster-digest',
     ...overrides,
 });
 
+const targetAcceptedContext = (
+    overrides: Partial<CapabilityContext> = {},
+): CapabilityContext =>
+    createContext({
+        lifecycleState: 'TargetAccepted',
+        thresholdProfile: certifiedThresholdProfile,
+        targetFinalityAccepted: true,
+        targetAccepted: true,
+        evaluationProofVerified: true,
+        oneShotDecryptionProofCertificatePresent: true,
+        thresholdDecryptionCertificatePresent: true,
+        ...overrides,
+    });
+
 describe('election foundation capability evaluator', () => {
-    it('refuses aggregate contribution before voting is closed', () => {
+    it('requires local roster acceptance for claim-bearing actions', () => {
+        expect(
+            evaluateActionCapability(
+                'VerifyEvaluationProof',
+                createContext({
+                    lifecycleState: 'EvaluationProofOpen',
+                    localRosterExternallyAccepted: false,
+                    targetFinalityAccepted: true,
+                    evaluationProofCertificatePresent: true,
+                    bridgeMobileCertificatePresent: true,
+                }),
+            ),
+        ).toMatchObject({ reason: 'LocalRosterNotAccepted' });
+    });
+
+    it('requires claim-bearing action contexts to bind the local roster acceptance digest', () => {
+        expect(
+            evaluateActionCapability(
+                'SubmitVote',
+                createContext({
+                    lifecycleState: 'VotingOpen',
+                    rosterExternalAcceptanceDigest: undefined,
+                    actionContextRosterExternalAcceptanceDigest: undefined,
+                }),
+            ),
+        ).toMatchObject({
+            reason: 'RosterExternalAcceptanceDigestMissing',
+        });
+
+        expect(
+            evaluateActionCapability(
+                'SubmitVote',
+                createContext({
+                    lifecycleState: 'VotingOpen',
+                    rosterExternalAcceptanceDigest: 'accepted-roster-digest',
+                    actionContextRosterExternalAcceptanceDigest: undefined,
+                }),
+            ),
+        ).toMatchObject({
+            reason: 'RosterExternalAcceptanceDigestMissing',
+        });
+
+        expect(
+            evaluateActionCapability(
+                'SubmitVote',
+                createContext({
+                    lifecycleState: 'VotingOpen',
+                    rosterExternalAcceptanceDigest: 'accepted-roster-digest',
+                    actionContextRosterExternalAcceptanceDigest:
+                        'different-roster-digest',
+                }),
+            ),
+        ).toMatchObject({
+            reason: 'RosterExternalAcceptanceDigestMismatch',
+        });
+
+        expect(
+            evaluateActionCapability(
+                'SubmitVote',
+                createContext({
+                    lifecycleState: 'VotingOpen',
+                    rosterExternalAcceptanceDigest: 'accepted-roster-digest',
+                    actionContextRosterExternalAcceptanceDigest:
+                        'accepted-roster-digest',
+                }),
+            ),
+        ).toEqual({ allowed: true, action: 'SubmitVote' });
+    });
+
+    it('refuses aggregate contribution before setup and turnout thresholds', () => {
         expect(
             evaluateActionCapability(
                 'DeriveAggregateContribution',
                 createContext({ lifecycleState: 'VotingOpen' }),
             ),
-        ).toEqual({
-            allowed: false,
-            action: 'DeriveAggregateContribution',
-            reason: 'InvalidLifecycleState',
-        });
-    });
-
-    it('refuses aggregate contribution before setup and turnout thresholds', () => {
+        ).toMatchObject({ reason: 'InvalidLifecycleState' });
         expect(
             evaluateActionCapability(
                 'DeriveAggregateContribution',
@@ -55,7 +154,7 @@ describe('election foundation capability evaluator', () => {
         ).toMatchObject({ reason: 'TurnoutBelowReleaseFloor' });
     });
 
-    it('allows aggregate contribution once structural gates pass', () => {
+    it('allows aggregate contribution once structural and bridge gates pass', () => {
         expect(
             evaluateActionCapability(
                 'DeriveAggregateContribution',
@@ -63,6 +162,8 @@ describe('election foundation capability evaluator', () => {
                     lifecycleState: 'AwaitingAggregateContributors',
                     setupCompleteCount: thresholdProfile.setupCompletionQuorum,
                     turnoutCount: thresholdProfile.releaseQuorum,
+                    bridgeMobileCertificatePresent: true,
+                    bridgeProverCertificatePresent: true,
                 }),
             ),
         ).toEqual({
@@ -71,85 +172,155 @@ describe('election foundation capability evaluator', () => {
         });
     });
 
-    it('refuses replay and attestation without target finality', () => {
+    it('keeps reserved safe API actions fail-closed until their implementations exist', () => {
+        expect(
+            evaluateActionCapability('VerifyTranscript', createContext()),
+        ).toMatchObject({ reason: 'OperationUnavailable' });
+        expect(
+            evaluateActionCapability(
+                'CreateBridgeProof',
+                createContext({
+                    bridgeMobileCertificatePresent: false,
+                }),
+            ),
+        ).toMatchObject({ reason: 'MissingBridgeMobileCertificate' });
+        expect(
+            evaluateActionCapability(
+                'VerifyBridgeProof',
+                createContext({
+                    bridgeMobileCertificatePresent: true,
+                }),
+            ),
+        ).toMatchObject({ reason: 'OperationUnavailable' });
+        expect(
+            evaluateActionCapability(
+                'VerifyOneShotSharePolicy',
+                createContext({
+                    lifecycleState: 'FirstThresholdSharesReached',
+                    thresholdProfile: certifiedThresholdProfile,
+                    oneShotDecryptionProofCertificatePresent: true,
+                }),
+            ),
+        ).toMatchObject({ reason: 'OperationUnavailable' });
+    });
+
+    it('verifies the mandatory evaluation proof only after target finality', () => {
+        expect(
+            evaluateActionCapability(
+                'VerifyEvaluationProof',
+                createContext({ lifecycleState: 'TopKEvaluated' }),
+            ),
+        ).toMatchObject({ reason: 'InvalidLifecycleState' });
+        expect(
+            evaluateActionCapability(
+                'VerifyEvaluationProof',
+                createContext({ lifecycleState: 'EvaluationProofOpen' }),
+            ),
+        ).toMatchObject({ reason: 'TargetFinalityCheckpointMissing' });
+        expect(
+            evaluateActionCapability(
+                'VerifyEvaluationProof',
+                createContext({
+                    lifecycleState: 'EvaluationProofOpen',
+                    targetFinalityAccepted: true,
+                    bridgeMobileCertificatePresent: true,
+                }),
+            ),
+        ).toMatchObject({ reason: 'MissingEvaluationProofCertificate' });
+        expect(
+            evaluateActionCapability(
+                'VerifyEvaluationProof',
+                createContext({
+                    lifecycleState: 'EvaluationProofOpen',
+                    targetFinalityAccepted: true,
+                    evaluationProofCertificatePresent: true,
+                    bridgeMobileCertificatePresent: true,
+                }),
+            ),
+        ).toEqual({ allowed: true, action: 'VerifyEvaluationProof' });
+    });
+
+    it('accepts a target only after finality and verified evaluation proof', () => {
+        expect(
+            evaluateActionCapability(
+                'AcceptTarget',
+                createContext({
+                    lifecycleState: 'EvaluationProofOpen',
+                    targetFinalityAccepted: true,
+                    evaluationProofVerified: true,
+                    bridgeMobileCertificatePresent: true,
+                }),
+            ),
+        ).toMatchObject({ reason: 'InvalidLifecycleState' });
+        expect(
+            evaluateActionCapability(
+                'AcceptTarget',
+                createContext({
+                    lifecycleState: 'EvaluationProofVerified',
+                    evaluationProofVerified: true,
+                    bridgeMobileCertificatePresent: true,
+                }),
+            ),
+        ).toMatchObject({ reason: 'TargetFinalityCheckpointMissing' });
+        expect(
+            evaluateActionCapability(
+                'AcceptTarget',
+                createContext({
+                    lifecycleState: 'EvaluationProofVerified',
+                    targetFinalityAccepted: true,
+                    bridgeMobileCertificatePresent: true,
+                }),
+            ),
+        ).toMatchObject({ reason: 'EvaluationProofMissing' });
+        expect(
+            evaluateActionCapability(
+                'AcceptTarget',
+                createContext({
+                    lifecycleState: 'EvaluationProofVerified',
+                    targetFinalityAccepted: true,
+                    evaluationProofVerified: true,
+                    bridgeMobileCertificatePresent: true,
+                }),
+            ),
+        ).toEqual({ allowed: true, action: 'AcceptTarget' });
+    });
+
+    it('keeps opt-in local replay behind accepted target evidence', () => {
+        expect(
+            evaluateActionCapability(
+                'CreateLocalReplayRecord',
+                createContext({
+                    lifecycleState: 'TargetAccepted',
+                    evaluationProofVerified: true,
+                }),
+            ),
+        ).toMatchObject({ reason: 'TargetNotAccepted' });
         expect(
             evaluateActionCapability(
                 'ReplayEvaluation',
-                createContext({ lifecycleState: 'TopKEvaluated' }),
-            ),
-        ).toMatchObject({ reason: 'TargetFinalityCheckpointMissing' });
-        expect(
-            evaluateActionCapability(
-                'AttestReplay',
                 createContext({
-                    lifecycleState: 'EvaluationReplayOpen',
-                    localReplaySucceeded: true,
+                    lifecycleState: 'TargetAccepted',
+                    targetAccepted: true,
                 }),
             ),
-        ).toMatchObject({ reason: 'TargetFinalityCheckpointMissing' });
+        ).toMatchObject({ reason: 'EvaluationProofMissing' });
+        expect(
+            evaluateActionCapability(
+                'CreateLocalReplayRecord',
+                createContext({
+                    lifecycleState: 'TargetAccepted',
+                    targetAccepted: true,
+                    evaluationProofVerified: true,
+                }),
+            ),
+        ).toEqual({ allowed: true, action: 'CreateLocalReplayRecord' });
     });
 
-    it('refuses replay attestation without local replay success', () => {
-        expect(
-            evaluateActionCapability(
-                'AttestReplay',
-                createContext({
-                    lifecycleState: 'EvaluationReplayOpen',
-                    targetFinalityAccepted: true,
-                }),
-            ),
-        ).toMatchObject({ reason: 'LocalReplayNotVerified' });
-    });
-
-    it('refuses create poll when the poll spec is invalid', () => {
-        expect(
-            evaluateActionCapability(
-                'CreatePoll',
-                createContext({ pollSpecValid: false }),
-            ),
-        ).toMatchObject({ reason: 'PollSpecInvalid' });
-    });
-
-    it('enforces target acceptance attestation threshold or optional proof', () => {
-        expect(
-            evaluateActionCapability(
-                'AcceptTarget',
-                createContext({
-                    lifecycleState: 'EvaluationReplayOpen',
-                    targetFinalityAccepted: true,
-                    replayAttestationCount:
-                        thresholdProfile.evaluationReplayQuorum - 1,
-                }),
-            ),
-        ).toMatchObject({ reason: 'EvaluationReplayThresholdNotReached' });
-        expect(
-            evaluateActionCapability(
-                'AcceptTarget',
-                createContext({
-                    lifecycleState: 'EvaluationReplayOpen',
-                    targetFinalityAccepted: true,
-                    replayAttestationCount:
-                        thresholdProfile.evaluationReplayQuorum,
-                }),
-            ),
-        ).toEqual({ allowed: true, action: 'AcceptTarget' });
-        expect(
-            evaluateActionCapability(
-                'AcceptTarget',
-                createContext({
-                    lifecycleState: 'OptionalEvaluationProofVerified',
-                    targetFinalityAccepted: true,
-                    optionalEvaluationProofVerified: true,
-                }),
-            ),
-        ).toEqual({ allowed: true, action: 'AcceptTarget' });
-    });
-
-    it('refuses decryption-share capability before target acceptance or finality', () => {
+    it('refuses decryption-share capability before accepted target evidence is complete', () => {
         expect(
             evaluateActionCapability(
                 'CreateTargetBoundDecryptionShare',
-                createContext({ lifecycleState: 'EvaluationReplayAttested' }),
+                createContext({ lifecycleState: 'EvaluationProofVerified' }),
             ),
         ).toMatchObject({ reason: 'InvalidLifecycleState' });
         expect(
@@ -167,6 +338,30 @@ describe('election foundation capability evaluator', () => {
                 }),
             ),
         ).toMatchObject({ reason: 'TargetNotAccepted' });
+        expect(
+            evaluateActionCapability(
+                'CreateTargetBoundDecryptionShare',
+                createContext({
+                    lifecycleState: 'TargetAccepted',
+                    targetFinalityAccepted: true,
+                    targetAccepted: true,
+                }),
+            ),
+        ).toMatchObject({ reason: 'EvaluationProofMissing' });
+    });
+
+    it('requires the certified BGV async CPAD threshold profile before decryption', () => {
+        expect(
+            evaluateActionCapability(
+                'CreateTargetBoundDecryptionShare',
+                createContext({
+                    lifecycleState: 'TargetAccepted',
+                    targetFinalityAccepted: true,
+                    targetAccepted: true,
+                    evaluationProofVerified: true,
+                }),
+            ),
+        ).toMatchObject({ reason: 'ThresholdDecryptionProfileNotCertified' });
     });
 
     it.each([
@@ -180,42 +375,150 @@ describe('election foundation capability evaluator', () => {
             expect(
                 evaluateActionCapability(
                     'CreateTargetBoundDecryptionShare',
-                    createContext({
-                        lifecycleState: 'TargetAccepted',
-                        targetFinalityAccepted: true,
-                        targetAccepted: true,
-                        recoveryState,
-                    }),
+                    targetAcceptedContext({ recoveryState }),
                 ),
             ).toMatchObject({ reason });
         },
     );
 
-    it('requires accepted target evidence before recombination', () => {
+    it('allows target-bound decryption shares while awaiting first threshold shares', () => {
         expect(
             evaluateActionCapability(
-                'RecombineAcceptedTarget',
-                createContext({
+                'CreateTargetBoundDecryptionShare',
+                targetAcceptedContext({
                     lifecycleState: 'AwaitingFirstDecryptionShares',
-                    decryptionShareCount:
-                        thresholdProfile.decryptionShareQuorum,
                 }),
             ),
-        ).toMatchObject({ reason: 'TargetNotAccepted' });
+        ).toEqual({
+            allowed: true,
+            action: 'CreateTargetBoundDecryptionShare',
+        });
     });
 
-    it('refuses recombination until the first threshold shares are reached', () => {
+    it('requires decryption and CPAD certificates for the target decryption path', () => {
         expect(
             evaluateActionCapability(
-                'RecombineAcceptedTarget',
+                'CreateTargetBoundDecryptionShare',
+                targetAcceptedContext({
+                    oneShotDecryptionProofCertificatePresent: false,
+                }),
+            ),
+        ).toMatchObject({
+            reason: 'MissingOneShotDecryptionProofCertificate',
+        });
+        expect(
+            evaluateActionCapability(
+                'CreateTargetBoundDecryptionShare',
+                targetAcceptedContext({
+                    thresholdDecryptionCertificatePresent: false,
+                }),
+            ),
+        ).toMatchObject({ reason: 'MissingThresholdDecryptionCertificate' });
+        expect(
+            evaluateActionCapability(
+                'VerifyCPADProfile',
                 createContext({
-                    lifecycleState: 'AwaitingFirstDecryptionShares',
-                    targetAccepted: true,
+                    lifecycleState: 'FirstThresholdSharesReached',
+                    thresholdProfile,
+                    cpadCertificatePresent: true,
+                    decryptionShareCount: thresholdProfile.decryptionThreshold,
+                    thresholdDecryptionCertificatePresent: true,
+                }),
+            ),
+        ).toMatchObject({
+            reason: 'ThresholdDecryptionProfileNotCertified',
+        });
+        expect(
+            evaluateActionCapability(
+                'VerifyCPADProfile',
+                createContext({
+                    lifecycleState: 'FirstThresholdSharesReached',
+                    thresholdProfile: certifiedThresholdProfile,
+                    cpadCertificatePresent: false,
                     decryptionShareCount:
-                        thresholdProfile.decryptionShareQuorum - 1,
+                        certifiedThresholdProfile.decryptionShareQuorum ?? 0,
+                    thresholdDecryptionCertificatePresent: true,
+                }),
+            ),
+        ).toMatchObject({ reason: 'MissingCPADCertificate' });
+    });
+
+    it('allows CPAD verification and recombination only after mandatory profile checks pass', () => {
+        expect(
+            evaluateActionCapability(
+                'VerifyCPADProfile',
+                createContext({
+                    lifecycleState: 'FirstThresholdSharesReached',
+                    thresholdProfile: certifiedThresholdProfile,
+                    cpadCertificatePresent: true,
+                    decryptionShareCount:
+                        certifiedThresholdProfile.decryptionShareQuorum ?? 0,
+                    thresholdDecryptionCertificatePresent: true,
+                }),
+            ),
+        ).toEqual({ allowed: true, action: 'VerifyCPADProfile' });
+        expect(
+            evaluateActionCapability(
+                'VerifyCPADProfile',
+                createContext({
+                    lifecycleState: 'FirstThresholdSharesReached',
+                    thresholdProfile: certifiedThresholdProfile,
+                    cpadCertificatePresent: true,
+                    decryptionShareCount:
+                        (certifiedThresholdProfile.decryptionShareQuorum ?? 0) -
+                        1,
+                    thresholdDecryptionCertificatePresent: true,
                 }),
             ),
         ).toMatchObject({ reason: 'FirstThresholdSharesNotReached' });
+        expect(
+            evaluateActionCapability(
+                'RecombineAcceptedTarget',
+                createContext({
+                    lifecycleState: 'FirstThresholdSharesReached',
+                    thresholdProfile: certifiedThresholdProfile,
+                    targetFinalityAccepted: true,
+                    targetAccepted: true,
+                    evaluationProofVerified: true,
+                    decryptionShareCount:
+                        certifiedThresholdProfile.decryptionShareQuorum ?? 0,
+                    cpadProfileVerified: false,
+                }),
+            ),
+        ).toMatchObject({ reason: 'CPADProfileNotVerified' });
+        expect(
+            evaluateActionCapability(
+                'RecombineAcceptedTarget',
+                createContext({
+                    lifecycleState: 'CPADProfileVerified',
+                    thresholdProfile: certifiedThresholdProfile,
+                    targetFinalityAccepted: true,
+                    targetAccepted: true,
+                    evaluationProofVerified: true,
+                    cpadProfileVerified: true,
+                    decryptionShareCount:
+                        (certifiedThresholdProfile.decryptionShareQuorum ?? 0) -
+                        1,
+                    oneShotDecryptionProofCertificatePresent: true,
+                }),
+            ),
+        ).toMatchObject({ reason: 'FirstThresholdSharesNotReached' });
+        expect(
+            evaluateActionCapability(
+                'RecombineAcceptedTarget',
+                createContext({
+                    lifecycleState: 'CPADProfileVerified',
+                    thresholdProfile: certifiedThresholdProfile,
+                    targetFinalityAccepted: true,
+                    targetAccepted: true,
+                    evaluationProofVerified: true,
+                    cpadProfileVerified: true,
+                    decryptionShareCount:
+                        certifiedThresholdProfile.decryptionShareQuorum ?? 0,
+                    oneShotDecryptionProofCertificatePresent: true,
+                }),
+            ),
+        ).toEqual({ allowed: true, action: 'RecombineAcceptedTarget' });
     });
 
     it('keeps non-claim-bearing profiles out of claim-bearing capabilities', () => {
@@ -223,31 +526,16 @@ describe('election foundation capability evaluator', () => {
             rosterSize: 19,
             unsafeMicroRosterAcknowledged: true,
         });
-        const certificateGatedThresholdProfile = deriveThresholdProfile({
-            rosterSize: 21,
-        });
 
         expect(
             evaluateActionCapability(
                 'AcceptTarget',
                 createContext({
-                    lifecycleState: 'EvaluationReplayOpen',
+                    lifecycleState: 'EvaluationProofVerified',
                     thresholdProfile: unsafeThresholdProfile,
                     targetFinalityAccepted: true,
-                    replayAttestationCount:
-                        unsafeThresholdProfile.evaluationReplayQuorum,
-                }),
-            ),
-        ).toMatchObject({ reason: 'ProfileNotClaimBearing' });
-        expect(
-            evaluateActionCapability(
-                'AcceptTarget',
-                createContext({
-                    lifecycleState: 'EvaluationReplayOpen',
-                    thresholdProfile: certificateGatedThresholdProfile,
-                    targetFinalityAccepted: true,
-                    replayAttestationCount:
-                        certificateGatedThresholdProfile.evaluationReplayQuorum,
+                    evaluationProofVerified: true,
+                    bridgeMobileCertificatePresent: true,
                 }),
             ),
         ).toMatchObject({ reason: 'ProfileNotClaimBearing' });
@@ -258,10 +546,10 @@ describe('election foundation capability evaluator', () => {
             evaluateActionCapability(
                 'AcceptTarget',
                 createContext({
-                    lifecycleState: 'EvaluationReplayOpen',
+                    lifecycleState: 'EvaluationProofVerified',
                     targetFinalityAccepted: true,
-                    replayAttestationCount:
-                        thresholdProfile.evaluationReplayQuorum,
+                    evaluationProofVerified: true,
+                    bridgeMobileCertificatePresent: true,
                     mobileProfileSupported: false,
                 }),
             ),
@@ -271,53 +559,14 @@ describe('election foundation capability evaluator', () => {
             evaluateActionCapability(
                 'AcceptTarget',
                 createContext({
-                    lifecycleState: 'EvaluationReplayOpen',
+                    lifecycleState: 'EvaluationProofVerified',
                     targetFinalityAccepted: true,
-                    replayAttestationCount:
-                        thresholdProfile.evaluationReplayQuorum,
+                    evaluationProofVerified: true,
+                    bridgeMobileCertificatePresent: true,
                     storageQuotaSufficient: false,
                 }),
             ),
         ).toMatchObject({ reason: 'InsufficientStorageQuota' });
-    });
-
-    it('refuses bridge and Brakerski paths when required mobile certificates are missing', () => {
-        expect(
-            evaluateActionCapability(
-                'ReplayEvaluation',
-                createContext({
-                    lifecycleState: 'TopKEvaluated',
-                    targetFinalityAccepted: true,
-                    bridgeMobileCertificatePresent: false,
-                }),
-            ),
-        ).toMatchObject({ reason: 'MissingBridgeMobileCertificate' });
-
-        expect(
-            evaluateActionCapability(
-                'DeriveAggregateContribution',
-                createContext({
-                    lifecycleState: 'VotingClosed',
-                    setupCompleteCount: thresholdProfile.setupCompletionQuorum,
-                    turnoutCount: thresholdProfile.releaseQuorum,
-                    bridgeProverCertificatePresent: false,
-                }),
-            ),
-        ).toMatchObject({ reason: 'MissingBridgeProverCertificate' });
-
-        expect(
-            evaluateActionCapability(
-                'CreateTargetBoundDecryptionShare',
-                createContext({
-                    lifecycleState: 'TargetAccepted',
-                    targetFinalityAccepted: true,
-                    targetAccepted: true,
-                    brakerskiMobileProofCertificatePresent: false,
-                }),
-            ),
-        ).toMatchObject({
-            reason: 'MissingBrakerskiMobileProofCertificate',
-        });
     });
 
     it('leaves verified top-k decoding unavailable in election foundation', () => {
@@ -326,10 +575,24 @@ describe('election foundation capability evaluator', () => {
                 'DecodeVerifiedTopK',
                 createContext({
                     lifecycleState: 'FullyVerifiedResult',
+                    thresholdProfile: certifiedThresholdProfile,
                     decryptionShareCount:
-                        thresholdProfile.decryptionShareQuorum,
+                        certifiedThresholdProfile.decryptionShareQuorum ?? 0,
                 }),
             ),
         ).toMatchObject({ reason: 'OperationUnavailable' });
+    });
+
+    it('refuses unknown runtime actions with a structured decision', () => {
+        expect(
+            evaluateActionCapability(
+                'NotAProtocolAction' as never,
+                createContext(),
+            ),
+        ).toEqual({
+            allowed: false,
+            action: 'NotAProtocolAction',
+            reason: 'ForbiddenOperation',
+        });
     });
 });

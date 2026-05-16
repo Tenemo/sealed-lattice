@@ -9,6 +9,7 @@
     "types": "dist/index.d.ts",
     "files": [
         "dist",
+        "public-surface.json",
         "README.md",
         "LICENSE"
     ],

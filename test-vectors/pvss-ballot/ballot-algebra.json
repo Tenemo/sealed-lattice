@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "ballotPackageDigest": "2aff4c0034b71f61d3b173de9f4ff3025fe01da7494d5b62c0aab8de6ef73b4bec6ceea798e29ea979454178bed586813f92813cf4d99d7a55d0d5a1eebe6fec",
+  "ballotPolynomialSetDigest": "ab60f2f9d3ae0b2beff301c5d3cce5b7a554760d1256c5095fdc9f674e76ceda04f4d14b429c51adef0147cca43d399075f732fe62eac88bd31c7fd9bcd46948",
+  "firstReceiverPayloadDigest": "1da5cbc303485e5390c1322dc5bfdc3eb012e87a886983513276089edfa28aa07abf79bb72988a9043d0148ac0ef0069364520465e3c4726ab6cfbb30e106687",
+  "firstReceiverShareVector": [
+    53665,
+    42889,
+    19012,
+    35001,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "firstShareCommitmentDigest": "a0e1c15af26abb46c8f4dbe290a262b393dfc91f619f4d1eadaf8525defa5671a722093291fdbd6c5da2584a6fc6b247cbb2ea87aed7ff97859883d88a2eb01e",
+  "normalizedScores": [
+    10,
+    1,
+    7,
+    1
+  ]
+}

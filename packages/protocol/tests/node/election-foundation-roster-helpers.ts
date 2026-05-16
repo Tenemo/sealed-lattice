@@ -1,18 +1,19 @@
-import {
-    deriveElectionManifestDigest,
-    deriveProtocolDigest,
-    deriveReceiverKeyRegistrationDigest,
-    deriveRegistrationEntryDigest,
-    deriveRosterDigest,
-    deriveTrusteeSetupEntryDigest,
-} from '../../src/index';
+import { deriveProtocolDigest } from '@sealed-lattice/crypto';
 import type {
     ElectionManifest,
     ReceiverKeyRegistration,
     RegistrationEntry,
     RosterManifestTranscriptInput,
     TrusteeSetupEntry,
-} from '../../src/index';
+} from '@sealed-lattice/types';
+
+import {
+    deriveElectionManifestDigest,
+    deriveReceiverKeyRegistrationDigest,
+    deriveRegistrationEntryDigest,
+    deriveRosterDigest,
+    deriveTrusteeSetupEntryDigest,
+} from '../../src/roster/index';
 
 import {
     createBoardEvidence,
@@ -30,7 +31,7 @@ import {
 
 export const createRegistrationEntry = (
     participantIdentity: string,
-    boardSeq: number,
+    boardSequence: number,
     boardPosition: number,
 ): RegistrationEntry => {
     const signingPublicKeyDigest =
@@ -41,7 +42,7 @@ export const createRegistrationEntry = (
         ceremonyId,
         participantIdentity,
         signingPublicKeyDigest,
-        boardSeq,
+        boardSequence,
         boardPosition,
         recoveryEpoch: 0,
         deviceEpoch: 0,
@@ -66,7 +67,7 @@ export const createRegistrationEntry = (
 
 export const createReceiverKeyRegistration = (
     participantIdentity: string,
-    boardSeq: number,
+    boardSequence: number,
     boardPosition: number,
 ): ReceiverKeyRegistration => {
     const signingPublicKeyDigest =
@@ -76,10 +77,10 @@ export const createReceiverKeyRegistration = (
         objectVersion: 1,
         ceremonyId,
         participantIdentity,
-        receiverKeyRoot: deriveProtocolDigest('ReceiverKeyRoot', {
+        receiverKeyRoot: deriveProtocolDigest('EncryptedEnvelopeRoot', {
             participantIdentity,
         }),
-        boardSeq,
+        boardSequence,
         boardPosition,
         recoveryEpoch: 0,
         deviceEpoch: 0,
@@ -105,7 +106,7 @@ export const createReceiverKeyRegistration = (
 
 export const createTrusteeSetupEntry = (
     trusteeIdentity: string,
-    boardSeq: number,
+    boardSequence: number,
     boardPosition: number,
 ): TrusteeSetupEntry => {
     const signingPublicKeyDigest =
@@ -115,10 +116,10 @@ export const createTrusteeSetupEntry = (
         objectVersion: 1,
         ceremonyId,
         trusteeIdentity,
-        trusteeSetupRoot: deriveProtocolDigest('TrusteeSetupRoot', {
+        trusteeSetupRoot: deriveProtocolDigest('CollectivePublicKeyRoot', {
             trusteeIdentity,
         }),
-        boardSeq,
+        boardSequence,
         boardPosition,
         recoveryEpoch: 0,
         deviceEpoch: 0,
@@ -159,7 +160,7 @@ export const createElectionManifest = (
         }),
         manifestPolicyDigests,
         manifestOpaqueBindings,
-        boardSeq: 3,
+        boardSequence: 3,
         boardPosition: 0,
         ...overrides,
     } satisfies Omit<ElectionManifest, 'electionManifestDigest' | 'signature'>;
@@ -280,7 +281,7 @@ export const createRosterManifestTranscriptInput = (
         electionManifest: manifest,
         organizerPublicKeyDigest,
         organizerIdentity: 'organizer',
-        rosterFreezeBoardSeq: 2,
+        rosterFreezeBoardSequence: 2,
         manifestInclusionProof: manifestInclusionProofs[0],
     };
 };

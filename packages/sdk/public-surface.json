@@ -1,0 +1,272 @@
+{
+  "schemaVersion": 1,
+  "runtimeExports": [
+    "createBridgeProof",
+    "deriveLifecycleLabels",
+    "deriveThresholdProfile",
+    "deriveValidatedFirstValidOrder",
+    "evaluateActionCapability",
+    "isActionCurrentForRecoveryEpoch",
+    "isValidLifecycleTransition",
+    "validatePollSpec",
+    "verifyBoardConsistency",
+    "verifyBridgeProof",
+    "verifyCastReceiptShell",
+    "verifyCloseRecordShell",
+    "verifyFirstValidPolicy",
+    "verifyOneShotSharePolicy",
+    "verifyRecoveryEpochUpdate",
+    "verifyRosterExternalAcceptance",
+    "verifyRosterManifestTranscript",
+    "verifyTargetFinality",
+    "verifyTranscript",
+    "verifyTranscriptCoreFixture"
+  ],
+  "forbiddenRuntimeExports": [
+    "bootstrap",
+    "createShamirPolynomial",
+    "decodeSparseTopKTarget",
+    "decryptAggregateShare",
+    "decryptComparisonBit",
+    "decryptExactSum",
+    "decryptIntermediateWire",
+    "decryptRank",
+    "decryptToFile",
+    "decryptToString",
+    "deriveBallotPackageDigest",
+    "deriveCanonicalBallotSet",
+    "derivePlaintextTopKOracle",
+    "deriveReceiverShareVectors",
+    "deriveTestAggregateShares",
+    "deriveTestBallotPackage",
+    "exportAggregateOpening",
+    "exportAggregateShare",
+    "exportBridgeWitness",
+    "exportSecretKey",
+    "exportShare",
+    "fieldModulus",
+    "getShare",
+    "importSecretKey",
+    "partialDecrypt",
+    "partialDecryptWithoutTarget",
+    "publishAggregateOpening",
+    "rawHEAdd",
+    "rawHEMul",
+    "rawHENoiseBudget",
+    "rawHERelin",
+    "rawHERotate",
+    "rawNTT",
+    "rawRNSLimbAccess",
+    "setNoiseFloodSigma",
+    "setSecretKey",
+    "setSmudgingDistribution",
+    "thresholdDecrypt",
+    "verifyBallotPackageShell",
+    "verifyLocalReplayRecordShell",
+    "verifyTargetAcceptedRecordShell",
+    "verifyTestAggregateShareOpening",
+    "verifyTestShareCommitmentOpening",
+    "verifyTopKDecryptionShareShell"
+  ],
+  "publicTypeExports": [
+    "AcceptedTargetFinalityCheckpoint",
+    "ActionContext",
+    "ActionCurrentForRecoveryEpochInput",
+    "ActionCurrentForRecoveryEpochResult",
+    "AppendOnlyConsistencyProof",
+    "BaseClaimProfile",
+    "BoardConsistencyInput",
+    "BoardConsistencyVerification",
+    "BoardEntryMerklePathStep",
+    "CanonicalError",
+    "CanonicalErrorCode",
+    "CanonicalSignedRootObject",
+    "CapabilityContext",
+    "CapabilityDecision",
+    "CastReceipt",
+    "CastReceiptVerification",
+    "CastReceiptVerificationInput",
+    "CloseRecord",
+    "CloseRecordKind",
+    "CloseRecordVerification",
+    "CloseRecordVerificationInput",
+    "ConflictingHeadEvidence",
+    "ConflictingManifestEvidence",
+    "DecryptionShareFilteringMode",
+    "DecryptionShareSelectionRule",
+    "DuplicateBallotPolicy",
+    "ElectionManifest",
+    "EvaluationProofMode",
+    "FailureStatusLabel",
+    "FirstValidOrderingInput",
+    "FirstValidOrderingVerification",
+    "FutureProtocolOperationResult",
+    "GoldenTranscriptCoreFixture",
+    "GoldenTranscriptCoreFixtureVerification",
+    "HeBackendCorruptionModel",
+    "InclusionProof",
+    "LifecycleLabelInput",
+    "LifecycleLabels",
+    "LifecycleState",
+    "LifecycleTransition",
+    "MalformedObjectFixture",
+    "MalformedObjectFixtureVerification",
+    "ManifestOpaqueBindings",
+    "ManifestPolicyDigests",
+    "MheSecurityClosure",
+    "MlDsaSignatureMode",
+    "MlDsaSignatureProfile",
+    "ModeStatusLabel",
+    "PollSpec",
+    "PollSpecInput",
+    "PollSpecValidation",
+    "PollSpecValidationError",
+    "PollSpecValidationErrorCode",
+    "PrimaryStatusLabel",
+    "ProtocolAction",
+    "ProtocolDigest",
+    "ProtocolObjectType",
+    "ProtocolRefusalCode",
+    "ProtocolSignatureEnvelope",
+    "ProtocolVerificationStatusLabel",
+    "ReceiverKeyRegistration",
+    "RecoveryEpochMapEntry",
+    "RecoveryEpochUpdate",
+    "RecoveryEpochVerification",
+    "RecoveryEpochVerificationInput",
+    "RecoveryState",
+    "RefusalReason",
+    "RefusalRecord",
+    "RegistrationEntry",
+    "ResultClaimLabel",
+    "RosterExternalAcceptance",
+    "RosterExternalAcceptanceVerification",
+    "RosterExternalAcceptanceVerificationInput",
+    "RosterManifestTranscriptInput",
+    "RosterManifestTranscriptVerification",
+    "RosterProfileKind",
+    "ScoreDomain",
+    "SignatureVerificationResult",
+    "SignedBoardHead",
+    "SignedObjectType",
+    "SignerRole",
+    "StructuredProtocolVerificationResult",
+    "TargetBoundShareSelectionProfile",
+    "TargetFinalityCheckpoint",
+    "TargetFinalityPolicy",
+    "TargetFinalityRecord",
+    "TargetFinalityVerification",
+    "TargetFinalityVerificationInput",
+    "TargetProposal",
+    "ThresholdProfile",
+    "ThresholdProfileInput",
+    "ThresholdWarning",
+    "TiePolicy",
+    "TranscriptCoreAnalysis",
+    "TranscriptCoreFixture",
+    "TranscriptCoreFixtureVerification",
+    "TranscriptCoreMheSecurityClosure",
+    "TranscriptCoreReplayFixture",
+    "TranscriptCoreStatusLabel",
+    "TranscriptCoreVerificationLabel",
+    "TranscriptCoreVerificationResult",
+    "TrusteeSetupEntry",
+    "ValidatedFirstValidObject",
+    "WitnessCheckpoint",
+    "WitnessPolicy"
+  ],
+  "vendoredProtocolRuntimeModules": [
+    "board/digests.ts",
+    "board/index.ts",
+    "board/shell-evidence.ts",
+    "closing/index.ts",
+    "common/verification-helpers.ts",
+    "finality/index.ts",
+    "lifecycle/capabilities.ts",
+    "lifecycle/labels.ts",
+    "lifecycle/lifecycle.ts",
+    "lifecycle/poll-spec.ts",
+    "lifecycle/profiles.ts",
+    "lifecycle/refusal.ts",
+    "lifecycle/thresholds.ts",
+    "ordering/index.ts",
+    "recovery/index.ts",
+    "roster/digests.ts",
+    "roster/inclusion.ts",
+    "roster/index.ts",
+    "roster/object-validation.ts",
+    "roster/verification.ts"
+  ],
+  "vendoredProtocolRuntimeEntryExports": [
+    {
+      "source": "board/index.js",
+      "exports": [
+        "verifyBoardConsistency"
+      ]
+    },
+    {
+      "source": "closing/index.js",
+      "exports": [
+        "verifyCastReceiptShell",
+        "verifyCloseRecordShell"
+      ]
+    },
+    {
+      "source": "finality/index.js",
+      "exports": [
+        "verifyTargetFinality"
+      ]
+    },
+    {
+      "source": "lifecycle/capabilities.js",
+      "exports": [
+        "evaluateActionCapability"
+      ]
+    },
+    {
+      "source": "lifecycle/labels.js",
+      "exports": [
+        "deriveLifecycleLabels"
+      ]
+    },
+    {
+      "source": "lifecycle/lifecycle.js",
+      "exports": [
+        "isValidLifecycleTransition"
+      ]
+    },
+    {
+      "source": "lifecycle/poll-spec.js",
+      "exports": [
+        "validatePollSpec"
+      ]
+    },
+    {
+      "source": "lifecycle/thresholds.js",
+      "exports": [
+        "deriveThresholdProfile"
+      ]
+    },
+    {
+      "source": "ordering/index.js",
+      "exports": [
+        "deriveValidatedFirstValidOrder",
+        "verifyFirstValidPolicy"
+      ]
+    },
+    {
+      "source": "recovery/index.js",
+      "exports": [
+        "isActionCurrentForRecoveryEpoch",
+        "verifyRecoveryEpochUpdate"
+      ]
+    },
+    {
+      "source": "roster/index.js",
+      "exports": [
+        "verifyRosterExternalAcceptance",
+        "verifyRosterManifestTranscript"
+      ]
+    }
+  ]
+}

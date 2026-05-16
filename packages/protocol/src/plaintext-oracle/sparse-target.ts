@@ -1,3 +1,4 @@
+import { deriveProtocolDigest } from '@sealed-lattice/crypto';
 import type {
     DecodedSparseTopKSelection,
     FieldElement,
@@ -7,7 +8,6 @@ import type {
     SparseTopKTargetDecoding,
 } from '@sealed-lattice/types';
 
-import { deriveProtocolDigest } from '../common/digests.js';
 import {
     createRefusal,
     uniqueStrings,
@@ -15,10 +15,10 @@ import {
 
 import { assertCanonicalFieldElement } from './field.js';
 
-export const sparseTopKTargetLayoutId = 'WinnerRankTopK-v1' as const;
+const sparseTopKTargetLayoutId = 'WinnerRankTopK-v1' as const;
 const forbiddenSemanticSlotCount = 4;
 
-export const deriveSparseTopKTargetLayoutDigest = (input: {
+const deriveSparseTopKTargetLayoutDigest = (input: {
     readonly optionCount: number;
     readonly topOptionCount: number;
 }): string =>
@@ -37,7 +37,7 @@ export const deriveSparseTopKTargetLayoutDigest = (input: {
 export const deriveSparseTopKTargetDigest = (
     target: Omit<SparseTopKTarget, 'targetDigest'>,
 ): string =>
-    deriveProtocolDigest('PlaintextRoot', {
+    deriveProtocolDigest('SparseTopKTargetDigest', {
         forbiddenSemanticSlots: target.forbiddenSemanticSlots,
         layoutDigest: target.layoutDigest,
         layoutId: target.layoutId,
@@ -109,6 +109,27 @@ export const deriveSparseTopKTarget = (input: {
 
         seenOptionIndexes.add(rankingEntry.optionIndex);
         seenRanks.add(rankingEntry.rank);
+    }
+
+    const canonicalRanking = [...input.ranking]
+        .sort(
+            (left, right) =>
+                right.totalScore - left.totalScore ||
+                left.optionIndex - right.optionIndex,
+        )
+        .map((entry, rank) => ({
+            optionIndex: entry.optionIndex,
+            rank,
+        }));
+    for (const expectedEntry of canonicalRanking) {
+        const actualEntry = input.ranking.find(
+            (entry) => entry.optionIndex === expectedEntry.optionIndex,
+        );
+        if (actualEntry?.rank !== expectedEntry.rank) {
+            throw new RangeError(
+                'Sparse target ranking must match the higher-score-then-lower-option-index order.',
+            );
+        }
     }
 
     const rankByOptionIndex = new Map(

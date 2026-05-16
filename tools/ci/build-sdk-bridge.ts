@@ -29,6 +29,7 @@ import {
     type StringLiteral,
 } from 'typescript';
 
+import publicSurface from '../../packages/sdk/public-surface.json' with { type: 'json' };
 import { collectFiles } from '../internal/files.js';
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
@@ -101,40 +102,15 @@ const runtimeImportTargets = new Map([
     ['@sealed-lattice/protocol', electionFoundationOutputDirectoryPath],
     ['@sealed-lattice/wasm', bridgeOutputPath],
 ]);
-export const sdkProtocolRuntimeSourceRelativePaths = [
-    'board/index.ts',
-    'closing/index.ts',
-    'common/digests.ts',
-    'common/signatures.ts',
-    'common/verification-helpers.ts',
-    'finality/index.ts',
-    'lifecycle/capabilities.ts',
-    'lifecycle/labels.ts',
-    'lifecycle/lifecycle.ts',
-    'lifecycle/poll-spec.ts',
-    'lifecycle/profiles.ts',
-    'lifecycle/refusal.ts',
-    'lifecycle/thresholds.ts',
-    'ordering/index.ts',
-    'recovery/index.ts',
-    'roster/digests.ts',
-    'roster/inclusion.ts',
-    'roster/index.ts',
-    'roster/object-validation.ts',
-    'roster/verification.ts',
-] as const;
-const sdkProtocolRuntimeIndexSource = `export { evaluateActionCapability } from './lifecycle/capabilities.js';
-export { verifyBoardConsistency, verifyInclusionProof } from './board/index.js';
-export { verifyCastReceiptShell, verifyCloseRecordShell } from './closing/index.js';
-export { deriveValidatedFirstComeOrder, verifyFirstComePolicy } from './ordering/index.js';
-export { verifyTargetFinality } from './finality/index.js';
-export { deriveLifecycleLabels } from './lifecycle/labels.js';
-export { isValidLifecycleTransition } from './lifecycle/lifecycle.js';
-export { validatePollSpecFromUnknown } from './lifecycle/poll-spec.js';
-export { isActionCurrentForRecoveryEpoch, verifyRecoveryEpochUpdate } from './recovery/index.js';
-export { verifyRosterManifestTranscript } from './roster/index.js';
-export { deriveThresholdProfile } from './lifecycle/thresholds.js';
-`;
+export const sdkProtocolRuntimeSourceRelativePaths =
+    publicSurface.vendoredProtocolRuntimeModules;
+const sdkProtocolRuntimeIndexSource =
+    publicSurface.vendoredProtocolRuntimeEntryExports
+        .map(
+            (entry) =>
+                `export { ${entry.exports.join(', ')} } from './${entry.source}';`,
+        )
+        .join('\n') + '\n';
 
 export const transpileSdkInternalSource = (
     sourceText: string,
@@ -459,9 +435,12 @@ const ensureTypesPackageBuilt = async (): Promise<void> => {
     }
 };
 
+const stripJavaScriptSourceMapComment = (sourceText: string): string =>
+    sourceText.replace(/\r?\n\/\/# sourceMappingURL=.*(?:\r?\n)?$/u, '\n');
+
 const copyTypesPackageSupportFiles = async (): Promise<void> => {
     const supportFilePaths = await collectFiles(typesBuildOutputDirectoryPath, {
-        fileNamePattern: /\.(?:d\.ts|js|js\.map)$/u,
+        fileNamePattern: /\.(?:d\.ts|js)$/u,
     });
 
     await Promise.all(
@@ -485,6 +464,17 @@ const copyTypesPackageSupportFiles = async (): Promise<void> => {
             );
 
             await mkdir(path.dirname(outputPath), { recursive: true });
+            if (sourcePath.endsWith('.js')) {
+                await writeFile(
+                    outputPath,
+                    stripJavaScriptSourceMapComment(
+                        await readFile(sourcePath, 'utf8'),
+                    ),
+                    'utf8',
+                );
+                return;
+            }
+
             await copyFile(sourcePath, outputPath);
         }),
     );

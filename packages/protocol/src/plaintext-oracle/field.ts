@@ -1,12 +1,11 @@
-import type { FieldElement, FieldElementEncoding } from '@sealed-lattice/types';
+import type { FieldElement } from '@sealed-lattice/types';
 
 export const fieldModulus = 65_537;
-export const maximumCanonicalFieldElement = fieldModulus - 1;
-export const fieldElementByteLength = 3;
+const maximumCanonicalFieldElement = fieldModulus - 1;
 
 const lowercaseHexBytePattern = /^[0-9a-f]{6}$/u;
 
-export const isCanonicalFieldElement = (value: number): value is FieldElement =>
+const isCanonicalFieldElement = (value: number): value is FieldElement =>
     Number.isSafeInteger(value) &&
     value >= 0 &&
     value < fieldModulus &&
@@ -65,18 +64,6 @@ export const decodeFieldElement = (bytesHex: string): FieldElement => {
     const value = Number.parseInt(bytesHex, 16);
 
     return assertCanonicalFieldElement(value, 'encoded field element');
-};
-
-export const describeFieldElement = (
-    value: FieldElement,
-): FieldElementEncoding => {
-    const canonicalValue = assertCanonicalFieldElement(value);
-
-    return {
-        bytesHex: encodeFieldElement(canonicalValue),
-        centeredValue: centeredFieldElement(canonicalValue),
-        value: canonicalValue,
-    };
 };
 
 export const addFieldElements = (
@@ -170,12 +157,4 @@ export const divideFieldElements = (
         invertFieldElement(
             assertCanonicalFieldElement(denominator, 'field denominator'),
         ),
-    );
-
-export const sumFieldElements = (
-    values: readonly FieldElement[],
-): FieldElement =>
-    values.reduce<FieldElement>(
-        (sum, value) => addFieldElements(sum, value),
-        0,
     );

@@ -1,12 +1,13 @@
+import { deriveProtocolDigest } from '@sealed-lattice/crypto';
 import type {
-    FirstComeOrderingInput,
-    FirstComeOrderingVerification,
+    FirstValidOrderingInput,
+    FirstValidOrderingVerification,
     RefusalRecord,
-    ValidatedFirstComeCandidate,
+    ValidatedFirstValidObject,
 } from '@sealed-lattice/types';
 
-import { deriveProtocolDigest } from '../common/digests.js';
 import {
+    compareCanonicalStrings,
     createRefusal,
     isNonNegativeInteger,
     uniqueStrings,
@@ -15,15 +16,15 @@ import {
 const defaultMaxPerIdentity = 1;
 
 const compareCandidates = (
-    left: ValidatedFirstComeCandidate,
-    right: ValidatedFirstComeCandidate,
+    left: ValidatedFirstValidObject,
+    right: ValidatedFirstValidObject,
 ): number =>
-    left.boardSeq - right.boardSeq ||
+    left.boardSequence - right.boardSequence ||
     left.boardPosition - right.boardPosition ||
     left.actionSequence - right.actionSequence ||
-    left.objectDigest.localeCompare(right.objectDigest);
+    compareCanonicalStrings(left.objectDigest, right.objectDigest);
 
-const candidateConflictKey = (candidate: ValidatedFirstComeCandidate): string =>
+const candidateConflictKey = (candidate: ValidatedFirstValidObject): string =>
     [
         candidate.signerIdentity,
         candidate.objectType,
@@ -33,8 +34,8 @@ const candidateConflictKey = (candidate: ValidatedFirstComeCandidate): string =>
 const isNonEmptyString = (value: unknown): value is string =>
     typeof value === 'string' && value.length > 0;
 
-const validateFirstComeCandidateShape = (
-    candidate: ValidatedFirstComeCandidate,
+const validateFirstValidObjectShape = (
+    candidate: ValidatedFirstValidObject,
 ): readonly RefusalRecord[] => {
     const refusedObjects: RefusalRecord[] = [];
     const objectDigest = isNonEmptyString(candidate.objectDigest)
@@ -52,15 +53,15 @@ const validateFirstComeCandidateShape = (
     ) {
         refusedObjects.push(
             createRefusal(
-                'FirstComePolicyMismatch',
-                'First-come candidate string fields must be non-empty canonical strings.',
+                'FirstValidPolicyMismatch',
+                'First-valid object string fields must be non-empty canonical strings.',
                 objectDigest,
                 objectType,
             ),
         );
     }
     if (
-        !isNonNegativeInteger(candidate.boardSeq) ||
+        !isNonNegativeInteger(candidate.boardSequence) ||
         !isNonNegativeInteger(candidate.boardPosition) ||
         !isNonNegativeInteger(candidate.recoveryEpoch) ||
         !isNonNegativeInteger(candidate.deviceEpoch) ||
@@ -68,8 +69,8 @@ const validateFirstComeCandidateShape = (
     ) {
         refusedObjects.push(
             createRefusal(
-                'FirstComePolicyMismatch',
-                'First-come candidate sequence and epoch fields must be non-negative safe integers.',
+                'FirstValidPolicyMismatch',
+                'First-valid object sequence and epoch fields must be non-negative safe integers.',
                 objectDigest,
                 objectType,
             ),
@@ -78,8 +79,8 @@ const validateFirstComeCandidateShape = (
     if (typeof candidate.isByteIdenticalRetransmission !== 'boolean') {
         refusedObjects.push(
             createRefusal(
-                'FirstComePolicyMismatch',
-                'First-come candidate retransmission flag must be boolean.',
+                'FirstValidPolicyMismatch',
+                'First-valid object retransmission flag must be boolean.',
                 objectDigest,
                 objectType,
             ),
@@ -90,8 +91,8 @@ const validateFirstComeCandidateShape = (
 };
 
 const isCurrentRecoveryEpoch = (
-    input: FirstComeOrderingInput,
-    candidate: ValidatedFirstComeCandidate,
+    input: FirstValidOrderingInput,
+    candidate: ValidatedFirstValidObject,
 ): boolean => {
     const recoveryEntry =
         input.currentRecoveryEpochMap[candidate.signerIdentity];
@@ -107,21 +108,21 @@ const isCurrentRecoveryEpoch = (
     }
 
     return (
-        recoveryEntry.oldActionCutoffBoardSeq !== undefined &&
-        candidate.boardSeq < recoveryEntry.oldActionCutoffBoardSeq &&
+        recoveryEntry.oldActionCutoffBoardSequence !== undefined &&
+        candidate.boardSequence < recoveryEntry.oldActionCutoffBoardSequence &&
         candidate.recoveryEpoch < recoveryEntry.currentRecoveryEpoch &&
         candidate.deviceEpoch < recoveryEntry.currentDeviceEpoch
     );
 };
 
-export const deriveFirstComeOrderDigest = (
+const deriveFirstValidOrderDigest = (
     input: Pick<
-        FirstComeOrderingInput,
+        FirstValidOrderingInput,
         'requiredContextDigest' | 'selectionPolicyDigest'
     >,
-    orderedCandidates: readonly ValidatedFirstComeCandidate[],
+    orderedCandidates: readonly ValidatedFirstValidObject[],
 ): string =>
-    deriveProtocolDigest('FirstComeOrderDigest', {
+    deriveProtocolDigest('FirstValidOrderDigest', {
         orderedObjectDigests: orderedCandidates.map(
             (candidate) => candidate.objectDigest,
         ),
@@ -129,27 +130,26 @@ export const deriveFirstComeOrderDigest = (
         selectionPolicyDigest: input.selectionPolicyDigest,
     });
 
-const deriveValidatedFirstComeOrderUnchecked = (
-    input: FirstComeOrderingInput,
-): FirstComeOrderingVerification => {
+const deriveValidatedFirstValidOrderUnchecked = (
+    input: FirstValidOrderingInput,
+): FirstValidOrderingVerification => {
     const refusedObjects: RefusalRecord[] = [];
-    const deduplicatedCandidates: ValidatedFirstComeCandidate[] = [];
+    const deduplicatedCandidates: ValidatedFirstValidObject[] = [];
     const seenObjectDigests = new Set<string>();
-    const seenConflictKeys = new Map<string, ValidatedFirstComeCandidate>();
+    const seenConflictKeys = new Map<string, ValidatedFirstValidObject>();
 
     if (input.selectionPolicyDigest !== input.expectedSelectionPolicyDigest) {
         refusedObjects.push(
             createRefusal(
-                'FirstComePolicyMismatch',
-                'First-come ordering requires the manifest-bound selection policy digest.',
+                'FirstValidPolicyMismatch',
+                'First-valid ordering requires the manifest-bound selection policy digest.',
                 input.selectionPolicyDigest,
             ),
         );
     }
 
-    for (const candidate of input.candidates) {
-        const candidateShapeRefusals =
-            validateFirstComeCandidateShape(candidate);
+    for (const candidate of input.objects) {
+        const candidateShapeRefusals = validateFirstValidObjectShape(candidate);
         if (candidateShapeRefusals.length > 0) {
             refusedObjects.push(...candidateShapeRefusals);
             continue;
@@ -161,8 +161,8 @@ const deriveValidatedFirstComeOrderUnchecked = (
         if (candidate.contextDigest !== input.requiredContextDigest) {
             refusedObjects.push(
                 createRefusal(
-                    'FirstComeContextMismatch',
-                    'First-come candidate context digest does not match the required context.',
+                    'FirstValidContextMismatch',
+                    'First-valid object context digest does not match the required context.',
                     candidate.objectDigest,
                     candidate.objectType,
                 ),
@@ -173,7 +173,7 @@ const deriveValidatedFirstComeOrderUnchecked = (
             refusedObjects.push(
                 createRefusal(
                     'UnknownRecoveryEpoch',
-                    'First-come candidate signer has no current recovery-epoch state.',
+                    'First-valid object signer has no current recovery-epoch state.',
                     candidate.objectDigest,
                     candidate.objectType,
                 ),
@@ -184,7 +184,7 @@ const deriveValidatedFirstComeOrderUnchecked = (
             refusedObjects.push(
                 createRefusal(
                     'StaleRecoveryEpoch',
-                    'First-come candidate uses a stale recovery or device epoch.',
+                    'First-valid object uses a stale recovery or device epoch.',
                     candidate.objectDigest,
                     candidate.objectType,
                 ),
@@ -200,8 +200,8 @@ const deriveValidatedFirstComeOrderUnchecked = (
         ) {
             refusedObjects.push(
                 createRefusal(
-                    'ConflictingFirstComeCandidate',
-                    'Same identity posted non-identical first-come candidates for the same context.',
+                    'ConflictingFirstValidObject',
+                    'Same identity posted non-identical first-valid objects for the same context.',
                     candidate.objectDigest,
                     candidate.objectType,
                 ),
@@ -214,8 +214,8 @@ const deriveValidatedFirstComeOrderUnchecked = (
             if (!candidate.isByteIdenticalRetransmission) {
                 refusedObjects.push(
                     createRefusal(
-                        'DuplicateFirstComeCandidate',
-                        'Duplicate first-come candidate was not marked as byte-identical retransmission.',
+                        'DuplicateFirstValidObject',
+                        'Duplicate first-valid object was not marked as byte-identical retransmission.',
                         candidate.objectDigest,
                         candidate.objectType,
                     ),
@@ -232,8 +232,8 @@ const deriveValidatedFirstComeOrderUnchecked = (
     if (!Number.isInteger(maxPerIdentity) || maxPerIdentity < 1) {
         refusedObjects.push(
             createRefusal(
-                'FirstComePolicyMismatch',
-                'First-come ordering requires a positive maxPerIdentity value.',
+                'FirstValidPolicyMismatch',
+                'First-valid ordering requires a positive maxPerIdentity value.',
                 input.selectionPolicyDigest,
             ),
         );
@@ -251,7 +251,7 @@ const deriveValidatedFirstComeOrderUnchecked = (
             countByIdentity.set(candidate.signerIdentity, currentCount + 1);
             return true;
         });
-    const firstComeOrderDigest = deriveFirstComeOrderDigest(
+    const firstValidOrderDigest = deriveFirstValidOrderDigest(
         input,
         orderedCandidates,
     );
@@ -260,21 +260,21 @@ const deriveValidatedFirstComeOrderUnchecked = (
         ok: refusedObjects.length === 0,
         statusLabels: [],
         acceptedDigests: uniqueStrings([
-            firstComeOrderDigest,
+            firstValidOrderDigest,
             ...orderedCandidates.map((candidate) => candidate.objectDigest),
         ]),
         refusedObjects,
-        firstComeOrderDigest:
-            refusedObjects.length === 0 ? firstComeOrderDigest : undefined,
-        orderedCandidates,
+        firstValidOrderDigest:
+            refusedObjects.length === 0 ? firstValidOrderDigest : undefined,
+        orderedObjects: orderedCandidates,
     };
 };
 
-export const deriveValidatedFirstComeOrder = (
-    input: FirstComeOrderingInput,
-): FirstComeOrderingVerification => {
+export const deriveValidatedFirstValidOrder = (
+    input: FirstValidOrderingInput,
+): FirstValidOrderingVerification => {
     try {
-        return deriveValidatedFirstComeOrderUnchecked(input);
+        return deriveValidatedFirstValidOrderUnchecked(input);
     } catch {
         return {
             ok: false,
@@ -282,15 +282,15 @@ export const deriveValidatedFirstComeOrder = (
             acceptedDigests: [],
             refusedObjects: [
                 createRefusal(
-                    'FirstComePolicyMismatch',
-                    'First-come ordering input could not be canonicalized or validated.',
+                    'FirstValidPolicyMismatch',
+                    'First-valid ordering input could not be canonicalized or validated.',
                 ),
             ],
-            orderedCandidates: [],
+            orderedObjects: [],
         };
     }
 };
 
-export const verifyFirstComePolicy = (
-    input: FirstComeOrderingInput,
-): FirstComeOrderingVerification => deriveValidatedFirstComeOrder(input);
+export const verifyFirstValidPolicy = (
+    input: FirstValidOrderingInput,
+): FirstValidOrderingVerification => deriveValidatedFirstValidOrder(input);

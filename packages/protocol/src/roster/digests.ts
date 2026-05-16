@@ -1,19 +1,21 @@
+import { deriveProtocolDigest } from '@sealed-lattice/crypto';
 import type {
     ElectionManifest,
     ProtocolDigest,
     ReceiverKeyRegistration,
     RegistrationEntry,
+    RosterExternalAcceptance,
     TrusteeSetupEntry,
 } from '@sealed-lattice/types';
 
-import { deriveProtocolDigest } from '../common/digests.js';
+import { compareCanonicalStrings } from '../common/verification-helpers.js';
 
 export const deriveRegistrationEntryDigest = (
     entry: Omit<RegistrationEntry, 'registrationEntryDigest' | 'signature'>,
 ): ProtocolDigest =>
     deriveProtocolDigest('RegistrationEntryDigest', {
         boardPosition: entry.boardPosition,
-        boardSeq: entry.boardSeq,
+        boardSequence: entry.boardSequence,
         ceremonyId: entry.ceremonyId,
         deviceEpoch: entry.deviceEpoch,
         objectType: entry.objectType,
@@ -31,7 +33,7 @@ export const deriveReceiverKeyRegistrationDigest = (
 ): ProtocolDigest =>
     deriveProtocolDigest('ReceiverKeyRegistrationDigest', {
         boardPosition: entry.boardPosition,
-        boardSeq: entry.boardSeq,
+        boardSequence: entry.boardSequence,
         ceremonyId: entry.ceremonyId,
         deviceEpoch: entry.deviceEpoch,
         objectType: entry.objectType,
@@ -46,7 +48,7 @@ export const deriveTrusteeSetupEntryDigest = (
 ): ProtocolDigest =>
     deriveProtocolDigest('TrusteeSetupEntryDigest', {
         boardPosition: entry.boardPosition,
-        boardSeq: entry.boardSeq,
+        boardSequence: entry.boardSequence,
         ceremonyId: entry.ceremonyId,
         deviceEpoch: entry.deviceEpoch,
         objectType: entry.objectType,
@@ -68,18 +70,36 @@ export const deriveRosterDigest = (
                 signingPublicKeyDigest: entry.signingPublicKeyDigest,
             }))
             .sort((left, right) =>
-                left.participantIdentity.localeCompare(
+                compareCanonicalStrings(
+                    left.participantIdentity,
                     right.participantIdentity,
                 ),
             ),
     );
+
+export const deriveRosterExternalAcceptanceDigest = (
+    acceptance: Omit<
+        RosterExternalAcceptance,
+        'rosterExternalAcceptanceDigest' | 'signature'
+    >,
+): ProtocolDigest =>
+    deriveProtocolDigest('RosterExternalAcceptanceDigest', {
+        acceptedBoardHeadDigest: acceptance.acceptedBoardHeadDigest,
+        ceremonyId: acceptance.ceremonyId,
+        electionManifestDigest: acceptance.electionManifestDigest,
+        objectType: acceptance.objectType,
+        objectVersion: acceptance.objectVersion,
+        participantIdentity: acceptance.participantIdentity,
+        rosterDigest: acceptance.rosterDigest,
+        warningTextVersion: acceptance.warningTextVersion,
+    });
 
 export const deriveElectionManifestDigest = (
     manifest: Omit<ElectionManifest, 'electionManifestDigest' | 'signature'>,
 ): ProtocolDigest =>
     deriveProtocolDigest('ElectionManifestDigest', {
         boardPosition: manifest.boardPosition,
-        boardSeq: manifest.boardSeq,
+        boardSequence: manifest.boardSequence,
         ceremonyId: manifest.ceremonyId,
         manifestOpaqueBindings: manifest.manifestOpaqueBindings,
         manifestPolicyDigests: manifest.manifestPolicyDigests,

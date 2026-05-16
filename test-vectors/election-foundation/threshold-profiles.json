@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "profiles": [
     {
-      "caseName": "mandatory-n20",
+      "caseName": "n20-main-profile",
       "input": {
         "rosterSize": 20
       },
@@ -15,23 +15,24 @@
         "privacyCorruptionBound": 6,
         "decryptionCorruptionBound": 6,
         "activeFaultBound": 4,
-        "replayBadCorruptionBound": 4,
         "pvssThreshold": 7,
         "decryptionThreshold": 7,
         "releaseQuorum": 14,
         "aggregateContributionQuorum": 7,
-        "decryptionShareQuorum": 7,
-        "evaluationReplayQuorum": 5,
+        "decryptionShareQuorum": null,
+        "targetBoundShareSelectionProfile": null,
         "maximumRaceShares": 20,
         "setupCompletionQuorum": 20,
         "backendCorruptionModel": {
           "kind": "StrictLessThanOneThird"
         },
-        "warnings": []
+        "warnings": [
+          "ShareSelectionProfileRequired"
+        ]
       }
     },
     {
-      "caseName": "strict-n30",
+      "caseName": "n30-certificate-gated-profile",
       "input": {
         "rosterSize": 30
       },
@@ -44,13 +45,12 @@
         "privacyCorruptionBound": 9,
         "decryptionCorruptionBound": 9,
         "activeFaultBound": 6,
-        "replayBadCorruptionBound": 6,
         "pvssThreshold": 10,
         "decryptionThreshold": 10,
         "releaseQuorum": 20,
         "aggregateContributionQuorum": 10,
-        "decryptionShareQuorum": 10,
-        "evaluationReplayQuorum": 7,
+        "decryptionShareQuorum": null,
+        "targetBoundShareSelectionProfile": null,
         "maximumRaceShares": 30,
         "setupCompletionQuorum": 30,
         "backendCorruptionModel": {
@@ -58,12 +58,13 @@
         },
         "warnings": [
           "CertificateGatedProfile",
-          "BackendCertificateRequired"
+          "BackendCertificateRequired",
+          "ShareSelectionProfileRequired"
         ]
       }
     },
     {
-      "caseName": "strict-n40",
+      "caseName": "n40-certificate-gated-profile",
       "input": {
         "rosterSize": 40
       },
@@ -76,13 +77,12 @@
         "privacyCorruptionBound": 13,
         "decryptionCorruptionBound": 13,
         "activeFaultBound": 8,
-        "replayBadCorruptionBound": 8,
         "pvssThreshold": 14,
         "decryptionThreshold": 14,
         "releaseQuorum": 27,
         "aggregateContributionQuorum": 14,
-        "decryptionShareQuorum": 14,
-        "evaluationReplayQuorum": 9,
+        "decryptionShareQuorum": null,
+        "targetBoundShareSelectionProfile": null,
         "maximumRaceShares": 40,
         "setupCompletionQuorum": 40,
         "backendCorruptionModel": {
@@ -90,12 +90,13 @@
         },
         "warnings": [
           "CertificateGatedProfile",
-          "BackendCertificateRequired"
+          "BackendCertificateRequired",
+          "ShareSelectionProfileRequired"
         ]
       }
     },
     {
-      "caseName": "strict-n50",
+      "caseName": "n50-certificate-gated-profile",
       "input": {
         "rosterSize": 50
       },
@@ -108,13 +109,12 @@
         "privacyCorruptionBound": 16,
         "decryptionCorruptionBound": 16,
         "activeFaultBound": 10,
-        "replayBadCorruptionBound": 10,
         "pvssThreshold": 17,
         "decryptionThreshold": 17,
         "releaseQuorum": 34,
         "aggregateContributionQuorum": 17,
-        "decryptionShareQuorum": 17,
-        "evaluationReplayQuorum": 11,
+        "decryptionShareQuorum": null,
+        "targetBoundShareSelectionProfile": null,
         "maximumRaceShares": 50,
         "setupCompletionQuorum": 50,
         "backendCorruptionModel": {
@@ -122,12 +122,13 @@
         },
         "warnings": [
           "CertificateGatedProfile",
-          "BackendCertificateRequired"
+          "BackendCertificateRequired",
+          "ShareSelectionProfileRequired"
         ]
       }
     },
     {
-      "caseName": "unsafe-n19",
+      "caseName": "unsafe-micro-roster",
       "input": {
         "rosterSize": 19,
         "unsafeMicroRosterAcknowledged": true
@@ -141,21 +142,70 @@
         "privacyCorruptionBound": 6,
         "decryptionCorruptionBound": 6,
         "activeFaultBound": 3,
-        "replayBadCorruptionBound": 3,
         "pvssThreshold": 7,
         "decryptionThreshold": 7,
         "releaseQuorum": 13,
         "aggregateContributionQuorum": 7,
-        "decryptionShareQuorum": 7,
-        "evaluationReplayQuorum": 4,
+        "decryptionShareQuorum": null,
+        "targetBoundShareSelectionProfile": null,
         "maximumRaceShares": 19,
         "setupCompletionQuorum": 19,
         "backendCorruptionModel": {
           "kind": "StrictLessThanOneThird"
         },
         "warnings": [
-          "UnsafeMicroRoster"
+          "UnsafeMicroRoster",
+          "ShareSelectionProfileRequired"
         ]
+      }
+    },
+    {
+      "caseName": "n20-certified-cpad-share-selection",
+      "input": {
+        "rosterSize": 20,
+        "targetBoundShareSelectionProfile": {
+          "profileId": "target-bound-first-valid-share-selection-v1",
+          "certificateDigest": "target-bound-certificate-digest",
+          "cpadProfileId": "CPAD-BGV-AsyncThreshold-v1",
+          "targetBasisDigest": "target-basis-digest",
+          "decryptionShareQuorum": 9,
+          "minimumSharesForInterpolation": 7,
+          "minimumArrivalsForRobustDecode": 9,
+          "invalidShareFilteringMode": "ProofVerifiedSharesOnly",
+          "selectedShareRule": "FirstValidSharesInCanonicalBoardOrder"
+        }
+      },
+      "expected": {
+        "rosterSize": 20,
+        "rosterProfileKind": "MandatoryN20",
+        "claimBearing": true,
+        "structuralCorruptionBound": 6,
+        "backendCorruptionBound": 6,
+        "privacyCorruptionBound": 6,
+        "decryptionCorruptionBound": 6,
+        "activeFaultBound": 4,
+        "pvssThreshold": 7,
+        "decryptionThreshold": 7,
+        "releaseQuorum": 14,
+        "aggregateContributionQuorum": 7,
+        "decryptionShareQuorum": 9,
+        "targetBoundShareSelectionProfile": {
+          "profileId": "target-bound-first-valid-share-selection-v1",
+          "certificateDigest": "target-bound-certificate-digest",
+          "cpadProfileId": "CPAD-BGV-AsyncThreshold-v1",
+          "targetBasisDigest": "target-basis-digest",
+          "decryptionShareQuorum": 9,
+          "minimumSharesForInterpolation": 7,
+          "minimumArrivalsForRobustDecode": 9,
+          "invalidShareFilteringMode": "ProofVerifiedSharesOnly",
+          "selectedShareRule": "FirstValidSharesInCanonicalBoardOrder"
+        },
+        "maximumRaceShares": 20,
+        "setupCompletionQuorum": 20,
+        "backendCorruptionModel": {
+          "kind": "StrictLessThanOneThird"
+        },
+        "warnings": []
       }
     }
   ]

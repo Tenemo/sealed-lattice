@@ -1,3 +1,4 @@
+import { deriveProtocolDigest } from '@sealed-lattice/crypto';
 import type {
     CastReceipt,
     CastReceiptVerification,
@@ -10,16 +11,14 @@ import type {
 } from '@sealed-lattice/types';
 
 import {
-    verifyBoardConsistency,
-    verifyInclusionProof,
-} from '../board/index.js';
-import { deriveProtocolDigest } from '../common/digests.js';
-import { verifySignedObjectSignature } from '../common/signatures.js';
+    buildSignedBoardShellVerificationBase,
+    collectSignedBoardInclusionEvidence,
+} from '../board/shell-evidence.js';
 import {
-    buildBoardHeadMap,
     createRefusal,
+    defaultSignedRootContextDigest,
     isNonNegativeInteger,
-    uniqueStrings,
+    signedObjectRootByteLength,
 } from '../common/verification-helpers.js';
 
 export const deriveCastReceiptDigest = (
@@ -28,7 +27,7 @@ export const deriveCastReceiptDigest = (
     deriveProtocolDigest('CastReceiptDigest', {
         ballotPackageDigest: receipt.ballotPackageDigest,
         boardPosition: receipt.boardPosition,
-        boardSeq: receipt.boardSeq,
+        boardSequence: receipt.boardSequence,
         ceremonyId: receipt.ceremonyId,
         contextDigest: receipt.contextDigest,
         deviceEpoch: receipt.deviceEpoch,
@@ -60,7 +59,7 @@ export const deriveCloseRecordDigest = (
 ): ProtocolDigest =>
     deriveProtocolDigest('CloseRecordDigest', {
         boardPosition: closeRecord.boardPosition,
-        boardSeq: closeRecord.boardSeq,
+        boardSequence: closeRecord.boardSequence,
         ceremonyId: closeRecord.ceremonyId,
         closeKind: closeRecord.closeKind,
         closedBoardHeadDigest: closeRecord.closedBoardHeadDigest,
@@ -78,7 +77,7 @@ const verifyCastReceiptShape = (
     const expectedDigest = deriveCastReceiptDigest({
         ballotPackageDigest: receipt.ballotPackageDigest,
         boardPosition: receipt.boardPosition,
-        boardSeq: receipt.boardSeq,
+        boardSequence: receipt.boardSequence,
         ceremonyId: receipt.ceremonyId,
         contextDigest: receipt.contextDigest,
         deviceEpoch: receipt.deviceEpoch,
@@ -102,7 +101,7 @@ const verifyCastReceiptShape = (
     if (
         receipt.objectType !== 'CastReceipt' ||
         receipt.objectVersion !== 1 ||
-        !isNonNegativeInteger(receipt.boardSeq) ||
+        !isNonNegativeInteger(receipt.boardSequence) ||
         !isNonNegativeInteger(receipt.boardPosition) ||
         !isNonNegativeInteger(receipt.recoveryEpoch) ||
         !isNonNegativeInteger(receipt.deviceEpoch)
@@ -153,7 +152,7 @@ const verifyCastReceiptShape = (
         );
     }
     if (
-        input.receiptInclusionProof.boardSeq !== receipt.boardSeq ||
+        input.receiptInclusionProof.boardSequence !== receipt.boardSequence ||
         input.receiptInclusionProof.boardPosition !== receipt.boardPosition
     ) {
         refusedObjects.push(
@@ -172,49 +171,35 @@ const verifyCastReceiptShape = (
 const verifyCastReceiptShellUnchecked = (
     input: CastReceiptVerificationInput,
 ): CastReceiptVerification => {
-    const boardResult = verifyBoardConsistency(input.boardEvidence);
-    const headsByDigest = buildBoardHeadMap(
-        input.boardEvidence.signedBoardHeads,
-    );
-    const refusedObjects: RefusalRecord[] = [
-        ...boardResult.refusedObjects,
-        ...verifyCastReceiptShape(input),
-        ...verifyInclusionProof(input.receiptInclusionProof, headsByDigest),
-    ];
-    const signatureResult = verifySignedObjectSignature(
-        input.receipt.signature,
-        {
+    const evidence = collectSignedBoardInclusionEvidence({
+        boardEvidence: input.boardEvidence,
+        inclusionProof: input.receiptInclusionProof,
+        objectRefusals: verifyCastReceiptShape(input),
+        signature: input.receipt.signature,
+        signatureExpectation: {
             objectType: 'CastReceipt',
             objectVersion: 1,
             signerRole: 'Voter',
             signerIdentity: input.receipt.voterIdentity,
             ceremonyId: input.receipt.ceremonyId,
             publicKeyDigest: input.expectedVoterPublicKeyDigest,
-            manifestHash: input.expectedElectionManifestDigest,
+            manifestDigest: input.expectedElectionManifestDigest,
             objectRoot: input.receipt.castReceiptDigest,
-            boardHeadHash: input.receiptInclusionProof.boardHeadDigest,
+            boardHeadDigest: input.receiptInclusionProof.boardHeadDigest,
             contextDigest: input.receipt.contextDigest,
+            byteLength: signedObjectRootByteLength,
+            recoveryEpoch: input.receipt.recoveryEpoch,
+            deviceEpoch: input.receipt.deviceEpoch,
         },
-    );
-    refusedObjects.push(...signatureResult.refusedObjects);
+        acceptedObjectDigest: input.receipt.castReceiptDigest,
+    });
+    const verificationBase = buildSignedBoardShellVerificationBase(evidence);
 
     return {
-        ok: refusedObjects.length === 0,
-        statusLabels: boardResult.statusLabels,
-        acceptedDigests:
-            refusedObjects.length === 0
-                ? uniqueStrings([
-                      ...boardResult.acceptedDigests,
-                      input.receipt.castReceiptDigest,
-                      input.receiptInclusionProof.inclusionProofDigest,
-                  ])
-                : [],
-        refusedObjects,
-        forkEvidence: boardResult.forkEvidence,
-        castReceiptDigest:
-            refusedObjects.length === 0
-                ? input.receipt.castReceiptDigest
-                : undefined,
+        ...verificationBase,
+        castReceiptDigest: verificationBase.ok
+            ? input.receipt.castReceiptDigest
+            : undefined,
     };
 };
 
@@ -245,7 +230,7 @@ const verifyCloseRecordShape = (
     const refusedObjects: RefusalRecord[] = [];
     const expectedDigest = deriveCloseRecordDigest({
         boardPosition: closeRecord.boardPosition,
-        boardSeq: closeRecord.boardSeq,
+        boardSequence: closeRecord.boardSequence,
         ceremonyId: closeRecord.ceremonyId,
         closeKind: closeRecord.closeKind,
         closedBoardHeadDigest: closeRecord.closedBoardHeadDigest,
@@ -268,7 +253,7 @@ const verifyCloseRecordShape = (
     if (
         closeRecord.objectType !== 'CloseRecord' ||
         closeRecord.objectVersion !== 1 ||
-        !isNonNegativeInteger(closeRecord.boardSeq) ||
+        !isNonNegativeInteger(closeRecord.boardSequence) ||
         !isNonNegativeInteger(closeRecord.boardPosition)
     ) {
         refusedObjects.push(
@@ -328,7 +313,8 @@ const verifyCloseRecordShape = (
         );
     }
     if (
-        input.closeRecordInclusionProof.boardSeq !== closeRecord.boardSeq ||
+        input.closeRecordInclusionProof.boardSequence !==
+            closeRecord.boardSequence ||
         input.closeRecordInclusionProof.boardPosition !==
             closeRecord.boardPosition
     ) {
@@ -381,15 +367,35 @@ const verifyCloseRecordShape = (
 const verifyCloseRecordShellUnchecked = (
     input: CloseRecordVerificationInput,
 ): CloseRecordVerification => {
-    const boardResult = verifyBoardConsistency(input.boardEvidence);
-    const headsByDigest = buildBoardHeadMap(
-        input.boardEvidence.signedBoardHeads,
-    );
-    const refusedObjects: RefusalRecord[] = [
-        ...boardResult.refusedObjects,
-        ...verifyCloseRecordShape(input),
-        ...verifyInclusionProof(input.closeRecordInclusionProof, headsByDigest),
-    ];
+    const evidence = collectSignedBoardInclusionEvidence({
+        boardEvidence: input.boardEvidence,
+        extraAcceptedDigests:
+            input.closeRecord.postVotingClosedContextDigest === null
+                ? []
+                : [input.closeRecord.postVotingClosedContextDigest],
+        inclusionProof: input.closeRecordInclusionProof,
+        objectRefusals: verifyCloseRecordShape(input),
+        signature: input.closeRecord.signature,
+        signatureExpectation: {
+            objectType: 'CloseRecord',
+            objectVersion: 1,
+            signerRole: 'Organizer',
+            signerIdentity: input.closeRecord.organizerIdentity,
+            ceremonyId: input.closeRecord.ceremonyId,
+            publicKeyDigest: input.expectedOrganizerPublicKeyDigest,
+            manifestDigest: input.expectedElectionManifestDigest,
+            objectRoot: input.closeRecord.closeRecordDigest,
+            boardHeadDigest: input.closeRecordInclusionProof.boardHeadDigest,
+            contextDigest:
+                input.closeRecord.postVotingClosedContextDigest ??
+                defaultSignedRootContextDigest,
+            byteLength: signedObjectRootByteLength,
+            recoveryEpoch: 0,
+            deviceEpoch: 0,
+        },
+        acceptedObjectDigest: input.closeRecord.closeRecordDigest,
+    });
+    const { headsByDigest, refusedObjects } = evidence;
     if (!headsByDigest.has(input.closeRecord.closedBoardHeadDigest)) {
         refusedObjects.push(
             createRefusal(
@@ -400,47 +406,32 @@ const verifyCloseRecordShellUnchecked = (
             ),
         );
     }
-    const signatureResult = verifySignedObjectSignature(
-        input.closeRecord.signature,
-        {
-            objectType: 'CloseRecord',
-            objectVersion: 1,
-            signerRole: 'Organizer',
-            signerIdentity: input.closeRecord.organizerIdentity,
-            ceremonyId: input.closeRecord.ceremonyId,
-            publicKeyDigest: input.expectedOrganizerPublicKeyDigest,
-            manifestHash: input.expectedElectionManifestDigest,
-            objectRoot: input.closeRecord.closeRecordDigest,
-            boardHeadHash: input.closeRecordInclusionProof.boardHeadDigest,
-        },
+    const closeRecordInclusionHead = headsByDigest.get(
+        input.closeRecordInclusionProof.boardHeadDigest,
     );
-    refusedObjects.push(...signatureResult.refusedObjects);
+    if (
+        closeRecordInclusionHead?.previousHeadDigest !==
+        input.closeRecord.closedBoardHeadDigest
+    ) {
+        refusedObjects.push(
+            createRefusal(
+                'CloseRecordInvalid',
+                'Close record inclusion must extend the closed board head.',
+                input.closeRecord.closeRecordDigest,
+                'CloseRecord',
+            ),
+        );
+    }
+    const verificationBase = buildSignedBoardShellVerificationBase(evidence);
 
     return {
-        ok: refusedObjects.length === 0,
-        statusLabels: boardResult.statusLabels,
-        acceptedDigests:
-            refusedObjects.length === 0
-                ? uniqueStrings([
-                      ...boardResult.acceptedDigests,
-                      input.closeRecord.closeRecordDigest,
-                      input.closeRecordInclusionProof.inclusionProofDigest,
-                      ...(input.closeRecord.postVotingClosedContextDigest ===
-                      null
-                          ? []
-                          : [input.closeRecord.postVotingClosedContextDigest]),
-                  ])
-                : [],
-        refusedObjects,
-        forkEvidence: boardResult.forkEvidence,
-        closeRecordDigest:
-            refusedObjects.length === 0
-                ? input.closeRecord.closeRecordDigest
-                : undefined,
-        postVotingClosedContextDigest:
-            refusedObjects.length === 0
-                ? (input.closeRecord.postVotingClosedContextDigest ?? undefined)
-                : undefined,
+        ...verificationBase,
+        closeRecordDigest: verificationBase.ok
+            ? input.closeRecord.closeRecordDigest
+            : undefined,
+        postVotingClosedContextDigest: verificationBase.ok
+            ? (input.closeRecord.postVotingClosedContextDigest ?? undefined)
+            : undefined,
     };
 };
 

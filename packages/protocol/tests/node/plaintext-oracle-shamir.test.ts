@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
+import { deriveThresholdProfile } from '../../src/lifecycle/thresholds';
 import {
     deriveInterpolationCoefficientReport,
-    deriveThresholdProfile,
     deriveWorstCaseInterpolationCoefficientReport,
     evaluateShamirPolynomialForRoster,
     interpolateShamirConstantTerm,
     normalizeFieldElement,
-} from '../../src/index';
+} from '../../src/plaintext-oracle/index';
 
 import {
     collectContributorPositionSets,
@@ -71,7 +71,7 @@ describe('plaintext oracle Shamir and interpolation', () => {
     );
 
     it.each([3, 4, 5, 6, 7, 8])(
-        'reconstructs every first-come contributor set for small roster size %d',
+        'reconstructs every first-valid contributor set for small roster size %d',
         (rosterSize) => {
             const thresholdProfile = deriveThresholdProfile({
                 rosterSize,
@@ -151,5 +151,17 @@ describe('plaintext oracle Shamir and interpolation', () => {
                 threshold: 7,
             }),
         ).toThrow('exactly match');
+        expect(() =>
+            evaluateShamirPolynomialForRoster(
+                createDeterministicPolynomial(1, 2),
+                51,
+            ),
+        ).toThrow('1..50');
+        expect(() =>
+            deriveWorstCaseInterpolationCoefficientReport({
+                rosterSize: 51,
+                threshold: 1,
+            }),
+        ).toThrow('1..50');
     });
 });

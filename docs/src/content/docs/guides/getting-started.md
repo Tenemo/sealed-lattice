@@ -11,7 +11,7 @@ exposes the safe transcript core fixture verifier and election foundation.
 ## Public package rules
 
 - The only committed public package name is `sealed-lattice`.
-- The public runtime facade currently exports transcript core fixture verification plus threshold, lifecycle, poll specification, capability, board, target-finality, roster-manifest, cast receipt, close record, first-come, and recovery helpers.
+- The public runtime facade currently exports transcript core fixture verification plus threshold, lifecycle, poll specification, capability, board, target-finality, roster-manifest, cast receipt, close record, first-valid, and recovery helpers.
 - No public subpaths are promised yet.
 - The current release freezes packaging, docs, smoke checks, transcript core fixtures, election foundation vectors, and the workspace shape.
 
@@ -36,14 +36,14 @@ and refuse premature protocol actions. They do not implement voting.
 - the published `sealed-lattice` package identity
 - private types, protocol, crypto, wasm, and testkit shells
 - a Rust transcript core plus an internal WASM loader
-- deterministic election foundation helpers for threshold, lifecycle, poll specification, capability, board/finality, roster-manifest, cast/close receipt, first-come, and recovery checks
+- deterministic election foundation helpers for threshold, lifecycle, poll specification, capability, board/finality, roster-manifest, cast/close receipt, first-valid, and recovery checks
 - docs, TypeDoc, pack smoke, vector manifest verification, and CI verification
 
 ## What is not published yet
 
 - ballot or tally APIs
 - proof systems
-- replay-attestation shell helpers, semantic target acceptance, decryption-share shell helpers, or decryption APIs
+- local replay record helpers, semantic target acceptance, decryption-share shell helpers, or decryption APIs
 - public crypto provider wrappers
 - public WASM or native arithmetic entry points
 

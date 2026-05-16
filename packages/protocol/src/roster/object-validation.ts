@@ -1,3 +1,12 @@
+import { verifySignedObjectSignature } from '@sealed-lattice/crypto';
+import {
+    bridgeProofProfileId,
+    cpadProfileId,
+    directTargetBasisDataBridgeProfileId,
+    evaluationProofProfileId,
+    mobileProfileId,
+    thresholdDecryptionProfileId,
+} from '@sealed-lattice/types';
 import type {
     ElectionManifest,
     InclusionProof,
@@ -5,22 +14,95 @@ import type {
     ReceiverKeyRegistration,
     RefusalRecord,
     RegistrationEntry,
+    RosterExternalAcceptanceVerification,
+    RosterExternalAcceptanceVerificationInput,
     RosterManifestTranscriptInput,
     TrusteeSetupEntry,
 } from '@sealed-lattice/types';
 
-import { verifySignedObjectSignature } from '../common/signatures.js';
 import {
     createRefusal,
+    defaultSignedRootContextDigest,
     isNonNegativeInteger,
+    signedObjectRootByteLength,
 } from '../common/verification-helpers.js';
 
 import {
     deriveElectionManifestDigest,
     deriveReceiverKeyRegistrationDigest,
     deriveRegistrationEntryDigest,
+    deriveRosterExternalAcceptanceDigest,
     deriveTrusteeSetupEntryDigest,
 } from './digests.js';
+
+const protocolDigestPattern = /^[0-9a-f]{128}$/u;
+
+const isProtocolDigestString = (value: ProtocolDigest): boolean =>
+    protocolDigestPattern.test(value);
+
+const collectManifestOpaqueBindingRefusals = (
+    manifest: ElectionManifest,
+): readonly RefusalRecord[] => {
+    const refusedObjects: RefusalRecord[] = [];
+    const bindings = manifest.manifestOpaqueBindings;
+
+    if (
+        bindings.bridgeProofProfileId !== bridgeProofProfileId ||
+        bindings.directTargetBasisDataBridgeProfileId !==
+            directTargetBasisDataBridgeProfileId ||
+        bindings.evaluationProofProfileId !== evaluationProofProfileId ||
+        bindings.thresholdDecryptionProfileId !==
+            thresholdDecryptionProfileId ||
+        bindings.cpadProfileId !== cpadProfileId ||
+        bindings.mobileProfileId !== mobileProfileId
+    ) {
+        refusedObjects.push(
+            createRefusal(
+                'ManifestDigestMismatch',
+                'Election manifest must bind the fixed v53 BGV bridge, evaluation-proof, threshold-decryption, CPAD, and mobile profile identifiers.',
+                manifest.electionManifestDigest,
+                'ElectionManifest',
+            ),
+        );
+    }
+
+    const requiredDigestFields = [
+        bindings.heParamDigest,
+        bindings.bgvProfileDigest,
+        bindings.bgvPublicKeyRoot,
+        bindings.collectivePublicKeyRoot,
+        bindings.canonicalCiphertextConventionDigest,
+        bindings.bridgeProofProfileDigest,
+        bindings.bgvBatchEncoderDigest,
+        bindings.bridgeLayoutDigest,
+        bindings.evaluationNoiseProfileDigest,
+        bindings.heEvaluationNoiseCertDigest,
+        bindings.allowedEvaluatorOpsDigest,
+        bindings.evaluationProofProfileDigest,
+        bindings.thresholdDecryptionProfileDigest,
+        bindings.bgvAsyncThresholdCPADProfileDigest,
+        bindings.cpadProfileDigest,
+        bindings.targetBasisDigest,
+        bindings.bridgeMobileCertificatePolicyDigest,
+    ];
+
+    if (
+        requiredDigestFields.some(
+            (digestField) => !isProtocolDigestString(digestField),
+        )
+    ) {
+        refusedObjects.push(
+            createRefusal(
+                'ManifestDigestMismatch',
+                'Election manifest opaque bindings must include canonical downstream profile and certificate digests.',
+                manifest.electionManifestDigest,
+                'ElectionManifest',
+            ),
+        );
+    }
+
+    return refusedObjects;
+};
 
 export const verifyRegistrationEntry = (
     input: RosterManifestTranscriptInput,
@@ -29,7 +111,7 @@ export const verifyRegistrationEntry = (
     const refusedObjects: RefusalRecord[] = [];
     const expectedDigest = deriveRegistrationEntryDigest({
         boardPosition: entry.boardPosition,
-        boardSeq: entry.boardSeq,
+        boardSequence: entry.boardSequence,
         ceremonyId: entry.ceremonyId,
         deviceEpoch: entry.deviceEpoch,
         objectType: entry.objectType,
@@ -52,7 +134,7 @@ export const verifyRegistrationEntry = (
     if (
         entry.objectType !== 'RegistrationEntry' ||
         entry.objectVersion !== 1 ||
-        !isNonNegativeInteger(entry.boardSeq) ||
+        !isNonNegativeInteger(entry.boardSequence) ||
         !isNonNegativeInteger(entry.boardPosition) ||
         !isNonNegativeInteger(entry.recoveryEpoch) ||
         !isNonNegativeInteger(entry.deviceEpoch)
@@ -76,7 +158,7 @@ export const verifyRegistrationEntry = (
             ),
         );
     }
-    if (entry.boardSeq >= input.rosterFreezeBoardSeq) {
+    if (entry.boardSequence >= input.rosterFreezeBoardSequence) {
         refusedObjects.push(
             createRefusal(
                 'LateRegistration',
@@ -93,9 +175,13 @@ export const verifyRegistrationEntry = (
         signerRole: 'Participant',
         signerIdentity: entry.participantIdentity,
         ceremonyId: input.ceremonyId,
-        manifestHash: null,
+        manifestDigest: null,
         objectRoot: entry.registrationEntryDigest,
-        boardHeadHash: null,
+        boardHeadDigest: null,
+        byteLength: signedObjectRootByteLength,
+        recoveryEpoch: entry.recoveryEpoch,
+        deviceEpoch: entry.deviceEpoch,
+        contextDigest: defaultSignedRootContextDigest,
         publicKeyDigest: entry.signingPublicKeyDigest,
     });
     refusedObjects.push(...signatureResult.refusedObjects);
@@ -111,7 +197,7 @@ export const verifyReceiverKeyRegistration = (
     const refusedObjects: RefusalRecord[] = [];
     const expectedDigest = deriveReceiverKeyRegistrationDigest({
         boardPosition: entry.boardPosition,
-        boardSeq: entry.boardSeq,
+        boardSequence: entry.boardSequence,
         ceremonyId: entry.ceremonyId,
         deviceEpoch: entry.deviceEpoch,
         objectType: entry.objectType,
@@ -134,7 +220,7 @@ export const verifyReceiverKeyRegistration = (
     if (
         entry.objectType !== 'ReceiverKeyRegistration' ||
         entry.objectVersion !== 1 ||
-        !isNonNegativeInteger(entry.boardSeq) ||
+        !isNonNegativeInteger(entry.boardSequence) ||
         !isNonNegativeInteger(entry.boardPosition) ||
         !isNonNegativeInteger(entry.recoveryEpoch) ||
         !isNonNegativeInteger(entry.deviceEpoch)
@@ -158,7 +244,7 @@ export const verifyReceiverKeyRegistration = (
             ),
         );
     }
-    if (entry.boardSeq >= input.rosterFreezeBoardSeq) {
+    if (entry.boardSequence >= input.rosterFreezeBoardSequence) {
         refusedObjects.push(
             createRefusal(
                 'LateRegistration',
@@ -185,9 +271,13 @@ export const verifyReceiverKeyRegistration = (
         signerRole: 'Participant',
         signerIdentity: entry.participantIdentity,
         ceremonyId: input.ceremonyId,
-        manifestHash: null,
+        manifestDigest: null,
         objectRoot: entry.receiverKeyRegistrationDigest,
-        boardHeadHash: null,
+        boardHeadDigest: null,
+        byteLength: signedObjectRootByteLength,
+        recoveryEpoch: entry.recoveryEpoch,
+        deviceEpoch: entry.deviceEpoch,
+        contextDigest: defaultSignedRootContextDigest,
         publicKeyDigest: expectedPublicKeyDigest,
     });
     refusedObjects.push(...signatureResult.refusedObjects);
@@ -203,7 +293,7 @@ export const verifyTrusteeSetupEntry = (
     const refusedObjects: RefusalRecord[] = [];
     const expectedDigest = deriveTrusteeSetupEntryDigest({
         boardPosition: entry.boardPosition,
-        boardSeq: entry.boardSeq,
+        boardSequence: entry.boardSequence,
         ceremonyId: entry.ceremonyId,
         deviceEpoch: entry.deviceEpoch,
         objectType: entry.objectType,
@@ -226,7 +316,7 @@ export const verifyTrusteeSetupEntry = (
     if (
         entry.objectType !== 'TrusteeSetupEntry' ||
         entry.objectVersion !== 1 ||
-        !isNonNegativeInteger(entry.boardSeq) ||
+        !isNonNegativeInteger(entry.boardSequence) ||
         !isNonNegativeInteger(entry.boardPosition) ||
         !isNonNegativeInteger(entry.recoveryEpoch) ||
         !isNonNegativeInteger(entry.deviceEpoch)
@@ -250,7 +340,7 @@ export const verifyTrusteeSetupEntry = (
             ),
         );
     }
-    if (entry.boardSeq >= input.rosterFreezeBoardSeq) {
+    if (entry.boardSequence >= input.rosterFreezeBoardSequence) {
         refusedObjects.push(
             createRefusal(
                 'LateRegistration',
@@ -277,9 +367,13 @@ export const verifyTrusteeSetupEntry = (
         signerRole: 'Trustee',
         signerIdentity: entry.trusteeIdentity,
         ceremonyId: input.ceremonyId,
-        manifestHash: null,
+        manifestDigest: null,
         objectRoot: entry.trusteeSetupEntryDigest,
-        boardHeadHash: null,
+        boardHeadDigest: null,
+        byteLength: signedObjectRootByteLength,
+        recoveryEpoch: entry.recoveryEpoch,
+        deviceEpoch: entry.deviceEpoch,
+        contextDigest: defaultSignedRootContextDigest,
         publicKeyDigest: expectedPublicKeyDigest,
     });
     refusedObjects.push(...signatureResult.refusedObjects);
@@ -296,7 +390,7 @@ export const verifyManifest = (
     const refusedObjects: RefusalRecord[] = [];
     const expectedDigest = deriveElectionManifestDigest({
         boardPosition: manifest.boardPosition,
-        boardSeq: manifest.boardSeq,
+        boardSequence: manifest.boardSequence,
         ceremonyId: manifest.ceremonyId,
         manifestOpaqueBindings: manifest.manifestOpaqueBindings,
         manifestPolicyDigests: manifest.manifestPolicyDigests,
@@ -320,7 +414,7 @@ export const verifyManifest = (
     if (
         manifest.objectType !== 'ElectionManifest' ||
         manifest.objectVersion !== 1 ||
-        !isNonNegativeInteger(manifest.boardSeq) ||
+        !isNonNegativeInteger(manifest.boardSequence) ||
         !isNonNegativeInteger(manifest.boardPosition)
     ) {
         refusedObjects.push(
@@ -332,6 +426,7 @@ export const verifyManifest = (
             ),
         );
     }
+    refusedObjects.push(...collectManifestOpaqueBindingRefusals(manifest));
     if (manifest.ceremonyId !== input.ceremonyId) {
         refusedObjects.push(
             createRefusal(
@@ -352,7 +447,7 @@ export const verifyManifest = (
             ),
         );
     }
-    if (manifest.boardSeq < input.rosterFreezeBoardSeq) {
+    if (manifest.boardSequence < input.rosterFreezeBoardSequence) {
         refusedObjects.push(
             createRefusal(
                 'ManifestDigestMismatch',
@@ -382,12 +477,115 @@ export const verifyManifest = (
         signerRole: 'Organizer',
         signerIdentity: input.organizerIdentity,
         ceremonyId: input.ceremonyId,
-        manifestHash: null,
+        manifestDigest: null,
         objectRoot: manifest.electionManifestDigest,
-        boardHeadHash: null,
+        boardHeadDigest: null,
+        byteLength: signedObjectRootByteLength,
+        recoveryEpoch: 0,
+        deviceEpoch: 0,
+        contextDigest: defaultSignedRootContextDigest,
         publicKeyDigest: input.organizerPublicKeyDigest,
     });
     refusedObjects.push(...signatureResult.refusedObjects);
 
     return refusedObjects;
+};
+
+export const verifyRosterExternalAcceptance = (
+    input: RosterExternalAcceptanceVerificationInput,
+): RosterExternalAcceptanceVerification => {
+    try {
+        const { acceptance } = input;
+        const refusedObjects: RefusalRecord[] = [];
+        const expectedDigest = deriveRosterExternalAcceptanceDigest({
+            acceptedBoardHeadDigest: acceptance.acceptedBoardHeadDigest,
+            ceremonyId: acceptance.ceremonyId,
+            electionManifestDigest: acceptance.electionManifestDigest,
+            objectType: acceptance.objectType,
+            objectVersion: acceptance.objectVersion,
+            participantIdentity: acceptance.participantIdentity,
+            rosterDigest: acceptance.rosterDigest,
+            warningTextVersion: acceptance.warningTextVersion,
+        });
+
+        if (acceptance.rosterExternalAcceptanceDigest !== expectedDigest) {
+            refusedObjects.push(
+                createRefusal(
+                    'RosterExternalAcceptanceInvalid',
+                    'Roster external acceptance digest does not match its canonical payload.',
+                    acceptance.rosterExternalAcceptanceDigest,
+                    'RosterExternalAcceptance',
+                ),
+            );
+        }
+        if (
+            acceptance.objectType !== 'RosterExternalAcceptance' ||
+            acceptance.objectVersion !== 1 ||
+            acceptance.ceremonyId !== input.expectedCeremonyId ||
+            acceptance.rosterDigest !== input.expectedRosterDigest ||
+            acceptance.electionManifestDigest !==
+                input.expectedElectionManifestDigest ||
+            acceptance.acceptedBoardHeadDigest !==
+                input.expectedAcceptedBoardHeadDigest ||
+            acceptance.warningTextVersion.trim().length === 0
+        ) {
+            refusedObjects.push(
+                createRefusal(
+                    'RosterExternalAcceptanceInvalid',
+                    'Roster external acceptance does not bind the expected frozen roster view.',
+                    acceptance.rosterExternalAcceptanceDigest,
+                    'RosterExternalAcceptance',
+                ),
+            );
+        }
+
+        const signatureResult = verifySignedObjectSignature(
+            acceptance.signature,
+            {
+                objectType: 'RosterExternalAcceptance',
+                objectVersion: 1,
+                signerRole: 'Participant',
+                signerIdentity: acceptance.participantIdentity,
+                ceremonyId: acceptance.ceremonyId,
+                manifestDigest: acceptance.electionManifestDigest,
+                objectRoot: acceptance.rosterExternalAcceptanceDigest,
+                boardHeadDigest: acceptance.acceptedBoardHeadDigest,
+                byteLength: signedObjectRootByteLength,
+                recoveryEpoch: 0,
+                deviceEpoch: 0,
+                contextDigest: defaultSignedRootContextDigest,
+                publicKeyDigest: input.expectedParticipantPublicKeyDigest,
+            },
+        );
+        refusedObjects.push(...signatureResult.refusedObjects);
+
+        return {
+            ok: refusedObjects.length === 0,
+            statusLabels:
+                refusedObjects.length === 0 ? ['RosterExternallyAccepted'] : [],
+            acceptedDigests:
+                refusedObjects.length === 0
+                    ? [acceptance.rosterExternalAcceptanceDigest]
+                    : [],
+            refusedObjects,
+            rosterExternalAcceptanceDigest:
+                refusedObjects.length === 0
+                    ? acceptance.rosterExternalAcceptanceDigest
+                    : undefined,
+        };
+    } catch {
+        return {
+            ok: false,
+            statusLabels: [],
+            acceptedDigests: [],
+            refusedObjects: [
+                createRefusal(
+                    'RosterExternalAcceptanceInvalid',
+                    'Roster external acceptance could not be canonicalized or validated.',
+                    undefined,
+                    'RosterExternalAcceptance',
+                ),
+            ],
+        };
+    }
 };

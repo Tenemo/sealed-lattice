@@ -2,6 +2,8 @@ import path from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
+import sdkPackageJson from '../../../packages/sdk/package.json' with { type: 'json' };
+import publicSurface from '../../../packages/sdk/public-surface.json' with { type: 'json' };
 import {
     computeRelativeTypesSpecifier,
     rewriteTypesImports,
@@ -14,6 +16,11 @@ const distRoot = path.resolve('/fake-repo/packages/sdk/dist');
 const typesRuntime = path.resolve(distRoot, 'internal/types.js');
 
 describe('SDK bridge build helpers', () => {
+    it('keeps the SDK package build script self-contained for type inlining', () => {
+        expect(sdkPackageJson.scripts.build).toContain('pnpm run build:types');
+        expect(sdkPackageJson.scripts.build).toContain('pnpm run build:bridge');
+    });
+
     it('removes type-only workspace imports from the published bridge copy', () => {
         const outputText = transpileBridgeSource(`
             import type { TranscriptCoreFixture } from '@sealed-lattice/types';
@@ -68,6 +75,9 @@ describe('SDK bridge build helpers', () => {
     });
 
     it('vendors only SDK-safe protocol runtime modules', () => {
+        expect(sdkProtocolRuntimeSourceRelativePaths).toEqual(
+            publicSurface.vendoredProtocolRuntimeModules,
+        );
         expect(sdkProtocolRuntimeSourceRelativePaths).toContain(
             'board/index.ts',
         );
@@ -78,7 +88,7 @@ describe('SDK bridge build helpers', () => {
             'plaintext-oracle/index.ts',
         );
         expect(sdkProtocolRuntimeSourceRelativePaths).not.toContain(
-            'target-phase/index.ts',
+            'target-acceptance/index.ts',
         );
     });
 });

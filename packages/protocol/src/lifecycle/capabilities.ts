@@ -11,32 +11,49 @@ import { isValidLifecycleTransition } from './lifecycle.js';
 import { allowAction, refuseAction } from './refusal.js';
 
 const claimBearingActions = new Set<ProtocolAction>([
+    'SubmitVote',
     'DeriveAggregateContribution',
-    'ReplayEvaluation',
-    'AttestReplay',
+    'CreateBridgeProof',
+    'VerifyBridgeProof',
+    'VerifyEvaluationProof',
     'AcceptTarget',
     'CreateTargetBoundDecryptionShare',
     'VerifyDecryptionShare',
+    'VerifyOneShotSharePolicy',
+    'VerifyCPADProfile',
     'RecombineAcceptedTarget',
     'DecodeVerifiedTopK',
 ]);
 
 const bridgeMobileCertificateActions = new Set<ProtocolAction>([
+    'CreateBridgeProof',
+    'VerifyBridgeProof',
     'DeriveAggregateContribution',
-    'ReplayEvaluation',
-    'AttestReplay',
+    'VerifyEvaluationProof',
     'AcceptTarget',
 ]);
 
-const brakerskiMobileProofCertificateActions = new Set<ProtocolAction>([
+const decryptionCertificateActions = new Set<ProtocolAction>([
     'CreateTargetBoundDecryptionShare',
     'VerifyDecryptionShare',
+    'VerifyOneShotSharePolicy',
+    'VerifyCPADProfile',
     'RecombineAcceptedTarget',
     'DecodeVerifiedTopK',
 ]);
 
 const countAtLeast = (actual: number | undefined, required: number): boolean =>
     actual !== undefined && actual >= required;
+
+const getCertifiedDecryptionShareQuorum = (
+    context: CapabilityContext,
+): number | undefined => {
+    if (context.thresholdProfile.targetBoundShareSelectionProfile === null) {
+        return undefined;
+    }
+
+    return context.thresholdProfile.decryptionShareQuorum ?? undefined;
+};
 
 const isRecoveryRefused = (
     recoveryState: RecoveryState | undefined,
@@ -101,50 +118,33 @@ const evaluateAggregateContribution = (
     ) {
         return refuseAction(action, 'TurnoutBelowReleaseFloor');
     }
-    if (context.bridgeMobileCertificatePresent === false) {
+    if (context.bridgeMobileCertificatePresent !== true) {
         return refuseAction(action, 'MissingBridgeMobileCertificate');
     }
-    if (context.bridgeProverCertificatePresent === false) {
+    if (context.bridgeProverCertificatePresent !== true) {
         return refuseAction(action, 'MissingBridgeProverCertificate');
     }
 
     return allowAction(action);
 };
 
-const evaluateReplay = (
+const evaluateEvaluationProof = (
     action: ProtocolAction,
     context: CapabilityContext,
 ): CapabilityDecision => {
     if (
-        context.lifecycleState !== 'TopKEvaluated' &&
-        context.lifecycleState !== 'EvaluationReplayOpen'
+        context.lifecycleState !== 'TargetFinalityReached' &&
+        context.lifecycleState !== 'EvaluationProofOpen'
     ) {
         return refuseAction(action, 'InvalidLifecycleState');
     }
     if (context.targetFinalityAccepted !== true) {
         return refuseAction(action, 'TargetFinalityCheckpointMissing');
     }
-    if (context.bridgeMobileCertificatePresent === false) {
-        return refuseAction(action, 'MissingBridgeMobileCertificate');
+    if (context.evaluationProofCertificatePresent !== true) {
+        return refuseAction(action, 'MissingEvaluationProofCertificate');
     }
-
-    return allowAction(action);
-};
-
-const evaluateReplayAttestation = (
-    action: ProtocolAction,
-    context: CapabilityContext,
-): CapabilityDecision => {
-    if (context.lifecycleState !== 'EvaluationReplayOpen') {
-        return refuseAction(action, 'InvalidLifecycleState');
-    }
-    if (context.targetFinalityAccepted !== true) {
-        return refuseAction(action, 'TargetFinalityCheckpointMissing');
-    }
-    if (context.localReplaySucceeded !== true) {
-        return refuseAction(action, 'LocalReplayNotVerified');
-    }
-    if (context.bridgeMobileCertificatePresent === false) {
+    if (context.bridgeMobileCertificatePresent !== true) {
         return refuseAction(action, 'MissingBridgeMobileCertificate');
     }
 
@@ -155,27 +155,40 @@ const evaluateTargetAcceptance = (
     action: ProtocolAction,
     context: CapabilityContext,
 ): CapabilityDecision => {
-    if (
-        context.lifecycleState !== 'EvaluationReplayOpen' &&
-        context.lifecycleState !== 'EvaluationReplayAttested' &&
-        context.lifecycleState !== 'OptionalEvaluationProofVerified'
-    ) {
+    if (context.lifecycleState !== 'EvaluationProofVerified') {
         return refuseAction(action, 'InvalidLifecycleState');
     }
     if (context.targetFinalityAccepted !== true) {
         return refuseAction(action, 'TargetFinalityCheckpointMissing');
     }
-    if (
-        context.optionalEvaluationProofVerified !== true &&
-        !countAtLeast(
-            context.replayAttestationCount,
-            context.thresholdProfile.evaluationReplayQuorum,
-        )
-    ) {
-        return refuseAction(action, 'EvaluationReplayThresholdNotReached');
+    if (context.evaluationProofVerified !== true) {
+        return refuseAction(action, 'EvaluationProofMissing');
     }
-    if (context.bridgeMobileCertificatePresent === false) {
+    if (context.bridgeMobileCertificatePresent !== true) {
         return refuseAction(action, 'MissingBridgeMobileCertificate');
+    }
+
+    return allowAction(action);
+};
+
+const evaluateLocalReplay = (
+    action: ProtocolAction,
+    context: CapabilityContext,
+): CapabilityDecision => {
+    if (
+        context.lifecycleState !== 'TargetAccepted' &&
+        context.lifecycleState !== 'AwaitingFirstDecryptionShares' &&
+        context.lifecycleState !== 'FirstThresholdSharesReached' &&
+        context.lifecycleState !== 'CPADProfileVerified' &&
+        context.lifecycleState !== 'FullyVerifiedResult'
+    ) {
+        return refuseAction(action, 'InvalidLifecycleState');
+    }
+    if (context.targetAccepted !== true) {
+        return refuseAction(action, 'TargetNotAccepted');
+    }
+    if (context.evaluationProofVerified !== true) {
+        return refuseAction(action, 'EvaluationProofMissing');
     }
 
     return allowAction(action);
@@ -185,7 +198,10 @@ const evaluateDecryptionShare = (
     action: ProtocolAction,
     context: CapabilityContext,
 ): CapabilityDecision => {
-    if (context.lifecycleState !== 'TargetAccepted') {
+    if (
+        context.lifecycleState !== 'TargetAccepted' &&
+        context.lifecycleState !== 'AwaitingFirstDecryptionShares'
+    ) {
         return refuseAction(action, 'InvalidLifecycleState');
     }
     if (context.targetFinalityAccepted !== true) {
@@ -194,13 +210,52 @@ const evaluateDecryptionShare = (
     if (context.targetAccepted !== true) {
         return refuseAction(action, 'TargetNotAccepted');
     }
+    if (context.evaluationProofVerified !== true) {
+        return refuseAction(action, 'EvaluationProofMissing');
+    }
+    if (getCertifiedDecryptionShareQuorum(context) === undefined) {
+        return refuseAction(action, 'ThresholdDecryptionProfileNotCertified');
+    }
 
     const recoveryRefusal = isRecoveryRefused(context.recoveryState);
     if (recoveryRefusal !== undefined) {
         return refuseAction(action, recoveryRefusal);
     }
-    if (context.brakerskiMobileProofCertificatePresent === false) {
-        return refuseAction(action, 'MissingBrakerskiMobileProofCertificate');
+    if (context.oneShotDecryptionProofCertificatePresent !== true) {
+        return refuseAction(action, 'MissingOneShotDecryptionProofCertificate');
+    }
+    if (context.thresholdDecryptionCertificatePresent !== true) {
+        return refuseAction(action, 'MissingThresholdDecryptionCertificate');
+    }
+
+    return allowAction(action);
+};
+
+const evaluateCPADProfile = (
+    action: ProtocolAction,
+    context: CapabilityContext,
+): CapabilityDecision => {
+    if (context.lifecycleState !== 'FirstThresholdSharesReached') {
+        return refuseAction(action, 'InvalidLifecycleState');
+    }
+    if (context.cpadCertificatePresent !== true) {
+        return refuseAction(action, 'MissingCPADCertificate');
+    }
+    const certifiedDecryptionShareQuorum =
+        getCertifiedDecryptionShareQuorum(context);
+    if (certifiedDecryptionShareQuorum === undefined) {
+        return refuseAction(action, 'ThresholdDecryptionProfileNotCertified');
+    }
+    if (
+        !countAtLeast(
+            context.decryptionShareCount,
+            certifiedDecryptionShareQuorum,
+        )
+    ) {
+        return refuseAction(action, 'FirstThresholdSharesNotReached');
+    }
+    if (context.thresholdDecryptionCertificatePresent !== true) {
+        return refuseAction(action, 'MissingThresholdDecryptionCertificate');
     }
 
     return allowAction(action);
@@ -211,8 +266,8 @@ const evaluateRecombination = (
     context: CapabilityContext,
 ): CapabilityDecision => {
     if (
-        context.lifecycleState !== 'AwaitingFirstDecryptionShares' &&
-        context.lifecycleState !== 'ResultComputedAuditable' &&
+        context.lifecycleState !== 'FirstThresholdSharesReached' &&
+        context.lifecycleState !== 'CPADProfileVerified' &&
         context.lifecycleState !== 'FullyVerifiedResult'
     ) {
         return refuseAction(action, 'InvalidLifecycleState');
@@ -220,16 +275,30 @@ const evaluateRecombination = (
     if (context.targetAccepted !== true) {
         return refuseAction(action, 'TargetNotAccepted');
     }
+    if (context.targetFinalityAccepted !== true) {
+        return refuseAction(action, 'TargetFinalityCheckpointMissing');
+    }
+    if (context.evaluationProofVerified !== true) {
+        return refuseAction(action, 'EvaluationProofMissing');
+    }
+    if (context.cpadProfileVerified !== true) {
+        return refuseAction(action, 'CPADProfileNotVerified');
+    }
+    const certifiedDecryptionShareQuorum =
+        getCertifiedDecryptionShareQuorum(context);
+    if (certifiedDecryptionShareQuorum === undefined) {
+        return refuseAction(action, 'ThresholdDecryptionProfileNotCertified');
+    }
     if (
         !countAtLeast(
             context.decryptionShareCount,
-            context.thresholdProfile.decryptionShareQuorum,
+            certifiedDecryptionShareQuorum,
         )
     ) {
         return refuseAction(action, 'FirstThresholdSharesNotReached');
     }
-    if (context.brakerskiMobileProofCertificatePresent === false) {
-        return refuseAction(action, 'MissingBrakerskiMobileProofCertificate');
+    if (context.oneShotDecryptionProofCertificatePresent !== true) {
+        return refuseAction(action, 'MissingOneShotDecryptionProofCertificate');
     }
 
     return allowAction(action);
@@ -241,6 +310,27 @@ const evaluateClaimBearingEnvironment = (
 ): CapabilityDecision | undefined => {
     if (!claimBearingActions.has(action)) {
         return undefined;
+    }
+    if (context.localRosterExternallyAccepted !== true) {
+        return refuseAction(action, 'LocalRosterNotAccepted');
+    }
+    if (
+        context.rosterExternalAcceptanceDigest === undefined ||
+        context.rosterExternalAcceptanceDigest.length === 0 ||
+        context.actionContextRosterExternalAcceptanceDigest === undefined ||
+        context.actionContextRosterExternalAcceptanceDigest === null ||
+        context.actionContextRosterExternalAcceptanceDigest.length === 0
+    ) {
+        return refuseAction(action, 'RosterExternalAcceptanceDigestMissing');
+    }
+    if (
+        context.actionContextRosterExternalAcceptanceDigest !==
+        context.rosterExternalAcceptanceDigest
+    ) {
+        return refuseAction(action, 'RosterExternalAcceptanceDigestMismatch');
+    }
+    if (!context.thresholdProfile.claimBearing) {
+        return refuseAction(action, 'ProfileNotClaimBearing');
     }
     if (context.mobileProfileSupported === false) {
         return refuseAction(action, 'UnsupportedMobileProfile');
@@ -263,10 +353,10 @@ const evaluateUnavailableFutureAction = (
         return refuseAction(action, 'MissingBridgeMobileCertificate');
     }
     if (
-        brakerskiMobileProofCertificateActions.has(action) &&
-        context.brakerskiMobileProofCertificatePresent === false
+        decryptionCertificateActions.has(action) &&
+        context.oneShotDecryptionProofCertificatePresent === false
     ) {
-        return refuseAction(action, 'MissingBrakerskiMobileProofCertificate');
+        return refuseAction(action, 'MissingOneShotDecryptionProofCertificate');
     }
 
     return refuseAction(action, 'OperationUnavailable');
@@ -281,12 +371,6 @@ export const evaluateActionCapability = (
     }
     if (!context.pollSpecValid) {
         return refuseAction(action, 'PollSpecInvalid');
-    }
-    if (
-        claimBearingActions.has(action) &&
-        !context.thresholdProfile.claimBearing
-    ) {
-        return refuseAction(action, 'ProfileNotClaimBearing');
     }
 
     const environmentRefusal = evaluateClaimBearingEnvironment(action, context);
@@ -325,16 +409,24 @@ export const evaluateActionCapability = (
                 : refuseAction(action, 'InvalidLifecycleState');
         case 'CloseVoting':
             return evaluateLifecycleAction(action, context, 'VotingClosed');
+        case 'VerifyTranscript':
+            return evaluateUnavailableFutureAction(action, context);
         case 'DeriveAggregateContribution':
             return evaluateAggregateContribution(action, context);
-        case 'ReplayEvaluation':
-            return evaluateReplay(action, context);
-        case 'AttestReplay':
-            return evaluateReplayAttestation(action, context);
+        case 'CreateBridgeProof':
+        case 'VerifyBridgeProof':
+            return evaluateUnavailableFutureAction(action, context);
+        case 'VerifyEvaluationProof':
+            return evaluateEvaluationProof(action, context);
         case 'AcceptTarget':
             return evaluateTargetAcceptance(action, context);
+        case 'ReplayEvaluation':
+        case 'CreateLocalReplayRecord':
+            return evaluateLocalReplay(action, context);
         case 'CreateTargetBoundDecryptionShare':
             return evaluateDecryptionShare(action, context);
+        case 'VerifyCPADProfile':
+            return evaluateCPADProfile(action, context);
         case 'RecombineAcceptedTarget':
             return evaluateRecombination(action, context);
         case 'DecodeVerifiedTopK':
@@ -342,8 +434,11 @@ export const evaluateActionCapability = (
         case 'CreateRecoveryEpochUpdate':
             return refuseAction(action, 'OperationUnavailable');
         case 'VerifyDecryptionShare':
+        case 'VerifyOneShotSharePolicy':
             return evaluateUnavailableFutureAction(action, context);
         case 'VerifyEncryptedEnvelope':
             return refuseAction(action, 'OperationUnavailable');
+        default:
+            return refuseAction(action as ProtocolAction, 'ForbiddenOperation');
     }
 };

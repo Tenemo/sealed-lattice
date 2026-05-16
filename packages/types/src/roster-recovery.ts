@@ -14,7 +14,7 @@ export type RegistrationEntry = {
     readonly ceremonyId: string;
     readonly participantIdentity: string;
     readonly signingPublicKeyDigest: ProtocolDigest;
-    readonly boardSeq: number;
+    readonly boardSequence: number;
     readonly boardPosition: number;
     readonly recoveryEpoch: number;
     readonly deviceEpoch: number;
@@ -29,7 +29,7 @@ export type ReceiverKeyRegistration = {
     readonly ceremonyId: string;
     readonly participantIdentity: string;
     readonly receiverKeyRoot: ProtocolDigest;
-    readonly boardSeq: number;
+    readonly boardSequence: number;
     readonly boardPosition: number;
     readonly recoveryEpoch: number;
     readonly deviceEpoch: number;
@@ -44,7 +44,7 @@ export type TrusteeSetupEntry = {
     readonly ceremonyId: string;
     readonly trusteeIdentity: string;
     readonly trusteeSetupRoot: ProtocolDigest;
-    readonly boardSeq: number;
+    readonly boardSequence: number;
     readonly boardPosition: number;
     readonly recoveryEpoch: number;
     readonly deviceEpoch: number;
@@ -55,7 +55,7 @@ export type TrusteeSetupEntry = {
 export type ManifestPolicyDigests = {
     readonly aggregateSelectionPolicyDigest: ProtocolDigest;
     readonly duplicateBallotPolicyDigest: ProtocolDigest;
-    readonly firstComePolicyDigest: ProtocolDigest;
+    readonly firstValidPolicyDigest: ProtocolDigest;
     readonly recoveryPolicyDigest: ProtocolDigest;
     readonly targetFinalityPolicyDigest: ProtocolDigest;
     readonly witnessPolicyDigest: ProtocolDigest;
@@ -64,15 +64,26 @@ export type ManifestPolicyDigests = {
 /** Opaque cryptographic implementation bindings embedded in a manifest. */
 export type ManifestOpaqueBindings = {
     readonly bridgeProofProfileId: string;
-    readonly proofPrimeParamId: string;
-    readonly proofPrimePublicKeyRoot: ProtocolDigest;
-    readonly proofPrimeToQDataKeyConsistencyDigest: ProtocolDigest;
-    readonly proofPrimeToQDataKeyConsistencyEvidence: ProtocolDigest;
+    readonly directTargetBasisDataBridgeProfileId: string;
+    readonly heParamDigest: ProtocolDigest;
+    readonly bgvProfileDigest: ProtocolDigest;
+    readonly bgvPublicKeyRoot: ProtocolDigest;
+    readonly collectivePublicKeyRoot: ProtocolDigest;
     readonly canonicalCiphertextConventionDigest: ProtocolDigest;
-    readonly bfvBatchEncoderDigest: ProtocolDigest;
+    readonly bridgeProofProfileDigest: ProtocolDigest;
+    readonly bgvBatchEncoderDigest: ProtocolDigest;
     readonly bridgeLayoutDigest: ProtocolDigest;
-    readonly brakerskiBackendProfileId: string;
-    readonly brakerskiShareVerificationKeyRoot: ProtocolDigest;
+    readonly evaluationNoiseProfileDigest: ProtocolDigest;
+    readonly heEvaluationNoiseCertDigest: ProtocolDigest;
+    readonly allowedEvaluatorOpsDigest: ProtocolDigest;
+    readonly evaluationProofProfileId: string;
+    readonly evaluationProofProfileDigest: ProtocolDigest;
+    readonly thresholdDecryptionProfileId: string;
+    readonly thresholdDecryptionProfileDigest: ProtocolDigest;
+    readonly bgvAsyncThresholdCPADProfileDigest: ProtocolDigest;
+    readonly cpadProfileId: string;
+    readonly cpadProfileDigest: ProtocolDigest;
+    readonly targetBasisDigest: ProtocolDigest;
     readonly mobileProfileId: string;
     readonly bridgeMobileCertificatePolicyDigest: ProtocolDigest;
 };
@@ -88,8 +99,22 @@ export type ElectionManifest = {
     readonly thresholdProfileDigest: ProtocolDigest;
     readonly manifestPolicyDigests: ManifestPolicyDigests;
     readonly manifestOpaqueBindings: ManifestOpaqueBindings;
-    readonly boardSeq: number;
+    readonly boardSequence: number;
     readonly boardPosition: number;
+    readonly signature: ProtocolSignatureEnvelope;
+};
+
+/** Participant-local acceptance of a frozen open-link public roster. */
+export type RosterExternalAcceptance = {
+    readonly objectType: 'RosterExternalAcceptance';
+    readonly objectVersion: 1;
+    readonly rosterExternalAcceptanceDigest: ProtocolDigest;
+    readonly ceremonyId: string;
+    readonly participantIdentity: string;
+    readonly rosterDigest: ProtocolDigest;
+    readonly electionManifestDigest: ProtocolDigest;
+    readonly acceptedBoardHeadDigest: ProtocolDigest;
+    readonly warningTextVersion: string;
     readonly signature: ProtocolSignatureEnvelope;
 };
 
@@ -112,7 +137,7 @@ export type RosterManifestTranscriptInput = {
     readonly electionManifest: ElectionManifest;
     readonly organizerPublicKeyDigest: ProtocolDigest;
     readonly organizerIdentity: string;
-    readonly rosterFreezeBoardSeq: number;
+    readonly rosterFreezeBoardSequence: number;
     readonly manifestInclusionProof: InclusionProof;
     readonly suppliedElectionManifests?: readonly ElectionManifest[];
     readonly conflictingManifestEvidence?: readonly ConflictingManifestEvidence[];
@@ -126,6 +151,22 @@ export type RosterManifestTranscriptVerification =
         readonly participantIdentities: readonly string[];
     };
 
+/** Input used to verify participant-local open-link roster acceptance. */
+export type RosterExternalAcceptanceVerificationInput = {
+    readonly acceptance: RosterExternalAcceptance;
+    readonly expectedCeremonyId: string;
+    readonly expectedRosterDigest: ProtocolDigest;
+    readonly expectedElectionManifestDigest: ProtocolDigest;
+    readonly expectedAcceptedBoardHeadDigest: ProtocolDigest;
+    readonly expectedParticipantPublicKeyDigest: ProtocolDigest;
+};
+
+/** Verification result for participant-local open-link roster acceptance. */
+export type RosterExternalAcceptanceVerification =
+    StructuredProtocolVerificationResult & {
+        readonly rosterExternalAcceptanceDigest?: ProtocolDigest;
+    };
+
 /** Signed-action context used for replay and recovery freshness checks. */
 export type ActionContext = {
     readonly actionContextDigest: ProtocolDigest;
@@ -133,12 +174,13 @@ export type ActionContext = {
     readonly electionManifestDigest: ProtocolDigest;
     readonly signerIdentity: string;
     readonly boardHeadDigest: ProtocolDigest;
-    readonly boardSeq: number;
+    readonly boardSequence: number;
     readonly recoveryEpoch: number;
     readonly deviceEpoch: number;
     readonly actionSequence: number;
     readonly recoveryPolicyDigest: ProtocolDigest;
     readonly acceptedRecoveryEpochUpdateDigest: ProtocolDigest | null;
+    readonly rosterExternalAcceptanceDigest: ProtocolDigest | null;
     readonly contextDigest: ProtocolDigest;
 };
 
@@ -147,14 +189,14 @@ export type RecoveryEpochMapEntry = {
     readonly signerIdentity: string;
     readonly currentRecoveryEpoch: number;
     readonly currentDeviceEpoch: number;
-    readonly oldActionCutoffBoardSeq?: number;
+    readonly oldActionCutoffBoardSequence?: number;
 };
 
 /** Candidate action after context, epoch, and duplicate checks. */
-export type ValidatedFirstComeCandidate = {
+export type ValidatedFirstValidObject = {
     readonly objectDigest: ProtocolDigest;
     readonly objectType: ProtocolObjectType;
-    readonly boardSeq: number;
+    readonly boardSequence: number;
     readonly boardPosition: number;
     readonly signerIdentity: string;
     readonly recoveryEpoch: number;
@@ -164,9 +206,9 @@ export type ValidatedFirstComeCandidate = {
     readonly isByteIdenticalRetransmission: boolean;
 };
 
-/** Input used to derive deterministic first-come ordering. */
-export type FirstComeOrderingInput = {
-    readonly candidates: readonly ValidatedFirstComeCandidate[];
+/** Input used to derive deterministic first-valid ordering. */
+export type FirstValidOrderingInput = {
+    readonly objects: readonly ValidatedFirstValidObject[];
     readonly requiredContextDigest: ProtocolDigest;
     readonly selectionPolicyDigest: ProtocolDigest;
     readonly expectedSelectionPolicyDigest: ProtocolDigest;
@@ -176,11 +218,11 @@ export type FirstComeOrderingInput = {
     readonly maxPerIdentity?: number;
 };
 
-/** First-come ordering verification result with ordered candidates. */
-export type FirstComeOrderingVerification =
+/** First-valid ordering verification result with ordered objects. */
+export type FirstValidOrderingVerification =
     StructuredProtocolVerificationResult & {
-        readonly firstComeOrderDigest?: ProtocolDigest;
-        readonly orderedCandidates: readonly ValidatedFirstComeCandidate[];
+        readonly firstValidOrderDigest?: ProtocolDigest;
+        readonly orderedObjects: readonly ValidatedFirstValidObject[];
     };
 
 /** Signed recovery epoch update for a participant or trustee identity. */
@@ -196,7 +238,7 @@ export type RecoveryEpochUpdate = {
     readonly newRecoveryEpoch: number;
     readonly previousDeviceEpoch: number;
     readonly newDeviceEpoch: number;
-    readonly oldActionCutoffBoardSeq: number;
+    readonly oldActionCutoffBoardSequence: number;
     readonly boardHeadDigest: ProtocolDigest;
     readonly newSigningPublicKeyDigest: ProtocolDigest;
     readonly restoredFrozenReceiverStateCommitment: ProtocolDigest;
@@ -224,6 +266,7 @@ export type RecoveryEpochVerification = StructuredProtocolVerificationResult & {
 export type ActionCurrentForRecoveryEpochInput = {
     readonly actionContext: ActionContext;
     readonly recoveryEpochState: RecoveryEpochMapEntry;
+    readonly expectedRosterExternalAcceptanceDigest?: ProtocolDigest | null;
 };
 
 /** Result returned when checking action freshness against recovery state. */
