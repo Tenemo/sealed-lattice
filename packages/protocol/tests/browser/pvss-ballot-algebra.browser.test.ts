@@ -147,7 +147,7 @@ describe('browser PVSS ballot algebra', () => {
                 optionCount: pollSpec.options.length,
                 rosterEntries,
                 thresholdProfile,
-            }),
-        ).toEqual([]);
+            }).map((refusal) => refusal.code),
+        ).toContain('BallotPackageInvalid');
     });
 });

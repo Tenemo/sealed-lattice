@@ -4,9 +4,11 @@ import type {
     CanonicalBallotSet,
     CanonicalBallotSetInput,
     CountedBallotPackage,
+    InclusionProof,
     ProtocolDigest,
     RefusalRecord,
     RejectedBallotCandidate,
+    SignedBoardHead,
     SignedBoardOrder,
 } from '@sealed-lattice/types';
 
@@ -148,9 +150,16 @@ const deriveRejectedCandidate = (
     refusalCodes: refusedObjects.map((refusal) => refusal.code),
 });
 
+type CloseBoundCanonicalBallotSetInput = CanonicalBallotSetInput & {
+    readonly closeRecordInclusionProof: InclusionProof;
+};
+
 const validateSetInput = (
-    input: CanonicalBallotSetInput,
+    input: CloseBoundCanonicalBallotSetInput,
+    headsByDigest: ReadonlyMap<ProtocolDigest, SignedBoardHead>,
 ): readonly RefusalRecord[] => {
+    const closeRecordInclusionProof: InclusionProof =
+        input.closeRecordInclusionProof;
     const refusedObjects: RefusalRecord[] = [
         ...validatePollAndThreshold(input.pollSpec, input.thresholdProfile),
         ...validateRosterEntries(input.rosterEntries, input.thresholdProfile),
@@ -183,6 +192,29 @@ const validateSetInput = (
             ),
         );
     }
+    refusedObjects.push(
+        ...verifyInclusionProof(closeRecordInclusionProof, headsByDigest),
+    );
+    if (
+        closeRecordInclusionProof.includedObjectType !== 'CloseRecord' ||
+        closeRecordInclusionProof.includedObjectDigest !==
+            input.closeRecordDigest ||
+        closeRecordInclusionProof.boardHeadDigest !==
+            input.votingClosedBoardHeadDigest ||
+        closeRecordInclusionProof.boardSequence !==
+            input.closeRecordBoardOrder.boardSequence ||
+        closeRecordInclusionProof.boardPosition !==
+            input.closeRecordBoardOrder.boardPosition
+    ) {
+        refusedObjects.push(
+            createRefusal(
+                'BallotSetInvalid',
+                'Ballot-set selection requires close-record inclusion evidence that binds the voting-close order.',
+                input.closeRecordDigest,
+                'CloseRecord',
+            ),
+        );
+    }
 
     return refusedObjects;
 };
@@ -196,7 +228,7 @@ const deriveCanonicalBallotSetUnchecked = (
     );
     const fatalRefusals: RefusalRecord[] = [
         ...boardResult.refusedObjects,
-        ...validateSetInput(input),
+        ...validateSetInput(input, headsByDigest),
     ];
     const validCandidates: CountedBallotPackage[] = [];
     const rejectedCandidates: RejectedBallotCandidate[] = [];

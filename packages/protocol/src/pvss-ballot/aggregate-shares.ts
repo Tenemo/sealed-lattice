@@ -508,15 +508,38 @@ export const verifyTestAggregateShareOpening = (
         return false;
     }
 
-    return witness.aggregateShare.aggregateShareVector.every(
-        (fieldElement, fieldIndex) =>
-            addFieldElements(
-                fieldElement,
-                normalizeFieldElement(
+    try {
+        return witness.aggregateShare.aggregateShareVector.every(
+            (fieldElement, fieldIndex) => {
+                assertCanonicalFieldElement(
+                    fieldElement,
+                    `aggregate share field ${String(fieldIndex)}`,
+                );
+                assertCanonicalFieldElement(
                     witness.aggregateOpeningVector[fieldIndex] ?? 0,
-                ),
-            ) === witness.aggregateShare.aggregateCommitmentValues[fieldIndex],
-    );
+                    `aggregate opening field ${String(fieldIndex)}`,
+                );
+                assertCanonicalFieldElement(
+                    witness.aggregateShare.aggregateCommitmentValues[
+                        fieldIndex
+                    ] ?? 0,
+                    `aggregate commitment field ${String(fieldIndex)}`,
+                );
+
+                return (
+                    addFieldElements(
+                        fieldElement,
+                        normalizeFieldElement(
+                            witness.aggregateOpeningVector[fieldIndex] ?? 0,
+                        ),
+                    ) ===
+                    witness.aggregateShare.aggregateCommitmentValues[fieldIndex]
+                );
+            },
+        );
+    } catch {
+        return false;
+    }
 };
 
 export const reconstructAggregateTallyFromShares = (input: {
@@ -540,6 +563,16 @@ export const reconstructAggregateTallyFromShares = (input: {
 
     const seenRosterPositions = new Set<number>();
     for (const aggregateShare of input.aggregateShares) {
+        if (
+            !Number.isSafeInteger(aggregateShare.trusteeRosterPosition) ||
+            aggregateShare.trusteeRosterPosition < 1 ||
+            aggregateShare.trusteeRosterPosition >
+                input.thresholdProfile.rosterSize
+        ) {
+            throw new RangeError(
+                'Aggregate reconstruction requires trustee positions within the frozen roster.',
+            );
+        }
         if (seenRosterPositions.has(aggregateShare.trusteeRosterPosition)) {
             throw new RangeError(
                 'Aggregate reconstruction requires distinct trustee positions.',

@@ -9,6 +9,7 @@ import {
     deriveMlDsaPublicKeyDigest,
     deriveProtocolDigest,
     deriveProtocolSignatureDigest,
+    hash512,
     hash512Hex,
     resolveProtocolDigestDomain,
     verifySignedObjectSignature,
@@ -55,6 +56,18 @@ describe('crypto primitive boundary', () => {
         expect(deriveProtocolDigest('PollSpecDigest', { poll: 'main' })).toBe(
             '423c71de65abadb5adc05d9b6b704252420bb738af888c62614c8afc53a2be808662585305e76738b23e4f20154f8779e3827c0c8f313455d84675924f4a2c83',
         );
+    });
+
+    it('hashes large byte parts without argument spreading', () => {
+        const largeCanonicalPart = new Uint8Array(200_000);
+
+        largeCanonicalPart.fill(7);
+
+        expect(
+            hash512('sealed-lattice-root/plaintext-root-v1', [
+                largeCanonicalPart,
+            ]),
+        ).toHaveLength(64);
     });
 
     it('rejects unreserved protocol digest namespaces', () => {

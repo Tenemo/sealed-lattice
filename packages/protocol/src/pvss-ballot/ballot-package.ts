@@ -326,7 +326,19 @@ export const verifyBallotPackageShell = (input: {
         }),
     );
 
-    if (voterRosterEntry?.signingPublicKeyDigest !== undefined) {
+    if (
+        voterRosterEntry !== undefined &&
+        voterRosterEntry.signingPublicKeyDigest === undefined
+    ) {
+        refusedObjects.push(
+            createRefusal(
+                'BallotPackageInvalid',
+                'Ballot package voter signature cannot be verified without a frozen roster signing key.',
+                ballotPackage.ballotPackageDigest,
+                'BallotPackage',
+            ),
+        );
+    } else if (voterRosterEntry?.signingPublicKeyDigest !== undefined) {
         const signatureResult = verifySignedObjectSignature(
             ballotPackage.signature,
             {

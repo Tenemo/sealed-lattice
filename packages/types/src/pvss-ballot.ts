@@ -174,6 +174,7 @@ export type CanonicalBallotSetInput = {
     readonly votingClosedBoardHeadDigest: ProtocolDigest;
     readonly closeRecordDigest: ProtocolDigest;
     readonly closeRecordBoardOrder: SignedBoardOrder;
+    readonly closeRecordInclusionProof: InclusionProof;
     readonly candidateBallots: readonly BallotPackageCandidate[];
     readonly includeRejectedCandidateSummariesInDigest?: boolean;
 };

@@ -165,7 +165,7 @@ const createBallotSetInput = (
         })),
         'vector-ballots',
     );
-    const closeHead = createBoardHeadWithObjects(
+    const closeHeadWithProofs = createBoardHeadWithObjects(
         2,
         ballotHeadWithProofs.head.headDigest,
         [
@@ -176,7 +176,8 @@ const createBallotSetInput = (
             },
         ],
         'vector-close',
-    ).head;
+    );
+    const closeHead = closeHeadWithProofs.head;
     const lateHeadWithProofs = createBoardHeadWithObjects(
         3,
         closeHead.headDigest,
@@ -221,6 +222,7 @@ const createBallotSetInput = (
             boardSequence: 2,
             boardPosition: 0,
         },
+        closeRecordInclusionProof: closeHeadWithProofs.inclusionProofs[0],
         candidateBallots,
         includeRejectedCandidateSummariesInDigest: true,
     };
@@ -383,6 +385,24 @@ describe('internal PVSS ballot algebra', () => {
         );
     });
 
+    it('rejects ballot-set inputs whose close cutoff does not match close inclusion evidence', () => {
+        const witness = createBallotWitness(1, [1, 2, 3, 4], 'close-binding');
+        const ballotSetInput = createBallotSetInput([witness]);
+        const ballotSet = deriveCanonicalBallotSet({
+            ...ballotSetInput,
+            closeRecordBoardOrder: {
+                boardSequence: 3,
+                boardPosition: 0,
+            },
+        });
+
+        expect(ballotSet.ok).toBe(false);
+        expect(ballotSet.ballotSetDigest).toBeUndefined();
+        expect(
+            ballotSet.refusedObjects.map((refusal) => refusal.code),
+        ).toContain('BallotSetInvalid');
+    });
+
     it('reconstructs aggregate shares to the plaintext oracle tally', () => {
         const witnesses = [
             createBallotWitness(1, [10, 1, 1, 1], 'vector-1'),
@@ -457,6 +477,33 @@ describe('internal PVSS ballot algebra', () => {
                 thresholdProfile,
             }),
         ).toThrow('exactly');
+        expect(
+            verifyTestAggregateShareOpening({
+                ...aggregateShareSet.aggregateShares[0],
+                aggregateOpeningVector: [
+                    Number.NaN,
+                    ...aggregateShareSet.aggregateShares[0].aggregateOpeningVector.slice(
+                        1,
+                    ),
+                ],
+            }),
+        ).toBe(false);
+        expect(() =>
+            reconstructAggregateTallyFromShares({
+                aggregateShares: aggregateShareSet.aggregateShares
+                    .slice(0, thresholdProfile.pvssThreshold)
+                    .map((aggregateWitness, aggregateWitnessIndex) =>
+                        aggregateWitnessIndex === 0
+                            ? {
+                                  ...aggregateWitness.aggregateShare,
+                                  trusteeRosterPosition: 999,
+                              }
+                            : aggregateWitness.aggregateShare,
+                    ),
+                optionCount: pollSpec.options.length,
+                thresholdProfile,
+            }),
+        ).toThrow('within the frozen roster');
     });
 
     it('rejects aggregate witnesses whose private shares no longer match the counted package', () => {
@@ -564,6 +611,26 @@ describe('internal PVSS ballot algebra', () => {
                     manifestPolicyDigests.duplicateBallotPolicyDigest,
                 optionCount: pollSpec.options.length,
                 rosterEntries,
+                thresholdProfile,
+            }).map((refusal) => refusal.code),
+        ).toContain('BallotPackageInvalid');
+        expect(
+            verifyBallotPackageShell({
+                ballotPackage: witness.ballotPackage,
+                ceremonyId,
+                electionManifestDigest,
+                rosterDigest,
+                pollSpecDigest,
+                thresholdProfileDigest,
+                duplicateBallotPolicyDigest:
+                    manifestPolicyDigests.duplicateBallotPolicyDigest,
+                optionCount: pollSpec.options.length,
+                rosterEntries: rosterEntries.map(
+                    ({ participantIdentity, rosterPosition }) => ({
+                        participantIdentity,
+                        rosterPosition,
+                    }),
+                ),
                 thresholdProfile,
             }).map((refusal) => refusal.code),
         ).toContain('BallotPackageInvalid');

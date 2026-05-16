@@ -89,7 +89,9 @@ const appendVarUint = (output: number[], value: number): void => {
 
 const appendBytes = (output: number[], value: Uint8Array): void => {
     appendVarUint(output, value.byteLength);
-    output.push(...value);
+    for (let index = 0; index < value.byteLength; index += 1) {
+        output.push(value[index] ?? 0);
+    }
 };
 
 export const hash512 = (
