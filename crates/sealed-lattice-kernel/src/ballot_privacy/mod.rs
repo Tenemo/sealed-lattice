@@ -1,9 +1,19 @@
+pub mod abdlop_commitment;
+pub mod lazer_demo_abdlop;
+pub mod lazer_demo_public_parameters;
+pub mod lazer_demo_rng;
+pub mod linear_proof_norms;
 pub mod linear_proof_parameters;
+pub mod linear_proof_statement;
+pub mod linear_proof_tbox;
+pub mod linear_proof_transcript;
 pub mod linear_proof_verifier;
 pub mod polynomial_matrix;
 pub mod polynomial_ring;
 pub mod polynomial_vector;
 pub mod proof_coder;
+pub mod sparse_polynomial_matrix;
+pub mod sparse_polynomial_vector;
 
 use std::collections::{BTreeMap, BTreeSet};
 

@@ -16,6 +16,16 @@ type LinearProofBackendVectorCase = {
     readonly trace?: {
         readonly expectedLogicalRejectionLayer?: string;
         readonly upstreamVerifierAccepted?: boolean;
+        readonly sealedLatticePreflightTranscript?: {
+            readonly domain: string;
+            readonly hash: string;
+            readonly parameterDigest: string;
+            readonly statementDigest: string;
+            readonly targetDigest: string;
+            readonly proofDigest: string;
+            readonly publicRandomnessDigest: string;
+            readonly preflightTranscriptDigest: string;
+        };
         readonly decodedProofFieldLengths?: {
             readonly fullProofBytes: number;
             readonly fields?: readonly {
@@ -69,6 +79,7 @@ const forbiddenPublicVectorKeys = new Set([
     'secret',
     'witness',
 ]);
+const lowercaseShake128DigestPattern = /^[a-f0-9]{64}$/u;
 
 const collectObjectKeys = (value: unknown, keys: Set<string>): void => {
     if (Array.isArray(value)) {
@@ -173,6 +184,65 @@ describe('ballot privacy linear proof backend vectors', () => {
                     upstreamVerifierAccepted: false,
                 });
             }
+        }
+    });
+
+    it('records a sealed-lattice preflight transcript for public vector binding', () => {
+        const validCase = linearProofBackendVectors.cases.find(
+            (vectorCase) => vectorCase.caseName === 'valid-small-linear-proof',
+        );
+        const casesWithChangedPreflightDigest = [
+            'mutated-statement-matrix',
+            'mutated-target-vector',
+            'mutated-proof-byte',
+            'wrong-public-randomness',
+            'truncated-proof',
+            'extended-proof',
+        ];
+
+        expect(
+            validCase?.trace?.sealedLatticePreflightTranscript,
+        ).toMatchObject({
+            domain: 'sealed.vote/internal/lazer-linear-preflight-v1',
+            hash: 'SHAKE128-256',
+        });
+        const validPreflightTranscript =
+            validCase?.trace?.sealedLatticePreflightTranscript;
+        expect(validPreflightTranscript?.parameterDigest).toMatch(
+            lowercaseShake128DigestPattern,
+        );
+        expect(validPreflightTranscript?.statementDigest).toMatch(
+            lowercaseShake128DigestPattern,
+        );
+        expect(validPreflightTranscript?.targetDigest).toMatch(
+            lowercaseShake128DigestPattern,
+        );
+        expect(validPreflightTranscript?.proofDigest).toMatch(
+            lowercaseShake128DigestPattern,
+        );
+        expect(validPreflightTranscript?.publicRandomnessDigest).toMatch(
+            lowercaseShake128DigestPattern,
+        );
+        expect(validPreflightTranscript?.preflightTranscriptDigest).toMatch(
+            lowercaseShake128DigestPattern,
+        );
+
+        const validPreflightDigest =
+            validPreflightTranscript?.preflightTranscriptDigest;
+        expect(validPreflightDigest).toBeDefined();
+        for (const caseName of casesWithChangedPreflightDigest) {
+            const mutatedCase = linearProofBackendVectors.cases.find(
+                (vectorCase) => vectorCase.caseName === caseName,
+            );
+
+            expect(
+                mutatedCase?.trace?.sealedLatticePreflightTranscript
+                    ?.preflightTranscriptDigest,
+            ).toMatch(lowercaseShake128DigestPattern);
+            expect(
+                mutatedCase?.trace?.sealedLatticePreflightTranscript
+                    ?.preflightTranscriptDigest,
+            ).not.toBe(validPreflightDigest);
         }
     });
 

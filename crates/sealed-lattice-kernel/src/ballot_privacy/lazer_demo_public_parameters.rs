@@ -1,0 +1,231 @@
+use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
+
+use super::{
+    lazer_demo_rng::sample_lazer_demo_uniform_u64_values, polynomial_matrix::PolynomialMatrix,
+    polynomial_ring::PolynomialRing,
+};
+
+pub const LAZER_DEMO_PROOF_RING_DEGREE: usize = 64;
+pub const LAZER_DEMO_PROOF_COEFFICIENT_MODULUS: u64 = 36_028_797_018_964_597;
+pub const LAZER_DEMO_PROOF_COEFFICIENT_BIT_LENGTH: usize = 56;
+pub const LAZER_DEMO_TBOX_SHORT_MESSAGE_LENGTH: usize = 33;
+pub const LAZER_DEMO_TBOX_RANDOMNESS_LENGTH: usize = 60;
+pub const LAZER_DEMO_TBOX_COMPRESSED_OPENING_LENGTH: usize = 13;
+pub const LAZER_DEMO_TBOX_MESSAGE_EXTENSION_LENGTH: usize = 12;
+
+const LAZER_DEMO_ABDLOP_COMMITMENT_KEY_DOMAIN: u32 = 0;
+const LAZER_DEMO_ABDLOP_OPENING_KEY_DOMAIN: u32 = 1;
+const LAZER_DEMO_ABDLOP_MESSAGE_KEY_DOMAIN: u32 = 2;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LazerDemoAbdlopPublicParameters {
+    pub commitment_key_matrix: PolynomialMatrix,
+    pub opening_key_matrix: PolynomialMatrix,
+    pub message_key_matrix: PolynomialMatrix,
+}
+
+pub fn derive_lazer_demo_abdlop_public_parameters(
+    public_randomness: &[u8; 32],
+) -> CanonicalResult<LazerDemoAbdlopPublicParameters> {
+    let proof_ring = PolynomialRing::new(
+        LAZER_DEMO_PROOF_RING_DEGREE,
+        LAZER_DEMO_PROOF_COEFFICIENT_MODULUS,
+    )?;
+    let randomness_without_compressed_opening =
+        LAZER_DEMO_TBOX_RANDOMNESS_LENGTH - LAZER_DEMO_TBOX_COMPRESSED_OPENING_LENGTH;
+
+    let commitment_key_matrix = expand_lazer_demo_uniform_polynomial_matrix(
+        proof_ring,
+        LAZER_DEMO_TBOX_COMPRESSED_OPENING_LENGTH,
+        LAZER_DEMO_TBOX_SHORT_MESSAGE_LENGTH,
+        public_randomness,
+        LAZER_DEMO_ABDLOP_COMMITMENT_KEY_DOMAIN,
+        LAZER_DEMO_PROOF_COEFFICIENT_BIT_LENGTH,
+    )?;
+    let opening_key_matrix = expand_lazer_demo_uniform_polynomial_matrix(
+        proof_ring,
+        LAZER_DEMO_TBOX_COMPRESSED_OPENING_LENGTH,
+        randomness_without_compressed_opening,
+        public_randomness,
+        LAZER_DEMO_ABDLOP_OPENING_KEY_DOMAIN,
+        LAZER_DEMO_PROOF_COEFFICIENT_BIT_LENGTH,
+    )?;
+    let message_key_matrix = expand_lazer_demo_uniform_polynomial_matrix(
+        proof_ring,
+        LAZER_DEMO_TBOX_MESSAGE_EXTENSION_LENGTH,
+        randomness_without_compressed_opening,
+        public_randomness,
+        LAZER_DEMO_ABDLOP_MESSAGE_KEY_DOMAIN,
+        LAZER_DEMO_PROOF_COEFFICIENT_BIT_LENGTH,
+    )?;
+
+    Ok(LazerDemoAbdlopPublicParameters {
+        commitment_key_matrix,
+        opening_key_matrix,
+        message_key_matrix,
+    })
+}
+
+pub fn expand_lazer_demo_uniform_polynomial_matrix(
+    ring: PolynomialRing,
+    row_count: usize,
+    column_count: usize,
+    public_randomness: &[u8; 32],
+    matrix_domain_separator: u32,
+    coefficient_bit_length: usize,
+) -> CanonicalResult<PolynomialMatrix> {
+    if row_count == 0 || column_count == 0 {
+        return Err(invalid_public_parameters(
+            "uniform matrix dimensions must be non-zero",
+        ));
+    }
+    let entry_count = row_count
+        .checked_mul(column_count)
+        .ok_or_else(|| invalid_public_parameters("uniform matrix entry count overflowed"))?;
+    if entry_count > u32::MAX as usize {
+        return Err(invalid_public_parameters(
+            "uniform matrix entry count does not fit in the LaZer domain layout",
+        ));
+    }
+
+    let mut entries = Vec::with_capacity(entry_count);
+    for entry_index in 0..entry_count {
+        let entry_domain_separator = compose_lazer_demo_matrix_domain(
+            matrix_domain_separator,
+            u32::try_from(entry_index).map_err(|_| {
+                invalid_public_parameters("uniform matrix entry index does not fit in u32")
+            })?,
+        );
+        entries.push(sample_lazer_demo_uniform_u64_values(
+            ring.degree(),
+            ring.modulus(),
+            coefficient_bit_length,
+            public_randomness,
+            entry_domain_separator,
+        )?);
+    }
+
+    PolynomialMatrix::new(ring, row_count, column_count, entries)
+}
+
+fn compose_lazer_demo_matrix_domain(matrix_domain_separator: u32, entry_index: u32) -> u64 {
+    (u64::from(matrix_domain_separator) << 32) | u64::from(entry_index)
+}
+
+fn invalid_public_parameters(message: impl Into<String>) -> CanonicalError {
+    CanonicalError::new(CanonicalErrorCode::InvalidFixture, message)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        LAZER_DEMO_PROOF_COEFFICIENT_MODULUS, LAZER_DEMO_PROOF_RING_DEGREE,
+        derive_lazer_demo_abdlop_public_parameters, expand_lazer_demo_uniform_polynomial_matrix,
+    };
+    use crate::{
+        ballot_privacy::polynomial_ring::PolynomialRing, hashing::to_hex,
+        transcript_core::decode_hex,
+    };
+
+    fn generated_vector_case(case_name: &str) -> serde_json::Value {
+        let vectors: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../test-vectors/ballot-privacy/proof-backend-linear-vectors.json"
+        ))
+        .expect("generated vector file should parse");
+
+        vectors["cases"]
+            .as_array()
+            .expect("generated vector file should contain cases")
+            .iter()
+            .find(|vector_case| vector_case["caseName"] == case_name)
+            .unwrap_or_else(|| panic!("generated vector case {case_name} should exist"))
+            .clone()
+    }
+
+    #[test]
+    fn uniform_matrix_expansion_matches_upstream_statement_vector() {
+        let vector_case = generated_vector_case("valid-small-linear-proof");
+        let public_randomness_bytes = decode_hex(
+            vector_case["publicRandomnessHex"]
+                .as_str()
+                .expect("public randomness should be present"),
+        )
+        .expect("public randomness should decode");
+        let mut public_randomness = [0_u8; 32];
+        public_randomness.copy_from_slice(&public_randomness_bytes);
+        let statement_matrix_coefficients: Vec<Vec<Vec<u64>>> =
+            serde_json::from_value(vector_case["statementMatrixCoefficients"].clone())
+                .expect("statement matrix should deserialize");
+        let source_ring = PolynomialRing::new(256, 4_294_962_689).expect("ring should validate");
+
+        let expanded_statement_matrix = expand_lazer_demo_uniform_polynomial_matrix(
+            source_ring,
+            4,
+            8,
+            &public_randomness,
+            0,
+            32,
+        )
+        .expect("statement matrix expansion should succeed");
+
+        assert_eq!(
+            expanded_statement_matrix.entries_by_row(),
+            statement_matrix_coefficients
+        );
+    }
+
+    #[test]
+    fn abdlop_public_parameter_expansion_has_demo_shapes() {
+        let public_randomness = [0_u8; 32];
+
+        let public_parameters = derive_lazer_demo_abdlop_public_parameters(&public_randomness)
+            .expect("public parameters should expand");
+
+        assert_eq!(public_parameters.commitment_key_matrix.rows(), 13);
+        assert_eq!(public_parameters.commitment_key_matrix.columns(), 33);
+        assert_eq!(public_parameters.opening_key_matrix.rows(), 13);
+        assert_eq!(public_parameters.opening_key_matrix.columns(), 47);
+        assert_eq!(public_parameters.message_key_matrix.rows(), 12);
+        assert_eq!(public_parameters.message_key_matrix.columns(), 47);
+        assert_eq!(
+            public_parameters.commitment_key_matrix.ring().degree(),
+            LAZER_DEMO_PROOF_RING_DEGREE
+        );
+        assert_eq!(
+            public_parameters.commitment_key_matrix.ring().modulus(),
+            LAZER_DEMO_PROOF_COEFFICIENT_MODULUS
+        );
+    }
+
+    #[test]
+    fn abdlop_public_parameter_expansion_binds_public_randomness() {
+        let zero_randomness = [0_u8; 32];
+        let mut changed_randomness = [0_u8; 32];
+        changed_randomness[0] = 1;
+
+        let zero_parameters = derive_lazer_demo_abdlop_public_parameters(&zero_randomness)
+            .expect("zero public parameters should expand");
+        let changed_parameters = derive_lazer_demo_abdlop_public_parameters(&changed_randomness)
+            .expect("changed public parameters should expand");
+
+        let zero_first_entry = zero_parameters
+            .commitment_key_matrix
+            .entry(0, 0)
+            .expect("first entry should exist");
+        let changed_first_entry = changed_parameters
+            .commitment_key_matrix
+            .entry(0, 0)
+            .expect("first entry should exist");
+        assert_ne!(
+            to_hex(&u64_slice_to_bytes(zero_first_entry)),
+            to_hex(&u64_slice_to_bytes(changed_first_entry))
+        );
+    }
+
+    fn u64_slice_to_bytes(values: &[u64]) -> Vec<u8> {
+        values
+            .iter()
+            .flat_map(|value| value.to_le_bytes())
+            .collect()
+    }
+}

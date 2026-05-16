@@ -12,7 +12,7 @@
         "dockerfileSha256": "36cce66333279e4c33ca6d8c0f0a768e512c596bb5e8af4f32952cb9fec374ae",
         "oracleDriverSha256": "a78d140b29236658bf1bdfdc7c133b869be6c0a78152010a7aacca1e2a6e700b",
         "oracleRunnerSha256": "1adfa6cccce98f257d2bacbb798653f1e2e15dc443113a2bfdbd41aa21fb8085",
-        "vectorEmitterSha256": "6339daa18b7443e1f2589c3e48e25e1bd7a2ad9c4e0582106e86534a546c2bf2",
+        "vectorEmitterSha256": "f1d0c649ee1d0a8a0b1ad33540f8b2dea46258c1500d93685013ea9cf507511c",
         "pythonVersion": "3.12.3",
         "sageVersion": "not installed; committed demo_params.h used",
         "compilerVersion": "gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
@@ -36,7 +36,7 @@
     "proofEncoding": {
         "profileId": "lazer-demo-linear-proof-encoding-v1",
         "ringDegree": 64,
-        "coefficientModulus": 36028797018964597,
+        "coefficientModulus": "36028797018964597",
         "fullSizeCoefficientBitLength": 56,
         "compressedCoefficientBitLength": 46,
         "targetCommitmentVectorLength": 12,
@@ -87,7 +87,7 @@
             "proofEncoding": {
                 "profileId": "lazer-demo-linear-proof-encoding-v1",
                 "ringDegree": 64,
-                "coefficientModulus": 36028797018964597,
+                "coefficientModulus": "36028797018964597",
                 "fullSizeCoefficientBitLength": 56,
                 "compressedCoefficientBitLength": 46,
                 "targetCommitmentVectorLength": 12,
@@ -9416,6 +9416,16 @@
                 "proofBytesSha256": "da88deb5b02f13ebb156e43985b14aa0d48c3b24d1fdeb38c92298d42bb9827a",
                 "proofSizeBytes": 22923,
                 "publicRandomnessSha256": "66687aadf862bd776c8fc18b8e9f8e20089714856ee233b3902a591d0d5f2925",
+                "sealedLatticePreflightTranscript": {
+                    "domain": "sealed.vote/internal/lazer-linear-preflight-v1",
+                    "hash": "SHAKE128-256",
+                    "parameterDigest": "0d9e29e4bed0885099b0fb0a7c024809f1dd32b3cacf4ddc9e007f6746a9ebd8",
+                    "statementDigest": "0335fbdff2f8d0d2d4383771927b9084f6cc02ca8ba5959b45699ed6ee7b4017",
+                    "targetDigest": "91bc471c86d4a9cd539050a3164c366f72bd340263390391ea41796961d8560e",
+                    "proofDigest": "d6bca00db38381829e87d1b3535f372041a951b960ae4612a7efc7e2ac0938e3",
+                    "publicRandomnessDigest": "24a7ca4b75e3898d4f12e74dea8cbb650733bd34525b281e4b6488d4291c0fdb",
+                    "preflightTranscriptDigest": "a33f9f20966374ae57c2235e11d0231ae66f304e8ce4c4f7a34fdd74031f58d9"
+                },
                 "decodedProofFieldLengths": {
                     "fullProofBytes": 22923,
                     "fields": [
@@ -9516,7 +9526,7 @@
             "proofEncoding": {
                 "profileId": "lazer-demo-linear-proof-encoding-v1",
                 "ringDegree": 64,
-                "coefficientModulus": 36028797018964597,
+                "coefficientModulus": "36028797018964597",
                 "fullSizeCoefficientBitLength": 56,
                 "compressedCoefficientBitLength": 46,
                 "targetCommitmentVectorLength": 12,
@@ -18845,6 +18855,16 @@
                 "proofBytesSha256": "da88deb5b02f13ebb156e43985b14aa0d48c3b24d1fdeb38c92298d42bb9827a",
                 "proofSizeBytes": 22923,
                 "publicRandomnessSha256": "66687aadf862bd776c8fc18b8e9f8e20089714856ee233b3902a591d0d5f2925",
+                "sealedLatticePreflightTranscript": {
+                    "domain": "sealed.vote/internal/lazer-linear-preflight-v1",
+                    "hash": "SHAKE128-256",
+                    "parameterDigest": "0d9e29e4bed0885099b0fb0a7c024809f1dd32b3cacf4ddc9e007f6746a9ebd8",
+                    "statementDigest": "fd56312cb40ba7eceab0bdefbc9f4c1667900abd0dcc7ef541ebb059785a9592",
+                    "targetDigest": "91bc471c86d4a9cd539050a3164c366f72bd340263390391ea41796961d8560e",
+                    "proofDigest": "d6bca00db38381829e87d1b3535f372041a951b960ae4612a7efc7e2ac0938e3",
+                    "publicRandomnessDigest": "24a7ca4b75e3898d4f12e74dea8cbb650733bd34525b281e4b6488d4291c0fdb",
+                    "preflightTranscriptDigest": "4b8ba3696ee22dff566e67c3d714c2b8b1441e13b3be1f5028a449d83d8341ec"
+                },
                 "decodedProofFieldLengths": {
                     "fullProofBytes": 22923,
                     "fields": [
@@ -18945,7 +18965,7 @@
             "proofEncoding": {
                 "profileId": "lazer-demo-linear-proof-encoding-v1",
                 "ringDegree": 64,
-                "coefficientModulus": 36028797018964597,
+                "coefficientModulus": "36028797018964597",
                 "fullSizeCoefficientBitLength": 56,
                 "compressedCoefficientBitLength": 46,
                 "targetCommitmentVectorLength": 12,
@@ -28274,6 +28294,16 @@
                 "proofBytesSha256": "da88deb5b02f13ebb156e43985b14aa0d48c3b24d1fdeb38c92298d42bb9827a",
                 "proofSizeBytes": 22923,
                 "publicRandomnessSha256": "66687aadf862bd776c8fc18b8e9f8e20089714856ee233b3902a591d0d5f2925",
+                "sealedLatticePreflightTranscript": {
+                    "domain": "sealed.vote/internal/lazer-linear-preflight-v1",
+                    "hash": "SHAKE128-256",
+                    "parameterDigest": "0d9e29e4bed0885099b0fb0a7c024809f1dd32b3cacf4ddc9e007f6746a9ebd8",
+                    "statementDigest": "0335fbdff2f8d0d2d4383771927b9084f6cc02ca8ba5959b45699ed6ee7b4017",
+                    "targetDigest": "3332e8f09d3ecb0fc5f9f4c72a0706ce077f04a72c4e16e9c10be4827858e36c",
+                    "proofDigest": "d6bca00db38381829e87d1b3535f372041a951b960ae4612a7efc7e2ac0938e3",
+                    "publicRandomnessDigest": "24a7ca4b75e3898d4f12e74dea8cbb650733bd34525b281e4b6488d4291c0fdb",
+                    "preflightTranscriptDigest": "954ec73b552ef0b84470bd38baa0b944c4b0b66e57422c39a6c28fe3911e9690"
+                },
                 "decodedProofFieldLengths": {
                     "fullProofBytes": 22923,
                     "fields": [
@@ -28374,7 +28404,7 @@
             "proofEncoding": {
                 "profileId": "lazer-demo-linear-proof-encoding-v1",
                 "ringDegree": 64,
-                "coefficientModulus": 36028797018964597,
+                "coefficientModulus": "36028797018964597",
                 "fullSizeCoefficientBitLength": 56,
                 "compressedCoefficientBitLength": 46,
                 "targetCommitmentVectorLength": 12,
@@ -37703,6 +37733,16 @@
                 "proofBytesSha256": "8724914c85b71a145b1730de73e770b8c3f8a65a9b31fcb743ffcf70b1bd703f",
                 "proofSizeBytes": 22923,
                 "publicRandomnessSha256": "66687aadf862bd776c8fc18b8e9f8e20089714856ee233b3902a591d0d5f2925",
+                "sealedLatticePreflightTranscript": {
+                    "domain": "sealed.vote/internal/lazer-linear-preflight-v1",
+                    "hash": "SHAKE128-256",
+                    "parameterDigest": "0d9e29e4bed0885099b0fb0a7c024809f1dd32b3cacf4ddc9e007f6746a9ebd8",
+                    "statementDigest": "0335fbdff2f8d0d2d4383771927b9084f6cc02ca8ba5959b45699ed6ee7b4017",
+                    "targetDigest": "91bc471c86d4a9cd539050a3164c366f72bd340263390391ea41796961d8560e",
+                    "proofDigest": "0a3cebbad4961ae3e2594a8f7f305c489e0290c74a97c26b611945bdfa2567c9",
+                    "publicRandomnessDigest": "24a7ca4b75e3898d4f12e74dea8cbb650733bd34525b281e4b6488d4291c0fdb",
+                    "preflightTranscriptDigest": "45ced238248f812c35df7aae60745003b8c8ec98b54f7b6ce21eae8c3bc552b2"
+                },
                 "decodedProofFieldLengths": {
                     "fullProofBytes": 22923,
                     "fields": [
@@ -37803,7 +37843,7 @@
             "proofEncoding": {
                 "profileId": "lazer-demo-linear-proof-encoding-v1",
                 "ringDegree": 64,
-                "coefficientModulus": 36028797018964597,
+                "coefficientModulus": "36028797018964597",
                 "fullSizeCoefficientBitLength": 56,
                 "compressedCoefficientBitLength": 46,
                 "targetCommitmentVectorLength": 12,
@@ -47132,6 +47172,16 @@
                 "proofBytesSha256": "da88deb5b02f13ebb156e43985b14aa0d48c3b24d1fdeb38c92298d42bb9827a",
                 "proofSizeBytes": 22923,
                 "publicRandomnessSha256": "01d0fabd251fcbbe2b93b4b927b26ad2a1a99077152e45ded1e678afa45dbec5",
+                "sealedLatticePreflightTranscript": {
+                    "domain": "sealed.vote/internal/lazer-linear-preflight-v1",
+                    "hash": "SHAKE128-256",
+                    "parameterDigest": "0d9e29e4bed0885099b0fb0a7c024809f1dd32b3cacf4ddc9e007f6746a9ebd8",
+                    "statementDigest": "0335fbdff2f8d0d2d4383771927b9084f6cc02ca8ba5959b45699ed6ee7b4017",
+                    "targetDigest": "91bc471c86d4a9cd539050a3164c366f72bd340263390391ea41796961d8560e",
+                    "proofDigest": "d6bca00db38381829e87d1b3535f372041a951b960ae4612a7efc7e2ac0938e3",
+                    "publicRandomnessDigest": "b7e503cf86537441513588eb872c463d0d97b056abdfeaa30b75866c25267ef6",
+                    "preflightTranscriptDigest": "79235e935688a79411c91755e5cad6af98210be8ae349db9f9f125b66052a9a4"
+                },
                 "decodedProofFieldLengths": {
                     "fullProofBytes": 22923,
                     "fields": [
@@ -47232,7 +47282,7 @@
             "proofEncoding": {
                 "profileId": "lazer-demo-linear-proof-encoding-v1",
                 "ringDegree": 64,
-                "coefficientModulus": 36028797018964597,
+                "coefficientModulus": "36028797018964597",
                 "fullSizeCoefficientBitLength": 56,
                 "compressedCoefficientBitLength": 46,
                 "targetCommitmentVectorLength": 12,
@@ -56561,6 +56611,16 @@
                 "proofBytesSha256": "734cb3ea3ffc9b219076e47338278069cb2a9beccb7a40a79143fbc75cbfa32c",
                 "proofSizeBytes": 22922,
                 "publicRandomnessSha256": "66687aadf862bd776c8fc18b8e9f8e20089714856ee233b3902a591d0d5f2925",
+                "sealedLatticePreflightTranscript": {
+                    "domain": "sealed.vote/internal/lazer-linear-preflight-v1",
+                    "hash": "SHAKE128-256",
+                    "parameterDigest": "0d9e29e4bed0885099b0fb0a7c024809f1dd32b3cacf4ddc9e007f6746a9ebd8",
+                    "statementDigest": "0335fbdff2f8d0d2d4383771927b9084f6cc02ca8ba5959b45699ed6ee7b4017",
+                    "targetDigest": "91bc471c86d4a9cd539050a3164c366f72bd340263390391ea41796961d8560e",
+                    "proofDigest": "1b8b80c0da4cbe0bb1db1b83e199635498b73f8388fb3fa10c73568bc81c86d3",
+                    "publicRandomnessDigest": "24a7ca4b75e3898d4f12e74dea8cbb650733bd34525b281e4b6488d4291c0fdb",
+                    "preflightTranscriptDigest": "58e57755ba80404af4cbf796004599f9ddc363ab2580542905fee697d205d8ee"
+                },
                 "decodedProofFieldLengths": {
                     "fullProofBytes": 22922,
                     "decoderError": "proof encoding ended before the current field was complete"
@@ -56590,7 +56650,7 @@
             "proofEncoding": {
                 "profileId": "lazer-demo-linear-proof-encoding-v1",
                 "ringDegree": 64,
-                "coefficientModulus": 36028797018964597,
+                "coefficientModulus": "36028797018964597",
                 "fullSizeCoefficientBitLength": 56,
                 "compressedCoefficientBitLength": 46,
                 "targetCommitmentVectorLength": 12,
@@ -65919,6 +65979,16 @@
                 "proofBytesSha256": "6c46859f7c298cc4f92af5b18f95dac23884ed5ed96f09f2f93437378dc1ca7e",
                 "proofSizeBytes": 22924,
                 "publicRandomnessSha256": "66687aadf862bd776c8fc18b8e9f8e20089714856ee233b3902a591d0d5f2925",
+                "sealedLatticePreflightTranscript": {
+                    "domain": "sealed.vote/internal/lazer-linear-preflight-v1",
+                    "hash": "SHAKE128-256",
+                    "parameterDigest": "0d9e29e4bed0885099b0fb0a7c024809f1dd32b3cacf4ddc9e007f6746a9ebd8",
+                    "statementDigest": "0335fbdff2f8d0d2d4383771927b9084f6cc02ca8ba5959b45699ed6ee7b4017",
+                    "targetDigest": "91bc471c86d4a9cd539050a3164c366f72bd340263390391ea41796961d8560e",
+                    "proofDigest": "51fddea28c9a9ce93385fe3a3232dc9f07398bef65c05ed0d75b90316c38482a",
+                    "publicRandomnessDigest": "24a7ca4b75e3898d4f12e74dea8cbb650733bd34525b281e4b6488d4291c0fdb",
+                    "preflightTranscriptDigest": "ca33d3e60feb26503d2823f8bd6833a21ef2d8f9c72bee2c24459940631cdcc0"
+                },
                 "decodedProofFieldLengths": {
                     "fullProofBytes": 22924,
                     "decoderError": "proof encoding contains trailing data"
@@ -65948,7 +66018,7 @@
             "proofEncoding": {
                 "profileId": "lazer-demo-linear-proof-encoding-v1",
                 "ringDegree": 64,
-                "coefficientModulus": 36028797018964597,
+                "coefficientModulus": "36028797018964597",
                 "fullSizeCoefficientBitLength": 56,
                 "compressedCoefficientBitLength": 46,
                 "targetCommitmentVectorLength": 12,
@@ -75277,6 +75347,16 @@
                 "proofBytesSha256": "da88deb5b02f13ebb156e43985b14aa0d48c3b24d1fdeb38c92298d42bb9827a",
                 "proofSizeBytes": 22923,
                 "publicRandomnessSha256": "66687aadf862bd776c8fc18b8e9f8e20089714856ee233b3902a591d0d5f2925",
+                "sealedLatticePreflightTranscript": {
+                    "domain": "sealed.vote/internal/lazer-linear-preflight-v1",
+                    "hash": "SHAKE128-256",
+                    "parameterDigest": "0d9e29e4bed0885099b0fb0a7c024809f1dd32b3cacf4ddc9e007f6746a9ebd8",
+                    "statementDigest": "5afc4036c3b9cdf5d22b70ef2f32e6a1319cb6b1d97d13651ef9672ae15b12af",
+                    "targetDigest": "91bc471c86d4a9cd539050a3164c366f72bd340263390391ea41796961d8560e",
+                    "proofDigest": "d6bca00db38381829e87d1b3535f372041a951b960ae4612a7efc7e2ac0938e3",
+                    "publicRandomnessDigest": "24a7ca4b75e3898d4f12e74dea8cbb650733bd34525b281e4b6488d4291c0fdb",
+                    "preflightTranscriptDigest": "e5618179f2980c1d9e05485beff73739d6165a19466e44f88cb6e4aee65515a0"
+                },
                 "decodedProofFieldLengths": {
                     "fullProofBytes": 22923,
                     "fields": [

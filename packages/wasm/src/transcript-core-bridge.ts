@@ -193,6 +193,14 @@ const transcriptCoreKernelNormalizedSha256HexValues = [
     'e99f4c32cf7572473b1fbb1117d052fd1d60627f8f2fc71285a211a4b1693ae4',
     '8f0fa37a3e8f571be5d788c6666c6d24ae6ba0ecf7ebae5387e6cee2e854e5ad',
     'aa02821ad2f6e7f01933f48704aea76a128876df2afbd447d36e3faf474b509d',
+    '567d2df11d7941e0b0cf33d5a6ebfb81e04b977c3d1ccfe3d4c6caa6244b142b',
+    '8ca4a23a74fff0cd38691d2d210f72a5a861dfdf67a17b7e73678dc1b85b6367',
+    'ca9c7df4bc0f5730654e9dfa6b233ad533c3dafa0d90ded75dda78f28617d57b',
+    '15112b7920ead0a440a61f76f45042660dfe215a2045e44363a4d844b7241401',
+    '5d1f6a92e4c8e982a2ac12b016db46e131b2aa3beca01b00319b262153f52d25',
+    'ed70c522d98f95dbc30d2c83c4a31c8e8f70925803f1bb050107be708fc1aad1',
+    '6d4fa5f041072fdd39b2d041b804f7b3c907acd92375971a2e9d38eba860eedf',
+    '2141ed25a0aa2e7ddc5a0d6b8c72f6dc07c9208923cc36fb3a0c562a70511182',
 ] as const;
 const defaultTranscriptCoreKernelNormalizedSha256HexValues = new Set<string>(
     transcriptCoreKernelNormalizedSha256HexValues,

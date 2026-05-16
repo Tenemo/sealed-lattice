@@ -15,6 +15,7 @@ from typing import Any
 
 
 VECTOR_PROFILE_ID = "lazer-linear-demo-compatibility-v1"
+LINEAR_PROOF_PREFLIGHT_DOMAIN = "sealed.vote/internal/lazer-linear-preflight-v1"
 REQUIRED_CASE_NAMES = [
     "valid-small-linear-proof",
     "mutated-statement-matrix",
@@ -53,14 +54,63 @@ def sha256_text(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
+def shake128_bytes_hex(*parts: bytes) -> str:
+    digest = hashlib.shake_128()
+    for part in parts:
+        digest.update(part)
+
+    return digest.hexdigest(32)
+
+
 def bytes_hex(value: bytes) -> str:
     return value.hex()
 
 
+def canonical_json_text(value: Any) -> str:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"))
+
+
 def canonical_json_digest(value: Any) -> str:
-    canonical = json.dumps(value, sort_keys=True, separators=(",", ":"))
+    canonical = canonical_json_text(value)
 
     return sha256_text(canonical)
+
+
+def canonical_json_shake128_digest(value: Any) -> str:
+    return shake128_bytes_hex(canonical_json_text(value).encode("utf-8"))
+
+
+def build_sealed_lattice_preflight_transcript(
+    *,
+    parameter_set: dict[str, Any],
+    statement_matrix_coefficients: list[list[list[int]]],
+    target_vector_coefficients: list[list[int]],
+    proof: bytes,
+    public_randomness: bytes,
+) -> dict[str, str]:
+    parameter_set_canonical = canonical_json_text(parameter_set).encode("utf-8")
+    statement_matrix_canonical = canonical_json_text(statement_matrix_coefficients).encode(
+        "utf-8"
+    )
+    target_vector_canonical = canonical_json_text(target_vector_coefficients).encode("utf-8")
+
+    return {
+        "domain": LINEAR_PROOF_PREFLIGHT_DOMAIN,
+        "hash": "SHAKE128-256",
+        "parameterDigest": canonical_json_shake128_digest(parameter_set),
+        "statementDigest": canonical_json_shake128_digest(statement_matrix_coefficients),
+        "targetDigest": canonical_json_shake128_digest(target_vector_coefficients),
+        "proofDigest": shake128_bytes_hex(proof),
+        "publicRandomnessDigest": shake128_bytes_hex(public_randomness),
+        "preflightTranscriptDigest": shake128_bytes_hex(
+            LINEAR_PROOF_PREFLIGHT_DOMAIN.encode("utf-8"),
+            parameter_set_canonical,
+            statement_matrix_canonical,
+            target_vector_canonical,
+            public_randomness,
+            proof,
+        ),
+    }
 
 
 def ceil_divide(dividend: int, divisor: int) -> int:
@@ -431,6 +481,13 @@ def build_trace(
         "proofBytesSha256": hashlib.sha256(proof).hexdigest(),
         "proofSizeBytes": len(proof),
         "publicRandomnessSha256": hashlib.sha256(public_randomness).hexdigest(),
+        "sealedLatticePreflightTranscript": build_sealed_lattice_preflight_transcript(
+            parameter_set=parameter_set,
+            statement_matrix_coefficients=statement_matrix_coefficients,
+            target_vector_coefficients=target_vector_coefficients,
+            proof=proof,
+            public_randomness=public_randomness,
+        ),
         "decodedProofFieldLengths": decoded_proof_field_lengths,
         "expectedLogicalRejectionLayer": expected_logical_rejection_layer,
     }
@@ -520,7 +577,7 @@ def emit_vectors(repo_root: Path, lazer_root: Path, out_path: Path) -> None:
     proof_encoding = {
         "profileId": "lazer-demo-linear-proof-encoding-v1",
         "ringDegree": 64,
-        "coefficientModulus": 36028797018964597,
+        "coefficientModulus": "36028797018964597",
         "fullSizeCoefficientBitLength": 56,
         "compressedCoefficientBitLength": 46,
         "targetCommitmentVectorLength": 12,

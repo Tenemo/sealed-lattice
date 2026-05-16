@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, de};
 
 use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
 
@@ -10,6 +10,7 @@ pub struct LinearProofParameterSet {
     pub relation: String,
     pub ring_degree: usize,
     pub proof_system_ring_degree: usize,
+    #[serde(deserialize_with = "deserialize_u64_decimal_string_or_number")]
     pub coefficient_modulus: u64,
     pub statement_rows: usize,
     pub statement_columns: usize,
@@ -69,6 +70,7 @@ impl LinearProofParameterSet {
 pub struct LazerDemoProofEncoding {
     pub profile_id: String,
     pub ring_degree: usize,
+    #[serde(deserialize_with = "deserialize_u64_decimal_string_or_number")]
     pub coefficient_modulus: u64,
     pub full_size_coefficient_bit_length: usize,
     pub compressed_coefficient_bit_length: usize,
@@ -224,6 +226,69 @@ fn bit_capacity(bit_length: usize) -> CanonicalResult<u64> {
     Ok(1_u64 << bit_length)
 }
 
+fn deserialize_u64_decimal_string_or_number<'de, DeserializerType>(
+    deserializer: DeserializerType,
+) -> Result<u64, DeserializerType::Error>
+where
+    DeserializerType: Deserializer<'de>,
+{
+    struct DecimalStringOrNumberVisitor;
+
+    impl de::Visitor<'_> for DecimalStringOrNumberVisitor {
+        type Value = u64;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str("a u64 JSON integer or decimal string")
+        }
+
+        fn visit_u64<ErrorType>(self, value: u64) -> Result<Self::Value, ErrorType>
+        where
+            ErrorType: de::Error,
+        {
+            Ok(value)
+        }
+
+        fn visit_i64<ErrorType>(self, value: i64) -> Result<Self::Value, ErrorType>
+        where
+            ErrorType: de::Error,
+        {
+            u64::try_from(value).map_err(|_| ErrorType::custom("u64 field must not be negative"))
+        }
+
+        fn visit_str<ErrorType>(self, value: &str) -> Result<Self::Value, ErrorType>
+        where
+            ErrorType: de::Error,
+        {
+            if value.is_empty() {
+                return Err(ErrorType::custom("u64 decimal string must not be empty"));
+            }
+            if value.starts_with('+') || value.starts_with('-') {
+                return Err(ErrorType::custom(
+                    "u64 decimal string must not include a sign",
+                ));
+            }
+            if !value.bytes().all(|byte| byte.is_ascii_digit()) {
+                return Err(ErrorType::custom(
+                    "u64 decimal string must contain only decimal digits",
+                ));
+            }
+
+            value.parse::<u64>().map_err(|error| {
+                ErrorType::custom(format!("u64 decimal string is invalid: {error}"))
+            })
+        }
+
+        fn visit_string<ErrorType>(self, value: String) -> Result<Self::Value, ErrorType>
+        where
+            ErrorType: de::Error,
+        {
+            self.visit_str(&value)
+        }
+    }
+
+    deserializer.deserialize_any(DecimalStringOrNumberVisitor)
+}
+
 fn invalid_parameter(message: impl Into<String>) -> CanonicalError {
     CanonicalError::new(CanonicalErrorCode::InvalidFixture, message)
 }
@@ -231,6 +296,7 @@ fn invalid_parameter(message: impl Into<String>) -> CanonicalError {
 #[cfg(test)]
 mod tests {
     use super::{demo_linear_parameter_contract, demo_linear_proof_encoding_contract};
+    use serde_json::json;
 
     #[test]
     fn demo_linear_parameter_contract_is_valid() {
@@ -256,5 +322,37 @@ mod tests {
         demo_linear_proof_encoding_contract()
             .validate()
             .expect("demo proof encoding should validate");
+    }
+
+    #[test]
+    fn proof_encoding_accepts_decimal_string_modulus_for_json_bridge_safety() {
+        let proof_encoding: super::LazerDemoProofEncoding = serde_json::from_value(json!({
+            "profileId": "lazer-demo-linear-proof-encoding-v1",
+            "ringDegree": 64,
+            "coefficientModulus": "36028797018964597",
+            "fullSizeCoefficientBitLength": 56,
+            "compressedCoefficientBitLength": 46,
+            "targetCommitmentVectorLength": 12,
+            "hashMaskVectorLength": 2,
+            "compressedCommitmentVectorLength": 13,
+            "challengeCoefficientModulus": 17,
+            "challengeCoefficientBitLength": 5,
+            "hintVectorLength": 13,
+            "shortResponseVectorLength": 33,
+            "randomnessResponseVectorLength": 47,
+            "euclideanResponseVectorLength": 4,
+            "infinityResponseVectorLength": 4,
+            "shortResponseLog2StandardDeviation": 16,
+            "randomnessResponseLog2StandardDeviation": 12,
+            "euclideanResponseLog2StandardDeviation": 11,
+            "infinityResponseLog2StandardDeviation": 16,
+            "source": "temp/lazer/python/demo/demo_params.h:_param"
+        }))
+        .expect("decimal string modulus should deserialize");
+
+        assert_eq!(proof_encoding.coefficient_modulus, 36_028_797_018_964_597);
+        proof_encoding
+            .validate()
+            .expect("decimal string modulus should preserve the validated value");
     }
 }

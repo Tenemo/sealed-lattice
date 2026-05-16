@@ -7,12 +7,25 @@ use crate::{
 };
 
 use super::{
-    BALLOT_PRIVACY_PROOF_BACKEND_AVAILABLE, describe_proof_backend,
+    BALLOT_PRIVACY_PROOF_BACKEND_AVAILABLE,
+    abdlop_commitment::hash_lazer_demo_abdlop_commitment,
+    describe_proof_backend,
+    lazer_demo_abdlop::validate_lazer_demo_abdlop_linear_opening,
+    lazer_demo_public_parameters::derive_lazer_demo_abdlop_public_parameters,
+    linear_proof_norms::validate_lazer_demo_linear_proof_norms,
     linear_proof_parameters::{LazerDemoProofEncoding, LinearProofParameterSet},
+    linear_proof_statement::derive_lazer_demo_linear_statement_transcript,
+    linear_proof_tbox::validate_lazer_demo_tbox_public_checks,
+    linear_proof_transcript::{
+        LinearProofPreflightTranscriptInput, compute_linear_proof_preflight_transcript,
+    },
     polynomial_matrix::PolynomialMatrix,
     polynomial_ring::PolynomialRing,
     polynomial_vector::PolynomialVector,
-    proof_coder::{LinearProofBytes, decode_lazer_demo_linear_proof_fields},
+    proof_coder::{
+        LinearProofBytes, decode_lazer_demo_linear_proof, decode_lazer_demo_linear_proof_fields,
+        encode_lazer_demo_linear_proof,
+    },
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -37,6 +50,7 @@ pub struct LinearProofVectorCase {
 #[serde(rename_all = "camelCase")]
 pub struct LinearProofVectorTrace {
     pub decoded_proof_field_lengths: Option<Value>,
+    pub sealed_lattice_preflight_transcript: Option<Value>,
 }
 
 impl LinearProofVectorCase {
@@ -74,16 +88,33 @@ impl LinearProofVectorCase {
                     "publicRandomnessHex must encode exactly 32 bytes",
                 ));
             }
+            let public_randomness_array: [u8; 32] = public_randomness
+                .as_slice()
+                .try_into()
+                .map_err(|_| invalid_vector("publicRandomnessHex must encode exactly 32 bytes"))?;
+            derive_lazer_demo_abdlop_public_parameters(&public_randomness_array)?;
             let proof_hex = self
                 .proof_hex
                 .as_deref()
                 .ok_or_else(|| invalid_vector("available vectors require proofHex"))?;
             let proof_bytes =
                 LinearProofBytes::from_hex(proof_hex, self.expected_proof_size_bytes)?;
-            if let Some(proof_encoding) = self.proof_encoding.as_ref() {
+            let decoded_proof_for_verified_encoding = if let Some(proof_encoding) =
+                self.proof_encoding.as_ref()
+            {
                 proof_encoding.validate()?;
                 let decoded_field_lengths =
                     decode_lazer_demo_linear_proof_fields(proof_bytes.bytes(), proof_encoding)?;
+                let decoded_proof =
+                    decode_lazer_demo_linear_proof(proof_bytes.bytes(), proof_encoding)?;
+                let reencoded_proof =
+                    encode_lazer_demo_linear_proof(&decoded_proof, proof_encoding)?;
+                if reencoded_proof != proof_bytes.bytes() {
+                    return Err(invalid_vector(
+                        "decoded proof object does not re-encode to the original canonical bytes",
+                    ));
+                }
+                validate_lazer_demo_linear_proof_norms(&decoded_proof, proof_encoding)?;
                 if let Some(expected_field_lengths) = self
                     .trace
                     .as_ref()
@@ -100,7 +131,10 @@ impl LinearProofVectorCase {
                         "decoded proof field lengths do not match the upstream trace",
                     ));
                 }
-            }
+                Some(decoded_proof)
+            } else {
+                None
+            };
             let statement_matrix_coefficients = self
                 .statement_matrix_coefficients
                 .as_deref()
@@ -113,10 +147,89 @@ impl LinearProofVectorCase {
                     invalid_vector("available vectors require targetVectorCoefficients")
                 })?;
             decode_target_vector(parameter_set, target_vector_coefficients)?;
+            if let (Some(proof_encoding), Some(decoded_proof)) = (
+                self.proof_encoding.as_ref(),
+                decoded_proof_for_verified_encoding.as_ref(),
+            ) {
+                let statement_transcript = derive_lazer_demo_linear_statement_transcript(
+                    parameter_set,
+                    proof_encoding,
+                    statement_matrix_coefficients,
+                    target_vector_coefficients,
+                    &public_randomness,
+                )?;
+                let abdlop_commitment_hash = hash_lazer_demo_abdlop_commitment(
+                    &statement_transcript.public_parameters_and_statement_hash,
+                    decoded_proof,
+                    proof_encoding,
+                )?;
+                validate_lazer_demo_abdlop_linear_opening(
+                    &abdlop_commitment_hash,
+                    &public_randomness_array,
+                    decoded_proof,
+                    proof_encoding,
+                )?;
+                validate_lazer_demo_tbox_public_checks(
+                    &abdlop_commitment_hash,
+                    decoded_proof,
+                    proof_encoding,
+                )?;
+            }
+
+            if let Some(expected_preflight_transcript) = self
+                .trace
+                .as_ref()
+                .and_then(|trace| trace.sealed_lattice_preflight_transcript.as_ref())
+            {
+                let actual_preflight_transcript = compute_preflight_transcript_value(
+                    parameter_set,
+                    statement_matrix_coefficients,
+                    target_vector_coefficients,
+                    &public_randomness,
+                    proof_bytes.bytes(),
+                )?;
+                if *expected_preflight_transcript != actual_preflight_transcript {
+                    return Err(invalid_vector(
+                        "sealed-lattice preflight transcript does not match the vector trace",
+                    ));
+                }
+            }
         }
 
         Ok(())
     }
+}
+
+fn compute_preflight_transcript_value(
+    parameter_set: &LinearProofParameterSet,
+    statement_matrix_coefficients: &[Vec<Vec<u64>>],
+    target_vector_coefficients: &[Vec<u64>],
+    public_randomness: &[u8],
+    proof_bytes: &[u8],
+) -> CanonicalResult<Value> {
+    let parameter_set_value = serde_json::to_value(parameter_set).map_err(|error| {
+        invalid_vector(format!("parameter set could not be serialized: {error}"))
+    })?;
+    let statement_matrix_value =
+        serde_json::to_value(statement_matrix_coefficients).map_err(|error| {
+            invalid_vector(format!("statement matrix could not be serialized: {error}"))
+        })?;
+    let target_vector_value =
+        serde_json::to_value(target_vector_coefficients).map_err(|error| {
+            invalid_vector(format!("target vector could not be serialized: {error}"))
+        })?;
+    let transcript =
+        compute_linear_proof_preflight_transcript(LinearProofPreflightTranscriptInput {
+            parameter_set: &parameter_set_value,
+            statement_matrix_coefficients: &statement_matrix_value,
+            target_vector_coefficients: &target_vector_value,
+            public_randomness,
+            proof_bytes,
+        })?;
+
+    serde_json::to_value(transcript).map_err(|error| {
+        invalid_vector(format!("preflight transcript could not serialize: {error}"))
+    })
 }
 
 fn decode_statement_matrix(
@@ -207,12 +320,18 @@ pub fn verify_linear_proof_vector_case_value(vector_case: &Value) -> Value {
         "caseName": parsed_case.case_name,
         "vectorAvailable": true,
         "expectedOutcome": parsed_case.expected_outcome,
-        "statusLabels": [],
+        "statusLabels": [
+            "LinearProofBytesCanonical",
+            "LinearProofNormBoundsChecked",
+            "AbdlopPublicParametersExpanded",
+            "AbdlopLinearOpeningRecovered",
+            "TboxPublicSlicesChecked"
+        ],
         "acceptedDigests": [],
         "refusedObjects": [
             {
                 "code": "OperationUnavailable",
-                "message": "Portable LaZer-style linear proof verification is not implemented in this build."
+                "message": "Portable LaZer-style linear proof verification remains fail-closed until the tbox quadratic helper verifier, Schwartz-Zippel accumulators, and final challenge recomputation are ported."
             }
         ],
         "unresolvedReason": "OperationUnavailable"

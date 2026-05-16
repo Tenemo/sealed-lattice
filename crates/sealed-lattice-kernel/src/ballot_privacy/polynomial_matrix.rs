@@ -46,6 +46,25 @@ impl PolynomialMatrix {
         self.columns
     }
 
+    pub fn ring(&self) -> PolynomialRing {
+        self.ring
+    }
+
+    pub fn entry(&self, row_index: usize, column_index: usize) -> CanonicalResult<&[u64]> {
+        if row_index >= self.rows || column_index >= self.columns {
+            return Err(invalid_matrix("matrix entry index is out of range"));
+        }
+
+        Ok(&self.entries[row_index * self.columns + column_index])
+    }
+
+    pub fn entries_by_row(&self) -> Vec<Vec<Vec<u64>>> {
+        self.entries
+            .chunks_exact(self.columns)
+            .map(|row| row.to_vec())
+            .collect()
+    }
+
     pub fn multiply_vector(&self, vector: &PolynomialVector) -> CanonicalResult<PolynomialVector> {
         if self.ring != vector.ring() {
             return Err(invalid_matrix("matrix and vector rings do not match"));
