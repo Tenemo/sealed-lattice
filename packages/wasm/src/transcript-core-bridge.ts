@@ -113,8 +113,8 @@ type KernelFailureResponse = {
     readonly error: CanonicalError;
 };
 
-const transcriptCoreKernelSha256Hex =
-    '28174a63b6bb465e35145d2185e3ffbf5f2693a946366e0545f23f22c975a3ad';
+const transcriptCoreKernelNormalizedSha256Hex =
+    '11fcbd3b6f45fc26db27d48e9956b0d6e33ff65adffa51ba793a2b196da29883';
 
 const bridgeCanonicalErrorCodeValues = [
     'DuplicateField',
@@ -152,7 +152,84 @@ const textEncoder = new TextEncoder();
 const bytesToHex = (bytes: Uint8Array): string =>
     Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
 
-const hashSha256Hex = async (bytes: ArrayBuffer): Promise<string> => {
+const isPrintableAscii = (byte: number): boolean =>
+    byte >= 0x20 && byte <= 0x7e;
+
+const normalizeRustSourcePathForDigest = (sourcePath: string): string => {
+    const forwardSlashSourcePath = sourcePath.replace(/\\/gu, '/');
+    const cargoRegistrySourcePath = forwardSlashSourcePath.replace(
+        /^(?:[A-Za-z]:)?\/.*?\/\.cargo\/registry\/src\//u,
+        '/cargo/registry/src/',
+    );
+
+    return cargoRegistrySourcePath.replace(
+        /^.*?\/crates\/sealed-lattice-kernel\//u,
+        'crates/sealed-lattice-kernel/',
+    );
+};
+
+const normalizeDigestChunk = (chunk: Uint8Array): Uint8Array => {
+    if (chunk.length === 0) {
+        return chunk;
+    }
+    if (!chunk.includes(0x2e)) {
+        return chunk;
+    }
+    for (const byte of chunk) {
+        if (!isPrintableAscii(byte)) {
+            return chunk;
+        }
+    }
+
+    const text = textDecoder.decode(chunk);
+    if (!text.includes('.rs')) {
+        return chunk;
+    }
+
+    const normalizedText = normalizeRustSourcePathForDigest(text);
+    if (normalizedText === text) {
+        return chunk;
+    }
+
+    return textEncoder.encode(normalizedText);
+};
+
+export const normalizeTranscriptCoreKernelBytesForDigest = (
+    bytes: Uint8Array,
+): Uint8Array => {
+    const normalizedChunks: Uint8Array[] = [];
+    let totalByteLength = 0;
+    let chunkStart = 0;
+
+    for (let byteIndex = 0; byteIndex <= bytes.length; byteIndex += 1) {
+        if (byteIndex !== bytes.length && bytes[byteIndex] !== 0) {
+            continue;
+        }
+
+        const normalizedChunk = normalizeDigestChunk(
+            bytes.subarray(chunkStart, byteIndex),
+        );
+        normalizedChunks.push(normalizedChunk);
+        totalByteLength += normalizedChunk.length;
+
+        if (byteIndex !== bytes.length) {
+            normalizedChunks.push(Uint8Array.of(0));
+            totalByteLength += 1;
+        }
+        chunkStart = byteIndex + 1;
+    }
+
+    const normalizedBytes = new Uint8Array(totalByteLength);
+    let writeOffset = 0;
+    for (const chunk of normalizedChunks) {
+        normalizedBytes.set(chunk, writeOffset);
+        writeOffset += chunk.length;
+    }
+
+    return normalizedBytes;
+};
+
+const hashSha256Hex = async (bytes: Uint8Array): Promise<string> => {
     const subtleCrypto = globalThis.crypto?.subtle;
     /* v8 ignore next 5 */
     if (subtleCrypto === undefined) {
@@ -161,8 +238,12 @@ const hashSha256Hex = async (bytes: ArrayBuffer): Promise<string> => {
         );
     }
 
+    const digestInput = Uint8Array.from(bytes);
+
     return bytesToHex(
-        new Uint8Array(await subtleCrypto.digest('SHA-256', bytes)),
+        new Uint8Array(
+            await subtleCrypto.digest('SHA-256', digestInput.buffer),
+        ),
     );
 };
 
@@ -170,7 +251,9 @@ const verifyKernelIntegrity = async (
     bytes: ArrayBuffer,
     expectedSha256Hex: string,
 ): Promise<void> => {
-    const actualSha256Hex = await hashSha256Hex(bytes);
+    const actualSha256Hex = await hashSha256Hex(
+        normalizeTranscriptCoreKernelBytesForDigest(new Uint8Array(bytes)),
+    );
     if (actualSha256Hex !== expectedSha256Hex) {
         throw new Error(
             `The transcript-core kernel failed integrity verification: expected ${expectedSha256Hex}, received ${actualSha256Hex}.`,
@@ -409,7 +492,7 @@ export const createTranscriptCoreKernelLoader = (
             await verifyKernelIntegrity(
                 bytes,
                 options.expectedKernelSha256Hex ??
-                    transcriptCoreKernelSha256Hex,
+                    transcriptCoreKernelNormalizedSha256Hex,
             );
             const instantiatedSource = await WebAssembly.instantiate(bytes, {});
             const exports = instantiatedSource.instance

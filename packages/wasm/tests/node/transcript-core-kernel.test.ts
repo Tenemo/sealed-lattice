@@ -12,13 +12,16 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import goldenTranscriptCoreFixturesJson from '../../../../test-vectors/transcript-core/golden-transcript-core.json';
 import malformedObjectFixturesJson from '../../../../test-vectors/transcript-core/malformed-objects.json';
 import {
-    createTranscriptCoreKernelLoader,
     loadTranscriptCoreKernel,
-    TranscriptCoreKernelCommandError,
     roundTripBytesThroughKernel,
-    type TranscriptCoreKernel,
     verifyTranscriptCoreFixture,
 } from '../../src/index';
+import {
+    createTranscriptCoreKernelLoader,
+    normalizeTranscriptCoreKernelBytesForDigest,
+    TranscriptCoreKernelCommandError,
+    type TranscriptCoreKernel,
+} from '../../src/transcript-core-bridge';
 
 type NamedFixture = {
     readonly caseName: string;
@@ -66,6 +69,8 @@ const fullyVerifiedActiveFixture = findFixture(
 const invalidEnumFixture = findFixture(malformedObjectFixtures, 'invalid-enum');
 const singleZeroByteSha256Hex =
     '6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d';
+const textEncoder = new TextEncoder();
+const textDecoder = new TextDecoder();
 
 const createMockKernelExports = ({
     allocationPointer = 12,
@@ -78,6 +83,7 @@ const createMockKernelExports = ({
         },
     },
     expectedKernelSha256Hex = singleZeroByteSha256Hex,
+    onCommand,
     outputLengthAllocationPointer = 512,
     roundTripPointer = allocationPointer,
 }: {
@@ -85,6 +91,7 @@ const createMockKernelExports = ({
     readonly commandPointer?: number;
     readonly commandResponse?: unknown;
     readonly expectedKernelSha256Hex?: string;
+    readonly onCommand?: () => void;
     readonly outputLengthAllocationPointer?: number;
     readonly roundTripPointer?: number;
 } = {}): {
@@ -124,6 +131,7 @@ const createMockKernelExports = ({
                         _length: number,
                         outputLengthPointer: number,
                     ) => {
+                        onCommand?.();
                         new Uint8Array(memory.buffer).set(
                             encodedCommandResponse,
                             commandPointer,
@@ -186,6 +194,42 @@ afterEach(() => {
 });
 
 describe('transcript-core kernel in Node', () => {
+    it('normalizes host-specific Rust source paths before digesting', () => {
+        const windowsBytes = textEncoder.encode(
+            [
+                'prefix',
+                'C:\\Users\\Piotr\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\serde_json-1.0.149\\src\\error.rs',
+                'crates\\sealed-lattice-kernel\\src\\lib.rs',
+                'suffix',
+            ].join('\0'),
+        );
+        const linuxBytes = textEncoder.encode(
+            [
+                'prefix',
+                '/home/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.149/src/error.rs',
+                'crates/sealed-lattice-kernel/src/lib.rs',
+                'suffix',
+            ].join('\0'),
+        );
+
+        const normalizedWindowsBytes =
+            normalizeTranscriptCoreKernelBytesForDigest(windowsBytes);
+        const normalizedLinuxBytes =
+            normalizeTranscriptCoreKernelBytesForDigest(linuxBytes);
+
+        expect(Array.from(normalizedWindowsBytes)).toEqual(
+            Array.from(normalizedLinuxBytes),
+        );
+        expect(textDecoder.decode(normalizedWindowsBytes)).toBe(
+            [
+                'prefix',
+                '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.149/src/error.rs',
+                'crates/sealed-lattice-kernel/src/lib.rs',
+                'suffix',
+            ].join('\0'),
+        );
+    });
+
     it('loads the transcript-core module and exposes command exports', async () => {
         const kernel = await loadTranscriptCoreKernel();
 
@@ -329,6 +373,10 @@ describe('transcript-core kernel in Node', () => {
         const kernel = await loadTranscriptCoreKernel();
 
         expect(kernel.hashRaw('00')).toMatch(/^[a-f0-9]{128}$/u);
+        expect(kernel.listCanonicalErrorCodes()).toContain('InvalidEnum');
+        expect(kernel.listReservedRootNamespaces()).toContain(
+            'sealed-lattice-root/poll-spec-digest-v1',
+        );
     });
 
     it('deallocates command inputs and outputs', async () => {
@@ -417,6 +465,41 @@ describe('transcript-core kernel in Node', () => {
             }),
         ).toThrow(
             'The transcript-core kernel returned a null pointer for a non-empty transcript-core command result.',
+        );
+    });
+
+    it('rejects null command output-length allocations', async () => {
+        const { loadMockKernel } = createMockKernelExports({
+            outputLengthAllocationPointer: 0,
+        });
+        const kernel = await loadMockKernel();
+
+        expect(() =>
+            kernel.computeChunkRoot({
+                inputHex: '00ff',
+                chunkSize: 2,
+            }),
+        ).toThrow(
+            'The transcript-core kernel returned a null pointer for the output-length allocation.',
+        );
+    });
+
+    it('rejects overlapping kernel commands on one instance', async () => {
+        const loadedKernelReference: { current?: TranscriptCoreKernel } = {};
+        const { loadMockKernel } = createMockKernelExports({
+            onCommand: () => {
+                loadedKernelReference.current?.hashRaw('00');
+            },
+        });
+        loadedKernelReference.current = await loadMockKernel();
+
+        expect(() =>
+            loadedKernelReference.current?.computeChunkRoot({
+                inputHex: '00ff',
+                chunkSize: 2,
+            }),
+        ).toThrow(
+            'The transcript-core kernel cannot run overlapping command operations on one instance.',
         );
     });
 

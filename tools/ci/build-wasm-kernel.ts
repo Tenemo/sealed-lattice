@@ -4,6 +4,7 @@ import { copyFile, mkdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+import { normalizeTranscriptCoreKernelBytesForDigest } from '../../packages/wasm/src/transcript-core-bridge.js';
 import { isWithinDirectory } from '../internal/files.js';
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
@@ -16,7 +17,7 @@ const bridgeSourcePath = path.resolve(
     'transcript-core-bridge.ts',
 );
 const expectedKernelDigestPattern =
-    /const transcriptCoreKernelSha256Hex =\s*['"]([a-f0-9]{64})['"]/u;
+    /const transcriptCoreKernelNormalizedSha256Hex =\s*['"]([a-f0-9]{64})['"]/u;
 
 export const resolveOutputFilePath = (
     commandLineArguments: readonly string[],
@@ -102,7 +103,9 @@ const resolveSourceFilePath = (): string =>
 const hashFileSha256Hex = async (filePath: string): Promise<string> => {
     const bytes = await readFile(filePath);
 
-    return createHash('sha256').update(bytes).digest('hex');
+    return createHash('sha256')
+        .update(normalizeTranscriptCoreKernelBytesForDigest(bytes))
+        .digest('hex');
 };
 
 const readExpectedKernelSha256Hex = async (): Promise<string> => {
@@ -125,10 +128,10 @@ const verifyKernelDigest = async (outputFilePath: string): Promise<string> => {
     if (actualSha256Hex !== expectedSha256Hex) {
         throw new Error(
             [
-                'Transcript-core WASM digest mismatch.',
+                'Transcript-core WASM normalized digest mismatch.',
                 `Expected ${expectedSha256Hex}.`,
                 `Received ${actualSha256Hex}.`,
-                'Update transcriptCoreKernelSha256Hex in packages/wasm/src/transcript-core-bridge.ts after reviewing the kernel change.',
+                'Update transcriptCoreKernelNormalizedSha256Hex in packages/wasm/src/transcript-core-bridge.ts after reviewing the kernel change.',
             ].join(' '),
         );
     }
