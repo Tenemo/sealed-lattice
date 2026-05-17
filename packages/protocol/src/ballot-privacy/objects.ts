@@ -2,6 +2,9 @@ import { deriveProtocolDigest } from '@sealed-lattice/crypto';
 import type {
     BallotPrivacyProofBackendStatus,
     BallotPrivacyVerification,
+    BallotProofComponentId,
+    BallotProofComponentProofBundle,
+    BallotProofComponentProofRecord,
     BallotProofRecord,
     BallotProofStatement,
     ClaimBearingBallotPackage,
@@ -43,6 +46,14 @@ type BallotProofRecordPayload = Omit<
     BallotProofRecord,
     'ballotProofRecordDigest'
 >;
+type BallotProofComponentProofRecordPayload = Omit<
+    BallotProofComponentProofRecord,
+    'componentProofRecordDigest'
+>;
+type BallotProofComponentProofBundlePayload = Omit<
+    BallotProofComponentProofBundle,
+    'componentProofBundleDigest'
+>;
 type ReceiverEncryptionPublicKeyInput = Omit<
     ReceiverEncryptionPublicKey,
     'objectType' | 'objectVersion' | 'receiverPublicKeyDigest'
@@ -67,6 +78,16 @@ const unavailableProofBackendMessage =
     'Ballot privacy proof verification requires the frozen LaZer-style lattice proof backend, which is not implemented in this build.';
 const protocolDigestPattern = /^[a-f0-9]{128}$/u;
 const proofBytesHexPattern = /^(?:[a-f0-9]{2})+$/u;
+const shareCommitmentModuleRank = 4;
+const shareCommitmentModuleDegree = 256;
+const shareCommitmentModulus = 18_446_744_069_414_584_321n;
+const requiredBallotProofComponentIds = [
+    'score-and-shamir-field-component',
+    'payload-plaintext-field-component',
+    'share-commitment-component',
+    'receiver-encryption-component',
+    'receiver-key-binding-component',
+] as const satisfies readonly BallotProofComponentId[];
 
 const requiredLazerPortComponents = [
     'generated linear proof parameters from lin-codegen.sage',
@@ -161,6 +182,22 @@ const deriveBallotProofRecordDigest = (
 ): ProtocolDigest =>
     deriveProtocolDigest('BallotProofRecordDigest', proofRecord);
 
+const deriveBallotProofComponentProofRecordDigest = (
+    proofRecord: BallotProofComponentProofRecordPayload,
+): ProtocolDigest =>
+    deriveProtocolDigest('ChallengeDomainDigest', {
+        payload: proofRecord,
+        purpose: 'ballot-proof-component-proof-record-v1',
+    });
+
+const deriveBallotProofComponentProofBundleDigest = (
+    proofBundle: BallotProofComponentProofBundlePayload,
+): ProtocolDigest =>
+    deriveProtocolDigest('ChallengeDomainDigest', {
+        payload: proofBundle,
+        purpose: 'ballot-proof-component-proof-bundle-v1',
+    });
+
 export const deriveProofBytesDigest = (input: {
     readonly proofBytesHex: string;
 }): ProtocolDigest => {
@@ -235,6 +272,8 @@ export const deriveBallotProofPublicRandomnessDigest = (input: {
 const deriveBallotProofChallengeDigest = (input: {
     readonly statement: BallotProofStatement;
     readonly backendStatementDigest?: ProtocolDigest;
+    readonly componentBundleStatementDigest?: ProtocolDigest;
+    readonly componentProofBundleDigest?: ProtocolDigest;
     readonly relationStatementDigest: ProtocolDigest;
     readonly linearStatementDigest?: ProtocolDigest;
     readonly statementMatrixDigest?: ProtocolDigest;
@@ -255,6 +294,8 @@ const deriveBallotProofChallengeDigest = (input: {
 
     for (const [fieldName, digestValue] of Object.entries({
         backendStatementDigest: input.backendStatementDigest,
+        componentBundleStatementDigest: input.componentBundleStatementDigest,
+        componentProofBundleDigest: input.componentProofBundleDigest,
         linearStatementDigest: input.linearStatementDigest,
         proofEncodingProfileDigest: input.proofEncodingProfileDigest,
         proofParameterSetDigest: input.proofParameterSetDigest,
@@ -492,6 +533,8 @@ export const buildBallotProofStatement = (
 export const createBallotProofRecordShell = (input: {
     readonly statement: BallotProofStatement;
     readonly backendStatementDigest?: ProtocolDigest;
+    readonly componentBundleStatementDigest?: ProtocolDigest;
+    readonly componentProofBundleDigest?: ProtocolDigest;
     readonly relationStatementDigest: ProtocolDigest;
     readonly linearStatementDigest?: ProtocolDigest;
     readonly statementMatrixDigest?: ProtocolDigest;
@@ -506,6 +549,8 @@ export const createBallotProofRecordShell = (input: {
     const challengeDigest = deriveBallotProofChallengeDigest({
         statement: input.statement,
         backendStatementDigest: input.backendStatementDigest,
+        componentBundleStatementDigest: input.componentBundleStatementDigest,
+        componentProofBundleDigest: input.componentProofBundleDigest,
         relationStatementDigest: input.relationStatementDigest,
         linearStatementDigest: input.linearStatementDigest,
         statementMatrixDigest: input.statementMatrixDigest,
@@ -523,6 +568,17 @@ export const createBallotProofRecordShell = (input: {
         ...(input.backendStatementDigest === undefined
             ? {}
             : { backendStatementDigest: input.backendStatementDigest }),
+        ...(input.componentBundleStatementDigest === undefined
+            ? {}
+            : {
+                  componentBundleStatementDigest:
+                      input.componentBundleStatementDigest,
+              }),
+        ...(input.componentProofBundleDigest === undefined
+            ? {}
+            : {
+                  componentProofBundleDigest: input.componentProofBundleDigest,
+              }),
         relationStatementDigest: input.relationStatementDigest,
         ...(input.linearStatementDigest === undefined
             ? {}
@@ -738,6 +794,9 @@ const collectBallotProofStructuralRefusals = (
         deriveBallotProofRecordDigest(proofPayload);
     const expectedChallengeDigest = deriveBallotProofChallengeDigest({
         backendStatementDigest: ballotProof.backendStatementDigest,
+        componentBundleStatementDigest:
+            ballotProof.componentBundleStatementDigest,
+        componentProofBundleDigest: ballotProof.componentProofBundleDigest,
         proofBytesDigest: ballotProof.proofBytesDigest,
         proofEncodingProfileDigest: ballotProof.proofEncodingProfileDigest,
         proofParameterSetDigest: ballotProof.proofParameterSetDigest,
@@ -811,6 +870,14 @@ const collectBallotProofStructuralRefusals = (
         ballotProof.proofBackend !== 'LaZerStyleLocalLatticeRelation' ||
         (ballotProof.backendStatementDigest !== undefined &&
             !protocolDigestPattern.test(ballotProof.backendStatementDigest)) ||
+        (ballotProof.componentBundleStatementDigest !== undefined &&
+            !protocolDigestPattern.test(
+                ballotProof.componentBundleStatementDigest,
+            )) ||
+        (ballotProof.componentProofBundleDigest !== undefined &&
+            !protocolDigestPattern.test(
+                ballotProof.componentProofBundleDigest,
+            )) ||
         !protocolDigestPattern.test(ballotProof.relationStatementDigest) ||
         (ballotProof.linearStatementDigest !== undefined &&
             !protocolDigestPattern.test(ballotProof.linearStatementDigest)) ||
@@ -945,6 +1012,273 @@ const collectBallotProofStructuralRefusals = (
     return refusedObjects;
 };
 
+const collectBallotProofComponentProofBundleRefusals = (input: {
+    readonly statement: BallotProofStatement;
+    readonly ballotProof: BallotProofRecord;
+    readonly componentProofBundle?: BallotProofComponentProofBundle;
+}): readonly RefusalRecord[] => {
+    const refusedObjects: RefusalRecord[] = [];
+    const proofRecordDigest = input.ballotProof.ballotProofRecordDigest;
+    const componentProofBundleDigest =
+        input.componentProofBundle?.componentProofBundleDigest;
+
+    if (
+        input.ballotProof.componentProofBundleDigest !== undefined &&
+        input.componentProofBundle === undefined
+    ) {
+        refusedObjects.push(
+            createRefusal(
+                'BallotPackageInvalid',
+                'Ballot proof record references a component proof bundle that was not supplied.',
+                proofRecordDigest,
+            ),
+        );
+
+        return refusedObjects;
+    }
+    if (
+        input.componentProofBundle !== undefined &&
+        input.ballotProof.componentProofBundleDigest === undefined
+    ) {
+        refusedObjects.push(
+            createRefusal(
+                'BallotPackageInvalid',
+                'Supplied component proof bundle is not bound by the ballot proof record.',
+                proofRecordDigest,
+            ),
+        );
+    }
+    if (input.componentProofBundle === undefined) {
+        return refusedObjects;
+    }
+
+    const proofBundlePayload = omitProperty(
+        input.componentProofBundle,
+        'componentProofBundleDigest',
+    );
+    const expectedProofBundleDigest =
+        deriveBallotProofComponentProofBundleDigest(proofBundlePayload);
+    const requiredComponentIdsMatch =
+        input.componentProofBundle.requiredComponentIds.length ===
+            requiredBallotProofComponentIds.length &&
+        input.componentProofBundle.requiredComponentIds.every(
+            (componentId, componentIndex) =>
+                componentId === requiredBallotProofComponentIds[componentIndex],
+        );
+
+    if (
+        input.componentProofBundle.objectType !==
+            'BallotProofComponentProofBundle' ||
+        input.componentProofBundle.objectVersion !== 1 ||
+        input.componentProofBundle.bundleCoverage !==
+            'full-encoded-score-ballot-relation' ||
+        !protocolDigestPattern.test(
+            input.componentProofBundle.componentProofBundleDigest,
+        ) ||
+        !protocolDigestPattern.test(
+            input.componentProofBundle.componentBundleStatementDigest,
+        ) ||
+        !protocolDigestPattern.test(
+            input.componentProofBundle.backendStatementDigest,
+        ) ||
+        !protocolDigestPattern.test(
+            input.componentProofBundle.relationStatementDigest,
+        ) ||
+        (input.componentProofBundle.ballotProofStatementDigest !== undefined &&
+            !protocolDigestPattern.test(
+                input.componentProofBundle.ballotProofStatementDigest,
+            )) ||
+        !requiredComponentIdsMatch
+    ) {
+        refusedObjects.push(
+            createRefusal(
+                'BallotPackageInvalid',
+                'Ballot proof component proof bundle has an invalid canonical shape.',
+                proofRecordDigest,
+            ),
+        );
+    }
+    if (componentProofBundleDigest !== expectedProofBundleDigest) {
+        refusedObjects.push(
+            createRefusal(
+                'BallotPackageInvalid',
+                'Ballot proof component proof bundle digest does not match its canonical payload.',
+                proofRecordDigest,
+            ),
+        );
+    }
+    if (
+        input.ballotProof.componentProofBundleDigest !==
+        componentProofBundleDigest
+    ) {
+        refusedObjects.push(
+            createRefusal(
+                'BallotPackageInvalid',
+                'Ballot proof record is not bound to the supplied component proof bundle.',
+                proofRecordDigest,
+            ),
+        );
+    }
+    if (
+        input.componentProofBundle.componentBundleStatementDigest !==
+            input.ballotProof.componentBundleStatementDigest ||
+        input.componentProofBundle.backendStatementDigest !==
+            input.ballotProof.backendStatementDigest ||
+        input.componentProofBundle.relationStatementDigest !==
+            input.ballotProof.relationStatementDigest
+    ) {
+        refusedObjects.push(
+            createRefusal(
+                'BallotPackageInvalid',
+                'Ballot proof component proof bundle is not bound to the supplied proof statement roots.',
+                proofRecordDigest,
+            ),
+        );
+    }
+    if (
+        input.componentProofBundle.ballotProofStatementDigest !== undefined &&
+        input.componentProofBundle.ballotProofStatementDigest !==
+            input.statement.ballotProofStatementDigest
+    ) {
+        refusedObjects.push(
+            createRefusal(
+                'BallotPackageInvalid',
+                'Ballot proof component proof bundle is not bound to the supplied ballot proof statement.',
+                proofRecordDigest,
+            ),
+        );
+    }
+    if (
+        input.componentProofBundle.componentProofs.length !==
+        requiredBallotProofComponentIds.length
+    ) {
+        refusedObjects.push(
+            createRefusal(
+                'BallotPackageInvalid',
+                'Ballot proof component proof bundle must contain exactly the required component proofs.',
+                proofRecordDigest,
+            ),
+        );
+    }
+
+    const seenComponentIds = new Set<string>();
+    for (
+        let componentIndex = 0;
+        componentIndex < requiredBallotProofComponentIds.length;
+        componentIndex += 1
+    ) {
+        const expectedComponentId =
+            requiredBallotProofComponentIds[componentIndex];
+        const componentProof =
+            input.componentProofBundle.componentProofs[componentIndex];
+        if (componentProof === undefined) {
+            continue;
+        }
+        if (seenComponentIds.has(componentProof.componentId)) {
+            refusedObjects.push(
+                createRefusal(
+                    'BallotPackageInvalid',
+                    'Ballot proof component proof bundle contains a duplicate component proof.',
+                    proofRecordDigest,
+                ),
+            );
+        }
+        seenComponentIds.add(componentProof.componentId);
+
+        const componentProofPayload = omitProperty(
+            componentProof,
+            'componentProofRecordDigest',
+        );
+        const expectedComponentProofDigest =
+            deriveBallotProofComponentProofRecordDigest(componentProofPayload);
+
+        if (
+            componentProof.objectType !== 'BallotProofComponentProofRecord' ||
+            componentProof.objectVersion !== 1 ||
+            componentProof.componentId !== expectedComponentId ||
+            componentProof.proofBackend !== 'LaZerStyleLocalLatticeRelation' ||
+            !protocolDigestPattern.test(
+                componentProof.componentProofRecordDigest,
+            ) ||
+            !protocolDigestPattern.test(
+                componentProof.componentStatementDigest,
+            ) ||
+            !protocolDigestPattern.test(
+                componentProof.backendStatementDigest,
+            ) ||
+            !protocolDigestPattern.test(
+                componentProof.relationStatementDigest,
+            ) ||
+            !protocolDigestPattern.test(componentProof.proofRoot) ||
+            !protocolDigestPattern.test(componentProof.proofBytesDigest) ||
+            !protocolDigestPattern.test(
+                componentProof.proofEncodingProfileDigest,
+            ) ||
+            !protocolDigestPattern.test(
+                componentProof.proofParameterSetDigest,
+            ) ||
+            !protocolDigestPattern.test(
+                componentProof.publicRandomnessDigest,
+            ) ||
+            (componentProof.ballotProofStatementDigest !== undefined &&
+                !protocolDigestPattern.test(
+                    componentProof.ballotProofStatementDigest,
+                )) ||
+            !Number.isSafeInteger(componentProof.proofSizeBytes) ||
+            componentProof.proofSizeBytes <= 0
+        ) {
+            refusedObjects.push(
+                createRefusal(
+                    'BallotPackageInvalid',
+                    `Ballot proof component proof for ${expectedComponentId} has an invalid canonical shape.`,
+                    proofRecordDigest,
+                ),
+            );
+        }
+        if (
+            componentProof.componentProofRecordDigest !==
+            expectedComponentProofDigest
+        ) {
+            refusedObjects.push(
+                createRefusal(
+                    'BallotPackageInvalid',
+                    `Ballot proof component proof digest for ${expectedComponentId} does not match its canonical payload.`,
+                    proofRecordDigest,
+                ),
+            );
+        }
+        if (
+            componentProof.backendStatementDigest !==
+                input.componentProofBundle.backendStatementDigest ||
+            componentProof.relationStatementDigest !==
+                input.componentProofBundle.relationStatementDigest
+        ) {
+            refusedObjects.push(
+                createRefusal(
+                    'BallotPackageInvalid',
+                    `Ballot proof component proof for ${expectedComponentId} is not bound to the supplied relation and backend statement.`,
+                    proofRecordDigest,
+                ),
+            );
+        }
+        if (
+            componentProof.ballotProofStatementDigest !== undefined &&
+            componentProof.ballotProofStatementDigest !==
+                input.statement.ballotProofStatementDigest
+        ) {
+            refusedObjects.push(
+                createRefusal(
+                    'BallotPackageInvalid',
+                    `Ballot proof component proof for ${expectedComponentId} is not bound to the supplied ballot proof statement.`,
+                    proofRecordDigest,
+                ),
+            );
+        }
+    }
+
+    return refusedObjects;
+};
+
 const collectReceiverPayloadStructuralRefusals = (
     payload: ReceiverPayload,
 ): readonly RefusalRecord[] => {
@@ -1034,6 +1368,45 @@ const collectShareCommitmentStructuralRefusals = (
             ),
         );
     }
+    if (shareCommitment.commitmentPolynomialVector !== undefined) {
+        const commitmentPolynomialVector =
+            shareCommitment.commitmentPolynomialVector;
+        const vectorShapeIsValid =
+            commitmentPolynomialVector.length === shareCommitmentModuleRank &&
+            commitmentPolynomialVector.every(
+                (commitmentPolynomial) =>
+                    commitmentPolynomial.length ===
+                        shareCommitmentModuleDegree &&
+                    commitmentPolynomial.every((coefficient) => {
+                        if (!/^(?:0|[1-9][0-9]*)$/u.test(coefficient)) {
+                            return false;
+                        }
+
+                        return BigInt(coefficient) < shareCommitmentModulus;
+                    }),
+            );
+        const expectedCommitmentBodyDigest = deriveProtocolDigest(
+            'ShareCommitmentDigest',
+            {
+                commitmentPolynomialVector,
+                profileDigest: shareCommitment.shareCommitmentProfileDigest,
+            },
+        );
+
+        if (
+            !vectorShapeIsValid ||
+            shareCommitment.commitmentBodyDigest !==
+                expectedCommitmentBodyDigest
+        ) {
+            refusedObjects.push(
+                createRefusal(
+                    'BallotPackageInvalid',
+                    'Share commitment polynomial vector is malformed or not bound to the commitment body digest.',
+                    shareCommitment.shareCommitmentDigest,
+                ),
+            );
+        }
+    }
     if (
         hasOwnProperty(shareCommitment, 'openingRandomness') ||
         hasOwnProperty(shareCommitment, 'receiverShareVector') ||
@@ -1059,6 +1432,11 @@ const collectClaimBearingPackageStructuralRefusals = (
             ballotPackage.ballotProofStatement,
             ballotPackage.ballotProof,
         ),
+        ...collectBallotProofComponentProofBundleRefusals({
+            ballotProof: ballotPackage.ballotProof,
+            componentProofBundle: ballotPackage.componentProofBundle,
+            statement: ballotPackage.ballotProofStatement,
+        }),
     ];
     const statement = ballotPackage.ballotProofStatement;
     const statementReceiverKeyReferences = new Map(
@@ -1230,13 +1608,21 @@ export const verifyReceiverKeyProof = (input: {
 export const verifyBallotProof = (input: {
     readonly statement: BallotProofStatement;
     readonly ballotProof: BallotProofRecord;
+    readonly componentProofBundle?: BallotProofComponentProofBundle;
     readonly proofBytesHex?: string;
 }): BallotPrivacyVerification => {
-    const structuralRefusals = collectBallotProofStructuralRefusals(
-        input.statement,
-        input.ballotProof,
-        input.proofBytesHex,
-    );
+    const structuralRefusals = [
+        ...collectBallotProofStructuralRefusals(
+            input.statement,
+            input.ballotProof,
+            input.proofBytesHex,
+        ),
+        ...collectBallotProofComponentProofBundleRefusals({
+            ballotProof: input.ballotProof,
+            componentProofBundle: input.componentProofBundle,
+            statement: input.statement,
+        }),
+    ];
     if (structuralRefusals.length > 0) {
         return createBallotPrivacyStructuralRejection(structuralRefusals);
     }

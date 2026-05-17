@@ -44,6 +44,19 @@ const shareCommitmentOpeningDimension = 64;
 const shareCommitmentModulus = 18_446_744_069_414_584_321n;
 const unsignedWordModulus = 1n << 64n;
 
+type ShareCommitmentMessageMatrix = readonly (readonly bigint[])[];
+type ShareCommitmentRandomnessMatrix =
+    readonly (readonly (readonly bigint[])[])[];
+
+const shareCommitmentMessageMatrixCache = new Map<
+    ProtocolDigest,
+    ShareCommitmentMessageMatrix
+>();
+const shareCommitmentRandomnessMatrixCache = new Map<
+    ProtocolDigest,
+    ShareCommitmentRandomnessMatrix
+>();
+
 type DeterministicFixtureRandomness = {
     readonly kind: 'fixture';
     readonly fixtureSeed: string;
@@ -430,37 +443,64 @@ const deriveReceiverPublicMatrix = (
             ),
     );
 
-const deriveShareCommitmentMessageMatrix = (
+export const deriveShareCommitmentMessageMatrix = (
     shareCommitmentProfileDigest: ProtocolDigest,
-): readonly (readonly bigint[])[] =>
-    Array.from({ length: shareCommitmentModuleRank }, (_unusedRow, rowIndex) =>
-        deriveBigIntPolynomial(
-            'sealed.vote/internal/share-commitment/message-matrix-v1',
-            { rowIndex, shareCommitmentProfileDigest },
-            shareCommitmentModuleDegree,
-            shareCommitmentModulus,
-        ),
+): ShareCommitmentMessageMatrix => {
+    const cachedMatrix = shareCommitmentMessageMatrixCache.get(
+        shareCommitmentProfileDigest,
+    );
+    if (cachedMatrix !== undefined) {
+        return cachedMatrix;
+    }
+    const matrix = Array.from(
+        { length: shareCommitmentModuleRank },
+        (_unusedRow, rowIndex) =>
+            deriveBigIntPolynomial(
+                'sealed.vote/internal/share-commitment/message-matrix-v1',
+                { rowIndex, shareCommitmentProfileDigest },
+                shareCommitmentModuleDegree,
+                shareCommitmentModulus,
+            ),
+    );
+    shareCommitmentMessageMatrixCache.set(shareCommitmentProfileDigest, matrix);
+
+    return matrix;
+};
+
+export const deriveShareCommitmentRandomnessMatrix = (
+    shareCommitmentProfileDigest: ProtocolDigest,
+): ShareCommitmentRandomnessMatrix => {
+    const cachedMatrix = shareCommitmentRandomnessMatrixCache.get(
+        shareCommitmentProfileDigest,
+    );
+    if (cachedMatrix !== undefined) {
+        return cachedMatrix;
+    }
+    const matrix = Array.from(
+        { length: shareCommitmentModuleRank },
+        (_unusedRow, rowIndex) =>
+            Array.from(
+                { length: shareCommitmentOpeningDimension },
+                (_unusedColumn, columnIndex) =>
+                    deriveBigIntPolynomial(
+                        'sealed.vote/internal/share-commitment/randomness-matrix-v1',
+                        {
+                            columnIndex,
+                            rowIndex,
+                            shareCommitmentProfileDigest,
+                        },
+                        shareCommitmentModuleDegree,
+                        shareCommitmentModulus,
+                    ),
+            ),
+    );
+    shareCommitmentRandomnessMatrixCache.set(
+        shareCommitmentProfileDigest,
+        matrix,
     );
 
-const deriveShareCommitmentRandomnessMatrix = (
-    shareCommitmentProfileDigest: ProtocolDigest,
-): readonly (readonly (readonly bigint[])[])[] =>
-    Array.from({ length: shareCommitmentModuleRank }, (_unusedRow, rowIndex) =>
-        Array.from(
-            { length: shareCommitmentOpeningDimension },
-            (_unusedColumn, columnIndex) =>
-                deriveBigIntPolynomial(
-                    'sealed.vote/internal/share-commitment/randomness-matrix-v1',
-                    {
-                        columnIndex,
-                        rowIndex,
-                        shareCommitmentProfileDigest,
-                    },
-                    shareCommitmentModuleDegree,
-                    shareCommitmentModulus,
-                ),
-        ),
-    );
+    return matrix;
+};
 
 const multiplyMatrixByVector = (
     matrix: readonly (readonly (readonly number[])[])[],
@@ -548,10 +588,9 @@ const dotNumberPolynomialVectors = (
 function validateReceiverShareVector(
     receiverShareVector: readonly number[],
     shareCommitmentProfile: ShareCommitmentProfile,
+    expectedShareVectorWidth: number = shareCommitmentProfile.shareVectorWidth,
 ): void {
-    if (
-        receiverShareVector.length !== shareCommitmentProfile.shareVectorWidth
-    ) {
+    if (receiverShareVector.length !== expectedShareVectorWidth) {
         throw new RangeError(
             'Receiver share vectors must use the fixed width.',
         );
@@ -589,8 +628,13 @@ function validateShareCommitmentOpening(
 const encodeShareVectorAsMessagePolynomial = (
     receiverShareVector: readonly number[],
     shareCommitmentProfile: ShareCommitmentProfile,
+    expectedShareVectorWidth: number = shareCommitmentProfile.shareVectorWidth,
 ): readonly bigint[] => {
-    validateReceiverShareVector(receiverShareVector, shareCommitmentProfile);
+    validateReceiverShareVector(
+        receiverShareVector,
+        shareCommitmentProfile,
+        expectedShareVectorWidth,
+    );
     const coefficients = Array.from(
         { length: shareCommitmentModuleDegree },
         () => 0n,
@@ -637,12 +681,18 @@ const computeShareCommitmentVector = (
     shareVector: readonly number[],
     opening: ShareCommitmentOpeningWitness,
     shareCommitmentProfile: ShareCommitmentProfile,
+    expectedShareVectorWidth: number = shareCommitmentProfile.shareVectorWidth,
 ): readonly (readonly bigint[])[] => {
-    validateReceiverShareVector(shareVector, shareCommitmentProfile);
+    validateReceiverShareVector(
+        shareVector,
+        shareCommitmentProfile,
+        expectedShareVectorWidth,
+    );
     validateShareCommitmentOpening(opening, shareCommitmentProfile);
     const messagePolynomial = encodeShareVectorAsMessagePolynomial(
         shareVector,
         shareCommitmentProfile,
+        expectedShareVectorWidth,
     );
     const messageMatrix = deriveShareCommitmentMessageMatrix(
         shareCommitmentProfile.shareCommitmentProfileDigest,
@@ -689,6 +739,30 @@ const stringifyBigIntPolynomialVector = (
 ): readonly (readonly string[])[] =>
     polynomialVector.map((polynomial) =>
         polynomial.map((coefficient) => coefficient.toString()),
+    );
+
+export const deriveShareCommitmentBodyDigest = (input: {
+    readonly commitmentPolynomialVector: readonly (readonly string[])[];
+    readonly shareCommitmentProfileDigest: ProtocolDigest;
+}): ProtocolDigest =>
+    deriveProtocolDigest('ShareCommitmentDigest', {
+        commitmentPolynomialVector: input.commitmentPolynomialVector,
+        profileDigest: input.shareCommitmentProfileDigest,
+    });
+
+export const createShareCommitmentPolynomialVector = (input: {
+    readonly receiverShareVector: readonly number[];
+    readonly shareCommitmentProfile: ShareCommitmentProfile;
+    readonly opening: ShareCommitmentOpeningWitness;
+    readonly shareVectorWidth: number;
+}): readonly (readonly string[])[] =>
+    stringifyBigIntPolynomialVector(
+        computeShareCommitmentVector(
+            input.receiverShareVector,
+            input.opening,
+            input.shareCommitmentProfile,
+            input.shareVectorWidth,
+        ),
     );
 
 export const addShareCommitmentPolynomialVectors = (
@@ -772,13 +846,14 @@ export const createShareCommitment = (input: {
     );
     const commitmentPolynomialVector =
         stringifyBigIntPolynomialVector(commitmentVector);
-    const commitmentBodyDigest = deriveProtocolDigest('ShareCommitmentDigest', {
+    const commitmentBodyDigest = deriveShareCommitmentBodyDigest({
         commitmentPolynomialVector,
-        profileDigest:
+        shareCommitmentProfileDigest:
             input.shareCommitmentProfile.shareCommitmentProfileDigest,
     });
     const shareCommitment = createShareCommitmentShell({
         ceremonyId: input.ceremonyId,
+        commitmentPolynomialVector,
         manifestDigest: input.manifestDigest,
         rosterDigest: input.rosterDigest,
         receiverIdentity: input.receiverIdentity,

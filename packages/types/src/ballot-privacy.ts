@@ -239,6 +239,44 @@ export type BallotProofShareCommitmentReference = {
     readonly shareCommitmentDigest: ProtocolDigest;
 };
 
+export type BallotProofComponentId =
+    | 'score-and-shamir-field-component'
+    | 'payload-plaintext-field-component'
+    | 'share-commitment-component'
+    | 'receiver-encryption-component'
+    | 'receiver-key-binding-component';
+
+export type BallotProofComponentProofRecord = {
+    readonly objectType: 'BallotProofComponentProofRecord';
+    readonly objectVersion: 1;
+    readonly componentProofRecordDigest: ProtocolDigest;
+    readonly componentId: BallotProofComponentId;
+    readonly componentStatementDigest: ProtocolDigest;
+    readonly backendStatementDigest: ProtocolDigest;
+    readonly ballotProofStatementDigest?: ProtocolDigest;
+    readonly relationStatementDigest: ProtocolDigest;
+    readonly proofBackend: 'LaZerStyleLocalLatticeRelation';
+    readonly proofRoot: ProtocolDigest;
+    readonly proofBytesDigest: ProtocolDigest;
+    readonly proofEncodingProfileDigest: ProtocolDigest;
+    readonly proofParameterSetDigest: ProtocolDigest;
+    readonly proofSizeBytes: number;
+    readonly publicRandomnessDigest: ProtocolDigest;
+};
+
+export type BallotProofComponentProofBundle = {
+    readonly objectType: 'BallotProofComponentProofBundle';
+    readonly objectVersion: 1;
+    readonly componentProofBundleDigest: ProtocolDigest;
+    readonly componentBundleStatementDigest: ProtocolDigest;
+    readonly backendStatementDigest: ProtocolDigest;
+    readonly ballotProofStatementDigest?: ProtocolDigest;
+    readonly relationStatementDigest: ProtocolDigest;
+    readonly bundleCoverage: 'full-encoded-score-ballot-relation';
+    readonly requiredComponentIds: readonly BallotProofComponentId[];
+    readonly componentProofs: readonly BallotProofComponentProofRecord[];
+};
+
 export type ReceiverEncryptionPublicKey = {
     readonly objectType: 'ReceiverEncryptionPublicKey';
     readonly objectVersion: 1;
@@ -303,6 +341,7 @@ export type ShareCommitment = {
     readonly receiverRosterPosition: number;
     readonly shareCommitmentProfileDigest: ProtocolDigest;
     readonly shareVectorWidth: number;
+    readonly commitmentPolynomialVector?: readonly (readonly DecimalIntegerString[])[];
     readonly commitmentBodyDigest: ProtocolDigest;
     readonly shareCommitmentDigest: ProtocolDigest;
 };
@@ -352,6 +391,8 @@ export type BallotProofRecord = {
     readonly ballotProofRecordDigest: ProtocolDigest;
     readonly ballotProofStatementDigest: ProtocolDigest;
     readonly backendStatementDigest?: ProtocolDigest;
+    readonly componentBundleStatementDigest?: ProtocolDigest;
+    readonly componentProofBundleDigest?: ProtocolDigest;
     readonly relationStatementDigest: ProtocolDigest;
     readonly linearStatementDigest?: ProtocolDigest;
     readonly statementMatrixDigest?: ProtocolDigest;
@@ -373,6 +414,7 @@ export type ClaimBearingBallotPackage = {
     readonly ballotPackageDigest: ProtocolDigest;
     readonly ballotProofStatement: BallotProofStatement;
     readonly ballotProof: BallotProofRecord;
+    readonly componentProofBundle?: BallotProofComponentProofBundle;
     readonly receiverPayloads: readonly ReceiverPayload[];
     readonly shareCommitments: readonly ShareCommitment[];
 };

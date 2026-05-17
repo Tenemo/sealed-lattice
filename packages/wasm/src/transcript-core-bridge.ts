@@ -142,6 +142,8 @@ export type TranscriptCoreKernel = {
     }): BallotPrivacyKernelVerification;
     verifyBallotProof(input: {
         readonly ballotProof: unknown;
+        readonly componentBundleStatement?: unknown;
+        readonly componentProofBundle?: unknown;
         readonly linearStatement?: unknown;
         readonly parameterSet?: unknown;
         readonly proofBytesHex?: string;
@@ -221,6 +223,8 @@ type TranscriptCoreKernelCommand =
     | {
           readonly command: 'VerifyBallotProof';
           readonly ballotProof: unknown;
+          readonly componentBundleStatement?: unknown;
+          readonly componentProofBundle?: unknown;
           readonly linearStatement?: unknown;
           readonly parameterSet?: unknown;
           readonly proofBytesHex?: string;
@@ -300,6 +304,19 @@ const transcriptCoreKernelNormalizedSha256HexValues = [
     '5ab92007b6a4c31a9538396aa4a475fb2bf7dd50804309197b87f5cc5f6cd1c9',
     '6c7879298bc0a76e35a5d6d2fcb7c5039795f26457d235f7b65f6140a9689405',
     '3fd22ecfe4f39391ea77e4a94e65988909b7baf7fe29cbeefdf8b7a4f7ab7809',
+    'e69214b4a428a34d4f73ab767d50e013401b6ba58132bf60eea17ee52078c355',
+    'd77ccc2cb505e384040b20d2f69a3a7178059daeb7ba06385a9782aa0a5201f1',
+    'e6801dcf533d59fed729d6f02bbce746d4932293476236a75413b50f5124c7ec',
+    '00b6a63fcdb812f93e2074361adf6098e2148bc4075a946f34afdf98f2794e4f',
+    'e3f6b47734f3ab107f6a4d01e44415d9ba8033600f9fbc00331e5078a0a43bc4',
+    '813e3258b6c7d14366b8bb9cc5aefdc1223956acafff9ae49ddfa06c2f3de7d6',
+    '9e61680946c1cd9627a768d8321cfb2dc5409cc5d3f6dc664be2c48b7dccdf1f',
+    '67b6b4f8a9f01d042feffa9e05157124bb725fcf951b6f4a594f477903f41f73',
+    '0589a1ad67171e06bbfe3bb8edc32eb03c255a151f0172b4c447a024e8ccb13f',
+    'e5b1158dbb4cf28456a5a3b068f3a8973eb70585cbcff5afaa551202937919b7',
+    '50f3bd5adc915e43e1b58df62165f3b6cc8d68c84785e3925769e41dc5b35f37',
+    'ee9e015bcc384985070758bb4292fc1ed0e3fc780b7a25cae996d83e96ea80f9',
+    'feb22829dd3c208b9c9cb3adaca77ee25307b9c894850d6923ef832b465b2610',
 ] as const;
 const defaultTranscriptCoreKernelNormalizedSha256HexValues = new Set<string>(
     transcriptCoreKernelNormalizedSha256HexValues,
@@ -980,6 +997,9 @@ export const createTranscriptCoreKernelLoader = (
                     executeCommand<BallotPrivacyKernelVerification>({
                         command: 'VerifyBallotProof',
                         ballotProof: input.ballotProof,
+                        componentBundleStatement:
+                            input.componentBundleStatement,
+                        componentProofBundle: input.componentProofBundle,
                         linearStatement: input.linearStatement,
                         parameterSet: input.parameterSet,
                         proofBytesHex: input.proofBytesHex,

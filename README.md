@@ -77,12 +77,42 @@ The encoded ballot relation now lowers the score layout into a deterministic
 sparse linear-relation statement: one scalar score coordinate plus ten hidden
 one-hot bucket coordinates per option, plus a concrete internal backend
 statement with explicit signed sparse field rows and digest-expanded algebraic
-row batches for share commitments, receiver-payload plaintext binding,
-receiver-payload encryption, and receiver-key binding. Public vectors cover a
-mini relation, the mandatory 20 option by 20 receiver shape, digest-changing
-public target mutations, malformed backend statements, and hostile compiler
-mutations. Rust/WASM verifies those vector shapes, backend statement digests,
-row-batch continuity, variable columns, bounds, and statement digests.
+row batches for receiver-payload encryption and receiver-key binding. Public
+share commitment polynomial vectors are now transcript-safe commitment data:
+when they are present, the relation backend lowers
+`A_message * EncodeShareVector(S) + A_randomness * rho = CommitmentVector`
+into an explicit mixed-modulus share-commitment row batch; when only legacy
+commitment digests are present, the share-commitment component remains
+digest-expanded and fail-closed for claim-bearing proof coverage.
+Receiver-payload plaintext binding now lowers to an
+explicit field-row batch that equates hidden payload share/opening variables
+with the same hidden share and opening variables used by the public share
+commitment and the receiver-encryption component. Because the full ballot
+relation is mixed-modulus, the backend statement also records proof components
+that partition rows into the explicit score/Shamir field component, the
+explicit payload-plaintext field component, the share-commitment component, the
+receiver-encryption component, and the receiver-key binding component. Public
+vectors cover a full mini digest-expanded relation, a mini relation summary
+with explicit share-commitment lowering, the mandatory 20 option by 20 receiver
+shape, digest-changing public target mutations, malformed backend statements, a
+proof-component mutation, and hostile compiler mutations. Rust/WASM verifies
+those vector shapes, backend statement digests, row-batch continuity, proof
+component order and digests, variable columns, bounds, and statement digests.
+The explicit mini relation vector also records public-only linear projection
+summaries for the score/Shamir field component, the receiver-payload plaintext
+binding component, and the share-commitment component. Those summaries bind the
+projection coverage, source row batches, matrix digest, target-vector digest,
+linear-statement digest, ring degree, source column count, and witness bound
+without publishing witness vectors. The share-commitment projection keeps
+commitment-modulus coefficients as canonical decimal strings so JavaScript does
+not truncate values above `Number.MAX_SAFE_INTEGER`.
+The relation compiler also emits a digest-bound component-bundle statement for
+those five components, and ballot proof records can now bind an ordered
+component proof bundle with one proof record per relation component. The
+ballot-proof verifier rejects supplied component bundle statements or component
+proof bundles that are missing, incomplete, reordered, duplicate-bearing, not
+bound to the ballot/backend/relation/component statements, or still backed by
+digest-expanded rows.
 Receiver-key proof records are generated only after the local key witness
 equation and norm checks pass, and can now carry proof-byte metadata bound to a
 canonical digest-expanded backend statement, a concrete public linear statement
@@ -99,18 +129,22 @@ internal Rust/WASM receiver-key proof command now accepts a proof-byte-bearing
 receiver-key record when its supplied public linear statement and proof bytes
 verify through the ported linear proof backend, and rejects target and proof-byte
 mutations. Ballot proof records now carry the lowered relation statement digest
-into their challenge binding and can also carry complete linear-backend proof
-metadata: backend statement digest, concrete linear statement digest, statement
-matrix digest, target vector digest, proof encoding digest, proof parameter-set
-digest, public randomness digest, proof bytes digest, and proof size. The
-internal Rust/WASM ballot-proof command now accepts a proof-byte-bearing ballot
-record when all public verifier inputs are supplied together and the proof bytes
-verify through the ported linear proof backend. The same command also verifies
-the encoded-score field-row proof-vector profile through native and WASM paths.
-This is still backend-record plumbing; claim-bearing ballot closure waits for
-proof bytes covering the full encoded-score ballot relation, including
-digest-expanded share-commitment, receiver-payload encryption, and receiver-key
-binding rows.
+into their challenge binding and can also carry linear-backend proof metadata:
+backend statement digest, concrete linear statement digest, statement matrix
+digest, target vector digest, proof encoding digest, proof parameter-set digest,
+public randomness digest, proof bytes digest, and proof size. The internal
+Rust/WASM ballot-proof command verifies supplied proof bytes through the ported
+linear proof backend, but rejects the record unless the supplied public linear
+statement, parameter set, and proof encoding all use the dedicated full
+encoded-score ballot-relation coverage profile, a complete ordered component
+bundle statement, and a complete ordered component proof bundle. Relabeling a
+field-only proof as full coverage fails closed. The
+current encoded-score field-row proof-vector
+profile is still verified natively and in WASM as a backend compatibility slice,
+but it is explicitly labelled `encoded-score-field-rows-only` and cannot be
+accepted as a complete ballot proof. Claim-bearing ballot closure still waits
+for proof bytes covering the full encoded-score relation, including
+share-commitment, receiver-payload encryption, and receiver-key binding rows.
 
 - workspace layout and package boundaries
 - packaging and tarball smoke checks

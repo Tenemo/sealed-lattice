@@ -4,9 +4,20 @@ import { fileURLToPath } from "node:url";
 
 import { deriveProtocolDigest } from "../../packages/crypto/src/digests.js";
 import {
+    buildBallotProofComponentBundleStatement,
+    buildBallotProofComponentLinearProofProjection,
+    type BallotProofComponentBundleStatement,
+    type BallotProofComponentStatement,
+    type BallotProofComponentProjectionWitness,
+} from "../../packages/protocol/src/ballot-privacy/ballot-proof-linear-statement.js";
+import {
     createBallotPrivacyProfileSet,
     createShareCommitmentMessageBoundCert,
 } from "../../packages/protocol/src/ballot-privacy/profiles.js";
+import {
+    createShareCommitmentPolynomialVector,
+    deriveShareCommitmentBodyDigest,
+} from "../../packages/protocol/src/ballot-privacy/lattice-primitives.js";
 import { lowerBallotPrivacyRelationToBackendStatement } from "../../packages/protocol/src/ballot-privacy/relation-backend-lowering.js";
 import type {
     BallotPrivacyLoweredLinearRelationStatement,
@@ -27,12 +38,39 @@ interface EncodedBallotRelationVectorCase {
     readonly mutation: string;
     readonly expectedOutcome: "accept" | "reject";
     readonly compilerAccepted: boolean;
+    readonly componentProjectionSummaries?: readonly {
+        readonly coefficientModulus: string;
+        readonly componentId: string;
+        readonly linearStatementDigest: string;
+        readonly matrixDigest: string;
+        readonly parameterProfileId: string;
+        readonly projectionCoverage: string;
+        readonly ringDegree: number;
+        readonly sourceBackendColumnCount: number;
+        readonly sourceRowBatchNames: readonly string[];
+        readonly statementColumns: number;
+        readonly statementRows: number;
+        readonly targetVectorDigest: string;
+        readonly witnessL2BoundSquared: string;
+    }[];
+    readonly componentBundleStatement?: BallotProofComponentBundleStatement;
+    readonly componentBundleSummary?: {
+        readonly bundleCoverage: string;
+        readonly componentBundleStatementDigest: string;
+        readonly componentCount: number;
+        readonly explicitComponentCount: number;
+        readonly firstComponentStatement: BallotProofComponentStatement;
+        readonly lastComponentStatement: BallotProofComponentStatement;
+        readonly pendingComponentIds: readonly string[];
+        readonly requiredComponentIds: readonly string[];
+    };
     readonly loweredStatement?: BallotPrivacyLoweredLinearRelationStatement;
     readonly loweredStatementSummary?: {
         readonly algebraicRowCount: number;
         readonly backendColumnCount: number;
         readonly backendDigestExpandedRowCount: number;
         readonly backendExplicitRowCount: number;
+        readonly backendProofComponentCount: number;
         readonly backendRowBatchCount: number;
         readonly backendRowCount: number;
         readonly backendStatementDigest: string;
@@ -40,12 +78,14 @@ interface EncodedBallotRelationVectorCase {
         readonly boundCount: number;
         readonly encodedCoordinateCount: number;
         readonly firstBackendRowBatch: unknown;
+        readonly firstProofComponent: unknown;
         readonly firstAlgebraicRow: unknown;
         readonly firstBound: unknown;
         readonly firstLinearRow: unknown;
         readonly lastAlgebraicRow: unknown;
         readonly lastBackendRowBatch: unknown;
         readonly lastBound: unknown;
+        readonly lastProofComponent: unknown;
         readonly lastLinearRow: unknown;
         readonly linearRowCount: number;
         readonly optionCount: number;
@@ -168,21 +208,29 @@ const mandatoryRelationInput = (): BallotPrivacyRelationCompilerInput => {
     };
 };
 
+const shareCommitmentOpeningForReceiver = (
+    receiverRosterPosition: number,
+): readonly number[] =>
+    Array.from(
+        { length: 64 },
+        (_unusedValue, openingCoordinateIndex) =>
+            ((receiverRosterPosition + openingCoordinateIndex) % 5) - 2,
+    );
+
 const publicContextForRoster = (
-    rosterSize: number,
+    relationInput: BallotPrivacyRelationCompilerInput,
+    includeShareCommitmentPolynomialVectors: boolean,
 ): BallotPrivacyRelationBackendPublicContext => {
     const profileSet = createBallotPrivacyProfileSet();
+    const rosterSize = relationInput.rosterSize;
     const certificate = createShareCommitmentMessageBoundCert({
         maximumCanonicalTurnout: Math.max(20, rosterSize),
         shareCommitmentProfile: profileSet.shareCommitmentProfile,
     });
-    const receiverReferences = Array.from(
-        { length: rosterSize },
-        (_unusedValue, receiverOffset) => ({
-            receiverIdentity: `receiver-${receiverOffset + 1}`,
-            receiverRosterPosition: receiverOffset + 1,
-        }),
-    );
+    const receiverReferences = relationInput.receivers.map((receiver) => ({
+        receiverIdentity: receiver.receiverIdentity,
+        receiverRosterPosition: receiver.receiverRosterPosition,
+    }));
 
     return {
         actionContextDigest: digest(`action-context-${rosterSize}`),
@@ -252,18 +300,58 @@ const publicContextForRoster = (
             certificate.shareCommitmentMessageBoundCertDigest,
         shareCommitmentProfileDigest:
             profileSet.shareCommitmentProfile.shareCommitmentProfileDigest,
-        shareCommitments: receiverReferences.map((receiverReference) => ({
-            commitmentBodyDigest: digest(
-                `share-commitment-body-${rosterSize}-${receiverReference.receiverRosterPosition}`,
-            ),
-            commitmentPolynomialVectorDigest: digest(
-                `share-commitment-polynomial-vector-${rosterSize}-${receiverReference.receiverRosterPosition}`,
-            ),
-            ...receiverReference,
-            shareCommitmentDigest: digest(
-                `share-commitment-${rosterSize}-${receiverReference.receiverRosterPosition}`,
-            ),
-        })),
+        shareCommitments: relationInput.receivers.map((receiver) => {
+            if (!includeShareCommitmentPolynomialVectors) {
+                return {
+                    commitmentBodyDigest: digest(
+                        `share-commitment-body-${rosterSize}-${receiver.receiverRosterPosition}`,
+                    ),
+                    commitmentPolynomialVectorDigest: digest(
+                        `share-commitment-polynomial-vector-${rosterSize}-${receiver.receiverRosterPosition}`,
+                    ),
+                    receiverIdentity: receiver.receiverIdentity,
+                    receiverRosterPosition: receiver.receiverRosterPosition,
+                    shareCommitmentDigest: digest(
+                        `share-commitment-${rosterSize}-${receiver.receiverRosterPosition}`,
+                    ),
+                };
+            }
+            const commitmentPolynomialVector =
+                createShareCommitmentPolynomialVector({
+                    opening: {
+                        openingRandomness: shareCommitmentOpeningForReceiver(
+                            receiver.receiverRosterPosition,
+                        ),
+                    },
+                    receiverShareVector: receiver.receiverShareVector,
+                    shareCommitmentProfile: profileSet.shareCommitmentProfile,
+                    shareVectorWidth: relationInput.optionCount * 11,
+                });
+            const commitmentBodyDigest = deriveShareCommitmentBodyDigest({
+                commitmentPolynomialVector,
+                shareCommitmentProfileDigest:
+                    profileSet.shareCommitmentProfile
+                        .shareCommitmentProfileDigest,
+            });
+
+            return {
+                commitmentBodyDigest,
+                commitmentPolynomialVector,
+                commitmentPolynomialVectorDigest: deriveProtocolDigest(
+                    "ChallengeDomainDigest",
+                    {
+                        commitmentPolynomialVector,
+                        purpose:
+                            "ballot-privacy-vector-share-commitment-polynomial-vector",
+                    },
+                ),
+                receiverIdentity: receiver.receiverIdentity,
+                receiverRosterPosition: receiver.receiverRosterPosition,
+                shareCommitmentDigest: digest(
+                    `share-commitment-${rosterSize}-${receiver.receiverRosterPosition}`,
+                ),
+            };
+        }),
     };
 };
 
@@ -286,6 +374,9 @@ const summarizeStatement = (
         statement.backendStatement.rowBatches[
             statement.backendStatement.rowBatches.length - 1
         ];
+    const proofComponents = statement.backendStatement
+        .proofComponents as unknown as readonly unknown[];
+    const lastProofComponent = proofComponents[proofComponents.length - 1];
     const lastBound = statement.bounds[statement.bounds.length - 1];
     const lastLinearRow = statement.linearRows[statement.linearRows.length - 1];
 
@@ -295,6 +386,7 @@ const summarizeStatement = (
         backendDigestExpandedRowCount:
             statement.backendStatement.digestExpandedRowCount,
         backendExplicitRowCount: statement.backendStatement.explicitRowCount,
+        backendProofComponentCount: proofComponents.length,
         backendRowBatchCount: statement.backendStatement.rowBatches.length,
         backendRowCount: statement.backendStatement.rowCount,
         backendStatementDigest:
@@ -305,11 +397,13 @@ const summarizeStatement = (
         encodedCoordinateCount: statement.encodedCoordinateCount,
         firstAlgebraicRow: statement.algebraicRows[0],
         firstBackendRowBatch,
+        firstProofComponent: proofComponents[0],
         firstBound: statement.bounds[0],
         firstLinearRow: statement.linearRows[0],
         lastAlgebraicRow,
         lastBackendRowBatch,
         lastBound,
+        lastProofComponent,
         lastLinearRow,
         linearRowCount: statement.linearRows.length,
         optionCount: statement.optionCount,
@@ -321,11 +415,129 @@ const summarizeStatement = (
     };
 };
 
+const summarizeComponentBundle = (
+    componentBundleStatement: BallotProofComponentBundleStatement,
+): NonNullable<EncodedBallotRelationVectorCase["componentBundleSummary"]> => {
+    const lastComponentStatement =
+        componentBundleStatement.componentStatements[
+            componentBundleStatement.componentStatements.length - 1
+        ];
+
+    if (lastComponentStatement === undefined) {
+        throw new Error("Component bundle statement must not be empty.");
+    }
+
+    return {
+        bundleCoverage: componentBundleStatement.bundleCoverage,
+        componentBundleStatementDigest:
+            componentBundleStatement.componentBundleStatementDigest,
+        componentCount: componentBundleStatement.componentStatements.length,
+        explicitComponentCount:
+            componentBundleStatement.componentStatements.filter(
+                (componentStatement) =>
+                    componentStatement.proofLoweringStatus ===
+                    "explicitRowsAvailable",
+            ).length,
+        firstComponentStatement:
+            componentBundleStatement.componentStatements[0] ??
+            lastComponentStatement,
+        lastComponentStatement,
+        pendingComponentIds: componentBundleStatement.componentStatements
+            .filter(
+                (componentStatement) =>
+                    componentStatement.proofLoweringStatus !==
+                    "explicitRowsAvailable",
+            )
+            .map((componentStatement) => componentStatement.componentId),
+        requiredComponentIds: componentBundleStatement.requiredComponentIds,
+    };
+};
+
+const projectionWitnessForRelationInput = (
+    relationInput: BallotPrivacyRelationCompilerInput,
+): BallotProofComponentProjectionWitness => ({
+    receiverPayloadPlaintexts: relationInput.receivers.map((receiver) => ({
+        openingRandomness: shareCommitmentOpeningForReceiver(
+            receiver.receiverRosterPosition,
+        ),
+        receiverRosterPosition: receiver.receiverRosterPosition,
+        receiverShareVector: receiver.receiverShareVector,
+    })),
+    shareCommitmentOpenings: relationInput.receivers.map((receiver) => ({
+        openingRandomness: shareCommitmentOpeningForReceiver(
+            receiver.receiverRosterPosition,
+        ),
+        receiverRosterPosition: receiver.receiverRosterPosition,
+    })),
+});
+
+const componentProjectionSummaries = (input: {
+    readonly loweredStatement: BallotPrivacyLoweredLinearRelationStatement;
+    readonly publicContext: BallotPrivacyRelationBackendPublicContext;
+    readonly relationInput: BallotPrivacyRelationCompilerInput;
+}): NonNullable<
+    EncodedBallotRelationVectorCase["componentProjectionSummaries"]
+> => {
+    const explicitComponentProfiles = [
+        {
+            componentId: "score-and-shamir-field-component",
+            parameterProfileId:
+                "encoded-score-field-linear-projection-summary-v1",
+            witnessL2BoundSquared: "65536",
+        },
+        {
+            componentId: "payload-plaintext-field-component",
+            parameterProfileId:
+                "payload-plaintext-field-linear-projection-summary-v1",
+            witnessL2BoundSquared: "65536",
+        },
+        {
+            componentId: "share-commitment-component",
+            parameterProfileId: "share-commitment-linear-projection-summary-v1",
+            witnessL2BoundSquared: "1048576",
+        },
+    ] as const;
+
+    return explicitComponentProfiles.map((profile) => {
+        const projection = buildBallotProofComponentLinearProofProjection({
+            ballotProofStatementDigest:
+                input.publicContext.ballotProofStatementDigest,
+            componentId: profile.componentId,
+            loweredStatement: input.loweredStatement,
+            parameterProfileId: profile.parameterProfileId,
+            projectionWitness: projectionWitnessForRelationInput(
+                input.relationInput,
+            ),
+            relationInput: input.relationInput,
+            sourceRingDegree: 1,
+            witnessL2BoundSquared: profile.witnessL2BoundSquared,
+        });
+
+        return {
+            coefficientModulus: projection.linearStatement.coefficientModulus,
+            componentId: projection.componentId,
+            linearStatementDigest: projection.linearStatement.statementDigest,
+            matrixDigest: projection.linearStatement.statementMatrixDigest,
+            parameterProfileId: profile.parameterProfileId,
+            projectionCoverage: projection.linearStatement.projectionCoverage,
+            ringDegree: projection.linearStatement.ringDegree,
+            sourceBackendColumnCount:
+                projection.sourceBackendColumnIndices.length,
+            sourceRowBatchNames: projection.sourceRowBatchNames,
+            statementColumns: projection.linearStatement.statementColumns,
+            statementRows: projection.linearStatement.statementRows,
+            targetVectorDigest: projection.linearStatement.targetVectorDigest,
+            witnessL2BoundSquared: profile.witnessL2BoundSquared,
+        };
+    });
+};
+
 const acceptingCase = (input: {
     readonly baselineRelationStatementDigest?: string;
     readonly caseName: string;
     readonly description: string;
     readonly expectedDigestChanged?: true;
+    readonly includeComponentProjectionSummaries?: boolean;
     readonly includeFullStatement: boolean;
     readonly mutation?: string;
     readonly publicContext: BallotPrivacyRelationBackendPublicContext;
@@ -341,10 +553,28 @@ const acceptingCase = (input: {
             `${input.caseName} was expected to lower but refused: ${result.refusedObjects.map((refusal) => refusal.message).join("; ")}`,
         );
     }
+    const componentBundleStatement = buildBallotProofComponentBundleStatement({
+        ballotProofStatementDigest:
+            input.publicContext.ballotProofStatementDigest,
+        loweredStatement: result.statement,
+    });
 
     return {
         caseName: input.caseName,
         compilerAccepted: true,
+        componentBundleStatement: input.includeFullStatement
+            ? componentBundleStatement
+            : undefined,
+        componentBundleSummary: input.includeFullStatement
+            ? undefined
+            : summarizeComponentBundle(componentBundleStatement),
+        componentProjectionSummaries: input.includeComponentProjectionSummaries
+            ? componentProjectionSummaries({
+                  loweredStatement: result.statement,
+                  publicContext: input.publicContext,
+                  relationInput: input.relationInput,
+              })
+            : undefined,
         description: input.description,
         expectedOutcome: "accept",
         loweredStatement: input.includeFullStatement
@@ -483,6 +713,9 @@ const digestChangingPublicContextCases = (input: {
 ];
 
 interface MutableBackendStatementView {
+    readonly proofComponents: {
+        componentId: string;
+    }[];
     readonly rowBatches: {
         readonly rows?: {
             readonly terms: { coefficient: string }[];
@@ -554,6 +787,27 @@ const backendPreflightMutationCases = (input: {
             return statement;
         },
         mutation: "backend-bound",
+        publicContext: input.publicContext,
+        relationInput: input.relationInput,
+    }),
+    backendPreflightRejectingCase({
+        caseName: "backend-proof-component-mutation-rejects",
+        description:
+            "A changed backend proof-component assignment fails canonical preflight.",
+        mutateStatement: (statement) => {
+            const backendStatement =
+                statement.backendStatement as unknown as MutableBackendStatementView;
+            const firstComponent = backendStatement.proofComponents[0];
+            if (firstComponent === undefined) {
+                throw new Error(
+                    "backend proof component mutation target is missing",
+                );
+            }
+            firstComponent.componentId = "receiver-key-binding-component";
+
+            return statement;
+        },
+        mutation: "backend-proof-component",
         publicContext: input.publicContext,
         relationInput: input.relationInput,
     }),
@@ -784,22 +1038,37 @@ const mutatedMiniRelationInputs = (
 const main = async (): Promise<void> => {
     const miniInput = miniRelationInput();
     const mandatoryInput = mandatoryRelationInput();
-    const miniPublicContext = publicContextForRoster(miniInput.rosterSize);
+    const miniPublicContext = publicContextForRoster(miniInput, true);
+    const miniDigestExpandedPublicContext = publicContextForRoster(
+        miniInput,
+        false,
+    );
     const mandatoryPublicContext = publicContextForRoster(
-        mandatoryInput.rosterSize,
+        mandatoryInput,
+        false,
     );
     const miniAcceptingCase = acceptingCase({
         caseName: "mini-encoded-ballot-relation",
         description:
             "Mini encoded-score ballot relation with three receivers and two options.",
         includeFullStatement: true,
+        publicContext: miniDigestExpandedPublicContext,
+        relationInput: miniInput,
+    });
+    const miniExplicitShareCommitmentCase = acceptingCase({
+        caseName: "mini-encoded-ballot-share-commitment-explicit-relation",
+        description:
+            "Mini encoded-score ballot relation with explicit share commitment backend rows.",
+        includeComponentProjectionSummaries: true,
+        includeFullStatement: false,
         publicContext: miniPublicContext,
         relationInput: miniInput,
     });
     const miniBaselineDigest =
-        miniAcceptingCase.trace.relationStatementDigest ?? "";
+        miniExplicitShareCommitmentCase.trace.relationStatementDigest ?? "";
     const cases: EncodedBallotRelationVectorCase[] = [
         miniAcceptingCase,
+        miniExplicitShareCommitmentCase,
         acceptingCase({
             caseName: "mandatory-profile-encoded-ballot-relation",
             description:
@@ -814,7 +1083,7 @@ const main = async (): Promise<void> => {
             relationInput: miniInput,
         }),
         ...backendPreflightMutationCases({
-            publicContext: miniPublicContext,
+            publicContext: miniDigestExpandedPublicContext,
             relationInput: miniInput,
         }),
         ...mutatedMiniRelationInputs(miniInput).map((mutationCase) =>

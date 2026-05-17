@@ -494,15 +494,21 @@ fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult<Value> {
             let public_randomness_hex = request.get("publicRandomnessHex").and_then(Value::as_str);
             let parameter_set = request.get("parameterSet");
             let proof_encoding = request.get("proofEncoding");
+            let component_bundle_statement = request.get("componentBundleStatement");
+            let component_proof_bundle = request.get("componentProofBundle");
 
             Ok(crate::ballot_privacy::verify_ballot_proof(
                 statement,
                 ballot_proof,
-                proof_bytes_hex,
-                linear_statement,
-                public_randomness_hex,
-                parameter_set,
-                proof_encoding,
+                crate::ballot_privacy::BallotProofVerificationInputs {
+                    component_bundle_statement,
+                    component_proof_bundle,
+                    linear_statement,
+                    parameter_set,
+                    proof_bytes_hex,
+                    proof_encoding,
+                    public_randomness_hex,
+                },
             ))
         }
         "VerifyClaimBearingBallotPackage" => {

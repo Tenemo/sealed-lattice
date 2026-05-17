@@ -3,11 +3,11 @@
   "entries": [
     {
       "path": "ballot-privacy/ballot-field-linear-proof-vectors.json",
-      "sha256": "5fd28903e640f1047ed177860e3bda3420eb2d9c4f6d27b44d7c9b397be2c222"
+      "sha256": "c3215e9b35e38a9623ea109ff3a4e5bfa2dcbc28c4b177d68cc07c92e45798f4"
     },
     {
       "path": "ballot-privacy/encoded-ballot-linear-relation-vectors.json",
-      "sha256": "8e895b13d7d388e601c3fcb5849d1198ca1a5bf64f90e90f32d9f21d04ad4ce4"
+      "sha256": "ae25360b7057bb75dae3c29aec5d46467f5bee0d99e873f154cfb523a41c1367"
     },
     {
       "path": "ballot-privacy/proof-backend-linear-vectors.json",

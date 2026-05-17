@@ -107,6 +107,7 @@ type BallotFieldLinearProofVectorFile = {
     readonly linearStatement: {
         readonly coefficientModulus: string;
         readonly parameterProfileId: string;
+        readonly projectionCoverage: string;
         readonly ringDegree: number;
         readonly statementColumns: number;
         readonly statementMatrixCoefficients: readonly (readonly (readonly number[])[])[];
@@ -622,6 +623,10 @@ describe('ballot privacy linear proof backend vectors', () => {
             ballotFieldLinearProofBackendVectors.linearStatement
                 .statementMatrixCoefficients,
         ).toHaveLength(70);
+        expect(
+            ballotFieldLinearProofBackendVectors.linearStatement
+                .projectionCoverage,
+        ).toBe('encoded-score-field-rows-only');
         expect(
             ballotFieldLinearProofBackendVectors.linearStatement
                 .statementMatrixCoefficients[0],

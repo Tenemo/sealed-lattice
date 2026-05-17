@@ -789,10 +789,20 @@ describe('transcript-core kernel in Node', () => {
                 vectorCase.caseName ===
                 'wrong-share-commitment-target-changes-digest',
         );
+        const explicitShareCommitmentCase = encodedRelationVectors.cases.find(
+            (vectorCase) =>
+                vectorCase.caseName ===
+                'mini-encoded-ballot-share-commitment-explicit-relation',
+        );
         const backendPreflightRejectCase = encodedRelationVectors.cases.find(
             (vectorCase) =>
                 vectorCase.caseName ===
                 'noncanonical-backend-coefficient-rejects',
+        );
+        const proofComponentRejectCase = encodedRelationVectors.cases.find(
+            (vectorCase) =>
+                vectorCase.caseName ===
+                'backend-proof-component-mutation-rejects',
         );
 
         expect(
@@ -830,12 +840,34 @@ describe('transcript-core kernel in Node', () => {
         });
         expect(
             kernel.verifyBallotPrivacyEncodedRelationVector({
+                vectorCase: explicitShareCommitmentCase,
+            }),
+        ).toMatchObject({
+            ok: true,
+            backendAvailable: false,
+            caseName: 'mini-encoded-ballot-share-commitment-explicit-relation',
+            expectedOutcome: 'accept',
+            unresolvedReason: null,
+        });
+        expect(
+            kernel.verifyBallotPrivacyEncodedRelationVector({
                 vectorCase: backendPreflightRejectCase,
             }),
         ).toMatchObject({
             ok: true,
             backendAvailable: false,
             caseName: 'noncanonical-backend-coefficient-rejects',
+            expectedOutcome: 'reject',
+            unresolvedReason: null,
+        });
+        expect(
+            kernel.verifyBallotPrivacyEncodedRelationVector({
+                vectorCase: proofComponentRejectCase,
+            }),
+        ).toMatchObject({
+            ok: true,
+            backendAvailable: false,
+            caseName: 'backend-proof-component-mutation-rejects',
             expectedOutcome: 'reject',
             unresolvedReason: null,
         });
@@ -1144,7 +1176,7 @@ describe('transcript-core kernel in Node', () => {
         });
     });
 
-    it('verifies proof-byte-bearing ballot records through the WASM linear proof backend', async () => {
+    it('rejects field-incomplete ballot records after WASM linear proof verification', async () => {
         const kernel = await loadTranscriptCoreKernel();
         const linearProofCases =
             linearProofBackendVectors.cases as readonly (Record<
@@ -1300,6 +1332,8 @@ describe('transcript-core kernel in Node', () => {
         const createBallotProof = (
             statement: Record<string, unknown>,
             linearStatement: Record<string, unknown>,
+            componentBundleStatement?: Record<string, unknown>,
+            componentProofBundle?: Record<string, unknown>,
         ): Record<string, unknown> => {
             const proofBytesDigest = kernel.deriveProtocolDigest({
                 namespace: 'ProofBytesDigest',
@@ -1347,6 +1381,18 @@ describe('transcript-core kernel in Node', () => {
                 ballotProofProfileDigest: statement.ballotProofProfileDigest,
                 ballotProofStatementDigest:
                     statement.ballotProofStatementDigest,
+                ...(componentBundleStatement === undefined
+                    ? {}
+                    : {
+                          componentBundleStatementDigest:
+                              componentBundleStatement.componentBundleStatementDigest,
+                      }),
+                ...(componentProofBundle === undefined
+                    ? {}
+                    : {
+                          componentProofBundleDigest:
+                              componentProofBundle.componentProofBundleDigest,
+                      }),
                 linearStatementDigest: linearStatement.statementDigest,
                 objectType: 'BallotProofRecord',
                 objectVersion: 1,
@@ -1370,6 +1416,18 @@ describe('transcript-core kernel in Node', () => {
                     ballotProofStatementDigest:
                         statement.ballotProofStatementDigest,
                     challengeDomainDigest: statement.challengeDomainDigest,
+                    ...(componentBundleStatement === undefined
+                        ? {}
+                        : {
+                              componentBundleStatementDigest:
+                                  componentBundleStatement.componentBundleStatementDigest,
+                          }),
+                    ...(componentProofBundle === undefined
+                        ? {}
+                        : {
+                              componentProofBundleDigest:
+                                  componentProofBundle.componentProofBundleDigest,
+                          }),
                     linearStatementDigest:
                         proofPayloadWithoutChallenge.linearStatementDigest,
                     proofBytesDigest:
@@ -1431,11 +1489,49 @@ describe('transcript-core kernel in Node', () => {
                 statement,
             }),
         ).toMatchObject({
-            ok: true,
+            ok: false,
             backendAvailable: false,
             operation: 'verifyBallotProof',
-            unresolvedReason: null,
+            unresolvedReason: 'BallotPackageInvalid',
         });
+        const relabeledLinearStatement = cloneJsonValue(validLinearStatement);
+        delete relabeledLinearStatement.statementDigest;
+        relabeledLinearStatement.projectionCoverage =
+            'full-encoded-score-ballot-relation';
+        relabeledLinearStatement.statementDigest = kernel.deriveProtocolDigest({
+            namespace: 'ChallengeDomainDigest',
+            value: {
+                payload: relabeledLinearStatement,
+                purpose: 'ballot-proof-linear-proof-statement-v1',
+            },
+        });
+        const relabeledBallotProof = createBallotProof(
+            statement,
+            relabeledLinearStatement,
+        );
+        const relabeledVerification = kernel.verifyBallotProof({
+            ballotProof: relabeledBallotProof,
+            linearStatement: relabeledLinearStatement,
+            parameterSet: validProofCase.parameterSet,
+            proofBytesHex,
+            proofEncoding: validProofCase.proofEncoding,
+            publicRandomnessHex,
+            statement,
+        });
+
+        expect(relabeledVerification).toMatchObject({
+            ok: false,
+            backendAvailable: false,
+            operation: 'verifyBallotProof',
+            unresolvedReason: 'BallotPackageInvalid',
+        });
+        expect(
+            relabeledVerification.refusedObjects.some((refusal) =>
+                refusal.message.includes(
+                    'dedicated full-relation parameter profile',
+                ),
+            ),
+        ).toBe(true);
         expect(
             kernel.verifyBallotProof({
                 ballotProof: mutatedBallotProof,
@@ -1470,7 +1566,7 @@ describe('transcript-core kernel in Node', () => {
         });
     });
 
-    it('verifies encoded-score field ballot proof records through the WASM linear proof backend', async () => {
+    it('rejects encoded-score field-only ballot proof records after WASM proof verification', async () => {
         const kernel = await loadTranscriptCoreKernel();
         const ballotFieldLinearProofCases =
             ballotFieldLinearProofBackendVectors.cases as readonly (Record<
@@ -1637,6 +1733,8 @@ describe('transcript-core kernel in Node', () => {
         const createBallotProof = (
             statement: Record<string, unknown>,
             linearStatement: Record<string, unknown>,
+            componentBundleStatement?: Record<string, unknown>,
+            componentProofBundle?: Record<string, unknown>,
         ): Record<string, unknown> => {
             const proofBytesDigest = kernel.deriveProtocolDigest({
                 namespace: 'ProofBytesDigest',
@@ -1684,6 +1782,18 @@ describe('transcript-core kernel in Node', () => {
                 ballotProofProfileDigest: statement.ballotProofProfileDigest,
                 ballotProofStatementDigest:
                     statement.ballotProofStatementDigest,
+                ...(componentBundleStatement === undefined
+                    ? {}
+                    : {
+                          componentBundleStatementDigest:
+                              componentBundleStatement.componentBundleStatementDigest,
+                      }),
+                ...(componentProofBundle === undefined
+                    ? {}
+                    : {
+                          componentProofBundleDigest:
+                              componentProofBundle.componentProofBundleDigest,
+                      }),
                 linearStatementDigest: linearStatement.statementDigest,
                 objectType: 'BallotProofRecord',
                 objectVersion: 1,
@@ -1707,6 +1817,18 @@ describe('transcript-core kernel in Node', () => {
                     ballotProofStatementDigest:
                         statement.ballotProofStatementDigest,
                     challengeDomainDigest: statement.challengeDomainDigest,
+                    ...(componentBundleStatement === undefined
+                        ? {}
+                        : {
+                              componentBundleStatementDigest:
+                                  componentBundleStatement.componentBundleStatementDigest,
+                          }),
+                    ...(componentProofBundle === undefined
+                        ? {}
+                        : {
+                              componentProofBundleDigest:
+                                  componentProofBundle.componentProofBundleDigest,
+                          }),
                     linearStatementDigest:
                         proofPayloadWithoutChallenge.linearStatementDigest,
                     proofBytesDigest:
@@ -1739,6 +1861,175 @@ describe('transcript-core kernel in Node', () => {
                 }),
             };
         };
+        const componentIds = [
+            'score-and-shamir-field-component',
+            'payload-plaintext-field-component',
+            'share-commitment-component',
+            'receiver-encryption-component',
+            'receiver-key-binding-component',
+        ];
+        const createComponentStatement = (
+            linearStatement: Record<string, unknown>,
+            statement: Record<string, unknown>,
+            componentId: string,
+            componentIndex: number,
+            proofLoweringStatus: string,
+        ): Record<string, unknown> => {
+            const componentPayload = {
+                backendStatementDigest: linearStatement.backendStatementDigest,
+                ballotProofStatementDigest:
+                    statement.ballotProofStatementDigest,
+                coefficientModulus: '65537',
+                componentDigest: digest(`${componentId}-component`),
+                componentId,
+                matrixDigest: digest(`${componentId}-matrix`),
+                objectType: 'BallotProofComponentStatement',
+                objectVersion: 1,
+                proofLoweringStatus,
+                relationStatementDigest:
+                    linearStatement.relationStatementDigest,
+                rowBatchMatrixDigests: [digest(`${componentId}-row-matrix`)],
+                rowBatchNames: [`${componentId}-rows`],
+                rowBatchTargetVectorDigests: [
+                    digest(`${componentId}-row-target`),
+                ],
+                rowCount: 1,
+                rowKinds: ['EncodedScoreFieldRows'],
+                targetVectorDigest: digest(`${componentId}-target`),
+                variableColumnCount: 1,
+                variableColumnIndices: [componentIndex],
+            };
+
+            return {
+                ...componentPayload,
+                componentStatementDigest: kernel.deriveProtocolDigest({
+                    namespace: 'ChallengeDomainDigest',
+                    value: {
+                        payload: componentPayload,
+                        purpose: 'ballot-proof-component-statement-v1',
+                    },
+                }),
+            };
+        };
+        const createComponentBundleStatement = (
+            linearStatement: Record<string, unknown>,
+            statement: Record<string, unknown>,
+            options: { readonly fullCoverage?: boolean } = {},
+        ): Record<string, unknown> => {
+            const componentStatements = componentIds.map(
+                (componentId, componentIndex) =>
+                    createComponentStatement(
+                        linearStatement,
+                        statement,
+                        componentId,
+                        componentIndex,
+                        options.fullCoverage === true || componentIndex === 0
+                            ? 'explicitRowsAvailable'
+                            : 'digestExpandedRowsPending',
+                    ),
+            );
+            const componentBundlePayload = {
+                backendStatementDigest: linearStatement.backendStatementDigest,
+                ballotProofStatementDigest:
+                    statement.ballotProofStatementDigest,
+                bundleCoverage:
+                    options.fullCoverage === true
+                        ? 'full-encoded-score-ballot-relation'
+                        : 'component-bundle-incomplete',
+                componentStatements,
+                objectType: 'BallotProofComponentBundleStatement',
+                objectVersion: 1,
+                relationLabel: 'BallotPrivacyPvssRelation',
+                relationStatementDigest:
+                    linearStatement.relationStatementDigest,
+                requiredComponentIds: componentIds,
+            };
+
+            return {
+                ...componentBundlePayload,
+                componentBundleStatementDigest: kernel.deriveProtocolDigest({
+                    namespace: 'ChallengeDomainDigest',
+                    value: {
+                        payload: componentBundlePayload,
+                        purpose: 'ballot-proof-component-bundle-statement-v1',
+                    },
+                }),
+            };
+        };
+        const createComponentProofRecord = (
+            linearStatement: Record<string, unknown>,
+            statement: Record<string, unknown>,
+            componentStatement: Record<string, unknown>,
+            componentId: string,
+        ): Record<string, unknown> => {
+            const proofRecordPayload = {
+                backendStatementDigest: linearStatement.backendStatementDigest,
+                ballotProofStatementDigest:
+                    statement.ballotProofStatementDigest,
+                componentId,
+                componentStatementDigest:
+                    componentStatement.componentStatementDigest,
+                objectType: 'BallotProofComponentProofRecord',
+                objectVersion: 1,
+                proofBackend: 'LaZerStyleLocalLatticeRelation',
+                proofBytesDigest: digest(`${componentId}-proof-bytes`),
+                proofEncodingProfileDigest: digest(
+                    `${componentId}-proof-encoding`,
+                ),
+                proofParameterSetDigest: digest(
+                    `${componentId}-proof-parameters`,
+                ),
+                proofRoot: digest(`${componentId}-proof-root`),
+                proofSizeBytes: 64,
+                publicRandomnessDigest: digest(
+                    `${componentId}-public-randomness`,
+                ),
+                relationStatementDigest:
+                    linearStatement.relationStatementDigest,
+            };
+
+            return {
+                ...proofRecordPayload,
+                componentProofRecordDigest: kernel.deriveProtocolDigest({
+                    namespace: 'ChallengeDomainDigest',
+                    value: {
+                        payload: proofRecordPayload,
+                        purpose: 'ballot-proof-component-proof-record-v1',
+                    },
+                }),
+            };
+        };
+        const createComponentProofBundle = (
+            componentBundleStatement: Record<string, unknown>,
+            componentProofs: readonly Record<string, unknown>[],
+        ): Record<string, unknown> => {
+            const proofBundlePayload = {
+                backendStatementDigest:
+                    componentBundleStatement.backendStatementDigest,
+                ballotProofStatementDigest:
+                    componentBundleStatement.ballotProofStatementDigest,
+                bundleCoverage: componentBundleStatement.bundleCoverage,
+                componentBundleStatementDigest:
+                    componentBundleStatement.componentBundleStatementDigest,
+                componentProofs,
+                objectType: 'BallotProofComponentProofBundle',
+                objectVersion: 1,
+                relationStatementDigest:
+                    componentBundleStatement.relationStatementDigest,
+                requiredComponentIds: componentIds,
+            };
+
+            return {
+                ...proofBundlePayload,
+                componentProofBundleDigest: kernel.deriveProtocolDigest({
+                    namespace: 'ChallengeDomainDigest',
+                    value: {
+                        payload: proofBundlePayload,
+                        purpose: 'ballot-proof-component-proof-bundle-v1',
+                    },
+                }),
+            };
+        };
         const statement = createStatement();
         const validLinearStatement = createLinearStatement(
             statement,
@@ -1756,6 +2047,13 @@ describe('transcript-core kernel in Node', () => {
             statement,
             mutatedLinearStatement,
         );
+        const incompleteComponentBundleStatement =
+            createComponentBundleStatement(validLinearStatement, statement);
+        const proofBoundToIncompleteComponentBundle = createBallotProof(
+            statement,
+            validLinearStatement,
+            incompleteComponentBundleStatement,
+        );
 
         expect(
             kernel.verifyBallotProof({
@@ -1768,11 +2066,213 @@ describe('transcript-core kernel in Node', () => {
                 statement,
             }),
         ).toMatchObject({
-            ok: true,
+            ok: false,
             backendAvailable: false,
             operation: 'verifyBallotProof',
-            unresolvedReason: null,
+            unresolvedReason: 'BallotPackageInvalid',
         });
+        const relabeledEncodedLinearStatement =
+            cloneJsonValue(validLinearStatement);
+        delete relabeledEncodedLinearStatement.statementDigest;
+        relabeledEncodedLinearStatement.projectionCoverage =
+            'full-encoded-score-ballot-relation';
+        relabeledEncodedLinearStatement.statementDigest =
+            kernel.deriveProtocolDigest({
+                namespace: 'ChallengeDomainDigest',
+                value: {
+                    payload: relabeledEncodedLinearStatement,
+                    purpose: 'ballot-proof-linear-proof-statement-v1',
+                },
+            });
+        const relabeledEncodedBallotProof = createBallotProof(
+            statement,
+            relabeledEncodedLinearStatement,
+        );
+        const relabeledEncodedVerification = kernel.verifyBallotProof({
+            ballotProof: relabeledEncodedBallotProof,
+            linearStatement: relabeledEncodedLinearStatement,
+            parameterSet: validProofCase.parameterSet,
+            proofBytesHex,
+            proofEncoding: validProofCase.proofEncoding,
+            publicRandomnessHex,
+            statement,
+        });
+
+        expect(relabeledEncodedVerification).toMatchObject({
+            ok: false,
+            backendAvailable: false,
+            operation: 'verifyBallotProof',
+            unresolvedReason: 'BallotPackageInvalid',
+        });
+        expect(
+            relabeledEncodedVerification.refusedObjects.some((refusal) =>
+                refusal.message.includes(
+                    'dedicated full-relation parameter profile',
+                ),
+            ),
+        ).toBe(true);
+        expect(
+            kernel
+                .verifyBallotProof({
+                    ballotProof: proofBoundToIncompleteComponentBundle,
+                    componentBundleStatement:
+                        incompleteComponentBundleStatement,
+                    linearStatement: validLinearStatement,
+                    parameterSet: validProofCase.parameterSet,
+                    proofBytesHex,
+                    proofEncoding: validProofCase.proofEncoding,
+                    publicRandomnessHex,
+                    statement,
+                })
+                .refusedObjects.some((refusal) =>
+                    refusal.message.includes(
+                        'component bundle is still incomplete',
+                    ),
+                ),
+        ).toBe(true);
+
+        const fullComponentBundleStatement = createComponentBundleStatement(
+            validLinearStatement,
+            statement,
+            {
+                fullCoverage: true,
+            },
+        );
+        const fullComponentStatements =
+            fullComponentBundleStatement.componentStatements as readonly Record<
+                string,
+                unknown
+            >[];
+        const componentProofs = componentIds.map(
+            (componentId, componentIndex) =>
+                createComponentProofRecord(
+                    validLinearStatement,
+                    statement,
+                    fullComponentStatements[componentIndex] ?? {},
+                    componentId,
+                ),
+        );
+        const componentProofBundle = createComponentProofBundle(
+            fullComponentBundleStatement,
+            componentProofs,
+        );
+        const proofBoundToComponentBundleWithoutProofBundle = createBallotProof(
+            statement,
+            validLinearStatement,
+            fullComponentBundleStatement,
+        );
+        const proofBoundToComponentProofBundle = createBallotProof(
+            statement,
+            validLinearStatement,
+            fullComponentBundleStatement,
+            componentProofBundle,
+        );
+
+        expect(
+            kernel
+                .verifyBallotProof({
+                    ballotProof: proofBoundToComponentBundleWithoutProofBundle,
+                    componentBundleStatement: fullComponentBundleStatement,
+                    linearStatement: validLinearStatement,
+                    parameterSet: validProofCase.parameterSet,
+                    proofBytesHex,
+                    proofEncoding: validProofCase.proofEncoding,
+                    publicRandomnessHex,
+                    statement,
+                })
+                .refusedObjects.some((refusal) =>
+                    refusal.message.includes(
+                        'requires a component proof bundle',
+                    ),
+                ),
+        ).toBe(true);
+        expect(
+            kernel
+                .verifyBallotProof({
+                    ballotProof: proofBoundToComponentProofBundle,
+                    componentBundleStatement: fullComponentBundleStatement,
+                    componentProofBundle,
+                    linearStatement: validLinearStatement,
+                    parameterSet: validProofCase.parameterSet,
+                    proofBytesHex,
+                    proofEncoding: validProofCase.proofEncoding,
+                    publicRandomnessHex,
+                    statement,
+                })
+                .refusedObjects.some((refusal) =>
+                    refusal.message.includes(
+                        'component proof bundle has an invalid canonical shape',
+                    ),
+                ),
+        ).toBe(false);
+        const reorderedComponentProofBundle = createComponentProofBundle(
+            fullComponentBundleStatement,
+            [...componentProofs].reverse(),
+        );
+        const proofBoundToReorderedComponentProofBundle = createBallotProof(
+            statement,
+            validLinearStatement,
+            fullComponentBundleStatement,
+            reorderedComponentProofBundle,
+        );
+
+        expect(
+            kernel
+                .verifyBallotProof({
+                    ballotProof: proofBoundToReorderedComponentProofBundle,
+                    componentBundleStatement: fullComponentBundleStatement,
+                    componentProofBundle: reorderedComponentProofBundle,
+                    linearStatement: validLinearStatement,
+                    parameterSet: validProofCase.parameterSet,
+                    proofBytesHex,
+                    proofEncoding: validProofCase.proofEncoding,
+                    publicRandomnessHex,
+                    statement,
+                })
+                .refusedObjects.some((refusal) =>
+                    refusal.message.includes('invalid canonical shape'),
+                ),
+        ).toBe(true);
+        const wrongComponentStatementProofs = [
+            createComponentProofRecord(
+                validLinearStatement,
+                statement,
+                { componentStatementDigest: digest('wrong-component') },
+                componentIds[0] ?? 'score-and-shamir-field-component',
+            ),
+            ...componentProofs.slice(1),
+        ];
+        const wrongComponentStatementProofBundle = createComponentProofBundle(
+            fullComponentBundleStatement,
+            wrongComponentStatementProofs,
+        );
+        const proofBoundToWrongComponentStatementProofBundle =
+            createBallotProof(
+                statement,
+                validLinearStatement,
+                fullComponentBundleStatement,
+                wrongComponentStatementProofBundle,
+            );
+
+        expect(
+            kernel
+                .verifyBallotProof({
+                    ballotProof: proofBoundToWrongComponentStatementProofBundle,
+                    componentBundleStatement: fullComponentBundleStatement,
+                    componentProofBundle: wrongComponentStatementProofBundle,
+                    linearStatement: validLinearStatement,
+                    parameterSet: validProofCase.parameterSet,
+                    proofBytesHex,
+                    proofEncoding: validProofCase.proofEncoding,
+                    publicRandomnessHex,
+                    statement,
+                })
+                .refusedObjects.some((refusal) =>
+                    refusal.message.includes(
+                        'not bound to the supplied component statement',
+                    ),
+                ),
+        ).toBe(true);
         expect(
             kernel.verifyBallotProof({
                 ballotProof: mutatedBallotProof,

@@ -6,6 +6,10 @@ export {
     verifyShareCommitmentMessageBoundCert,
 } from './profiles.js';
 export {
+    createBallotProofComponentProofBundle,
+    createBallotProofComponentProofRecord,
+} from './ballot-proof-linear-statement.js';
+export {
     buildBallotProofStatement,
     createBallotProofRecordShell,
     createReceiverEncryptionPublicKeyShell,
