@@ -99,6 +99,20 @@ const createStatement = (
             profileSet.ballotProofProfile.ballotProofProfileDigest,
         scoreMembershipProfileDigest:
             profileSet.scoreMembershipProfile.scoreMembershipProfileDigest,
+        ballotScoreEncodingProfileDigest:
+            profileSet.ballotScoreEncodingProfile
+                .ballotScoreEncodingProfileDigest,
+        ballotShareLayoutProfileDigest:
+            profileSet.ballotShareLayoutProfile.ballotShareLayoutProfileDigest,
+        aggregateInputEncodingProfileDigest:
+            profileSet.aggregateInputEncodingProfile
+                .aggregateInputEncodingProfileDigest,
+        encodedShareVectorLayoutDigest:
+            profileSet.encodedShareVectorLayoutProfile
+                .encodedShareVectorLayoutDigest,
+        encodedAggregateLayoutDigest:
+            profileSet.encodedAggregateLayoutProfile
+                .encodedAggregateLayoutDigest,
         shareCommitmentMessageBoundCertDigest:
             boundCertificate.shareCommitmentMessageBoundCertDigest,
         ballotPackageDigest: digest('ballot-package'),
@@ -167,6 +181,8 @@ const createStructurallyBoundObjects = (): {
                 shareCommitmentProfileDigest:
                     profileSet.shareCommitmentProfile
                         .shareCommitmentProfileDigest,
+                shareVectorWidth:
+                    profileSet.shareCommitmentProfile.shareVectorWidth,
             }),
     );
     const statement = buildBallotProofStatement({
@@ -209,6 +225,20 @@ const createStructurallyBoundObjects = (): {
             profileSet.ballotProofProfile.ballotProofProfileDigest,
         scoreMembershipProfileDigest:
             profileSet.scoreMembershipProfile.scoreMembershipProfileDigest,
+        ballotScoreEncodingProfileDigest:
+            profileSet.ballotScoreEncodingProfile
+                .ballotScoreEncodingProfileDigest,
+        ballotShareLayoutProfileDigest:
+            profileSet.ballotShareLayoutProfile.ballotShareLayoutProfileDigest,
+        aggregateInputEncodingProfileDigest:
+            profileSet.aggregateInputEncodingProfile
+                .aggregateInputEncodingProfileDigest,
+        encodedShareVectorLayoutDigest:
+            profileSet.encodedShareVectorLayoutProfile
+                .encodedShareVectorLayoutDigest,
+        encodedAggregateLayoutDigest:
+            profileSet.encodedAggregateLayoutProfile
+                .encodedAggregateLayoutDigest,
         shareCommitmentMessageBoundCertDigest:
             boundCertificate.shareCommitmentMessageBoundCertDigest,
         ballotPackageDigest: digest('ballot-package'),
@@ -271,6 +301,8 @@ describe('ballot privacy proof object boundary', () => {
             receiverRosterPosition: receiverPublicKey.receiverRosterPosition,
             shareCommitmentProfileDigest:
                 profileSet.shareCommitmentProfile.shareCommitmentProfileDigest,
+            shareVectorWidth:
+                profileSet.shareCommitmentProfile.shareVectorWidth,
             commitmentBodyDigest: digest('share-commitment-body'),
         });
 
@@ -298,7 +330,22 @@ describe('ballot privacy proof object boundary', () => {
         });
 
         expect(statement.objectType).toBe('BallotProofStatement');
-        expect(statement.shareVectorWidth).toBe(20);
+        expect(statement.shareVectorWidth).toBe(220);
+        expect(statement.ballotScoreEncodingProfileDigest).toMatch(
+            /^[a-f0-9]{128}$/u,
+        );
+        expect(statement.ballotShareLayoutProfileDigest).toMatch(
+            /^[a-f0-9]{128}$/u,
+        );
+        expect(statement.aggregateInputEncodingProfileDigest).toMatch(
+            /^[a-f0-9]{128}$/u,
+        );
+        expect(statement.encodedShareVectorLayoutDigest).toMatch(
+            /^[a-f0-9]{128}$/u,
+        );
+        expect(statement.encodedAggregateLayoutDigest).toMatch(
+            /^[a-f0-9]{128}$/u,
+        );
         expect(statement.ballotProofStatementDigest).toMatch(
             /^[a-f0-9]{128}$/u,
         );
@@ -311,17 +358,59 @@ describe('ballot privacy proof object boundary', () => {
         );
     });
 
+    it('binds the encoded-score layout digests into the challenge domain and proof record', () => {
+        const statement = createStatement();
+        const changedLayoutStatement = createStatement({
+            encodedShareVectorLayoutDigest: digest(
+                'changed-encoded-share-vector-layout',
+            ),
+        });
+        const proofRecord = createBallotProofRecordShell({
+            statement,
+            relationStatementDigest: digest('relation-statement'),
+            proofRoot: digest('proof-root'),
+            proofBytesDigest: digest('proof-bytes'),
+            proofSizeBytes: 1_024,
+        });
+        const changedLayoutProofRecord = createBallotProofRecordShell({
+            statement: changedLayoutStatement,
+            relationStatementDigest: digest('changed-relation-statement'),
+            proofRoot: digest('proof-root'),
+            proofBytesDigest: digest('proof-bytes'),
+            proofSizeBytes: 1_024,
+        });
+
+        expect(changedLayoutStatement.challengeDomainDigest).not.toBe(
+            statement.challengeDomainDigest,
+        );
+        expect(changedLayoutStatement.ballotProofStatementDigest).not.toBe(
+            statement.ballotProofStatementDigest,
+        );
+        expect(changedLayoutProofRecord.challengeDigest).not.toBe(
+            proofRecord.challengeDigest,
+        );
+    });
+
     it('binds proof shell challenge to statement and proof roots', () => {
         const statement = createStatement();
         const proofRecord = createBallotProofRecordShell({
             statement,
+            relationStatementDigest: digest('relation-statement'),
             proofRoot: digest('proof-root'),
             proofBytesDigest: digest('proof-bytes'),
             proofSizeBytes: 1_024,
         });
         const changedProofRecord = createBallotProofRecordShell({
             statement,
+            relationStatementDigest: digest('relation-statement'),
             proofRoot: digest('changed-proof-root'),
+            proofBytesDigest: digest('proof-bytes'),
+            proofSizeBytes: 1_024,
+        });
+        const changedRelationProofRecord = createBallotProofRecordShell({
+            statement,
+            relationStatementDigest: digest('changed-relation-statement'),
+            proofRoot: digest('proof-root'),
             proofBytesDigest: digest('proof-bytes'),
             proofSizeBytes: 1_024,
         });
@@ -330,8 +419,14 @@ describe('ballot privacy proof object boundary', () => {
         expect(proofRecord.ballotProofStatementDigest).toBe(
             statement.ballotProofStatementDigest,
         );
+        expect(proofRecord.relationStatementDigest).toBe(
+            digest('relation-statement'),
+        );
         expect(proofRecord.challengeDigest).not.toBe(
             changedProofRecord.challengeDigest,
+        );
+        expect(proofRecord.challengeDigest).not.toBe(
+            changedRelationProofRecord.challengeDigest,
         );
         expect(proofRecord.ballotProofRecordDigest).not.toBe(
             changedProofRecord.ballotProofRecordDigest,
@@ -342,6 +437,7 @@ describe('ballot privacy proof object boundary', () => {
         const statement = createStatement();
         const proofRecord = createBallotProofRecordShell({
             statement,
+            relationStatementDigest: digest('relation-statement'),
             proofRoot: digest('proof-root'),
             proofBytesDigest: digest('proof-bytes'),
             proofSizeBytes: 1_024,
@@ -362,6 +458,7 @@ describe('ballot privacy proof object boundary', () => {
         const structurallyBoundObjects = createStructurallyBoundObjects();
         const structurallyBoundProofRecord = createBallotProofRecordShell({
             proofBytesDigest: digest('bound-proof-bytes'),
+            relationStatementDigest: digest('bound-relation-statement'),
             proofRoot: digest('bound-proof-root'),
             proofSizeBytes: 1_024,
             statement: structurallyBoundObjects.statement,
@@ -421,6 +518,7 @@ describe('ballot privacy proof object boundary', () => {
         }
         const proofRecord = createBallotProofRecordShell({
             proofBytesDigest: digest('bound-proof-bytes'),
+            relationStatementDigest: digest('bound-relation-statement'),
             proofRoot: digest('bound-proof-root'),
             proofSizeBytes: 1_024,
             statement: structurallyBoundObjects.statement,
@@ -467,6 +565,7 @@ describe('ballot privacy proof object boundary', () => {
         });
         const duplicateReceiverProofRecord = createBallotProofRecordShell({
             proofBytesDigest: digest('duplicate-proof-bytes'),
+            relationStatementDigest: digest('duplicate-relation-statement'),
             proofRoot: digest('duplicate-proof-root'),
             proofSizeBytes: 1_024,
             statement: duplicateReceiverStatement,

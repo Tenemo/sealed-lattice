@@ -1,14 +1,24 @@
 import { deriveProtocolDigest } from '@sealed-lattice/crypto';
 import {
+    aggregateInputEncodingProfileId,
     ballotProofProfileId,
+    ballotScoreEncodingProfileId,
+    ballotShareLayoutProfileId,
+    encodedAggregateLayoutProfileId,
+    encodedShareVectorLayoutProfileId,
     fieldEncodingProfileId,
     receiverEncryptionProfileId,
     scoreMembershipProfileId,
     shareCommitmentMessageBoundProfileId,
     shareCommitmentProfileId,
+    type AggregateInputEncodingProfile,
+    type BallotScoreEncodingProfile,
+    type BallotShareLayoutProfile,
     type BallotPrivacyProfileDigests,
     type BallotPrivacyProfileSet,
     type BallotProofProfile,
+    type EncodedAggregateLayoutProfile,
+    type EncodedShareVectorLayoutProfile,
     type ProtocolDigest,
     type ReceiverEncryptionProfile,
     type RefusalRecord,
@@ -20,7 +30,14 @@ import {
 
 import { createRefusal } from '../common/verification-helpers.js';
 import { fieldModulus } from '../plaintext-oracle/field.js';
-import { pvssBallotShareVectorWidth } from '../pvss-ballot/common.js';
+
+import {
+    ballotPrivacyEncodedCoordinatesPerOption,
+    ballotPrivacyMandatoryOptionCount,
+    ballotPrivacyMandatoryShareVectorWidth,
+    ballotPrivacyMaximumOptionCount,
+    ballotPrivacyScoreBucketCount,
+} from './encoded-share-layout.js';
 
 const receiverEncryptionCiphertextModulus = '12289';
 const shareCommitmentModulus = '18446744069414584321';
@@ -46,6 +63,26 @@ type ShareCommitmentProfilePayload = Omit<
 type ScoreMembershipProfilePayload = Omit<
     ScoreMembershipProfile,
     'scoreMembershipProfileDigest'
+>;
+type BallotScoreEncodingProfilePayload = Omit<
+    BallotScoreEncodingProfile,
+    'ballotScoreEncodingProfileDigest'
+>;
+type BallotShareLayoutProfilePayload = Omit<
+    BallotShareLayoutProfile,
+    'ballotShareLayoutProfileDigest'
+>;
+type AggregateInputEncodingProfilePayload = Omit<
+    AggregateInputEncodingProfile,
+    'aggregateInputEncodingProfileDigest'
+>;
+type EncodedShareVectorLayoutProfilePayload = Omit<
+    EncodedShareVectorLayoutProfile,
+    'encodedShareVectorLayoutDigest'
+>;
+type EncodedAggregateLayoutProfilePayload = Omit<
+    EncodedAggregateLayoutProfile,
+    'encodedAggregateLayoutDigest'
 >;
 type BallotProofProfilePayload = Omit<
     BallotProofProfile,
@@ -93,6 +130,31 @@ const deriveScoreMembershipProfileDigest = (
     profile: ScoreMembershipProfilePayload,
 ): ProtocolDigest =>
     deriveProtocolDigest('ScoreMembershipProfileDigest', profile);
+
+const deriveBallotScoreEncodingProfileDigest = (
+    profile: BallotScoreEncodingProfilePayload,
+): ProtocolDigest =>
+    deriveProtocolDigest('BallotScoreEncodingProfileDigest', profile);
+
+const deriveBallotShareLayoutProfileDigest = (
+    profile: BallotShareLayoutProfilePayload,
+): ProtocolDigest =>
+    deriveProtocolDigest('BallotShareLayoutProfileDigest', profile);
+
+const deriveAggregateInputEncodingProfileDigest = (
+    profile: AggregateInputEncodingProfilePayload,
+): ProtocolDigest =>
+    deriveProtocolDigest('AggregateInputEncodingProfileDigest', profile);
+
+const deriveEncodedShareVectorLayoutDigest = (
+    profile: EncodedShareVectorLayoutProfilePayload,
+): ProtocolDigest =>
+    deriveProtocolDigest('EncodedShareVectorLayoutDigest', profile);
+
+const deriveEncodedAggregateLayoutDigest = (
+    profile: EncodedAggregateLayoutProfilePayload,
+): ProtocolDigest =>
+    deriveProtocolDigest('EncodedAggregateLayoutDigest', profile);
 
 const deriveBallotProofProfileDigest = (
     profile: BallotProofProfilePayload,
@@ -153,7 +215,7 @@ const createShareCommitmentProfile = (): ShareCommitmentProfile => {
         commitmentModulus: shareCommitmentModulus,
         moduleRank: 4,
         moduleDegree: 256,
-        shareVectorWidth: pvssBallotShareVectorWidth,
+        shareVectorWidth: ballotPrivacyMandatoryShareVectorWidth,
         messageFieldModulus: fieldModulus,
         messageRepresentativeMinimum: 0,
         messageRepresentativeMaximum: maximumCanonicalFieldElement,
@@ -198,6 +260,114 @@ const createScoreMembershipProfile = (): ScoreMembershipProfile => {
     };
 };
 
+const createBallotScoreEncodingProfile = (): BallotScoreEncodingProfile => {
+    const profilePayload: BallotScoreEncodingProfilePayload = {
+        objectType: 'BallotScoreEncodingProfile',
+        objectVersion: 1,
+        profileId: ballotScoreEncodingProfileId,
+        encoding: 'ScalarScorePlusOneHotScoreBuckets',
+        scoreMinimum: 1,
+        scoreMaximum: 10,
+        oneHotWidth: ballotPrivacyScoreBucketCount,
+        coordinatesPerOption: ballotPrivacyEncodedCoordinatesPerOption,
+        scalarCoordinateOffset: 0,
+        scoreBucketCoordinateOffsets: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+        scalarConsistencyConstraint:
+            'scalar_score = sum(score_value * one_hot_score[score_value])',
+        oneHotConstraint:
+            'sum(one_hot_score[1..10]) = 1 and entries are boolean',
+    };
+
+    return {
+        ...profilePayload,
+        ballotScoreEncodingProfileDigest:
+            deriveBallotScoreEncodingProfileDigest(profilePayload),
+    };
+};
+
+const createBallotShareLayoutProfile = (): BallotShareLayoutProfile => {
+    const profilePayload: BallotShareLayoutProfilePayload = {
+        objectType: 'BallotShareLayoutProfile',
+        objectVersion: 1,
+        profileId: ballotShareLayoutProfileId,
+        layout: 'ScalarThenOneHotBucketsPerOption',
+        maximumOptionCount: ballotPrivacyMaximumOptionCount,
+        coordinatesPerOption: ballotPrivacyEncodedCoordinatesPerOption,
+        mandatoryOptionCount: ballotPrivacyMandatoryOptionCount,
+        mandatoryShareVectorWidth: ballotPrivacyMandatoryShareVectorWidth,
+        widthFormula: 'shareVectorWidth = 11 * optionCount',
+        paddingRule: 'unused coordinates must be zero',
+    };
+
+    return {
+        ...profilePayload,
+        ballotShareLayoutProfileDigest:
+            deriveBallotShareLayoutProfileDigest(profilePayload),
+    };
+};
+
+const createAggregateInputEncodingProfile =
+    (): AggregateInputEncodingProfile => {
+        const profilePayload: AggregateInputEncodingProfilePayload = {
+            objectType: 'AggregateInputEncodingProfile',
+            objectVersion: 1,
+            profileId: aggregateInputEncodingProfileId,
+            encoding: 'AggregatedScoreHistogram',
+            scalarAggregateCoordinates: true,
+            oneHotBucketAggregateCoordinates: true,
+            coordinatesPerOption: ballotPrivacyEncodedCoordinatesPerOption,
+            maximumOptionCount: ballotPrivacyMaximumOptionCount,
+        };
+
+        return {
+            ...profilePayload,
+            aggregateInputEncodingProfileDigest:
+                deriveAggregateInputEncodingProfileDigest(profilePayload),
+        };
+    };
+
+const createEncodedShareVectorLayoutProfile =
+    (): EncodedShareVectorLayoutProfile => {
+        const profilePayload: EncodedShareVectorLayoutProfilePayload = {
+            objectType: 'EncodedShareVectorLayoutProfile',
+            objectVersion: 1,
+            profileId: encodedShareVectorLayoutProfileId,
+            layout: 'ScalarThenOneHotBucketsPerOption',
+            coordinatesPerOption: ballotPrivacyEncodedCoordinatesPerOption,
+            maximumOptionCount: ballotPrivacyMaximumOptionCount,
+            mandatoryShareVectorWidth: ballotPrivacyMandatoryShareVectorWidth,
+            coordinateOrder:
+                'score, score_bucket_1, ..., score_bucket_10 for each option',
+        };
+
+        return {
+            ...profilePayload,
+            encodedShareVectorLayoutDigest:
+                deriveEncodedShareVectorLayoutDigest(profilePayload),
+        };
+    };
+
+const createEncodedAggregateLayoutProfile =
+    (): EncodedAggregateLayoutProfile => {
+        const profilePayload: EncodedAggregateLayoutProfilePayload = {
+            objectType: 'EncodedAggregateLayoutProfile',
+            objectVersion: 1,
+            profileId: encodedAggregateLayoutProfileId,
+            layout: 'AggregatedScalarAndScoreBucketCoordinates',
+            coordinatesPerOption: ballotPrivacyEncodedCoordinatesPerOption,
+            maximumOptionCount: ballotPrivacyMaximumOptionCount,
+            mandatoryAggregateWidth: ballotPrivacyMandatoryShareVectorWidth,
+            aggregateCoordinateMeaning:
+                'sum of accepted receiver-share coordinates before bridge reduction',
+        };
+
+        return {
+            ...profilePayload,
+            encodedAggregateLayoutDigest:
+                deriveEncodedAggregateLayoutDigest(profilePayload),
+        };
+    };
+
 const createBallotProofProfile = (): BallotProofProfile => {
     const profilePayload: BallotProofProfilePayload = {
         objectType: 'BallotProofProfile',
@@ -232,6 +402,11 @@ export const createBallotPrivacyProfileSet = (): BallotPrivacyProfileSet => ({
     receiverEncryptionProfile: createReceiverEncryptionProfile(),
     shareCommitmentProfile: createShareCommitmentProfile(),
     scoreMembershipProfile: createScoreMembershipProfile(),
+    ballotScoreEncodingProfile: createBallotScoreEncodingProfile(),
+    ballotShareLayoutProfile: createBallotShareLayoutProfile(),
+    aggregateInputEncodingProfile: createAggregateInputEncodingProfile(),
+    encodedShareVectorLayoutProfile: createEncodedShareVectorLayoutProfile(),
+    encodedAggregateLayoutProfile: createEncodedAggregateLayoutProfile(),
     ballotProofProfile: createBallotProofProfile(),
 });
 
@@ -247,6 +422,21 @@ export const deriveBallotPrivacyProfileDigests =
                 profileSet.shareCommitmentProfile.shareCommitmentProfileDigest,
             scoreMembershipProfileDigest:
                 profileSet.scoreMembershipProfile.scoreMembershipProfileDigest,
+            ballotScoreEncodingProfileDigest:
+                profileSet.ballotScoreEncodingProfile
+                    .ballotScoreEncodingProfileDigest,
+            ballotShareLayoutProfileDigest:
+                profileSet.ballotShareLayoutProfile
+                    .ballotShareLayoutProfileDigest,
+            aggregateInputEncodingProfileDigest:
+                profileSet.aggregateInputEncodingProfile
+                    .aggregateInputEncodingProfileDigest,
+            encodedShareVectorLayoutDigest:
+                profileSet.encodedShareVectorLayoutProfile
+                    .encodedShareVectorLayoutDigest,
+            encodedAggregateLayoutDigest:
+                profileSet.encodedAggregateLayoutProfile
+                    .encodedAggregateLayoutDigest,
             ballotProofProfileDigest:
                 profileSet.ballotProofProfile.ballotProofProfileDigest,
         };
@@ -291,7 +481,7 @@ export const createShareCommitmentMessageBoundCert = (input: {
         shareCommitmentProfileDigest:
             shareCommitmentProfile.shareCommitmentProfileDigest,
         fieldModulus,
-        shareVectorWidth: pvssBallotShareVectorWidth,
+        shareVectorWidth: ballotPrivacyMandatoryShareVectorWidth,
         perBallotShareRepresentativeRange: [0, maximumCanonicalFieldElement],
         maximumCanonicalTurnout,
         maximumAggregateInteger,
@@ -355,7 +545,8 @@ export const verifyShareCommitmentMessageBoundCert = (input: {
         certificate.objectVersion !== 1 ||
         certificate.profileId !== shareCommitmentMessageBoundProfileId ||
         certificate.fieldModulus !== fieldModulus ||
-        certificate.shareVectorWidth !== pvssBallotShareVectorWidth ||
+        certificate.shareVectorWidth !==
+            ballotPrivacyMandatoryShareVectorWidth ||
         certificate.perBallotShareRepresentativeRange[0] !== 0 ||
         certificate.perBallotShareRepresentativeRange[1] !== fieldModulus - 1
     ) {

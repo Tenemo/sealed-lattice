@@ -5,35 +5,60 @@ import {
     type BallotPrivacyRelationCompilerInput,
 } from '../../src/ballot-privacy/index';
 
-const zeroPadding = Array.from({ length: 18 }, () => 0);
-
 const oneHotScore = (score: number): readonly number[] =>
     Array.from({ length: 10 }, (_unusedValue, scoreIndex) =>
         scoreIndex + 1 === score ? 1 : 0,
     );
+
+const encodedShareVector = (input: {
+    readonly firstOptionScoreShare: number;
+    readonly secondOptionScoreShare: number;
+}): readonly number[] => [
+    input.firstOptionScoreShare,
+    ...oneHotScore(7),
+    input.secondOptionScoreShare,
+    ...oneHotScore(3),
+];
+
+const encodedCoordinateShamirCoefficients =
+    (): readonly (readonly number[])[] => [
+        [65_536],
+        ...Array.from({ length: 10 }, () => [0] as const),
+        [9],
+        ...Array.from({ length: 10 }, () => [0] as const),
+    ];
 
 const validRelationInput = (): BallotPrivacyRelationCompilerInput => ({
     optionCount: 2,
     rosterSize: 3,
     pvssThreshold: 2,
     normalizedScores: [7, 3],
-    scoreMembershipWitnesses: [oneHotScore(7), oneHotScore(3)],
-    shamirCoefficients: [[65_536], [9]],
+    scoreOneHotWitnesses: [oneHotScore(7), oneHotScore(3)],
+    encodedCoordinateShamirCoefficients: encodedCoordinateShamirCoefficients(),
     receivers: [
         {
             receiverIdentity: 'receiver-1',
             receiverRosterPosition: 1,
-            receiverShareVector: [6, 12, ...zeroPadding],
+            receiverShareVector: encodedShareVector({
+                firstOptionScoreShare: 6,
+                secondOptionScoreShare: 12,
+            }),
         },
         {
             receiverIdentity: 'receiver-2',
             receiverRosterPosition: 2,
-            receiverShareVector: [5, 21, ...zeroPadding],
+            receiverShareVector: encodedShareVector({
+                firstOptionScoreShare: 5,
+                secondOptionScoreShare: 21,
+            }),
         },
         {
             receiverIdentity: 'receiver-3',
             receiverRosterPosition: 3,
-            receiverShareVector: [4, 30, ...zeroPadding],
+            receiverShareVector: encodedShareVector({
+                firstOptionScoreShare: 4,
+                secondOptionScoreShare: 30,
+            }),
         },
     ],
 });
@@ -56,7 +81,7 @@ const expectRelationRefusal = (
 };
 
 describe('ballot privacy relation compiler', () => {
-    it('compiles score membership and Shamir quotient constraints', () => {
+    it('compiles encoded score membership and Shamir quotient constraints', () => {
         const result = compileBallotPrivacyRelation(validRelationInput());
 
         expect(result).toMatchObject({
@@ -65,6 +90,8 @@ describe('ballot privacy relation compiler', () => {
             optionCount: 2,
             rosterSize: 3,
             pvssThreshold: 2,
+            shareVectorWidth: 22,
+            encodedCoordinateCount: 22,
             maximumAbsoluteShamirQuotient: 3,
         });
         if (result.ok) {
@@ -80,50 +107,51 @@ describe('ballot privacy relation compiler', () => {
                     reconstructedScore: 3,
                 },
             ]);
-            expect(result.shamirQuotientConstraints).toEqual([
-                {
-                    optionIndex: 0,
-                    receiverRosterPosition: 1,
-                    evaluatedInteger: 65_543,
-                    shareRepresentative: 6,
-                    quotient: 1,
-                },
-                {
-                    optionIndex: 1,
-                    receiverRosterPosition: 1,
-                    evaluatedInteger: 12,
-                    shareRepresentative: 12,
-                    quotient: 0,
-                },
-                {
-                    optionIndex: 0,
-                    receiverRosterPosition: 2,
-                    evaluatedInteger: 131_079,
-                    shareRepresentative: 5,
-                    quotient: 2,
-                },
-                {
-                    optionIndex: 1,
-                    receiverRosterPosition: 2,
-                    evaluatedInteger: 21,
-                    shareRepresentative: 21,
-                    quotient: 0,
-                },
-                {
-                    optionIndex: 0,
-                    receiverRosterPosition: 3,
-                    evaluatedInteger: 196_615,
-                    shareRepresentative: 4,
-                    quotient: 3,
-                },
-                {
-                    optionIndex: 1,
-                    receiverRosterPosition: 3,
-                    evaluatedInteger: 30,
-                    shareRepresentative: 30,
-                    quotient: 0,
-                },
-            ]);
+            expect(result.shamirQuotientConstraints).toHaveLength(3 * 22);
+            expect(result.shamirQuotientConstraints).toEqual(
+                expect.arrayContaining([
+                    {
+                        coordinateRole: 'ScalarScore',
+                        encodedCoordinateIndex: 0,
+                        evaluatedInteger: 65_543,
+                        optionIndex: 0,
+                        quotient: 1,
+                        receiverRosterPosition: 1,
+                        scoreBucketValue: undefined,
+                        shareRepresentative: 6,
+                    },
+                    {
+                        coordinateRole: 'ScoreBucket',
+                        encodedCoordinateIndex: 7,
+                        evaluatedInteger: 1,
+                        optionIndex: 0,
+                        quotient: 0,
+                        receiverRosterPosition: 1,
+                        scoreBucketValue: 7,
+                        shareRepresentative: 1,
+                    },
+                    {
+                        coordinateRole: 'ScalarScore',
+                        encodedCoordinateIndex: 11,
+                        evaluatedInteger: 30,
+                        optionIndex: 1,
+                        quotient: 0,
+                        receiverRosterPosition: 3,
+                        scoreBucketValue: undefined,
+                        shareRepresentative: 30,
+                    },
+                    {
+                        coordinateRole: 'ScoreBucket',
+                        encodedCoordinateIndex: 14,
+                        evaluatedInteger: 1,
+                        optionIndex: 1,
+                        quotient: 0,
+                        receiverRosterPosition: 3,
+                        scoreBucketValue: 3,
+                        shareRepresentative: 1,
+                    },
+                ]),
+            );
         }
     });
 
@@ -132,7 +160,7 @@ describe('ballot privacy relation compiler', () => {
             {
                 ...validRelationInput(),
                 normalizedScores: [0, 3],
-                scoreMembershipWitnesses: [oneHotScore(1), oneHotScore(3)],
+                scoreOneHotWitnesses: [oneHotScore(1), oneHotScore(3)],
             },
             'score is outside the frozen score domain',
         );
@@ -140,61 +168,101 @@ describe('ballot privacy relation compiler', () => {
             {
                 ...validRelationInput(),
                 normalizedScores: [11, 3],
-                scoreMembershipWitnesses: [oneHotScore(10), oneHotScore(3)],
+                scoreOneHotWitnesses: [oneHotScore(10), oneHotScore(3)],
             },
             'score is outside the frozen score domain',
         );
     });
 
-    it('rejects malformed one-hot witnesses including signed cancellation', () => {
+    it('rejects malformed one-hot witnesses', () => {
         expectRelationRefusal(
             {
                 ...validRelationInput(),
-                scoreMembershipWitnesses: [
-                    oneHotScore(7),
-                    [-1, 2, 0, 0, 0, 0, 0, 0, 0, 0],
+                scoreOneHotWitnesses: [
+                    [0, 0, 0, 0, 0, 0, 1, 1, 0, 0],
+                    oneHotScore(3),
                 ],
             },
-            'score-membership witness is not one-hot',
+            'score one-hot witness is not a valid score encoding',
         );
         expectRelationRefusal(
             {
                 ...validRelationInput(),
-                scoreMembershipWitnesses: [
+                scoreOneHotWitnesses: [
                     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
                     oneHotScore(3),
                 ],
             },
-            'score-membership witness is not one-hot',
+            'score one-hot witness is not a valid score encoding',
+        );
+        expectRelationRefusal(
+            {
+                ...validRelationInput(),
+                scoreOneHotWitnesses: [[0, 0, 0], oneHotScore(3)],
+            },
+            'ten-entry one-hot score witness',
         );
     });
 
-    it('rejects wrong polynomial degree, constant term, and quotient constraints', () => {
+    it('rejects signed-cancellation-style one-hot witnesses even when linear equations match', () => {
         expectRelationRefusal(
             {
                 ...validRelationInput(),
-                shamirCoefficients: [[65_536, 1], [9]],
+                scoreOneHotWitnesses: [
+                    [0, 0, -1, 0, 2, 0, 0, 0, 0, 0],
+                    oneHotScore(3),
+                ],
+            },
+            'score one-hot witness is not a valid score encoding',
+        );
+    });
+
+    it('rejects wrong polynomial degree and quotient constraints across encoded coordinates', () => {
+        expectRelationRefusal(
+            {
+                ...validRelationInput(),
+                encodedCoordinateShamirCoefficients: [
+                    [65_536, 1],
+                    ...encodedCoordinateShamirCoefficients().slice(1),
+                ],
             },
             'degree less than the PVSS threshold',
         );
+
+        const wrongScalarShareInput = validRelationInput();
         expectRelationRefusal(
             {
-                ...validRelationInput(),
-                normalizedScores: [8, 3],
-                scoreMembershipWitnesses: [oneHotScore(8), oneHotScore(3)],
+                ...wrongScalarShareInput,
+                receivers: wrongScalarShareInput.receivers.map((receiver) =>
+                    receiver.receiverRosterPosition === 2
+                        ? {
+                              ...receiver,
+                              receiverShareVector: encodedShareVector({
+                                  firstOptionScoreShare: 6,
+                                  secondOptionScoreShare: 21,
+                              }),
+                          }
+                        : receiver,
+                ),
             },
             'Shamir quotient constraint is not exact',
         );
 
-        const wrongShareInput = validRelationInput();
+        const wrongBucketShareInput = validRelationInput();
         expectRelationRefusal(
             {
-                ...wrongShareInput,
-                receivers: wrongShareInput.receivers.map((receiver) =>
-                    receiver.receiverRosterPosition === 2
+                ...wrongBucketShareInput,
+                receivers: wrongBucketShareInput.receivers.map((receiver) =>
+                    receiver.receiverRosterPosition === 1
                         ? {
                               ...receiver,
-                              receiverShareVector: [6, 21, ...zeroPadding],
+                              receiverShareVector:
+                                  receiver.receiverShareVector.map(
+                                      (shareRepresentative, coordinateIndex) =>
+                                          coordinateIndex === 7
+                                              ? 0
+                                              : shareRepresentative,
+                                  ),
                           }
                         : receiver,
                 ),
@@ -203,7 +271,7 @@ describe('ballot privacy relation compiler', () => {
         );
     });
 
-    it('rejects malformed receiver coverage and share-vector layout', () => {
+    it('rejects omitted or duplicated receivers', () => {
         const duplicateReceiverInput = validRelationInput();
         expectRelationRefusal(
             {
@@ -228,6 +296,23 @@ describe('ballot privacy relation compiler', () => {
             },
             'one receiver entry for every roster position',
         );
+    });
+
+    it('rejects stale scalar-only layouts and nonzero padding', () => {
+        const scalarOnlyInput = validRelationInput();
+        expectRelationRefusal(
+            {
+                ...scalarOnlyInput,
+                receivers: scalarOnlyInput.receivers.map((receiver) => ({
+                    ...receiver,
+                    receiverShareVector: receiver.receiverShareVector.slice(
+                        0,
+                        2,
+                    ),
+                })),
+            },
+            'receiver share vectors must use the encoded width',
+        );
 
         const nonzeroPaddingInput = validRelationInput();
         expectRelationRefusal(
@@ -238,10 +323,8 @@ describe('ballot privacy relation compiler', () => {
                         ? {
                               ...receiver,
                               receiverShareVector: [
-                                  4,
-                                  30,
+                                  ...receiver.receiverShareVector,
                                   1,
-                                  ...zeroPadding.slice(1),
                               ],
                           }
                         : receiver,

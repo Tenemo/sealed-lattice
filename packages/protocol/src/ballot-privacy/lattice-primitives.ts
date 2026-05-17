@@ -7,6 +7,7 @@ import type {
     ProtocolDigest,
     ReceiverEncryptionProfile,
     ReceiverEncryptionPublicKey,
+    ReceiverKeyProof,
     ReceiverPayload,
     RefusalRecord,
     ShareCommitment,
@@ -15,10 +16,10 @@ import type {
 
 import { createRefusal } from '../common/verification-helpers.js';
 import { assertCanonicalFieldElement } from '../plaintext-oracle/field.js';
-import { pvssBallotShareVectorWidth } from '../pvss-ballot/common.js';
 
 import {
     createReceiverEncryptionPublicKeyShell,
+    createReceiverKeyProofShell,
     createReceiverPayloadShell,
     createShareCommitmentShell,
 } from './objects.js';
@@ -541,8 +542,11 @@ const dotNumberPolynomialVectors = (
 
 function validateReceiverShareVector(
     receiverShareVector: readonly number[],
+    shareCommitmentProfile: ShareCommitmentProfile,
 ): void {
-    if (receiverShareVector.length !== pvssBallotShareVectorWidth) {
+    if (
+        receiverShareVector.length !== shareCommitmentProfile.shareVectorWidth
+    ) {
         throw new RangeError(
             'Receiver share vectors must use the fixed width.',
         );
@@ -579,8 +583,9 @@ function validateShareCommitmentOpening(
 
 const encodeShareVectorAsMessagePolynomial = (
     receiverShareVector: readonly number[],
+    shareCommitmentProfile: ShareCommitmentProfile,
 ): readonly bigint[] => {
-    validateReceiverShareVector(receiverShareVector);
+    validateReceiverShareVector(receiverShareVector, shareCommitmentProfile);
     const coefficients = Array.from(
         { length: shareCommitmentModuleDegree },
         () => 0n,
@@ -628,9 +633,12 @@ const computeShareCommitmentVector = (
     opening: ShareCommitmentOpeningWitness,
     shareCommitmentProfile: ShareCommitmentProfile,
 ): readonly (readonly bigint[])[] => {
-    validateReceiverShareVector(shareVector);
+    validateReceiverShareVector(shareVector, shareCommitmentProfile);
     validateShareCommitmentOpening(opening, shareCommitmentProfile);
-    const messagePolynomial = encodeShareVectorAsMessagePolynomial(shareVector);
+    const messagePolynomial = encodeShareVectorAsMessagePolynomial(
+        shareVector,
+        shareCommitmentProfile,
+    );
     const messageMatrix = deriveShareCommitmentMessageMatrix(
         shareCommitmentProfile.shareCommitmentProfileDigest,
     );
@@ -772,6 +780,7 @@ export const createShareCommitment = (input: {
         receiverRosterPosition: input.receiverRosterPosition,
         shareCommitmentProfileDigest:
             input.shareCommitmentProfile.shareCommitmentProfileDigest,
+        shareVectorWidth: input.shareCommitmentProfile.shareVectorWidth,
         commitmentBodyDigest,
     });
 
@@ -841,7 +850,10 @@ const encodePayloadPlaintextBits = (
     plaintext: ReceiverPayloadPlaintextWitness,
     shareCommitmentProfile: ShareCommitmentProfile,
 ): readonly number[] => {
-    validateReceiverShareVector(plaintext.receiverShareVector);
+    validateReceiverShareVector(
+        plaintext.receiverShareVector,
+        shareCommitmentProfile,
+    );
     validateShareCommitmentOpening(
         plaintext.shareCommitmentOpening,
         shareCommitmentProfile,
@@ -1032,6 +1044,220 @@ const validateReceiverPublicKeyMaterial = (
             }
         }
     }
+};
+
+const validateReceiverSecretState = (
+    secretState: ReceiverEncryptionSecretState,
+): void => {
+    const validateShortVector = (
+        vector: readonly (readonly number[])[],
+        vectorLabel: string,
+    ): void => {
+        if (vector.length !== receiverEncryptionModuleRank) {
+            throw new RangeError(
+                `${vectorLabel} must use the frozen module rank.`,
+            );
+        }
+        for (const polynomial of vector) {
+            if (polynomial.length !== receiverEncryptionModuleDegree) {
+                throw new RangeError(
+                    `${vectorLabel} polynomials must use the frozen degree.`,
+                );
+            }
+            for (const coefficient of polynomial) {
+                if (
+                    !Number.isSafeInteger(coefficient) ||
+                    Math.abs(coefficient) >
+                        receiverEncryptionCenteredBinomialEta
+                ) {
+                    throw new RangeError(
+                        `${vectorLabel} coefficients must satisfy the frozen centered-binomial norm bound.`,
+                    );
+                }
+            }
+        }
+    };
+
+    validateShortVector(secretState.secretVector, 'Receiver secret vector');
+    validateShortVector(secretState.errorVector, 'Receiver error vector');
+};
+
+const deriveExpectedReceiverPublicKeyMaterial = (input: {
+    readonly receiverEncryptionProfile: ReceiverEncryptionProfile;
+    readonly publicMatrixSeedDigest: ProtocolDigest;
+    readonly secretState: ReceiverEncryptionSecretState;
+}): ReceiverEncryptionPublicKeyMaterial => {
+    const publicMatrix = deriveReceiverPublicMatrix(
+        input.receiverEncryptionProfile.receiverEncryptionProfileDigest,
+        input.publicMatrixSeedDigest,
+    );
+    const publicKeyVector = multiplyMatrixByVector(
+        publicMatrix,
+        input.secretState.secretVector,
+        receiverEncryptionModulus,
+    ).map((polynomial, vectorIndex) =>
+        addNumberPolynomials(
+            polynomial,
+            input.secretState.errorVector[vectorIndex] ?? [],
+            receiverEncryptionModulus,
+        ),
+    );
+
+    return {
+        publicKeyVector,
+        publicMatrixSeedDigest: input.publicMatrixSeedDigest,
+    };
+};
+
+const deriveReceiverKeyProofRoot = (input: {
+    readonly receiverEncryptionProfile: ReceiverEncryptionProfile;
+    readonly receiverPublicKey: ReceiverEncryptionPublicKey;
+    readonly publicKeyMaterial: ReceiverEncryptionPublicKeyMaterial;
+}): ProtocolDigest =>
+    deriveProtocolDigest('ReceiverKeyProofRoot', {
+        coefficientModulus: receiverEncryptionModulus,
+        errorInfinityNormBound: receiverEncryptionCenteredBinomialEta,
+        keyMaterialDigest: input.receiverPublicKey.keyMaterialDigest,
+        moduleDegree: receiverEncryptionModuleDegree,
+        moduleRank: receiverEncryptionModuleRank,
+        proofRelation:
+            'receiver_public_key_vector = public_matrix * secret_vector + error_vector mod q_receiver',
+        proofRootKind: 'ReceiverKeyRelationWitnessPreflight',
+        publicMatrixSeedDigest: input.publicKeyMaterial.publicMatrixSeedDigest,
+        receiverEncryptionProfileDigest:
+            input.receiverEncryptionProfile.receiverEncryptionProfileDigest,
+        receiverPublicKeyDigest:
+            input.receiverPublicKey.receiverPublicKeyDigest,
+        secretInfinityNormBound: receiverEncryptionCenteredBinomialEta,
+    });
+
+export const verifyReceiverKeyWitness = (input: {
+    readonly receiverEncryptionProfile: ReceiverEncryptionProfile;
+    readonly receiverPublicKey: ReceiverEncryptionPublicKey;
+    readonly publicKeyMaterial: ReceiverEncryptionPublicKeyMaterial;
+    readonly secretState: ReceiverEncryptionSecretState;
+}): readonly RefusalRecord[] => {
+    const refusedObjects: RefusalRecord[] = [];
+
+    try {
+        validateReceiverPublicKeyMaterial(input.publicKeyMaterial);
+        validateReceiverSecretState(input.secretState);
+    } catch (error) {
+        refusedObjects.push(
+            createRefusal(
+                'BallotPackageInvalid',
+                error instanceof Error
+                    ? error.message
+                    : 'Receiver key witness is malformed.',
+                input.receiverPublicKey.receiverPublicKeyDigest,
+            ),
+        );
+
+        return refusedObjects;
+    }
+
+    const expectedPublicMatrixSeedDigest = deriveReceiverMatrixSeedDigest({
+        ceremonyId: input.receiverPublicKey.ceremonyId,
+        manifestDigest: input.receiverPublicKey.manifestDigest,
+        receiverEncryptionProfileDigest:
+            input.receiverEncryptionProfile.receiverEncryptionProfileDigest,
+        receiverIdentity: input.receiverPublicKey.receiverIdentity,
+        receiverRosterPosition: input.receiverPublicKey.receiverRosterPosition,
+        recoveryEpoch: input.receiverPublicKey.recoveryEpoch,
+        rosterDigest: input.receiverPublicKey.rosterDigest,
+    });
+    const expectedPublicKeyMaterial = deriveExpectedReceiverPublicKeyMaterial({
+        publicMatrixSeedDigest: input.publicKeyMaterial.publicMatrixSeedDigest,
+        receiverEncryptionProfile: input.receiverEncryptionProfile,
+        secretState: input.secretState,
+    });
+    const expectedKeyMaterialDigest = deriveReceiverKeyMaterialDigest({
+        publicKeyVector: input.publicKeyMaterial.publicKeyVector,
+        publicMatrixSeedDigest: input.publicKeyMaterial.publicMatrixSeedDigest,
+        receiverEncryptionProfileDigest:
+            input.receiverEncryptionProfile.receiverEncryptionProfileDigest,
+    });
+
+    if (
+        input.receiverPublicKey.receiverEncryptionProfileDigest !==
+        input.receiverEncryptionProfile.receiverEncryptionProfileDigest
+    ) {
+        refusedObjects.push(
+            createRefusal(
+                'BallotPackageInvalid',
+                'Receiver key witness is not bound to the receiver encryption profile.',
+                input.receiverPublicKey.receiverPublicKeyDigest,
+            ),
+        );
+    }
+    if (
+        input.publicKeyMaterial.publicMatrixSeedDigest !==
+        expectedPublicMatrixSeedDigest
+    ) {
+        refusedObjects.push(
+            createRefusal(
+                'BallotPackageInvalid',
+                'Receiver key witness public matrix seed is not roster-bound.',
+                input.receiverPublicKey.receiverPublicKeyDigest,
+            ),
+        );
+    }
+    if (
+        input.receiverPublicKey.keyMaterialDigest !== expectedKeyMaterialDigest
+    ) {
+        refusedObjects.push(
+            createRefusal(
+                'BallotPackageInvalid',
+                'Receiver key witness public key material does not match the frozen receiver key.',
+                input.receiverPublicKey.receiverPublicKeyDigest,
+            ),
+        );
+    }
+    if (
+        !canonicalEqual(
+            input.publicKeyMaterial.publicKeyVector,
+            expectedPublicKeyMaterial.publicKeyVector,
+        )
+    ) {
+        refusedObjects.push(
+            createRefusal(
+                'BallotPackageInvalid',
+                'Receiver key witness does not satisfy the frozen receiver-key equation.',
+                input.receiverPublicKey.receiverPublicKeyDigest,
+            ),
+        );
+    }
+
+    return refusedObjects;
+};
+
+export const createReceiverKeyProof = (input: {
+    readonly receiverEncryptionProfile: ReceiverEncryptionProfile;
+    readonly receiverPublicKey: ReceiverEncryptionPublicKey;
+    readonly publicKeyMaterial: ReceiverEncryptionPublicKeyMaterial;
+    readonly secretState: ReceiverEncryptionSecretState;
+}): ReceiverKeyProof => {
+    const refusedObjects = verifyReceiverKeyWitness(input);
+    if (refusedObjects.length > 0) {
+        throw new RangeError(
+            refusedObjects.map((refusal) => refusal.message).join(' '),
+        );
+    }
+
+    return createReceiverKeyProofShell({
+        ceremonyId: input.receiverPublicKey.ceremonyId,
+        manifestDigest: input.receiverPublicKey.manifestDigest,
+        proofBackend: 'LaZerStyleLocalLatticeRelation',
+        proofRoot: deriveReceiverKeyProofRoot(input),
+        receiverEncryptionProfileDigest:
+            input.receiverPublicKey.receiverEncryptionProfileDigest,
+        receiverIdentity: input.receiverPublicKey.receiverIdentity,
+        receiverPublicKeyDigest:
+            input.receiverPublicKey.receiverPublicKeyDigest,
+        receiverRosterPosition: input.receiverPublicKey.receiverRosterPosition,
+        recoveryEpoch: input.receiverPublicKey.recoveryEpoch,
+        rosterDigest: input.receiverPublicKey.rosterDigest,
+    });
 };
 
 const sampleReceiverEncryptionChunkWitness = (

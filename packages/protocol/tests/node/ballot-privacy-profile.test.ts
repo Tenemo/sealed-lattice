@@ -17,12 +17,22 @@ const ballotPrivacyProfileVector = ballotPrivacyProfileVectorJson as {
         readonly receiverEncryptionProfileId: string;
         readonly shareCommitmentProfileId: string;
         readonly scoreMembershipProfileId: string;
+        readonly ballotScoreEncodingProfileId: string;
+        readonly ballotShareLayoutProfileId: string;
+        readonly aggregateInputEncodingProfileId: string;
+        readonly encodedShareVectorLayoutProfileId: string;
+        readonly encodedAggregateLayoutProfileId: string;
         readonly ballotProofProfileId: string;
     };
     readonly profileDigests: {
         readonly receiverEncryptionProfileDigest: string;
         readonly shareCommitmentProfileDigest: string;
         readonly scoreMembershipProfileDigest: string;
+        readonly ballotScoreEncodingProfileDigest: string;
+        readonly ballotShareLayoutProfileDigest: string;
+        readonly aggregateInputEncodingProfileDigest: string;
+        readonly encodedShareVectorLayoutDigest: string;
+        readonly encodedAggregateLayoutDigest: string;
         readonly ballotProofProfileDigest: string;
     };
     readonly mandatoryBoundCert: {
@@ -108,6 +118,28 @@ describe('ballot privacy profile freeze', () => {
         expect(profileSet.scoreMembershipProfile.relation).toBe(
             'OneHotScoreMembership',
         );
+        expect(profileSet.ballotScoreEncodingProfile.profileId).toBe(
+            ballotPrivacyProfileVector.profileIds.ballotScoreEncodingProfileId,
+        );
+        expect(profileSet.ballotShareLayoutProfile.profileId).toBe(
+            ballotPrivacyProfileVector.profileIds.ballotShareLayoutProfileId,
+        );
+        expect(profileSet.aggregateInputEncodingProfile.profileId).toBe(
+            ballotPrivacyProfileVector.profileIds
+                .aggregateInputEncodingProfileId,
+        );
+        expect(profileSet.encodedShareVectorLayoutProfile.profileId).toBe(
+            ballotPrivacyProfileVector.profileIds
+                .encodedShareVectorLayoutProfileId,
+        );
+        expect(profileSet.encodedAggregateLayoutProfile.profileId).toBe(
+            ballotPrivacyProfileVector.profileIds
+                .encodedAggregateLayoutProfileId,
+        );
+        expect(profileSet.shareCommitmentProfile.shareVectorWidth).toBe(220);
+        expect(
+            profileSet.ballotShareLayoutProfile.mandatoryShareVectorWidth,
+        ).toBe(220);
         expect(profileSet.ballotProofProfile.profileId).toBe(
             ballotPrivacyProfileVector.profileIds.ballotProofProfileId,
         );
@@ -222,6 +254,11 @@ describe('ballot privacy profile freeze', () => {
                 'ShareCommitmentProfileDigest',
                 'BallotProofProfileDigest',
                 'ScoreMembershipProfileDigest',
+                'BallotScoreEncodingProfileDigest',
+                'BallotShareLayoutProfileDigest',
+                'AggregateInputEncodingProfileDigest',
+                'EncodedShareVectorLayoutDigest',
+                'EncodedAggregateLayoutDigest',
                 'ShareCommitmentMessageBoundCertDigest',
                 'ReceiverPayloadDigest',
                 'ReceiverPayloadCiphertextRoot',

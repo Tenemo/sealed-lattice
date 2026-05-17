@@ -439,6 +439,15 @@ fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult<Value> {
                 vector_case,
             ))
         }
+        "VerifyBallotPrivacyEncodedRelationVector" => {
+            let vector_case = request.get("vectorCase").ok_or_else(|| {
+                CanonicalError::new(CanonicalErrorCode::InvalidFixture, "vectorCase is required")
+            })?;
+
+            Ok(crate::ballot_privacy::verify_encoded_relation_vector_case(
+                vector_case,
+            ))
+        }
         "VerifyReceiverKeyProof" => {
             let receiver_key_proof = request.get("receiverKeyProof").ok_or_else(|| {
                 CanonicalError::new(

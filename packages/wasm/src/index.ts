@@ -7,6 +7,7 @@ import {
     canonicalErrorCodes,
     createTranscriptCoreKernelLoader,
     TranscriptCoreKernelCommandError,
+    type BallotPrivacyEncodedRelationVectorVerification,
     type BallotPrivacyKernelVerification,
     type BallotPrivacyLinearProofVectorVerification,
     type BallotPrivacyProofBackendStatus,
@@ -27,6 +28,7 @@ export {
 };
 export type {
     TranscriptCoreKernel,
+    BallotPrivacyEncodedRelationVectorVerification,
     BallotPrivacyKernelVerification,
     BallotPrivacyLinearProofVectorVerification,
     BallotPrivacyProofBackendStatus,

@@ -7,10 +7,12 @@ import {
     addShareCommitmentPolynomialVectors,
     assertNoFixtureRandomnessInProduction,
     createFixtureRandomnessSource,
+    createReceiverKeyProof,
     createShareCommitment,
     encodeReceiverPayloadPlaintextForTests,
     encryptReceiverPayload,
     generateReceiverState,
+    verifyReceiverKeyWitness,
     verifyReceiverPayloadWitness,
     verifyShareCommitmentWitness,
     type ReceiverPayloadPlaintextWitness,
@@ -31,7 +33,7 @@ const shareVector = (
 ): readonly number[] => [
     firstShare,
     secondShare,
-    ...Array.from({ length: 18 }, () => 0),
+    ...Array.from({ length: 218 }, () => 0),
 ];
 
 const opening = (seed: number): ShareCommitmentOpeningWitness => ({
@@ -103,6 +105,86 @@ describe('ballot privacy lattice primitives', () => {
         );
         expect(firstState.receiverPublicKey).not.toHaveProperty('secretVector');
         expect(firstState.receiverPublicKey).not.toHaveProperty('errorVector');
+    });
+
+    it('creates receiver-key proof records only after the key witness relation checks', () => {
+        const profileSet = createBallotPrivacyProfileSet();
+        const receiverState = generateReceiverState({
+            ceremonyId: 'ceremony-1',
+            manifestDigest: digest('manifest'),
+            randomnessSource: fixtureRandomness,
+            receiverEncryptionProfile: profileSet.receiverEncryptionProfile,
+            receiverIdentity: 'receiver-1',
+            receiverRosterPosition: 1,
+            recoveryEpoch: 0,
+            rosterDigest: digest('roster'),
+        });
+        const proofRecord = createReceiverKeyProof({
+            publicKeyMaterial: receiverState.publicKeyMaterial,
+            receiverEncryptionProfile: profileSet.receiverEncryptionProfile,
+            receiverPublicKey: receiverState.receiverPublicKey,
+            secretState: receiverState.secretState,
+        });
+
+        expect(proofRecord).toMatchObject({
+            ceremonyId: 'ceremony-1',
+            objectType: 'ReceiverKeyProof',
+            proofBackend: 'LaZerStyleLocalLatticeRelation',
+            receiverIdentity: 'receiver-1',
+            receiverRosterPosition: 1,
+        });
+        expect(proofRecord.proofRoot).toMatch(/^[a-f0-9]{128}$/u);
+        expect(proofRecord.receiverKeyProofRoot).toMatch(/^[a-f0-9]{128}$/u);
+        expect(proofRecord).not.toHaveProperty('secretVector');
+        expect(proofRecord).not.toHaveProperty('errorVector');
+        expect(
+            verifyReceiverKeyWitness({
+                publicKeyMaterial: receiverState.publicKeyMaterial,
+                receiverEncryptionProfile: profileSet.receiverEncryptionProfile,
+                receiverPublicKey: receiverState.receiverPublicKey,
+                secretState: receiverState.secretState,
+            }),
+        ).toEqual([]);
+
+        const changedPublicKeyMaterial = {
+            ...receiverState.publicKeyMaterial,
+            publicKeyVector:
+                receiverState.publicKeyMaterial.publicKeyVector.map(
+                    (polynomial, polynomialIndex) =>
+                        polynomialIndex === 0
+                            ? polynomial.map((coefficient, coefficientIndex) =>
+                                  coefficientIndex === 0
+                                      ? (coefficient + 1) % 12_289
+                                      : coefficient,
+                              )
+                            : polynomial,
+                ),
+        };
+        expect(
+            verifyReceiverKeyWitness({
+                publicKeyMaterial: changedPublicKeyMaterial,
+                receiverEncryptionProfile: profileSet.receiverEncryptionProfile,
+                receiverPublicKey: receiverState.receiverPublicKey,
+                secretState: receiverState.secretState,
+            }).map((refusal) => refusal.message),
+        ).toEqual(
+            expect.arrayContaining([
+                expect.stringContaining(
+                    'public key material does not match the frozen receiver key',
+                ),
+                expect.stringContaining(
+                    'does not satisfy the frozen receiver-key equation',
+                ),
+            ]),
+        );
+        expect(() =>
+            createReceiverKeyProof({
+                publicKeyMaterial: changedPublicKeyMaterial,
+                receiverEncryptionProfile: profileSet.receiverEncryptionProfile,
+                receiverPublicKey: receiverState.receiverPublicKey,
+                secretState: receiverState.secretState,
+            }),
+        ).toThrow(/receiver-key equation/u);
     });
 
     it('computes additively homomorphic share commitments', () => {

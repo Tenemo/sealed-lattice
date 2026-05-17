@@ -9,7 +9,7 @@ export const cpadProfileId = 'CPAD-BGV-AsyncThreshold-v1';
 export const bridgeProofProfileId =
     'CommittedAggregateShare-TargetBasisData-HwangPiEnc-BGV-v1';
 
-/** Direct target-basis data bridge profile required by accepted manifests. */
+/** TargetBasisData bridge profile required by accepted manifests. */
 export const directTargetBasisDataBridgeProfileId =
     'CommittedAggregateShare-TargetBasisData-BGV-v1';
 
@@ -58,6 +58,23 @@ export const ballotProofProfileId = 'lazer-linear-ballot-privacy-proof-v1';
 
 /** Score membership profile for score values in the supported score domain. */
 export const scoreMembershipProfileId = 'one-hot-score-membership-v1';
+
+/** Ballot score encoding profile for scalar plus score-bucket coordinates. */
+export const ballotScoreEncodingProfileId = 'ScoreOneHotShares-v1';
+
+/** Ballot share layout profile for receiver share-vector coordinates. */
+export const ballotShareLayoutProfileId = 'ScalarScoreAndOneHotScoreShares-v1';
+
+/** Aggregate input encoding profile for later committed bridge inputs. */
+export const aggregateInputEncodingProfileId = 'AggregatedScoreHistogram-v1';
+
+/** Encoded receiver share-vector layout profile. */
+export const encodedShareVectorLayoutProfileId =
+    'encoded-share-vector-layout-scalar-score-and-one-hot-v1';
+
+/** Encoded aggregate layout profile. */
+export const encodedAggregateLayoutProfileId =
+    'encoded-aggregate-layout-score-histogram-v1';
 
 /** Field encoding profile for canonical GF(65537) representatives. */
 export const fieldEncodingProfileId =

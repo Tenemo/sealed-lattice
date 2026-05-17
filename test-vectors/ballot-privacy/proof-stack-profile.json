@@ -4,24 +4,36 @@
     "receiverEncryptionProfileId": "linear-module-lwe-receiver-encryption-v1",
     "shareCommitmentProfileId": "module-sis-additive-share-commitment-v1",
     "scoreMembershipProfileId": "one-hot-score-membership-v1",
+    "ballotScoreEncodingProfileId": "ScoreOneHotShares-v1",
+    "ballotShareLayoutProfileId": "ScalarScoreAndOneHotScoreShares-v1",
+    "aggregateInputEncodingProfileId": "AggregatedScoreHistogram-v1",
+    "encodedShareVectorLayoutProfileId": "encoded-share-vector-layout-scalar-score-and-one-hot-v1",
+    "encodedAggregateLayoutProfileId": "encoded-aggregate-layout-score-histogram-v1",
     "ballotProofProfileId": "lazer-linear-ballot-privacy-proof-v1"
   },
   "profileDigests": {
     "receiverEncryptionProfileDigest": "5de80d6b0eaf3d6e32c95a65985651732176fcf390195595dd76d64615ca03034b71d9757e5d70dc370cdeafeaa341cadeafa2ebe8c19d7fd2a74c5b163650b9",
-    "shareCommitmentProfileDigest": "afa50d4f9d1ba1820cdb66d17aae060d04d411be4115120da16d3449ddc65d37b42dc8550482cb05bfc1559fca105592450e98c646499f5f9d95c795d3f2e6af",
+    "shareCommitmentProfileDigest": "220791dd96061d68bb9a3c2740c17e25205fa55e31dfeed489e1bbc51415630711a12eaeef227fef6b2765636c1447fbb9ca35493908177812935943d94f3f6f",
     "scoreMembershipProfileDigest": "d2c6448460e46c81b849d8a2a7391830d0ffbe908fb0916a5a687a9f1bc9400c6d9af6bc668dcc98d081953a50059c00a3ed41c528fe0311cafac8ef1608b548",
+    "ballotScoreEncodingProfileDigest": "d7d68c4149c276c1b3515c3299c2fb68b73ac8633e7cec36820523aa2dc4697e5f29e72f8065c784c68476ff0d9b153834d5981d64ae9e95ed37c399a4dd68d7",
+    "ballotShareLayoutProfileDigest": "0561e327c52fb00ee1df7de1f0a93d5b919df9ff7b8faf39fdcae25f9b7fe6295600c5999f391750dceedd012319c30b449adf55781b0a4d2423e98d00caa73b",
+    "aggregateInputEncodingProfileDigest": "8423aa20ac82748accbf934e3de76133e1fdce7f051325f6df8517d7ab3903f2eda9506c7ff428e70e960af283bd9280541f7252a78f3fa402733c668f377abe",
+    "encodedShareVectorLayoutDigest": "384cfeafbae0ab84370f768eebea5896c74637f54d3045dc9b8e3ea08317b7a83dfddffe162840a0b34c72583eb4d78f722df228fde2cfaab983bb490c88c742",
+    "encodedAggregateLayoutDigest": "5d97928d6662de259e96d04288772fc0054d865bdec8f4c57b0407f85081e71ca626612429ca55915ffbe0b8aa40962d9cc1736b0651ef80d8806ed86868b7f8",
     "ballotProofProfileDigest": "e87fa767de12a5dcbeca30859f7d4f7903746ef390a10186d374752537bb77e7cc6d2bceedbf40523f59439a96d7d035a9e5ce2c9a018db5913b706b571dc14d"
   },
   "mandatoryBoundCert": {
-    "shareCommitmentMessageBoundCertDigest": "8355fd1145b81d18aafcdf39d04106e9b7c935070787203b245c8ab8f5e85b6662215e506e5b6d55d21600868363319d09c37c24db8f688a3efc1d123ca5eba2",
+    "shareCommitmentMessageBoundCertDigest": "09762e51e94fd0a3ca27dbce2282cd47f3fee269acad1d3b3e606eae23e186c978642b1c693321d12e6cd8792ebec7eb91001d0d4b37339e2f8806c74cbe7d72",
     "maximumCanonicalTurnout": 20,
     "maximumAggregateInteger": 1310720,
-    "openingRandomnessAggregateBound": 20480
+    "openingRandomnessAggregateBound": 20480,
+    "shareVectorWidth": 220
   },
   "certificateGatedBoundCert": {
-    "shareCommitmentMessageBoundCertDigest": "d1b6e85ede97c9d678ea553e7d0808032e1959503ac6ea9d5c490c7f0f0494668ef270c2685e3605f028aa714d8fd44cc3741f3e63b4b4f501cdb9dbe1e32954",
+    "shareCommitmentMessageBoundCertDigest": "e9aad277a88d10a3471524d5c0e26fdaafd9c9b46fa2f8f909ef9c54068e164e189fa09728cd7708d427639a7e40599ef721e8fd1acb5124d3b22a42ae5b70d5",
     "maximumCanonicalTurnout": 50,
     "maximumAggregateInteger": 3276800,
-    "openingRandomnessAggregateBound": 51200
+    "openingRandomnessAggregateBound": 51200,
+    "shareVectorWidth": 220
   }
 }

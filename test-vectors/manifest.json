@@ -2,12 +2,16 @@
   "schemaVersion": 1,
   "entries": [
     {
+      "path": "ballot-privacy/encoded-ballot-linear-relation-vectors.json",
+      "sha256": "8e895b13d7d388e601c3fcb5849d1198ca1a5bf64f90e90f32d9f21d04ad4ce4"
+    },
+    {
       "path": "ballot-privacy/proof-backend-linear-vectors.json",
       "sha256": "2b3a7f807a5db6db5ceec4699148b9979169107df4b56bb72867c5b2e69f814a"
     },
     {
       "path": "ballot-privacy/proof-stack-profile.json",
-      "sha256": "64705a7bb7b4bd5c8bc06588c03a0a1229946481e6a457d89fe03f3ba16651e0"
+      "sha256": "e2ae8e910952f273bc0f8d00b943e7cb67ad7da8c2ff9e85764617d72b92a834"
     },
     {
       "path": "election-foundation/board-finality.json",

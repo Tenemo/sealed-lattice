@@ -1,4 +1,5 @@
 pub mod abdlop_commitment;
+pub mod encoded_relation_vectors;
 pub mod lazer_demo_abdlop;
 pub(crate) mod lazer_demo_many_quadratic;
 pub mod lazer_demo_public_parameters;
@@ -31,6 +32,7 @@ pub const BALLOT_PRIVACY_PROOF_BACKEND_AVAILABLE: bool = false;
 const UNAVAILABLE_BACKEND_MESSAGE: &str = "Ballot privacy proof verification requires the frozen LaZer-style lattice proof backend, which is not implemented in this build.";
 const BACKEND_NAME: &str = "LaZer-style linear lattice proof backend";
 const UPSTREAM_LAZER_REFERENCE: &str = "lazer-crypto/lazer";
+const ENCODED_COORDINATES_PER_OPTION: u64 = 11;
 
 pub const REQUIRED_LAZER_PORT_COMPONENTS: &[&str] = &[
     "generated linear proof parameters from lin-codegen.sage",
@@ -67,6 +69,13 @@ pub const UPSTREAM_LAZER_REFERENCE_FILES: &[&str] = &[
     "src/shake128.c",
     "scripts/lin-codegen.sage",
 ];
+
+fn encoded_share_vector_width(statement: &Value) -> Option<u64> {
+    object_map(statement)
+        .and_then(|object| object.get("optionCount"))
+        .and_then(Value::as_u64)
+        .map(|option_count| option_count.saturating_mul(ENCODED_COORDINATES_PER_OPTION))
+}
 
 pub fn describe_proof_backend() -> Value {
     json!({
@@ -133,6 +142,13 @@ fn object_map(value: &Value) -> Option<&Map<String, Value>> {
 
 fn string_field<'value>(value: &'value Value, field_name: &str) -> Option<&'value str> {
     object_map(value)?.get(field_name)?.as_str()
+}
+
+fn is_protocol_digest(value: &str) -> bool {
+    value.len() == 128
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
 fn positive_roster_position(value: &Value, field_name: &str) -> Option<u64> {
@@ -217,6 +233,8 @@ fn collect_receiver_key_proof_refusals(receiver_key_proof: &Value) -> Vec<Value>
             != Some(1)
         || string_field(receiver_key_proof, "proofBackend")
             != Some("LaZerStyleLocalLatticeRelation")
+        || string_field(receiver_key_proof, "proofRoot")
+            .is_none_or(|proof_root| !is_protocol_digest(proof_root))
     {
         refused_objects.push(structural_refusal(
             "Receiver key proof shell has an invalid canonical shape.",
@@ -246,12 +264,14 @@ fn collect_ballot_proof_refusals(statement: &Value, ballot_proof: &Value) -> Vec
         string_field(statement, "challengeDomainDigest"),
         string_field(ballot_proof, "proofBytesDigest"),
         string_field(ballot_proof, "proofRoot"),
+        string_field(ballot_proof, "relationStatementDigest"),
     ) {
         (
             Some(ballot_proof_statement_digest),
             Some(challenge_domain_digest),
             Some(proof_bytes_digest),
             Some(proof_root),
+            Some(relation_statement_digest),
         ) => derive_digest(
             "ChallengeDomainDigest",
             &json!({
@@ -259,6 +279,7 @@ fn collect_ballot_proof_refusals(statement: &Value, ballot_proof: &Value) -> Vec
                 "challengeDomainDigest": challenge_domain_digest,
                 "proofBytesDigest": proof_bytes_digest,
                 "proofRoot": proof_root,
+                "relationStatementDigest": relation_statement_digest,
             }),
         ),
         _ => None,
@@ -272,7 +293,7 @@ fn collect_ballot_proof_refusals(statement: &Value, ballot_proof: &Value) -> Vec
         || object_map(statement)
             .and_then(|object| object.get("shareVectorWidth"))
             .and_then(Value::as_u64)
-            != Some(20)
+            != encoded_share_vector_width(statement)
     {
         refused_objects.push(structural_refusal(
             "Ballot proof statement has an invalid canonical shape.",
@@ -326,6 +347,8 @@ fn collect_ballot_proof_refusals(statement: &Value, ballot_proof: &Value) -> Vec
             .and_then(Value::as_u64)
             != Some(1)
         || string_field(ballot_proof, "proofBackend") != Some("LaZerStyleLocalLatticeRelation")
+        || string_field(ballot_proof, "relationStatementDigest")
+            .is_none_or(|digest| !is_protocol_digest(digest))
         || object_map(ballot_proof)
             .and_then(|object| object.get("proofSizeBytes"))
             .and_then(Value::as_u64)
@@ -453,7 +476,7 @@ fn collect_share_commitment_refusals(share_commitment: &Value) -> Vec<Value> {
         || object_map(share_commitment)
             .and_then(|object| object.get("shareVectorWidth"))
             .and_then(Value::as_u64)
-            != Some(20)
+            .is_none_or(|share_vector_width| share_vector_width == 0)
         || share_commitment_digest != expected_digest.as_deref()
     {
         refused_objects.push(structural_refusal(
@@ -628,6 +651,12 @@ fn collect_claim_bearing_package_refusals(ballot_package: &Value) -> Vec<Value> 
                 != string_field(statement, "manifestDigest")
             || string_field(share_commitment, "rosterDigest")
                 != string_field(statement, "rosterDigest")
+            || object_map(share_commitment)
+                .and_then(|object| object.get("shareVectorWidth"))
+                .and_then(Value::as_u64)
+                != object_map(statement)
+                    .and_then(|object| object.get("shareVectorWidth"))
+                    .and_then(Value::as_u64)
             || string_field(share_commitment, "shareCommitmentProfileDigest")
                 != string_field(statement, "shareCommitmentProfileDigest")
         {
@@ -672,6 +701,10 @@ pub fn verify_linear_proof_vector_case(vector_case: &Value) -> Value {
     linear_proof_verifier::verify_linear_proof_vector_case_value(vector_case)
 }
 
+pub fn verify_encoded_relation_vector_case(vector_case: &Value) -> Value {
+    encoded_relation_vectors::verify_encoded_relation_vector_case_value(vector_case)
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -681,7 +714,8 @@ mod tests {
         let statement = json!({
             "objectType": "BallotProofStatement",
             "objectVersion": 1,
-            "shareVectorWidth": 20,
+            "optionCount": 20,
+            "shareVectorWidth": 220,
             "receiverPublicKeys": [],
             "receiverPayloads": [],
             "shareCommitments": []

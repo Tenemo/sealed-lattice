@@ -9,6 +9,7 @@ import {
 } from '@sealed-lattice/types';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import encodedRelationVectorsJson from '../../../../test-vectors/ballot-privacy/encoded-ballot-linear-relation-vectors.json';
 import linearProofBackendVectorsJson from '../../../../test-vectors/ballot-privacy/proof-backend-linear-vectors.json';
 import goldenTranscriptCoreFixturesJson from '../../../../test-vectors/transcript-core/golden-transcript-core.json';
 import malformedObjectFixturesJson from '../../../../test-vectors/transcript-core/malformed-objects.json';
@@ -45,6 +46,10 @@ const goldenTranscriptCoreFixtures =
 const malformedObjectFixtures =
     malformedObjectFixturesJson as readonly MalformedObjectFixture[];
 const linearProofBackendVectors = linearProofBackendVectorsJson as {
+    readonly requiredCaseNames: readonly string[];
+    readonly cases: readonly Record<string, unknown>[];
+};
+const encodedRelationVectors = encodedRelationVectorsJson as {
     readonly requiredCaseNames: readonly string[];
     readonly cases: readonly Record<string, unknown>[];
 };
@@ -521,6 +526,82 @@ describe('transcript-core kernel in Node', () => {
         expect(verification.statusLabels).toContain(
             'QuadraticChallengeRecomputed',
         );
+    });
+
+    it('routes encoded ballot relation vectors through the WASM backend gate', async () => {
+        const kernel = await loadTranscriptCoreKernel();
+        const vectorCaseNames = new Set(
+            encodedRelationVectors.cases.map((vectorCase) =>
+                String(vectorCase.caseName),
+            ),
+        );
+
+        for (const requiredCaseName of encodedRelationVectors.requiredCaseNames) {
+            expect(vectorCaseNames.has(requiredCaseName)).toBe(true);
+        }
+
+        const miniCase = encodedRelationVectors.cases.find(
+            (vectorCase) =>
+                vectorCase.caseName === 'mini-encoded-ballot-relation',
+        );
+        const rejectCase = encodedRelationVectors.cases.find(
+            (vectorCase) => vectorCase.caseName === 'wrong-quotient-rejects',
+        );
+        const digestChangeCase = encodedRelationVectors.cases.find(
+            (vectorCase) =>
+                vectorCase.caseName ===
+                'wrong-share-commitment-target-changes-digest',
+        );
+        const backendPreflightRejectCase = encodedRelationVectors.cases.find(
+            (vectorCase) =>
+                vectorCase.caseName ===
+                'noncanonical-backend-coefficient-rejects',
+        );
+
+        expect(
+            kernel.verifyBallotPrivacyEncodedRelationVector({
+                vectorCase: miniCase,
+            }),
+        ).toMatchObject({
+            ok: true,
+            backendAvailable: false,
+            caseName: 'mini-encoded-ballot-relation',
+            expectedOutcome: 'accept',
+            unresolvedReason: null,
+        });
+        expect(
+            kernel.verifyBallotPrivacyEncodedRelationVector({
+                vectorCase: rejectCase,
+            }),
+        ).toMatchObject({
+            ok: true,
+            backendAvailable: false,
+            caseName: 'wrong-quotient-rejects',
+            expectedOutcome: 'reject',
+            unresolvedReason: null,
+        });
+        expect(
+            kernel.verifyBallotPrivacyEncodedRelationVector({
+                vectorCase: digestChangeCase,
+            }),
+        ).toMatchObject({
+            ok: true,
+            backendAvailable: false,
+            caseName: 'wrong-share-commitment-target-changes-digest',
+            expectedOutcome: 'accept',
+            unresolvedReason: null,
+        });
+        expect(
+            kernel.verifyBallotPrivacyEncodedRelationVector({
+                vectorCase: backendPreflightRejectCase,
+            }),
+        ).toMatchObject({
+            ok: true,
+            backendAvailable: false,
+            caseName: 'noncanonical-backend-coefficient-rejects',
+            expectedOutcome: 'reject',
+            unresolvedReason: null,
+        });
     });
 
     it('deallocates command inputs and outputs', async () => {

@@ -1,10 +1,9 @@
 # sealed-lattice
 
-WORK IN PROGRESS - protocol-facing APIs remain under implementation. Versions below 1.0.0 are not suitable for production or real elections.
+WORK IN PROGRESS - protocol-facing APIs remain under implementation and are not suitable for production or real elections.
 
 ---
 
-[![npm version](https://img.shields.io/npm/v/sealed-lattice?color=5FA04E)](https://www.npmjs.com/package/sealed-lattice)
 [![npm downloads](https://img.shields.io/npm/dm/sealed-lattice?color=5FA04E)](https://www.npmjs.com/package/sealed-lattice)
 
 ---
@@ -15,7 +14,6 @@ WORK IN PROGRESS - protocol-facing APIs remain under implementation. Versions be
 
 ---
 
-[![Node version](https://img.shields.io/badge/node-%E2%89%A524.14.1-5FA04E?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![License](https://img.shields.io/github/license/Tenemo/sealed-lattice?color=5FA04E)](LICENSE)
 
 ---
@@ -56,8 +54,32 @@ The internal ballot privacy plan targets ballot-level encoded score shares:
 scalar score coordinates plus hidden one-hot score-bucket coordinates. Those
 encoded aggregates feed TargetBasisData and a packed bit-sliced BGV evaluator.
 The current scalar PVSS helpers remain fixture/oracle infrastructure only.
-Proof generation, proof verification, the encoded TargetBasisData bridge, and
-the bit-sliced evaluator are not implemented yet.
+Claim-bearing ballot proof generation and verification, the encoded
+TargetBasisData bridge, and the bit-sliced evaluator are not implemented yet.
+
+The internal LaZer-style proof verifier work uses upstream LaZer only as an
+offline deterministic oracle. Generated public vectors record upstream
+provenance and accept/reject outcomes, while the Rust/WASM port independently
+decodes canonical proof bytes, checks bounds, rebuilds the ABDLOP/tbox and
+many-quadratic verifier path, and recomputes the final challenge. This is
+compatibility evidence for the selected internal proof slice, not production
+ballot-proof availability.
+
+The encoded ballot relation now lowers the score layout into a deterministic
+sparse linear-relation statement: one scalar score coordinate plus ten hidden
+one-hot bucket coordinates per option, plus a concrete internal backend
+statement with explicit signed sparse field rows and digest-expanded algebraic
+row batches for share commitments, receiver-payload plaintext binding,
+receiver-payload encryption, and receiver-key binding. Public vectors cover a
+mini relation, the mandatory 20 option by 20 receiver shape, digest-changing
+public target mutations, malformed backend statements, and hostile compiler
+mutations. Rust/WASM verifies those vector shapes, backend statement digests,
+row-batch continuity, variable columns, bounds, and statement digests.
+Receiver-key proof records are generated only after the local key witness
+equation and norm checks pass. Ballot proof records now carry the lowered
+relation statement digest into their challenge binding. The claim-bearing
+ballot and receiver-key proof verifiers still fail closed until real proof
+generation and verification are wired to those statements.
 
 - workspace layout and package boundaries
 - packaging and tarball smoke checks

@@ -157,7 +157,7 @@ export const manifestOpaqueBindings: ManifestOpaqueBindings = {
         layout: 'WinnerRankTopK-v1',
     }),
     bridgeLayoutDigest: deriveProtocolDigest('BridgeLayoutDigest', {
-        layout: 'aggregate-share-layout-v1',
+        layout: 'target-basis-data-encoded-aggregate-layout-v1',
     }),
     evaluationNoiseProfileDigest: deriveProtocolDigest(
         'EvaluationNoiseProfileDigest',
@@ -171,7 +171,7 @@ export const manifestOpaqueBindings: ManifestOpaqueBindings = {
     ),
     allowedEvaluatorOpsDigest: deriveProtocolDigest(
         'AllowedEvaluatorOpsDigest',
-        { operations: 'packed-bgv-top-k-v1' },
+        { operations: 'packed-bit-sliced-bgv-top-k-v1' },
     ),
     evaluationProofProfileId,
     evaluationProofProfileDigest: deriveProtocolDigest(

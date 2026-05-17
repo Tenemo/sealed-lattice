@@ -66,7 +66,7 @@ const fullyVerifiedLabelInput = (
 });
 
 describe('election foundation lifecycle', () => {
-    it('accepts the primary v53 BGV lifecycle path', () => {
+    it('accepts the primary packed BGV lifecycle path', () => {
         expectValidPath([
             'DraftPoll',
             'RegistrationOpen',
@@ -140,7 +140,7 @@ describe('election foundation lifecycle', () => {
         ).toContain('RosterExternallyAccepted');
     });
 
-    it('emits FullyVerifiedResult only after all v53 theorem gates close', () => {
+    it('emits FullyVerifiedResult only after all packed BGV claim gates close', () => {
         const labels = deriveLifecycleLabels(fullyVerifiedLabelInput());
 
         expect(labels.primary).toContain('FullyVerifiedResult');

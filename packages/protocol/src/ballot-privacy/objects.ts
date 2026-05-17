@@ -14,7 +14,8 @@ import type {
 } from '@sealed-lattice/types';
 
 import { createRefusal } from '../common/verification-helpers.js';
-import { pvssBallotShareVectorWidth } from '../pvss-ballot/common.js';
+
+import { getBallotPrivacyEncodedShareVectorWidth } from './encoded-share-layout.js';
 
 type ReceiverEncryptionPublicKeyPayload = Omit<
     ReceiverEncryptionPublicKey,
@@ -59,14 +60,12 @@ type ReceiverPayloadInput = Omit<
 >;
 type ShareCommitmentInput = Omit<
     ShareCommitment,
-    | 'objectType'
-    | 'objectVersion'
-    | 'shareVectorWidth'
-    | 'shareCommitmentDigest'
+    'objectType' | 'objectVersion' | 'shareCommitmentDigest'
 >;
 
 const unavailableProofBackendMessage =
     'Ballot privacy proof verification requires the frozen LaZer-style lattice proof backend, which is not implemented in this build.';
+const protocolDigestPattern = /^[a-f0-9]{128}$/u;
 
 const requiredLazerPortComponents = [
     'generated linear proof parameters from lin-codegen.sage',
@@ -163,6 +162,7 @@ const deriveBallotProofRecordDigest = (
 
 const deriveBallotProofChallengeDigest = (input: {
     readonly statement: BallotProofStatement;
+    readonly relationStatementDigest: ProtocolDigest;
     readonly proofRoot: ProtocolDigest;
     readonly proofBytesDigest: ProtocolDigest;
 }): ProtocolDigest =>
@@ -171,6 +171,7 @@ const deriveBallotProofChallengeDigest = (input: {
         challengeDomainDigest: input.statement.challengeDomainDigest,
         proofBytesDigest: input.proofBytesDigest,
         proofRoot: input.proofRoot,
+        relationStatementDigest: input.relationStatementDigest,
     });
 
 const hasOwnProperty = (value: object, key: PropertyKey): boolean =>
@@ -304,7 +305,6 @@ export const createShareCommitmentShell = (
         objectType: 'ShareCommitment',
         objectVersion: 1,
         ...input,
-        shareVectorWidth: pvssBallotShareVectorWidth,
     };
 
     return {
@@ -322,9 +322,18 @@ export const buildBallotProofStatement = (
         'ChallengeDomainDigest',
         {
             ballotProofProfileDigest: input.ballotProofProfileDigest,
+            aggregateInputEncodingProfileDigest:
+                input.aggregateInputEncodingProfileDigest,
             challengeDomainLabel:
                 input.challengeDomainLabel ??
                 'sealed.vote/v1/ballot-proof/challenge',
+            ballotScoreEncodingProfileDigest:
+                input.ballotScoreEncodingProfileDigest,
+            ballotShareLayoutProfileDigest:
+                input.ballotShareLayoutProfileDigest,
+            encodedAggregateLayoutDigest: input.encodedAggregateLayoutDigest,
+            encodedShareVectorLayoutDigest:
+                input.encodedShareVectorLayoutDigest,
             receiverEncryptionProfileDigest:
                 input.receiverEncryptionProfileDigest,
             scoreMembershipProfileDigest: input.scoreMembershipProfileDigest,
@@ -332,6 +341,9 @@ export const buildBallotProofStatement = (
                 input.shareCommitmentMessageBoundCertDigest,
             shareCommitmentProfileDigest: input.shareCommitmentProfileDigest,
         },
+    );
+    const shareVectorWidth = getBallotPrivacyEncodedShareVectorWidth(
+        input.optionCount,
     );
     const statementPayload: BallotProofStatementPayload = {
         objectType: 'BallotProofStatement',
@@ -346,7 +358,7 @@ export const buildBallotProofStatement = (
         tiePolicyDigest: input.tiePolicyDigest,
         topOptionCount: input.topOptionCount,
         optionCount: input.optionCount,
-        shareVectorWidth: pvssBallotShareVectorWidth,
+        shareVectorWidth,
         voterIdentityDigest: input.voterIdentityDigest,
         voterRosterPosition: input.voterRosterPosition,
         voterSigningKeyDigest: input.voterSigningKeyDigest,
@@ -361,6 +373,13 @@ export const buildBallotProofStatement = (
         receiverEncryptionProfileDigest: input.receiverEncryptionProfileDigest,
         ballotProofProfileDigest: input.ballotProofProfileDigest,
         scoreMembershipProfileDigest: input.scoreMembershipProfileDigest,
+        ballotScoreEncodingProfileDigest:
+            input.ballotScoreEncodingProfileDigest,
+        ballotShareLayoutProfileDigest: input.ballotShareLayoutProfileDigest,
+        aggregateInputEncodingProfileDigest:
+            input.aggregateInputEncodingProfileDigest,
+        encodedShareVectorLayoutDigest: input.encodedShareVectorLayoutDigest,
+        encodedAggregateLayoutDigest: input.encodedAggregateLayoutDigest,
         shareCommitmentMessageBoundCertDigest:
             input.shareCommitmentMessageBoundCertDigest,
         ballotPackageDigest: input.ballotPackageDigest,
@@ -376,12 +395,14 @@ export const buildBallotProofStatement = (
 
 export const createBallotProofRecordShell = (input: {
     readonly statement: BallotProofStatement;
+    readonly relationStatementDigest: ProtocolDigest;
     readonly proofRoot: ProtocolDigest;
     readonly proofBytesDigest: ProtocolDigest;
     readonly proofSizeBytes: number;
 }): BallotProofRecord => {
     const challengeDigest = deriveBallotProofChallengeDigest({
         statement: input.statement,
+        relationStatementDigest: input.relationStatementDigest,
         proofRoot: input.proofRoot,
         proofBytesDigest: input.proofBytesDigest,
     });
@@ -389,6 +410,7 @@ export const createBallotProofRecordShell = (input: {
         objectType: 'BallotProofRecord',
         objectVersion: 1,
         ballotProofStatementDigest: input.statement.ballotProofStatementDigest,
+        relationStatementDigest: input.relationStatementDigest,
         ballotProofProfileDigest: input.statement.ballotProofProfileDigest,
         proofBackend: 'LaZerStyleLocalLatticeRelation',
         challengeDigest,
@@ -454,7 +476,8 @@ const collectReceiverKeyProofStructuralRefusals = (
     if (
         receiverKeyProof.objectType !== 'ReceiverKeyProof' ||
         receiverKeyProof.objectVersion !== 1 ||
-        receiverKeyProof.proofBackend !== 'LaZerStyleLocalLatticeRelation'
+        receiverKeyProof.proofBackend !== 'LaZerStyleLocalLatticeRelation' ||
+        !protocolDigestPattern.test(receiverKeyProof.proofRoot)
     ) {
         refusedObjects.push(
             createRefusal(
@@ -496,13 +519,15 @@ const collectBallotProofStructuralRefusals = (
     const expectedChallengeDigest = deriveBallotProofChallengeDigest({
         proofBytesDigest: ballotProof.proofBytesDigest,
         proofRoot: ballotProof.proofRoot,
+        relationStatementDigest: ballotProof.relationStatementDigest,
         statement,
     });
 
     if (
         statement.objectType !== 'BallotProofStatement' ||
         statement.objectVersion !== 1 ||
-        statement.shareVectorWidth !== pvssBallotShareVectorWidth
+        statement.shareVectorWidth !==
+            getBallotPrivacyEncodedShareVectorWidth(statement.optionCount)
     ) {
         refusedObjects.push(
             createRefusal(
@@ -557,6 +582,7 @@ const collectBallotProofStructuralRefusals = (
         ballotProof.objectType !== 'BallotProofRecord' ||
         ballotProof.objectVersion !== 1 ||
         ballotProof.proofBackend !== 'LaZerStyleLocalLatticeRelation' ||
+        !protocolDigestPattern.test(ballotProof.relationStatementDigest) ||
         !Number.isSafeInteger(ballotProof.proofSizeBytes) ||
         ballotProof.proofSizeBytes <= 0
     ) {
@@ -691,7 +717,8 @@ const collectShareCommitmentStructuralRefusals = (
     if (
         shareCommitment.objectType !== 'ShareCommitment' ||
         shareCommitment.objectVersion !== 1 ||
-        shareCommitment.shareVectorWidth !== pvssBallotShareVectorWidth ||
+        !Number.isSafeInteger(shareCommitment.shareVectorWidth) ||
+        shareCommitment.shareVectorWidth <= 0 ||
         shareCommitment.shareCommitmentDigest !== expectedShareCommitmentDigest
     ) {
         refusedObjects.push(
@@ -860,6 +887,7 @@ const collectClaimBearingPackageStructuralRefusals = (
             shareCommitment.ceremonyId !== statement.ceremonyId ||
             shareCommitment.manifestDigest !== statement.manifestDigest ||
             shareCommitment.rosterDigest !== statement.rosterDigest ||
+            shareCommitment.shareVectorWidth !== statement.shareVectorWidth ||
             shareCommitment.shareCommitmentProfileDigest !==
                 statement.shareCommitmentProfileDigest
         ) {

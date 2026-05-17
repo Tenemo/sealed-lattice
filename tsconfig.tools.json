@@ -7,6 +7,7 @@
   "include": [
     "packages/*/tests/**/*.ts",
     "tools/**/*.ts",
+    "tools/**/*.mts",
     "tools/**/*.mjs",
     "typedoc/**/*.ts",
     "tests/**/*.ts",

@@ -45,7 +45,7 @@ export type ShareCommitmentProfile = {
     readonly commitmentModulus: DecimalIntegerString;
     readonly moduleRank: 4;
     readonly moduleDegree: 256;
-    readonly shareVectorWidth: 20;
+    readonly shareVectorWidth: 220;
     readonly messageFieldModulus: 65537;
     readonly messageRepresentativeMinimum: 0;
     readonly messageRepresentativeMaximum: 65536;
@@ -71,6 +71,83 @@ export type ScoreMembershipProfile = {
         'score = sum(score_value * one_hot_score[score_value])',
         'one_hot_score entries are boolean',
     ];
+};
+
+export type BallotScoreEncodingProfile = {
+    readonly objectType: 'BallotScoreEncodingProfile';
+    readonly objectVersion: 1;
+    readonly profileId: string;
+    readonly ballotScoreEncodingProfileDigest: ProtocolDigest;
+    readonly encoding: 'ScalarScorePlusOneHotScoreBuckets';
+    readonly scoreMinimum: 1;
+    readonly scoreMaximum: 10;
+    readonly oneHotWidth: 10;
+    readonly coordinatesPerOption: 11;
+    readonly scalarCoordinateOffset: 0;
+    readonly scoreBucketCoordinateOffsets: readonly [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+    ];
+    readonly scalarConsistencyConstraint: 'scalar_score = sum(score_value * one_hot_score[score_value])';
+    readonly oneHotConstraint: 'sum(one_hot_score[1..10]) = 1 and entries are boolean';
+};
+
+export type BallotShareLayoutProfile = {
+    readonly objectType: 'BallotShareLayoutProfile';
+    readonly objectVersion: 1;
+    readonly profileId: string;
+    readonly ballotShareLayoutProfileDigest: ProtocolDigest;
+    readonly layout: 'ScalarThenOneHotBucketsPerOption';
+    readonly maximumOptionCount: 20;
+    readonly coordinatesPerOption: 11;
+    readonly mandatoryOptionCount: 20;
+    readonly mandatoryShareVectorWidth: 220;
+    readonly widthFormula: 'shareVectorWidth = 11 * optionCount';
+    readonly paddingRule: 'unused coordinates must be zero';
+};
+
+export type AggregateInputEncodingProfile = {
+    readonly objectType: 'AggregateInputEncodingProfile';
+    readonly objectVersion: 1;
+    readonly profileId: string;
+    readonly aggregateInputEncodingProfileDigest: ProtocolDigest;
+    readonly encoding: 'AggregatedScoreHistogram';
+    readonly scalarAggregateCoordinates: true;
+    readonly oneHotBucketAggregateCoordinates: true;
+    readonly coordinatesPerOption: 11;
+    readonly maximumOptionCount: 20;
+};
+
+export type EncodedShareVectorLayoutProfile = {
+    readonly objectType: 'EncodedShareVectorLayoutProfile';
+    readonly objectVersion: 1;
+    readonly profileId: string;
+    readonly encodedShareVectorLayoutDigest: ProtocolDigest;
+    readonly layout: 'ScalarThenOneHotBucketsPerOption';
+    readonly coordinatesPerOption: 11;
+    readonly maximumOptionCount: 20;
+    readonly mandatoryShareVectorWidth: 220;
+    readonly coordinateOrder: 'score, score_bucket_1, ..., score_bucket_10 for each option';
+};
+
+export type EncodedAggregateLayoutProfile = {
+    readonly objectType: 'EncodedAggregateLayoutProfile';
+    readonly objectVersion: 1;
+    readonly profileId: string;
+    readonly encodedAggregateLayoutDigest: ProtocolDigest;
+    readonly layout: 'AggregatedScalarAndScoreBucketCoordinates';
+    readonly coordinatesPerOption: 11;
+    readonly maximumOptionCount: 20;
+    readonly mandatoryAggregateWidth: 220;
+    readonly aggregateCoordinateMeaning: 'sum of accepted receiver-share coordinates before bridge reduction';
 };
 
 export type BallotProofProfile = {
@@ -100,7 +177,7 @@ export type ShareCommitmentMessageBoundCert = {
     readonly profileDigest: ProtocolDigest;
     readonly shareCommitmentProfileDigest: ProtocolDigest;
     readonly fieldModulus: 65537;
-    readonly shareVectorWidth: 20;
+    readonly shareVectorWidth: 220;
     readonly perBallotShareRepresentativeRange: readonly [0, 65536];
     readonly maximumCanonicalTurnout: number;
     readonly maximumAggregateInteger: number;
@@ -118,6 +195,11 @@ export type BallotPrivacyProfileSet = {
     readonly receiverEncryptionProfile: ReceiverEncryptionProfile;
     readonly shareCommitmentProfile: ShareCommitmentProfile;
     readonly scoreMembershipProfile: ScoreMembershipProfile;
+    readonly ballotScoreEncodingProfile: BallotScoreEncodingProfile;
+    readonly ballotShareLayoutProfile: BallotShareLayoutProfile;
+    readonly aggregateInputEncodingProfile: AggregateInputEncodingProfile;
+    readonly encodedShareVectorLayoutProfile: EncodedShareVectorLayoutProfile;
+    readonly encodedAggregateLayoutProfile: EncodedAggregateLayoutProfile;
     readonly ballotProofProfile: BallotProofProfile;
 };
 
@@ -125,6 +207,11 @@ export type BallotPrivacyProfileDigests = {
     readonly receiverEncryptionProfileDigest: ProtocolDigest;
     readonly shareCommitmentProfileDigest: ProtocolDigest;
     readonly scoreMembershipProfileDigest: ProtocolDigest;
+    readonly ballotScoreEncodingProfileDigest: ProtocolDigest;
+    readonly ballotShareLayoutProfileDigest: ProtocolDigest;
+    readonly aggregateInputEncodingProfileDigest: ProtocolDigest;
+    readonly encodedShareVectorLayoutDigest: ProtocolDigest;
+    readonly encodedAggregateLayoutDigest: ProtocolDigest;
     readonly ballotProofProfileDigest: ProtocolDigest;
 };
 
@@ -209,7 +296,7 @@ export type ShareCommitment = {
     readonly receiverIdentity: string;
     readonly receiverRosterPosition: number;
     readonly shareCommitmentProfileDigest: ProtocolDigest;
-    readonly shareVectorWidth: 20;
+    readonly shareVectorWidth: number;
     readonly commitmentBodyDigest: ProtocolDigest;
     readonly shareCommitmentDigest: ProtocolDigest;
 };
@@ -228,7 +315,7 @@ export type BallotProofStatement = {
     readonly tiePolicyDigest: ProtocolDigest;
     readonly topOptionCount: number;
     readonly optionCount: number;
-    readonly shareVectorWidth: 20;
+    readonly shareVectorWidth: number;
     readonly voterIdentityDigest: ProtocolDigest;
     readonly voterRosterPosition: number;
     readonly voterSigningKeyDigest: ProtocolDigest;
@@ -243,6 +330,11 @@ export type BallotProofStatement = {
     readonly receiverEncryptionProfileDigest: ProtocolDigest;
     readonly ballotProofProfileDigest: ProtocolDigest;
     readonly scoreMembershipProfileDigest: ProtocolDigest;
+    readonly ballotScoreEncodingProfileDigest: ProtocolDigest;
+    readonly ballotShareLayoutProfileDigest: ProtocolDigest;
+    readonly aggregateInputEncodingProfileDigest: ProtocolDigest;
+    readonly encodedShareVectorLayoutDigest: ProtocolDigest;
+    readonly encodedAggregateLayoutDigest: ProtocolDigest;
     readonly shareCommitmentMessageBoundCertDigest: ProtocolDigest;
     readonly ballotPackageDigest: ProtocolDigest;
     readonly challengeDomainDigest: ProtocolDigest;
@@ -253,6 +345,7 @@ export type BallotProofRecord = {
     readonly objectVersion: 1;
     readonly ballotProofRecordDigest: ProtocolDigest;
     readonly ballotProofStatementDigest: ProtocolDigest;
+    readonly relationStatementDigest: ProtocolDigest;
     readonly ballotProofProfileDigest: ProtocolDigest;
     readonly proofBackend: 'LaZerStyleLocalLatticeRelation';
     readonly challengeDigest: ProtocolDigest;

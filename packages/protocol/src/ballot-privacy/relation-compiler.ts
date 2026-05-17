@@ -6,11 +6,17 @@ import {
     exponentiateFieldElement,
     fieldModulus,
 } from '../plaintext-oracle/field.js';
-import { pvssBallotShareVectorWidth } from '../pvss-ballot/common.js';
+
+import {
+    ballotPrivacyMaximumOptionCount,
+    ballotPrivacyScoreBucketCount,
+    getBallotPrivacyEncodedShareVectorWidth,
+    getBallotPrivacyScalarCoordinateIndex,
+    getBallotPrivacyScoreBucketCoordinateIndex,
+} from './encoded-share-layout.js';
 
 const minimumScore = 1;
 const maximumScore = 10;
-const oneHotScoreWidth = 10;
 
 type BallotPrivacyRelationReceiverInput = {
     readonly receiverIdentity: string;
@@ -23,9 +29,19 @@ export type BallotPrivacyRelationCompilerInput = {
     readonly rosterSize: number;
     readonly pvssThreshold: number;
     readonly normalizedScores: readonly number[];
-    readonly scoreMembershipWitnesses: readonly (readonly number[])[];
-    readonly shamirCoefficients: readonly (readonly number[])[];
+    readonly scoreOneHotWitnesses: readonly (readonly number[])[];
+    readonly encodedCoordinateShamirCoefficients: readonly (readonly number[])[];
     readonly receivers: readonly BallotPrivacyRelationReceiverInput[];
+};
+
+type BallotPrivacyEncodedCoordinateRole = 'ScalarScore' | 'ScoreBucket';
+
+type BallotPrivacyEncodedCoordinate = {
+    readonly encodedCoordinateIndex: number;
+    readonly optionIndex: number;
+    readonly coordinateRole: BallotPrivacyEncodedCoordinateRole;
+    readonly scoreBucketValue?: number;
+    readonly constantTerm: number;
 };
 
 type BallotPrivacyScoreMembershipConstraint = {
@@ -35,7 +51,10 @@ type BallotPrivacyScoreMembershipConstraint = {
 };
 
 type BallotPrivacyShamirQuotientConstraint = {
+    readonly encodedCoordinateIndex: number;
     readonly optionIndex: number;
+    readonly coordinateRole: BallotPrivacyEncodedCoordinateRole;
+    readonly scoreBucketValue?: number;
     readonly receiverRosterPosition: number;
     readonly evaluatedInteger: number;
     readonly shareRepresentative: FieldElement;
@@ -48,6 +67,8 @@ type BallotPrivacyRelationCompilation = {
     readonly optionCount: number;
     readonly rosterSize: number;
     readonly pvssThreshold: number;
+    readonly shareVectorWidth: number;
+    readonly encodedCoordinateCount: number;
     readonly scoreMembershipConstraints: readonly BallotPrivacyScoreMembershipConstraint[];
     readonly shamirQuotientConstraints: readonly BallotPrivacyShamirQuotientConstraint[];
     readonly maximumAbsoluteShamirQuotient: number;
@@ -75,9 +96,13 @@ const validateRelationDimensions = (
     input: BallotPrivacyRelationCompilerInput,
     refusedObjects: RefusalRecord[],
 ): void => {
+    const encodedShareVectorWidth = getBallotPrivacyEncodedShareVectorWidth(
+        input.optionCount,
+    );
+
     if (
         !isPositiveSafeInteger(input.optionCount) ||
-        input.optionCount > pvssBallotShareVectorWidth
+        input.optionCount > ballotPrivacyMaximumOptionCount
     ) {
         addRelationRefusal(
             refusedObjects,
@@ -100,16 +125,19 @@ const validateRelationDimensions = (
             'Ballot privacy relation requires one normalized score per option.',
         );
     }
-    if (input.scoreMembershipWitnesses.length !== input.optionCount) {
+    if (input.scoreOneHotWitnesses.length !== input.optionCount) {
         addRelationRefusal(
             refusedObjects,
-            'Ballot privacy relation requires one score-membership witness per option.',
+            'Ballot privacy relation requires one score one-hot witness per option.',
         );
     }
-    if (input.shamirCoefficients.length !== input.optionCount) {
+    if (
+        input.encodedCoordinateShamirCoefficients.length !==
+        encodedShareVectorWidth
+    ) {
         addRelationRefusal(
             refusedObjects,
-            'Ballot privacy relation requires one Shamir coefficient row per option.',
+            'Ballot privacy relation requires one Shamir coefficient row per encoded coordinate.',
         );
     }
 };
@@ -117,8 +145,12 @@ const validateRelationDimensions = (
 const compileScoreMembershipConstraints = (
     input: BallotPrivacyRelationCompilerInput,
     refusedObjects: RefusalRecord[],
-): readonly BallotPrivacyScoreMembershipConstraint[] => {
+): {
+    readonly constraints: readonly BallotPrivacyScoreMembershipConstraint[];
+    readonly encodedCoordinates: readonly BallotPrivacyEncodedCoordinate[];
+} => {
     const constraints: BallotPrivacyScoreMembershipConstraint[] = [];
+    const encodedCoordinates: BallotPrivacyEncodedCoordinate[] = [];
 
     input.normalizedScores.forEach((score, optionIndex) => {
         if (
@@ -133,33 +165,43 @@ const compileScoreMembershipConstraints = (
             );
         }
 
-        const oneHotWitness = input.scoreMembershipWitnesses[optionIndex] ?? [];
-        if (oneHotWitness.length !== oneHotScoreWidth) {
+        const oneHotWitness = input.scoreOneHotWitnesses[optionIndex] ?? [];
+        if (oneHotWitness.length !== ballotPrivacyScoreBucketCount) {
             addRelationRefusal(
                 refusedObjects,
                 'Ballot privacy relation requires a ten-entry one-hot score witness.',
             );
         }
 
-        const oneHotSum = oneHotWitness.reduce(
-            (runningSum, witnessEntry) => runningSum + witnessEntry,
-            0,
-        );
-        const reconstructedScore = oneHotWitness.reduce(
-            (runningScore, witnessEntry, witnessIndex) =>
-                runningScore + (witnessIndex + 1) * witnessEntry,
-            0,
-        );
+        let oneHotSum = 0;
+        let reconstructedScore = 0;
+        let witnessEntriesAreBoolean = true;
+        for (
+            let scoreBucketOffset = 0;
+            scoreBucketOffset < ballotPrivacyScoreBucketCount;
+            scoreBucketOffset += 1
+        ) {
+            const witnessEntry = oneHotWitness[scoreBucketOffset];
+            const entryIsBoolean =
+                (witnessEntry === 0 || witnessEntry === 1) &&
+                !Object.is(witnessEntry, -0);
+            if (!entryIsBoolean) {
+                witnessEntriesAreBoolean = false;
+            }
+            if (Number.isSafeInteger(witnessEntry)) {
+                oneHotSum += witnessEntry;
+                reconstructedScore += (scoreBucketOffset + 1) * witnessEntry;
+            }
+        }
+
         if (
-            oneHotWitness.some(
-                (witnessEntry) => witnessEntry !== 0 && witnessEntry !== 1,
-            ) ||
+            !witnessEntriesAreBoolean ||
             oneHotSum !== 1 ||
             reconstructedScore !== score
         ) {
             addRelationRefusal(
                 refusedObjects,
-                'Ballot privacy relation score-membership witness is not one-hot.',
+                'Ballot privacy relation score one-hot witness is not a valid score encoding.',
             );
         }
 
@@ -168,9 +210,39 @@ const compileScoreMembershipConstraints = (
             oneHotSum,
             reconstructedScore,
         });
+        encodedCoordinates.push({
+            constantTerm: score,
+            coordinateRole: 'ScalarScore',
+            encodedCoordinateIndex:
+                getBallotPrivacyScalarCoordinateIndex(optionIndex),
+            optionIndex,
+        });
+        for (
+            let scoreBucketValue = minimumScore;
+            scoreBucketValue <= maximumScore;
+            scoreBucketValue += 1
+        ) {
+            const witnessEntry = oneHotWitness[scoreBucketValue - 1];
+            encodedCoordinates.push({
+                constantTerm: Number.isSafeInteger(witnessEntry)
+                    ? witnessEntry
+                    : -1,
+                coordinateRole: 'ScoreBucket',
+                encodedCoordinateIndex:
+                    getBallotPrivacyScoreBucketCoordinateIndex(
+                        optionIndex,
+                        scoreBucketValue,
+                    ),
+                optionIndex,
+                scoreBucketValue,
+            });
+        }
     });
 
-    return constraints;
+    return {
+        constraints,
+        encodedCoordinates,
+    };
 };
 
 const compileReceiverMap = (
@@ -182,6 +254,9 @@ const compileReceiverMap = (
         BallotPrivacyRelationReceiverInput
     >();
     const receiverIdentities = new Set<string>();
+    const expectedShareVectorWidth = getBallotPrivacyEncodedShareVectorWidth(
+        input.optionCount,
+    );
 
     if (input.receivers.length !== input.rosterSize) {
         addRelationRefusal(
@@ -227,11 +302,20 @@ const compileReceiverMap = (
         );
 
         if (
-            receiver.receiverShareVector.length !== pvssBallotShareVectorWidth
+            receiver.receiverShareVector.length > expectedShareVectorWidth &&
+            receiver.receiverShareVector
+                .slice(expectedShareVectorWidth)
+                .some((paddingElement) => paddingElement !== 0)
         ) {
             addRelationRefusal(
                 refusedObjects,
-                'Ballot privacy relation receiver share vectors must use the fixed width.',
+                'Ballot privacy relation receiver share-vector padding must be zero.',
+            );
+        }
+        if (receiver.receiverShareVector.length !== expectedShareVectorWidth) {
+            addRelationRefusal(
+                refusedObjects,
+                'Ballot privacy relation receiver share vectors must use the encoded width.',
             );
         }
         receiver.receiverShareVector.forEach((shareRepresentative) => {
@@ -247,16 +331,6 @@ const compileReceiverMap = (
                 );
             }
         });
-        if (
-            receiver.receiverShareVector
-                .slice(input.optionCount)
-                .some((paddingElement) => paddingElement !== 0)
-        ) {
-            addRelationRefusal(
-                refusedObjects,
-                'Ballot privacy relation receiver share-vector padding must be zero.',
-            );
-        }
     }
 
     for (
@@ -276,8 +350,28 @@ const compileReceiverMap = (
     return receiversByRosterPosition;
 };
 
+const validateEncodedCoordinateConstants = (
+    encodedCoordinates: readonly BallotPrivacyEncodedCoordinate[],
+    refusedObjects: RefusalRecord[],
+): void => {
+    for (const encodedCoordinate of encodedCoordinates) {
+        try {
+            assertCanonicalFieldElement(
+                encodedCoordinate.constantTerm,
+                'encoded coordinate constant term',
+            );
+        } catch {
+            addRelationRefusal(
+                refusedObjects,
+                'Ballot privacy relation encoded coordinate constants must be canonical field representatives.',
+            );
+        }
+    }
+};
+
 const compileShamirQuotientConstraints = (
     input: BallotPrivacyRelationCompilerInput,
+    encodedCoordinates: readonly BallotPrivacyEncodedCoordinate[],
     receiversByRosterPosition: ReadonlyMap<
         number,
         BallotPrivacyRelationReceiverInput
@@ -290,7 +384,8 @@ const compileShamirQuotientConstraints = (
     const constraints: BallotPrivacyShamirQuotientConstraint[] = [];
     let maximumAbsoluteShamirQuotient = 0;
 
-    input.shamirCoefficients.forEach((coefficientRow) => {
+    validateEncodedCoordinateConstants(encodedCoordinates, refusedObjects);
+    input.encodedCoordinateShamirCoefficients.forEach((coefficientRow) => {
         if (coefficientRow.length !== input.pvssThreshold - 1) {
             addRelationRefusal(
                 refusedObjects,
@@ -332,9 +427,12 @@ const compileShamirQuotientConstraints = (
             continue;
         }
 
-        input.normalizedScores.forEach((score, optionIndex) => {
-            const coefficientRow = input.shamirCoefficients[optionIndex] ?? [];
-            let evaluatedInteger = score;
+        for (const encodedCoordinate of encodedCoordinates) {
+            const coefficientRow =
+                input.encodedCoordinateShamirCoefficients[
+                    encodedCoordinate.encodedCoordinateIndex
+                ] ?? [];
+            let evaluatedInteger = encodedCoordinate.constantTerm;
             coefficientRow.forEach((coefficient, coefficientIndex) => {
                 const fieldPower = exponentiateFieldElement(
                     receiverPoint,
@@ -346,7 +444,9 @@ const compileShamirQuotientConstraints = (
             let shareRepresentative: FieldElement;
             try {
                 shareRepresentative = assertCanonicalFieldElement(
-                    receiver.receiverShareVector[optionIndex] ?? -1,
+                    receiver.receiverShareVector[
+                        encodedCoordinate.encodedCoordinateIndex
+                    ] ?? -1,
                     'receiver share representative',
                 );
             } catch {
@@ -354,7 +454,7 @@ const compileShamirQuotientConstraints = (
                     refusedObjects,
                     'Ballot privacy relation receiver share representative is not canonical.',
                 );
-                return;
+                continue;
             }
             const quotientNumerator = evaluatedInteger - shareRepresentative;
             if (quotientNumerator % fieldModulus !== 0) {
@@ -362,7 +462,7 @@ const compileShamirQuotientConstraints = (
                     refusedObjects,
                     'Ballot privacy relation Shamir quotient constraint is not exact.',
                 );
-                return;
+                continue;
             }
             const quotient = quotientNumerator / fieldModulus;
             maximumAbsoluteShamirQuotient = Math.max(
@@ -370,13 +470,17 @@ const compileShamirQuotientConstraints = (
                 Math.abs(quotient),
             );
             constraints.push({
-                optionIndex,
-                receiverRosterPosition,
+                coordinateRole: encodedCoordinate.coordinateRole,
+                encodedCoordinateIndex:
+                    encodedCoordinate.encodedCoordinateIndex,
                 evaluatedInteger,
-                shareRepresentative,
+                optionIndex: encodedCoordinate.optionIndex,
                 quotient,
+                receiverRosterPosition,
+                scoreBucketValue: encodedCoordinate.scoreBucketValue,
+                shareRepresentative,
             });
-        });
+        }
     }
 
     return {
@@ -389,16 +493,18 @@ export const compileBallotPrivacyRelation = (
     input: BallotPrivacyRelationCompilerInput,
 ): BallotPrivacyRelationCompilationResult => {
     const refusedObjects: RefusalRecord[] = [];
+    const shareVectorWidth = getBallotPrivacyEncodedShareVectorWidth(
+        input.optionCount,
+    );
 
     validateRelationDimensions(input, refusedObjects);
-    const scoreMembershipConstraints = compileScoreMembershipConstraints(
-        input,
-        refusedObjects,
-    );
+    const { constraints: scoreMembershipConstraints, encodedCoordinates } =
+        compileScoreMembershipConstraints(input, refusedObjects);
     const receiversByRosterPosition = compileReceiverMap(input, refusedObjects);
     const { constraints, maximumAbsoluteShamirQuotient } =
         compileShamirQuotientConstraints(
             input,
+            encodedCoordinates,
             receiversByRosterPosition,
             refusedObjects,
         );
@@ -417,6 +523,8 @@ export const compileBallotPrivacyRelation = (
         optionCount: input.optionCount,
         rosterSize: input.rosterSize,
         pvssThreshold: input.pvssThreshold,
+        shareVectorWidth,
+        encodedCoordinateCount: encodedCoordinates.length,
         scoreMembershipConstraints,
         shamirQuotientConstraints: constraints,
         maximumAbsoluteShamirQuotient,

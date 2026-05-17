@@ -59,7 +59,7 @@ const collectManifestOpaqueBindingRefusals = (
         refusedObjects.push(
             createRefusal(
                 'ManifestDigestMismatch',
-                'Election manifest must bind the fixed v53 BGV bridge, evaluation-proof, threshold-decryption, CPAD, and mobile profile identifiers.',
+                'Election manifest must bind the fixed packed BGV bridge, evaluation-proof, threshold-decryption, CPAD, and mobile profile identifiers.',
                 manifest.electionManifestDigest,
                 'ElectionManifest',
             ),
