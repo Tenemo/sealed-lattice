@@ -11,7 +11,7 @@ use super::{
     proof_coder::DecodedLazerDemoLinearProof,
 };
 
-pub const LAZER_DEMO_TBOX_AUXILIARY_VECTOR_LENGTH: usize = 9;
+pub const LAZER_DEMO_TBOX_Z34_TARGET_VECTOR_LENGTH: usize = 9;
 pub const LAZER_DEMO_TBOX_GENERATOR_VECTOR_OFFSET: usize = 9;
 pub const LAZER_DEMO_TBOX_GENERATOR_VECTOR_LENGTH: usize = 2;
 pub const LAZER_DEMO_TBOX_HASH_MASK_ZERO_COEFFICIENTS: &[usize] = &[0, 32];
@@ -19,10 +19,10 @@ pub const LAZER_DEMO_TBOX_HASH_MASK_ZERO_COEFFICIENTS: &[usize] = &[0, 32];
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LazerDemoTboxPublicCheckSummary {
-    pub auxiliary_commitment_encoding_bytes: usize,
-    pub auxiliary_commitment_hash: String,
-    pub generator_commitment_encoding_bytes: usize,
-    pub generator_commitment_hash: String,
+    pub z34_challenge_encoding_bytes: usize,
+    pub z34_challenge_hash: String,
+    pub generator_challenge_encoding_bytes: usize,
+    pub generator_challenge_hash: String,
 }
 
 pub fn validate_lazer_demo_tbox_public_checks(
@@ -44,27 +44,26 @@ pub fn validate_lazer_demo_tbox_public_checks(
         ));
     }
 
-    let auxiliary_commitment_encoding = encode_uniform_polynomial_vector(
-        &target_commitment_vector[..LAZER_DEMO_TBOX_AUXILIARY_VECTOR_LENGTH],
+    let z34_challenge_encoding = encode_uniform_polynomial_vector(
+        &target_commitment_vector[..LAZER_DEMO_TBOX_Z34_TARGET_VECTOR_LENGTH],
         proof_encoding,
     )?;
-    let auxiliary_commitment_hash =
-        shake128_32(&[base_transcript_hash, &auxiliary_commitment_encoding]);
+    let z34_challenge_hash = shake128_32(&[base_transcript_hash, &z34_challenge_encoding]);
 
     let generator_range_start = LAZER_DEMO_TBOX_GENERATOR_VECTOR_OFFSET;
     let generator_range_end = generator_range_start + LAZER_DEMO_TBOX_GENERATOR_VECTOR_LENGTH;
-    let generator_commitment_encoding = encode_uniform_polynomial_vector(
+    let generator_challenge_encoding = encode_uniform_polynomial_vector(
         &target_commitment_vector[generator_range_start..generator_range_end],
         proof_encoding,
     )?;
-    let generator_commitment_hash =
-        shake128_32(&[&auxiliary_commitment_hash, &generator_commitment_encoding]);
+    let generator_challenge_hash =
+        shake128_32(&[&z34_challenge_hash, &generator_challenge_encoding]);
 
     Ok(LazerDemoTboxPublicCheckSummary {
-        auxiliary_commitment_encoding_bytes: auxiliary_commitment_encoding.len(),
-        auxiliary_commitment_hash: to_hex(&auxiliary_commitment_hash),
-        generator_commitment_encoding_bytes: generator_commitment_encoding.len(),
-        generator_commitment_hash: to_hex(&generator_commitment_hash),
+        z34_challenge_encoding_bytes: z34_challenge_encoding.len(),
+        z34_challenge_hash: to_hex(&z34_challenge_hash),
+        generator_challenge_encoding_bytes: generator_challenge_encoding.len(),
+        generator_challenge_hash: to_hex(&generator_challenge_hash),
     })
 }
 
@@ -243,10 +242,10 @@ mod tests {
         )
         .expect("valid proof should pass public tbox checks");
 
-        assert_eq!(summary.auxiliary_commitment_encoding_bytes, 4_033);
-        assert_eq!(summary.generator_commitment_encoding_bytes, 897);
-        assert_eq!(summary.auxiliary_commitment_hash.len(), 64);
-        assert_eq!(summary.generator_commitment_hash.len(), 64);
+        assert_eq!(summary.z34_challenge_encoding_bytes, 4_033);
+        assert_eq!(summary.generator_challenge_encoding_bytes, 897);
+        assert_eq!(summary.z34_challenge_hash.len(), 64);
+        assert_eq!(summary.generator_challenge_hash.len(), 64);
     }
 
     #[test]
@@ -286,17 +285,17 @@ mod tests {
         .expect("valid proof should pass public tbox checks");
 
         assert_ne!(
-            zero_base_summary.auxiliary_commitment_hash,
-            different_base_summary.auxiliary_commitment_hash
+            zero_base_summary.z34_challenge_hash,
+            different_base_summary.z34_challenge_hash
         );
         assert_ne!(
-            zero_base_summary.generator_commitment_hash,
-            different_base_summary.generator_commitment_hash
+            zero_base_summary.generator_challenge_hash,
+            different_base_summary.generator_challenge_hash
         );
     }
 
     #[test]
-    fn tbox_hashes_bind_target_commitment_slices() {
+    fn z34_challenge_hash_binds_z34_target_slice() {
         let (mut decoded_proof, proof_encoding) = decoded_valid_proof();
         let base_transcript_hash = [0_u8; 32];
         let original_summary = validate_lazer_demo_tbox_public_checks(
@@ -317,8 +316,41 @@ mod tests {
         .expect("mutated target slice should still be canonical but hash differently");
 
         assert_ne!(
-            original_summary.auxiliary_commitment_hash,
-            mutated_summary.auxiliary_commitment_hash
+            original_summary.z34_challenge_hash,
+            mutated_summary.z34_challenge_hash
+        );
+    }
+
+    #[test]
+    fn generator_challenge_hash_binds_generator_target_slice_after_z34_hash() {
+        let (mut decoded_proof, proof_encoding) = decoded_valid_proof();
+        let base_transcript_hash = [0_u8; 32];
+        let original_summary = validate_lazer_demo_tbox_public_checks(
+            &base_transcript_hash,
+            &decoded_proof,
+            &proof_encoding,
+        )
+        .expect("valid proof should pass public tbox checks");
+        decoded_proof.commitment_target_vector_mut()
+            [super::LAZER_DEMO_TBOX_GENERATOR_VECTOR_OFFSET][0] = (decoded_proof
+            .commitment_target_vector()[super::LAZER_DEMO_TBOX_GENERATOR_VECTOR_OFFSET][0]
+            + 1)
+            % proof_encoding.coefficient_modulus;
+
+        let mutated_summary = validate_lazer_demo_tbox_public_checks(
+            &base_transcript_hash,
+            &decoded_proof,
+            &proof_encoding,
+        )
+        .expect("mutated generator slice should still be canonical but hash differently");
+
+        assert_eq!(
+            original_summary.z34_challenge_hash,
+            mutated_summary.z34_challenge_hash
+        );
+        assert_ne!(
+            original_summary.generator_challenge_hash,
+            mutated_summary.generator_challenge_hash
         );
     }
 }

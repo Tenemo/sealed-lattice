@@ -44,12 +44,21 @@ export type BallotPrivacyKernelVerification = {
     readonly unresolvedReason: string;
 };
 
-export type BallotPrivacyLinearProofVectorVerification =
-    BallotPrivacyKernelVerification & {
-        readonly caseName?: string;
-        readonly vectorAvailable?: boolean;
-        readonly expectedOutcome?: string;
-    };
+export type BallotPrivacyLinearProofVectorVerification = {
+    readonly ok: boolean;
+    readonly backendAvailable: false;
+    readonly backendStatus: BallotPrivacyProofBackendStatus;
+    readonly statusLabels: readonly string[];
+    readonly acceptedDigests: readonly string[];
+    readonly refusedObjects: readonly {
+        readonly code: string;
+        readonly message: string;
+    }[];
+    readonly unresolvedReason: string | null;
+    readonly caseName?: string;
+    readonly vectorAvailable?: boolean;
+    readonly expectedOutcome?: string;
+};
 
 export type TranscriptCoreKernel = {
     readonly exportedFunctionNames: readonly string[];
@@ -201,6 +210,10 @@ const transcriptCoreKernelNormalizedSha256HexValues = [
     'ed70c522d98f95dbc30d2c83c4a31c8e8f70925803f1bb050107be708fc1aad1',
     '6d4fa5f041072fdd39b2d041b804f7b3c907acd92375971a2e9d38eba860eedf',
     '2141ed25a0aa2e7ddc5a0d6b8c72f6dc07c9208923cc36fb3a0c562a70511182',
+    '287413585146cbe73e28b6932ebe9f3ac66a97723997a6d64a76f68b23e73f7a',
+    '6c75458c6615d7f2d3b6675b01892ea4d186e5e142e320112865600a347ae5f3',
+    '572f2fda7bc64bb7a1061f1bfa097c76cca52f100e921e82f8d30b7be2408ce8',
+    '804ab12b4bfdcacc5cf567f39db9be05e9167a304fee3ff4c8ce032f6cd8c451',
 ] as const;
 const defaultTranscriptCoreKernelNormalizedSha256HexValues = new Set<string>(
     transcriptCoreKernelNormalizedSha256HexValues,

@@ -99,6 +99,10 @@ impl SparsePolynomialMatrix {
         self.columns
     }
 
+    pub fn ring(&self) -> PolynomialRing {
+        self.ring
+    }
+
     pub fn entries(&self) -> &[SparsePolynomialMatrixEntry] {
         &self.entries
     }
@@ -168,6 +172,113 @@ impl SparsePolynomialMatrix {
         Self::new(self.ring, self.rows, self.columns, merged_entries)
     }
 
+    pub fn scale(&self, scalar: u64) -> CanonicalResult<Self> {
+        let mut scaled_entries = Vec::with_capacity(self.entries.len());
+        for entry in &self.entries {
+            let scaled_coefficients = self.ring.scale(scalar, &entry.coefficients)?;
+            if !is_zero_polynomial(&scaled_coefficients) {
+                scaled_entries.push(SparsePolynomialMatrixEntry::new(
+                    entry.row_index,
+                    entry.column_index,
+                    scaled_coefficients,
+                ));
+            }
+        }
+
+        Self::new(self.ring, self.rows, self.columns, scaled_entries)
+    }
+
+    pub(crate) fn scale_by_polynomial(&self, polynomial: &[u64]) -> CanonicalResult<Self> {
+        self.ring.validate_coefficients(polynomial)?;
+
+        let mut scaled_entries = Vec::with_capacity(self.entries.len());
+        for entry in &self.entries {
+            let scaled_coefficients = self.ring.mul_negacyclic(polynomial, &entry.coefficients)?;
+            if !is_zero_polynomial(&scaled_coefficients) {
+                scaled_entries.push(SparsePolynomialMatrixEntry::new(
+                    entry.row_index,
+                    entry.column_index,
+                    scaled_coefficients,
+                ));
+            }
+        }
+
+        Self::new(self.ring, self.rows, self.columns, scaled_entries)
+    }
+
+    pub(crate) fn resize(
+        &self,
+        resized_rows: usize,
+        resized_columns: usize,
+    ) -> CanonicalResult<Self> {
+        if resized_rows < self.rows || resized_columns < self.columns {
+            return Err(invalid_sparse_matrix(
+                "sparse matrix resize cannot shrink existing entries",
+            ));
+        }
+
+        Self::new(
+            self.ring,
+            resized_rows,
+            resized_columns,
+            self.entries.clone(),
+        )
+    }
+
+    pub fn automorphism(&self) -> CanonicalResult<Self> {
+        let mut transformed_entries = Vec::with_capacity(self.entries.len());
+        for entry in &self.entries {
+            transformed_entries.push(SparsePolynomialMatrixEntry::new(
+                entry.row_index,
+                entry.column_index,
+                self.ring.automorphism(&entry.coefficients)?,
+            ));
+        }
+
+        Self::new(self.ring, self.rows, self.columns, transformed_entries)
+    }
+
+    pub fn left_rotate_negacyclic(&self, rotation: usize) -> CanonicalResult<Self> {
+        let mut rotated_entries = Vec::with_capacity(self.entries.len());
+        for entry in &self.entries {
+            rotated_entries.push(SparsePolynomialMatrixEntry::new(
+                entry.row_index,
+                entry.column_index,
+                self.ring
+                    .left_rotate_negacyclic(&entry.coefficients, rotation)?,
+            ));
+        }
+
+        Self::new(self.ring, self.rows, self.columns, rotated_entries)
+    }
+
+    pub fn shuffle_upper_diagonal_automorphism_by_pairs(&self) -> CanonicalResult<Self> {
+        if !self.rows.is_multiple_of(2) || !self.columns.is_multiple_of(2) {
+            return Err(invalid_sparse_matrix(
+                "pair shuffle requires even sparse matrix dimensions",
+            ));
+        }
+        if !self.is_upper_diagonal() {
+            return Err(invalid_sparse_matrix(
+                "pair shuffle requires an upper-diagonal sparse matrix",
+            ));
+        }
+
+        let mut transformed_entries = Vec::with_capacity(self.entries.len());
+        for entry in &self.entries {
+            let (transformed_row_index, transformed_column_index) =
+                shuffled_upper_diagonal_pair_position(entry.row_index, entry.column_index);
+            transformed_entries.push(SparsePolynomialMatrixEntry::new(
+                transformed_row_index,
+                transformed_column_index,
+                self.ring.automorphism(&entry.coefficients)?,
+            ));
+        }
+        transformed_entries.sort_by_key(entry_position);
+
+        Self::new(self.ring, self.rows, self.columns, transformed_entries)
+    }
+
     pub fn multiply_vector(&self, vector: &PolynomialVector) -> CanonicalResult<PolynomialVector> {
         if self.ring != vector.ring() {
             return Err(invalid_sparse_matrix(
@@ -209,6 +320,16 @@ impl SparsePolynomialMatrix {
 
 fn entry_position(entry: &SparsePolynomialMatrixEntry) -> (usize, usize) {
     (entry.row_index, entry.column_index)
+}
+
+fn shuffled_upper_diagonal_pair_position(row_index: usize, column_index: usize) -> (usize, usize) {
+    match (row_index.is_multiple_of(2), column_index.is_multiple_of(2)) {
+        (true, true) => (row_index + 1, column_index + 1),
+        (false, false) => (row_index - 1, column_index - 1),
+        (false, true) => (row_index - 1, column_index + 1),
+        (true, false) if row_index + 1 > column_index - 1 => (row_index, column_index),
+        (true, false) => (row_index + 1, column_index - 1),
+    }
 }
 
 fn is_zero_polynomial(coefficients: &[u64]) -> bool {
@@ -390,5 +511,226 @@ mod tests {
         .expect("expected dense matrix should validate");
 
         assert_eq!(dense_matrix, expected_dense_matrix);
+    }
+
+    #[test]
+    fn maps_ring_operations_across_sparse_matrix_entries_without_changing_positions() {
+        let ring = PolynomialRing::new(8, 17).expect("ring should validate");
+        let sparse_matrix = SparsePolynomialMatrix::new(
+            ring,
+            3,
+            3,
+            vec![
+                SparsePolynomialMatrixEntry::new(0, 1, vec![1, 2, 3, 4, 5, 6, 7, 8]),
+                SparsePolynomialMatrixEntry::new(2, 2, vec![8, 7, 6, 5, 4, 3, 2, 1]),
+            ],
+        )
+        .expect("sparse matrix should validate");
+
+        let scaled = sparse_matrix.scale(3).expect("scaling should succeed");
+        assert_eq!(scaled.entries()[0].row_index(), 0);
+        assert_eq!(scaled.entries()[0].column_index(), 1);
+        assert_eq!(
+            scaled.entries()[0].coefficients(),
+            &[3, 6, 9, 12, 15, 1, 4, 7]
+        );
+        assert_eq!(scaled.entries()[1].row_index(), 2);
+        assert_eq!(scaled.entries()[1].column_index(), 2);
+        assert_eq!(
+            scaled.entries()[1].coefficients(),
+            &[7, 4, 1, 15, 12, 9, 6, 3]
+        );
+
+        let transformed = sparse_matrix
+            .automorphism()
+            .expect("automorphism should succeed");
+        assert_eq!(transformed.entries()[0].row_index(), 0);
+        assert_eq!(transformed.entries()[0].column_index(), 1);
+        assert_eq!(
+            transformed.entries()[0].coefficients(),
+            &[1, 9, 10, 11, 12, 13, 14, 15]
+        );
+        assert_eq!(transformed.entries()[1].row_index(), 2);
+        assert_eq!(transformed.entries()[1].column_index(), 2);
+        assert_eq!(
+            transformed.entries()[1].coefficients(),
+            &[8, 16, 15, 14, 13, 12, 11, 10]
+        );
+    }
+
+    #[test]
+    fn scaling_sparse_matrix_by_zero_drops_all_entries() {
+        let ring = PolynomialRing::new(4, 17).expect("ring should validate");
+        let sparse_matrix = SparsePolynomialMatrix::new(
+            ring,
+            2,
+            2,
+            vec![
+                SparsePolynomialMatrixEntry::new(0, 0, vec![1, 0, 0, 0]),
+                SparsePolynomialMatrixEntry::new(1, 1, vec![0, 2, 0, 0]),
+            ],
+        )
+        .expect("sparse matrix should validate");
+
+        let scaled = sparse_matrix.scale(0).expect("scaling should succeed");
+
+        assert!(scaled.entries().is_empty());
+        assert_eq!(scaled.rows(), 2);
+        assert_eq!(scaled.columns(), 2);
+    }
+
+    #[test]
+    fn polynomial_scaling_multiplies_each_sparse_entry() {
+        let ring = PolynomialRing::new(4, 17).expect("ring should validate");
+        let sparse_matrix = SparsePolynomialMatrix::new(
+            ring,
+            2,
+            2,
+            vec![
+                SparsePolynomialMatrixEntry::new(0, 0, vec![1, 2, 0, 0]),
+                SparsePolynomialMatrixEntry::new(1, 1, vec![0, 1, 0, 0]),
+            ],
+        )
+        .expect("sparse matrix should validate");
+
+        let scaled = sparse_matrix
+            .scale_by_polynomial(&[3, 4, 0, 0])
+            .expect("polynomial scaling should succeed");
+
+        assert_eq!(scaled.entries().len(), 2);
+        assert_eq!(scaled.entries()[0].coefficients(), &[3, 10, 8, 0]);
+        assert_eq!(scaled.entries()[1].coefficients(), &[0, 3, 4, 0]);
+    }
+
+    #[test]
+    fn resize_expands_shape_without_moving_entries() {
+        let ring = PolynomialRing::new(4, 17).expect("ring should validate");
+        let sparse_matrix = SparsePolynomialMatrix::new(
+            ring,
+            2,
+            2,
+            vec![SparsePolynomialMatrixEntry::new(1, 1, vec![7, 0, 0, 0])],
+        )
+        .expect("sparse matrix should validate");
+
+        let resized = sparse_matrix
+            .resize(4, 5)
+            .expect("expanding resize should succeed");
+
+        assert_eq!(resized.rows(), 4);
+        assert_eq!(resized.columns(), 5);
+        assert_eq!(resized.entries()[0].row_index(), 1);
+        assert_eq!(resized.entries()[0].column_index(), 1);
+        assert!(
+            sparse_matrix
+                .resize(1, 2)
+                .expect_err("shrinking rows should fail")
+                .message
+                .contains("cannot shrink")
+        );
+    }
+
+    #[test]
+    fn left_rotates_sparse_matrix_coefficients_without_changing_positions() {
+        let ring = PolynomialRing::new(8, 17).expect("ring should validate");
+        let sparse_matrix = SparsePolynomialMatrix::new(
+            ring,
+            3,
+            3,
+            vec![
+                SparsePolynomialMatrixEntry::new(0, 1, vec![1, 2, 3, 4, 5, 6, 7, 8]),
+                SparsePolynomialMatrixEntry::new(2, 2, vec![8, 7, 6, 5, 4, 3, 2, 1]),
+            ],
+        )
+        .expect("sparse matrix should validate");
+
+        let rotated = sparse_matrix
+            .left_rotate_negacyclic(3)
+            .expect("rotation should succeed");
+
+        assert_eq!(rotated.entries()[0].row_index(), 0);
+        assert_eq!(rotated.entries()[0].column_index(), 1);
+        assert_eq!(
+            rotated.entries()[0].coefficients(),
+            &[11, 10, 9, 1, 2, 3, 4, 5]
+        );
+        assert_eq!(rotated.entries()[1].row_index(), 2);
+        assert_eq!(rotated.entries()[1].column_index(), 2);
+        assert_eq!(
+            rotated.entries()[1].coefficients(),
+            &[14, 15, 16, 8, 7, 6, 5, 4]
+        );
+    }
+
+    #[test]
+    fn shuffle_automorphism_preserves_upper_diagonal_matrix_layout() {
+        let ring = PolynomialRing::new(8, 17).expect("ring should validate");
+        let sparse_matrix = SparsePolynomialMatrix::new(
+            ring,
+            6,
+            6,
+            vec![
+                SparsePolynomialMatrixEntry::new(0, 0, vec![1, 2, 3, 4, 5, 6, 7, 8]),
+                SparsePolynomialMatrixEntry::new(0, 1, vec![2, 0, 0, 0, 0, 0, 0, 0]),
+                SparsePolynomialMatrixEntry::new(1, 2, vec![3, 0, 0, 0, 0, 0, 0, 0]),
+                SparsePolynomialMatrixEntry::new(1, 3, vec![4, 0, 0, 0, 0, 0, 0, 0]),
+                SparsePolynomialMatrixEntry::new(2, 4, vec![5, 0, 0, 0, 0, 0, 0, 0]),
+            ],
+        )
+        .expect("sparse matrix should validate");
+
+        let transformed = sparse_matrix
+            .shuffle_upper_diagonal_automorphism_by_pairs()
+            .expect("shuffle automorphism should succeed");
+
+        assert!(transformed.is_upper_diagonal());
+        assert_eq!(transformed.entries()[0].row_index(), 0);
+        assert_eq!(transformed.entries()[0].column_index(), 1);
+        assert_eq!(
+            transformed.entries()[0].coefficients(),
+            &[2, 0, 0, 0, 0, 0, 0, 0]
+        );
+        assert_eq!(transformed.entries()[1].row_index(), 0);
+        assert_eq!(transformed.entries()[1].column_index(), 2);
+        assert_eq!(
+            transformed.entries()[1].coefficients(),
+            &[4, 0, 0, 0, 0, 0, 0, 0]
+        );
+        assert_eq!(transformed.entries()[2].row_index(), 0);
+        assert_eq!(transformed.entries()[2].column_index(), 3);
+        assert_eq!(
+            transformed.entries()[2].coefficients(),
+            &[3, 0, 0, 0, 0, 0, 0, 0]
+        );
+        assert_eq!(transformed.entries()[3].row_index(), 1);
+        assert_eq!(transformed.entries()[3].column_index(), 1);
+        assert_eq!(
+            transformed.entries()[3].coefficients(),
+            &[1, 9, 10, 11, 12, 13, 14, 15]
+        );
+        assert_eq!(transformed.entries()[4].row_index(), 3);
+        assert_eq!(transformed.entries()[4].column_index(), 5);
+        assert_eq!(
+            transformed.entries()[4].coefficients(),
+            &[5, 0, 0, 0, 0, 0, 0, 0]
+        );
+    }
+
+    #[test]
+    fn shuffle_automorphism_rejects_non_upper_diagonal_matrix() {
+        let ring = PolynomialRing::new(4, 17).expect("ring should validate");
+        let sparse_matrix = SparsePolynomialMatrix::new(
+            ring,
+            4,
+            4,
+            vec![SparsePolynomialMatrixEntry::new(2, 0, vec![1, 0, 0, 0])],
+        )
+        .expect("sparse matrix should validate");
+
+        let error = sparse_matrix
+            .shuffle_upper_diagonal_automorphism_by_pairs()
+            .expect_err("lower diagonal matrix should fail");
+
+        assert!(error.message.contains("upper-diagonal"));
     }
 }

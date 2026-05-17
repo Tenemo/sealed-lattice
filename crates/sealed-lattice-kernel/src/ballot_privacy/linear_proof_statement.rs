@@ -8,6 +8,9 @@ use crate::{
 use super::{
     linear_proof_parameters::{LazerDemoProofEncoding, LinearProofParameterSet},
     linear_proof_transcript::shake128_32,
+    polynomial_matrix::PolynomialMatrix,
+    polynomial_ring::PolynomialRing,
+    polynomial_vector::PolynomialVector,
 };
 
 pub const LAZER_DEMO_LINEAR_SELECTED_SHORT_COLUMNS: usize = 8;
@@ -77,6 +80,65 @@ pub fn derive_lazer_demo_linear_statement_transcript(
         public_parameters_and_statement_hash,
         public_parameters_and_statement_hash_hex: to_hex(&public_parameters_and_statement_hash),
     })
+}
+
+pub(crate) fn derive_lazer_demo_transformed_statement_matrix(
+    parameter_set: &LinearProofParameterSet,
+    proof_encoding: &LazerDemoProofEncoding,
+    statement_matrix_coefficients: &[Vec<Vec<u64>>],
+    target_vector_coefficients: &[Vec<u64>],
+    public_randomness: &[u8],
+) -> CanonicalResult<PolynomialMatrix> {
+    validate_demo_statement_inputs(
+        parameter_set,
+        proof_encoding,
+        statement_matrix_coefficients,
+        target_vector_coefficients,
+        public_randomness,
+    )?;
+    let transformed_statement_matrix = transform_statement_matrix_to_proof_ring(
+        statement_matrix_coefficients,
+        parameter_set,
+        proof_encoding,
+    )?;
+    PolynomialMatrix::new(
+        PolynomialRing::new(
+            proof_encoding.ring_degree,
+            proof_encoding.coefficient_modulus,
+        )?,
+        parameter_set.statement_rows * LAZER_DEMO_LINEAR_PROOF_RING_ROWS_PER_SOURCE_ROW,
+        LAZER_DEMO_LINEAR_SELECTED_SHORT_COLUMNS
+            * LAZER_DEMO_LINEAR_PROOF_RING_COLUMNS_PER_SOURCE_COLUMN,
+        transformed_statement_matrix,
+    )
+}
+
+pub(crate) fn derive_lazer_demo_transformed_target_vector(
+    parameter_set: &LinearProofParameterSet,
+    proof_encoding: &LazerDemoProofEncoding,
+    statement_matrix_coefficients: &[Vec<Vec<u64>>],
+    target_vector_coefficients: &[Vec<u64>],
+    public_randomness: &[u8],
+) -> CanonicalResult<PolynomialVector> {
+    validate_demo_statement_inputs(
+        parameter_set,
+        proof_encoding,
+        statement_matrix_coefficients,
+        target_vector_coefficients,
+        public_randomness,
+    )?;
+    let transformed_target_vector = transform_target_vector_to_proof_ring(
+        target_vector_coefficients,
+        parameter_set,
+        proof_encoding,
+    )?;
+    PolynomialVector::new(
+        PolynomialRing::new(
+            proof_encoding.ring_degree,
+            proof_encoding.coefficient_modulus,
+        )?,
+        transformed_target_vector,
+    )
 }
 
 fn validate_demo_statement_inputs(
@@ -169,7 +231,7 @@ fn transform_statement_matrix_to_proof_ring(
             .take(LAZER_DEMO_LINEAR_SELECTED_SHORT_COLUMNS)
             .enumerate()
         {
-            let split_polynomials = split_polynomial_into_proof_ring(source_polynomial)?;
+            let split_polynomials = split_unsigned_polynomial_into_proof_ring(source_polynomial)?;
             let rotated_split_polynomials = split_polynomials
                 .iter()
                 .map(|polynomial| rotate_left_negacyclic_signed_polynomial(polynomial))
@@ -222,7 +284,10 @@ fn transform_target_vector_to_proof_ring(
         parameter_set.statement_rows * LAZER_DEMO_LINEAR_PROOF_RING_ROWS_PER_SOURCE_ROW;
     let mut transformed_entries = Vec::with_capacity(transformed_length);
     for source_polynomial in target_vector_coefficients {
-        for signed_polynomial in split_polynomial_into_proof_ring(source_polynomial)? {
+        for signed_polynomial in split_centered_source_polynomial_into_proof_ring(
+            source_polynomial,
+            parameter_set.coefficient_modulus,
+        )? {
             transformed_entries.push(scale_signed_polynomial_by_source_modulus_inverse(
                 &signed_polynomial,
                 proof_encoding,
@@ -233,7 +298,34 @@ fn transform_target_vector_to_proof_ring(
     Ok(transformed_entries)
 }
 
-fn split_polynomial_into_proof_ring(source_polynomial: &[u64]) -> CanonicalResult<Vec<Vec<i128>>> {
+fn split_unsigned_polynomial_into_proof_ring(
+    source_polynomial: &[u64],
+) -> CanonicalResult<Vec<Vec<i128>>> {
+    split_polynomial_into_proof_ring(source_polynomial, |coefficient| Ok(i128::from(coefficient)))
+}
+
+fn split_centered_source_polynomial_into_proof_ring(
+    source_polynomial: &[u64],
+    source_modulus: u64,
+) -> CanonicalResult<Vec<Vec<i128>>> {
+    split_polynomial_into_proof_ring(source_polynomial, |coefficient| {
+        if coefficient >= source_modulus {
+            return Err(invalid_statement(
+                "linear statement target coefficient is not canonical for the source modulus",
+            ));
+        }
+        if coefficient > source_modulus / 2 {
+            Ok(i128::from(coefficient) - i128::from(source_modulus))
+        } else {
+            Ok(i128::from(coefficient))
+        }
+    })
+}
+
+fn split_polynomial_into_proof_ring(
+    source_polynomial: &[u64],
+    coefficient_mapper: impl Fn(u64) -> CanonicalResult<i128>,
+) -> CanonicalResult<Vec<Vec<i128>>> {
     let source_degree = source_polynomial.len();
     if !source_degree.is_multiple_of(LAZER_DEMO_LINEAR_PROOF_RING_ROWS_PER_SOURCE_ROW) {
         return Err(invalid_statement(
@@ -246,11 +338,11 @@ fn split_polynomial_into_proof_ring(source_polynomial: &[u64]) -> CanonicalResul
 
     for (component_index, split_polynomial) in split_polynomials.iter_mut().enumerate() {
         for (coefficient_index, coefficient) in split_polynomial.iter_mut().enumerate() {
-            *coefficient = i128::from(
+            *coefficient = coefficient_mapper(
                 source_polynomial[LAZER_DEMO_LINEAR_PROOF_RING_ROWS_PER_SOURCE_ROW
                     * coefficient_index
                     + component_index],
-            );
+            )?;
         }
     }
 
@@ -406,6 +498,7 @@ mod tests {
         LAZER_DEMO_LINEAR_PROOF_RING_COLUMNS_PER_SOURCE_COLUMN,
         LAZER_DEMO_LINEAR_PROOF_RING_ROWS_PER_SOURCE_ROW,
         derive_lazer_demo_linear_statement_transcript,
+        split_centered_source_polynomial_into_proof_ring,
     };
     use crate::{
         ballot_privacy::linear_proof_parameters::{
@@ -523,5 +616,33 @@ mod tests {
         assert_ne!(valid_digest, derive_digest(&mutated_statement_case));
         assert_ne!(valid_digest, derive_digest(&mutated_target_case));
         assert_ne!(valid_digest, derive_digest(&wrong_randomness_case));
+    }
+
+    #[test]
+    fn target_split_recovers_centered_source_representatives() {
+        let split_polynomials = split_centered_source_polynomial_into_proof_ring(
+            &[
+                0,
+                1,
+                2_147_481_344,
+                2_147_481_345,
+                4_294_962_688,
+                10,
+                11,
+                12,
+            ],
+            4_294_962_689,
+        )
+        .expect("target polynomial should split");
+
+        assert_eq!(
+            split_polynomials,
+            vec![
+                vec![0, -1],
+                vec![1, 10],
+                vec![2_147_481_344, 11],
+                vec![-2_147_481_344, 12],
+            ]
+        );
     }
 }

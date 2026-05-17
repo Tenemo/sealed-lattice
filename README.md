@@ -52,10 +52,12 @@ release flow stable while the broader voting API remains future implementation.
 Internal PVSS ballot-algebra helpers are deterministic test infrastructure only:
 they are not exported by the public package and must not be used for real ballot
 confidentiality.
-The internal ballot privacy profile freeze records the future receiver
-encryption, share commitment, score-membership, proof-profile, and bound
-certificate choices, but proof generation and verification are not implemented
-yet.
+The internal ballot privacy plan targets ballot-level encoded score shares:
+scalar score coordinates plus hidden one-hot score-bucket coordinates. Those
+encoded aggregates feed TargetBasisData and a packed bit-sliced BGV evaluator.
+The current scalar PVSS helpers remain fixture/oracle infrastructure only.
+Proof generation, proof verification, the encoded TargetBasisData bridge, and
+the bit-sliced evaluator are not implemented yet.
 
 - workspace layout and package boundaries
 - packaging and tarball smoke checks

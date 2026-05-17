@@ -145,6 +145,97 @@ impl SparsePolynomialVector {
         Self::new(self.ring, self.length, merged_entries)
     }
 
+    pub fn scale(&self, scalar: u64) -> CanonicalResult<Self> {
+        let mut scaled_entries = Vec::with_capacity(self.entries.len());
+        for entry in &self.entries {
+            let scaled_coefficients = self.ring.scale(scalar, &entry.coefficients)?;
+            if !is_zero_polynomial(&scaled_coefficients) {
+                scaled_entries.push(SparsePolynomialVectorEntry::new(
+                    entry.position,
+                    scaled_coefficients,
+                ));
+            }
+        }
+
+        Self::new(self.ring, self.length, scaled_entries)
+    }
+
+    pub(crate) fn scale_by_polynomial(&self, polynomial: &[u64]) -> CanonicalResult<Self> {
+        self.ring.validate_coefficients(polynomial)?;
+
+        let mut scaled_entries = Vec::with_capacity(self.entries.len());
+        for entry in &self.entries {
+            let scaled_coefficients = self.ring.mul_negacyclic(polynomial, &entry.coefficients)?;
+            if !is_zero_polynomial(&scaled_coefficients) {
+                scaled_entries.push(SparsePolynomialVectorEntry::new(
+                    entry.position,
+                    scaled_coefficients,
+                ));
+            }
+        }
+
+        Self::new(self.ring, self.length, scaled_entries)
+    }
+
+    pub(crate) fn resize(&self, resized_length: usize) -> CanonicalResult<Self> {
+        if resized_length < self.length {
+            return Err(invalid_sparse_vector(
+                "sparse vector resize cannot shrink existing entries",
+            ));
+        }
+
+        Self::new(self.ring, resized_length, self.entries.clone())
+    }
+
+    pub fn left_rotate_negacyclic(&self, rotation: usize) -> CanonicalResult<Self> {
+        let mut rotated_entries = Vec::with_capacity(self.entries.len());
+        for entry in &self.entries {
+            rotated_entries.push(SparsePolynomialVectorEntry::new(
+                entry.position,
+                self.ring
+                    .left_rotate_negacyclic(&entry.coefficients, rotation)?,
+            ));
+        }
+
+        Self::new(self.ring, self.length, rotated_entries)
+    }
+
+    pub fn automorphism(&self) -> CanonicalResult<Self> {
+        let mut transformed_entries = Vec::with_capacity(self.entries.len());
+        for entry in &self.entries {
+            transformed_entries.push(SparsePolynomialVectorEntry::new(
+                entry.position,
+                self.ring.automorphism(&entry.coefficients)?,
+            ));
+        }
+
+        Self::new(self.ring, self.length, transformed_entries)
+    }
+
+    pub fn shuffle_automorphism_by_pairs(&self) -> CanonicalResult<Self> {
+        if !self.length.is_multiple_of(2) {
+            return Err(invalid_sparse_vector(
+                "pair shuffle requires an even sparse vector length",
+            ));
+        }
+
+        let mut transformed_entries = Vec::with_capacity(self.entries.len());
+        for entry in &self.entries {
+            let transformed_position = if entry.position.is_multiple_of(2) {
+                entry.position + 1
+            } else {
+                entry.position - 1
+            };
+            transformed_entries.push(SparsePolynomialVectorEntry::new(
+                transformed_position,
+                self.ring.automorphism(&entry.coefficients)?,
+            ));
+        }
+        transformed_entries.sort_by_key(|entry| entry.position);
+
+        Self::new(self.ring, self.length, transformed_entries)
+    }
+
     fn require_same_shape(&self, other: &Self) -> CanonicalResult<()> {
         if self.ring != other.ring {
             return Err(invalid_sparse_vector("sparse vector rings do not match"));
@@ -264,5 +355,177 @@ mod tests {
             .message
             .contains("zero polynomials")
         );
+    }
+
+    #[test]
+    fn maps_ring_operations_across_sparse_entries_without_changing_positions() {
+        let ring = PolynomialRing::new(8, 17).expect("ring should validate");
+        let sparse_vector = SparsePolynomialVector::new(
+            ring,
+            4,
+            vec![
+                SparsePolynomialVectorEntry::new(1, vec![1, 2, 3, 4, 5, 6, 7, 8]),
+                SparsePolynomialVectorEntry::new(3, vec![8, 7, 6, 5, 4, 3, 2, 1]),
+            ],
+        )
+        .expect("sparse vector should validate");
+
+        let scaled = sparse_vector.scale(3).expect("scaling should succeed");
+        assert_eq!(scaled.entries()[0].position(), 1);
+        assert_eq!(
+            scaled.entries()[0].coefficients(),
+            &[3, 6, 9, 12, 15, 1, 4, 7]
+        );
+        assert_eq!(scaled.entries()[1].position(), 3);
+        assert_eq!(
+            scaled.entries()[1].coefficients(),
+            &[7, 4, 1, 15, 12, 9, 6, 3]
+        );
+
+        let rotated = sparse_vector
+            .left_rotate_negacyclic(3)
+            .expect("rotation should succeed");
+        assert_eq!(rotated.entries()[0].position(), 1);
+        assert_eq!(
+            rotated.entries()[0].coefficients(),
+            &[11, 10, 9, 1, 2, 3, 4, 5]
+        );
+        assert_eq!(rotated.entries()[1].position(), 3);
+        assert_eq!(
+            rotated.entries()[1].coefficients(),
+            &[14, 15, 16, 8, 7, 6, 5, 4]
+        );
+
+        let transformed = sparse_vector
+            .automorphism()
+            .expect("automorphism should succeed");
+        assert_eq!(transformed.entries()[0].position(), 1);
+        assert_eq!(
+            transformed.entries()[0].coefficients(),
+            &[1, 9, 10, 11, 12, 13, 14, 15]
+        );
+        assert_eq!(transformed.entries()[1].position(), 3);
+        assert_eq!(
+            transformed.entries()[1].coefficients(),
+            &[8, 16, 15, 14, 13, 12, 11, 10]
+        );
+    }
+
+    #[test]
+    fn scaling_sparse_vector_by_zero_drops_all_entries() {
+        let ring = PolynomialRing::new(4, 17).expect("ring should validate");
+        let sparse_vector = SparsePolynomialVector::new(
+            ring,
+            3,
+            vec![
+                SparsePolynomialVectorEntry::new(0, vec![1, 0, 0, 0]),
+                SparsePolynomialVectorEntry::new(2, vec![0, 2, 0, 0]),
+            ],
+        )
+        .expect("sparse vector should validate");
+
+        let scaled = sparse_vector.scale(0).expect("scaling should succeed");
+
+        assert!(scaled.entries().is_empty());
+        assert_eq!(scaled.length(), 3);
+    }
+
+    #[test]
+    fn polynomial_scaling_multiplies_each_sparse_vector_entry() {
+        let ring = PolynomialRing::new(4, 17).expect("ring should validate");
+        let sparse_vector = SparsePolynomialVector::new(
+            ring,
+            3,
+            vec![
+                SparsePolynomialVectorEntry::new(0, vec![1, 2, 0, 0]),
+                SparsePolynomialVectorEntry::new(2, vec![0, 1, 0, 0]),
+            ],
+        )
+        .expect("sparse vector should validate");
+
+        let scaled = sparse_vector
+            .scale_by_polynomial(&[3, 4, 0, 0])
+            .expect("polynomial scaling should succeed");
+
+        assert_eq!(scaled.entries().len(), 2);
+        assert_eq!(scaled.entries()[0].coefficients(), &[3, 10, 8, 0]);
+        assert_eq!(scaled.entries()[1].coefficients(), &[0, 3, 4, 0]);
+    }
+
+    #[test]
+    fn resize_expands_sparse_vector_without_moving_entries() {
+        let ring = PolynomialRing::new(4, 17).expect("ring should validate");
+        let sparse_vector = SparsePolynomialVector::new(
+            ring,
+            2,
+            vec![SparsePolynomialVectorEntry::new(1, vec![7, 0, 0, 0])],
+        )
+        .expect("sparse vector should validate");
+
+        let resized = sparse_vector
+            .resize(5)
+            .expect("expanding resize should succeed");
+
+        assert_eq!(resized.length(), 5);
+        assert_eq!(resized.entries()[0].position(), 1);
+        assert!(
+            sparse_vector
+                .resize(1)
+                .expect_err("shrinking length should fail")
+                .message
+                .contains("cannot shrink")
+        );
+    }
+
+    #[test]
+    fn shuffle_automorphism_swaps_adjacent_sparse_positions() {
+        let ring = PolynomialRing::new(8, 17).expect("ring should validate");
+        let sparse_vector = SparsePolynomialVector::new(
+            ring,
+            6,
+            vec![
+                SparsePolynomialVectorEntry::new(0, vec![1, 2, 3, 4, 5, 6, 7, 8]),
+                SparsePolynomialVectorEntry::new(3, vec![8, 7, 6, 5, 4, 3, 2, 1]),
+                SparsePolynomialVectorEntry::new(4, vec![2, 0, 0, 0, 0, 0, 0, 0]),
+            ],
+        )
+        .expect("sparse vector should validate");
+
+        let transformed = sparse_vector
+            .shuffle_automorphism_by_pairs()
+            .expect("shuffle automorphism should succeed");
+
+        assert_eq!(transformed.entries()[0].position(), 1);
+        assert_eq!(
+            transformed.entries()[0].coefficients(),
+            &[1, 9, 10, 11, 12, 13, 14, 15]
+        );
+        assert_eq!(transformed.entries()[1].position(), 2);
+        assert_eq!(
+            transformed.entries()[1].coefficients(),
+            &[8, 16, 15, 14, 13, 12, 11, 10]
+        );
+        assert_eq!(transformed.entries()[2].position(), 5);
+        assert_eq!(
+            transformed.entries()[2].coefficients(),
+            &[2, 0, 0, 0, 0, 0, 0, 0]
+        );
+    }
+
+    #[test]
+    fn shuffle_automorphism_rejects_odd_sparse_vector_length() {
+        let ring = PolynomialRing::new(4, 17).expect("ring should validate");
+        let sparse_vector = SparsePolynomialVector::new(
+            ring,
+            3,
+            vec![SparsePolynomialVectorEntry::new(0, vec![1, 0, 0, 0])],
+        )
+        .expect("sparse vector should validate");
+
+        let error = sparse_vector
+            .shuffle_automorphism_by_pairs()
+            .expect_err("odd vector length should fail");
+
+        assert!(error.message.contains("even"));
     }
 }

@@ -507,17 +507,20 @@ describe('transcript-core kernel in Node', () => {
             expect(vectorCaseNames.has(requiredCaseName)).toBe(true);
         }
 
-        expect(
-            kernel.verifyBallotPrivacyLinearProofVector({
-                vectorCase: linearProofBackendVectors.cases[0],
-            }),
-        ).toMatchObject({
-            ok: false,
+        const verification = kernel.verifyBallotPrivacyLinearProofVector({
+            vectorCase: linearProofBackendVectors.cases[0],
+        });
+
+        expect(verification).toMatchObject({
+            ok: true,
             backendAvailable: false,
             caseName: 'valid-small-linear-proof',
             vectorAvailable: true,
-            unresolvedReason: 'OperationUnavailable',
+            unresolvedReason: null,
         });
+        expect(verification.statusLabels).toContain(
+            'QuadraticChallengeRecomputed',
+        );
     });
 
     it('deallocates command inputs and outputs', async () => {

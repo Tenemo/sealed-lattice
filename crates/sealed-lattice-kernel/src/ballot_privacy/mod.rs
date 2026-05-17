@@ -1,7 +1,11 @@
 pub mod abdlop_commitment;
 pub mod lazer_demo_abdlop;
+pub(crate) mod lazer_demo_many_quadratic;
 pub mod lazer_demo_public_parameters;
+pub(crate) mod lazer_demo_quadratic;
+pub(crate) mod lazer_demo_quadratic_challenge;
 pub mod lazer_demo_rng;
+pub(crate) mod lazer_demo_tbox_relations;
 pub mod linear_proof_norms;
 pub mod linear_proof_parameters;
 pub mod linear_proof_statement;

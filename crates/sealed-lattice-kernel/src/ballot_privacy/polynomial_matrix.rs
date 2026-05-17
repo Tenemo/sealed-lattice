@@ -65,6 +65,26 @@ impl PolynomialMatrix {
             .collect()
     }
 
+    pub fn scale(&self, scalar: u64) -> CanonicalResult<Self> {
+        let entries = self
+            .entries
+            .iter()
+            .map(|entry| self.ring.scale(scalar, entry))
+            .collect::<CanonicalResult<Vec<_>>>()?;
+
+        Self::new(self.ring, self.rows, self.columns, entries)
+    }
+
+    pub fn automorphism(&self) -> CanonicalResult<Self> {
+        let entries = self
+            .entries
+            .iter()
+            .map(|entry| self.ring.automorphism(entry))
+            .collect::<CanonicalResult<Vec<_>>>()?;
+
+        Self::new(self.ring, self.rows, self.columns, entries)
+    }
+
     pub fn multiply_vector(&self, vector: &PolynomialVector) -> CanonicalResult<PolynomialVector> {
         if self.ring != vector.ring() {
             return Err(invalid_matrix("matrix and vector rings do not match"));
@@ -133,6 +153,36 @@ mod tests {
         assert_eq!(
             product.entries(),
             &[vec![10, 11, 13, 15], vec![14, 15, 0, 3]]
+        );
+    }
+
+    #[test]
+    fn maps_ring_operations_across_matrix_entries() {
+        let ring = PolynomialRing::new(8, 17).expect("ring should validate");
+        let matrix = PolynomialMatrix::new(
+            ring,
+            1,
+            2,
+            vec![vec![1, 2, 3, 4, 5, 6, 7, 8], vec![8, 7, 6, 5, 4, 3, 2, 1]],
+        )
+        .expect("matrix should validate");
+
+        let scaled = matrix.scale(3).expect("scaling should succeed");
+        assert_eq!(
+            scaled.entries_by_row(),
+            vec![vec![
+                vec![3, 6, 9, 12, 15, 1, 4, 7],
+                vec![7, 4, 1, 15, 12, 9, 6, 3],
+            ]]
+        );
+
+        let transformed = matrix.automorphism().expect("automorphism should succeed");
+        assert_eq!(
+            transformed.entries_by_row(),
+            vec![vec![
+                vec![1, 9, 10, 11, 12, 13, 14, 15],
+                vec![8, 16, 15, 14, 13, 12, 11, 10],
+            ]]
         );
     }
 }

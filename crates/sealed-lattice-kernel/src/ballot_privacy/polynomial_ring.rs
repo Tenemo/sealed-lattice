@@ -86,6 +86,73 @@ impl PolynomialRing {
             .collect())
     }
 
+    pub fn scale(&self, scalar: u64, value: &[u64]) -> CanonicalResult<Vec<u64>> {
+        self.validate_coefficients(value)?;
+        if scalar >= self.modulus {
+            return Err(invalid_ring("scalar is not canonical for this modulus"));
+        }
+
+        Ok(value
+            .iter()
+            .map(|coefficient| mul_mod(*coefficient, scalar, self.modulus))
+            .collect())
+    }
+
+    pub fn left_rotate_negacyclic(
+        &self,
+        value: &[u64],
+        rotation: usize,
+    ) -> CanonicalResult<Vec<u64>> {
+        self.validate_coefficients(value)?;
+        let normalized_rotation = rotation % self.degree;
+        if normalized_rotation == 0 {
+            return Ok(value.to_vec());
+        }
+
+        let mut output = vec![0_u64; self.degree];
+        for wrapped_offset in 1..=normalized_rotation {
+            let output_index = normalized_rotation - wrapped_offset;
+            let input_index = self.degree - wrapped_offset;
+            output[output_index] = if value[input_index] == 0 {
+                0
+            } else {
+                self.modulus - value[input_index]
+            };
+        }
+        output[normalized_rotation..self.degree]
+            .copy_from_slice(&value[..(self.degree - normalized_rotation)]);
+
+        Ok(output)
+    }
+
+    pub fn automorphism(&self, value: &[u64]) -> CanonicalResult<Vec<u64>> {
+        self.validate_coefficients(value)?;
+
+        let mut output = vec![0_u64; self.degree];
+        output[0] = value[0];
+        let half_degree = self.degree / 2;
+        output[half_degree] = if value[half_degree] == 0 {
+            0
+        } else {
+            self.modulus - value[half_degree]
+        };
+        for coefficient_index in 1..half_degree {
+            let reflected_index = self.degree - coefficient_index;
+            output[coefficient_index] = if value[reflected_index] == 0 {
+                0
+            } else {
+                self.modulus - value[reflected_index]
+            };
+            output[reflected_index] = if value[coefficient_index] == 0 {
+                0
+            } else {
+                self.modulus - value[coefficient_index]
+            };
+        }
+
+        Ok(output)
+    }
+
     pub fn mul_negacyclic(&self, left: &[u64], right: &[u64]) -> CanonicalResult<Vec<u64>> {
         self.validate_coefficients(left)?;
         self.validate_coefficients(right)?;
@@ -160,5 +227,45 @@ mod tests {
             .expect_err("coefficient equal to modulus should fail");
 
         assert!(error.message.contains("non-canonical"));
+    }
+
+    #[test]
+    fn scales_polynomial_coefficients() {
+        let ring = PolynomialRing::new(4, 17).expect("ring should validate");
+        let scaled = ring
+            .scale(5, &[1, 2, 3, 4])
+            .expect("scaling should succeed");
+
+        assert_eq!(scaled, vec![5, 10, 15, 3]);
+    }
+
+    #[test]
+    fn left_rotates_negacyclic_polynomials() {
+        let ring = PolynomialRing::new(8, 17).expect("ring should validate");
+        let rotated = ring
+            .left_rotate_negacyclic(&[1, 2, 3, 4, 5, 6, 7, 8], 3)
+            .expect("rotation should succeed");
+
+        assert_eq!(rotated, vec![11, 10, 9, 1, 2, 3, 4, 5]);
+    }
+
+    #[test]
+    fn normalizes_full_negacyclic_rotations() {
+        let ring = PolynomialRing::new(4, 17).expect("ring should validate");
+        let rotated = ring
+            .left_rotate_negacyclic(&[1, 2, 3, 4], 8)
+            .expect("rotation should succeed");
+
+        assert_eq!(rotated, vec![1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn applies_lazer_style_automorphism() {
+        let ring = PolynomialRing::new(8, 17).expect("ring should validate");
+        let transformed = ring
+            .automorphism(&[1, 2, 3, 4, 5, 6, 7, 8])
+            .expect("automorphism should succeed");
+
+        assert_eq!(transformed, vec![1, 9, 10, 11, 12, 13, 14, 15]);
     }
 }

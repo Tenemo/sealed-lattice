@@ -11,10 +11,24 @@ use super::{
     abdlop_commitment::hash_lazer_demo_abdlop_commitment,
     describe_proof_backend,
     lazer_demo_abdlop::validate_lazer_demo_abdlop_linear_opening,
+    lazer_demo_many_quadratic::{
+        build_lazer_demo_many_quadratic_equations, fold_lazer_demo_many_quadratic_equations,
+        validate_lazer_demo_many_quadratic_port,
+    },
     lazer_demo_public_parameters::derive_lazer_demo_abdlop_public_parameters,
+    lazer_demo_quadratic::validate_lazer_demo_quadratic_helper_port,
+    lazer_demo_quadratic_challenge::validate_lazer_demo_quadratic_challenge,
+    lazer_demo_tbox_relations::{
+        apply_lazer_demo_tbox_z3_response_relations, apply_lazer_demo_tbox_z4_response_relations,
+        build_lazer_demo_tbox_prefix_accumulators, validate_lazer_demo_tbox_relation_builder_port,
+    },
     linear_proof_norms::validate_lazer_demo_linear_proof_norms,
     linear_proof_parameters::{LazerDemoProofEncoding, LinearProofParameterSet},
-    linear_proof_statement::derive_lazer_demo_linear_statement_transcript,
+    linear_proof_statement::{
+        derive_lazer_demo_linear_statement_transcript,
+        derive_lazer_demo_transformed_statement_matrix,
+        derive_lazer_demo_transformed_target_vector,
+    },
     linear_proof_tbox::validate_lazer_demo_tbox_public_checks,
     linear_proof_transcript::{
         LinearProofPreflightTranscriptInput, compute_linear_proof_preflight_transcript,
@@ -169,11 +183,62 @@ impl LinearProofVectorCase {
                     decoded_proof,
                     proof_encoding,
                 )?;
-                validate_lazer_demo_tbox_public_checks(
+                let tbox_public_check_summary = validate_lazer_demo_tbox_public_checks(
                     &abdlop_commitment_hash,
                     decoded_proof,
                     proof_encoding,
                 )?;
+                let transformed_statement_matrix = derive_lazer_demo_transformed_statement_matrix(
+                    parameter_set,
+                    proof_encoding,
+                    statement_matrix_coefficients,
+                    target_vector_coefficients,
+                    &public_randomness,
+                )?;
+                let transformed_target_vector = derive_lazer_demo_transformed_target_vector(
+                    parameter_set,
+                    proof_encoding,
+                    statement_matrix_coefficients,
+                    target_vector_coefficients,
+                    &public_randomness,
+                )?;
+                let z34_challenge_hash =
+                    challenge_hash_from_hex(&tbox_public_check_summary.z34_challenge_hash)?;
+                let generator_challenge_hash =
+                    challenge_hash_from_hex(&tbox_public_check_summary.generator_challenge_hash)?;
+                let mut tbox_accumulators =
+                    build_lazer_demo_tbox_prefix_accumulators(&generator_challenge_hash)?;
+                apply_lazer_demo_tbox_z4_response_relations(
+                    &mut tbox_accumulators,
+                    &transformed_statement_matrix,
+                    &transformed_target_vector,
+                    decoded_proof.infinity_response_vector(),
+                    &z34_challenge_hash,
+                )?;
+                apply_lazer_demo_tbox_z3_response_relations(
+                    &mut tbox_accumulators,
+                    &transformed_statement_matrix,
+                    decoded_proof.euclidean_response_vector(),
+                    &z34_challenge_hash,
+                )?;
+                let many_quadratic_equations = build_lazer_demo_many_quadratic_equations(
+                    &tbox_accumulators,
+                    decoded_proof.hash_mask_vector(),
+                )?;
+                let folded_many_quadratic_equation = fold_lazer_demo_many_quadratic_equations(
+                    &many_quadratic_equations,
+                    &generator_challenge_hash,
+                )?;
+                validate_lazer_demo_quadratic_challenge(
+                    &generator_challenge_hash,
+                    &public_randomness_array,
+                    decoded_proof,
+                    proof_encoding,
+                    &folded_many_quadratic_equation,
+                )?;
+                validate_lazer_demo_quadratic_helper_port()?;
+                validate_lazer_demo_tbox_relation_builder_port()?;
+                validate_lazer_demo_many_quadratic_port()?;
             }
 
             if let Some(expected_preflight_transcript) = self
@@ -230,6 +295,14 @@ fn compute_preflight_transcript_value(
     serde_json::to_value(transcript).map_err(|error| {
         invalid_vector(format!("preflight transcript could not serialize: {error}"))
     })
+}
+
+fn challenge_hash_from_hex(hash_hex: &str) -> CanonicalResult<[u8; 32]> {
+    let bytes = decode_hex(hash_hex)?;
+    bytes
+        .as_slice()
+        .try_into()
+        .map_err(|_| invalid_vector("challenge hash must encode exactly 32 bytes"))
 }
 
 fn decode_statement_matrix(
@@ -313,28 +386,51 @@ pub fn verify_linear_proof_vector_case_value(vector_case: &Value) -> Value {
         });
     }
 
+    let verified_status_labels = json!([
+        "LinearProofBytesCanonical",
+        "LinearProofNormBoundsChecked",
+        "AbdlopPublicParametersExpanded",
+        "AbdlopLinearOpeningRecovered",
+        "TboxZ34ChallengeUpdated",
+        "TboxGeneratorChallengeUpdated",
+        "QuadraticAccumulatorHelpersChecked",
+        "TboxRelationBuildersChecked",
+        "TboxResponseRelationBuildersChecked",
+        "ManyQuadraticEquationsFolded",
+        "QuadraticChallengeRecomputed"
+    ]);
+
+    if parsed_case.expected_outcome == "reject" {
+        return json!({
+            "ok": false,
+            "backendAvailable": BALLOT_PRIVACY_PROOF_BACKEND_AVAILABLE,
+            "backendStatus": describe_proof_backend(),
+            "caseName": parsed_case.case_name,
+            "vectorAvailable": true,
+            "expectedOutcome": parsed_case.expected_outcome,
+            "statusLabels": verified_status_labels,
+            "acceptedDigests": [],
+            "refusedObjects": [
+                {
+                    "code": "FixtureMismatch",
+                    "message": "Reject vector unexpectedly verified as a valid LaZer-style linear proof."
+                }
+            ],
+            "unresolvedReason": "FixtureMismatch"
+        });
+    }
+
     json!({
-        "ok": false,
+        "ok": true,
         "backendAvailable": BALLOT_PRIVACY_PROOF_BACKEND_AVAILABLE,
         "backendStatus": describe_proof_backend(),
         "caseName": parsed_case.case_name,
         "vectorAvailable": true,
         "expectedOutcome": parsed_case.expected_outcome,
-        "statusLabels": [
-            "LinearProofBytesCanonical",
-            "LinearProofNormBoundsChecked",
-            "AbdlopPublicParametersExpanded",
-            "AbdlopLinearOpeningRecovered",
-            "TboxPublicSlicesChecked"
-        ],
+        "statusLabels": verified_status_labels,
         "acceptedDigests": [],
-        "refusedObjects": [
-            {
-                "code": "OperationUnavailable",
-                "message": "Portable LaZer-style linear proof verification remains fail-closed until the tbox quadratic helper verifier, Schwartz-Zippel accumulators, and final challenge recomputation are ported."
-            }
-        ],
-        "unresolvedReason": "OperationUnavailable"
+        "refusedObjects": [],
+        "unresolvedReason": null
     })
 }
 
@@ -424,7 +520,7 @@ mod tests {
     }
 
     #[test]
-    fn generated_upstream_vector_decodes_and_fails_closed() {
+    fn generated_upstream_vector_verifies() {
         let vectors: serde_json::Value = serde_json::from_str(include_str!(
             "../../../../test-vectors/ballot-privacy/proof-backend-linear-vectors.json"
         ))
@@ -438,8 +534,45 @@ mod tests {
 
         let verification = verify_linear_proof_vector_case_value(vector_case);
 
-        assert_eq!(verification["ok"], false);
+        assert_eq!(verification["ok"], true);
         assert_eq!(verification["vectorAvailable"], true);
-        assert_eq!(verification["unresolvedReason"], "OperationUnavailable");
+        assert_eq!(verification["backendAvailable"], false);
+        assert_eq!(verification["unresolvedReason"], serde_json::Value::Null);
+        assert!(
+            verification["statusLabels"]
+                .as_array()
+                .expect("status labels should be an array")
+                .contains(&json!("QuadraticChallengeRecomputed"))
+        );
+    }
+
+    #[test]
+    fn generated_upstream_mutations_fail_closed() {
+        let vectors: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../test-vectors/ballot-privacy/proof-backend-linear-vectors.json"
+        ))
+        .expect("generated vector file should parse");
+
+        for vector_case in vectors["cases"]
+            .as_array()
+            .expect("generated vector file should contain cases")
+            .iter()
+            .filter(|vector_case| vector_case["expectedOutcome"] == "reject")
+        {
+            let verification = verify_linear_proof_vector_case_value(vector_case);
+
+            assert_eq!(
+                verification["ok"], false,
+                "{} should fail closed",
+                vector_case["caseName"]
+            );
+            assert!(
+                verification["refusedObjects"][0]["message"]
+                    .as_str()
+                    .expect("refusal message should be a string")
+                    .len()
+                    > 8
+            );
+        }
     }
 }
