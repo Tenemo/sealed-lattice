@@ -426,6 +426,12 @@ def emit_vectors(repo_root: Path, lazer_root: Path, out_path: Path) -> None:
         "upstreamRepositoryUrl": "https://github.com/lazer-crypto/lazer",
         "upstreamCommitHash": run_command(["git", "rev-parse", "HEAD"], cwd=lazer_root),
         "dockerfileSha256": sha256_file(repo_root / "tools" / "lazer-oracle" / "Dockerfile"),
+        "oracleDriverSha256": sha256_file(
+            repo_root / "tools" / "lazer-oracle" / "generate-receiver-key-linear-vectors.ts"
+        ),
+        "oracleRunnerSha256": sha256_file(
+            repo_root / "tools" / "lazer-oracle" / "run_receiver_key_oracle.py"
+        ),
         "receiverKeyParameterSourceSha256": sha256_file(
             repo_root / "tools" / "lazer-oracle" / "receiver-key-linear-params.py"
         ),
@@ -433,6 +439,7 @@ def emit_vectors(repo_root: Path, lazer_root: Path, out_path: Path) -> None:
         "pythonVersion": platform.python_version(),
         "sageVersion": sage_version,
         "compilerVersion": run_command(["gcc", "--version"]).splitlines()[0],
+        "buildCommand": "tsx tools/lazer-oracle/generate-receiver-key-linear-vectors.ts",
         "parameterGenerationCommand": "docker run sagemath/sagemath:latest sage lin-codegen.sage tools/lazer-oracle/receiver-key-linear-params.py",
         "profileWarning": "LaZer lin-codegen emits protocol-not-complete for this exploratory receiver-key parameter file; vectors are used for porting behavior only, not production closure.",
         "licenseNote": "LaZer is used only as an offline vector oracle; no upstream C library is shipped in sealed-lattice.",

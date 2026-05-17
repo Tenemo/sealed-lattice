@@ -18,8 +18,12 @@
       "sha256": "64b521a60145d51ec1170c7a99898c75ee0fb0edbd490a702b7040b4814f2fe6"
     },
     {
+      "path": "ballot-privacy/README.md",
+      "sha256": "c5d23b0538ea23b82174574bfb8505ec6b4ae4fa2ef9a8607bb70c2a22e2bd7c"
+    },
+    {
       "path": "ballot-privacy/receiver-key-linear-proof-vectors.json",
-      "sha256": "9bdd3acfd04ec883577d3b45f42f380d2dfcd89b9b82c6e7b7de906ea815badd"
+      "sha256": "9c88d0839aa2dab574717e822ea2720db09a2817c53a639ccd85f1d03b80da4c"
     },
     {
       "path": "ballot-privacy/receiver-key-proof-vectors.json",

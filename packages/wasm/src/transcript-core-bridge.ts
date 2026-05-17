@@ -144,6 +144,7 @@ export type TranscriptCoreKernel = {
         readonly ballotProof: unknown;
         readonly componentBundleStatement?: unknown;
         readonly componentProofBundle?: unknown;
+        readonly componentProofInputs?: readonly unknown[];
         readonly linearStatement?: unknown;
         readonly parameterSet?: unknown;
         readonly proofBytesHex?: string;
@@ -225,6 +226,7 @@ type TranscriptCoreKernelCommand =
           readonly ballotProof: unknown;
           readonly componentBundleStatement?: unknown;
           readonly componentProofBundle?: unknown;
+          readonly componentProofInputs?: readonly unknown[];
           readonly linearStatement?: unknown;
           readonly parameterSet?: unknown;
           readonly proofBytesHex?: string;
@@ -323,6 +325,8 @@ const transcriptCoreKernelNormalizedSha256HexValues = [
     '7d68c10468efb9f60361567e0087ed4821988670f503648e60cfdb28ec11b119',
     'd807255202275e58385160d64a266073cba216ff3e1d863ea55c776f74a158f7',
     '5a7ad4a4d7ded9894ce36dc46352f5f815cfca04d7f7629b434544194b6a51b2',
+    '0820267a833515aadba4fc21186965b9fd6bfb11f71ee87f5c3168f34c326153',
+    '04751166b468d32fb541b5c0ec8b91250ad4abd3517cb5ca8ed494b07ce2041c',
 ] as const;
 const defaultTranscriptCoreKernelNormalizedSha256HexValues = new Set<string>(
     transcriptCoreKernelNormalizedSha256HexValues,
@@ -1006,6 +1010,7 @@ export const createTranscriptCoreKernelLoader = (
                         componentBundleStatement:
                             input.componentBundleStatement,
                         componentProofBundle: input.componentProofBundle,
+                        componentProofInputs: input.componentProofInputs,
                         linearStatement: input.linearStatement,
                         parameterSet: input.parameterSet,
                         proofBytesHex: input.proofBytesHex,

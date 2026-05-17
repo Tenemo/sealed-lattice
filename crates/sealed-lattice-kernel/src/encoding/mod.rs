@@ -496,12 +496,14 @@ fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult<Value> {
             let proof_encoding = request.get("proofEncoding");
             let component_bundle_statement = request.get("componentBundleStatement");
             let component_proof_bundle = request.get("componentProofBundle");
+            let component_proof_inputs = request.get("componentProofInputs");
 
             Ok(crate::ballot_privacy::verify_ballot_proof(
                 statement,
                 ballot_proof,
                 crate::ballot_privacy::BallotProofVerificationInputs {
                     component_bundle_statement,
+                    component_proof_inputs,
                     component_proof_bundle,
                     linear_statement,
                     parameter_set,

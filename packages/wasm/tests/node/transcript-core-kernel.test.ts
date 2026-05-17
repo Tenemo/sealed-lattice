@@ -1614,6 +1614,48 @@ describe('transcript-core kernel in Node', () => {
                         'encoded-score-field-ballot-proof-record-wasm-test',
                 },
             });
+        const deriveProofBytesDigestForTest = (
+            proofBytesHexForTest: string,
+        ): string =>
+            kernel.deriveProtocolDigest({
+                namespace: 'ProofBytesDigest',
+                value: {
+                    objectType: 'ProofBytes',
+                    objectVersion: 1,
+                    proofBytesHex: proofBytesHexForTest,
+                    proofSizeBytes: proofBytesHexForTest.length / 2,
+                },
+            });
+        const deriveBallotProofEncodingDigestForTest = (
+            proofEncoding: unknown,
+        ): string =>
+            kernel.deriveProtocolDigest({
+                namespace: 'ChallengeDomainDigest',
+                value: {
+                    proofEncoding,
+                    purpose: 'ballot-proof-linear-proof-encoding-profile-v1',
+                },
+            });
+        const deriveBallotProofParameterSetDigestForTest = (
+            parameterSet: unknown,
+        ): string =>
+            kernel.deriveProtocolDigest({
+                namespace: 'ChallengeDomainDigest',
+                value: {
+                    parameterSet,
+                    purpose: 'ballot-proof-linear-proof-parameter-set-v1',
+                },
+            });
+        const deriveBallotProofPublicRandomnessDigestForTest = (
+            componentPublicRandomnessHex: string,
+        ): string =>
+            kernel.deriveProtocolDigest({
+                namespace: 'ChallengeDomainDigest',
+                value: {
+                    publicRandomnessHex: componentPublicRandomnessHex,
+                    purpose: 'ballot-proof-linear-proof-public-randomness-v1',
+                },
+            });
         const createStatement = (): Record<string, unknown> => {
             const statementPayload = {
                 actionContextDigest: digest('action-context'),
@@ -1972,34 +2014,77 @@ describe('transcript-core kernel in Node', () => {
                 }),
             };
         };
+        const createComponentProofInput = (
+            componentId: string,
+            componentStatementDigest: string,
+        ): Record<string, unknown> => {
+            const componentIndex = componentIds.indexOf(componentId);
+            const publicRandomnessByte = (componentIndex + 1)
+                .toString(16)
+                .padStart(2, '0');
+
+            return {
+                componentId,
+                componentProofStatementDigest: digest(
+                    `${componentId}-proof-statement`,
+                ),
+                proofBytesHex: digest(`${componentId}-proof-bytes-material`),
+                proofEncoding: {
+                    profileId: 'ballot-proof-component-encoding-v1',
+                    componentId,
+                },
+                proofParameterSet: {
+                    profileId: 'ballot-proof-component-parameter-set-v1',
+                    componentId,
+                },
+                proofStatementFormat:
+                    componentId === 'receiver-encryption-component'
+                        ? 'structured-module-lwe-linear-proof-v1'
+                        : 'sparse-polynomial-matrix-linear-proof-v1',
+                publicRandomnessHex: publicRandomnessByte.repeat(32),
+                statementDigest: componentStatementDigest,
+            };
+        };
         const createComponentProofRecord = (
             linearStatement: Record<string, unknown>,
             statement: Record<string, unknown>,
             componentStatement: Record<string, unknown>,
             componentId: string,
         ): Record<string, unknown> => {
+            const componentProofInput = createComponentProofInput(
+                componentId,
+                String(componentStatement.componentStatementDigest),
+            );
             const proofRecordPayload = {
                 backendStatementDigest: linearStatement.backendStatementDigest,
                 ballotProofStatementDigest:
                     statement.ballotProofStatementDigest,
                 componentId,
+                componentProofStatementDigest:
+                    componentProofInput.componentProofStatementDigest,
                 componentStatementDigest:
                     componentStatement.componentStatementDigest,
                 objectType: 'BallotProofComponentProofRecord',
                 objectVersion: 1,
                 proofBackend: 'LaZerStyleLocalLatticeRelation',
-                proofBytesDigest: digest(`${componentId}-proof-bytes`),
-                proofEncodingProfileDigest: digest(
-                    `${componentId}-proof-encoding`,
+                proofBytesDigest: deriveProofBytesDigestForTest(
+                    String(componentProofInput.proofBytesHex),
                 ),
-                proofParameterSetDigest: digest(
-                    `${componentId}-proof-parameters`,
-                ),
+                proofEncodingProfileDigest:
+                    deriveBallotProofEncodingDigestForTest(
+                        componentProofInput.proofEncoding,
+                    ),
+                proofParameterSetDigest:
+                    deriveBallotProofParameterSetDigestForTest(
+                        componentProofInput.proofParameterSet,
+                    ),
                 proofRoot: digest(`${componentId}-proof-root`),
-                proofSizeBytes: 64,
-                publicRandomnessDigest: digest(
-                    `${componentId}-public-randomness`,
-                ),
+                proofSizeBytes:
+                    String(componentProofInput.proofBytesHex).length / 2,
+                publicRandomnessDigest:
+                    deriveBallotProofPublicRandomnessDigestForTest(
+                        String(componentProofInput.publicRandomnessHex),
+                    ),
                 relationStatementDigest:
                     linearStatement.relationStatementDigest,
             };
@@ -2015,6 +2100,15 @@ describe('transcript-core kernel in Node', () => {
                 }),
             };
         };
+        const createComponentProofInputs = (
+            componentProofs: readonly Record<string, unknown>[],
+        ): readonly Record<string, unknown>[] =>
+            componentProofs.map((componentProof) =>
+                createComponentProofInput(
+                    String(componentProof.componentId),
+                    String(componentProof.componentStatementDigest),
+                ),
+            );
         const createComponentProofBundle = (
             componentBundleStatement: Record<string, unknown>,
             componentProofs: readonly Record<string, unknown>[],
@@ -2168,6 +2262,8 @@ describe('transcript-core kernel in Node', () => {
                     componentId,
                 ),
         );
+        const componentProofInputs =
+            createComponentProofInputs(componentProofs);
         const componentProofBundle = createComponentProofBundle(
             fullComponentBundleStatement,
             componentProofs,
@@ -2208,6 +2304,7 @@ describe('transcript-core kernel in Node', () => {
                     ballotProof: proofBoundToComponentProofBundle,
                     componentBundleStatement: fullComponentBundleStatement,
                     componentProofBundle,
+                    componentProofInputs,
                     linearStatement: validLinearStatement,
                     parameterSet: validProofCase.parameterSet,
                     proofBytesHex,
@@ -2221,8 +2318,92 @@ describe('transcript-core kernel in Node', () => {
                     ),
                 ),
         ).toBe(false);
+        expect(
+            kernel
+                .verifyBallotProof({
+                    ballotProof: proofBoundToComponentProofBundle,
+                    componentBundleStatement: fullComponentBundleStatement,
+                    componentProofBundle,
+                    linearStatement: validLinearStatement,
+                    parameterSet: validProofCase.parameterSet,
+                    proofBytesHex,
+                    proofEncoding: validProofCase.proofEncoding,
+                    publicRandomnessHex,
+                    statement,
+                })
+                .refusedObjects.some((refusal) =>
+                    refusal.message.includes(
+                        'requires public proof inputs for every component proof',
+                    ),
+                ),
+        ).toBe(true);
+        expect(
+            kernel
+                .verifyBallotProof({
+                    ballotProof: proofBoundToComponentProofBundle,
+                    componentBundleStatement: fullComponentBundleStatement,
+                    componentProofBundle,
+                    componentProofInputs: componentProofInputs.map(
+                        (componentProofInput, componentIndex) =>
+                            componentIndex === 0
+                                ? {
+                                      ...componentProofInput,
+                                      proofBytesHex: 'ff'.repeat(
+                                          String(
+                                              componentProofInput.proofBytesHex,
+                                          ).length / 2,
+                                      ),
+                                  }
+                                : componentProofInput,
+                    ),
+                    linearStatement: validLinearStatement,
+                    parameterSet: validProofCase.parameterSet,
+                    proofBytesHex,
+                    proofEncoding: validProofCase.proofEncoding,
+                    publicRandomnessHex,
+                    statement,
+                })
+                .refusedObjects.some((refusal) =>
+                    refusal.message.includes(
+                        'proof bytes do not match the proof record digest',
+                    ),
+                ),
+        ).toBe(true);
+        expect(
+            kernel
+                .verifyBallotProof({
+                    ballotProof: proofBoundToComponentProofBundle,
+                    componentBundleStatement: fullComponentBundleStatement,
+                    componentProofBundle,
+                    componentProofInputs: componentProofInputs.map(
+                        (componentProofInput, componentIndex) =>
+                            componentIndex === 0
+                                ? {
+                                      ...componentProofInput,
+                                      componentProofStatementDigest: digest(
+                                          'wrong-component-proof-statement',
+                                      ),
+                                  }
+                                : componentProofInput,
+                    ),
+                    linearStatement: validLinearStatement,
+                    parameterSet: validProofCase.parameterSet,
+                    proofBytesHex,
+                    proofEncoding: validProofCase.proofEncoding,
+                    publicRandomnessHex,
+                    statement,
+                })
+                .refusedObjects.some((refusal) =>
+                    refusal.message.includes(
+                        'proof statement for score-and-shamir-field-component does not match the proof record',
+                    ),
+                ),
+        ).toBe(true);
         const reorderedComponentProofBundle = createComponentProofBundle(
             fullComponentBundleStatement,
+            [...componentProofs].reverse(),
+        );
+        const reorderedComponentProofInputs = createComponentProofInputs(
             [...componentProofs].reverse(),
         );
         const proofBoundToReorderedComponentProofBundle = createBallotProof(
@@ -2238,6 +2419,7 @@ describe('transcript-core kernel in Node', () => {
                     ballotProof: proofBoundToReorderedComponentProofBundle,
                     componentBundleStatement: fullComponentBundleStatement,
                     componentProofBundle: reorderedComponentProofBundle,
+                    componentProofInputs: reorderedComponentProofInputs,
                     linearStatement: validLinearStatement,
                     parameterSet: validProofCase.parameterSet,
                     proofBytesHex,
@@ -2262,6 +2444,9 @@ describe('transcript-core kernel in Node', () => {
             fullComponentBundleStatement,
             wrongComponentStatementProofs,
         );
+        const wrongComponentStatementProofInputs = createComponentProofInputs(
+            wrongComponentStatementProofs,
+        );
         const proofBoundToWrongComponentStatementProofBundle =
             createBallotProof(
                 statement,
@@ -2276,6 +2461,7 @@ describe('transcript-core kernel in Node', () => {
                     ballotProof: proofBoundToWrongComponentStatementProofBundle,
                     componentBundleStatement: fullComponentBundleStatement,
                     componentProofBundle: wrongComponentStatementProofBundle,
+                    componentProofInputs: wrongComponentStatementProofInputs,
                     linearStatement: validLinearStatement,
                     parameterSet: validProofCase.parameterSet,
                     proofBytesHex,

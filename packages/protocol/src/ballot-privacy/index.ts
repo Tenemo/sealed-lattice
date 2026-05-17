@@ -27,5 +27,6 @@ export {
     verifyClaimBearingBallotPackage,
     verifyReceiverKeyProof,
 } from './objects.js';
+export type { BallotProofComponentProofVerificationInput } from './objects.js';
 export { compileBallotPrivacyRelation } from './relation-compiler.js';
 export type { BallotPrivacyRelationCompilerInput } from './relation-compiler.js';

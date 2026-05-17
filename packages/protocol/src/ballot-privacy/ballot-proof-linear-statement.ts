@@ -1563,6 +1563,7 @@ export const createBallotProofComponentProofRecord = (input: {
     readonly backendStatementDigest: ProtocolDigest;
     readonly ballotProofStatementDigest?: ProtocolDigest;
     readonly componentId: BallotProofComponentId;
+    readonly componentProofStatementDigest?: ProtocolDigest;
     readonly componentStatementDigest: ProtocolDigest;
     readonly proofBytesDigest: ProtocolDigest;
     readonly proofEncodingProfileDigest: ProtocolDigest;
@@ -1580,6 +1581,12 @@ export const createBallotProofComponentProofRecord = (input: {
                   ballotProofStatementDigest: input.ballotProofStatementDigest,
               }),
         componentId: input.componentId,
+        ...(input.componentProofStatementDigest === undefined
+            ? {}
+            : {
+                  componentProofStatementDigest:
+                      input.componentProofStatementDigest,
+              }),
         componentStatementDigest: input.componentStatementDigest,
         objectType: 'BallotProofComponentProofRecord',
         objectVersion: 1,

@@ -48,6 +48,12 @@ const REQUIRED_BALLOT_PROOF_COMPONENT_IDS: &[&str] = &[
     "receiver-encryption-component",
     "receiver-key-binding-component",
 ];
+const ALLOWED_BALLOT_PROOF_COMPONENT_STATEMENT_FORMATS: &[&str] = &[
+    "dense-polynomial-matrix-linear-proof-v1",
+    "sparse-polynomial-matrix-linear-proof-v1",
+    "structured-module-lwe-linear-proof-v1",
+    "public-zero-witness-binding-check-v1",
+];
 
 pub const REQUIRED_LAZER_PORT_COMPONENTS: &[&str] = &[
     "generated linear proof parameters from lin-codegen.sage",
@@ -1502,6 +1508,8 @@ fn collect_component_proof_record_refusals(
             .is_none_or(|digest| !is_protocol_digest(digest))
         || string_field(component_proof, "publicRandomnessDigest")
             .is_none_or(|digest| !is_protocol_digest(digest))
+        || string_field(component_proof, "componentProofStatementDigest")
+            .is_some_and(|digest| !is_protocol_digest(digest))
         || string_field(component_proof, "ballotProofStatementDigest")
             .is_some_and(|digest| !is_protocol_digest(digest))
         || proof_size_bytes.is_none_or(|proof_size_bytes| proof_size_bytes == 0)
@@ -1553,6 +1561,7 @@ fn collect_ballot_component_proof_bundle_refusals(
     ballot_proof: &Value,
     component_bundle_statement: Option<&Value>,
     component_proof_bundle: Option<&Value>,
+    component_proof_inputs: Option<&Value>,
 ) -> Vec<Value> {
     let mut refused_objects = Vec::new();
     let proof_record_digest = string_field(ballot_proof, "ballotProofRecordDigest");
@@ -1586,6 +1595,11 @@ fn collect_ballot_component_proof_bundle_refusals(
     let Some(component_proof_bundle) = component_proof_bundle else {
         return refused_objects;
     };
+    refused_objects.extend(collect_ballot_component_proof_input_refusals(
+        ballot_proof,
+        component_proof_bundle,
+        component_proof_inputs,
+    ));
 
     let component_proof_bundle_digest =
         string_field(component_proof_bundle, "componentProofBundleDigest");
@@ -1718,6 +1732,166 @@ fn collect_ballot_component_proof_bundle_refusals(
     refused_objects
 }
 
+fn collect_ballot_component_proof_input_refusals(
+    ballot_proof: &Value,
+    component_proof_bundle: &Value,
+    component_proof_inputs: Option<&Value>,
+) -> Vec<Value> {
+    let mut refused_objects = Vec::new();
+    let proof_record_digest = string_field(ballot_proof, "ballotProofRecordDigest");
+    let Some(component_proof_inputs) = component_proof_inputs else {
+        refused_objects.push(structural_refusal(
+            "Full encoded-score ballot proof verification requires public proof inputs for every component proof.",
+            proof_record_digest,
+        ));
+
+        return refused_objects;
+    };
+    let Some(component_proof_inputs_array) = component_proof_inputs.as_array() else {
+        refused_objects.push(structural_refusal(
+            "Ballot proof component proof inputs must be an array.",
+            proof_record_digest,
+        ));
+
+        return refused_objects;
+    };
+    if component_proof_inputs_array.len() != REQUIRED_BALLOT_PROOF_COMPONENT_IDS.len() {
+        refused_objects.push(structural_refusal(
+            "Ballot proof component proof inputs must contain exactly the required components.",
+            proof_record_digest,
+        ));
+    }
+
+    let mut proof_inputs_by_component = BTreeMap::new();
+    for proof_input in component_proof_inputs_array {
+        let Some(component_id) = string_field(proof_input, "componentId") else {
+            refused_objects.push(structural_refusal(
+                "Ballot proof component proof input is missing its component id.",
+                proof_record_digest,
+            ));
+            continue;
+        };
+        if proof_inputs_by_component
+            .insert(component_id.to_string(), proof_input)
+            .is_some()
+        {
+            refused_objects.push(structural_refusal(
+                "Ballot proof component proof inputs contain a duplicate component.",
+                proof_record_digest,
+            ));
+        }
+    }
+
+    let component_proofs = array_field(component_proof_bundle, "componentProofs")
+        .map(|values| values.as_slice())
+        .unwrap_or(&[]);
+    for (component_index, expected_component_id) in
+        REQUIRED_BALLOT_PROOF_COMPONENT_IDS.iter().enumerate()
+    {
+        let Some(component_proof) = component_proofs.get(component_index) else {
+            continue;
+        };
+        let Some(proof_input) = proof_inputs_by_component.get(*expected_component_id) else {
+            refused_objects.push(structural_refusal(
+                format!(
+                    "Ballot proof component proof input for {expected_component_id} is missing."
+                ),
+                proof_record_digest,
+            ));
+            continue;
+        };
+        if string_field(proof_input, "componentId") != string_field(component_proof, "componentId")
+        {
+            refused_objects.push(structural_refusal(
+                format!(
+                    "Ballot proof component proof input for {expected_component_id} is not bound to the matching proof record."
+                ),
+                proof_record_digest,
+            ));
+        }
+        if string_field(component_proof, "componentProofStatementDigest").is_some()
+            && string_field(proof_input, "componentProofStatementDigest")
+                != string_field(component_proof, "componentProofStatementDigest")
+        {
+            refused_objects.push(structural_refusal(
+                format!(
+                    "Ballot proof component proof statement for {expected_component_id} does not match the proof record."
+                ),
+                proof_record_digest,
+            ));
+        }
+        if string_field(proof_input, "proofStatementFormat").is_none_or(|proof_statement_format| {
+            !ALLOWED_BALLOT_PROOF_COMPONENT_STATEMENT_FORMATS.contains(&proof_statement_format)
+        }) {
+            refused_objects.push(structural_refusal(
+                format!(
+                    "Ballot proof component proof statement format for {expected_component_id} is not supported."
+                ),
+                proof_record_digest,
+            ));
+        }
+        refused_objects.extend(collect_proof_bytes_refusals(
+            string_field(proof_input, "proofBytesHex"),
+            string_field(component_proof, "proofBytesDigest"),
+            object_map(component_proof)
+                .and_then(|object| object.get("proofSizeBytes"))
+                .and_then(Value::as_u64),
+            proof_record_digest,
+            "Ballot proof component",
+        ));
+        let expected_proof_encoding_digest = object_map(proof_input)
+            .and_then(|object| object.get("proofEncoding"))
+            .and_then(derive_ballot_proof_encoding_profile_digest);
+        if expected_proof_encoding_digest.as_deref()
+            != string_field(component_proof, "proofEncodingProfileDigest")
+        {
+            refused_objects.push(structural_refusal(
+                format!(
+                    "Ballot proof component proof encoding for {expected_component_id} does not match the proof record."
+                ),
+                proof_record_digest,
+            ));
+        }
+        let expected_parameter_set_digest = object_map(proof_input)
+            .and_then(|object| object.get("proofParameterSet"))
+            .and_then(derive_ballot_proof_parameter_set_digest);
+        if expected_parameter_set_digest.as_deref()
+            != string_field(component_proof, "proofParameterSetDigest")
+        {
+            refused_objects.push(structural_refusal(
+                format!(
+                    "Ballot proof component proof parameter set for {expected_component_id} does not match the proof record."
+                ),
+                proof_record_digest,
+            ));
+        }
+        let expected_public_randomness_digest = string_field(proof_input, "publicRandomnessHex")
+            .and_then(derive_ballot_proof_public_randomness_digest);
+        if expected_public_randomness_digest.as_deref()
+            != string_field(component_proof, "publicRandomnessDigest")
+        {
+            refused_objects.push(structural_refusal(
+                format!(
+                    "Ballot proof component public randomness for {expected_component_id} does not match the proof record."
+                ),
+                proof_record_digest,
+            ));
+        }
+        if string_field(proof_input, "statementDigest")
+            != string_field(component_proof, "componentStatementDigest")
+        {
+            refused_objects.push(structural_refusal(
+                format!(
+                    "Ballot proof component proof input for {expected_component_id} is not bound to the component statement."
+                ),
+                proof_record_digest,
+            ));
+        }
+    }
+
+    refused_objects
+}
+
 struct BallotLinearProofVerificationInputs<'a> {
     linear_statement: &'a Value,
     proof_bytes_hex: &'a str,
@@ -1734,6 +1908,7 @@ pub(crate) struct BallotProofVerificationInputs<'a> {
     pub(crate) parameter_set: Option<&'a Value>,
     pub(crate) proof_encoding: Option<&'a Value>,
     pub(crate) component_bundle_statement: Option<&'a Value>,
+    pub(crate) component_proof_inputs: Option<&'a Value>,
     pub(crate) component_proof_bundle: Option<&'a Value>,
 }
 
@@ -2001,6 +2176,7 @@ pub(crate) fn verify_ballot_proof(
         ballot_proof,
         backend_inputs.component_bundle_statement,
         backend_inputs.component_proof_bundle,
+        backend_inputs.component_proof_inputs,
     ));
     if !refused_objects.is_empty() {
         return structural_rejection("verifyBallotProof", refused_objects);
@@ -2077,7 +2253,8 @@ pub fn verify_receiver_key_vector_case(vector_case: &Value) -> Value {
 mod tests {
     use serde_json::{Value, json};
 
-    fn ballot_proof_backend_inputs<'a>(
+    #[derive(Default)]
+    struct BallotProofBackendInputParts<'a> {
         proof_bytes_hex: Option<&'a str>,
         linear_statement: Option<&'a Value>,
         public_randomness_hex: Option<&'a str>,
@@ -2085,15 +2262,21 @@ mod tests {
         proof_encoding: Option<&'a Value>,
         component_bundle_statement: Option<&'a Value>,
         component_proof_bundle: Option<&'a Value>,
+        component_proof_inputs: Option<&'a Value>,
+    }
+
+    fn ballot_proof_backend_inputs<'a>(
+        parts: BallotProofBackendInputParts<'a>,
     ) -> super::BallotProofVerificationInputs<'a> {
         super::BallotProofVerificationInputs {
-            component_bundle_statement,
-            component_proof_bundle,
-            linear_statement,
-            parameter_set,
-            proof_bytes_hex,
-            proof_encoding,
-            public_randomness_hex,
+            component_bundle_statement: parts.component_bundle_statement,
+            component_proof_bundle: parts.component_proof_bundle,
+            component_proof_inputs: parts.component_proof_inputs,
+            linear_statement: parts.linear_statement,
+            parameter_set: parts.parameter_set,
+            proof_bytes_hex: parts.proof_bytes_hex,
+            proof_encoding: parts.proof_encoding,
+            public_randomness_hex: parts.public_randomness_hex,
         }
     }
 
@@ -2183,7 +2366,7 @@ mod tests {
         let verification = super::verify_ballot_proof(
             &statement,
             &ballot_proof,
-            ballot_proof_backend_inputs(None, None, None, None, None, None, None),
+            ballot_proof_backend_inputs(BallotProofBackendInputParts::default()),
         );
 
         assert_eq!(verification["ok"], false);
@@ -2648,15 +2831,14 @@ mod tests {
         let valid_verification = super::verify_ballot_proof(
             &statement,
             &valid_ballot_proof,
-            ballot_proof_backend_inputs(
-                Some(proof_bytes_hex),
-                Some(&valid_linear_statement),
-                Some(public_randomness_hex),
-                Some(&valid_case["parameterSet"]),
-                Some(&valid_case["proofEncoding"]),
-                None,
-                None,
-            ),
+            ballot_proof_backend_inputs(BallotProofBackendInputParts {
+                proof_bytes_hex: Some(proof_bytes_hex),
+                linear_statement: Some(&valid_linear_statement),
+                public_randomness_hex: Some(public_randomness_hex),
+                parameter_set: Some(&valid_case["parameterSet"]),
+                proof_encoding: Some(&valid_case["proofEncoding"]),
+                ..BallotProofBackendInputParts::default()
+            }),
         );
 
         assert_eq!(valid_verification["ok"], false);
@@ -2685,15 +2867,14 @@ mod tests {
         let mutated_verification = super::verify_ballot_proof(
             &statement,
             &mutated_ballot_proof,
-            ballot_proof_backend_inputs(
-                Some(proof_bytes_hex),
-                Some(&mutated_linear_statement),
-                Some(public_randomness_hex),
-                Some(&valid_case["parameterSet"]),
-                Some(&valid_case["proofEncoding"]),
-                None,
-                None,
-            ),
+            ballot_proof_backend_inputs(BallotProofBackendInputParts {
+                proof_bytes_hex: Some(proof_bytes_hex),
+                linear_statement: Some(&mutated_linear_statement),
+                public_randomness_hex: Some(public_randomness_hex),
+                parameter_set: Some(&valid_case["parameterSet"]),
+                proof_encoding: Some(&valid_case["proofEncoding"]),
+                ..BallotProofBackendInputParts::default()
+            }),
         );
 
         assert_eq!(mutated_verification["ok"], false);
@@ -2953,15 +3134,14 @@ mod tests {
         let valid_verification = super::verify_ballot_proof(
             &statement,
             &valid_ballot_proof,
-            ballot_proof_backend_inputs(
-                Some(proof_bytes_hex),
-                Some(&valid_linear_statement),
-                Some(public_randomness_hex),
-                Some(&valid_case["parameterSet"]),
-                Some(&valid_case["proofEncoding"]),
-                None,
-                None,
-            ),
+            ballot_proof_backend_inputs(BallotProofBackendInputParts {
+                proof_bytes_hex: Some(proof_bytes_hex),
+                linear_statement: Some(&valid_linear_statement),
+                public_randomness_hex: Some(public_randomness_hex),
+                parameter_set: Some(&valid_case["parameterSet"]),
+                proof_encoding: Some(&valid_case["proofEncoding"]),
+                ..BallotProofBackendInputParts::default()
+            }),
         );
 
         assert_eq!(
@@ -3015,15 +3195,14 @@ mod tests {
         let relabeled_verification = super::verify_ballot_proof(
             &statement,
             &relabeled_ballot_proof,
-            ballot_proof_backend_inputs(
-                Some(proof_bytes_hex),
-                Some(&relabeled_linear_statement),
-                Some(public_randomness_hex),
-                Some(&valid_case["parameterSet"]),
-                Some(&valid_case["proofEncoding"]),
-                None,
-                None,
-            ),
+            ballot_proof_backend_inputs(BallotProofBackendInputParts {
+                proof_bytes_hex: Some(proof_bytes_hex),
+                linear_statement: Some(&relabeled_linear_statement),
+                public_randomness_hex: Some(public_randomness_hex),
+                parameter_set: Some(&valid_case["parameterSet"]),
+                proof_encoding: Some(&valid_case["proofEncoding"]),
+                ..BallotProofBackendInputParts::default()
+            }),
         );
 
         assert_eq!(relabeled_verification["ok"], false);
@@ -3043,15 +3222,14 @@ mod tests {
         let mutated_verification = super::verify_ballot_proof(
             &statement,
             &mutated_ballot_proof,
-            ballot_proof_backend_inputs(
-                Some(proof_bytes_hex),
-                Some(&mutated_linear_statement),
-                Some(public_randomness_hex),
-                Some(&valid_case["parameterSet"]),
-                Some(&valid_case["proofEncoding"]),
-                None,
-                None,
-            ),
+            ballot_proof_backend_inputs(BallotProofBackendInputParts {
+                proof_bytes_hex: Some(proof_bytes_hex),
+                linear_statement: Some(&mutated_linear_statement),
+                public_randomness_hex: Some(public_randomness_hex),
+                parameter_set: Some(&valid_case["parameterSet"]),
+                proof_encoding: Some(&valid_case["proofEncoding"]),
+                ..BallotProofBackendInputParts::default()
+            }),
         );
 
         assert_eq!(mutated_verification["ok"], false);
@@ -3132,21 +3310,83 @@ mod tests {
         component_bundle
     }
 
+    fn proof_bytes_digest_for_test(proof_bytes_hex: &str) -> String {
+        super::derive_digest(
+            "ProofBytesDigest",
+            &json!({
+                "objectType": "ProofBytes",
+                "objectVersion": 1,
+                "proofBytesHex": proof_bytes_hex,
+                "proofSizeBytes": proof_bytes_hex.len() / 2,
+            }),
+        )
+        .expect("proof bytes digest should derive")
+    }
+
+    fn component_proof_input_for_test(
+        component_id: &str,
+        component_statement_digest: &Value,
+    ) -> Value {
+        let component_index = super::REQUIRED_BALLOT_PROOF_COMPONENT_IDS
+            .iter()
+            .position(|expected_component_id| *expected_component_id == component_id)
+            .expect("component id should be required");
+        let public_randomness_byte = format!("{:02x}", component_index + 1);
+
+        json!({
+            "componentId": component_id,
+            "componentProofStatementDigest": test_digest(&format!("{component_id}-proof-statement")),
+            "proofBytesHex": test_digest(&format!("{component_id}-proof-bytes-material")),
+            "proofEncoding": {
+                "profileId": "ballot-proof-component-encoding-v1",
+                "componentId": component_id,
+            },
+            "proofParameterSet": {
+                "profileId": "ballot-proof-component-parameter-set-v1",
+                "componentId": component_id,
+            },
+            "proofStatementFormat": if component_id == "receiver-encryption-component" {
+                "structured-module-lwe-linear-proof-v1"
+            } else {
+                "sparse-polynomial-matrix-linear-proof-v1"
+            },
+            "publicRandomnessHex": public_randomness_byte.repeat(32),
+            "statementDigest": component_statement_digest,
+        })
+    }
+
     fn component_proof_for_test(component_id: &str, component_statement_digest: &Value) -> Value {
+        let proof_input = component_proof_input_for_test(component_id, component_statement_digest);
+        let proof_bytes_hex = proof_input["proofBytesHex"]
+            .as_str()
+            .expect("component proof bytes should be a string");
+        let proof_encoding = proof_input
+            .get("proofEncoding")
+            .expect("component proof encoding should exist");
+        let proof_parameter_set = proof_input
+            .get("proofParameterSet")
+            .expect("component proof parameter set should exist");
+        let public_randomness_hex = proof_input["publicRandomnessHex"]
+            .as_str()
+            .expect("component proof public randomness should be a string");
         let component_proof_payload = json!({
             "objectType": "BallotProofComponentProofRecord",
             "objectVersion": 1,
             "backendStatementDigest": test_digest("backend-statement"),
             "ballotProofStatementDigest": test_digest("ballot-proof-statement"),
             "componentId": component_id,
+            "componentProofStatementDigest": proof_input["componentProofStatementDigest"],
             "componentStatementDigest": component_statement_digest,
             "proofBackend": "LaZerStyleLocalLatticeRelation",
-            "proofBytesDigest": test_digest(&format!("{component_id}-proof-bytes")),
-            "proofEncodingProfileDigest": test_digest(&format!("{component_id}-proof-encoding")),
-            "proofParameterSetDigest": test_digest(&format!("{component_id}-proof-parameters")),
+            "proofBytesDigest": proof_bytes_digest_for_test(proof_bytes_hex),
+            "proofEncodingProfileDigest": super::derive_ballot_proof_encoding_profile_digest(proof_encoding)
+                .expect("component proof encoding digest should derive"),
+            "proofParameterSetDigest": super::derive_ballot_proof_parameter_set_digest(proof_parameter_set)
+                .expect("component proof parameter set digest should derive"),
             "proofRoot": test_digest(&format!("{component_id}-proof-root")),
-            "proofSizeBytes": 32,
-            "publicRandomnessDigest": test_digest(&format!("{component_id}-public-randomness")),
+            "proofSizeBytes": proof_bytes_hex.len() / 2,
+            "publicRandomnessDigest": super::derive_ballot_proof_public_randomness_digest(public_randomness_hex)
+                .expect("component proof public randomness digest should derive"),
             "relationStatementDigest": test_digest("relation-statement"),
         });
         let component_proof_record_digest =
@@ -3297,8 +3537,19 @@ mod tests {
                 )
             })
             .collect::<Vec<_>>();
+        let component_proof_inputs = component_statements
+            .iter()
+            .zip(super::REQUIRED_BALLOT_PROOF_COMPONENT_IDS.iter())
+            .map(|(component_statement, component_id)| {
+                component_proof_input_for_test(
+                    component_id,
+                    &component_statement["componentStatementDigest"],
+                )
+            })
+            .collect::<Vec<_>>();
         let component_proof_bundle =
             component_proof_bundle_for_test(&component_bundle_statement, component_proofs.clone());
+        let component_proof_inputs = json!(component_proof_inputs);
         let ballot_proof = json!({
             "backendStatementDigest": test_digest("backend-statement"),
             "ballotProofRecordDigest": test_digest("ballot-proof-record"),
@@ -3311,6 +3562,7 @@ mod tests {
             &ballot_proof,
             Some(&component_bundle_statement),
             Some(&component_proof_bundle),
+            Some(&component_proof_inputs),
         );
 
         assert!(
@@ -3318,10 +3570,33 @@ mod tests {
             "well-formed component proof bundle should have no structural refusals: {valid_refusals:?}"
         );
 
+        let mut wrong_component_proof_statement_inputs = component_proof_inputs.clone();
+        wrong_component_proof_statement_inputs[0]["componentProofStatementDigest"] =
+            json!(test_digest("wrong-component-proof-statement"));
+        let wrong_component_proof_statement_refusals =
+            super::collect_ballot_component_proof_bundle_refusals(
+                &statement,
+                &ballot_proof,
+                Some(&component_bundle_statement),
+                Some(&component_proof_bundle),
+                Some(&wrong_component_proof_statement_inputs),
+            );
+        assert!(
+            wrong_component_proof_statement_refusals
+                .iter()
+                .any(|refusal| {
+                    refusal["message"]
+                        .as_str()
+                        .expect("refusal message should be a string")
+                        .contains("proof statement for score-and-shamir-field-component does not match the proof record")
+                })
+        );
+
         let missing_bundle_refusals = super::collect_ballot_component_proof_bundle_refusals(
             &statement,
             &ballot_proof,
             Some(&component_bundle_statement),
+            None,
             None,
         );
         assert!(missing_bundle_refusals.iter().any(|refusal| {
@@ -3349,6 +3624,7 @@ mod tests {
             &reordered_ballot_proof,
             Some(&component_bundle_statement),
             Some(&reordered_proof_bundle),
+            Some(&component_proof_inputs),
         );
         assert!(reordered_refusals.iter().any(|refusal| {
             refusal["message"]
@@ -3365,6 +3641,7 @@ mod tests {
             &ballot_proof,
             Some(&component_bundle_statement),
             Some(&wrong_statement_proof_bundle),
+            Some(&component_proof_inputs),
         );
         assert!(wrong_statement_refusals.iter().any(|refusal| {
             refusal["message"]

@@ -20,6 +20,7 @@ import {
     createReceiverPayloadShell,
     createShareCommitmentMessageBoundCert,
     createShareCommitmentShell,
+    type BallotProofComponentProofVerificationInput,
     deriveBallotProofEncodingProfileDigest,
     deriveBallotProofParameterSetDigest,
     deriveBallotProofPublicRandomnessDigest,
@@ -137,27 +138,70 @@ const createStatement = (
     });
 };
 
+function createComponentProofVerificationInputFixture(
+    componentId: BallotProofComponentId,
+    statementDigest = digest(`${componentId}-statement`),
+): BallotProofComponentProofVerificationInput {
+    const componentIndex = requiredComponentIds.indexOf(componentId);
+    const randomnessByte = (componentIndex + 1).toString(16).padStart(2, '0');
+
+    return {
+        componentId,
+        componentProofStatementDigest: digest(`${componentId}-proof-statement`),
+        proofBytesHex: digest(`${componentId}-proof-bytes-material`),
+        proofEncoding: {
+            profileId: 'ballot-proof-component-encoding-v1',
+            componentId,
+        },
+        proofParameterSet: {
+            profileId: 'ballot-proof-component-parameter-set-v1',
+            componentId,
+        },
+        proofStatementFormat:
+            componentId === 'receiver-encryption-component'
+                ? 'structured-module-lwe-linear-proof-v1'
+                : 'sparse-polynomial-matrix-linear-proof-v1',
+        publicRandomnessHex: randomnessByte.repeat(32),
+        statementDigest,
+    };
+}
+
 const createComponentProofBundleFixture = (
     statement: BallotProofStatement,
     componentIds: readonly BallotProofComponentId[] = requiredComponentIds,
 ): BallotProofComponentProofBundle => {
     const backendStatementDigest = digest('component-backend-statement');
     const relationStatementDigest = digest('component-relation-statement');
-    const componentProofs = componentIds.map((componentId) =>
-        createBallotProofComponentProofRecord({
+    const componentProofs = componentIds.map((componentId) => {
+        const proofInput = createComponentProofVerificationInputFixture(
+            componentId,
+            digest(`${componentId}-statement`),
+        );
+
+        return createBallotProofComponentProofRecord({
             backendStatementDigest,
             ballotProofStatementDigest: statement.ballotProofStatementDigest,
             componentId,
-            componentStatementDigest: digest(`${componentId}-statement`),
-            proofBytesDigest: digest(`${componentId}-proof-bytes`),
-            proofEncodingProfileDigest: digest(`${componentId}-encoding`),
-            proofParameterSetDigest: digest(`${componentId}-parameters`),
+            componentProofStatementDigest:
+                proofInput.componentProofStatementDigest,
+            componentStatementDigest: proofInput.statementDigest,
+            proofBytesDigest: deriveProofBytesDigest({
+                proofBytesHex: proofInput.proofBytesHex,
+            }),
+            proofEncodingProfileDigest: deriveBallotProofEncodingProfileDigest({
+                proofEncoding: proofInput.proofEncoding,
+            }),
+            proofParameterSetDigest: deriveBallotProofParameterSetDigest({
+                parameterSet: proofInput.proofParameterSet,
+            }),
             proofRoot: digest(`${componentId}-proof-root`),
-            proofSizeBytes: 64,
-            publicRandomnessDigest: digest(`${componentId}-randomness`),
+            proofSizeBytes: proofInput.proofBytesHex.length / 2,
+            publicRandomnessDigest: deriveBallotProofPublicRandomnessDigest({
+                publicRandomnessHex: proofInput.publicRandomnessHex,
+            }),
             relationStatementDigest,
-        }),
-    );
+        });
+    });
     const componentBundleStatement = {
         backendStatementDigest,
         ballotProofStatementDigest: statement.ballotProofStatementDigest,
@@ -178,6 +222,16 @@ const createComponentProofBundleFixture = (
         componentProofs,
     });
 };
+
+const createComponentProofVerificationInputsFixture = (
+    componentProofBundle: BallotProofComponentProofBundle,
+): readonly BallotProofComponentProofVerificationInput[] =>
+    componentProofBundle.componentProofs.map((componentProof) =>
+        createComponentProofVerificationInputFixture(
+            componentProof.componentId,
+            componentProof.componentStatementDigest,
+        ),
+    );
 
 const createStructurallyBoundObjects = (): {
     readonly statement: BallotProofStatement;
@@ -587,6 +641,8 @@ describe('ballot privacy proof object boundary', () => {
         const proofBytesHex = '001122aabbcc';
         const componentProofBundle =
             createComponentProofBundleFixture(statement);
+        const componentProofInputs =
+            createComponentProofVerificationInputsFixture(componentProofBundle);
         const proofRecord = createBallotProofRecordShell({
             backendStatementDigest: componentProofBundle.backendStatementDigest,
             componentBundleStatementDigest:
@@ -610,6 +666,10 @@ describe('ballot privacy proof object boundary', () => {
             statement,
             [...requiredComponentIds].reverse(),
         );
+        const reorderedComponentProofInputs =
+            createComponentProofVerificationInputsFixture(
+                reorderedComponentProofBundle,
+            );
         const reorderedProofRecord = createBallotProofRecordShell({
             backendStatementDigest:
                 reorderedComponentProofBundle.backendStatementDigest,
@@ -635,6 +695,7 @@ describe('ballot privacy proof object boundary', () => {
             verifyBallotProof({
                 ballotProof: proofRecord,
                 componentProofBundle,
+                componentProofInputs,
                 proofBytesHex,
                 statement,
             }),
@@ -645,6 +706,7 @@ describe('ballot privacy proof object boundary', () => {
         expect(
             verifyBallotProof({
                 ballotProof: proofRecord,
+                componentProofBundle,
                 proofBytesHex,
                 statement,
             }),
@@ -661,6 +723,7 @@ describe('ballot privacy proof object boundary', () => {
                     ),
                 },
                 componentProofBundle,
+                componentProofInputs,
                 proofBytesHex,
                 statement,
             }),
@@ -672,6 +735,72 @@ describe('ballot privacy proof object boundary', () => {
             verifyBallotProof({
                 ballotProof: reorderedProofRecord,
                 componentProofBundle: reorderedComponentProofBundle,
+                componentProofInputs: reorderedComponentProofInputs,
+                proofBytesHex,
+                statement,
+            }),
+        ).toMatchObject({
+            ok: false,
+            unresolvedReason: 'BallotPackageInvalid',
+        });
+
+        const wrongProofBytesInputs = componentProofInputs.map(
+            (componentProofInput, componentIndex) =>
+                componentIndex === 0
+                    ? {
+                          ...componentProofInput,
+                          proofBytesHex: 'ff'.repeat(
+                              componentProofInput.proofBytesHex.length / 2,
+                          ),
+                      }
+                    : componentProofInput,
+        );
+        expect(
+            verifyBallotProof({
+                ballotProof: proofRecord,
+                componentProofBundle,
+                componentProofInputs: wrongProofBytesInputs,
+                proofBytesHex,
+                statement,
+            }),
+        ).toMatchObject({
+            ok: false,
+            unresolvedReason: 'BallotPackageInvalid',
+        });
+
+        const wrongComponentProofStatementInputs = componentProofInputs.map(
+            (componentProofInput, componentIndex) =>
+                componentIndex === 0
+                    ? {
+                          ...componentProofInput,
+                          componentProofStatementDigest: digest(
+                              'wrong-component-proof-statement',
+                          ),
+                      }
+                    : componentProofInput,
+        );
+        expect(
+            verifyBallotProof({
+                ballotProof: proofRecord,
+                componentProofBundle,
+                componentProofInputs: wrongComponentProofStatementInputs,
+                proofBytesHex,
+                statement,
+            }),
+        ).toMatchObject({
+            ok: false,
+            unresolvedReason: 'BallotPackageInvalid',
+        });
+
+        const duplicateComponentInputs = [
+            componentProofInputs[0],
+            ...componentProofInputs.slice(0, -1),
+        ];
+        expect(
+            verifyBallotProof({
+                ballotProof: proofRecord,
+                componentProofBundle,
+                componentProofInputs: duplicateComponentInputs,
                 proofBytesHex,
                 statement,
             }),

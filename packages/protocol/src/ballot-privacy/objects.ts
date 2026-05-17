@@ -73,6 +73,21 @@ type ShareCommitmentInput = Omit<
     ShareCommitment,
     'objectType' | 'objectVersion' | 'shareCommitmentDigest'
 >;
+export type BallotProofComponentProofVerificationInput = {
+    readonly componentId: BallotProofComponentId;
+    readonly componentProofStatementDigest?: ProtocolDigest;
+    readonly proofBytesHex: string;
+    readonly proofEncoding: unknown;
+    readonly proofParameterSet: unknown;
+    readonly proofStatement?: unknown;
+    readonly proofStatementFormat:
+        | 'dense-polynomial-matrix-linear-proof-v1'
+        | 'sparse-polynomial-matrix-linear-proof-v1'
+        | 'structured-module-lwe-linear-proof-v1'
+        | 'public-zero-witness-binding-check-v1';
+    readonly publicRandomnessHex: string;
+    readonly statementDigest: ProtocolDigest;
+};
 
 const unavailableProofBackendMessage =
     'Ballot privacy proof verification requires the frozen LaZer-style lattice proof backend, which is not implemented in this build.';
@@ -88,6 +103,14 @@ const requiredBallotProofComponentIds = [
     'receiver-encryption-component',
     'receiver-key-binding-component',
 ] as const satisfies readonly BallotProofComponentId[];
+const allowedBallotProofComponentStatementFormats = new Set<
+    BallotProofComponentProofVerificationInput['proofStatementFormat']
+>([
+    'dense-polynomial-matrix-linear-proof-v1',
+    'sparse-polynomial-matrix-linear-proof-v1',
+    'structured-module-lwe-linear-proof-v1',
+    'public-zero-witness-binding-check-v1',
+]);
 
 const requiredLazerPortComponents = [
     'generated linear proof parameters from lin-codegen.sage',
@@ -1012,10 +1035,223 @@ const collectBallotProofStructuralRefusals = (
     return refusedObjects;
 };
 
+function collectBallotProofComponentProofInputRefusals(input: {
+    readonly ballotProof: BallotProofRecord;
+    readonly componentProofBundle: BallotProofComponentProofBundle;
+    readonly componentProofInputs?: readonly BallotProofComponentProofVerificationInput[];
+}): readonly RefusalRecord[] {
+    const refusedObjects: RefusalRecord[] = [];
+    const proofRecordDigest = input.ballotProof.ballotProofRecordDigest;
+
+    if (input.componentProofInputs === undefined) {
+        refusedObjects.push(
+            createRefusal(
+                'BallotPackageInvalid',
+                'Full encoded-score ballot proof verification requires public proof inputs for every component proof.',
+                proofRecordDigest,
+            ),
+        );
+
+        return refusedObjects;
+    }
+    if (
+        input.componentProofInputs.length !==
+        requiredBallotProofComponentIds.length
+    ) {
+        refusedObjects.push(
+            createRefusal(
+                'BallotPackageInvalid',
+                'Ballot proof component proof inputs must contain exactly the required components.',
+                proofRecordDigest,
+            ),
+        );
+    }
+
+    const proofInputsByComponent = new Map<
+        BallotProofComponentId,
+        BallotProofComponentProofVerificationInput
+    >();
+    for (const proofInput of input.componentProofInputs) {
+        if (proofInputsByComponent.has(proofInput.componentId)) {
+            refusedObjects.push(
+                createRefusal(
+                    'BallotPackageInvalid',
+                    'Ballot proof component proof inputs contain a duplicate component.',
+                    proofRecordDigest,
+                ),
+            );
+        }
+        proofInputsByComponent.set(proofInput.componentId, proofInput);
+    }
+
+    for (
+        let componentIndex = 0;
+        componentIndex < requiredBallotProofComponentIds.length;
+        componentIndex += 1
+    ) {
+        const expectedComponentId =
+            requiredBallotProofComponentIds[componentIndex];
+        const componentProof =
+            input.componentProofBundle.componentProofs[componentIndex];
+        const proofInput = proofInputsByComponent.get(expectedComponentId);
+        if (componentProof === undefined || proofInput === undefined) {
+            refusedObjects.push(
+                createRefusal(
+                    'BallotPackageInvalid',
+                    `Ballot proof component proof input for ${expectedComponentId} is missing.`,
+                    proofRecordDigest,
+                ),
+            );
+            continue;
+        }
+        if (proofInput.componentId !== componentProof.componentId) {
+            refusedObjects.push(
+                createRefusal(
+                    'BallotPackageInvalid',
+                    `Ballot proof component proof input for ${expectedComponentId} is not bound to the matching proof record.`,
+                    proofRecordDigest,
+                ),
+            );
+        }
+        if (
+            componentProof.componentProofStatementDigest !== undefined &&
+            proofInput.componentProofStatementDigest !==
+                componentProof.componentProofStatementDigest
+        ) {
+            refusedObjects.push(
+                createRefusal(
+                    'BallotPackageInvalid',
+                    `Ballot proof component proof statement for ${expectedComponentId} does not match the proof record.`,
+                    proofRecordDigest,
+                ),
+            );
+        }
+        if (
+            !allowedBallotProofComponentStatementFormats.has(
+                proofInput.proofStatementFormat,
+            )
+        ) {
+            refusedObjects.push(
+                createRefusal(
+                    'BallotPackageInvalid',
+                    `Ballot proof component proof statement format for ${expectedComponentId} is not supported.`,
+                    proofRecordDigest,
+                ),
+            );
+        }
+        if (!proofBytesHexPattern.test(proofInput.proofBytesHex)) {
+            refusedObjects.push(
+                createRefusal(
+                    'BallotPackageInvalid',
+                    `Ballot proof component proof bytes for ${expectedComponentId} must be non-empty lowercase hexadecimal bytes.`,
+                    proofRecordDigest,
+                ),
+            );
+            continue;
+        }
+        const proofBytesDigest = deriveProofBytesDigest({
+            proofBytesHex: proofInput.proofBytesHex,
+        });
+        const proofSizeBytes = proofInput.proofBytesHex.length / 2;
+        const proofEncodingProfileDigest =
+            deriveBallotProofEncodingProfileDigest({
+                proofEncoding: proofInput.proofEncoding,
+            });
+        const proofParameterSetDigest = deriveBallotProofParameterSetDigest({
+            parameterSet: proofInput.proofParameterSet,
+        });
+        const publicRandomnessDigest = (() => {
+            try {
+                return deriveBallotProofPublicRandomnessDigest({
+                    publicRandomnessHex: proofInput.publicRandomnessHex,
+                });
+            } catch {
+                return undefined;
+            }
+        })();
+
+        if (proofSizeBytes !== componentProof.proofSizeBytes) {
+            refusedObjects.push(
+                createRefusal(
+                    'BallotPackageInvalid',
+                    `Ballot proof component proof byte length for ${expectedComponentId} does not match the proof record.`,
+                    proofRecordDigest,
+                ),
+            );
+        }
+        if (proofBytesDigest !== componentProof.proofBytesDigest) {
+            refusedObjects.push(
+                createRefusal(
+                    'BallotPackageInvalid',
+                    `Ballot proof component proof bytes for ${expectedComponentId} do not match the proof record digest.`,
+                    proofRecordDigest,
+                ),
+            );
+        }
+        if (
+            proofEncodingProfileDigest !==
+            componentProof.proofEncodingProfileDigest
+        ) {
+            refusedObjects.push(
+                createRefusal(
+                    'BallotPackageInvalid',
+                    `Ballot proof component proof encoding for ${expectedComponentId} does not match the proof record.`,
+                    proofRecordDigest,
+                ),
+            );
+        }
+        if (
+            proofParameterSetDigest !== componentProof.proofParameterSetDigest
+        ) {
+            refusedObjects.push(
+                createRefusal(
+                    'BallotPackageInvalid',
+                    `Ballot proof component proof parameter set for ${expectedComponentId} does not match the proof record.`,
+                    proofRecordDigest,
+                ),
+            );
+        }
+        if (publicRandomnessDigest === undefined) {
+            refusedObjects.push(
+                createRefusal(
+                    'BallotPackageInvalid',
+                    `Ballot proof component public randomness for ${expectedComponentId} must be 32 lowercase hexadecimal bytes.`,
+                    proofRecordDigest,
+                ),
+            );
+        } else if (
+            publicRandomnessDigest !== componentProof.publicRandomnessDigest
+        ) {
+            refusedObjects.push(
+                createRefusal(
+                    'BallotPackageInvalid',
+                    `Ballot proof component public randomness for ${expectedComponentId} does not match the proof record.`,
+                    proofRecordDigest,
+                ),
+            );
+        }
+        if (
+            proofInput.statementDigest !==
+            componentProof.componentStatementDigest
+        ) {
+            refusedObjects.push(
+                createRefusal(
+                    'BallotPackageInvalid',
+                    `Ballot proof component proof input for ${expectedComponentId} is not bound to the component statement.`,
+                    proofRecordDigest,
+                ),
+            );
+        }
+    }
+
+    return refusedObjects;
+}
+
 const collectBallotProofComponentProofBundleRefusals = (input: {
     readonly statement: BallotProofStatement;
     readonly ballotProof: BallotProofRecord;
     readonly componentProofBundle?: BallotProofComponentProofBundle;
+    readonly componentProofInputs?: readonly BallotProofComponentProofVerificationInput[];
 }): readonly RefusalRecord[] => {
     const refusedObjects: RefusalRecord[] = [];
     const proofRecordDigest = input.ballotProof.ballotProofRecordDigest;
@@ -1051,6 +1287,13 @@ const collectBallotProofComponentProofBundleRefusals = (input: {
     if (input.componentProofBundle === undefined) {
         return refusedObjects;
     }
+    refusedObjects.push(
+        ...collectBallotProofComponentProofInputRefusals({
+            ballotProof: input.ballotProof,
+            componentProofBundle: input.componentProofBundle,
+            componentProofInputs: input.componentProofInputs,
+        }),
+    );
 
     const proofBundlePayload = omitProperty(
         input.componentProofBundle,
@@ -1220,6 +1463,10 @@ const collectBallotProofComponentProofBundleRefusals = (input: {
             !protocolDigestPattern.test(
                 componentProof.publicRandomnessDigest,
             ) ||
+            (componentProof.componentProofStatementDigest !== undefined &&
+                !protocolDigestPattern.test(
+                    componentProof.componentProofStatementDigest,
+                )) ||
             (componentProof.ballotProofStatementDigest !== undefined &&
                 !protocolDigestPattern.test(
                     componentProof.ballotProofStatementDigest,
@@ -1609,6 +1856,7 @@ export const verifyBallotProof = (input: {
     readonly statement: BallotProofStatement;
     readonly ballotProof: BallotProofRecord;
     readonly componentProofBundle?: BallotProofComponentProofBundle;
+    readonly componentProofInputs?: readonly BallotProofComponentProofVerificationInput[];
     readonly proofBytesHex?: string;
 }): BallotPrivacyVerification => {
     const structuralRefusals = [
@@ -1620,6 +1868,7 @@ export const verifyBallotProof = (input: {
         ...collectBallotProofComponentProofBundleRefusals({
             ballotProof: input.ballotProof,
             componentProofBundle: input.componentProofBundle,
+            componentProofInputs: input.componentProofInputs,
             statement: input.statement,
         }),
     ];

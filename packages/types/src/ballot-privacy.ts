@@ -252,6 +252,7 @@ export type BallotProofComponentProofRecord = {
     readonly componentProofRecordDigest: ProtocolDigest;
     readonly componentId: BallotProofComponentId;
     readonly componentStatementDigest: ProtocolDigest;
+    readonly componentProofStatementDigest?: ProtocolDigest;
     readonly backendStatementDigest: ProtocolDigest;
     readonly ballotProofStatementDigest?: ProtocolDigest;
     readonly relationStatementDigest: ProtocolDigest;

@@ -134,8 +134,12 @@ receiver-encryption component.
 The relation compiler also emits a digest-bound component-bundle statement for
 those five components, and ballot proof records can now bind an ordered
 component proof bundle with one proof record per relation component. The
-ballot-proof verifier rejects supplied component bundle statements or component
-proof bundles that are missing, incomplete, reordered, duplicate-bearing, not
+ballot-proof verifier now also requires public component proof inputs for each
+supplied component proof bundle and checks that each input matches the proof
+record's proof bytes, proof encoding, parameter set, public randomness,
+component statement, and component proof-statement digest. Supplied component
+bundle statements, component proof bundles, and component proof inputs are
+rejected when they are missing, incomplete, reordered, duplicate-bearing, not
 bound to the ballot/backend/relation/component statements, or still backed by
 digest-expanded rows.
 Receiver-key proof records are generated only after the local key witness
@@ -162,8 +166,9 @@ Rust/WASM ballot-proof command verifies supplied proof bytes through the ported
 linear proof backend, but rejects the record unless the supplied public linear
 statement, parameter set, and proof encoding all use the dedicated full
 encoded-score ballot-relation coverage profile, a complete ordered component
-bundle statement, and a complete ordered component proof bundle. Relabeling a
-field-only proof as full coverage fails closed. The
+bundle statement, a complete ordered component proof bundle, and matching
+public component proof inputs. Relabeling a field-only proof as full coverage
+fails closed. The
 current encoded-score field-row proof-vector
 profile is still verified natively and in WASM as a backend compatibility slice,
 but it is explicitly labelled `encoded-score-field-rows-only` and cannot be
