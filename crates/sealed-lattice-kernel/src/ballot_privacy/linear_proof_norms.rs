@@ -3,15 +3,13 @@ use serde::{Deserialize, Serialize};
 use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
 
 use super::{
-    linear_proof_parameters::LazerDemoProofEncoding, proof_coder::DecodedLazerDemoLinearProof,
+    linear_proof_parameters::{LazerDemoProofEncoding, linear_proof_profile_for_encoding},
+    proof_coder::DecodedLazerDemoLinearProof,
 };
 
 pub const LAZER_DEMO_CHALLENGE_CENTERED_BOUND: i64 = 8;
 pub const LAZER_DEMO_EUCLIDEAN_RESPONSE_BOUND_SQUARED: u128 = 6_938_266_263;
 pub const LAZER_DEMO_INFINITY_RESPONSE_BOUND: u128 = 1_625_292;
-pub const LAZER_DEMO_SHORT_RESPONSE_MESSAGE_LENGTH: u128 = 33;
-pub const LAZER_DEMO_SHORT_RESPONSE_BOUND_SCALE_NUMERATOR: u128 = 962;
-pub const LAZER_DEMO_SHORT_RESPONSE_BOUND_SCALE_DENOMINATOR: u128 = 400;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -29,27 +27,34 @@ pub fn validate_lazer_demo_linear_proof_norms(
     decoded_proof: &DecodedLazerDemoLinearProof,
     proof_encoding: &LazerDemoProofEncoding,
 ) -> CanonicalResult<LinearProofNormSummary> {
+    let proof_profile = linear_proof_profile_for_encoding(proof_encoding)?;
     let challenge_centered_linf =
         centered_linf(decoded_proof.challenge_polynomial().centered_coefficients())?;
-    if challenge_centered_linf > LAZER_DEMO_CHALLENGE_CENTERED_BOUND.unsigned_abs() {
-        return Err(invalid_norm("challenge coefficient exceeds the demo bound"));
+    if challenge_centered_linf > proof_profile.challenge_centered_bound.unsigned_abs() {
+        return Err(invalid_norm(
+            "challenge coefficient exceeds the proof profile bound",
+        ));
     }
 
     let short_response_l2_squared = l2_squared(decoded_proof.short_response_vector())?;
-    let short_response_bound_squared = short_response_bound_squared(proof_encoding)?;
+    let short_response_bound_squared = short_response_bound_squared(proof_encoding, proof_profile)?;
     if short_response_l2_squared > short_response_bound_squared {
-        return Err(invalid_norm("short response exceeds the demo l2 bound"));
+        return Err(invalid_norm(
+            "short response exceeds the proof profile l2 bound",
+        ));
     }
 
     let euclidean_response_l2_squared = l2_squared(decoded_proof.euclidean_response_vector())?;
-    if euclidean_response_l2_squared > LAZER_DEMO_EUCLIDEAN_RESPONSE_BOUND_SQUARED {
-        return Err(invalid_norm("euclidean response exceeds the demo l2 bound"));
+    if euclidean_response_l2_squared > proof_profile.euclidean_response_bound_squared {
+        return Err(invalid_norm(
+            "euclidean response exceeds the proof profile l2 bound",
+        ));
     }
 
     let infinity_response_linf = linf(decoded_proof.infinity_response_vector())?;
-    if infinity_response_linf > LAZER_DEMO_INFINITY_RESPONSE_BOUND {
+    if infinity_response_linf > proof_profile.infinity_response_bound {
         return Err(invalid_norm(
-            "infinity response exceeds the demo infinity bound",
+            "infinity response exceeds the proof profile infinity bound",
         ));
     }
 
@@ -58,13 +63,16 @@ pub fn validate_lazer_demo_linear_proof_norms(
         short_response_l2_squared,
         short_response_bound_squared,
         euclidean_response_l2_squared,
-        euclidean_response_bound_squared: LAZER_DEMO_EUCLIDEAN_RESPONSE_BOUND_SQUARED,
+        euclidean_response_bound_squared: proof_profile.euclidean_response_bound_squared,
         infinity_response_linf,
-        infinity_response_bound: LAZER_DEMO_INFINITY_RESPONSE_BOUND,
+        infinity_response_bound: proof_profile.infinity_response_bound,
     })
 }
 
-fn short_response_bound_squared(proof_encoding: &LazerDemoProofEncoding) -> CanonicalResult<u128> {
+fn short_response_bound_squared(
+    proof_encoding: &LazerDemoProofEncoding,
+    proof_profile: super::linear_proof_parameters::LazerLinearProofProfile,
+) -> CanonicalResult<u128> {
     let ring_degree = proof_encoding.ring_degree as u128;
     let standard_deviation_scale = 1_u128
         .checked_shl(
@@ -78,12 +86,13 @@ fn short_response_bound_squared(proof_encoding: &LazerDemoProofEncoding) -> Cano
         )
         .ok_or_else(|| invalid_norm("short response scale shift overflowed"))?;
 
-    LAZER_DEMO_SHORT_RESPONSE_MESSAGE_LENGTH
+    proof_profile
+        .short_response_message_length
         .checked_mul(2)
         .and_then(|value| value.checked_mul(ring_degree))
-        .and_then(|value| value.checked_mul(LAZER_DEMO_SHORT_RESPONSE_BOUND_SCALE_NUMERATOR))
+        .and_then(|value| value.checked_mul(proof_profile.short_response_bound_scale_numerator))
         .and_then(|value| value.checked_mul(standard_deviation_scale))
-        .map(|value| value / LAZER_DEMO_SHORT_RESPONSE_BOUND_SCALE_DENOMINATOR)
+        .map(|value| value / proof_profile.short_response_bound_scale_denominator)
         .ok_or_else(|| invalid_norm("short response bound overflowed"))
 }
 

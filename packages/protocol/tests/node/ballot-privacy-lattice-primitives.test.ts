@@ -19,6 +19,11 @@ import {
     type ShareCommitmentOpeningWitness,
 } from '../../src/ballot-privacy/lattice-primitives';
 import { createBallotPrivacyProfileSet } from '../../src/ballot-privacy/profiles';
+import { createReceiverKeyProofBackendStatement } from '../../src/ballot-privacy/receiver-key-backend-statement';
+import {
+    createReceiverKeyLinearProofStatement,
+    verifyReceiverKeyLinearWitness,
+} from '../../src/ballot-privacy/receiver-key-linear-statement';
 
 const digest = (label: string): ProtocolDigest =>
     deriveProtocolDigest('ActionContextDigest', { label });
@@ -119,6 +124,16 @@ describe('ballot privacy lattice primitives', () => {
             recoveryEpoch: 0,
             rosterDigest: digest('roster'),
         });
+        const backendStatement = createReceiverKeyProofBackendStatement({
+            publicKeyMaterial: receiverState.publicKeyMaterial,
+            receiverEncryptionProfile: profileSet.receiverEncryptionProfile,
+            receiverPublicKey: receiverState.receiverPublicKey,
+        });
+        const linearStatement = createReceiverKeyLinearProofStatement({
+            publicKeyMaterial: receiverState.publicKeyMaterial,
+            receiverEncryptionProfile: profileSet.receiverEncryptionProfile,
+            receiverPublicKey: receiverState.receiverPublicKey,
+        });
         const proofRecord = createReceiverKeyProof({
             publicKeyMaterial: receiverState.publicKeyMaterial,
             receiverEncryptionProfile: profileSet.receiverEncryptionProfile,
@@ -137,6 +152,54 @@ describe('ballot privacy lattice primitives', () => {
         expect(proofRecord.receiverKeyProofRoot).toMatch(/^[a-f0-9]{128}$/u);
         expect(proofRecord).not.toHaveProperty('secretVector');
         expect(proofRecord).not.toHaveProperty('errorVector');
+        expect(backendStatement).toMatchObject({
+            backendStatementFormat: 'SparseSignedIntegerBackendStatement-v1',
+            columnCount: 2_048,
+            digestExpandedRowCount: 1_024,
+            explicitRowCount: 0,
+            objectType: 'ReceiverKeyProofBackendStatement',
+            receiverPublicKeyDigest:
+                receiverState.receiverPublicKey.receiverPublicKeyDigest,
+            relationLabel: 'ReceiverKeyWellFormednessRelation',
+            rowCount: 1_024,
+        });
+        expect(backendStatement.backendStatementDigest).toMatch(
+            /^[a-f0-9]{128}$/u,
+        );
+        expect(backendStatement.variableColumns).toHaveLength(2_048);
+        expect(backendStatement.rowBatches).toHaveLength(1);
+        expect(backendStatement.bounds).toHaveLength(2);
+        expect(backendStatement).not.toHaveProperty('secretVector');
+        expect(backendStatement).not.toHaveProperty('errorVector');
+        expect(linearStatement).toMatchObject({
+            coefficientModulus: '12289',
+            objectType: 'ReceiverKeyLinearProofStatement',
+            relation: 'A*w + t = 0',
+            ringDegree: 256,
+            sourceRing: 'Z_q[X]/(X^256 + 1)',
+            statementColumns: 8,
+            statementProfileId: 'receiver-key-linear-module-lwe-statement-v1',
+            statementRows: 4,
+            witnessInfinityNormBound: 2,
+            witnessL2BoundSquared: '8192',
+        });
+        expect(linearStatement.statementMatrixCoefficients).toHaveLength(4);
+        expect(linearStatement.statementMatrixCoefficients[0]).toHaveLength(8);
+        expect(linearStatement.targetVectorCoefficients).toHaveLength(4);
+        expect(linearStatement.statementDigest).toMatch(/^[a-f0-9]{128}$/u);
+        expect(linearStatement).not.toHaveProperty('secretVector');
+        expect(linearStatement).not.toHaveProperty('errorVector');
+        expect(
+            verifyReceiverKeyLinearWitness({
+                publicKeyMaterial: receiverState.publicKeyMaterial,
+                receiverEncryptionProfile: profileSet.receiverEncryptionProfile,
+                receiverPublicKey: receiverState.receiverPublicKey,
+                secretState: receiverState.secretState,
+            }),
+        ).toMatchObject({
+            ok: true,
+            statementDigest: linearStatement.statementDigest,
+        });
         expect(
             verifyReceiverKeyWitness({
                 publicKeyMaterial: receiverState.publicKeyMaterial,
@@ -185,6 +248,13 @@ describe('ballot privacy lattice primitives', () => {
                 secretState: receiverState.secretState,
             }),
         ).toThrow(/receiver-key equation/u);
+        expect(() =>
+            createReceiverKeyLinearProofStatement({
+                publicKeyMaterial: changedPublicKeyMaterial,
+                receiverEncryptionProfile: profileSet.receiverEncryptionProfile,
+                receiverPublicKey: receiverState.receiverPublicKey,
+            }),
+        ).toThrow(/public key material/u);
     });
 
     it('computes additively homomorphic share commitments', () => {

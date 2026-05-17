@@ -12,20 +12,20 @@ use super::{
     describe_proof_backend,
     lazer_demo_abdlop::validate_lazer_demo_abdlop_linear_opening,
     lazer_demo_many_quadratic::{
-        build_lazer_demo_many_quadratic_equations, fold_lazer_demo_many_quadratic_equations,
+        build_lazer_demo_many_quadratic_equations, fold_lazer_many_quadratic_equations,
         validate_lazer_demo_many_quadratic_port,
     },
     lazer_demo_public_parameters::derive_lazer_demo_abdlop_public_parameters,
     lazer_demo_quadratic::validate_lazer_demo_quadratic_helper_port,
     lazer_demo_quadratic_challenge::validate_lazer_demo_quadratic_challenge,
     lazer_demo_tbox_relations::{
-        apply_lazer_demo_tbox_z3_response_relations, apply_lazer_demo_tbox_z4_response_relations,
-        build_lazer_demo_tbox_prefix_accumulators, validate_lazer_demo_tbox_relation_builder_port,
+        apply_lazer_tbox_z3_response_relations, apply_lazer_tbox_z4_response_relations,
+        build_lazer_tbox_prefix_accumulators, validate_lazer_demo_tbox_relation_builder_port,
     },
     linear_proof_norms::validate_lazer_demo_linear_proof_norms,
     linear_proof_parameters::{LazerDemoProofEncoding, LinearProofParameterSet},
     linear_proof_statement::{
-        derive_lazer_demo_linear_statement_transcript,
+        LinearProofTargetCoefficientRepresentation, derive_lazer_demo_linear_statement_transcript,
         derive_lazer_demo_transformed_statement_matrix,
         derive_lazer_demo_transformed_target_vector,
     },
@@ -55,6 +55,7 @@ pub struct LinearProofVectorCase {
     pub public_randomness_hex: Option<String>,
     pub statement_matrix_coefficients: Option<Vec<Vec<Vec<u64>>>>,
     pub target_vector_coefficients: Option<Vec<Vec<u64>>>,
+    pub target_coefficient_representation: Option<LinearProofTargetCoefficientRepresentation>,
     pub proof_hex: Option<String>,
     pub expected_proof_size_bytes: Option<usize>,
     pub trace: Option<LinearProofVectorTrace>,
@@ -161,6 +162,10 @@ impl LinearProofVectorCase {
                     invalid_vector("available vectors require targetVectorCoefficients")
                 })?;
             decode_target_vector(parameter_set, target_vector_coefficients)?;
+            let target_coefficient_representation =
+                self.target_coefficient_representation.ok_or_else(|| {
+                    invalid_vector("available vectors require targetCoefficientRepresentation")
+                })?;
             if let (Some(proof_encoding), Some(decoded_proof)) = (
                 self.proof_encoding.as_ref(),
                 decoded_proof_for_verified_encoding.as_ref(),
@@ -170,6 +175,7 @@ impl LinearProofVectorCase {
                     proof_encoding,
                     statement_matrix_coefficients,
                     target_vector_coefficients,
+                    target_coefficient_representation,
                     &public_randomness,
                 )?;
                 let abdlop_commitment_hash = hash_lazer_demo_abdlop_commitment(
@@ -193,6 +199,7 @@ impl LinearProofVectorCase {
                     proof_encoding,
                     statement_matrix_coefficients,
                     target_vector_coefficients,
+                    target_coefficient_representation,
                     &public_randomness,
                 )?;
                 let transformed_target_vector = derive_lazer_demo_transformed_target_vector(
@@ -200,34 +207,40 @@ impl LinearProofVectorCase {
                     proof_encoding,
                     statement_matrix_coefficients,
                     target_vector_coefficients,
+                    target_coefficient_representation,
                     &public_randomness,
                 )?;
                 let z34_challenge_hash =
                     challenge_hash_from_hex(&tbox_public_check_summary.z34_challenge_hash)?;
                 let generator_challenge_hash =
                     challenge_hash_from_hex(&tbox_public_check_summary.generator_challenge_hash)?;
-                let mut tbox_accumulators =
-                    build_lazer_demo_tbox_prefix_accumulators(&generator_challenge_hash)?;
-                apply_lazer_demo_tbox_z4_response_relations(
+                let mut tbox_accumulators = build_lazer_tbox_prefix_accumulators(
+                    &generator_challenge_hash,
+                    proof_encoding,
+                )?;
+                apply_lazer_tbox_z4_response_relations(
                     &mut tbox_accumulators,
                     &transformed_statement_matrix,
                     &transformed_target_vector,
                     decoded_proof.infinity_response_vector(),
                     &z34_challenge_hash,
+                    proof_encoding,
                 )?;
-                apply_lazer_demo_tbox_z3_response_relations(
+                apply_lazer_tbox_z3_response_relations(
                     &mut tbox_accumulators,
                     &transformed_statement_matrix,
                     decoded_proof.euclidean_response_vector(),
                     &z34_challenge_hash,
+                    proof_encoding,
                 )?;
                 let many_quadratic_equations = build_lazer_demo_many_quadratic_equations(
                     &tbox_accumulators,
                     decoded_proof.hash_mask_vector(),
                 )?;
-                let folded_many_quadratic_equation = fold_lazer_demo_many_quadratic_equations(
+                let folded_many_quadratic_equation = fold_lazer_many_quadratic_equations(
                     &many_quadratic_equations,
                     &generator_challenge_hash,
+                    proof_encoding.full_size_coefficient_bit_length,
                 )?;
                 validate_lazer_demo_quadratic_challenge(
                     &generator_challenge_hash,
@@ -363,7 +376,7 @@ pub fn verify_linear_proof_vector_case_value(vector_case: &Value) -> Value {
     };
 
     if let Err(error) = parsed_case.validate_shape() {
-        return error_value(error);
+        return error_value_for_case(error, &parsed_case);
     }
 
     if !parsed_case.upstream_vector_available {
@@ -455,15 +468,102 @@ fn error_value(error: CanonicalError) -> Value {
     })
 }
 
+fn error_value_for_case(error: CanonicalError, parsed_case: &LinearProofVectorCase) -> Value {
+    json!({
+        "ok": false,
+        "backendAvailable": BALLOT_PRIVACY_PROOF_BACKEND_AVAILABLE,
+        "backendStatus": describe_proof_backend(),
+        "caseName": parsed_case.case_name,
+        "vectorAvailable": parsed_case.upstream_vector_available,
+        "expectedOutcome": parsed_case.expected_outcome,
+        "statusLabels": [],
+        "acceptedDigests": [],
+        "refusedObjects": [
+            {
+                "code": error.code.as_str(),
+                "message": error.message
+            }
+        ],
+        "unresolvedReason": error.code.as_str()
+    })
+}
+
 fn invalid_vector(message: impl Into<String>) -> CanonicalError {
     CanonicalError::new(CanonicalErrorCode::InvalidFixture, message)
 }
 
 #[cfg(test)]
 mod tests {
+    use serde_json::Value;
     use serde_json::json;
 
     use super::verify_linear_proof_vector_case_value;
+
+    fn integer_property(value: &Value, field_name: &str) -> usize {
+        value
+            .get(field_name)
+            .and_then(Value::as_u64)
+            .and_then(|field_value| usize::try_from(field_value).ok())
+            .unwrap_or_else(|| panic!("{field_name} should be a usize-compatible integer"))
+    }
+
+    fn apply_statement_matrix_patch(statement_matrix: &mut Value, patch: &Value) {
+        let row_index = integer_property(patch, "rowIndex");
+        let column_index = integer_property(patch, "columnIndex");
+        let coefficient_index = integer_property(patch, "coefficientIndex");
+        let coefficient = patch
+            .get("coefficient")
+            .cloned()
+            .expect("statement matrix patch coefficient should exist");
+
+        statement_matrix[row_index][column_index][coefficient_index] = coefficient;
+    }
+
+    fn apply_target_vector_patch(target_vector: &mut Value, patch: &Value) {
+        let row_index = integer_property(patch, "rowIndex");
+        let coefficient_index = integer_property(patch, "coefficientIndex");
+        let coefficient = patch
+            .get("coefficient")
+            .cloned()
+            .expect("target vector patch coefficient should exist");
+
+        target_vector[row_index][coefficient_index] = coefficient;
+    }
+
+    fn expand_encoded_score_field_vector_case(vectors: &Value, compact_case: &Value) -> Value {
+        let mut statement_matrix =
+            vectors["linearStatement"]["statementMatrixCoefficients"].clone();
+        let mut target_vector = vectors["linearStatement"]["targetVectorCoefficients"].clone();
+        if let Some(statement_matrix_patch) = compact_case.get("statementMatrixPatch") {
+            apply_statement_matrix_patch(&mut statement_matrix, statement_matrix_patch);
+        }
+        if let Some(target_vector_patch) = compact_case.get("targetVectorPatch") {
+            apply_target_vector_patch(&mut target_vector, target_vector_patch);
+        }
+
+        json!({
+            "caseName": compact_case["caseName"],
+            "description": compact_case["description"],
+            "mutation": compact_case["mutation"],
+            "expectedOutcome": compact_case["expectedOutcome"],
+            "upstreamVectorAvailable": compact_case["upstreamVectorAvailable"],
+            "parameterSet": vectors["parameterSet"],
+            "proofEncoding": vectors["proofEncoding"],
+            "publicRandomnessHex": compact_case
+                .get("publicRandomnessHex")
+                .cloned()
+                .unwrap_or_else(|| vectors["publicRandomnessHex"].clone()),
+            "statementMatrixCoefficients": statement_matrix,
+            "targetVectorCoefficients": target_vector,
+            "targetCoefficientRepresentation": vectors["targetCoefficientRepresentation"],
+            "proofHex": compact_case
+                .get("proofHex")
+                .cloned()
+                .unwrap_or_else(|| vectors["proofHex"].clone()),
+            "expectedProofSizeBytes": vectors["expectedProofSizeBytes"],
+            "trace": compact_case["trace"]
+        })
+    }
 
     #[test]
     fn pending_upstream_vector_fails_closed() {
@@ -534,7 +634,10 @@ mod tests {
 
         let verification = verify_linear_proof_vector_case_value(vector_case);
 
-        assert_eq!(verification["ok"], true);
+        assert_eq!(
+            verification["ok"], true,
+            "receiver-key vector verification failed: {verification}"
+        );
         assert_eq!(verification["vectorAvailable"], true);
         assert_eq!(verification["backendAvailable"], false);
         assert_eq!(verification["unresolvedReason"], serde_json::Value::Null);
@@ -566,6 +669,8 @@ mod tests {
                 "{} should fail closed",
                 vector_case["caseName"]
             );
+            assert_eq!(verification["caseName"], vector_case["caseName"]);
+            assert_eq!(verification["vectorAvailable"], true);
             assert!(
                 verification["refusedObjects"][0]["message"]
                     .as_str()
@@ -573,6 +678,126 @@ mod tests {
                     .len()
                     > 8
             );
+        }
+    }
+
+    #[test]
+    fn generated_receiver_key_vector_verifies() {
+        let vectors: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../test-vectors/ballot-privacy/receiver-key-linear-proof-vectors.json"
+        ))
+        .expect("receiver-key linear vector file should parse");
+        let vector_case = vectors["cases"]
+            .as_array()
+            .expect("receiver-key vector file should contain cases")
+            .iter()
+            .find(|vector_case| vector_case["caseName"] == "valid-receiver-key-linear-proof")
+            .expect("valid receiver-key vector should exist");
+
+        let verification = verify_linear_proof_vector_case_value(vector_case);
+
+        assert_eq!(
+            verification["ok"], true,
+            "receiver-key vector verification failed: {verification}"
+        );
+        assert_eq!(verification["vectorAvailable"], true);
+        assert_eq!(verification["backendAvailable"], false);
+        assert_eq!(verification["unresolvedReason"], serde_json::Value::Null);
+    }
+
+    #[test]
+    fn generated_receiver_key_mutations_fail_closed() {
+        let vectors: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../test-vectors/ballot-privacy/receiver-key-linear-proof-vectors.json"
+        ))
+        .expect("receiver-key linear vector file should parse");
+
+        for vector_case in vectors["cases"]
+            .as_array()
+            .expect("receiver-key vector file should contain cases")
+            .iter()
+            .filter(|vector_case| vector_case["expectedOutcome"] == "reject")
+        {
+            let verification = verify_linear_proof_vector_case_value(vector_case);
+
+            assert_eq!(
+                verification["ok"], false,
+                "{} should fail closed",
+                vector_case["caseName"]
+            );
+            assert_eq!(verification["caseName"], vector_case["caseName"]);
+            assert_eq!(verification["vectorAvailable"], true);
+            assert!(
+                verification["refusedObjects"][0]["message"]
+                    .as_str()
+                    .expect("refusal message should be a string")
+                    .len()
+                    > 8
+            );
+        }
+    }
+
+    #[test]
+    fn generated_encoded_score_field_vector_verifies() {
+        let vectors: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../test-vectors/ballot-privacy/ballot-field-linear-proof-vectors.json"
+        ))
+        .expect("encoded-score field vector file should parse");
+        let compact_case = vectors["cases"]
+            .as_array()
+            .expect("encoded-score field vector file should contain cases")
+            .iter()
+            .find(|vector_case| vector_case["caseName"] == "valid-encoded-score-field-linear-proof")
+            .expect("valid encoded-score field vector should exist");
+        let vector_case = expand_encoded_score_field_vector_case(&vectors, compact_case);
+
+        let verification = verify_linear_proof_vector_case_value(&vector_case);
+
+        assert_eq!(
+            verification["ok"], true,
+            "encoded-score field vector verification failed: {verification}"
+        );
+        assert_eq!(verification["vectorAvailable"], true);
+        assert_eq!(verification["backendAvailable"], false);
+        assert_eq!(verification["unresolvedReason"], serde_json::Value::Null);
+        assert!(
+            verification["statusLabels"]
+                .as_array()
+                .expect("status labels should be an array")
+                .contains(&json!("QuadraticChallengeRecomputed"))
+        );
+    }
+
+    #[test]
+    fn generated_encoded_score_field_mutations_fail_closed() {
+        let vectors: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../test-vectors/ballot-privacy/ballot-field-linear-proof-vectors.json"
+        ))
+        .expect("encoded-score field vector file should parse");
+
+        for compact_case in vectors["cases"]
+            .as_array()
+            .expect("encoded-score field vector file should contain cases")
+            .iter()
+            .filter(|vector_case| vector_case["expectedOutcome"] == "reject")
+        {
+            let vector_case = expand_encoded_score_field_vector_case(&vectors, compact_case);
+            let verification = verify_linear_proof_vector_case_value(&vector_case);
+
+            assert_eq!(
+                verification["ok"], false,
+                "{} should fail closed",
+                compact_case["caseName"]
+            );
+            assert_eq!(verification["caseName"], compact_case["caseName"]);
+            assert_eq!(verification["vectorAvailable"], true);
+            assert! {
+                verification["refusedObjects"][0]["message"]
+                    .as_str()
+                    .expect("refusal message should be a string")
+                    .len()
+                    > 8
+            };
         }
     }
 }

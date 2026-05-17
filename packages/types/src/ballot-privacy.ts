@@ -265,6 +265,12 @@ export type ReceiverKeyProof = {
     readonly receiverPublicKeyDigest: ProtocolDigest;
     readonly receiverEncryptionProfileDigest: ProtocolDigest;
     readonly proofBackend: 'LaZerStyleLocalLatticeRelation';
+    readonly backendStatementDigest?: ProtocolDigest;
+    readonly linearStatementDigest?: ProtocolDigest;
+    readonly proofBytesDigest?: ProtocolDigest;
+    readonly proofEncodingProfileDigest?: ProtocolDigest;
+    readonly proofSizeBytes?: number;
+    readonly publicRandomnessDigest?: ProtocolDigest;
     readonly proofRoot: ProtocolDigest;
     readonly receiverKeyProofRoot: ProtocolDigest;
 };
@@ -345,13 +351,20 @@ export type BallotProofRecord = {
     readonly objectVersion: 1;
     readonly ballotProofRecordDigest: ProtocolDigest;
     readonly ballotProofStatementDigest: ProtocolDigest;
+    readonly backendStatementDigest?: ProtocolDigest;
     readonly relationStatementDigest: ProtocolDigest;
+    readonly linearStatementDigest?: ProtocolDigest;
+    readonly statementMatrixDigest?: ProtocolDigest;
+    readonly targetVectorDigest?: ProtocolDigest;
     readonly ballotProofProfileDigest: ProtocolDigest;
     readonly proofBackend: 'LaZerStyleLocalLatticeRelation';
     readonly challengeDigest: ProtocolDigest;
     readonly proofRoot: ProtocolDigest;
     readonly proofBytesDigest: ProtocolDigest;
+    readonly proofEncodingProfileDigest?: ProtocolDigest;
+    readonly proofParameterSetDigest?: ProtocolDigest;
     readonly proofSizeBytes: number;
+    readonly publicRandomnessDigest?: ProtocolDigest;
 };
 
 export type ClaimBearingBallotPackage = {

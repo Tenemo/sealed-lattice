@@ -265,6 +265,7 @@ describe('ballot privacy profile freeze', () => {
                 'ReceiverKeyProofRoot',
                 'BallotProofStatementDigest',
                 'BallotProofRecordDigest',
+                'ProofBytesDigest',
                 'ChallengeDomainDigest',
             ]),
         );

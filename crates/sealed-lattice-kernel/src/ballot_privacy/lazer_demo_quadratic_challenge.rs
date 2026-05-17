@@ -6,11 +6,10 @@ use crate::{
 use super::{
     lazer_demo_many_quadratic::LazerDemoManyQuadraticFold,
     lazer_demo_public_parameters::{
-        LAZER_DEMO_PROOF_COEFFICIENT_BIT_LENGTH, LAZER_DEMO_PROOF_COEFFICIENT_MODULUS,
-        LAZER_DEMO_PROOF_RING_DEGREE, derive_lazer_demo_abdlop_public_parameters,
+        LAZER_DEMO_PROOF_RING_DEGREE, derive_lazer_abdlop_public_parameters,
     },
     lazer_demo_rng::sample_lazer_demo_autostable_challenge_coefficients,
-    linear_proof_parameters::LazerDemoProofEncoding,
+    linear_proof_parameters::{LazerDemoProofEncoding, linear_proof_profile_for_encoding},
     linear_proof_transcript::shake128_32,
     polynomial_matrix::PolynomialMatrix,
     polynomial_ring::PolynomialRing,
@@ -19,18 +18,8 @@ use super::{
     sparse_polynomial_vector::SparsePolynomialVector,
 };
 
-const LAZER_DEMO_QUADRATIC_SHORT_RESPONSE_LENGTH: usize = 33;
-const LAZER_DEMO_QUADRATIC_RANDOMNESS_RESPONSE_LENGTH: usize = 47;
 const LAZER_DEMO_QUADRATIC_TARGET_VECTOR_LENGTH: usize = 12;
 const LAZER_DEMO_QUADRATIC_MESSAGE_LENGTH: usize = 11;
-const LAZER_DEMO_QUADRATIC_DECOMPRESSION_SHIFT: usize = 10;
-const LAZER_DEMO_QUADRATIC_DECOMPRESSION_GAMMA: i128 = 514_206;
-const LAZER_DEMO_QUADRATIC_DECOMPRESSION_MODULUS: i128 = 70_066_854_566;
-const LAZER_DEMO_QUADRATIC_DECOMPRESSION_LOG2_MODULUS: usize = 37;
-const LAZER_DEMO_QUADRATIC_LOW_PART_BOUND_SQUARED: u128 = 100_800_248_132_613;
-const LAZER_DEMO_QUADRATIC_CHALLENGE_BOUND: i64 = 8;
-const LAZER_DEMO_QUADRATIC_CHALLENGE_LOG2_BOUND: usize = 5;
-const LAZER_DEMO_QUADRATIC_SHORT_RESPONSE_LOG2_STANDARD_DEVIATION: usize = 16;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct LazerDemoQuadraticChallengeSummary {
@@ -50,13 +39,15 @@ pub(crate) fn validate_lazer_demo_quadratic_challenge(
     many_quadratic_fold: &LazerDemoManyQuadraticFold,
 ) -> CanonicalResult<LazerDemoQuadraticChallengeSummary> {
     proof_encoding.validate()?;
+    let proof_profile = linear_proof_profile_for_encoding(proof_encoding)?;
     validate_lazer_demo_quadratic_shapes(decoded_proof, proof_encoding, many_quadratic_fold)?;
 
     let proof_ring = PolynomialRing::new(
-        LAZER_DEMO_PROOF_RING_DEGREE,
-        LAZER_DEMO_PROOF_COEFFICIENT_MODULUS,
+        proof_encoding.ring_degree,
+        proof_encoding.coefficient_modulus,
     )?;
-    let public_parameters = derive_lazer_demo_abdlop_public_parameters(public_randomness)?;
+    let public_parameters =
+        derive_lazer_abdlop_public_parameters(public_randomness, proof_encoding)?;
     let challenge_polynomial = challenge_polynomial_to_canonical_proof_ring(
         proof_ring,
         decoded_proof.challenge_polynomial().centered_coefficients(),
@@ -64,7 +55,7 @@ pub(crate) fn validate_lazer_demo_quadratic_challenge(
     let shifted_challenge_polynomial = multiply_polynomial_by_power_of_two(
         proof_ring,
         &challenge_polynomial,
-        LAZER_DEMO_QUADRATIC_DECOMPRESSION_SHIFT,
+        proof_profile.decompression_shift,
     )?;
     let short_response_vector =
         signed_polynomial_vector_to_canonical(proof_ring, decoded_proof.short_response_vector())?;
@@ -93,15 +84,18 @@ pub(crate) fn validate_lazer_demo_quadratic_challenge(
     let recovered_high_bits = recover_lazer_demo_quadratic_high_bits(
         recovery_input.entries(),
         decoded_proof.hint_vector(),
+        proof_encoding,
+        proof_profile,
     )?;
     let low_part_l2_squared = compute_lazer_demo_quadratic_low_part_l2_squared(
         proof_ring,
         recovery_input.entries(),
         &recovered_high_bits,
+        proof_profile,
     )?;
-    if low_part_l2_squared > LAZER_DEMO_QUADRATIC_LOW_PART_BOUND_SQUARED {
+    if low_part_l2_squared > proof_profile.decompression_low_part_bound_squared {
         return Err(invalid_quadratic_challenge(
-            "quadratic decompression low part exceeds the demo l2 bound",
+            "quadratic decompression low part exceeds the proof profile l2 bound",
         ));
     }
 
@@ -129,12 +123,14 @@ pub(crate) fn validate_lazer_demo_quadratic_challenge(
         &target_commitment_vector.entries()[LAZER_DEMO_QUADRATIC_MESSAGE_LENGTH..],
         &verifier_polynomial,
         &recovered_high_bits,
+        proof_encoding,
+        proof_profile,
     )?;
     let recomputed_challenge_seed = shake128_32(&[challenge_seed, &challenge_encoding]);
     let recomputed_challenge_coefficients = sample_lazer_demo_autostable_challenge_coefficients(
         proof_ring.degree(),
-        LAZER_DEMO_QUADRATIC_CHALLENGE_BOUND,
-        LAZER_DEMO_QUADRATIC_CHALLENGE_LOG2_BOUND,
+        proof_profile.challenge_centered_bound,
+        proof_profile.challenge_coefficient_bit_length,
         &recomputed_challenge_seed,
         0,
     )?;
@@ -148,7 +144,8 @@ pub(crate) fn validate_lazer_demo_quadratic_challenge(
 
     let short_response_l2_squared =
         signed_polynomial_l2_squared(decoded_proof.short_response_vector())?;
-    let short_response_l2_bound_squared = short_response_l2_bound_squared()?;
+    let short_response_l2_bound_squared =
+        short_response_l2_bound_squared(proof_encoding, proof_profile)?;
     if short_response_l2_squared > short_response_l2_bound_squared {
         return Err(invalid_quadratic_challenge(
             "quadratic short response exceeds the demo l2 bound",
@@ -159,7 +156,7 @@ pub(crate) fn validate_lazer_demo_quadratic_challenge(
     if hint_infinity_norm
         .checked_mul(2)
         .ok_or_else(|| invalid_quadratic_challenge("hint infinity norm overflowed"))?
-        > u128::try_from(LAZER_DEMO_QUADRATIC_DECOMPRESSION_MODULUS).map_err(|_| {
+        > u128::try_from(proof_profile.decompression_modulus).map_err(|_| {
             invalid_quadratic_challenge("decompression modulus does not fit in u128")
         })?
     {
@@ -173,7 +170,7 @@ pub(crate) fn validate_lazer_demo_quadratic_challenge(
         short_response_l2_squared,
         short_response_l2_bound_squared,
         low_part_l2_squared,
-        low_part_l2_bound_squared: LAZER_DEMO_QUADRATIC_LOW_PART_BOUND_SQUARED,
+        low_part_l2_bound_squared: proof_profile.decompression_low_part_bound_squared,
         hint_infinity_norm,
     })
 }
@@ -183,37 +180,30 @@ fn validate_lazer_demo_quadratic_shapes(
     proof_encoding: &LazerDemoProofEncoding,
     many_quadratic_fold: &LazerDemoManyQuadraticFold,
 ) -> CanonicalResult<()> {
-    if proof_encoding.ring_degree != LAZER_DEMO_PROOF_RING_DEGREE
-        || proof_encoding.coefficient_modulus != LAZER_DEMO_PROOF_COEFFICIENT_MODULUS
-        || proof_encoding.full_size_coefficient_bit_length
-            != LAZER_DEMO_PROOF_COEFFICIENT_BIT_LENGTH
-    {
+    if decoded_proof.short_response_vector().len() != proof_encoding.short_response_vector_length {
         return Err(invalid_quadratic_challenge(
-            "quadratic verifier proof encoding does not match the demo profile",
-        ));
-    }
-    if decoded_proof.short_response_vector().len() != LAZER_DEMO_QUADRATIC_SHORT_RESPONSE_LENGTH {
-        return Err(invalid_quadratic_challenge(
-            "quadratic short response length does not match the demo profile",
+            "quadratic short response length does not match the proof profile",
         ));
     }
     if decoded_proof.randomness_response_vector().len()
-        != LAZER_DEMO_QUADRATIC_RANDOMNESS_RESPONSE_LENGTH
+        != proof_encoding.randomness_response_vector_length
     {
         return Err(invalid_quadratic_challenge(
-            "quadratic randomness response length does not match the demo profile",
+            "quadratic randomness response length does not match the proof profile",
         ));
     }
-    if decoded_proof.commitment_target_vector().len() != LAZER_DEMO_QUADRATIC_TARGET_VECTOR_LENGTH {
+    if decoded_proof.commitment_target_vector().len()
+        != proof_encoding.target_commitment_vector_length
+    {
         return Err(invalid_quadratic_challenge(
-            "quadratic target vector length does not match the demo profile",
+            "quadratic target vector length does not match the proof profile",
         ));
     }
     if many_quadratic_fold.folded_equation.dimension()
-        != 2 * (LAZER_DEMO_QUADRATIC_SHORT_RESPONSE_LENGTH + LAZER_DEMO_QUADRATIC_MESSAGE_LENGTH)
+        != 2 * (proof_encoding.short_response_vector_length + LAZER_DEMO_QUADRATIC_MESSAGE_LENGTH)
     {
         return Err(invalid_quadratic_challenge(
-            "folded many-quadratic equation dimension does not match the demo profile",
+            "folded many-quadratic equation dimension does not match the proof profile",
         ));
     }
 
@@ -325,14 +315,8 @@ fn build_lazer_demo_quadratic_witness_vector(
     short_response_vector: &PolynomialVector,
     reconstructed_message_vector: &PolynomialVector,
 ) -> CanonicalResult<PolynomialVector> {
-    let mut witness_entries = Vec::with_capacity(
-        2 * (LAZER_DEMO_QUADRATIC_SHORT_RESPONSE_LENGTH + LAZER_DEMO_QUADRATIC_MESSAGE_LENGTH),
-    );
-    if short_response_vector.len() != LAZER_DEMO_QUADRATIC_SHORT_RESPONSE_LENGTH {
-        return Err(invalid_quadratic_challenge(
-            "short response vector length does not match the demo profile",
-        ));
-    }
+    let mut witness_entries =
+        Vec::with_capacity(2 * (short_response_vector.len() + LAZER_DEMO_QUADRATIC_MESSAGE_LENGTH));
     for short_response_polynomial in short_response_vector.entries() {
         witness_entries.push(short_response_polynomial.clone());
         witness_entries.push(ring.automorphism(short_response_polynomial)?);
@@ -385,6 +369,8 @@ fn recover_lazer_demo_external_target_polynomial(
 fn recover_lazer_demo_quadratic_high_bits(
     recovery_input: &[Vec<u64>],
     hint_vector: &[Vec<i64>],
+    proof_encoding: &LazerDemoProofEncoding,
+    proof_profile: super::linear_proof_parameters::LazerLinearProofProfile,
 ) -> CanonicalResult<Vec<Vec<u64>>> {
     if recovery_input.len() != hint_vector.len() {
         return Err(invalid_quadratic_challenge(
@@ -405,12 +391,13 @@ fn recover_lazer_demo_quadratic_high_bits(
                 .iter()
                 .zip(hint_polynomial)
                 .map(|(coefficient, hint)| {
-                    let high_bits = gamma_decompression_high_bits(*coefficient)?;
+                    let high_bits =
+                        gamma_decompression_high_bits(*coefficient, proof_encoding, proof_profile)?;
                     positive_mod_i128(
                         high_bits.checked_add(i128::from(*hint)).ok_or_else(|| {
                             invalid_quadratic_challenge("hint addition overflowed")
                         })?,
-                        LAZER_DEMO_QUADRATIC_DECOMPRESSION_MODULUS,
+                        proof_profile.decompression_modulus,
                     )
                 })
                 .collect::<CanonicalResult<Vec<_>>>()
@@ -418,25 +405,29 @@ fn recover_lazer_demo_quadratic_high_bits(
         .collect()
 }
 
-fn gamma_decompression_high_bits(coefficient: u64) -> CanonicalResult<i128> {
-    if coefficient >= LAZER_DEMO_PROOF_COEFFICIENT_MODULUS {
+fn gamma_decompression_high_bits(
+    coefficient: u64,
+    proof_encoding: &LazerDemoProofEncoding,
+    proof_profile: super::linear_proof_parameters::LazerLinearProofProfile,
+) -> CanonicalResult<i128> {
+    if coefficient >= proof_encoding.coefficient_modulus {
         return Err(invalid_quadratic_challenge(
             "quadratic decompression coefficient is not canonical",
         ));
     }
-    let mut low_part = i128::from(coefficient) % LAZER_DEMO_QUADRATIC_DECOMPRESSION_GAMMA;
-    let half_gamma = LAZER_DEMO_QUADRATIC_DECOMPRESSION_GAMMA / 2;
+    let mut low_part = i128::from(coefficient) % proof_profile.decompression_gamma;
+    let half_gamma = proof_profile.decompression_gamma / 2;
     if low_part > half_gamma {
-        low_part -= LAZER_DEMO_QUADRATIC_DECOMPRESSION_GAMMA;
+        low_part -= proof_profile.decompression_gamma;
     }
     let high_numerator = i128::from(coefficient)
         .checked_sub(low_part)
         .ok_or_else(|| invalid_quadratic_challenge("high-bit subtraction overflowed"))?;
 
-    if high_numerator == i128::from(LAZER_DEMO_PROOF_COEFFICIENT_MODULUS - 1) {
+    if high_numerator == i128::from(proof_encoding.coefficient_modulus - 1) {
         Ok(0)
     } else {
-        Ok(high_numerator / LAZER_DEMO_QUADRATIC_DECOMPRESSION_GAMMA)
+        Ok(high_numerator / proof_profile.decompression_gamma)
     }
 }
 
@@ -444,6 +435,7 @@ fn compute_lazer_demo_quadratic_low_part_l2_squared(
     ring: PolynomialRing,
     recovery_input: &[Vec<u64>],
     recovered_high_bits: &[Vec<u64>],
+    proof_profile: super::linear_proof_parameters::LazerLinearProofProfile,
 ) -> CanonicalResult<u128> {
     if recovery_input.len() != recovered_high_bits.len() {
         return Err(invalid_quadratic_challenge(
@@ -463,7 +455,8 @@ fn compute_lazer_demo_quadratic_low_part_l2_squared(
             let low_part = positive_mod_u64_modulus(
                 i128::from(*input_coefficient)
                     .checked_sub(
-                        LAZER_DEMO_QUADRATIC_DECOMPRESSION_GAMMA
+                        proof_profile
+                            .decompression_gamma
                             .checked_mul(i128::from(*high_bits_coefficient))
                             .ok_or_else(|| {
                                 invalid_quadratic_challenge("low-part multiplication overflowed")
@@ -493,6 +486,8 @@ fn encode_lazer_demo_quadratic_challenge_input(
     target_tail_polynomials: &[Vec<u64>],
     verifier_polynomial: &[u64],
     recovered_high_bits: &[Vec<u64>],
+    proof_encoding: &LazerDemoProofEncoding,
+    proof_profile: super::linear_proof_parameters::LazerLinearProofProfile,
 ) -> CanonicalResult<Vec<u8>> {
     if target_tail_polynomials.len() != 1 {
         return Err(invalid_quadratic_challenge(
@@ -505,23 +500,23 @@ fn encode_lazer_demo_quadratic_challenge_input(
             &mut writer,
             polynomial,
             ring.modulus(),
-            LAZER_DEMO_PROOF_COEFFICIENT_BIT_LENGTH,
+            proof_encoding.full_size_coefficient_bit_length,
         )?;
     }
     encode_uniform_polynomial(
         &mut writer,
         verifier_polynomial,
         ring.modulus(),
-        LAZER_DEMO_PROOF_COEFFICIENT_BIT_LENGTH,
+        proof_encoding.full_size_coefficient_bit_length,
     )?;
     for polynomial in recovered_high_bits {
         encode_uniform_polynomial(
             &mut writer,
             polynomial,
-            u64::try_from(LAZER_DEMO_QUADRATIC_DECOMPRESSION_MODULUS).map_err(|_| {
+            u64::try_from(proof_profile.decompression_modulus).map_err(|_| {
                 invalid_quadratic_challenge("decompression modulus does not fit in u64")
             })?,
-            LAZER_DEMO_QUADRATIC_DECOMPRESSION_LOG2_MODULUS,
+            proof_profile.decompression_log2_modulus,
         )?;
     }
 
@@ -748,17 +743,20 @@ fn signed_polynomial_infinity_norm(polynomials: &[Vec<i64>]) -> CanonicalResult<
     Ok(maximum)
 }
 
-fn short_response_l2_bound_squared() -> CanonicalResult<u128> {
+fn short_response_l2_bound_squared(
+    proof_encoding: &LazerDemoProofEncoding,
+    proof_profile: super::linear_proof_parameters::LazerLinearProofProfile,
+) -> CanonicalResult<u128> {
     let base = 2_u128
-        .checked_mul(LAZER_DEMO_QUADRATIC_SHORT_RESPONSE_LENGTH as u128)
-        .and_then(|value| value.checked_mul(LAZER_DEMO_PROOF_RING_DEGREE as u128))
-        .and_then(|value| value.checked_mul(962))
+        .checked_mul(proof_encoding.short_response_vector_length as u128)
+        .and_then(|value| value.checked_mul(proof_encoding.ring_degree as u128))
+        .and_then(|value| value.checked_mul(proof_profile.short_response_bound_scale_numerator))
         .ok_or_else(|| invalid_quadratic_challenge("short response bound base overflowed"))?;
     let scaled = base
         .checked_mul(
             1_u128
                 .checked_shl(
-                    u32::try_from(2 * LAZER_DEMO_QUADRATIC_SHORT_RESPONSE_LOG2_STANDARD_DEVIATION)
+                    u32::try_from(2 * proof_encoding.short_response_log2_standard_deviation)
                         .map_err(|_| {
                             invalid_quadratic_challenge(
                                 "short response bound shift does not fit in u32",
@@ -771,7 +769,7 @@ fn short_response_l2_bound_squared() -> CanonicalResult<u128> {
         )
         .ok_or_else(|| invalid_quadratic_challenge("short response bound overflowed"))?;
 
-    Ok(scaled / 400)
+    Ok(scaled / proof_profile.short_response_bound_scale_denominator)
 }
 
 fn positive_mod_u64_modulus(value: i128, modulus: u64) -> CanonicalResult<u64> {
@@ -878,7 +876,11 @@ mod tests {
                 build_lazer_demo_tbox_prefix_accumulators,
             },
             linear_proof_parameters::{LazerDemoProofEncoding, LinearProofParameterSet},
+            linear_proof_parameters::{
+                demo_linear_proof_encoding_contract, linear_proof_profile_for_encoding,
+            },
             linear_proof_statement::{
+                LinearProofTargetCoefficientRepresentation,
                 derive_lazer_demo_linear_statement_transcript,
                 derive_lazer_demo_transformed_statement_matrix,
                 derive_lazer_demo_transformed_target_vector,
@@ -891,17 +893,21 @@ mod tests {
 
     #[test]
     fn gamma_decompression_matches_lazer_high_part_rule() {
+        let proof_encoding = demo_linear_proof_encoding_contract();
+        let proof_profile =
+            linear_proof_profile_for_encoding(&proof_encoding).expect("profile should resolve");
         assert_eq!(
-            gamma_decompression_high_bits(514_206).expect("high bits should compute"),
+            gamma_decompression_high_bits(514_206, &proof_encoding, proof_profile)
+                .expect("high bits should compute"),
             1
         );
         assert_eq!(
-            gamma_decompression_high_bits(514_206 + 257_103)
+            gamma_decompression_high_bits(514_206 + 257_103, &proof_encoding, proof_profile)
                 .expect("half low part should stay positive"),
             1
         );
         assert_eq!(
-            gamma_decompression_high_bits(514_206 + 257_104)
+            gamma_decompression_high_bits(514_206 + 257_104, &proof_encoding, proof_profile)
                 .expect("wrapped low part should become negative"),
             2
         );
@@ -909,8 +915,12 @@ mod tests {
 
     #[test]
     fn short_response_bound_matches_demo_parameters() {
+        let proof_encoding = demo_linear_proof_encoding_contract();
+        let proof_profile =
+            linear_proof_profile_for_encoding(&proof_encoding).expect("profile should resolve");
         assert_eq!(
-            short_response_l2_bound_squared().expect("bound should compute"),
+            short_response_l2_bound_squared(&proof_encoding, proof_profile)
+                .expect("bound should compute"),
             43_631_370_169_221
         );
     }
@@ -960,6 +970,7 @@ mod tests {
             &proof_encoding,
             &statement_matrix_coefficients,
             &target_vector_coefficients,
+            LinearProofTargetCoefficientRepresentation::CenteredSignedSourceModulus,
             &public_randomness,
         )
         .expect("statement transcript should derive");
@@ -982,6 +993,7 @@ mod tests {
             &proof_encoding,
             &statement_matrix_coefficients,
             &target_vector_coefficients,
+            LinearProofTargetCoefficientRepresentation::CenteredSignedSourceModulus,
             &public_randomness,
         )
         .expect("transformed statement should derive");
@@ -990,6 +1002,7 @@ mod tests {
             &proof_encoding,
             &statement_matrix_coefficients,
             &target_vector_coefficients,
+            LinearProofTargetCoefficientRepresentation::CenteredSignedSourceModulus,
             &public_randomness,
         )
         .expect("transformed target should derive");

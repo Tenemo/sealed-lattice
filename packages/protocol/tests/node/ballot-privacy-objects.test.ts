@@ -16,6 +16,12 @@ import {
     createReceiverPayloadShell,
     createShareCommitmentMessageBoundCert,
     createShareCommitmentShell,
+    deriveBallotProofEncodingProfileDigest,
+    deriveBallotProofParameterSetDigest,
+    deriveBallotProofPublicRandomnessDigest,
+    deriveProofBytesDigest,
+    deriveReceiverKeyProofEncodingProfileDigest,
+    deriveReceiverKeyProofPublicRandomnessDigest,
     describeBallotPrivacyProofBackend,
     verifyBallotProof,
     verifyClaimBearingBallotPackage,
@@ -431,6 +437,243 @@ describe('ballot privacy proof object boundary', () => {
         expect(proofRecord.ballotProofRecordDigest).not.toBe(
             changedProofRecord.ballotProofRecordDigest,
         );
+    });
+
+    it('binds ballot proof records to complete linear backend proof metadata', () => {
+        const statement = createStatement();
+        const proofBytesHex = '001122aabbcc';
+        const proofEncoding = {
+            profileId: 'ballot-proof-linear-proof-encoding-v1',
+        };
+        const parameterSet = {
+            profileId: 'ballot-proof-linear-parameter-set-v1',
+        };
+        const publicRandomnessHex = '00'.repeat(32);
+        const proofRecord = createBallotProofRecordShell({
+            backendStatementDigest: digest('ballot-backend-statement'),
+            linearStatementDigest: digest('ballot-linear-statement'),
+            proofBytesDigest: deriveProofBytesDigest({ proofBytesHex }),
+            proofEncodingProfileDigest: deriveBallotProofEncodingProfileDigest({
+                proofEncoding,
+            }),
+            proofParameterSetDigest: deriveBallotProofParameterSetDigest({
+                parameterSet,
+            }),
+            proofRoot: digest('ballot-proof-root'),
+            proofSizeBytes: proofBytesHex.length / 2,
+            publicRandomnessDigest: deriveBallotProofPublicRandomnessDigest({
+                publicRandomnessHex,
+            }),
+            relationStatementDigest: digest('relation-statement'),
+            statement,
+            statementMatrixDigest: digest('ballot-statement-matrix'),
+            targetVectorDigest: digest('ballot-target-vector'),
+        });
+        const changedRandomnessProofRecord = createBallotProofRecordShell({
+            backendStatementDigest: digest('ballot-backend-statement'),
+            linearStatementDigest: digest('ballot-linear-statement'),
+            proofBytesDigest: deriveProofBytesDigest({ proofBytesHex }),
+            proofEncodingProfileDigest: deriveBallotProofEncodingProfileDigest({
+                proofEncoding,
+            }),
+            proofParameterSetDigest: deriveBallotProofParameterSetDigest({
+                parameterSet,
+            }),
+            proofRoot: digest('ballot-proof-root'),
+            proofSizeBytes: proofBytesHex.length / 2,
+            publicRandomnessDigest: deriveBallotProofPublicRandomnessDigest({
+                publicRandomnessHex: '11'.repeat(32),
+            }),
+            relationStatementDigest: digest('relation-statement'),
+            statement,
+            statementMatrixDigest: digest('ballot-statement-matrix'),
+            targetVectorDigest: digest('ballot-target-vector'),
+        });
+        const incompleteBackendMetadataProofRecord =
+            createBallotProofRecordShell({
+                linearStatementDigest: digest('ballot-linear-statement'),
+                proofBytesDigest: deriveProofBytesDigest({ proofBytesHex }),
+                proofRoot: digest('ballot-proof-root'),
+                proofSizeBytes: proofBytesHex.length / 2,
+                relationStatementDigest: digest('relation-statement'),
+                statement,
+            });
+
+        expect(proofRecord.backendStatementDigest).toBe(
+            digest('ballot-backend-statement'),
+        );
+        expect(proofRecord.proofParameterSetDigest).toBe(
+            deriveBallotProofParameterSetDigest({ parameterSet }),
+        );
+        expect(proofRecord.challengeDigest).not.toBe(
+            changedRandomnessProofRecord.challengeDigest,
+        );
+        expect(
+            verifyBallotProof({
+                ballotProof: proofRecord,
+                proofBytesHex,
+                statement,
+            }),
+        ).toMatchObject({
+            ok: false,
+            unresolvedReason: 'OperationUnavailable',
+        });
+        expect(
+            verifyBallotProof({
+                ballotProof: incompleteBackendMetadataProofRecord,
+                statement,
+            }),
+        ).toMatchObject({
+            ok: false,
+            unresolvedReason: 'BallotPackageInvalid',
+        });
+    });
+
+    it('checks supplied ballot proof bytes against the proof record before the backend gate', () => {
+        const statement = createStatement();
+        const proofBytesHex = '001122aabbcc';
+        const proofRecord = createBallotProofRecordShell({
+            statement,
+            relationStatementDigest: digest('relation-statement'),
+            proofRoot: digest('proof-root'),
+            proofBytesDigest: deriveProofBytesDigest({ proofBytesHex }),
+            proofSizeBytes: proofBytesHex.length / 2,
+        });
+        const wrongProofBytes = '001122aabbcd';
+        const shortProofRecord = createBallotProofRecordShell({
+            statement,
+            relationStatementDigest: digest('relation-statement'),
+            proofRoot: digest('proof-root'),
+            proofBytesDigest: deriveProofBytesDigest({ proofBytesHex }),
+            proofSizeBytes: proofBytesHex.length / 2 + 1,
+        });
+
+        expect(
+            verifyBallotProof({
+                statement,
+                ballotProof: proofRecord,
+                proofBytesHex,
+            }),
+        ).toMatchObject({
+            ok: false,
+            unresolvedReason: 'OperationUnavailable',
+        });
+        expect(
+            verifyBallotProof({
+                statement,
+                ballotProof: proofRecord,
+                proofBytesHex: wrongProofBytes,
+            }),
+        ).toMatchObject({
+            ok: false,
+            unresolvedReason: 'BallotPackageInvalid',
+        });
+        expect(
+            verifyBallotProof({
+                statement,
+                ballotProof: shortProofRecord,
+                proofBytesHex,
+            }),
+        ).toMatchObject({
+            ok: false,
+            unresolvedReason: 'BallotPackageInvalid',
+        });
+        expect(
+            verifyBallotProof({
+                statement,
+                ballotProof: proofRecord,
+                proofBytesHex: 'AA',
+            }),
+        ).toMatchObject({
+            ok: false,
+            unresolvedReason: 'BallotPackageInvalid',
+        });
+    });
+
+    it('checks supplied receiver-key proof bytes against proof-byte metadata before the backend gate', () => {
+        const proofBytesHex = '001122aabbcc';
+        const wrongProofBytesHex = '001122aabbcd';
+        const proofEncoding = {
+            profileId: 'receiver-key-linear-proof-encoding-v1',
+        };
+        const publicRandomnessHex = '00'.repeat(32);
+        const receiverKeyProof = createReceiverKeyProofShell({
+            backendStatementDigest: digest('receiver-key-backend-statement'),
+            ceremonyId: 'ceremony-1',
+            linearStatementDigest: digest('receiver-key-linear-statement'),
+            manifestDigest: digest('manifest'),
+            proofBackend: 'LaZerStyleLocalLatticeRelation',
+            proofBytesDigest: deriveProofBytesDigest({ proofBytesHex }),
+            proofEncodingProfileDigest:
+                deriveReceiverKeyProofEncodingProfileDigest({
+                    proofEncoding,
+                }),
+            proofRoot: digest('receiver-key-proof-root'),
+            proofSizeBytes: proofBytesHex.length / 2,
+            publicRandomnessDigest:
+                deriveReceiverKeyProofPublicRandomnessDigest({
+                    publicRandomnessHex,
+                }),
+            receiverEncryptionProfileDigest: digest(
+                'receiver-encryption-profile',
+            ),
+            receiverIdentity: 'receiver-1',
+            receiverPublicKeyDigest: digest('receiver-public-key-1'),
+            receiverRosterPosition: 1,
+            recoveryEpoch: 0,
+            rosterDigest: digest('roster'),
+        });
+        const incompleteProofMetadata = createReceiverKeyProofShell({
+            ceremonyId: 'ceremony-1',
+            linearStatementDigest: digest('receiver-key-linear-statement'),
+            manifestDigest: digest('manifest'),
+            proofBackend: 'LaZerStyleLocalLatticeRelation',
+            proofRoot: digest('receiver-key-proof-root'),
+            receiverEncryptionProfileDigest: digest(
+                'receiver-encryption-profile',
+            ),
+            receiverIdentity: 'receiver-1',
+            receiverPublicKeyDigest: digest('receiver-public-key-1'),
+            receiverRosterPosition: 1,
+            recoveryEpoch: 0,
+            rosterDigest: digest('roster'),
+        });
+
+        expect(
+            verifyReceiverKeyProof({
+                proofBytesHex,
+                receiverKeyProof,
+            }),
+        ).toMatchObject({
+            ok: false,
+            unresolvedReason: 'OperationUnavailable',
+        });
+        expect(
+            verifyReceiverKeyProof({
+                proofBytesHex: wrongProofBytesHex,
+                receiverKeyProof,
+            }),
+        ).toMatchObject({
+            ok: false,
+            unresolvedReason: 'BallotPackageInvalid',
+        });
+        expect(
+            verifyReceiverKeyProof({
+                proofBytesHex: 'AA',
+                receiverKeyProof,
+            }),
+        ).toMatchObject({
+            ok: false,
+            unresolvedReason: 'BallotPackageInvalid',
+        });
+        expect(
+            verifyReceiverKeyProof({
+                receiverKeyProof: incompleteProofMetadata,
+            }),
+        ).toMatchObject({
+            ok: false,
+            unresolvedReason: 'BallotPackageInvalid',
+        });
     });
 
     it('keeps proof verification fail-closed until the lattice backend is integrated', () => {

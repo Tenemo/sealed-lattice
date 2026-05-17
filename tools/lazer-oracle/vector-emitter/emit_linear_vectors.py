@@ -510,6 +510,7 @@ def build_case(
     expected_proof_size_bytes: int,
     statement_matrix_coefficients: list[list[list[int]]],
     target_vector_coefficients: list[list[int]],
+    target_coefficient_representation: str,
     trace: dict[str, Any],
 ) -> dict[str, Any]:
     return {
@@ -523,6 +524,7 @@ def build_case(
         "publicRandomnessHex": public_randomness_hex,
         "statementMatrixCoefficients": statement_matrix_coefficients,
         "targetVectorCoefficients": target_vector_coefficients,
+        "targetCoefficientRepresentation": target_coefficient_representation,
         "proofHex": proof_hex,
         "expectedProofSizeBytes": expected_proof_size_bytes,
         "trace": trace,
@@ -682,6 +684,7 @@ def emit_vectors(repo_root: Path, lazer_root: Path, out_path: Path) -> None:
             public_randomness_hex=public_randomness_hex,
             statement_matrix_coefficients=matrix_coefficients,
             target_vector_coefficients=target_coefficients,
+            target_coefficient_representation="centeredSignedSourceModulus",
             proof_hex=proof_hex,
             expected_proof_size_bytes=len(proof),
             trace=build_trace(
@@ -705,6 +708,7 @@ def emit_vectors(repo_root: Path, lazer_root: Path, out_path: Path) -> None:
             public_randomness_hex=public_randomness_hex,
             statement_matrix_coefficients=mutated_matrix_coefficients,
             target_vector_coefficients=target_coefficients,
+            target_coefficient_representation="centeredSignedSourceModulus",
             proof_hex=proof_hex,
             expected_proof_size_bytes=len(proof),
             trace=build_trace(
@@ -728,6 +732,7 @@ def emit_vectors(repo_root: Path, lazer_root: Path, out_path: Path) -> None:
             public_randomness_hex=public_randomness_hex,
             statement_matrix_coefficients=matrix_coefficients,
             target_vector_coefficients=mutated_target_coefficients,
+            target_coefficient_representation="centeredSignedSourceModulus",
             proof_hex=proof_hex,
             expected_proof_size_bytes=len(proof),
             trace=build_trace(
@@ -751,6 +756,7 @@ def emit_vectors(repo_root: Path, lazer_root: Path, out_path: Path) -> None:
             public_randomness_hex=public_randomness_hex,
             statement_matrix_coefficients=matrix_coefficients,
             target_vector_coefficients=target_coefficients,
+            target_coefficient_representation="centeredSignedSourceModulus",
             proof_hex=mutated_proof.hex(),
             expected_proof_size_bytes=len(proof),
             trace=build_trace(
@@ -774,6 +780,7 @@ def emit_vectors(repo_root: Path, lazer_root: Path, out_path: Path) -> None:
             public_randomness_hex=bytes(wrong_public_randomness).hex(),
             statement_matrix_coefficients=matrix_coefficients,
             target_vector_coefficients=target_coefficients,
+            target_coefficient_representation="centeredSignedSourceModulus",
             proof_hex=proof_hex,
             expected_proof_size_bytes=len(proof),
             trace=build_trace(
@@ -797,6 +804,7 @@ def emit_vectors(repo_root: Path, lazer_root: Path, out_path: Path) -> None:
             public_randomness_hex=public_randomness_hex,
             statement_matrix_coefficients=matrix_coefficients,
             target_vector_coefficients=target_coefficients,
+            target_coefficient_representation="centeredSignedSourceModulus",
             proof_hex=truncated_proof.hex(),
             expected_proof_size_bytes=len(proof),
             trace=build_trace(
@@ -820,6 +828,7 @@ def emit_vectors(repo_root: Path, lazer_root: Path, out_path: Path) -> None:
             public_randomness_hex=public_randomness_hex,
             statement_matrix_coefficients=matrix_coefficients,
             target_vector_coefficients=target_coefficients,
+            target_coefficient_representation="centeredSignedSourceModulus",
             proof_hex=extended_proof.hex(),
             expected_proof_size_bytes=len(proof),
             trace=build_trace(
@@ -843,6 +852,7 @@ def emit_vectors(repo_root: Path, lazer_root: Path, out_path: Path) -> None:
             public_randomness_hex=public_randomness_hex,
             statement_matrix_coefficients=noncanonical_matrix_coefficients,
             target_vector_coefficients=target_coefficients,
+            target_coefficient_representation="centeredSignedSourceModulus",
             proof_hex=proof_hex,
             expected_proof_size_bytes=len(proof),
             trace=build_trace(

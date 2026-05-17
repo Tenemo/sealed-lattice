@@ -66,6 +66,7 @@ type ShareCommitmentInput = Omit<
 const unavailableProofBackendMessage =
     'Ballot privacy proof verification requires the frozen LaZer-style lattice proof backend, which is not implemented in this build.';
 const protocolDigestPattern = /^[a-f0-9]{128}$/u;
+const proofBytesHexPattern = /^(?:[a-f0-9]{2})+$/u;
 
 const requiredLazerPortComponents = [
     'generated linear proof parameters from lin-codegen.sage',
@@ -160,19 +161,114 @@ const deriveBallotProofRecordDigest = (
 ): ProtocolDigest =>
     deriveProtocolDigest('BallotProofRecordDigest', proofRecord);
 
-const deriveBallotProofChallengeDigest = (input: {
-    readonly statement: BallotProofStatement;
-    readonly relationStatementDigest: ProtocolDigest;
-    readonly proofRoot: ProtocolDigest;
-    readonly proofBytesDigest: ProtocolDigest;
+export const deriveProofBytesDigest = (input: {
+    readonly proofBytesHex: string;
+}): ProtocolDigest => {
+    if (!proofBytesHexPattern.test(input.proofBytesHex)) {
+        throw new RangeError(
+            'Proof bytes must be non-empty lowercase hexadecimal bytes.',
+        );
+    }
+
+    return deriveProtocolDigest('ProofBytesDigest', {
+        objectType: 'ProofBytes',
+        objectVersion: 1,
+        proofBytesHex: input.proofBytesHex,
+        proofSizeBytes: input.proofBytesHex.length / 2,
+    });
+};
+
+export const deriveReceiverKeyProofEncodingProfileDigest = (input: {
+    readonly proofEncoding: unknown;
 }): ProtocolDigest =>
     deriveProtocolDigest('ChallengeDomainDigest', {
+        proofEncoding: input.proofEncoding,
+        purpose: 'receiver-key-linear-proof-encoding-profile-v1',
+    });
+
+export const deriveReceiverKeyProofPublicRandomnessDigest = (input: {
+    readonly publicRandomnessHex: string;
+}): ProtocolDigest => {
+    if (!/^[a-f0-9]{64}$/u.test(input.publicRandomnessHex)) {
+        throw new RangeError(
+            'Receiver-key proof public randomness must be 32 lowercase hexadecimal bytes.',
+        );
+    }
+
+    return deriveProtocolDigest('ChallengeDomainDigest', {
+        publicRandomnessHex: input.publicRandomnessHex,
+        purpose: 'receiver-key-linear-proof-public-randomness-v1',
+    });
+};
+
+export const deriveBallotProofEncodingProfileDigest = (input: {
+    readonly proofEncoding: unknown;
+}): ProtocolDigest =>
+    deriveProtocolDigest('ChallengeDomainDigest', {
+        proofEncoding: input.proofEncoding,
+        purpose: 'ballot-proof-linear-proof-encoding-profile-v1',
+    });
+
+export const deriveBallotProofParameterSetDigest = (input: {
+    readonly parameterSet: unknown;
+}): ProtocolDigest =>
+    deriveProtocolDigest('ChallengeDomainDigest', {
+        parameterSet: input.parameterSet,
+        purpose: 'ballot-proof-linear-proof-parameter-set-v1',
+    });
+
+export const deriveBallotProofPublicRandomnessDigest = (input: {
+    readonly publicRandomnessHex: string;
+}): ProtocolDigest => {
+    if (!/^[a-f0-9]{64}$/u.test(input.publicRandomnessHex)) {
+        throw new RangeError(
+            'Ballot proof public randomness must be 32 lowercase hexadecimal bytes.',
+        );
+    }
+
+    return deriveProtocolDigest('ChallengeDomainDigest', {
+        publicRandomnessHex: input.publicRandomnessHex,
+        purpose: 'ballot-proof-linear-proof-public-randomness-v1',
+    });
+};
+
+const deriveBallotProofChallengeDigest = (input: {
+    readonly statement: BallotProofStatement;
+    readonly backendStatementDigest?: ProtocolDigest;
+    readonly relationStatementDigest: ProtocolDigest;
+    readonly linearStatementDigest?: ProtocolDigest;
+    readonly statementMatrixDigest?: ProtocolDigest;
+    readonly targetVectorDigest?: ProtocolDigest;
+    readonly proofRoot: ProtocolDigest;
+    readonly proofBytesDigest: ProtocolDigest;
+    readonly proofEncodingProfileDigest?: ProtocolDigest;
+    readonly proofParameterSetDigest?: ProtocolDigest;
+    readonly publicRandomnessDigest?: ProtocolDigest;
+}): ProtocolDigest => {
+    const challengePayload: Record<string, unknown> = {
         ballotProofStatementDigest: input.statement.ballotProofStatementDigest,
         challengeDomainDigest: input.statement.challengeDomainDigest,
         proofBytesDigest: input.proofBytesDigest,
         proofRoot: input.proofRoot,
         relationStatementDigest: input.relationStatementDigest,
-    });
+    };
+
+    for (const [fieldName, digestValue] of Object.entries({
+        backendStatementDigest: input.backendStatementDigest,
+        linearStatementDigest: input.linearStatementDigest,
+        proofEncodingProfileDigest: input.proofEncodingProfileDigest,
+        proofParameterSetDigest: input.proofParameterSetDigest,
+        publicRandomnessDigest: input.publicRandomnessDigest,
+        statementMatrixDigest: input.statementMatrixDigest,
+        targetVectorDigest: input.targetVectorDigest,
+    })) {
+        if (digestValue !== undefined) {
+            challengePayload[fieldName] = digestValue;
+        }
+    }
+
+    return deriveProtocolDigest('ChallengeDomainDigest', challengePayload);
+};
 
 const hasOwnProperty = (value: object, key: PropertyKey): boolean =>
     Object.prototype.hasOwnProperty.call(value, key);
@@ -395,28 +491,65 @@ export const buildBallotProofStatement = (
 
 export const createBallotProofRecordShell = (input: {
     readonly statement: BallotProofStatement;
+    readonly backendStatementDigest?: ProtocolDigest;
     readonly relationStatementDigest: ProtocolDigest;
+    readonly linearStatementDigest?: ProtocolDigest;
+    readonly statementMatrixDigest?: ProtocolDigest;
+    readonly targetVectorDigest?: ProtocolDigest;
     readonly proofRoot: ProtocolDigest;
     readonly proofBytesDigest: ProtocolDigest;
+    readonly proofEncodingProfileDigest?: ProtocolDigest;
+    readonly proofParameterSetDigest?: ProtocolDigest;
     readonly proofSizeBytes: number;
+    readonly publicRandomnessDigest?: ProtocolDigest;
 }): BallotProofRecord => {
     const challengeDigest = deriveBallotProofChallengeDigest({
         statement: input.statement,
+        backendStatementDigest: input.backendStatementDigest,
         relationStatementDigest: input.relationStatementDigest,
+        linearStatementDigest: input.linearStatementDigest,
+        statementMatrixDigest: input.statementMatrixDigest,
+        targetVectorDigest: input.targetVectorDigest,
         proofRoot: input.proofRoot,
         proofBytesDigest: input.proofBytesDigest,
+        proofEncodingProfileDigest: input.proofEncodingProfileDigest,
+        proofParameterSetDigest: input.proofParameterSetDigest,
+        publicRandomnessDigest: input.publicRandomnessDigest,
     });
     const proofRecordPayload: BallotProofRecordPayload = {
         objectType: 'BallotProofRecord',
         objectVersion: 1,
         ballotProofStatementDigest: input.statement.ballotProofStatementDigest,
+        ...(input.backendStatementDigest === undefined
+            ? {}
+            : { backendStatementDigest: input.backendStatementDigest }),
         relationStatementDigest: input.relationStatementDigest,
+        ...(input.linearStatementDigest === undefined
+            ? {}
+            : { linearStatementDigest: input.linearStatementDigest }),
+        ...(input.statementMatrixDigest === undefined
+            ? {}
+            : { statementMatrixDigest: input.statementMatrixDigest }),
+        ...(input.targetVectorDigest === undefined
+            ? {}
+            : { targetVectorDigest: input.targetVectorDigest }),
         ballotProofProfileDigest: input.statement.ballotProofProfileDigest,
         proofBackend: 'LaZerStyleLocalLatticeRelation',
         challengeDigest,
         proofRoot: input.proofRoot,
         proofBytesDigest: input.proofBytesDigest,
+        ...(input.proofEncodingProfileDigest === undefined
+            ? {}
+            : {
+                  proofEncodingProfileDigest: input.proofEncodingProfileDigest,
+              }),
+        ...(input.proofParameterSetDigest === undefined
+            ? {}
+            : { proofParameterSetDigest: input.proofParameterSetDigest }),
         proofSizeBytes: input.proofSizeBytes,
+        ...(input.publicRandomnessDigest === undefined
+            ? {}
+            : { publicRandomnessDigest: input.publicRandomnessDigest }),
     };
 
     return {
@@ -463,6 +596,7 @@ const createBallotPrivacyStructuralRejection = (
 
 const collectReceiverKeyProofStructuralRefusals = (
     receiverKeyProof: ReceiverKeyProof,
+    proofBytesHex?: string,
 ): readonly RefusalRecord[] => {
     const refusedObjects: RefusalRecord[] = [];
     const receiverKeyProofPayload = omitProperty(
@@ -477,7 +611,28 @@ const collectReceiverKeyProofStructuralRefusals = (
         receiverKeyProof.objectType !== 'ReceiverKeyProof' ||
         receiverKeyProof.objectVersion !== 1 ||
         receiverKeyProof.proofBackend !== 'LaZerStyleLocalLatticeRelation' ||
-        !protocolDigestPattern.test(receiverKeyProof.proofRoot)
+        !protocolDigestPattern.test(receiverKeyProof.proofRoot) ||
+        (receiverKeyProof.backendStatementDigest !== undefined &&
+            !protocolDigestPattern.test(
+                receiverKeyProof.backendStatementDigest,
+            )) ||
+        (receiverKeyProof.linearStatementDigest !== undefined &&
+            !protocolDigestPattern.test(
+                receiverKeyProof.linearStatementDigest,
+            )) ||
+        (receiverKeyProof.proofBytesDigest !== undefined &&
+            !protocolDigestPattern.test(receiverKeyProof.proofBytesDigest)) ||
+        (receiverKeyProof.proofEncodingProfileDigest !== undefined &&
+            !protocolDigestPattern.test(
+                receiverKeyProof.proofEncodingProfileDigest,
+            )) ||
+        (receiverKeyProof.publicRandomnessDigest !== undefined &&
+            !protocolDigestPattern.test(
+                receiverKeyProof.publicRandomnessDigest,
+            )) ||
+        (receiverKeyProof.proofSizeBytes !== undefined &&
+            (!Number.isSafeInteger(receiverKeyProof.proofSizeBytes) ||
+                receiverKeyProof.proofSizeBytes <= 0))
     ) {
         refusedObjects.push(
             createRefusal(
@@ -486,6 +641,70 @@ const collectReceiverKeyProofStructuralRefusals = (
                 receiverKeyProof.receiverKeyProofRoot,
             ),
         );
+    }
+    const proofMetadataFieldNames = [
+        'linearStatementDigest',
+        'proofBytesDigest',
+        'proofEncodingProfileDigest',
+        'proofSizeBytes',
+        'publicRandomnessDigest',
+    ] as const;
+    const presentProofMetadataFieldCount = proofMetadataFieldNames.filter(
+        (fieldName) => receiverKeyProof[fieldName] !== undefined,
+    ).length;
+    if (
+        presentProofMetadataFieldCount > 0 &&
+        presentProofMetadataFieldCount !== proofMetadataFieldNames.length
+    ) {
+        refusedObjects.push(
+            createRefusal(
+                'BallotPackageInvalid',
+                'Receiver key proof byte metadata must be complete when any proof-byte field is present.',
+                receiverKeyProof.receiverKeyProofRoot,
+            ),
+        );
+    }
+    if (proofBytesHex !== undefined) {
+        if (receiverKeyProof.proofBytesDigest === undefined) {
+            refusedObjects.push(
+                createRefusal(
+                    'BallotPackageInvalid',
+                    'Receiver key proof bytes require a proof-byte-bearing receiver key proof record.',
+                    receiverKeyProof.receiverKeyProofRoot,
+                ),
+            );
+        } else if (!proofBytesHexPattern.test(proofBytesHex)) {
+            refusedObjects.push(
+                createRefusal(
+                    'BallotPackageInvalid',
+                    'Receiver key proof bytes must be non-empty lowercase hexadecimal bytes.',
+                    receiverKeyProof.receiverKeyProofRoot,
+                ),
+            );
+        } else {
+            const proofSizeBytes = proofBytesHex.length / 2;
+            const proofBytesDigest = deriveProofBytesDigest({
+                proofBytesHex,
+            });
+            if (proofSizeBytes !== receiverKeyProof.proofSizeBytes) {
+                refusedObjects.push(
+                    createRefusal(
+                        'BallotPackageInvalid',
+                        'Receiver key proof byte length does not match the proof record.',
+                        receiverKeyProof.receiverKeyProofRoot,
+                    ),
+                );
+            }
+            if (proofBytesDigest !== receiverKeyProof.proofBytesDigest) {
+                refusedObjects.push(
+                    createRefusal(
+                        'BallotPackageInvalid',
+                        'Receiver key proof bytes do not match the proof record digest.',
+                        receiverKeyProof.receiverKeyProofRoot,
+                    ),
+                );
+            }
+        }
     }
     if (
         receiverKeyProof.receiverKeyProofRoot !== expectedReceiverKeyProofRoot
@@ -505,6 +724,7 @@ const collectReceiverKeyProofStructuralRefusals = (
 const collectBallotProofStructuralRefusals = (
     statement: BallotProofStatement,
     ballotProof: BallotProofRecord,
+    proofBytesHex?: string,
 ): readonly RefusalRecord[] => {
     const refusedObjects: RefusalRecord[] = [];
     const statementPayload = omitProperty(
@@ -517,10 +737,17 @@ const collectBallotProofStructuralRefusals = (
     const expectedProofRecordDigest =
         deriveBallotProofRecordDigest(proofPayload);
     const expectedChallengeDigest = deriveBallotProofChallengeDigest({
+        backendStatementDigest: ballotProof.backendStatementDigest,
         proofBytesDigest: ballotProof.proofBytesDigest,
+        proofEncodingProfileDigest: ballotProof.proofEncodingProfileDigest,
+        proofParameterSetDigest: ballotProof.proofParameterSetDigest,
         proofRoot: ballotProof.proofRoot,
+        publicRandomnessDigest: ballotProof.publicRandomnessDigest,
         relationStatementDigest: ballotProof.relationStatementDigest,
+        linearStatementDigest: ballotProof.linearStatementDigest,
+        statementMatrixDigest: ballotProof.statementMatrixDigest,
         statement,
+        targetVectorDigest: ballotProof.targetVectorDigest,
     });
 
     if (
@@ -582,7 +809,25 @@ const collectBallotProofStructuralRefusals = (
         ballotProof.objectType !== 'BallotProofRecord' ||
         ballotProof.objectVersion !== 1 ||
         ballotProof.proofBackend !== 'LaZerStyleLocalLatticeRelation' ||
+        (ballotProof.backendStatementDigest !== undefined &&
+            !protocolDigestPattern.test(ballotProof.backendStatementDigest)) ||
         !protocolDigestPattern.test(ballotProof.relationStatementDigest) ||
+        (ballotProof.linearStatementDigest !== undefined &&
+            !protocolDigestPattern.test(ballotProof.linearStatementDigest)) ||
+        (ballotProof.statementMatrixDigest !== undefined &&
+            !protocolDigestPattern.test(ballotProof.statementMatrixDigest)) ||
+        (ballotProof.targetVectorDigest !== undefined &&
+            !protocolDigestPattern.test(ballotProof.targetVectorDigest)) ||
+        !protocolDigestPattern.test(ballotProof.proofRoot) ||
+        !protocolDigestPattern.test(ballotProof.proofBytesDigest) ||
+        (ballotProof.proofEncodingProfileDigest !== undefined &&
+            !protocolDigestPattern.test(
+                ballotProof.proofEncodingProfileDigest,
+            )) ||
+        (ballotProof.proofParameterSetDigest !== undefined &&
+            !protocolDigestPattern.test(ballotProof.proofParameterSetDigest)) ||
+        (ballotProof.publicRandomnessDigest !== undefined &&
+            !protocolDigestPattern.test(ballotProof.publicRandomnessDigest)) ||
         !Number.isSafeInteger(ballotProof.proofSizeBytes) ||
         ballotProof.proofSizeBytes <= 0
     ) {
@@ -590,6 +835,32 @@ const collectBallotProofStructuralRefusals = (
             createRefusal(
                 'BallotPackageInvalid',
                 'Ballot proof record has an invalid canonical shape.',
+                ballotProof.ballotProofRecordDigest,
+            ),
+        );
+    }
+    const proofBackendMetadataFieldNames = [
+        'backendStatementDigest',
+        'linearStatementDigest',
+        'statementMatrixDigest',
+        'targetVectorDigest',
+        'proofEncodingProfileDigest',
+        'proofParameterSetDigest',
+        'publicRandomnessDigest',
+    ] as const;
+    const presentProofBackendMetadataFieldCount =
+        proofBackendMetadataFieldNames.filter(
+            (fieldName) => ballotProof[fieldName] !== undefined,
+        ).length;
+    if (
+        presentProofBackendMetadataFieldCount > 0 &&
+        presentProofBackendMetadataFieldCount !==
+            proofBackendMetadataFieldNames.length
+    ) {
+        refusedObjects.push(
+            createRefusal(
+                'BallotPackageInvalid',
+                'Ballot proof backend metadata must be complete when any backend proof field is present.',
                 ballotProof.ballotProofRecordDigest,
             ),
         );
@@ -635,6 +906,40 @@ const collectBallotProofStructuralRefusals = (
                 ballotProof.ballotProofRecordDigest,
             ),
         );
+    }
+    if (proofBytesHex !== undefined) {
+        if (!proofBytesHexPattern.test(proofBytesHex)) {
+            refusedObjects.push(
+                createRefusal(
+                    'BallotPackageInvalid',
+                    'Ballot proof bytes must be non-empty lowercase hexadecimal bytes.',
+                    ballotProof.ballotProofRecordDigest,
+                ),
+            );
+        } else {
+            const proofSizeBytes = proofBytesHex.length / 2;
+            const proofBytesDigest = deriveProofBytesDigest({
+                proofBytesHex,
+            });
+            if (proofSizeBytes !== ballotProof.proofSizeBytes) {
+                refusedObjects.push(
+                    createRefusal(
+                        'BallotPackageInvalid',
+                        'Ballot proof byte length does not match the proof record.',
+                        ballotProof.ballotProofRecordDigest,
+                    ),
+                );
+            }
+            if (proofBytesDigest !== ballotProof.proofBytesDigest) {
+                refusedObjects.push(
+                    createRefusal(
+                        'BallotPackageInvalid',
+                        'Ballot proof bytes do not match the proof record digest.',
+                        ballotProof.ballotProofRecordDigest,
+                    ),
+                );
+            }
+        }
     }
 
     return refusedObjects;
@@ -906,9 +1211,11 @@ const collectClaimBearingPackageStructuralRefusals = (
 
 export const verifyReceiverKeyProof = (input: {
     readonly receiverKeyProof: ReceiverKeyProof;
+    readonly proofBytesHex?: string;
 }): BallotPrivacyVerification => {
     const structuralRefusals = collectReceiverKeyProofStructuralRefusals(
         input.receiverKeyProof,
+        input.proofBytesHex,
     );
     if (structuralRefusals.length > 0) {
         return createBallotPrivacyStructuralRejection(structuralRefusals);
@@ -923,10 +1230,12 @@ export const verifyReceiverKeyProof = (input: {
 export const verifyBallotProof = (input: {
     readonly statement: BallotProofStatement;
     readonly ballotProof: BallotProofRecord;
+    readonly proofBytesHex?: string;
 }): BallotPrivacyVerification => {
     const structuralRefusals = collectBallotProofStructuralRefusals(
         input.statement,
         input.ballotProof,
+        input.proofBytesHex,
     );
     if (structuralRefusals.length > 0) {
         return createBallotPrivacyStructuralRejection(structuralRefusals);

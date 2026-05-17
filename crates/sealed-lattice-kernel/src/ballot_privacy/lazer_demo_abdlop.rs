@@ -6,22 +6,13 @@ use crate::{
 };
 
 use super::{
-    lazer_demo_public_parameters::{
-        LAZER_DEMO_PROOF_COEFFICIENT_MODULUS, LAZER_DEMO_PROOF_RING_DEGREE,
-        derive_lazer_demo_abdlop_public_parameters,
-    },
-    linear_proof_parameters::LazerDemoProofEncoding,
+    lazer_demo_public_parameters::derive_lazer_abdlop_public_parameters,
+    linear_proof_parameters::{LazerDemoProofEncoding, linear_proof_profile_for_encoding},
     linear_proof_transcript::shake128_32,
     polynomial_ring::PolynomialRing,
     polynomial_vector::PolynomialVector,
     proof_coder::DecodedLazerDemoLinearProof,
 };
-
-const LAZER_DEMO_DECOMPRESSION_SHIFT: usize = 10;
-const LAZER_DEMO_DECOMPRESSION_GAMMA: i128 = 514_206;
-const LAZER_DEMO_DECOMPRESSION_MODULUS: i128 = 70_066_854_566;
-const LAZER_DEMO_DECOMPRESSION_LOG2_MODULUS: usize = 37;
-const LAZER_DEMO_DECOMPRESSION_LOW_PART_BOUND_SQUARED: u128 = 100_800_248_132_613;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -40,21 +31,13 @@ pub fn validate_lazer_demo_abdlop_linear_opening(
     proof_encoding: &LazerDemoProofEncoding,
 ) -> CanonicalResult<LazerDemoAbdlopLinearOpeningSummary> {
     proof_encoding.validate()?;
-    if proof_encoding.ring_degree != LAZER_DEMO_PROOF_RING_DEGREE {
-        return Err(invalid_abdlop(
-            "ABDLOP proof ring degree does not match the demo profile",
-        ));
-    }
-    if proof_encoding.coefficient_modulus != LAZER_DEMO_PROOF_COEFFICIENT_MODULUS {
-        return Err(invalid_abdlop(
-            "ABDLOP coefficient modulus does not match the demo profile",
-        ));
-    }
+    let proof_profile = linear_proof_profile_for_encoding(proof_encoding)?;
 
-    let public_parameters = derive_lazer_demo_abdlop_public_parameters(public_randomness)?;
+    let public_parameters =
+        derive_lazer_abdlop_public_parameters(public_randomness, proof_encoding)?;
     let proof_ring = PolynomialRing::new(
-        LAZER_DEMO_PROOF_RING_DEGREE,
-        LAZER_DEMO_PROOF_COEFFICIENT_MODULUS,
+        proof_encoding.ring_degree,
+        proof_encoding.coefficient_modulus,
     )?;
     let short_response_vector =
         signed_polynomial_vector_to_canonical(proof_ring, decoded_proof.short_response_vector())?;
@@ -62,7 +45,8 @@ pub fn validate_lazer_demo_abdlop_linear_opening(
         proof_ring,
         decoded_proof.randomness_response_vector(),
     )?;
-    let challenge_polynomial = shifted_challenge_polynomial(decoded_proof, proof_ring)?;
+    let challenge_polynomial =
+        shifted_challenge_polynomial(decoded_proof, proof_ring, proof_profile)?;
     let compressed_commitment_vector = PolynomialVector::new(
         proof_ring,
         decoded_proof.compressed_commitment_vector().to_vec(),
@@ -81,16 +65,25 @@ pub fn validate_lazer_demo_abdlop_linear_opening(
         &compressed_commitment_vector,
     )?;
     let recovery_input = product_sum.sub(&challenge_commitment_product)?;
-    let recovered_high_bits =
-        recover_decompressed_high_bits(recovery_input.entries(), decoded_proof.hint_vector())?;
-    let low_part_l2_squared =
-        compute_low_part_l2_squared(proof_ring, recovery_input.entries(), &recovered_high_bits)?;
-    if low_part_l2_squared > LAZER_DEMO_DECOMPRESSION_LOW_PART_BOUND_SQUARED {
+    let recovered_high_bits = recover_decompressed_high_bits(
+        recovery_input.entries(),
+        decoded_proof.hint_vector(),
+        proof_encoding,
+        proof_profile,
+    )?;
+    let low_part_l2_squared = compute_low_part_l2_squared(
+        proof_ring,
+        recovery_input.entries(),
+        &recovered_high_bits,
+        proof_profile,
+    )?;
+    if low_part_l2_squared > proof_profile.decompression_low_part_bound_squared {
         return Err(invalid_abdlop(
-            "ABDLOP decompression low part exceeds the demo l2 bound",
+            "ABDLOP decompression low part exceeds the proof profile l2 bound",
         ));
     }
-    let recovered_high_bits_encoding = encode_lazer_demo_recovered_high_bits(&recovered_high_bits)?;
+    let recovered_high_bits_encoding =
+        encode_lazer_demo_recovered_high_bits(&recovered_high_bits, proof_encoding, proof_profile)?;
     let recovered_high_bits_hash =
         shake128_32(&[base_transcript_hash, &recovered_high_bits_encoding]);
 
@@ -99,7 +92,7 @@ pub fn validate_lazer_demo_abdlop_linear_opening(
         recovered_high_bits_encoding_bytes: recovered_high_bits_encoding.len(),
         recovered_high_bits_hash: to_hex(&recovered_high_bits_hash),
         low_part_l2_squared,
-        low_part_bound_squared: LAZER_DEMO_DECOMPRESSION_LOW_PART_BOUND_SQUARED,
+        low_part_bound_squared: proof_profile.decompression_low_part_bound_squared,
     })
 }
 
@@ -128,6 +121,7 @@ fn signed_polynomial_vector_to_canonical(
 fn shifted_challenge_polynomial(
     decoded_proof: &DecodedLazerDemoLinearProof,
     ring: PolynomialRing,
+    proof_profile: super::linear_proof_parameters::LazerLinearProofProfile,
 ) -> CanonicalResult<Vec<u64>> {
     if decoded_proof
         .challenge_polynomial()
@@ -141,7 +135,7 @@ fn shifted_challenge_polynomial(
     }
     let shift_multiplier = 1_i128
         .checked_shl(
-            u32::try_from(LAZER_DEMO_DECOMPRESSION_SHIFT)
+            u32::try_from(proof_profile.decompression_shift)
                 .map_err(|_| invalid_abdlop("decompression shift does not fit in u32"))?,
         )
         .ok_or_else(|| invalid_abdlop("decompression shift overflowed"))?;
@@ -183,6 +177,8 @@ fn multiply_polynomial_by_vector(
 fn recover_decompressed_high_bits(
     recovery_input: &[Vec<u64>],
     hint_vector: &[Vec<i64>],
+    proof_encoding: &LazerDemoProofEncoding,
+    proof_profile: super::linear_proof_parameters::LazerLinearProofProfile,
 ) -> CanonicalResult<Vec<Vec<u64>>> {
     if recovery_input.len() != hint_vector.len() {
         return Err(invalid_abdlop(
@@ -203,12 +199,13 @@ fn recover_decompressed_high_bits(
                 .iter()
                 .zip(hint_polynomial)
                 .map(|(coefficient, hint)| {
-                    let high_bits = decompression_high_bits(*coefficient)?;
+                    let high_bits =
+                        decompression_high_bits(*coefficient, proof_encoding, proof_profile)?;
                     positive_mod_with_i128_modulus(
                         high_bits
                             .checked_add(i128::from(*hint))
                             .ok_or_else(|| invalid_abdlop("ABDLOP hint addition overflowed"))?,
-                        LAZER_DEMO_DECOMPRESSION_MODULUS,
+                        proof_profile.decompression_modulus,
                     )
                 })
                 .collect::<CanonicalResult<Vec<_>>>()
@@ -216,27 +213,31 @@ fn recover_decompressed_high_bits(
         .collect()
 }
 
-fn decompression_high_bits(coefficient: u64) -> CanonicalResult<i128> {
-    if coefficient >= LAZER_DEMO_PROOF_COEFFICIENT_MODULUS {
+fn decompression_high_bits(
+    coefficient: u64,
+    proof_encoding: &LazerDemoProofEncoding,
+    proof_profile: super::linear_proof_parameters::LazerLinearProofProfile,
+) -> CanonicalResult<i128> {
+    if coefficient >= proof_encoding.coefficient_modulus {
         return Err(invalid_abdlop(
             "ABDLOP recovery coefficient is not canonical",
         ));
     }
     let mut low_part = i128::from(coefficient)
-        .checked_rem(LAZER_DEMO_DECOMPRESSION_GAMMA)
+        .checked_rem(proof_profile.decompression_gamma)
         .ok_or_else(|| invalid_abdlop("ABDLOP low-part reduction failed"))?;
-    let half_gamma = LAZER_DEMO_DECOMPRESSION_GAMMA / 2;
+    let half_gamma = proof_profile.decompression_gamma / 2;
     if low_part > half_gamma {
-        low_part -= LAZER_DEMO_DECOMPRESSION_GAMMA;
+        low_part -= proof_profile.decompression_gamma;
     }
 
     let high_numerator = i128::from(coefficient)
         .checked_sub(low_part)
         .ok_or_else(|| invalid_abdlop("ABDLOP high-part subtraction overflowed"))?;
-    if high_numerator == i128::from(LAZER_DEMO_PROOF_COEFFICIENT_MODULUS - 1) {
+    if high_numerator == i128::from(proof_encoding.coefficient_modulus - 1) {
         Ok(0)
     } else {
-        Ok(high_numerator / LAZER_DEMO_DECOMPRESSION_GAMMA)
+        Ok(high_numerator / proof_profile.decompression_gamma)
     }
 }
 
@@ -244,6 +245,7 @@ fn compute_low_part_l2_squared(
     ring: PolynomialRing,
     recovery_input: &[Vec<u64>],
     recovered_high_bits: &[Vec<u64>],
+    proof_profile: super::linear_proof_parameters::LazerLinearProofProfile,
 ) -> CanonicalResult<u128> {
     if recovery_input.len() != recovered_high_bits.len() {
         return Err(invalid_abdlop("ABDLOP low-part input lengths do not match"));
@@ -261,7 +263,8 @@ fn compute_low_part_l2_squared(
             let low_part = positive_mod_i128(
                 i128::from(*input_coefficient)
                     .checked_sub(
-                        LAZER_DEMO_DECOMPRESSION_GAMMA
+                        proof_profile
+                            .decompression_gamma
                             .checked_mul(i128::from(*high_bits_coefficient))
                             .ok_or_else(|| {
                                 invalid_abdlop("ABDLOP low-part multiplication overflowed")
@@ -282,17 +285,21 @@ fn compute_low_part_l2_squared(
     Ok(squared_sum)
 }
 
-fn encode_lazer_demo_recovered_high_bits(polynomials: &[Vec<u64>]) -> CanonicalResult<Vec<u8>> {
+fn encode_lazer_demo_recovered_high_bits(
+    polynomials: &[Vec<u64>],
+    proof_encoding: &LazerDemoProofEncoding,
+    proof_profile: super::linear_proof_parameters::LazerLinearProofProfile,
+) -> CanonicalResult<Vec<u8>> {
     let mut writer = RecoveredHighBitsWriter::new();
     for polynomial in polynomials {
-        if polynomial.len() != LAZER_DEMO_PROOF_RING_DEGREE {
+        if polynomial.len() != proof_encoding.ring_degree {
             return Err(invalid_abdlop(
                 "ABDLOP recovered high-bits polynomial degree does not match the proof ring",
             ));
         }
         for coefficient in polynomial {
             if *coefficient
-                >= u64::try_from(LAZER_DEMO_DECOMPRESSION_MODULUS).map_err(|_| {
+                >= u64::try_from(proof_profile.decompression_modulus).map_err(|_| {
                     invalid_abdlop("ABDLOP decompression modulus does not fit in u64")
                 })?
             {
@@ -302,7 +309,7 @@ fn encode_lazer_demo_recovered_high_bits(polynomials: &[Vec<u64>]) -> CanonicalR
             }
             writer.write_unsigned_little_endian_bits(
                 *coefficient,
-                LAZER_DEMO_DECOMPRESSION_LOG2_MODULUS,
+                proof_profile.decompression_log2_modulus,
             )?;
         }
     }
@@ -399,7 +406,10 @@ mod tests {
         ballot_privacy::{
             abdlop_commitment::hash_lazer_demo_abdlop_commitment,
             linear_proof_parameters::{LazerDemoProofEncoding, LinearProofParameterSet},
-            linear_proof_statement::derive_lazer_demo_linear_statement_transcript,
+            linear_proof_statement::{
+                LinearProofTargetCoefficientRepresentation,
+                derive_lazer_demo_linear_statement_transcript,
+            },
             proof_coder::decode_lazer_demo_linear_proof,
         },
         transcript_core::decode_hex,
@@ -456,6 +466,7 @@ mod tests {
             &proof_encoding,
             &statement_matrix_coefficients,
             &target_vector_coefficients,
+            LinearProofTargetCoefficientRepresentation::CenteredSignedSourceModulus,
             &public_randomness,
         )
         .expect("statement transcript should derive");

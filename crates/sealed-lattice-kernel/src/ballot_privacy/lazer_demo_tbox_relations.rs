@@ -1,12 +1,18 @@
 use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
 
+#[cfg(test)]
+use super::lazer_demo_public_parameters::LAZER_DEMO_PROOF_COEFFICIENT_BIT_LENGTH;
 use super::{
     lazer_demo_public_parameters::{
-        LAZER_DEMO_PROOF_COEFFICIENT_BIT_LENGTH, LAZER_DEMO_PROOF_COEFFICIENT_MODULUS,
-        LAZER_DEMO_PROOF_RING_DEGREE, LAZER_DEMO_TBOX_SHORT_MESSAGE_LENGTH,
+        LAZER_DEMO_PROOF_COEFFICIENT_MODULUS, LAZER_DEMO_PROOF_RING_DEGREE,
+        LAZER_DEMO_TBOX_SHORT_MESSAGE_LENGTH,
     },
     lazer_demo_quadratic::{LazerDemoQuadraticEquation, WeightedLazerDemoQuadraticEquation},
     lazer_demo_rng::sample_lazer_demo_uniform_u64_values,
+    linear_proof_parameters::{
+        LazerDemoProofEncoding, LazerLinearProofProfile, demo_linear_proof_encoding_contract,
+        linear_proof_profile_for_encoding,
+    },
     polynomial_matrix::PolynomialMatrix,
     polynomial_ring::PolynomialRing,
     polynomial_vector::PolynomialVector,
@@ -18,6 +24,7 @@ const LAZER_DEMO_TBOX_UPSILON_COORDINATES: usize = 1;
 const LAZER_DEMO_TBOX_UNBOUNDED_MESSAGE_LENGTH: usize = 0;
 const LAZER_DEMO_TBOX_APPROXIMATE_NORM_COORDINATES: usize = 16;
 const LAZER_DEMO_TBOX_EXACT_NORM_DIMENSION: usize = 32;
+#[cfg(test)]
 const LAZER_DEMO_TBOX_EXACT_NORM_BOUND_SQUARED: u64 = 2_048;
 const LAZER_DEMO_TBOX_EXTENDED_COORDINATES: usize = 33;
 pub(crate) const LAZER_DEMO_TBOX_QUADRATIC_EVALUATION_MESSAGE_LENGTH: usize = 9;
@@ -44,6 +51,98 @@ const LAZER_DEMO_TBOX_Z3_RESPONSE_DOMAIN_OFFSET: u32 =
     (LAZER_DEMO_TBOX_QUADRATIC_EVALUATION_REPETITIONS
         * (2 * (LAZER_DEMO_PROOF_RING_DEGREE - 1) + 2 + LAZER_DEMO_TBOX_UPSILON_COORDINATES + 256))
         as u32;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct LazerTboxRelationProfile {
+    proof_ring: PolynomialRing,
+    coefficient_bit_length: usize,
+    exact_norm_bound_squared: u64,
+    euclidean_response_vector_length: usize,
+    infinity_response_vector_length: usize,
+    short_response_message_length: usize,
+}
+
+impl LazerTboxRelationProfile {
+    fn from_proof_encoding(proof_encoding: &LazerDemoProofEncoding) -> CanonicalResult<Self> {
+        proof_encoding.validate()?;
+        let proof_profile = linear_proof_profile_for_encoding(proof_encoding)?;
+        Self::from_parts(proof_encoding, proof_profile)
+    }
+
+    fn from_parts(
+        proof_encoding: &LazerDemoProofEncoding,
+        proof_profile: LazerLinearProofProfile,
+    ) -> CanonicalResult<Self> {
+        Ok(Self {
+            proof_ring: PolynomialRing::new(
+                proof_encoding.ring_degree,
+                proof_encoding.coefficient_modulus,
+            )?,
+            coefficient_bit_length: proof_encoding.full_size_coefficient_bit_length,
+            exact_norm_bound_squared: proof_profile.exact_norm_bound_squared,
+            euclidean_response_vector_length: proof_encoding.euclidean_response_vector_length,
+            infinity_response_vector_length: proof_encoding.infinity_response_vector_length,
+            short_response_message_length: proof_encoding.short_response_vector_length,
+        })
+    }
+
+    fn short_message_without_upsilon(self) -> usize {
+        self.short_response_message_length - LAZER_DEMO_TBOX_UPSILON_COORDINATES
+    }
+
+    fn extended_coordinates(self) -> usize {
+        self.short_response_message_length
+    }
+
+    fn exact_norm_dimension(self) -> usize {
+        self.short_response_message_length - LAZER_DEMO_TBOX_UPSILON_COORDINATES
+    }
+
+    fn approximate_relation_polynomial_count(self) -> usize {
+        self.infinity_response_vector_length
+    }
+
+    fn beta_offset(self) -> usize {
+        (self.short_message_without_upsilon()
+            + LAZER_DEMO_TBOX_UPSILON_COORDINATES
+            + LAZER_DEMO_TBOX_UNBOUNDED_MESSAGE_LENGTH
+            + self.approximate_relation_polynomial_count()
+            + self.approximate_relation_polynomial_count())
+            * 2
+    }
+
+    fn upsilon_offset(self) -> usize {
+        self.short_message_without_upsilon() * 2
+    }
+
+    fn y3_offset(self) -> usize {
+        (self.short_message_without_upsilon()
+            + LAZER_DEMO_TBOX_UPSILON_COORDINATES
+            + LAZER_DEMO_TBOX_UNBOUNDED_MESSAGE_LENGTH)
+            * 2
+    }
+
+    fn y4_offset(self) -> usize {
+        (self.short_message_without_upsilon()
+            + LAZER_DEMO_TBOX_UPSILON_COORDINATES
+            + LAZER_DEMO_TBOX_UNBOUNDED_MESSAGE_LENGTH
+            + self.approximate_relation_polynomial_count())
+            * 2
+    }
+
+    fn quadratic_evaluation_dimension(self) -> usize {
+        2 * (self.short_response_message_length
+            + LAZER_DEMO_TBOX_QUADRATIC_EVALUATION_MESSAGE_LENGTH)
+    }
+
+    fn quadratic_many_dimension(self) -> usize {
+        2 * (self.short_response_message_length + LAZER_DEMO_TBOX_QUADRATIC_MANY_MESSAGE_LENGTH)
+    }
+}
+
+fn demo_tbox_profile() -> CanonicalResult<LazerTboxRelationProfile> {
+    LazerTboxRelationProfile::from_proof_encoding(&demo_linear_proof_encoding_contract())
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct LazerDemoTboxRelationAccumulatorSet {
@@ -81,10 +180,16 @@ impl LazerDemoTboxRelationAccumulatorSet {
 
 pub(crate) fn initialize_lazer_demo_tbox_relation_accumulators()
 -> CanonicalResult<LazerDemoTboxRelationAccumulatorSet> {
+    initialize_lazer_tbox_relation_accumulators(demo_tbox_profile()?)
+}
+
+fn initialize_lazer_tbox_relation_accumulators(
+    tbox_profile: LazerTboxRelationProfile,
+) -> CanonicalResult<LazerDemoTboxRelationAccumulatorSet> {
     validate_lazer_demo_tbox_shape()?;
 
-    let proof_ring = lazer_demo_tbox_proof_ring()?;
-    let equation_dimension = lazer_demo_tbox_quadratic_evaluation_dimension();
+    let proof_ring = tbox_profile.proof_ring;
+    let equation_dimension = tbox_profile.quadratic_evaluation_dimension();
     let accumulator_count = LAZER_DEMO_TBOX_QUADRATIC_EVALUATION_REPETITIONS / 2;
     let primary_schwartz_zippel_accumulators = (0..accumulator_count)
         .map(|_| LazerDemoQuadraticEquation::zero(proof_ring, equation_dimension))
@@ -97,8 +202,8 @@ pub(crate) fn initialize_lazer_demo_tbox_relation_accumulators()
         primary_schwartz_zippel_accumulators,
         secondary_schwartz_zippel_accumulators,
         extra_beta_norm_equations: vec![
-            build_lazer_demo_beta3_norm_equation()?,
-            build_lazer_demo_beta4_norm_equation()?,
+            build_lazer_beta3_norm_equation(tbox_profile)?,
+            build_lazer_beta4_norm_equation(tbox_profile)?,
         ],
     })
 }
@@ -106,26 +211,43 @@ pub(crate) fn initialize_lazer_demo_tbox_relation_accumulators()
 pub(crate) fn build_lazer_demo_tbox_prefix_accumulators(
     challenge_seed: &[u8; 32],
 ) -> CanonicalResult<LazerDemoTboxRelationAccumulatorSet> {
-    let mut accumulator_set = initialize_lazer_demo_tbox_relation_accumulators()?;
-    apply_lazer_demo_tbox_beta3_relations(&mut accumulator_set, challenge_seed)?;
-    apply_lazer_demo_tbox_beta4_relations(&mut accumulator_set, challenge_seed)?;
-    apply_lazer_demo_tbox_upsilon_relation(&mut accumulator_set, challenge_seed)?;
+    build_lazer_tbox_prefix_accumulators(challenge_seed, &demo_linear_proof_encoding_contract())
+}
+
+pub(crate) fn build_lazer_tbox_prefix_accumulators(
+    challenge_seed: &[u8; 32],
+    proof_encoding: &LazerDemoProofEncoding,
+) -> CanonicalResult<LazerDemoTboxRelationAccumulatorSet> {
+    let tbox_profile = LazerTboxRelationProfile::from_proof_encoding(proof_encoding)?;
+    let mut accumulator_set = initialize_lazer_tbox_relation_accumulators(tbox_profile)?;
+    apply_lazer_tbox_beta3_relations(&mut accumulator_set, challenge_seed, tbox_profile)?;
+    apply_lazer_tbox_beta4_relations(&mut accumulator_set, challenge_seed, tbox_profile)?;
+    apply_lazer_tbox_upsilon_relation(&mut accumulator_set, challenge_seed, tbox_profile)?;
     ensure_lazer_demo_binary_relation_is_not_required()?;
-    apply_lazer_demo_tbox_l2_relation(&mut accumulator_set, challenge_seed)?;
+    apply_lazer_tbox_l2_relation(&mut accumulator_set, challenge_seed, tbox_profile)?;
 
     Ok(accumulator_set)
 }
 
+#[cfg(test)]
 pub(crate) fn apply_lazer_demo_tbox_beta3_relations(
     accumulator_set: &mut LazerDemoTboxRelationAccumulatorSet,
     challenge_seed: &[u8; 32],
 ) -> CanonicalResult<()> {
-    let proof_ring = lazer_demo_tbox_proof_ring()?;
+    apply_lazer_tbox_beta3_relations(accumulator_set, challenge_seed, demo_tbox_profile()?)
+}
+
+fn apply_lazer_tbox_beta3_relations(
+    accumulator_set: &mut LazerDemoTboxRelationAccumulatorSet,
+    challenge_seed: &[u8; 32],
+    tbox_profile: LazerTboxRelationProfile,
+) -> CanonicalResult<()> {
+    let proof_ring = tbox_profile.proof_ring;
     let inverse_two = proof_ring.modulus().div_ceil(2);
     let challenge_values = sample_lazer_demo_uniform_u64_values(
         (LAZER_DEMO_PROOF_RING_DEGREE - 1) * LAZER_DEMO_TBOX_QUADRATIC_EVALUATION_REPETITIONS,
         proof_ring.modulus(),
-        LAZER_DEMO_PROOF_COEFFICIENT_BIT_LENGTH,
+        tbox_profile.coefficient_bit_length,
         challenge_seed,
         u64::from(LAZER_DEMO_TBOX_BETA3_DOMAIN_OFFSET),
     )?;
@@ -141,8 +263,11 @@ pub(crate) fn apply_lazer_demo_tbox_beta3_relations(
                 challenge_values[primary_challenge_index],
                 proof_ring.modulus(),
             );
-            let primary_relation =
-                build_lazer_demo_beta3_linear_relation(coefficient_index, primary_coefficient)?;
+            let primary_relation = build_lazer_beta3_linear_relation(
+                coefficient_index,
+                primary_coefficient,
+                tbox_profile,
+            )?;
             accumulator_set.primary_schwartz_zippel_accumulators[accumulator_pair_index] =
                 accumulator_set.primary_schwartz_zippel_accumulators[accumulator_pair_index]
                     .accumulate_weighted_partial_equations(&[
@@ -158,8 +283,11 @@ pub(crate) fn apply_lazer_demo_tbox_beta3_relations(
                 challenge_values[secondary_challenge_index],
                 proof_ring.modulus(),
             );
-            let secondary_relation =
-                build_lazer_demo_beta3_linear_relation(coefficient_index, secondary_coefficient)?;
+            let secondary_relation = build_lazer_beta3_linear_relation(
+                coefficient_index,
+                secondary_coefficient,
+                tbox_profile,
+            )?;
             accumulator_set.secondary_schwartz_zippel_accumulators[accumulator_pair_index] =
                 accumulator_set.secondary_schwartz_zippel_accumulators[accumulator_pair_index]
                     .accumulate_weighted_partial_equations(&[
@@ -174,16 +302,25 @@ pub(crate) fn apply_lazer_demo_tbox_beta3_relations(
     Ok(())
 }
 
+#[cfg(test)]
 pub(crate) fn apply_lazer_demo_tbox_beta4_relations(
     accumulator_set: &mut LazerDemoTboxRelationAccumulatorSet,
     challenge_seed: &[u8; 32],
 ) -> CanonicalResult<()> {
-    let proof_ring = lazer_demo_tbox_proof_ring()?;
+    apply_lazer_tbox_beta4_relations(accumulator_set, challenge_seed, demo_tbox_profile()?)
+}
+
+fn apply_lazer_tbox_beta4_relations(
+    accumulator_set: &mut LazerDemoTboxRelationAccumulatorSet,
+    challenge_seed: &[u8; 32],
+    tbox_profile: LazerTboxRelationProfile,
+) -> CanonicalResult<()> {
+    let proof_ring = tbox_profile.proof_ring;
     let inverse_two = proof_ring.modulus().div_ceil(2);
     let challenge_values = sample_lazer_demo_uniform_u64_values(
         (LAZER_DEMO_PROOF_RING_DEGREE - 1) * LAZER_DEMO_TBOX_QUADRATIC_EVALUATION_REPETITIONS,
         proof_ring.modulus(),
-        LAZER_DEMO_PROOF_COEFFICIENT_BIT_LENGTH,
+        tbox_profile.coefficient_bit_length,
         challenge_seed,
         u64::from(LAZER_DEMO_TBOX_BETA4_DOMAIN_OFFSET),
     )?;
@@ -199,8 +336,11 @@ pub(crate) fn apply_lazer_demo_tbox_beta4_relations(
                 challenge_values[primary_challenge_index],
                 proof_ring.modulus(),
             );
-            let primary_relation =
-                build_lazer_demo_beta4_linear_relation(coefficient_index, primary_coefficient)?;
+            let primary_relation = build_lazer_beta4_linear_relation(
+                coefficient_index,
+                primary_coefficient,
+                tbox_profile,
+            )?;
             accumulator_set.primary_schwartz_zippel_accumulators[accumulator_pair_index] =
                 accumulator_set.primary_schwartz_zippel_accumulators[accumulator_pair_index]
                     .accumulate_weighted_partial_equations(&[
@@ -216,8 +356,11 @@ pub(crate) fn apply_lazer_demo_tbox_beta4_relations(
                 challenge_values[secondary_challenge_index],
                 proof_ring.modulus(),
             );
-            let secondary_relation =
-                build_lazer_demo_beta4_linear_relation(coefficient_index, secondary_coefficient)?;
+            let secondary_relation = build_lazer_beta4_linear_relation(
+                coefficient_index,
+                secondary_coefficient,
+                tbox_profile,
+            )?;
             accumulator_set.secondary_schwartz_zippel_accumulators[accumulator_pair_index] =
                 accumulator_set.secondary_schwartz_zippel_accumulators[accumulator_pair_index]
                     .accumulate_weighted_partial_equations(&[
@@ -232,29 +375,49 @@ pub(crate) fn apply_lazer_demo_tbox_beta4_relations(
     Ok(())
 }
 
+#[cfg(test)]
 pub(crate) fn apply_lazer_demo_tbox_upsilon_relation(
     accumulator_set: &mut LazerDemoTboxRelationAccumulatorSet,
     challenge_seed: &[u8; 32],
 ) -> CanonicalResult<()> {
-    let relation = build_lazer_demo_upsilon_binary_relation()?;
+    apply_lazer_tbox_upsilon_relation(accumulator_set, challenge_seed, demo_tbox_profile()?)
+}
+
+fn apply_lazer_tbox_upsilon_relation(
+    accumulator_set: &mut LazerDemoTboxRelationAccumulatorSet,
+    challenge_seed: &[u8; 32],
+    tbox_profile: LazerTboxRelationProfile,
+) -> CanonicalResult<()> {
+    let relation = build_lazer_upsilon_binary_relation(tbox_profile)?;
     accumulate_single_lazer_demo_partial_relation_by_schwartz_zippel(
         accumulator_set,
         &relation,
         challenge_seed,
         LAZER_DEMO_TBOX_UPSILON_DOMAIN_OFFSET,
+        tbox_profile.coefficient_bit_length,
     )
 }
 
+#[cfg(test)]
 pub(crate) fn apply_lazer_demo_tbox_l2_relation(
     accumulator_set: &mut LazerDemoTboxRelationAccumulatorSet,
     challenge_seed: &[u8; 32],
 ) -> CanonicalResult<()> {
-    let relation = build_lazer_demo_l2_norm_relation()?;
+    apply_lazer_tbox_l2_relation(accumulator_set, challenge_seed, demo_tbox_profile()?)
+}
+
+fn apply_lazer_tbox_l2_relation(
+    accumulator_set: &mut LazerDemoTboxRelationAccumulatorSet,
+    challenge_seed: &[u8; 32],
+    tbox_profile: LazerTboxRelationProfile,
+) -> CanonicalResult<()> {
+    let relation = build_lazer_l2_norm_relation(tbox_profile)?;
     accumulate_single_lazer_demo_partial_relation_by_schwartz_zippel(
         accumulator_set,
         &relation,
         challenge_seed,
         LAZER_DEMO_TBOX_EUCLIDEAN_DOMAIN_OFFSET,
+        tbox_profile.coefficient_bit_length,
     )
 }
 
@@ -265,31 +428,57 @@ pub(crate) fn apply_lazer_demo_tbox_z4_response_relations(
     infinity_response_vector: &[Vec<i64>],
     challenge_seed: &[u8; 32],
 ) -> CanonicalResult<()> {
+    apply_lazer_tbox_z4_response_relations(
+        accumulator_set,
+        transformed_statement_matrix,
+        transformed_target_vector,
+        infinity_response_vector,
+        challenge_seed,
+        &demo_linear_proof_encoding_contract(),
+    )
+}
+
+pub(crate) fn apply_lazer_tbox_z4_response_relations(
+    accumulator_set: &mut LazerDemoTboxRelationAccumulatorSet,
+    transformed_statement_matrix: &PolynomialMatrix,
+    transformed_target_vector: &PolynomialVector,
+    infinity_response_vector: &[Vec<i64>],
+    challenge_seed: &[u8; 32],
+    proof_encoding: &LazerDemoProofEncoding,
+) -> CanonicalResult<()> {
+    let tbox_profile = LazerTboxRelationProfile::from_proof_encoding(proof_encoding)?;
     validate_lazer_demo_z4_inputs(
         transformed_statement_matrix,
         transformed_target_vector,
         infinity_response_vector,
+        tbox_profile,
     )?;
-    let proof_ring = lazer_demo_tbox_proof_ring()?;
+    let proof_ring = tbox_profile.proof_ring;
     let automorphic_statement_matrix = transformed_statement_matrix.automorphism()?;
     let challenge_matrix = sample_lazer_demo_uniform_matrix(
         LAZER_DEMO_TBOX_QUADRATIC_EVALUATION_REPETITIONS,
         256,
         proof_ring.modulus(),
-        LAZER_DEMO_PROOF_COEFFICIENT_BIT_LENGTH,
+        tbox_profile.coefficient_bit_length,
         challenge_seed,
         LAZER_DEMO_TBOX_Z4_RESPONSE_DOMAIN_OFFSET,
     )?;
-    let flattened_response = flatten_signed_response(infinity_response_vector)?;
+    let flattened_response = flatten_signed_response(
+        infinity_response_vector,
+        tbox_profile.infinity_response_vector_length,
+        proof_ring.degree(),
+    )?;
     let response_rotation_matrix_products = compute_lazer_demo_response_rotation_products(
         challenge_seed,
         &challenge_matrix,
-        LAZER_DEMO_TBOX_APPROXIMATE_NORM_COORDINATES,
+        transformed_statement_matrix.rows(),
         true,
+        proof_ring.modulus(),
     )?;
     let shifted_rotation_polynomial_matrix = convert_z4_rotation_products_to_polynomials(
         proof_ring,
         &response_rotation_matrix_products,
+        transformed_statement_matrix.rows(),
     )?;
     let statement_products = multiply_rows_by_polynomial_matrix(
         proof_ring,
@@ -304,6 +493,7 @@ pub(crate) fn apply_lazer_demo_tbox_z4_response_relations(
 
     for repetition_index in 0..LAZER_DEMO_TBOX_QUADRATIC_EVALUATION_REPETITIONS {
         let relation = build_lazer_demo_z4_response_relation(
+            tbox_profile,
             proof_ring,
             &challenge_matrix[repetition_index],
             &flattened_response,
@@ -322,30 +512,58 @@ pub(crate) fn apply_lazer_demo_tbox_z3_response_relations(
     euclidean_response_vector: &[Vec<i64>],
     challenge_seed: &[u8; 32],
 ) -> CanonicalResult<()> {
-    validate_lazer_demo_z3_inputs(transformed_statement_matrix, euclidean_response_vector)?;
-    let proof_ring = lazer_demo_tbox_proof_ring()?;
+    apply_lazer_tbox_z3_response_relations(
+        accumulator_set,
+        transformed_statement_matrix,
+        euclidean_response_vector,
+        challenge_seed,
+        &demo_linear_proof_encoding_contract(),
+    )
+}
+
+pub(crate) fn apply_lazer_tbox_z3_response_relations(
+    accumulator_set: &mut LazerDemoTboxRelationAccumulatorSet,
+    transformed_statement_matrix: &PolynomialMatrix,
+    euclidean_response_vector: &[Vec<i64>],
+    challenge_seed: &[u8; 32],
+    proof_encoding: &LazerDemoProofEncoding,
+) -> CanonicalResult<()> {
+    let tbox_profile = LazerTboxRelationProfile::from_proof_encoding(proof_encoding)?;
+    validate_lazer_demo_z3_inputs(
+        transformed_statement_matrix,
+        euclidean_response_vector,
+        tbox_profile,
+    )?;
+    let proof_ring = tbox_profile.proof_ring;
     let challenge_matrix = sample_lazer_demo_uniform_matrix(
         LAZER_DEMO_TBOX_QUADRATIC_EVALUATION_REPETITIONS,
         256,
         proof_ring.modulus(),
-        LAZER_DEMO_PROOF_COEFFICIENT_BIT_LENGTH,
+        tbox_profile.coefficient_bit_length,
         challenge_seed,
         LAZER_DEMO_TBOX_Z3_RESPONSE_DOMAIN_OFFSET,
     )?;
-    let flattened_response = flatten_signed_response(euclidean_response_vector)?;
+    let flattened_response = flatten_signed_response(
+        euclidean_response_vector,
+        tbox_profile.euclidean_response_vector_length,
+        proof_ring.degree(),
+    )?;
     let response_rotation_matrix_products = compute_lazer_demo_response_rotation_products(
         challenge_seed,
         &challenge_matrix,
-        LAZER_DEMO_TBOX_EXTENDED_COORDINATES,
+        tbox_profile.extended_coordinates(),
         false,
+        proof_ring.modulus(),
     )?;
     let rotation_polynomial_matrix = convert_z3_rotation_products_to_polynomials(
         proof_ring,
         &response_rotation_matrix_products,
+        tbox_profile.extended_coordinates(),
     )?;
 
     for repetition_index in 0..LAZER_DEMO_TBOX_QUADRATIC_EVALUATION_REPETITIONS {
         let relation = build_lazer_demo_z3_response_relation(
+            tbox_profile,
             proof_ring,
             &challenge_matrix[repetition_index],
             &flattened_response,
@@ -474,33 +692,44 @@ fn validate_lazer_demo_z4_inputs(
     transformed_statement_matrix: &PolynomialMatrix,
     transformed_target_vector: &PolynomialVector,
     infinity_response_vector: &[Vec<i64>],
+    tbox_profile: LazerTboxRelationProfile,
 ) -> CanonicalResult<()> {
-    validate_lazer_demo_statement_matrix(transformed_statement_matrix)?;
+    validate_lazer_demo_statement_matrix(transformed_statement_matrix, tbox_profile)?;
     if transformed_target_vector.ring() != transformed_statement_matrix.ring()
-        || transformed_target_vector.len() != LAZER_DEMO_TBOX_APPROXIMATE_NORM_COORDINATES
+        || transformed_target_vector.len() != transformed_statement_matrix.rows()
     {
         return Err(invalid_tbox_relation(
             "z4 response relation target vector does not match the demo transformed statement",
         ));
     }
-    validate_lazer_demo_response_vector(infinity_response_vector)
+    validate_lazer_demo_response_vector(
+        infinity_response_vector,
+        tbox_profile.infinity_response_vector_length,
+        tbox_profile.proof_ring.degree(),
+    )
 }
 
 fn validate_lazer_demo_z3_inputs(
     transformed_statement_matrix: &PolynomialMatrix,
     euclidean_response_vector: &[Vec<i64>],
+    tbox_profile: LazerTboxRelationProfile,
 ) -> CanonicalResult<()> {
-    validate_lazer_demo_statement_matrix(transformed_statement_matrix)?;
-    validate_lazer_demo_response_vector(euclidean_response_vector)
+    validate_lazer_demo_statement_matrix(transformed_statement_matrix, tbox_profile)?;
+    validate_lazer_demo_response_vector(
+        euclidean_response_vector,
+        tbox_profile.euclidean_response_vector_length,
+        tbox_profile.proof_ring.degree(),
+    )
 }
 
 fn validate_lazer_demo_statement_matrix(
     transformed_statement_matrix: &PolynomialMatrix,
+    tbox_profile: LazerTboxRelationProfile,
 ) -> CanonicalResult<()> {
-    let proof_ring = lazer_demo_tbox_proof_ring()?;
+    let proof_ring = tbox_profile.proof_ring;
     if transformed_statement_matrix.ring() != proof_ring
-        || transformed_statement_matrix.rows() != LAZER_DEMO_TBOX_APPROXIMATE_NORM_COORDINATES
-        || transformed_statement_matrix.columns() != LAZER_DEMO_TBOX_EXACT_NORM_DIMENSION
+        || transformed_statement_matrix.rows() == 0
+        || transformed_statement_matrix.columns() != tbox_profile.exact_norm_dimension()
     {
         return Err(invalid_tbox_relation(
             "response relation statement matrix does not match the demo transformed statement shape",
@@ -510,17 +739,19 @@ fn validate_lazer_demo_statement_matrix(
     Ok(())
 }
 
-fn validate_lazer_demo_response_vector(response_vector: &[Vec<i64>]) -> CanonicalResult<()> {
-    if response_vector.len()
-        != LAZER_DEMO_PROOF_RING_DEGREE / LAZER_DEMO_TBOX_APPROXIMATE_NORM_COORDINATES
-    {
+fn validate_lazer_demo_response_vector(
+    response_vector: &[Vec<i64>],
+    expected_vector_length: usize,
+    proof_ring_degree: usize,
+) -> CanonicalResult<()> {
+    if response_vector.len() != expected_vector_length {
         return Err(invalid_tbox_relation(
             "response relation vector length does not match the demo response layout",
         ));
     }
     if response_vector
         .iter()
-        .any(|polynomial| polynomial.len() != LAZER_DEMO_PROOF_RING_DEGREE)
+        .any(|polynomial| polynomial.len() != proof_ring_degree)
     {
         return Err(invalid_tbox_relation(
             "response relation polynomial degree does not match the demo proof ring",
@@ -563,6 +794,7 @@ fn compute_lazer_demo_response_rotation_products(
     challenge_matrix: &[Vec<u64>],
     column_group_count: usize,
     use_prime_rotation_domain: bool,
+    modulus: u64,
 ) -> CanonicalResult<Vec<Vec<u64>>> {
     let rotation_column_count = column_group_count
         .checked_mul(LAZER_DEMO_PROOF_RING_DEGREE)
@@ -598,9 +830,7 @@ fn compute_lazer_demo_response_rotation_products(
         .iter()
         .map(|row| {
             row.iter()
-                .map(|value| {
-                    positive_mod_i128(*value, i128::from(LAZER_DEMO_PROOF_COEFFICIENT_MODULUS))
-                })
+                .map(|value| positive_mod_i128(*value, i128::from(modulus)))
                 .collect::<CanonicalResult<Vec<_>>>()
         })
         .collect()
@@ -609,13 +839,13 @@ fn compute_lazer_demo_response_rotation_products(
 fn convert_z4_rotation_products_to_polynomials(
     ring: PolynomialRing,
     response_rotation_matrix_products: &[Vec<u64>],
+    approximate_norm_coordinates: usize,
 ) -> CanonicalResult<Vec<Vec<Vec<u64>>>> {
     let inverse_two = ring.modulus().div_ceil(2);
     let mut rows = Vec::with_capacity(response_rotation_matrix_products.len());
     for response_rotation_product_row in response_rotation_matrix_products {
-        let mut polynomial_row =
-            vec![vec![0_u64; ring.degree()]; LAZER_DEMO_TBOX_APPROXIMATE_NORM_COORDINATES];
-        for approximate_coordinate_index in 0..LAZER_DEMO_TBOX_APPROXIMATE_NORM_COORDINATES {
+        let mut polynomial_row = vec![vec![0_u64; ring.degree()]; approximate_norm_coordinates];
+        for approximate_coordinate_index in 0..approximate_norm_coordinates {
             for coefficient_index in 0..ring.degree() {
                 let scaled_coefficient = multiply_mod(
                     inverse_two,
@@ -642,11 +872,12 @@ fn convert_z4_rotation_products_to_polynomials(
 fn convert_z3_rotation_products_to_polynomials(
     ring: PolynomialRing,
     response_rotation_matrix_products: &[Vec<u64>],
+    extended_coordinates: usize,
 ) -> CanonicalResult<Vec<Vec<Vec<u64>>>> {
     let mut rows = Vec::with_capacity(response_rotation_matrix_products.len());
     for response_rotation_product_row in response_rotation_matrix_products {
-        let mut polynomial_row = Vec::with_capacity(LAZER_DEMO_TBOX_EXTENDED_COORDINATES);
-        for extended_coordinate_index in 0..LAZER_DEMO_TBOX_EXTENDED_COORDINATES {
+        let mut polynomial_row = Vec::with_capacity(extended_coordinates);
+        for extended_coordinate_index in 0..extended_coordinates {
             polynomial_row.push(
                 response_rotation_product_row[extended_coordinate_index * ring.degree()
                     ..(extended_coordinate_index + 1) * ring.degree()]
@@ -704,24 +935,25 @@ fn dot_rotation_products_with_target(
 }
 
 fn build_lazer_demo_z4_response_relation(
+    tbox_profile: LazerTboxRelationProfile,
     ring: PolynomialRing,
     challenge_row: &[u64],
     flattened_response: &[i64],
     statement_products: &[Vec<u64>],
     target_product: u64,
 ) -> CanonicalResult<LazerDemoQuadraticEquation> {
-    if statement_products.len() < LAZER_DEMO_TBOX_EXACT_NORM_DIMENSION {
+    if statement_products.len() < tbox_profile.exact_norm_dimension() {
         return Err(invalid_tbox_relation(
             "statement product row is too short for the z4 response relation",
         ));
     }
-    let beta_offset = lazer_demo_tbox_beta_offset();
+    let beta_offset = tbox_profile.beta_offset();
     let inverse_two = ring.modulus().div_ceil(2);
     let mut quadratic_entries = Vec::new();
     for (short_coordinate_index, statement_product) in statement_products
         .iter()
         .enumerate()
-        .take(LAZER_DEMO_TBOX_EXACT_NORM_DIMENSION)
+        .take(tbox_profile.exact_norm_dimension())
     {
         push_sparse_matrix_entry_if_nonzero(
             &mut quadratic_entries,
@@ -738,10 +970,10 @@ fn build_lazer_demo_z4_response_relation(
     }
 
     let mut linear_entries = Vec::new();
-    for approximate_offset_index in 0..lazer_demo_tbox_approximate_relation_polynomial_count() {
+    for approximate_offset_index in 0..tbox_profile.approximate_relation_polynomial_count() {
         push_sparse_vector_entry_if_nonzero(
             &mut linear_entries,
-            lazer_demo_tbox_y4_offset() + 1 + 2 * approximate_offset_index,
+            tbox_profile.y4_offset() + 1 + 2 * approximate_offset_index,
             challenge_polynomial_from_row(ring, challenge_row, approximate_offset_index)?,
         );
     }
@@ -764,13 +996,13 @@ fn build_lazer_demo_z4_response_relation(
     LazerDemoQuadraticEquation::new(
         SparsePolynomialMatrix::new(
             ring,
-            lazer_demo_tbox_quadratic_evaluation_dimension(),
-            lazer_demo_tbox_quadratic_evaluation_dimension(),
+            tbox_profile.quadratic_evaluation_dimension(),
+            tbox_profile.quadratic_evaluation_dimension(),
             quadratic_entries,
         )?,
         SparsePolynomialVector::new(
             ring,
-            lazer_demo_tbox_quadratic_evaluation_dimension(),
+            tbox_profile.quadratic_evaluation_dimension(),
             linear_entries,
         )?,
         Some(constant_polynomial(
@@ -788,23 +1020,24 @@ fn build_lazer_demo_z4_response_relation(
 }
 
 fn build_lazer_demo_z3_response_relation(
+    tbox_profile: LazerTboxRelationProfile,
     ring: PolynomialRing,
     challenge_row: &[u64],
     flattened_response: &[i64],
     rotation_polynomial_row: &[Vec<u64>],
 ) -> CanonicalResult<LazerDemoQuadraticEquation> {
-    if rotation_polynomial_row.len() < LAZER_DEMO_TBOX_EXTENDED_COORDINATES {
+    if rotation_polynomial_row.len() < tbox_profile.extended_coordinates() {
         return Err(invalid_tbox_relation(
             "rotation polynomial row is too short for the z3 response relation",
         ));
     }
-    let beta_offset = lazer_demo_tbox_beta_offset();
+    let beta_offset = tbox_profile.beta_offset();
     let inverse_two = ring.modulus().div_ceil(2);
     let mut quadratic_entries = Vec::new();
     for (short_coordinate_index, rotation_polynomial) in rotation_polynomial_row
         .iter()
         .enumerate()
-        .take(LAZER_DEMO_TBOX_EXACT_NORM_DIMENSION)
+        .take(tbox_profile.exact_norm_dimension())
     {
         let scaled_product = ring.scale(inverse_two, rotation_polynomial)?;
         push_sparse_matrix_entry_if_nonzero(
@@ -822,26 +1055,26 @@ fn build_lazer_demo_z3_response_relation(
     }
     let scaled_upsilon_product = ring.scale(
         inverse_two,
-        &rotation_polynomial_row[LAZER_DEMO_TBOX_EXTENDED_COORDINATES - 1],
+        &rotation_polynomial_row[tbox_profile.extended_coordinates() - 1],
     )?;
     push_sparse_matrix_entry_if_nonzero(
         &mut quadratic_entries,
-        lazer_demo_tbox_upsilon_offset() + 1,
+        tbox_profile.upsilon_offset() + 1,
         beta_offset,
         scaled_upsilon_product.clone(),
     );
     push_sparse_matrix_entry_if_nonzero(
         &mut quadratic_entries,
-        lazer_demo_tbox_upsilon_offset() + 1,
+        tbox_profile.upsilon_offset() + 1,
         beta_offset + 1,
         scaled_upsilon_product,
     );
 
     let mut linear_entries = Vec::new();
-    for approximate_offset_index in 0..lazer_demo_tbox_approximate_relation_polynomial_count() {
+    for approximate_offset_index in 0..tbox_profile.approximate_relation_polynomial_count() {
         push_sparse_vector_entry_if_nonzero(
             &mut linear_entries,
-            lazer_demo_tbox_y3_offset() + 1 + 2 * approximate_offset_index,
+            tbox_profile.y3_offset() + 1 + 2 * approximate_offset_index,
             challenge_polynomial_from_row(ring, challenge_row, approximate_offset_index)?,
         );
     }
@@ -849,13 +1082,13 @@ fn build_lazer_demo_z3_response_relation(
     LazerDemoQuadraticEquation::new(
         SparsePolynomialMatrix::new(
             ring,
-            lazer_demo_tbox_quadratic_evaluation_dimension(),
-            lazer_demo_tbox_quadratic_evaluation_dimension(),
+            tbox_profile.quadratic_evaluation_dimension(),
+            tbox_profile.quadratic_evaluation_dimension(),
             quadratic_entries,
         )?,
         SparsePolynomialVector::new(
             ring,
-            lazer_demo_tbox_quadratic_evaluation_dimension(),
+            tbox_profile.quadratic_evaluation_dimension(),
             linear_entries,
         )?,
         Some(constant_polynomial(
@@ -896,8 +1129,16 @@ fn accumulate_lazer_demo_repetition_relation(
     Ok(())
 }
 
-fn flatten_signed_response(response_vector: &[Vec<i64>]) -> CanonicalResult<Vec<i64>> {
-    validate_lazer_demo_response_vector(response_vector)?;
+fn flatten_signed_response(
+    response_vector: &[Vec<i64>],
+    expected_vector_length: usize,
+    proof_ring_degree: usize,
+) -> CanonicalResult<Vec<i64>> {
+    validate_lazer_demo_response_vector(
+        response_vector,
+        expected_vector_length,
+        proof_ring_degree,
+    )?;
     Ok(response_vector
         .iter()
         .flat_map(|polynomial| polynomial.iter().copied())
@@ -1025,12 +1266,13 @@ fn accumulate_single_lazer_demo_partial_relation_by_schwartz_zippel(
     relation: &LazerDemoQuadraticEquation,
     challenge_seed: &[u8; 32],
     challenge_domain: u32,
+    coefficient_bit_length: usize,
 ) -> CanonicalResult<()> {
     for accumulator_pair_index in 0..accumulator_set.primary_schwartz_zippel_accumulators.len() {
         let challenge_values = sample_lazer_demo_uniform_u64_values(
             2,
             relation.ring().modulus(),
-            LAZER_DEMO_PROOF_COEFFICIENT_BIT_LENGTH,
+            coefficient_bit_length,
             challenge_seed,
             u64::from(challenge_domain),
         )?;
@@ -1051,18 +1293,33 @@ fn accumulate_single_lazer_demo_partial_relation_by_schwartz_zippel(
     Ok(())
 }
 
+#[cfg(test)]
 fn build_lazer_demo_beta3_norm_equation() -> CanonicalResult<LazerDemoQuadraticEquation> {
-    build_lazer_demo_beta_norm_equation(false)
+    build_lazer_beta3_norm_equation(demo_tbox_profile()?)
 }
 
-fn build_lazer_demo_beta4_norm_equation() -> CanonicalResult<LazerDemoQuadraticEquation> {
-    build_lazer_demo_beta_norm_equation(true)
-}
-
-fn build_lazer_demo_beta_norm_equation(
-    negated_diagonal_terms: bool,
+fn build_lazer_beta3_norm_equation(
+    tbox_profile: LazerTboxRelationProfile,
 ) -> CanonicalResult<LazerDemoQuadraticEquation> {
-    let proof_ring = lazer_demo_tbox_proof_ring()?;
+    build_lazer_beta_norm_equation(false, tbox_profile)
+}
+
+#[cfg(test)]
+fn build_lazer_demo_beta4_norm_equation() -> CanonicalResult<LazerDemoQuadraticEquation> {
+    build_lazer_beta4_norm_equation(demo_tbox_profile()?)
+}
+
+fn build_lazer_beta4_norm_equation(
+    tbox_profile: LazerTboxRelationProfile,
+) -> CanonicalResult<LazerDemoQuadraticEquation> {
+    build_lazer_beta_norm_equation(true, tbox_profile)
+}
+
+fn build_lazer_beta_norm_equation(
+    negated_diagonal_terms: bool,
+    tbox_profile: LazerTboxRelationProfile,
+) -> CanonicalResult<LazerDemoQuadraticEquation> {
+    let proof_ring = tbox_profile.proof_ring;
     let inverse_two = proof_ring.modulus().div_ceil(2);
     let inverse_four = inverse_four_modulus(proof_ring.modulus())?;
     let diagonal_coefficient = if negated_diagonal_terms {
@@ -1070,8 +1327,8 @@ fn build_lazer_demo_beta_norm_equation(
     } else {
         inverse_four
     };
-    let beta_offset = lazer_demo_tbox_beta_offset();
-    let equation_dimension = lazer_demo_tbox_quadratic_many_dimension();
+    let beta_offset = tbox_profile.beta_offset();
+    let equation_dimension = tbox_profile.quadratic_many_dimension();
 
     LazerDemoQuadraticEquation::new(
         SparsePolynomialMatrix::new(
@@ -1105,13 +1362,21 @@ fn build_lazer_demo_beta3_linear_relation(
     coefficient_index: usize,
     coefficient_value: u64,
 ) -> CanonicalResult<LazerDemoQuadraticEquation> {
-    let proof_ring = lazer_demo_tbox_proof_ring()?;
+    build_lazer_beta3_linear_relation(coefficient_index, coefficient_value, demo_tbox_profile()?)
+}
+
+fn build_lazer_beta3_linear_relation(
+    coefficient_index: usize,
+    coefficient_value: u64,
+    tbox_profile: LazerTboxRelationProfile,
+) -> CanonicalResult<LazerDemoQuadraticEquation> {
+    let proof_ring = tbox_profile.proof_ring;
     if coefficient_index == 0 || coefficient_index >= proof_ring.degree() {
         return Err(invalid_tbox_relation(
             "beta3 coefficient index must be in one through degree minus one",
         ));
     }
-    let beta_offset = lazer_demo_tbox_beta_offset();
+    let beta_offset = tbox_profile.beta_offset();
     let coefficient_polynomial =
         single_coefficient_polynomial(proof_ring, coefficient_index, coefficient_value)?;
     let mut vector_entries = Vec::new();
@@ -1129,12 +1394,12 @@ fn build_lazer_demo_beta3_linear_relation(
     LazerDemoQuadraticEquation::new(
         SparsePolynomialMatrix::zero(
             proof_ring,
-            lazer_demo_tbox_quadratic_evaluation_dimension(),
-            lazer_demo_tbox_quadratic_evaluation_dimension(),
+            tbox_profile.quadratic_evaluation_dimension(),
+            tbox_profile.quadratic_evaluation_dimension(),
         )?,
         SparsePolynomialVector::new(
             proof_ring,
-            lazer_demo_tbox_quadratic_evaluation_dimension(),
+            tbox_profile.quadratic_evaluation_dimension(),
             vector_entries,
         )?,
         None,
@@ -1145,7 +1410,15 @@ fn build_lazer_demo_beta4_linear_relation(
     coefficient_index: usize,
     coefficient_value: u64,
 ) -> CanonicalResult<LazerDemoQuadraticEquation> {
-    let proof_ring = lazer_demo_tbox_proof_ring()?;
+    build_lazer_beta4_linear_relation(coefficient_index, coefficient_value, demo_tbox_profile()?)
+}
+
+fn build_lazer_beta4_linear_relation(
+    coefficient_index: usize,
+    coefficient_value: u64,
+    tbox_profile: LazerTboxRelationProfile,
+) -> CanonicalResult<LazerDemoQuadraticEquation> {
+    let proof_ring = tbox_profile.proof_ring;
     if coefficient_index == 0 || coefficient_index >= proof_ring.degree() {
         return Err(invalid_tbox_relation(
             "beta4 coefficient index must be in one through degree minus one",
@@ -1167,7 +1440,7 @@ fn build_lazer_demo_beta4_linear_relation(
     } else {
         negate_mod(coefficient_value, proof_ring.modulus())
     };
-    let beta_offset = lazer_demo_tbox_beta_offset();
+    let beta_offset = tbox_profile.beta_offset();
     let first_polynomial = single_coefficient_polynomial(
         proof_ring,
         shifted_coefficient_index,
@@ -1196,12 +1469,12 @@ fn build_lazer_demo_beta4_linear_relation(
     LazerDemoQuadraticEquation::new(
         SparsePolynomialMatrix::zero(
             proof_ring,
-            lazer_demo_tbox_quadratic_evaluation_dimension(),
-            lazer_demo_tbox_quadratic_evaluation_dimension(),
+            tbox_profile.quadratic_evaluation_dimension(),
+            tbox_profile.quadratic_evaluation_dimension(),
         )?,
         SparsePolynomialVector::new(
             proof_ring,
-            lazer_demo_tbox_quadratic_evaluation_dimension(),
+            tbox_profile.quadratic_evaluation_dimension(),
             vector_entries,
         )?,
         None,
@@ -1209,9 +1482,15 @@ fn build_lazer_demo_beta4_linear_relation(
 }
 
 fn build_lazer_demo_upsilon_binary_relation() -> CanonicalResult<LazerDemoQuadraticEquation> {
-    let proof_ring = lazer_demo_tbox_proof_ring()?;
-    let upsilon_offset = lazer_demo_tbox_upsilon_offset();
-    let equation_dimension = lazer_demo_tbox_quadratic_evaluation_dimension();
+    build_lazer_upsilon_binary_relation(demo_tbox_profile()?)
+}
+
+fn build_lazer_upsilon_binary_relation(
+    tbox_profile: LazerTboxRelationProfile,
+) -> CanonicalResult<LazerDemoQuadraticEquation> {
+    let proof_ring = tbox_profile.proof_ring;
+    let upsilon_offset = tbox_profile.upsilon_offset();
+    let equation_dimension = tbox_profile.quadratic_evaluation_dimension();
 
     LazerDemoQuadraticEquation::new(
         SparsePolynomialMatrix::new(
@@ -1237,10 +1516,16 @@ fn build_lazer_demo_upsilon_binary_relation() -> CanonicalResult<LazerDemoQuadra
 }
 
 fn build_lazer_demo_l2_norm_relation() -> CanonicalResult<LazerDemoQuadraticEquation> {
-    let proof_ring = lazer_demo_tbox_proof_ring()?;
-    let equation_dimension = lazer_demo_tbox_quadratic_evaluation_dimension();
-    let mut quadratic_entries = Vec::with_capacity(LAZER_DEMO_TBOX_EXACT_NORM_DIMENSION);
-    for short_coordinate_index in 0..LAZER_DEMO_TBOX_EXACT_NORM_DIMENSION {
+    build_lazer_l2_norm_relation(demo_tbox_profile()?)
+}
+
+fn build_lazer_l2_norm_relation(
+    tbox_profile: LazerTboxRelationProfile,
+) -> CanonicalResult<LazerDemoQuadraticEquation> {
+    let proof_ring = tbox_profile.proof_ring;
+    let equation_dimension = tbox_profile.quadratic_evaluation_dimension();
+    let mut quadratic_entries = Vec::with_capacity(tbox_profile.exact_norm_dimension());
+    for short_coordinate_index in 0..tbox_profile.exact_norm_dimension() {
         quadratic_entries.push(SparsePolynomialMatrixEntry::new(
             2 * short_coordinate_index,
             2 * short_coordinate_index + 1,
@@ -1259,16 +1544,17 @@ fn build_lazer_demo_l2_norm_relation() -> CanonicalResult<LazerDemoQuadraticEqua
             proof_ring,
             equation_dimension,
             vec![SparsePolynomialVectorEntry::new(
-                lazer_demo_tbox_upsilon_offset(),
+                tbox_profile.upsilon_offset(),
                 binary_power_polynomial_automorphism(
                     proof_ring,
-                    LAZER_DEMO_TBOX_EXACT_NORM_BOUND_SQUARED,
+                    tbox_profile.exact_norm_bound_squared,
+                    tbox_profile.coefficient_bit_length,
                 )?,
             )],
         )?,
         Some(constant_polynomial(
             proof_ring,
-            proof_ring.modulus() - LAZER_DEMO_TBOX_EXACT_NORM_BOUND_SQUARED,
+            proof_ring.modulus() - tbox_profile.exact_norm_bound_squared,
         )),
     )
 }
@@ -1343,31 +1629,9 @@ fn lazer_demo_tbox_beta_offset() -> usize {
         * 2
 }
 
+#[cfg(test)]
 fn lazer_demo_tbox_upsilon_offset() -> usize {
     lazer_demo_tbox_short_message_without_upsilon() * 2
-}
-
-fn lazer_demo_tbox_y3_offset() -> usize {
-    (lazer_demo_tbox_short_message_without_upsilon()
-        + LAZER_DEMO_TBOX_UPSILON_COORDINATES
-        + LAZER_DEMO_TBOX_UNBOUNDED_MESSAGE_LENGTH)
-        * 2
-}
-
-fn lazer_demo_tbox_y4_offset() -> usize {
-    (lazer_demo_tbox_short_message_without_upsilon()
-        + LAZER_DEMO_TBOX_UPSILON_COORDINATES
-        + LAZER_DEMO_TBOX_UNBOUNDED_MESSAGE_LENGTH
-        + lazer_demo_tbox_approximate_relation_polynomial_count())
-        * 2
-}
-
-fn lazer_demo_tbox_approximate_relation_polynomial_count() -> usize {
-    LAZER_DEMO_PROOF_RING_DEGREE / LAZER_DEMO_TBOX_APPROXIMATE_NORM_COORDINATES
-}
-
-pub(crate) fn lazer_demo_tbox_quadratic_evaluation_dimension() -> usize {
-    2 * (LAZER_DEMO_TBOX_SHORT_MESSAGE_LENGTH + LAZER_DEMO_TBOX_QUADRATIC_EVALUATION_MESSAGE_LENGTH)
 }
 
 pub(crate) fn lazer_demo_tbox_quadratic_many_dimension() -> usize {
@@ -1403,12 +1667,13 @@ fn single_coefficient_polynomial(
 fn binary_power_polynomial_automorphism(
     ring: PolynomialRing,
     value: u64,
+    coefficient_bit_length: usize,
 ) -> CanonicalResult<Vec<u64>> {
     let mut polynomial = vec![0_u64; ring.degree()];
     for (bit_index, coefficient) in polynomial
         .iter_mut()
         .enumerate()
-        .take(LAZER_DEMO_PROOF_COEFFICIENT_BIT_LENGTH)
+        .take(coefficient_bit_length)
     {
         let power_of_two =
             1_u64

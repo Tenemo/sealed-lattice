@@ -9503,7 +9503,8 @@
                 },
                 "expectedLogicalRejectionLayer": "accept",
                 "upstreamVerifierAccepted": true
-            }
+            },
+            "targetCoefficientRepresentation": "centeredSignedSourceModulus"
         },
         {
             "caseName": "mutated-statement-matrix",
@@ -18942,7 +18943,8 @@
                 },
                 "expectedLogicalRejectionLayer": "statement-binding",
                 "upstreamVerifierAccepted": false
-            }
+            },
+            "targetCoefficientRepresentation": "centeredSignedSourceModulus"
         },
         {
             "caseName": "mutated-target-vector",
@@ -28381,7 +28383,8 @@
                 },
                 "expectedLogicalRejectionLayer": "statement-binding",
                 "upstreamVerifierAccepted": false
-            }
+            },
+            "targetCoefficientRepresentation": "centeredSignedSourceModulus"
         },
         {
             "caseName": "mutated-proof-byte",
@@ -37820,7 +37823,8 @@
                 },
                 "expectedLogicalRejectionLayer": "proof-body",
                 "upstreamVerifierAccepted": false
-            }
+            },
+            "targetCoefficientRepresentation": "centeredSignedSourceModulus"
         },
         {
             "caseName": "wrong-public-randomness",
@@ -47259,7 +47263,8 @@
                 },
                 "expectedLogicalRejectionLayer": "public-parameter-binding",
                 "upstreamVerifierAccepted": false
-            }
+            },
+            "targetCoefficientRepresentation": "centeredSignedSourceModulus"
         },
         {
             "caseName": "truncated-proof",
@@ -56627,7 +56632,8 @@
                 },
                 "expectedLogicalRejectionLayer": "proof-decoder",
                 "upstreamVerifierAccepted": false
-            }
+            },
+            "targetCoefficientRepresentation": "centeredSignedSourceModulus"
         },
         {
             "caseName": "extended-proof",
@@ -65995,7 +66001,8 @@
                 },
                 "expectedLogicalRejectionLayer": "proof-decoder",
                 "upstreamVerifierAccepted": true
-            }
+            },
+            "targetCoefficientRepresentation": "centeredSignedSourceModulus"
         },
         {
             "caseName": "noncanonical-coefficient-encoding",
@@ -75433,7 +75440,9 @@
                     }
                 },
                 "expectedLogicalRejectionLayer": "canonical-statement-decoder"
-            }
+            },
+            "targetCoefficientRepresentation": "centeredSignedSourceModulus"
         }
-    ]
+    ],
+    "targetCoefficientRepresentation": "centeredSignedSourceModulus"
 }

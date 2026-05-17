@@ -1,7 +1,9 @@
 use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
 
 use super::{
-    lazer_demo_rng::sample_lazer_demo_uniform_u64_values, polynomial_matrix::PolynomialMatrix,
+    lazer_demo_rng::sample_lazer_demo_uniform_u64_values,
+    linear_proof_parameters::{LazerDemoProofEncoding, demo_linear_proof_encoding_contract},
+    polynomial_matrix::PolynomialMatrix,
     polynomial_ring::PolynomialRing,
 };
 
@@ -27,36 +29,43 @@ pub struct LazerDemoAbdlopPublicParameters {
 pub fn derive_lazer_demo_abdlop_public_parameters(
     public_randomness: &[u8; 32],
 ) -> CanonicalResult<LazerDemoAbdlopPublicParameters> {
+    let proof_encoding = demo_linear_proof_encoding_contract();
+    derive_lazer_abdlop_public_parameters(public_randomness, &proof_encoding)
+}
+
+pub fn derive_lazer_abdlop_public_parameters(
+    public_randomness: &[u8; 32],
+    proof_encoding: &LazerDemoProofEncoding,
+) -> CanonicalResult<LazerDemoAbdlopPublicParameters> {
+    proof_encoding.validate()?;
     let proof_ring = PolynomialRing::new(
-        LAZER_DEMO_PROOF_RING_DEGREE,
-        LAZER_DEMO_PROOF_COEFFICIENT_MODULUS,
+        proof_encoding.ring_degree,
+        proof_encoding.coefficient_modulus,
     )?;
-    let randomness_without_compressed_opening =
-        LAZER_DEMO_TBOX_RANDOMNESS_LENGTH - LAZER_DEMO_TBOX_COMPRESSED_OPENING_LENGTH;
 
     let commitment_key_matrix = expand_lazer_demo_uniform_polynomial_matrix(
         proof_ring,
-        LAZER_DEMO_TBOX_COMPRESSED_OPENING_LENGTH,
-        LAZER_DEMO_TBOX_SHORT_MESSAGE_LENGTH,
+        proof_encoding.compressed_commitment_vector_length,
+        proof_encoding.short_response_vector_length,
         public_randomness,
         LAZER_DEMO_ABDLOP_COMMITMENT_KEY_DOMAIN,
-        LAZER_DEMO_PROOF_COEFFICIENT_BIT_LENGTH,
+        proof_encoding.full_size_coefficient_bit_length,
     )?;
     let opening_key_matrix = expand_lazer_demo_uniform_polynomial_matrix(
         proof_ring,
-        LAZER_DEMO_TBOX_COMPRESSED_OPENING_LENGTH,
-        randomness_without_compressed_opening,
+        proof_encoding.compressed_commitment_vector_length,
+        proof_encoding.randomness_response_vector_length,
         public_randomness,
         LAZER_DEMO_ABDLOP_OPENING_KEY_DOMAIN,
-        LAZER_DEMO_PROOF_COEFFICIENT_BIT_LENGTH,
+        proof_encoding.full_size_coefficient_bit_length,
     )?;
     let message_key_matrix = expand_lazer_demo_uniform_polynomial_matrix(
         proof_ring,
-        LAZER_DEMO_TBOX_MESSAGE_EXTENSION_LENGTH,
-        randomness_without_compressed_opening,
+        proof_encoding.target_commitment_vector_length,
+        proof_encoding.randomness_response_vector_length,
         public_randomness,
         LAZER_DEMO_ABDLOP_MESSAGE_KEY_DOMAIN,
-        LAZER_DEMO_PROOF_COEFFICIENT_BIT_LENGTH,
+        proof_encoding.full_size_coefficient_bit_length,
     )?;
 
     Ok(LazerDemoAbdlopPublicParameters {

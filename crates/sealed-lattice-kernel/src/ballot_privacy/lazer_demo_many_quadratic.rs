@@ -5,9 +5,11 @@ use super::{
     lazer_demo_quadratic::LazerDemoQuadraticEquation,
     lazer_demo_rng::sample_lazer_demo_uniform_u64_values,
     lazer_demo_tbox_relations::{
-        LAZER_DEMO_TBOX_QUADRATIC_EVALUATION_MESSAGE_LENGTH, LazerDemoTboxRelationAccumulatorSet,
+        LAZER_DEMO_TBOX_QUADRATIC_EVALUATION_MESSAGE_LENGTH,
+        LAZER_DEMO_TBOX_QUADRATIC_MANY_MESSAGE_LENGTH, LazerDemoTboxRelationAccumulatorSet,
         constant_polynomial, lazer_demo_tbox_proof_ring, lazer_demo_tbox_quadratic_many_dimension,
     },
+    polynomial_ring::PolynomialRing,
 };
 
 const LAZER_DEMO_TBOX_HASH_MASK_POLYNOMIALS: usize = 2;
@@ -22,20 +24,28 @@ pub(crate) fn build_lazer_demo_many_quadratic_equations(
     accumulator_set: &LazerDemoTboxRelationAccumulatorSet,
     hash_mask_vector: &[Vec<u64>],
 ) -> CanonicalResult<Vec<LazerDemoQuadraticEquation>> {
-    validate_lazer_demo_hash_mask_vector(hash_mask_vector)?;
-
-    let proof_ring = lazer_demo_tbox_proof_ring()?;
-    let many_quadratic_dimension = lazer_demo_tbox_quadratic_many_dimension();
     let folded_tbox_equations = accumulator_set.auto_folded_equations()?;
     if folded_tbox_equations.len() != 4 {
         return Err(invalid_many_quadratic(
             "tbox accumulator fold must produce two hash-mask equations and two beta norm equations",
         ));
     }
+    let proof_ring = folded_tbox_equations[0].ring();
+    validate_lazer_demo_hash_mask_vector(hash_mask_vector, proof_ring)?;
+    let evaluation_dimension = folded_tbox_equations[0].dimension();
+    if evaluation_dimension < 2 * LAZER_DEMO_TBOX_QUADRATIC_EVALUATION_MESSAGE_LENGTH
+        || !evaluation_dimension.is_multiple_of(2)
+    {
+        return Err(invalid_many_quadratic(
+            "tbox accumulator evaluation dimension is not compatible with the many-quadratic layout",
+        ));
+    }
+    let short_response_message_length =
+        evaluation_dimension / 2 - LAZER_DEMO_TBOX_QUADRATIC_EVALUATION_MESSAGE_LENGTH;
+    let many_quadratic_dimension =
+        2 * (short_response_message_length + LAZER_DEMO_TBOX_QUADRATIC_MANY_MESSAGE_LENGTH);
 
-    let hash_mask_linear_position_base = 2
-        * (super::lazer_demo_public_parameters::LAZER_DEMO_TBOX_SHORT_MESSAGE_LENGTH
-            + LAZER_DEMO_TBOX_QUADRATIC_EVALUATION_MESSAGE_LENGTH);
+    let hash_mask_linear_position_base = evaluation_dimension;
     let mut many_quadratic_equations = Vec::with_capacity(folded_tbox_equations.len());
     for hash_mask_index in 0..LAZER_DEMO_TBOX_HASH_MASK_POLYNOMIALS {
         let expanded_equation =
@@ -61,6 +71,18 @@ pub(crate) fn fold_lazer_demo_many_quadratic_equations(
     equations: &[LazerDemoQuadraticEquation],
     challenge_seed: &[u8; 32],
 ) -> CanonicalResult<LazerDemoManyQuadraticFold> {
+    fold_lazer_many_quadratic_equations(
+        equations,
+        challenge_seed,
+        LAZER_DEMO_PROOF_COEFFICIENT_BIT_LENGTH,
+    )
+}
+
+pub(crate) fn fold_lazer_many_quadratic_equations(
+    equations: &[LazerDemoQuadraticEquation],
+    challenge_seed: &[u8; 32],
+    coefficient_bit_length: usize,
+) -> CanonicalResult<LazerDemoManyQuadraticFold> {
     if equations.is_empty() {
         return Err(invalid_many_quadratic(
             "many-quadratic folding requires at least one equation",
@@ -81,7 +103,7 @@ pub(crate) fn fold_lazer_demo_many_quadratic_equations(
         let challenge_polynomial = sample_lazer_demo_uniform_u64_values(
             proof_ring.degree(),
             proof_ring.modulus(),
-            LAZER_DEMO_PROOF_COEFFICIENT_BIT_LENGTH,
+            coefficient_bit_length,
             challenge_seed,
             u64::try_from(equation_index + 1).map_err(|_| {
                 invalid_many_quadratic("many-quadratic challenge index does not fit in u64")
@@ -129,8 +151,10 @@ pub(crate) fn validate_lazer_demo_many_quadratic_port() -> CanonicalResult<()> {
     Ok(())
 }
 
-fn validate_lazer_demo_hash_mask_vector(hash_mask_vector: &[Vec<u64>]) -> CanonicalResult<()> {
-    let proof_ring = lazer_demo_tbox_proof_ring()?;
+fn validate_lazer_demo_hash_mask_vector(
+    hash_mask_vector: &[Vec<u64>],
+    proof_ring: PolynomialRing,
+) -> CanonicalResult<()> {
     if hash_mask_vector.len() != LAZER_DEMO_TBOX_HASH_MASK_POLYNOMIALS {
         return Err(invalid_many_quadratic(
             "hash-mask vector length must match the demo tbox lambda halves",

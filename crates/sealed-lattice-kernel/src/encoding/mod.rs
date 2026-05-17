@@ -448,6 +448,15 @@ fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult<Value> {
                 vector_case,
             ))
         }
+        "VerifyBallotPrivacyReceiverKeyVector" => {
+            let vector_case = request.get("vectorCase").ok_or_else(|| {
+                CanonicalError::new(CanonicalErrorCode::InvalidFixture, "vectorCase is required")
+            })?;
+
+            Ok(crate::ballot_privacy::verify_receiver_key_vector_case(
+                vector_case,
+            ))
+        }
         "VerifyReceiverKeyProof" => {
             let receiver_key_proof = request.get("receiverKeyProof").ok_or_else(|| {
                 CanonicalError::new(
@@ -455,9 +464,19 @@ fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult<Value> {
                     "receiverKeyProof is required",
                 )
             })?;
+            let linear_statement = request.get("linearStatement");
+            let proof_bytes_hex = request.get("proofBytesHex").and_then(Value::as_str);
+            let public_randomness_hex = request.get("publicRandomnessHex").and_then(Value::as_str);
+            let parameter_set = request.get("parameterSet");
+            let proof_encoding = request.get("proofEncoding");
 
             Ok(crate::ballot_privacy::verify_receiver_key_proof(
                 receiver_key_proof,
+                linear_statement,
+                proof_bytes_hex,
+                public_randomness_hex,
+                parameter_set,
+                proof_encoding,
             ))
         }
         "VerifyBallotProof" => {
@@ -470,10 +489,20 @@ fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult<Value> {
                     "ballotProof is required",
                 )
             })?;
+            let proof_bytes_hex = request.get("proofBytesHex").and_then(Value::as_str);
+            let linear_statement = request.get("linearStatement");
+            let public_randomness_hex = request.get("publicRandomnessHex").and_then(Value::as_str);
+            let parameter_set = request.get("parameterSet");
+            let proof_encoding = request.get("proofEncoding");
 
             Ok(crate::ballot_privacy::verify_ballot_proof(
                 statement,
                 ballot_proof,
+                proof_bytes_hex,
+                linear_statement,
+                public_randomness_hex,
+                parameter_set,
+                proof_encoding,
             ))
         }
         "VerifyClaimBearingBallotPackage" => {

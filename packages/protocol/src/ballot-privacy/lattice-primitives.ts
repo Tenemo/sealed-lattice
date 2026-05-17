@@ -23,6 +23,11 @@ import {
     createReceiverPayloadShell,
     createShareCommitmentShell,
 } from './objects.js';
+import { createReceiverKeyProofBackendStatement } from './receiver-key-backend-statement.js';
+import {
+    createReceiverKeyLinearProofStatement,
+    verifyReceiverKeyLinearWitness,
+} from './receiver-key-linear-statement.js';
 
 const textEncoder = new TextEncoder();
 const receiverEncryptionModulus = 12_289;
@@ -70,7 +75,7 @@ export type ReceiverPayloadPlaintextWitness = {
     readonly ballotPackageContextDigest: ProtocolDigest;
 };
 
-type ReceiverEncryptionSecretState = {
+export type ReceiverEncryptionSecretState = {
     readonly secretVector: readonly (readonly number[])[];
     readonly errorVector: readonly (readonly number[])[];
 };
@@ -1110,19 +1115,23 @@ const deriveExpectedReceiverPublicKeyMaterial = (input: {
 };
 
 const deriveReceiverKeyProofRoot = (input: {
+    readonly backendStatementDigest: ProtocolDigest;
+    readonly linearStatementDigest: ProtocolDigest;
     readonly receiverEncryptionProfile: ReceiverEncryptionProfile;
     readonly receiverPublicKey: ReceiverEncryptionPublicKey;
     readonly publicKeyMaterial: ReceiverEncryptionPublicKeyMaterial;
 }): ProtocolDigest =>
     deriveProtocolDigest('ReceiverKeyProofRoot', {
+        backendStatementDigest: input.backendStatementDigest,
         coefficientModulus: receiverEncryptionModulus,
         errorInfinityNormBound: receiverEncryptionCenteredBinomialEta,
         keyMaterialDigest: input.receiverPublicKey.keyMaterialDigest,
+        linearStatementDigest: input.linearStatementDigest,
         moduleDegree: receiverEncryptionModuleDegree,
         moduleRank: receiverEncryptionModuleRank,
         proofRelation:
             'receiver_public_key_vector = public_matrix * secret_vector + error_vector mod q_receiver',
-        proofRootKind: 'ReceiverKeyRelationWitnessPreflight',
+        proofRootKind: 'ReceiverKeyRelationLinearStatementAndBackendStatement',
         publicMatrixSeedDigest: input.publicKeyMaterial.publicMatrixSeedDigest,
         receiverEncryptionProfileDigest:
             input.receiverEncryptionProfile.receiverEncryptionProfileDigest,
@@ -1243,12 +1252,32 @@ export const createReceiverKeyProof = (input: {
             refusedObjects.map((refusal) => refusal.message).join(' '),
         );
     }
+    const backendStatement = createReceiverKeyProofBackendStatement({
+        publicKeyMaterial: input.publicKeyMaterial,
+        receiverEncryptionProfile: input.receiverEncryptionProfile,
+        receiverPublicKey: input.receiverPublicKey,
+    });
+    const linearStatement = createReceiverKeyLinearProofStatement({
+        publicKeyMaterial: input.publicKeyMaterial,
+        receiverEncryptionProfile: input.receiverEncryptionProfile,
+        receiverPublicKey: input.receiverPublicKey,
+    });
+    verifyReceiverKeyLinearWitness({
+        publicKeyMaterial: input.publicKeyMaterial,
+        receiverEncryptionProfile: input.receiverEncryptionProfile,
+        receiverPublicKey: input.receiverPublicKey,
+        secretState: input.secretState,
+    });
 
     return createReceiverKeyProofShell({
         ceremonyId: input.receiverPublicKey.ceremonyId,
         manifestDigest: input.receiverPublicKey.manifestDigest,
         proofBackend: 'LaZerStyleLocalLatticeRelation',
-        proofRoot: deriveReceiverKeyProofRoot(input),
+        proofRoot: deriveReceiverKeyProofRoot({
+            ...input,
+            backendStatementDigest: backendStatement.backendStatementDigest,
+            linearStatementDigest: linearStatement.statementDigest,
+        }),
         receiverEncryptionProfileDigest:
             input.receiverPublicKey.receiverEncryptionProfileDigest,
         receiverIdentity: input.receiverPublicKey.receiverIdentity,

@@ -61,7 +61,15 @@ The internal LaZer-style proof verifier work uses upstream LaZer only as an
 offline deterministic oracle. Generated public vectors record upstream
 provenance and accept/reject outcomes, while the Rust/WASM port independently
 decodes canonical proof bytes, checks bounds, rebuilds the ABDLOP/tbox and
-many-quadratic verifier path, and recomputes the final challenge. This is
+many-quadratic verifier path, and recomputes the final challenge for the demo
+and receiver-key linear proof-vector profiles plus the compiler-derived
+encoded-score field-row proof-vector profile. The verifier now records the
+target coefficient representation explicitly: the demo and receiver-key oracle
+targets recover LaZer's centered signed internal target coefficients from
+positive JSON representatives, while the encoded-score field-row target uses
+canonical unsigned `GF(65537)` representatives. The receiver-key profile still
+carries an upstream `protocol-not-complete` warning, and the encoded-score
+profile covers only the compiler-emitted field-row projection, so this is
 compatibility evidence for the selected internal proof slice, not production
 ballot-proof availability.
 
@@ -76,10 +84,33 @@ public target mutations, malformed backend statements, and hostile compiler
 mutations. Rust/WASM verifies those vector shapes, backend statement digests,
 row-batch continuity, variable columns, bounds, and statement digests.
 Receiver-key proof records are generated only after the local key witness
-equation and norm checks pass. Ballot proof records now carry the lowered
-relation statement digest into their challenge binding. The claim-bearing
-ballot and receiver-key proof verifiers still fail closed until real proof
-generation and verification are wired to those statements.
+equation and norm checks pass, and can now carry proof-byte metadata bound to a
+canonical digest-expanded backend statement, a concrete public linear statement
+for `A * secret + error - public_key = 0 mod 12289`, proof encoding, and public
+randomness. Public
+receiver-key vectors cover valid context binding, digest-changing manifest
+input, malformed backend statements, mutated linear statement matrix/target
+coefficients, proof-root mutation, substituted matrix seed, wrong key material,
+and hostile witness-construction refusals. Rust/WASM verifies those vector
+shapes, recomputes the receiver-key linear statement matrix from the frozen
+seed/profile, derives the public key-material digest from the target vector,
+and recomputes the backend statement, linear statement, and proof roots. The
+internal Rust/WASM receiver-key proof command now accepts a proof-byte-bearing
+receiver-key record when its supplied public linear statement and proof bytes
+verify through the ported linear proof backend, and rejects target and proof-byte
+mutations. Ballot proof records now carry the lowered relation statement digest
+into their challenge binding and can also carry complete linear-backend proof
+metadata: backend statement digest, concrete linear statement digest, statement
+matrix digest, target vector digest, proof encoding digest, proof parameter-set
+digest, public randomness digest, proof bytes digest, and proof size. The
+internal Rust/WASM ballot-proof command now accepts a proof-byte-bearing ballot
+record when all public verifier inputs are supplied together and the proof bytes
+verify through the ported linear proof backend. The same command also verifies
+the encoded-score field-row proof-vector profile through native and WASM paths.
+This is still backend-record plumbing; claim-bearing ballot closure waits for
+proof bytes covering the full encoded-score ballot relation, including
+digest-expanded share-commitment, receiver-payload encryption, and receiver-key
+binding rows.
 
 - workspace layout and package boundaries
 - packaging and tarball smoke checks

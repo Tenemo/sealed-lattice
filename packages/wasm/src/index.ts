@@ -11,6 +11,7 @@ import {
     type BallotPrivacyKernelVerification,
     type BallotPrivacyLinearProofVectorVerification,
     type BallotPrivacyProofBackendStatus,
+    type BallotPrivacyReceiverKeyVectorVerification,
     type TranscriptCoreKernelSharePoint,
     type TranscriptCorePlaintextComparison,
     type TranscriptCoreKernel,
@@ -32,6 +33,7 @@ export type {
     BallotPrivacyKernelVerification,
     BallotPrivacyLinearProofVectorVerification,
     BallotPrivacyProofBackendStatus,
+    BallotPrivacyReceiverKeyVectorVerification,
     TranscriptCoreKernelSharePoint,
     TranscriptCorePlaintextComparison,
 };

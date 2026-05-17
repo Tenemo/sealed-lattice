@@ -1,6 +1,7 @@
 import { deriveProtocolDigest } from '@sealed-lattice/crypto';
 import { describe, expect, it } from 'vitest';
 
+import { buildEncodedScoreFieldLinearProofProjection } from '../../src/ballot-privacy/ballot-proof-linear-statement';
 import {
     createBallotPrivacyProfileSet,
     createShareCommitmentMessageBoundCert,
@@ -439,6 +440,85 @@ describe('ballot privacy relation backend lowering', () => {
         );
         expect(JSON.stringify(result.statement)).not.toMatch(
             /normalizedScores|scoreOneHotWitnesses|receiverShareVector|encodedCoordinateShamirCoefficients/u,
+        );
+    });
+
+    it('projects encoded-score field rows into the linear proof backend shape', () => {
+        const relationInput = validRelationInput();
+        const context = publicContext();
+        const loweringResult = lowerBallotPrivacyRelationToBackendStatement({
+            publicContext: context,
+            relationInput,
+        });
+
+        expect(loweringResult.ok).toBe(true);
+        if (!loweringResult.ok) {
+            throw new Error('valid relation input should lower');
+        }
+
+        const projection = buildEncodedScoreFieldLinearProofProjection({
+            ballotProofStatementDigest: context.ballotProofStatementDigest,
+            loweredStatement: loweringResult.statement,
+            parameterProfileId: 'encoded-score-field-linear-compatibility-v1',
+            relationInput,
+            sourceRingDegree: 64,
+            witnessL2BoundSquared: '65536',
+        });
+
+        expect(projection.sourceRowBatchName).toBe('encoded_score_field_rows');
+        expect(projection.sourceBackendColumnIndices).toHaveLength(176);
+        expect(projection.sourceBackendColumnIndices[0]).toBe(0);
+        expect(
+            projection.sourceBackendColumnIndices[
+                projection.sourceBackendColumnIndices.length - 1
+            ],
+        ).toBe(175);
+        expect(projection.linearStatement).toMatchObject({
+            ballotProofStatementDigest: context.ballotProofStatementDigest,
+            coefficientModulus: '65537',
+            objectType: 'BallotProofLinearProofStatement',
+            parameterProfileId: 'encoded-score-field-linear-compatibility-v1',
+            relation: 'A*w + t = 0',
+            ringDegree: 64,
+            statementColumns: 176,
+            statementRows: 70,
+            witnessL2BoundSquared: '65536',
+        });
+        expect(
+            projection.linearStatement.statementMatrixCoefficients,
+        ).toHaveLength(70);
+        expect(
+            projection.linearStatement.statementMatrixCoefficients[0],
+        ).toHaveLength(176);
+        expect(
+            projection.linearStatement.statementMatrixCoefficients[0]?.[0],
+        ).toHaveLength(64);
+        expect(
+            projection.linearStatement.targetVectorCoefficients,
+        ).toHaveLength(70);
+        expect(projection.linearStatement.statementDigest).toMatch(
+            /^[a-f0-9]{128}$/u,
+        );
+        expect(projection.privateWitnessVectorCoefficients).toHaveLength(176);
+        expect(
+            projection.privateWitnessVectorCoefficients.some(
+                (polynomial) => polynomial[0] === -1,
+            ),
+        ).toBe(true);
+        expect(
+            projection.privateWitnessVectorCoefficients.every(
+                (polynomial) =>
+                    polynomial.length === 64 &&
+                    polynomial
+                        .slice(1)
+                        .every((coefficient) => coefficient === 0),
+            ),
+        ).toBe(true);
+        expect(projection.linearStatement).not.toHaveProperty(
+            'privateWitnessVectorCoefficients',
+        );
+        expect(JSON.stringify(projection.linearStatement)).not.toMatch(
+            /normalizedScores|scoreOneHotWitnesses|receiverShareVector|privateWitness/u,
         );
     });
 
