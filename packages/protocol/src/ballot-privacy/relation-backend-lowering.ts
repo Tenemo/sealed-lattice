@@ -48,6 +48,8 @@ const receiverEncryptionModulus = 12_289;
 const receiverEncryptionModuleRank = 4;
 const receiverEncryptionModuleDegree = 256;
 const receiverEncryptionShortVectorInfinityNormBound = 2;
+const receiverShareRepresentativeBitLength = 17;
+const receiverOpeningRandomnessBitLength = 12;
 
 type ReceiverReference = {
     readonly receiverIdentity: string;
@@ -57,17 +59,26 @@ type ReceiverReference = {
 type ReceiverPublicKeyReference = ReceiverReference & {
     readonly keyMaterialDigest?: ProtocolDigest;
     readonly publicMatrixSeedDigest?: ProtocolDigest;
+    readonly publicKeyVector?: readonly (readonly number[])[];
     readonly receiverPublicKeyDigest: ProtocolDigest;
 };
 
 type ReceiverPayloadReference = ReceiverReference & {
     readonly ciphertextBodyDigest?: ProtocolDigest;
+    readonly ciphertextChunks?: readonly {
+        readonly chunkIndex: number;
+        readonly firstCiphertextVector: readonly (readonly number[])[];
+        readonly secondCiphertextPolynomial: readonly number[];
+    }[];
     readonly ciphertextChunkDigest?: ProtocolDigest;
     readonly ciphertextChunkCount?: number;
     readonly plaintextBitLength?: number;
     readonly receiverPayloadDigest: ProtocolDigest;
     readonly receiverPayloadCiphertextRoot: ProtocolDigest;
 };
+type ReceiverPayloadCiphertextChunkReference = NonNullable<
+    ReceiverPayloadReference['ciphertextChunks']
+>[number];
 
 type ShareCommitmentReference = ReceiverReference & {
     readonly commitmentBodyDigest?: ProtocolDigest;
@@ -109,8 +120,11 @@ type BallotPrivacyLinearRelationVariableRole =
     | 'ShamirQuotient'
     | 'ReceiverPayloadPlaintextShare'
     | 'ReceiverPayloadPlaintextOpening'
+    | 'ReceiverPayloadPlaintextBit'
     | 'ShareCommitmentOpening'
     | 'ReceiverEncryptionRandomness'
+    | 'ReceiverEncryptionFirstNoise'
+    | 'ReceiverEncryptionSecondNoise'
     | 'ReceiverEncryptionNoise';
 
 type BallotPrivacyLinearRelationVariable = {
@@ -120,7 +134,11 @@ type BallotPrivacyLinearRelationVariable = {
     readonly optionIndex?: number;
     readonly scoreBucketValue?: number;
     readonly coefficientDegree?: number;
+    readonly chunkIndex?: number;
+    readonly ciphertextVectorIndex?: number;
+    readonly bitIndex?: number;
     readonly openingCoordinateIndex?: number;
+    readonly polynomialCoefficientIndex?: number;
     readonly receiverRosterPosition?: number;
 };
 
@@ -135,7 +153,11 @@ type BallotPrivacyLinearRelationRowKind =
     | 'ShamirEvaluationQuotient'
     | 'ShareCommitmentEquation'
     | 'ReceiverPayloadSharePlaintextBinding'
-    | 'ReceiverPayloadOpeningPlaintextBinding';
+    | 'ReceiverPayloadOpeningPlaintextBinding'
+    | 'ReceiverPayloadShareBitDecomposition'
+    | 'ReceiverPayloadOpeningBitDecomposition'
+    | 'ReceiverPayloadEncryptionEquation'
+    | 'ReceiverKeyBinding';
 
 type BallotPrivacyLinearRelationRow = {
     readonly rowName: string;
@@ -201,11 +223,25 @@ type BallotPrivacyBackendStatementExplicitRow = {
     readonly terms: readonly BallotPrivacyBackendStatementTerm[];
 };
 
+type BallotPrivacyBackendStatementReceiverEncryptionRowDescriptor = {
+    readonly ciphertextChunkCount: number;
+    readonly plaintextBitLength: number;
+    readonly receiverIdentity: string;
+    readonly receiverPayloadDigest: ProtocolDigest;
+    readonly receiverRosterPosition: number;
+    readonly receiverPublicKeyDigest: ProtocolDigest;
+    readonly rowCount: number;
+    readonly rowOffsetWithinBatch: number;
+};
+
 type BallotPrivacyBackendStatementRowBatch =
     | {
           readonly batchKind: 'ExplicitSparseRows';
           readonly batchName:
               | 'encoded_score_field_rows'
+              | 'receiver_key_binding_rows'
+              | 'receiver_payload_encryption_equation_rows'
+              | 'receiver_payload_plaintext_bit_decomposition_rows'
               | 'share_commitment_equation_rows'
               | 'receiver_payload_plaintext_binding_rows';
           readonly matrixDigest: ProtocolDigest;
@@ -213,10 +249,25 @@ type BallotPrivacyBackendStatementRowBatch =
           readonly rowCount: number;
           readonly rowKind:
               | 'EncodedScoreFieldRows'
+              | 'ReceiverKeyBindingRows'
+              | 'ReceiverPayloadEncryptionEquationRows'
+              | 'ReceiverPayloadPlaintextBitDecompositionRows'
               | 'ShareCommitmentEquationRows'
               | 'ReceiverPayloadPlaintextBindingRows';
           readonly rowOffset: number;
           readonly rows: readonly BallotPrivacyBackendStatementExplicitRow[];
+          readonly targetVectorDigest: ProtocolDigest;
+          readonly variableColumnIndices: readonly number[];
+      }
+    | {
+          readonly batchKind: 'StructuredModuleLweReceiverEncryptionRows';
+          readonly batchName: 'receiver_payload_encryption_equation_rows';
+          readonly matrixDigest: ProtocolDigest;
+          readonly modulus: string;
+          readonly receiverRows: readonly BallotPrivacyBackendStatementReceiverEncryptionRowDescriptor[];
+          readonly rowCount: number;
+          readonly rowKind: 'ReceiverPayloadEncryptionEquationRows';
+          readonly rowOffset: number;
           readonly targetVectorDigest: ProtocolDigest;
           readonly variableColumnIndices: readonly number[];
       }
@@ -399,14 +450,77 @@ const receiverPayloadPlaintextOpeningVariableName = (
 ): string =>
     `receiver_${receiverRosterPosition}_payload_plaintext_opening_coordinate_${openingCoordinateIndex}`;
 
-const receiverEncryptionRandomnessVariableName = (
+const receiverPayloadPlaintextShareBitVariableName = (
+    receiverRosterPosition: number,
+    encodedCoordinateIndex: number,
+    bitIndex: number,
+): string =>
+    `receiver_${receiverRosterPosition}_payload_plaintext_encoded_coordinate_${encodedCoordinateIndex}_bit_${bitIndex}`;
+
+const receiverPayloadPlaintextOpeningBitVariableName = (
+    receiverRosterPosition: number,
+    openingCoordinateIndex: number,
+    bitIndex: number,
+): string =>
+    `receiver_${receiverRosterPosition}_payload_plaintext_opening_coordinate_${openingCoordinateIndex}_bit_${bitIndex}`;
+
+const receiverPayloadPlaintextBitVariableNameForLayout = (
+    receiverRosterPosition: number,
+    shareVectorWidth: number,
+    plaintextBitIndex: number,
+): string => {
+    const shareBitCount =
+        shareVectorWidth * receiverShareRepresentativeBitLength;
+    if (plaintextBitIndex < shareBitCount) {
+        return receiverPayloadPlaintextShareBitVariableName(
+            receiverRosterPosition,
+            Math.floor(
+                plaintextBitIndex / receiverShareRepresentativeBitLength,
+            ),
+            plaintextBitIndex % receiverShareRepresentativeBitLength,
+        );
+    }
+
+    const openingBitIndex = plaintextBitIndex - shareBitCount;
+
+    return receiverPayloadPlaintextOpeningBitVariableName(
+        receiverRosterPosition,
+        Math.floor(openingBitIndex / receiverOpeningRandomnessBitLength),
+        openingBitIndex % receiverOpeningRandomnessBitLength,
+    );
+};
+
+const digestExpandedReceiverEncryptionRandomnessVariableName = (
     receiverRosterPosition: number,
 ): string =>
     `receiver_${receiverRosterPosition}_receiver_encryption_randomness`;
 
-const receiverEncryptionNoiseVariableName = (
+const digestExpandedReceiverEncryptionNoiseVariableName = (
     receiverRosterPosition: number,
 ): string => `receiver_${receiverRosterPosition}_receiver_encryption_noise`;
+
+const receiverEncryptionRandomnessVariableName = (
+    receiverRosterPosition: number,
+    chunkIndex: number,
+    ciphertextVectorIndex: number,
+    polynomialCoefficientIndex: number,
+): string =>
+    `receiver_${receiverRosterPosition}_receiver_encryption_chunk_${chunkIndex}_randomness_vector_${ciphertextVectorIndex}_coefficient_${polynomialCoefficientIndex}`;
+
+const receiverEncryptionFirstNoiseVariableName = (
+    receiverRosterPosition: number,
+    chunkIndex: number,
+    ciphertextVectorIndex: number,
+    polynomialCoefficientIndex: number,
+): string =>
+    `receiver_${receiverRosterPosition}_receiver_encryption_chunk_${chunkIndex}_first_noise_vector_${ciphertextVectorIndex}_coefficient_${polynomialCoefficientIndex}`;
+
+const receiverEncryptionSecondNoiseVariableName = (
+    receiverRosterPosition: number,
+    chunkIndex: number,
+    polynomialCoefficientIndex: number,
+): string =>
+    `receiver_${receiverRosterPosition}_receiver_encryption_chunk_${chunkIndex}_second_noise_coefficient_${polynomialCoefficientIndex}`;
 
 const addScalarConstantVariable = (
     registry: VariableRegistry,
@@ -535,25 +649,137 @@ const addReceiverPayloadPlaintextOpeningVariable = (
         variableRole: 'ReceiverPayloadPlaintextOpening',
     }).variableName;
 
+const addReceiverPayloadPlaintextShareBitVariable = (
+    registry: VariableRegistry,
+    receiverRosterPosition: number,
+    encodedCoordinateIndex: number,
+    bitIndex: number,
+): string => {
+    const plaintextBitIndex =
+        encodedCoordinateIndex * receiverShareRepresentativeBitLength +
+        bitIndex;
+
+    return registry.add({
+        bitIndex,
+        encodedCoordinateIndex,
+        polynomialCoefficientIndex:
+            plaintextBitIndex % receiverEncryptionModuleDegree,
+        receiverRosterPosition,
+        variableName: receiverPayloadPlaintextShareBitVariableName(
+            receiverRosterPosition,
+            encodedCoordinateIndex,
+            bitIndex,
+        ),
+        variableRole: 'ReceiverPayloadPlaintextBit',
+    }).variableName;
+};
+
+const addReceiverPayloadPlaintextOpeningBitVariable = (
+    registry: VariableRegistry,
+    receiverRosterPosition: number,
+    shareVectorWidth: number,
+    openingCoordinateIndex: number,
+    bitIndex: number,
+): string => {
+    const plaintextBitIndex =
+        shareVectorWidth * receiverShareRepresentativeBitLength +
+        openingCoordinateIndex * receiverOpeningRandomnessBitLength +
+        bitIndex;
+
+    return registry.add({
+        bitIndex,
+        openingCoordinateIndex,
+        polynomialCoefficientIndex:
+            plaintextBitIndex % receiverEncryptionModuleDegree,
+        receiverRosterPosition,
+        variableName: receiverPayloadPlaintextOpeningBitVariableName(
+            receiverRosterPosition,
+            openingCoordinateIndex,
+            bitIndex,
+        ),
+        variableRole: 'ReceiverPayloadPlaintextBit',
+    }).variableName;
+};
+
 const addReceiverEncryptionRandomnessVariable = (
+    registry: VariableRegistry,
+    receiverRosterPosition: number,
+    chunkIndex: number,
+    ciphertextVectorIndex: number,
+    polynomialCoefficientIndex: number,
+): string =>
+    registry.add({
+        chunkIndex,
+        ciphertextVectorIndex,
+        polynomialCoefficientIndex,
+        receiverRosterPosition,
+        variableName: receiverEncryptionRandomnessVariableName(
+            receiverRosterPosition,
+            chunkIndex,
+            ciphertextVectorIndex,
+            polynomialCoefficientIndex,
+        ),
+        variableRole: 'ReceiverEncryptionRandomness',
+    }).variableName;
+
+const addReceiverEncryptionFirstNoiseVariable = (
+    registry: VariableRegistry,
+    receiverRosterPosition: number,
+    chunkIndex: number,
+    ciphertextVectorIndex: number,
+    polynomialCoefficientIndex: number,
+): string =>
+    registry.add({
+        chunkIndex,
+        ciphertextVectorIndex,
+        polynomialCoefficientIndex,
+        receiverRosterPosition,
+        variableName: receiverEncryptionFirstNoiseVariableName(
+            receiverRosterPosition,
+            chunkIndex,
+            ciphertextVectorIndex,
+            polynomialCoefficientIndex,
+        ),
+        variableRole: 'ReceiverEncryptionFirstNoise',
+    }).variableName;
+
+const addReceiverEncryptionSecondNoiseVariable = (
+    registry: VariableRegistry,
+    receiverRosterPosition: number,
+    chunkIndex: number,
+    polynomialCoefficientIndex: number,
+): string =>
+    registry.add({
+        chunkIndex,
+        polynomialCoefficientIndex,
+        receiverRosterPosition,
+        variableName: receiverEncryptionSecondNoiseVariableName(
+            receiverRosterPosition,
+            chunkIndex,
+            polynomialCoefficientIndex,
+        ),
+        variableRole: 'ReceiverEncryptionSecondNoise',
+    }).variableName;
+
+const addDigestExpandedReceiverEncryptionRandomnessVariable = (
     registry: VariableRegistry,
     receiverRosterPosition: number,
 ): string =>
     registry.add({
         receiverRosterPosition,
-        variableName: receiverEncryptionRandomnessVariableName(
+        variableName: digestExpandedReceiverEncryptionRandomnessVariableName(
             receiverRosterPosition,
         ),
         variableRole: 'ReceiverEncryptionRandomness',
     }).variableName;
 
-const addReceiverEncryptionNoiseVariable = (
+const addDigestExpandedReceiverEncryptionNoiseVariable = (
     registry: VariableRegistry,
     receiverRosterPosition: number,
 ): string =>
     registry.add({
         receiverRosterPosition,
-        variableName: receiverEncryptionNoiseVariableName(
+        variableName: digestExpandedReceiverEncryptionNoiseVariableName(
             receiverRosterPosition,
         ),
         variableRole: 'ReceiverEncryptionNoise',
@@ -821,6 +1047,103 @@ const buildReceiverPayloadPlaintextBindingRows = (
     return rows;
 };
 
+const buildReceiverPayloadPlaintextBitDecompositionRows = (
+    input: BallotPrivacyRelationCompilerInput,
+    registry: VariableRegistry,
+): readonly BallotPrivacyLinearRelationRow[] => {
+    const rows: BallotPrivacyLinearRelationRow[] = [];
+    const encodedCoordinateCount = getBallotPrivacyEncodedShareVectorWidth(
+        input.optionCount,
+    );
+
+    for (const receiver of input.receivers) {
+        const receiverRosterPosition = receiver.receiverRosterPosition;
+
+        for (
+            let encodedCoordinateIndex = 0;
+            encodedCoordinateIndex < encodedCoordinateCount;
+            encodedCoordinateIndex += 1
+        ) {
+            rows.push({
+                encodedCoordinateIndex,
+                modulus: fieldModulus,
+                optionIndex: getEncodedCoordinateOptionIndex(
+                    encodedCoordinateIndex,
+                ),
+                receiverRosterPosition,
+                rowKind: 'ReceiverPayloadShareBitDecomposition',
+                rowName: `receiver_${receiverRosterPosition}_payload_plaintext_encoded_coordinate_${encodedCoordinateIndex}_share_bit_decomposition`,
+                target: 0,
+                terms: [
+                    ...Array.from(
+                        { length: receiverShareRepresentativeBitLength },
+                        (_unusedValue, bitIndex) => ({
+                            coefficient: 2 ** bitIndex,
+                            variableName:
+                                addReceiverPayloadPlaintextShareBitVariable(
+                                    registry,
+                                    receiverRosterPosition,
+                                    encodedCoordinateIndex,
+                                    bitIndex,
+                                ),
+                        }),
+                    ),
+                    {
+                        coefficient: -1,
+                        variableName: addReceiverPayloadPlaintextShareVariable(
+                            registry,
+                            receiverRosterPosition,
+                            encodedCoordinateIndex,
+                        ),
+                    },
+                ],
+            });
+        }
+
+        for (
+            let openingCoordinateIndex = 0;
+            openingCoordinateIndex < shareCommitmentOpeningDimension;
+            openingCoordinateIndex += 1
+        ) {
+            rows.push({
+                modulus: fieldModulus,
+                openingCoordinateIndex,
+                receiverRosterPosition,
+                rowKind: 'ReceiverPayloadOpeningBitDecomposition',
+                rowName: `receiver_${receiverRosterPosition}_payload_plaintext_opening_coordinate_${openingCoordinateIndex}_bit_decomposition`,
+                target: shareCommitmentOpeningInfinityNormBound,
+                terms: [
+                    ...Array.from(
+                        { length: receiverOpeningRandomnessBitLength },
+                        (_unusedValue, bitIndex) => ({
+                            coefficient: 2 ** bitIndex,
+                            variableName:
+                                addReceiverPayloadPlaintextOpeningBitVariable(
+                                    registry,
+                                    receiverRosterPosition,
+                                    encodedCoordinateCount,
+                                    openingCoordinateIndex,
+                                    bitIndex,
+                                ),
+                        }),
+                    ),
+                    {
+                        coefficient: -1,
+                        variableName:
+                            addReceiverPayloadPlaintextOpeningVariable(
+                                registry,
+                                receiverRosterPosition,
+                                openingCoordinateIndex,
+                            ),
+                    },
+                ],
+            });
+        }
+    }
+
+    return rows;
+};
+
 const receiverReferenceKey = (receiver: ReceiverReference): string =>
     `${receiver.receiverRosterPosition}:${receiver.receiverIdentity}`;
 
@@ -883,6 +1206,103 @@ const receiverPayloadPlaintextOpeningVariableNames = (
                 openingCoordinateIndex,
             ),
     );
+
+const receiverPayloadPlaintextBitVariableNames = (
+    registry: VariableRegistry,
+    receiverRosterPosition: number,
+    shareVectorWidth: number,
+    plaintextBitLength: number,
+): readonly string[] =>
+    Array.from(
+        { length: plaintextBitLength },
+        (_unusedValue, plaintextBitIndex) => {
+            const shareBitCount =
+                shareVectorWidth * receiverShareRepresentativeBitLength;
+            if (plaintextBitIndex < shareBitCount) {
+                return addReceiverPayloadPlaintextShareBitVariable(
+                    registry,
+                    receiverRosterPosition,
+                    Math.floor(
+                        plaintextBitIndex /
+                            receiverShareRepresentativeBitLength,
+                    ),
+                    plaintextBitIndex % receiverShareRepresentativeBitLength,
+                );
+            }
+
+            const openingBitIndex = plaintextBitIndex - shareBitCount;
+
+            return addReceiverPayloadPlaintextOpeningBitVariable(
+                registry,
+                receiverRosterPosition,
+                shareVectorWidth,
+                Math.floor(
+                    openingBitIndex / receiverOpeningRandomnessBitLength,
+                ),
+                openingBitIndex % receiverOpeningRandomnessBitLength,
+            );
+        },
+    );
+
+const receiverEncryptionVariableNames = (
+    registry: VariableRegistry,
+    receiverRosterPosition: number,
+    ciphertextChunkCount: number,
+): readonly string[] => {
+    const variableNames: string[] = [];
+    for (
+        let chunkIndex = 0;
+        chunkIndex < ciphertextChunkCount;
+        chunkIndex += 1
+    ) {
+        for (
+            let vectorIndex = 0;
+            vectorIndex < receiverEncryptionModuleRank;
+            vectorIndex += 1
+        ) {
+            for (
+                let coefficientIndex = 0;
+                coefficientIndex < receiverEncryptionModuleDegree;
+                coefficientIndex += 1
+            ) {
+                variableNames.push(
+                    addReceiverEncryptionRandomnessVariable(
+                        registry,
+                        receiverRosterPosition,
+                        chunkIndex,
+                        vectorIndex,
+                        coefficientIndex,
+                    ),
+                );
+                variableNames.push(
+                    addReceiverEncryptionFirstNoiseVariable(
+                        registry,
+                        receiverRosterPosition,
+                        chunkIndex,
+                        vectorIndex,
+                        coefficientIndex,
+                    ),
+                );
+            }
+        }
+        for (
+            let coefficientIndex = 0;
+            coefficientIndex < receiverEncryptionModuleDegree;
+            coefficientIndex += 1
+        ) {
+            variableNames.push(
+                addReceiverEncryptionSecondNoiseVariable(
+                    registry,
+                    receiverRosterPosition,
+                    chunkIndex,
+                    coefficientIndex,
+                ),
+            );
+        }
+    }
+
+    return variableNames;
+};
 
 const deriveAlgebraicTargetDigest = (
     purpose: string,
@@ -1085,6 +1505,76 @@ const shareCommitmentOpeningCoefficient = (input: {
         input.randomnessMatrixPolynomial[input.outputCoefficientIndex] ?? 0n,
     );
 
+const validateReceiverPublicKeyVector = (input: {
+    readonly publicKeyVector: readonly (readonly number[])[];
+    readonly receiverRosterPosition: number;
+}): void => {
+    if (input.publicKeyVector.length !== receiverEncryptionModuleRank) {
+        throw new RangeError(
+            `Receiver ${input.receiverRosterPosition} public key vector does not use the frozen module rank.`,
+        );
+    }
+    for (const [vectorIndex, polynomial] of input.publicKeyVector.entries()) {
+        if (polynomial.length !== receiverEncryptionModuleDegree) {
+            throw new RangeError(
+                `Receiver ${input.receiverRosterPosition} public key polynomial ${vectorIndex} does not use the frozen module degree.`,
+            );
+        }
+        for (const [coefficientIndex, coefficient] of polynomial.entries()) {
+            if (
+                !Number.isSafeInteger(coefficient) ||
+                coefficient < 0 ||
+                coefficient >= receiverEncryptionModulus
+            ) {
+                throw new RangeError(
+                    `Receiver ${input.receiverRosterPosition} public key coefficient ${vectorIndex}:${coefficientIndex} is outside the receiver encryption modulus.`,
+                );
+            }
+        }
+    }
+};
+
+const validateReceiverPayloadCiphertextChunks = (input: {
+    readonly ciphertextChunks: readonly ReceiverPayloadCiphertextChunkReference[];
+    readonly receiverRosterPosition: number;
+}): void => {
+    input.ciphertextChunks.forEach((chunk, expectedChunkIndex) => {
+        if (chunk.chunkIndex !== expectedChunkIndex) {
+            throw new RangeError(
+                `Receiver ${input.receiverRosterPosition} ciphertext chunks must be in canonical chunk order.`,
+            );
+        }
+        if (
+            chunk.firstCiphertextVector.length !== receiverEncryptionModuleRank
+        ) {
+            throw new RangeError(
+                `Receiver ${input.receiverRosterPosition} ciphertext chunk ${chunk.chunkIndex} first vector does not use the frozen module rank.`,
+            );
+        }
+        for (const polynomial of [
+            ...chunk.firstCiphertextVector,
+            chunk.secondCiphertextPolynomial,
+        ]) {
+            if (polynomial.length !== receiverEncryptionModuleDegree) {
+                throw new RangeError(
+                    `Receiver ${input.receiverRosterPosition} ciphertext chunk ${chunk.chunkIndex} polynomial does not use the frozen module degree.`,
+                );
+            }
+            for (const coefficient of polynomial) {
+                if (
+                    !Number.isSafeInteger(coefficient) ||
+                    coefficient < 0 ||
+                    coefficient >= receiverEncryptionModulus
+                ) {
+                    throw new RangeError(
+                        `Receiver ${input.receiverRosterPosition} ciphertext chunk ${chunk.chunkIndex} coefficient is outside the receiver encryption modulus.`,
+                    );
+                }
+            }
+        }
+    });
+};
+
 const buildShareCommitmentEquationRows = (input: {
     readonly columnLookup: ReadonlyMap<string, number>;
     readonly shareCommitmentRows: readonly BallotPrivacyAlgebraicRelationRow[];
@@ -1235,6 +1725,333 @@ const buildExplicitShareCommitmentRowBatch = (input: {
     };
 };
 
+const buildExplicitBackendRowBatch = (input: {
+    readonly batchName:
+        | 'receiver_key_binding_rows'
+        | 'receiver_payload_encryption_equation_rows'
+        | 'receiver_payload_plaintext_bit_decomposition_rows';
+    readonly modulus: string;
+    readonly rowKind:
+        | 'ReceiverKeyBindingRows'
+        | 'ReceiverPayloadEncryptionEquationRows'
+        | 'ReceiverPayloadPlaintextBitDecompositionRows';
+    readonly rowOffset: number;
+    readonly rows: readonly BallotPrivacyBackendStatementExplicitRow[];
+}): BallotPrivacyBackendStatementRowBatch => {
+    const variableColumnIndices = [
+        ...new Set(
+            input.rows.flatMap((row) =>
+                row.terms.map((term) => term.columnIndex),
+            ),
+        ),
+    ].sort((leftColumn, rightColumn) => leftColumn - rightColumn);
+
+    return {
+        batchKind: 'ExplicitSparseRows',
+        batchName: input.batchName,
+        matrixDigest: deriveBackendDigest(explicitBackendMatrixDigestPurpose, {
+            rows: input.rows.map(({ rowIndex, rowKind, rowName, terms }) => ({
+                rowIndex,
+                rowKind,
+                rowName,
+                terms,
+            })),
+        }),
+        modulus: input.modulus,
+        rowCount: input.rows.length,
+        rowKind: input.rowKind,
+        rowOffset: input.rowOffset,
+        rows: input.rows,
+        targetVectorDigest: deriveBackendDigest(
+            explicitBackendTargetVectorDigestPurpose,
+            {
+                targets: input.rows.map(
+                    ({ rowIndex, rowKind, rowName, target }) => ({
+                        rowIndex,
+                        rowKind,
+                        rowName,
+                        target,
+                    }),
+                ),
+            },
+        ),
+        variableColumnIndices,
+    };
+};
+
+const buildReceiverPayloadPlaintextBitDecompositionRowBatch = (input: {
+    readonly columnLookup: ReadonlyMap<string, number>;
+    readonly rowOffset: number;
+    readonly rows: readonly BallotPrivacyLinearRelationRow[];
+}): BallotPrivacyBackendStatementRowBatch => {
+    const rows = input.rows.map((row, rowIndex) => ({
+        modulus: decimalString(row.modulus),
+        rowIndex,
+        rowKind: row.rowKind,
+        rowName: row.rowName,
+        target: decimalString(row.target),
+        terms: backendTermsForLinearRow(row, input.columnLookup),
+    }));
+
+    return buildExplicitBackendRowBatch({
+        batchName: 'receiver_payload_plaintext_bit_decomposition_rows',
+        modulus: decimalString(fieldModulus),
+        rowKind: 'ReceiverPayloadPlaintextBitDecompositionRows',
+        rowOffset: input.rowOffset,
+        rows,
+    });
+};
+
+const receiverPayloadEncryptionVariableColumnIndices = (input: {
+    readonly ciphertextChunkCount: number;
+    readonly columnLookup: ReadonlyMap<string, number>;
+    readonly plaintextBitLength: number;
+    readonly receiverRosterPosition: number;
+    readonly shareVectorWidth: number;
+}): readonly number[] => {
+    const variableNames: string[] = [];
+    for (
+        let plaintextBitIndex = 0;
+        plaintextBitIndex < input.plaintextBitLength;
+        plaintextBitIndex += 1
+    ) {
+        variableNames.push(
+            receiverPayloadPlaintextBitVariableNameForLayout(
+                input.receiverRosterPosition,
+                input.shareVectorWidth,
+                plaintextBitIndex,
+            ),
+        );
+    }
+    for (
+        let chunkIndex = 0;
+        chunkIndex < input.ciphertextChunkCount;
+        chunkIndex += 1
+    ) {
+        for (
+            let vectorIndex = 0;
+            vectorIndex < receiverEncryptionModuleRank;
+            vectorIndex += 1
+        ) {
+            for (
+                let coefficientIndex = 0;
+                coefficientIndex < receiverEncryptionModuleDegree;
+                coefficientIndex += 1
+            ) {
+                variableNames.push(
+                    receiverEncryptionRandomnessVariableName(
+                        input.receiverRosterPosition,
+                        chunkIndex,
+                        vectorIndex,
+                        coefficientIndex,
+                    ),
+                    receiverEncryptionFirstNoiseVariableName(
+                        input.receiverRosterPosition,
+                        chunkIndex,
+                        vectorIndex,
+                        coefficientIndex,
+                    ),
+                );
+            }
+        }
+        for (
+            let coefficientIndex = 0;
+            coefficientIndex < receiverEncryptionModuleDegree;
+            coefficientIndex += 1
+        ) {
+            variableNames.push(
+                receiverEncryptionSecondNoiseVariableName(
+                    input.receiverRosterPosition,
+                    chunkIndex,
+                    coefficientIndex,
+                ),
+            );
+        }
+    }
+
+    return [
+        ...new Set(
+            variableNames.map((variableName) =>
+                requireColumnIndex(input.columnLookup, variableName),
+            ),
+        ),
+    ].sort((leftColumn, rightColumn) => leftColumn - rightColumn);
+};
+
+const buildReceiverPayloadEncryptionRowBatch = (input: {
+    readonly columnLookup: ReadonlyMap<string, number>;
+    readonly publicContext: BallotPrivacyRelationBackendPublicContext;
+    readonly receivers: readonly ReceiverReference[];
+    readonly rowOffset: number;
+    readonly shareVectorWidth: number;
+}): BallotPrivacyBackendStatementRowBatch | undefined => {
+    const publicKeysByReceiver = referencesByReceiver(
+        input.publicContext.receiverPublicKeys,
+    );
+    const payloadsByReceiver = referencesByReceiver(
+        input.publicContext.receiverPayloads,
+    );
+    const receiverRows: BallotPrivacyBackendStatementReceiverEncryptionRowDescriptor[] =
+        [];
+    const variableColumnIndices: number[] = [];
+    let rowOffsetWithinBatch = 0;
+
+    for (const receiver of input.receivers) {
+        const receiverKey = receiverReferenceKey(receiver);
+        const publicKey = publicKeysByReceiver.get(receiverKey);
+        const receiverPayload = payloadsByReceiver.get(receiverKey);
+        if (
+            publicKey?.publicKeyVector === undefined ||
+            publicKey.publicMatrixSeedDigest === undefined ||
+            receiverPayload?.ciphertextChunks === undefined
+        ) {
+            continue;
+        }
+        validateReceiverPublicKeyVector({
+            publicKeyVector: publicKey.publicKeyVector,
+            receiverRosterPosition: receiver.receiverRosterPosition,
+        });
+        validateReceiverPayloadCiphertextChunks({
+            ciphertextChunks: receiverPayload.ciphertextChunks,
+            receiverRosterPosition: receiver.receiverRosterPosition,
+        });
+        const plaintextBitLength =
+            receiverPayload.plaintextBitLength ??
+            input.shareVectorWidth * receiverShareRepresentativeBitLength +
+                shareCommitmentOpeningDimension *
+                    receiverOpeningRandomnessBitLength;
+        if (
+            plaintextBitLength >
+            receiverPayload.ciphertextChunks.length *
+                receiverEncryptionModuleDegree
+        ) {
+            throw new RangeError(
+                `Receiver ${receiver.receiverRosterPosition} ciphertext chunks do not cover the declared plaintext bit length.`,
+            );
+        }
+        const rowCount =
+            receiverPayload.ciphertextChunks.length *
+            (receiverEncryptionModuleRank + 1) *
+            receiverEncryptionModuleDegree;
+        variableColumnIndices.push(
+            ...receiverPayloadEncryptionVariableColumnIndices({
+                ciphertextChunkCount: receiverPayload.ciphertextChunks.length,
+                columnLookup: input.columnLookup,
+                plaintextBitLength,
+                receiverRosterPosition: receiver.receiverRosterPosition,
+                shareVectorWidth: input.shareVectorWidth,
+            }),
+        );
+        receiverRows.push({
+            ciphertextChunkCount: receiverPayload.ciphertextChunks.length,
+            plaintextBitLength,
+            receiverIdentity: receiver.receiverIdentity,
+            receiverPayloadDigest: receiverPayload.receiverPayloadDigest,
+            receiverPublicKeyDigest: publicKey.receiverPublicKeyDigest,
+            receiverRosterPosition: receiver.receiverRosterPosition,
+            rowCount,
+            rowOffsetWithinBatch,
+        });
+        rowOffsetWithinBatch += rowCount;
+    }
+
+    if (receiverRows.length === 0) {
+        return undefined;
+    }
+    const sortedVariableColumnIndices = [
+        ...new Set(variableColumnIndices),
+    ].sort((leftColumn, rightColumn) => leftColumn - rightColumn);
+    const digestPayload = {
+        receiverEncryptionProfileDigest:
+            input.publicContext.receiverEncryptionProfileDigest,
+        receiverRows,
+        variableColumnIndices: sortedVariableColumnIndices,
+    };
+
+    return {
+        batchKind: 'StructuredModuleLweReceiverEncryptionRows',
+        batchName: 'receiver_payload_encryption_equation_rows',
+        matrixDigest: deriveBackendDigest(explicitBackendMatrixDigestPurpose, {
+            ...digestPayload,
+            matrixKind: 'module-lwe-receiver-encryption-rows',
+        }),
+        modulus: decimalString(receiverEncryptionModulus),
+        receiverRows,
+        rowCount: rowOffsetWithinBatch,
+        rowKind: 'ReceiverPayloadEncryptionEquationRows',
+        rowOffset: input.rowOffset,
+        targetVectorDigest: deriveBackendDigest(
+            explicitBackendTargetVectorDigestPurpose,
+            {
+                ciphertextChunks: input.publicContext.receiverPayloads.map(
+                    (receiverPayload) => ({
+                        ciphertextChunkDigest:
+                            receiverPayload.ciphertextChunkDigest,
+                        receiverIdentity: receiverPayload.receiverIdentity,
+                        receiverPayloadCiphertextRoot:
+                            receiverPayload.receiverPayloadCiphertextRoot,
+                        receiverPayloadDigest:
+                            receiverPayload.receiverPayloadDigest,
+                        receiverRosterPosition:
+                            receiverPayload.receiverRosterPosition,
+                    }),
+                ),
+                ...digestPayload,
+                targetKind: 'module-lwe-receiver-encryption-ciphertext-rows',
+            },
+        ),
+        variableColumnIndices: sortedVariableColumnIndices,
+    };
+};
+
+const buildReceiverKeyBindingRows = (input: {
+    readonly publicContext: BallotPrivacyRelationBackendPublicContext;
+    readonly receivers: readonly ReceiverReference[];
+}): readonly BallotPrivacyBackendStatementExplicitRow[] => {
+    const publicKeysByReceiver = referencesByReceiver(
+        input.publicContext.receiverPublicKeys,
+    );
+    const rows: BallotPrivacyBackendStatementExplicitRow[] = [];
+
+    for (const receiver of input.receivers) {
+        const publicKey = publicKeysByReceiver.get(
+            receiverReferenceKey(receiver),
+        );
+        if (
+            publicKey?.publicKeyVector === undefined ||
+            publicKey.publicMatrixSeedDigest === undefined
+        ) {
+            continue;
+        }
+        validateReceiverPublicKeyVector({
+            publicKeyVector: publicKey.publicKeyVector,
+            receiverRosterPosition: receiver.receiverRosterPosition,
+        });
+        for (
+            let vectorIndex = 0;
+            vectorIndex < receiverEncryptionModuleRank;
+            vectorIndex += 1
+        ) {
+            for (
+                let coefficientIndex = 0;
+                coefficientIndex < receiverEncryptionModuleDegree;
+                coefficientIndex += 1
+            ) {
+                rows.push({
+                    modulus: decimalString(receiverEncryptionModulus),
+                    rowIndex: rows.length,
+                    rowKind: 'ReceiverKeyBinding',
+                    rowName: `receiver_${receiver.receiverRosterPosition}_receiver_key_binding_vector_${vectorIndex}_coefficient_${coefficientIndex}`,
+                    target: '0',
+                    terms: [],
+                });
+            }
+        }
+    }
+
+    return rows;
+};
+
 const buildDigestExpandedRowBatch = (input: {
     readonly algebraicRow: BallotPrivacyAlgebraicRelationRow;
     readonly columnLookup: ReadonlyMap<string, number>;
@@ -1322,7 +2139,10 @@ const componentIdForBatch = (
     if (batch.rowKind === 'EncodedScoreFieldRows') {
         return 'score-and-shamir-field-component';
     }
-    if (batch.rowKind === 'ReceiverPayloadPlaintextBindingRows') {
+    if (
+        batch.rowKind === 'ReceiverPayloadPlaintextBindingRows' ||
+        batch.rowKind === 'ReceiverPayloadPlaintextBitDecompositionRows'
+    ) {
         return 'payload-plaintext-field-component';
     }
     if (
@@ -1331,7 +2151,10 @@ const componentIdForBatch = (
     ) {
         return 'share-commitment-component';
     }
-    if (batch.rowKind === 'ReceiverPayloadEncryptionEquation') {
+    if (
+        batch.rowKind === 'ReceiverPayloadEncryptionEquation' ||
+        batch.rowKind === 'ReceiverPayloadEncryptionEquationRows'
+    ) {
         return 'receiver-encryption-component';
     }
 
@@ -1387,7 +2210,7 @@ const buildBackendProofComponents = (
         }
         const proofLoweringStatus: BallotPrivacyBackendProofComponent['proofLoweringStatus'] =
             componentBatches.every(
-                (batch) => batch.batchKind === 'ExplicitSparseRows',
+                (batch) => batch.batchKind !== 'DigestExpandedRows',
             )
                 ? 'explicitRowsAvailable'
                 : 'digestExpandedRowsPending';
@@ -1422,13 +2245,63 @@ const buildBackendProofComponents = (
     return proofComponents;
 };
 
+const explicitReceiverEncryptionRelationKeys = (input: {
+    readonly publicContext: BallotPrivacyRelationBackendPublicContext;
+    readonly receivers: readonly ReceiverReference[];
+}): ReadonlySet<string> => {
+    const publicKeysByReceiver = referencesByReceiver(
+        input.publicContext.receiverPublicKeys,
+    );
+    const payloadsByReceiver = referencesByReceiver(
+        input.publicContext.receiverPayloads,
+    );
+
+    return new Set(
+        input.receivers.flatMap((receiver) => {
+            const receiverKey = receiverReferenceKey(receiver);
+            const publicKey = publicKeysByReceiver.get(receiverKey);
+            const receiverPayload = payloadsByReceiver.get(receiverKey);
+
+            return publicKey?.publicKeyVector !== undefined &&
+                publicKey.publicMatrixSeedDigest !== undefined &&
+                receiverPayload?.ciphertextChunks !== undefined
+                ? [receiverKey]
+                : [];
+        }),
+    );
+};
+
+const explicitReceiverKeyRelationKeys = (input: {
+    readonly publicContext: BallotPrivacyRelationBackendPublicContext;
+    readonly receivers: readonly ReceiverReference[];
+}): ReadonlySet<string> => {
+    const publicKeysByReceiver = referencesByReceiver(
+        input.publicContext.receiverPublicKeys,
+    );
+
+    return new Set(
+        input.receivers.flatMap((receiver) => {
+            const publicKey = publicKeysByReceiver.get(
+                receiverReferenceKey(receiver),
+            );
+
+            return publicKey?.publicKeyVector !== undefined &&
+                publicKey.publicMatrixSeedDigest !== undefined
+                ? [receiverReferenceKey(receiver)]
+                : [];
+        }),
+    );
+};
+
 const buildBackendStatement = (input: {
     readonly algebraicRows: readonly BallotPrivacyAlgebraicRelationRow[];
     readonly bounds: readonly BallotPrivacyLinearRelationBound[];
     readonly encodedCoordinateCount: number;
     readonly linearRows: readonly BallotPrivacyLinearRelationRow[];
     readonly optionCount: number;
+    readonly publicContext: BallotPrivacyRelationBackendPublicContext;
     readonly pvssThreshold: number;
+    readonly receivers: readonly ReceiverReference[];
     readonly rosterSize: number;
     readonly shareCommitmentProfileDigest: ProtocolDigest;
     readonly shareVectorWidth: number;
@@ -1448,20 +2321,42 @@ const buildBackendStatement = (input: {
             'ReceiverPayloadOpeningPlaintextBinding',
         ].includes(row.rowKind),
     );
+    const payloadPlaintextBitRows = input.linearRows.filter((row) =>
+        [
+            'ReceiverPayloadShareBitDecomposition',
+            'ReceiverPayloadOpeningBitDecomposition',
+        ].includes(row.rowKind),
+    );
+    const explicitBatches: BallotPrivacyBackendStatementRowBatch[] = [];
+    let nextExplicitRowOffset = 0;
     const explicitScoreFieldRowBatch = buildExplicitSparseRowBatch({
         batchName: 'encoded_score_field_rows',
         columnLookup,
         rowKind: 'EncodedScoreFieldRows',
-        rowOffset: 0,
+        rowOffset: nextExplicitRowOffset,
         rows: scoreAndShamirRows,
     });
+    explicitBatches.push(explicitScoreFieldRowBatch);
+    nextExplicitRowOffset += explicitScoreFieldRowBatch.rowCount;
     const explicitPayloadPlaintextRowBatch = buildExplicitSparseRowBatch({
         batchName: 'receiver_payload_plaintext_binding_rows',
         columnLookup,
         rowKind: 'ReceiverPayloadPlaintextBindingRows',
-        rowOffset: explicitScoreFieldRowBatch.rowCount,
+        rowOffset: nextExplicitRowOffset,
         rows: payloadPlaintextBindingRows,
     });
+    explicitBatches.push(explicitPayloadPlaintextRowBatch);
+    nextExplicitRowOffset += explicitPayloadPlaintextRowBatch.rowCount;
+    if (payloadPlaintextBitRows.length > 0) {
+        const explicitPayloadPlaintextBitRowBatch =
+            buildReceiverPayloadPlaintextBitDecompositionRowBatch({
+                columnLookup,
+                rowOffset: nextExplicitRowOffset,
+                rows: payloadPlaintextBitRows,
+            });
+        explicitBatches.push(explicitPayloadPlaintextBitRowBatch);
+        nextExplicitRowOffset += explicitPayloadPlaintextBitRowBatch.rowCount;
+    }
     const shareCommitmentRowsWithPublicVectors = input.algebraicRows.filter(
         (algebraicRow) =>
             algebraicRow.rowKind === 'ShareCommitmentEquation' &&
@@ -1473,32 +2368,71 @@ const buildBackendStatement = (input: {
         shareCommitmentRows: shareCommitmentRowsWithPublicVectors,
         shareVectorWidth: input.shareVectorWidth,
     });
-    const explicitShareCommitmentRowBatch =
-        explicitShareCommitmentRows.length > 0
-            ? buildExplicitShareCommitmentRowBatch({
-                  rowOffset:
-                      explicitScoreFieldRowBatch.rowCount +
-                      explicitPayloadPlaintextRowBatch.rowCount,
-                  rows: explicitShareCommitmentRows,
-              })
-            : undefined;
-    const explicitBatches = [
-        explicitScoreFieldRowBatch,
-        explicitPayloadPlaintextRowBatch,
-        ...(explicitShareCommitmentRowBatch === undefined
-            ? []
-            : [explicitShareCommitmentRowBatch]),
-    ] as const;
-    let nextRowOffset = explicitBatches.reduce(
-        (rowCount, batch) => rowCount + batch.rowCount,
-        0,
-    );
+    if (explicitShareCommitmentRows.length > 0) {
+        const explicitShareCommitmentRowBatch =
+            buildExplicitShareCommitmentRowBatch({
+                rowOffset: nextExplicitRowOffset,
+                rows: explicitShareCommitmentRows,
+            });
+        explicitBatches.push(explicitShareCommitmentRowBatch);
+        nextExplicitRowOffset += explicitShareCommitmentRowBatch.rowCount;
+    }
+    const explicitReceiverEncryptionRowBatch =
+        buildReceiverPayloadEncryptionRowBatch({
+            columnLookup,
+            publicContext: input.publicContext,
+            receivers: input.receivers,
+            rowOffset: nextExplicitRowOffset,
+            shareVectorWidth: input.shareVectorWidth,
+        });
+    if (explicitReceiverEncryptionRowBatch !== undefined) {
+        explicitBatches.push(explicitReceiverEncryptionRowBatch);
+        nextExplicitRowOffset += explicitReceiverEncryptionRowBatch.rowCount;
+    }
+    const explicitReceiverKeyRows = buildReceiverKeyBindingRows({
+        publicContext: input.publicContext,
+        receivers: input.receivers,
+    });
+    if (explicitReceiverKeyRows.length > 0) {
+        const explicitReceiverKeyRowBatch = buildExplicitBackendRowBatch({
+            batchName: 'receiver_key_binding_rows',
+            modulus: decimalString(receiverEncryptionModulus),
+            rowKind: 'ReceiverKeyBindingRows',
+            rowOffset: nextExplicitRowOffset,
+            rows: explicitReceiverKeyRows,
+        });
+        explicitBatches.push(explicitReceiverKeyRowBatch);
+        nextExplicitRowOffset += explicitReceiverKeyRowBatch.rowCount;
+    }
+    const explicitlyLoweredReceiverEncryptionKeys =
+        explicitReceiverEncryptionRelationKeys({
+            publicContext: input.publicContext,
+            receivers: input.receivers,
+        });
+    const explicitlyLoweredReceiverKeyKeys = explicitReceiverKeyRelationKeys({
+        publicContext: input.publicContext,
+        receivers: input.receivers,
+    });
+    let nextRowOffset = nextExplicitRowOffset;
     const digestExpandedBatches = input.algebraicRows
-        .filter(
-            (algebraicRow) =>
-                algebraicRow.rowKind !== 'ShareCommitmentEquation' ||
-                algebraicRow.shareCommitmentPolynomialVector === undefined,
-        )
+        .filter((algebraicRow) => {
+            if (algebraicRow.rowKind === 'ShareCommitmentEquation') {
+                return (
+                    algebraicRow.shareCommitmentPolynomialVector === undefined
+                );
+            }
+            const receiverKey = receiverReferenceKey(algebraicRow);
+            if (algebraicRow.rowKind === 'ReceiverPayloadEncryptionEquation') {
+                return !explicitlyLoweredReceiverEncryptionKeys.has(
+                    receiverKey,
+                );
+            }
+            if (algebraicRow.rowKind === 'ReceiverKeyBinding') {
+                return !explicitlyLoweredReceiverKeyKeys.has(receiverKey);
+            }
+
+            return true;
+        })
         .map((algebraicRow) => {
             const batch = buildDigestExpandedRowBatch({
                 algebraicRow,
@@ -1595,7 +2529,10 @@ const buildBackendStatement = (input: {
 
 const resolveCiphertextChunkCount = (
     receiverPayload: ReceiverPayloadReference | undefined,
-): number => receiverPayload?.ciphertextChunkCount ?? 1;
+): number =>
+    receiverPayload?.ciphertextChunkCount ??
+    receiverPayload?.ciphertextChunks?.length ??
+    1;
 
 const buildAlgebraicRows = (
     input: {
@@ -1644,15 +2581,6 @@ const buildAlgebraicRows = (
                 registry,
                 receiverRosterPosition,
             );
-        const encryptionRandomnessVariableName =
-            addReceiverEncryptionRandomnessVariable(
-                registry,
-                receiverRosterPosition,
-            );
-        const encryptionNoiseVariableName = addReceiverEncryptionNoiseVariable(
-            registry,
-            receiverRosterPosition,
-        );
         const shareCommitmentPublicInputs = {
             commitmentBodyDigest:
                 shareCommitment?.commitmentBodyDigest ??
@@ -1701,6 +2629,40 @@ const buildAlgebraicRows = (
         };
         const ciphertextChunkCount =
             resolveCiphertextChunkCount(receiverPayload);
+        const hasExplicitReceiverEncryptionRows =
+            publicKey?.publicKeyVector !== undefined &&
+            publicKey.publicMatrixSeedDigest !== undefined &&
+            receiverPayload?.ciphertextChunks !== undefined;
+        const plaintextBitLength =
+            receiverPayload?.plaintextBitLength ??
+            encodedCoordinateCount * receiverShareRepresentativeBitLength +
+                shareCommitmentOpeningDimension *
+                    receiverOpeningRandomnessBitLength;
+        const payloadPlaintextBitVariableNames =
+            hasExplicitReceiverEncryptionRows
+                ? receiverPayloadPlaintextBitVariableNames(
+                      registry,
+                      receiverRosterPosition,
+                      encodedCoordinateCount,
+                      plaintextBitLength,
+                  )
+                : [];
+        const encryptionVariableNames = hasExplicitReceiverEncryptionRows
+            ? receiverEncryptionVariableNames(
+                  registry,
+                  receiverRosterPosition,
+                  ciphertextChunkCount,
+              )
+            : [
+                  addDigestExpandedReceiverEncryptionRandomnessVariable(
+                      registry,
+                      receiverRosterPosition,
+                  ),
+                  addDigestExpandedReceiverEncryptionNoiseVariable(
+                      registry,
+                      receiverRosterPosition,
+                  ),
+              ];
 
         rows.push({
             equationCount:
@@ -1754,8 +2716,8 @@ const buildAlgebraicRows = (
             variableNames: [
                 ...payloadPlaintextShareVariableNames,
                 ...payloadPlaintextOpeningVariableNames,
-                encryptionRandomnessVariableName,
-                encryptionNoiseVariableName,
+                ...payloadPlaintextBitVariableNames,
+                ...encryptionVariableNames,
             ],
         });
         rows.push({
@@ -1809,8 +2771,11 @@ const buildBounds = (
     const quotientVariables: string[] = [];
     const receiverPayloadPlaintextShareFieldVariables: string[] = [];
     const receiverPayloadPlaintextOpeningVariables: string[] = [];
+    const receiverPayloadPlaintextBitVariables: string[] = [];
     const shareCommitmentOpeningVariables: string[] = [];
     const receiverEncryptionRandomnessVariables: string[] = [];
+    const receiverEncryptionFirstNoiseVariables: string[] = [];
+    const receiverEncryptionSecondNoiseVariables: string[] = [];
     const receiverEncryptionNoiseVariables: string[] = [];
 
     for (const variable of registry.values()) {
@@ -1840,10 +2805,16 @@ const buildBounds = (
             receiverPayloadPlaintextOpeningVariables.push(
                 variable.variableName,
             );
+        } else if (variable.variableRole === 'ReceiverPayloadPlaintextBit') {
+            receiverPayloadPlaintextBitVariables.push(variable.variableName);
         } else if (variable.variableRole === 'ShareCommitmentOpening') {
             shareCommitmentOpeningVariables.push(variable.variableName);
         } else if (variable.variableRole === 'ReceiverEncryptionRandomness') {
             receiverEncryptionRandomnessVariables.push(variable.variableName);
+        } else if (variable.variableRole === 'ReceiverEncryptionFirstNoise') {
+            receiverEncryptionFirstNoiseVariables.push(variable.variableName);
+        } else if (variable.variableRole === 'ReceiverEncryptionSecondNoise') {
+            receiverEncryptionSecondNoiseVariables.push(variable.variableName);
         } else if (variable.variableRole === 'ReceiverEncryptionNoise') {
             receiverEncryptionNoiseVariables.push(variable.variableName);
         }
@@ -1887,10 +2858,29 @@ const buildBounds = (
         variableNames: receiverPayloadPlaintextOpeningVariables,
     });
     bounds.push({
+        boundKind: 'Boolean',
+        boundName: 'receiver_payload_plaintext_bits_boolean',
+        maximum: 1,
+        minimum: 0,
+        variableNames: receiverPayloadPlaintextBitVariables,
+    });
+    bounds.push({
         absoluteMaximum: receiverEncryptionShortVectorInfinityNormBound,
         boundKind: 'SignedIntegerAbsoluteBound',
         boundName: 'receiver_encryption_randomness_certified_absolute_bound',
         variableNames: receiverEncryptionRandomnessVariables,
+    });
+    bounds.push({
+        absoluteMaximum: receiverEncryptionShortVectorInfinityNormBound,
+        boundKind: 'SignedIntegerAbsoluteBound',
+        boundName: 'receiver_encryption_first_noise_certified_absolute_bound',
+        variableNames: receiverEncryptionFirstNoiseVariables,
+    });
+    bounds.push({
+        absoluteMaximum: receiverEncryptionShortVectorInfinityNormBound,
+        boundKind: 'SignedIntegerAbsoluteBound',
+        boundName: 'receiver_encryption_second_noise_certified_absolute_bound',
+        variableNames: receiverEncryptionSecondNoiseVariables,
     });
     bounds.push({
         absoluteMaximum: receiverEncryptionShortVectorInfinityNormBound,
@@ -1926,6 +2916,11 @@ export const lowerBallotPrivacyRelationToBackendStatement = (input: {
     }
 
     const registry = createVariableRegistry();
+    const hasExplicitReceiverEncryptionMaterial =
+        explicitReceiverEncryptionRelationKeys({
+            publicContext: input.publicContext,
+            receivers: input.relationInput.receivers,
+        }).size > 0;
     const linearRows = [
         ...buildMembershipRows(input.relationInput, registry),
         ...buildShamirRows(input.relationInput, registry),
@@ -1933,6 +2928,12 @@ export const lowerBallotPrivacyRelationToBackendStatement = (input: {
             input.relationInput,
             registry,
         ),
+        ...(hasExplicitReceiverEncryptionMaterial
+            ? buildReceiverPayloadPlaintextBitDecompositionRows(
+                  input.relationInput,
+                  registry,
+              )
+            : []),
     ];
     const algebraicRows = buildAlgebraicRows(input, registry);
     const bounds = buildBounds(input.relationInput, registry);
@@ -1943,7 +2944,9 @@ export const lowerBallotPrivacyRelationToBackendStatement = (input: {
         encodedCoordinateCount: relationCompilation.encodedCoordinateCount,
         linearRows,
         optionCount: relationCompilation.optionCount,
+        publicContext: input.publicContext,
         pvssThreshold: relationCompilation.pvssThreshold,
+        receivers: input.relationInput.receivers,
         rosterSize: relationCompilation.rosterSize,
         shareCommitmentProfileDigest:
             input.publicContext.shareCommitmentProfileDigest,

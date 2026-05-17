@@ -6,7 +6,10 @@ import { deriveProtocolDigest } from "../../packages/crypto/src/digests.js";
 import {
     buildBallotProofComponentBundleStatement,
     buildBallotProofComponentLinearProofProjection,
+    buildBallotProofComponentProofStatementPlans,
+    verifyBallotProofComponentExplicitRows,
     type BallotProofComponentBundleStatement,
+    type BallotProofComponentProofStatementPlan,
     type BallotProofComponentStatement,
     type BallotProofComponentProjectionWitness,
 } from "../../packages/protocol/src/ballot-privacy/ballot-proof-linear-statement.js";
@@ -15,8 +18,10 @@ import {
     createShareCommitmentMessageBoundCert,
 } from "../../packages/protocol/src/ballot-privacy/profiles.js";
 import {
+    createFixtureRandomnessSource,
     createShareCommitmentPolynomialVector,
     deriveShareCommitmentBodyDigest,
+    generateReceiverState,
 } from "../../packages/protocol/src/ballot-privacy/lattice-primitives.js";
 import { lowerBallotPrivacyRelationToBackendStatement } from "../../packages/protocol/src/ballot-privacy/relation-backend-lowering.js";
 import type {
@@ -52,6 +57,42 @@ interface EncodedBallotRelationVectorCase {
         readonly statementRows: number;
         readonly targetVectorDigest: string;
         readonly witnessL2BoundSquared: string;
+    }[];
+    readonly componentProofReadinessManifests?: readonly {
+        readonly coefficientModulus: string;
+        readonly componentId: string;
+        readonly denseCoefficientCount: string | null;
+        readonly denseMatrixOracleStatus:
+            | "available-for-small-field-component"
+            | "blocked-pending-sparse-proof-statement"
+            | "not-applicable-for-structured-component"
+            | "not-applicable-for-public-zero-witness-component";
+        readonly objectType: "BallotProofComponentProofReadinessManifest";
+        readonly objectVersion: 1;
+        readonly proofLoweringStatus: string;
+        readonly proofStatementFormat:
+            | "dense-polynomial-matrix-linear-proof-v1"
+            | "sparse-polynomial-matrix-linear-proof-v1"
+            | "structured-module-lwe-linear-proof-v1"
+            | "public-zero-witness-binding-check-v1";
+        readonly recommendedSourceRingDegree: number | null;
+        readonly rowBatchNames: readonly string[];
+        readonly rowCount: number;
+        readonly variableColumnCount: number;
+    }[];
+    readonly componentProofStatementPlans?: readonly BallotProofComponentProofStatementPlan[];
+    readonly proofReadinessSummary?: {
+        readonly denseMatrixOracleComponentCount: number;
+        readonly fullComponentProofBytesAvailable: false;
+        readonly publicZeroWitnessComponentCount: number;
+        readonly sparseOrStructuredComponentCount: number;
+        readonly totalComponentCount: number;
+    };
+    readonly explicitComponentVerificationSummaries?: readonly {
+        readonly checkedRowBatchNames: readonly string[];
+        readonly componentId: string;
+        readonly rowCount: number;
+        readonly verificationStatus: "explicitRowsSatisfied";
     }[];
     readonly componentBundleStatement?: BallotProofComponentBundleStatement;
     readonly componentBundleSummary?: {
@@ -180,6 +221,30 @@ const miniRelationInput = (): BallotPrivacyRelationCompilerInput => ({
     scoreOneHotWitnesses: [oneHotScore(7), oneHotScore(3)],
 });
 
+const singleOptionRelationInput = (): BallotPrivacyRelationCompilerInput => ({
+    encodedCoordinateShamirCoefficients: [
+        [2],
+        ...Array.from({ length: 10 }, () => [0] as const),
+    ],
+    normalizedScores: [5],
+    optionCount: 1,
+    pvssThreshold: 2,
+    receivers: Array.from({ length: 3 }, (_unusedValue, receiverOffset) => {
+        const receiverRosterPosition = receiverOffset + 1;
+
+        return {
+            receiverIdentity: `receiver-${receiverRosterPosition}`,
+            receiverRosterPosition,
+            receiverShareVector: [
+                5 + 2 * receiverRosterPosition,
+                ...oneHotScore(5),
+            ],
+        };
+    }),
+    rosterSize: 3,
+    scoreOneHotWitnesses: [oneHotScore(5)],
+});
+
 const mandatoryRelationInput = (): BallotPrivacyRelationCompilerInput => {
     const scores = Array.from(
         { length: 20 },
@@ -216,6 +281,145 @@ const shareCommitmentOpeningForReceiver = (
         (_unusedValue, openingCoordinateIndex) =>
             ((receiverRosterPosition + openingCoordinateIndex) % 5) - 2,
     );
+
+const receiverEncryptionModuleRank = 4;
+const receiverEncryptionModuleDegree = 256;
+const receiverEncryptionModulus = 12_289;
+const receiverEncryptionMessageScale = Math.floor(
+    receiverEncryptionModulus / 2,
+);
+const receiverShareRepresentativeBitLength = 17;
+const receiverOpeningRandomnessBitLength = 12;
+const receiverOpeningEncodingOffset = 1_024;
+
+const unsignedBits = (value: number, bitLength: number): readonly number[] => {
+    if (
+        !Number.isSafeInteger(value) ||
+        value < 0 ||
+        BigInt(value) >= 1n << BigInt(bitLength)
+    ) {
+        throw new RangeError(
+            `Unsigned plaintext value ${String(value)} does not fit ${String(bitLength)} bits.`,
+        );
+    }
+    const integerValue = BigInt(value);
+
+    return Array.from({ length: bitLength }, (_unusedValue, bitIndex) =>
+        Number((integerValue >> BigInt(bitIndex)) & 1n),
+    );
+};
+
+const receiverPayloadPlaintextBitsForRelation = (input: {
+    readonly openingRandomness: readonly number[];
+    readonly receiverShareVector: readonly number[];
+}): readonly number[] => [
+    ...input.receiverShareVector.flatMap((shareRepresentative) =>
+        unsignedBits(shareRepresentative, receiverShareRepresentativeBitLength),
+    ),
+    ...input.openingRandomness.flatMap((openingCoordinate) =>
+        unsignedBits(
+            openingCoordinate + receiverOpeningEncodingOffset,
+            receiverOpeningRandomnessBitLength,
+        ),
+    ),
+];
+
+const zeroReceiverEncryptionVector = (): readonly (readonly number[])[] =>
+    Array.from({ length: receiverEncryptionModuleRank }, () =>
+        Array.from({ length: receiverEncryptionModuleDegree }, () => 0),
+    );
+
+const zeroReceiverEncryptionPolynomial = (): readonly number[] =>
+    Array.from({ length: receiverEncryptionModuleDegree }, () => 0);
+
+const deterministicReceiverPayloadCiphertext = (input: {
+    readonly plaintextBits: readonly number[];
+    readonly receiverEncryptionProfileDigest: string;
+    readonly receiverIdentity: string;
+    readonly receiverRosterPosition: number;
+}): {
+    readonly ciphertextBodyDigest: string;
+    readonly ciphertextChunkDigest: string;
+    readonly ciphertextChunks: readonly {
+        readonly chunkIndex: number;
+        readonly firstCiphertextVector: readonly (readonly number[])[];
+        readonly secondCiphertextPolynomial: readonly number[];
+    }[];
+    readonly plaintextBitLength: number;
+    readonly receiverPayloadCiphertextRoot: string;
+    readonly receiverPayloadDigest: string;
+    readonly witness: NonNullable<
+        BallotProofComponentProjectionWitness["receiverEncryptionWitnesses"]
+    >[number];
+} => {
+    const chunkCount = Math.ceil(
+        input.plaintextBits.length / receiverEncryptionModuleDegree,
+    );
+    const ciphertextChunks = Array.from(
+        { length: chunkCount },
+        (_unusedValue, chunkIndex) => ({
+            chunkIndex,
+            firstCiphertextVector: zeroReceiverEncryptionVector(),
+            secondCiphertextPolynomial: Array.from(
+                { length: receiverEncryptionModuleDegree },
+                (_unusedCoefficient, coefficientIndex) =>
+                    input.plaintextBits[
+                        chunkIndex * receiverEncryptionModuleDegree +
+                            coefficientIndex
+                    ] === 1
+                        ? receiverEncryptionMessageScale
+                        : 0,
+            ),
+        }),
+    );
+    const ciphertextBodyDigest = deriveProtocolDigest(
+        "ReceiverPayloadCiphertextRoot",
+        {
+            ciphertextChunks,
+            plaintextBitLength: input.plaintextBits.length,
+            receiverEncryptionProfileDigest:
+                input.receiverEncryptionProfileDigest,
+        },
+    );
+    const receiverPayloadCiphertextRoot = deriveProtocolDigest(
+        "ReceiverPayloadCiphertextRoot",
+        {
+            ciphertextBodyDigest,
+            receiverIdentity: input.receiverIdentity,
+            receiverRosterPosition: input.receiverRosterPosition,
+        },
+    );
+    const receiverPayloadDigest = deriveProtocolDigest(
+        "ReceiverPayloadDigest",
+        {
+            receiverPayloadCiphertextRoot,
+            receiverIdentity: input.receiverIdentity,
+            receiverRosterPosition: input.receiverRosterPosition,
+        },
+    );
+
+    return {
+        ciphertextBodyDigest,
+        ciphertextChunkDigest: deriveProtocolDigest("ChallengeDomainDigest", {
+            ciphertextChunks,
+            plaintextBitLength: input.plaintextBits.length,
+            purpose: "ballot-privacy-vector-receiver-ciphertext-chunks",
+        }),
+        ciphertextChunks,
+        plaintextBitLength: input.plaintextBits.length,
+        receiverPayloadCiphertextRoot,
+        receiverPayloadDigest,
+        witness: {
+            chunkWitnesses: ciphertextChunks.map((ciphertextChunk) => ({
+                chunkIndex: ciphertextChunk.chunkIndex,
+                encryptionRandomnessVector: zeroReceiverEncryptionVector(),
+                firstNoiseVector: zeroReceiverEncryptionVector(),
+                secondNoisePolynomial: zeroReceiverEncryptionPolynomial(),
+            })),
+            receiverRosterPosition: input.receiverRosterPosition,
+        },
+    };
+};
 
 const publicContextForRoster = (
     relationInput: BallotPrivacyRelationCompilerInput,
@@ -471,8 +675,99 @@ const projectionWitnessForRelationInput = (
     })),
 });
 
+const explicitReceiverEncryptionContextForRelation = (
+    relationInput: BallotPrivacyRelationCompilerInput,
+): {
+    readonly projectionWitness: BallotProofComponentProjectionWitness;
+    readonly publicContext: BallotPrivacyRelationBackendPublicContext;
+} => {
+    const profileSet = createBallotPrivacyProfileSet();
+    const publicContext = publicContextForRoster(relationInput, true);
+    const encryptedReceiverRecords = relationInput.receivers.map((receiver) => {
+        const receiverState = generateReceiverState({
+            ceremonyId: publicContext.ceremonyId,
+            manifestDigest: publicContext.manifestDigest,
+            randomnessSource: createFixtureRandomnessSource(
+                `encoded-relation-vector-receiver-key-${receiver.receiverRosterPosition}`,
+            ),
+            receiverEncryptionProfile: profileSet.receiverEncryptionProfile,
+            receiverIdentity: receiver.receiverIdentity,
+            receiverRosterPosition: receiver.receiverRosterPosition,
+            recoveryEpoch: 0,
+            rosterDigest: publicContext.rosterDigest,
+        });
+        const openingRandomness = shareCommitmentOpeningForReceiver(
+            receiver.receiverRosterPosition,
+        );
+        const encryptedPayload = deterministicReceiverPayloadCiphertext({
+            plaintextBits: receiverPayloadPlaintextBitsForRelation({
+                openingRandomness,
+                receiverShareVector: receiver.receiverShareVector,
+            }),
+            receiverEncryptionProfileDigest:
+                profileSet.receiverEncryptionProfile
+                    .receiverEncryptionProfileDigest,
+            receiverIdentity: receiver.receiverIdentity,
+            receiverRosterPosition: receiver.receiverRosterPosition,
+        });
+
+        return {
+            encryptedPayload,
+            receiver,
+            receiverState,
+        };
+    });
+
+    return {
+        projectionWitness: {
+            ...projectionWitnessForRelationInput(relationInput),
+            receiverEncryptionWitnesses: encryptedReceiverRecords.map(
+                ({ encryptedPayload, receiver }) => ({
+                    chunkWitnesses: encryptedPayload.witness.chunkWitnesses,
+                    receiverRosterPosition: receiver.receiverRosterPosition,
+                }),
+            ),
+        },
+        publicContext: {
+            ...publicContext,
+            receiverPayloads: encryptedReceiverRecords.map(
+                ({ encryptedPayload, receiver }) => ({
+                    ciphertextBodyDigest: encryptedPayload.ciphertextBodyDigest,
+                    ciphertextChunkCount:
+                        encryptedPayload.ciphertextChunks.length,
+                    ciphertextChunkDigest:
+                        encryptedPayload.ciphertextChunkDigest,
+                    ciphertextChunks: encryptedPayload.ciphertextChunks,
+                    plaintextBitLength: encryptedPayload.plaintextBitLength,
+                    receiverIdentity: receiver.receiverIdentity,
+                    receiverPayloadCiphertextRoot:
+                        encryptedPayload.receiverPayloadCiphertextRoot,
+                    receiverPayloadDigest:
+                        encryptedPayload.receiverPayloadDigest,
+                    receiverRosterPosition: receiver.receiverRosterPosition,
+                }),
+            ),
+            receiverPublicKeys: encryptedReceiverRecords.map(
+                ({ receiver, receiverState }) => ({
+                    keyMaterialDigest:
+                        receiverState.receiverPublicKey.keyMaterialDigest,
+                    publicKeyVector:
+                        receiverState.publicKeyMaterial.publicKeyVector,
+                    publicMatrixSeedDigest:
+                        receiverState.publicKeyMaterial.publicMatrixSeedDigest,
+                    receiverIdentity: receiver.receiverIdentity,
+                    receiverPublicKeyDigest:
+                        receiverState.receiverPublicKey.receiverPublicKeyDigest,
+                    receiverRosterPosition: receiver.receiverRosterPosition,
+                }),
+            ),
+        },
+    };
+};
+
 const componentProjectionSummaries = (input: {
     readonly loweredStatement: BallotPrivacyLoweredLinearRelationStatement;
+    readonly projectionWitness?: BallotProofComponentProjectionWitness;
     readonly publicContext: BallotPrivacyRelationBackendPublicContext;
     readonly relationInput: BallotPrivacyRelationCompilerInput;
 }): NonNullable<
@@ -505,9 +800,9 @@ const componentProjectionSummaries = (input: {
             componentId: profile.componentId,
             loweredStatement: input.loweredStatement,
             parameterProfileId: profile.parameterProfileId,
-            projectionWitness: projectionWitnessForRelationInput(
-                input.relationInput,
-            ),
+            projectionWitness:
+                input.projectionWitness ??
+                projectionWitnessForRelationInput(input.relationInput),
             relationInput: input.relationInput,
             sourceRingDegree: 1,
             witnessL2BoundSquared: profile.witnessL2BoundSquared,
@@ -532,14 +827,203 @@ const componentProjectionSummaries = (input: {
     });
 };
 
+const sourceRingDegreeForComponent = (input: {
+    readonly coefficientModulus: string;
+    readonly componentId: string;
+}): number | null => {
+    if (input.componentId === "share-commitment-component") {
+        return 256;
+    }
+    if (
+        input.componentId === "score-and-shamir-field-component" ||
+        input.componentId === "payload-plaintext-field-component"
+    ) {
+        return 64;
+    }
+    if (input.componentId === "receiver-encryption-component") {
+        return 256;
+    }
+    if (input.componentId === "receiver-key-binding-component") {
+        return null;
+    }
+
+    throw new Error(`Unknown proof component ${input.componentId}.`);
+};
+
+const denseCoefficientCountForComponent = (input: {
+    readonly componentId: string;
+    readonly coefficientModulus: string;
+    readonly rowCount: number;
+    readonly variableColumnCount: number;
+}): string | null => {
+    const sourceRingDegree = sourceRingDegreeForComponent(input);
+    if (sourceRingDegree === null || input.variableColumnCount === 0) {
+        return null;
+    }
+
+    return (
+        BigInt(input.rowCount) *
+        BigInt(input.variableColumnCount) *
+        BigInt(sourceRingDegree)
+    ).toString();
+};
+
+const proofStatementFormatForComponent = (input: {
+    readonly componentId: string;
+    readonly rowBatchNames: readonly string[];
+    readonly variableColumnCount: number;
+}): NonNullable<
+    EncodedBallotRelationVectorCase["componentProofReadinessManifests"]
+>[number]["proofStatementFormat"] => {
+    if (input.componentId === "receiver-encryption-component") {
+        return "structured-module-lwe-linear-proof-v1";
+    }
+    if (
+        input.componentId === "receiver-key-binding-component" &&
+        input.variableColumnCount === 0
+    ) {
+        return "public-zero-witness-binding-check-v1";
+    }
+    if (
+        input.rowBatchNames.length === 1 &&
+        input.rowBatchNames[0] === "encoded_score_field_rows"
+    ) {
+        return "dense-polynomial-matrix-linear-proof-v1";
+    }
+
+    return "sparse-polynomial-matrix-linear-proof-v1";
+};
+
+const denseMatrixOracleStatusForComponent = (input: {
+    readonly componentId: string;
+    readonly proofStatementFormat: string;
+}): NonNullable<
+    EncodedBallotRelationVectorCase["componentProofReadinessManifests"]
+>[number]["denseMatrixOracleStatus"] => {
+    if (
+        input.proofStatementFormat === "dense-polynomial-matrix-linear-proof-v1"
+    ) {
+        return "available-for-small-field-component";
+    }
+    if (
+        input.proofStatementFormat === "structured-module-lwe-linear-proof-v1"
+    ) {
+        return "not-applicable-for-structured-component";
+    }
+    if (input.proofStatementFormat === "public-zero-witness-binding-check-v1") {
+        return "not-applicable-for-public-zero-witness-component";
+    }
+
+    return "blocked-pending-sparse-proof-statement";
+};
+
+const componentProofReadinessManifests = (input: {
+    readonly loweredStatement: BallotPrivacyLoweredLinearRelationStatement;
+}): NonNullable<
+    EncodedBallotRelationVectorCase["componentProofReadinessManifests"]
+> =>
+    input.loweredStatement.backendStatement.proofComponents.map((component) => {
+        const recommendedSourceRingDegree = sourceRingDegreeForComponent({
+            coefficientModulus: component.coefficientModulus,
+            componentId: component.componentId,
+        });
+        const proofStatementFormat = proofStatementFormatForComponent({
+            componentId: component.componentId,
+            rowBatchNames: component.rowBatchNames,
+            variableColumnCount: component.variableColumnCount,
+        });
+
+        return {
+            coefficientModulus: component.coefficientModulus,
+            componentId: component.componentId,
+            denseCoefficientCount: denseCoefficientCountForComponent({
+                coefficientModulus: component.coefficientModulus,
+                componentId: component.componentId,
+                rowCount: component.rowCount,
+                variableColumnCount: component.variableColumnCount,
+            }),
+            denseMatrixOracleStatus: denseMatrixOracleStatusForComponent({
+                componentId: component.componentId,
+                proofStatementFormat,
+            }),
+            objectType: "BallotProofComponentProofReadinessManifest",
+            objectVersion: 1,
+            proofLoweringStatus: component.proofLoweringStatus,
+            proofStatementFormat,
+            recommendedSourceRingDegree,
+            rowBatchNames: component.rowBatchNames,
+            rowCount: component.rowCount,
+            variableColumnCount: component.variableColumnCount,
+        };
+    });
+
+const proofReadinessSummary = (
+    manifests: NonNullable<
+        EncodedBallotRelationVectorCase["componentProofReadinessManifests"]
+    >,
+): NonNullable<EncodedBallotRelationVectorCase["proofReadinessSummary"]> => ({
+    denseMatrixOracleComponentCount: manifests.filter(
+        (manifest) =>
+            manifest.denseMatrixOracleStatus ===
+            "available-for-small-field-component",
+    ).length,
+    fullComponentProofBytesAvailable: false,
+    publicZeroWitnessComponentCount: manifests.filter(
+        (manifest) =>
+            manifest.denseMatrixOracleStatus ===
+            "not-applicable-for-public-zero-witness-component",
+    ).length,
+    sparseOrStructuredComponentCount: manifests.filter(
+        (manifest) =>
+            manifest.denseMatrixOracleStatus ===
+                "blocked-pending-sparse-proof-statement" ||
+            manifest.denseMatrixOracleStatus ===
+                "not-applicable-for-structured-component",
+    ).length,
+    totalComponentCount: manifests.length,
+});
+
+const explicitComponentVerificationSummaries = (input: {
+    readonly loweredStatement: BallotPrivacyLoweredLinearRelationStatement;
+    readonly projectionWitness: BallotProofComponentProjectionWitness;
+    readonly relationInput: BallotPrivacyRelationCompilerInput;
+}): NonNullable<
+    EncodedBallotRelationVectorCase["explicitComponentVerificationSummaries"]
+> =>
+    (
+        [
+            "score-and-shamir-field-component",
+            "payload-plaintext-field-component",
+            "share-commitment-component",
+            "receiver-encryption-component",
+            "receiver-key-binding-component",
+        ] as const
+    ).map((componentId) => {
+        const verification = verifyBallotProofComponentExplicitRows({
+            componentId,
+            loweredStatement: input.loweredStatement,
+            projectionWitness: input.projectionWitness,
+            relationInput: input.relationInput,
+        });
+
+        return {
+            checkedRowBatchNames: verification.checkedRowBatchNames,
+            componentId: verification.componentId,
+            rowCount: verification.rowCount,
+            verificationStatus: verification.verificationStatus,
+        };
+    });
+
 const acceptingCase = (input: {
     readonly baselineRelationStatementDigest?: string;
     readonly caseName: string;
     readonly description: string;
     readonly expectedDigestChanged?: true;
     readonly includeComponentProjectionSummaries?: boolean;
+    readonly includeExplicitComponentVerificationSummaries?: boolean;
     readonly includeFullStatement: boolean;
     readonly mutation?: string;
+    readonly projectionWitness?: BallotProofComponentProjectionWitness;
     readonly publicContext: BallotPrivacyRelationBackendPublicContext;
     readonly relationInput: BallotPrivacyRelationCompilerInput;
 }): EncodedBallotRelationVectorCase => {
@@ -558,6 +1042,21 @@ const acceptingCase = (input: {
             input.publicContext.ballotProofStatementDigest,
         loweredStatement: result.statement,
     });
+    const proofReadinessManifests =
+        input.includeExplicitComponentVerificationSummaries
+            ? componentProofReadinessManifests({
+                  loweredStatement: result.statement,
+              })
+            : undefined;
+    const componentProofStatementPlans =
+        input.includeExplicitComponentVerificationSummaries
+            ? buildBallotProofComponentProofStatementPlans({
+                  ballotProofStatementDigest:
+                      input.publicContext.ballotProofStatementDigest,
+                  componentBundleStatement,
+                  loweredStatement: result.statement,
+              })
+            : undefined;
 
     return {
         caseName: input.caseName,
@@ -571,10 +1070,25 @@ const acceptingCase = (input: {
         componentProjectionSummaries: input.includeComponentProjectionSummaries
             ? componentProjectionSummaries({
                   loweredStatement: result.statement,
+                  projectionWitness: input.projectionWitness,
                   publicContext: input.publicContext,
                   relationInput: input.relationInput,
               })
             : undefined,
+        componentProofReadinessManifests: proofReadinessManifests,
+        componentProofStatementPlans,
+        explicitComponentVerificationSummaries:
+            input.includeExplicitComponentVerificationSummaries
+                ? explicitComponentVerificationSummaries({
+                      loweredStatement: result.statement,
+                      projectionWitness:
+                          input.projectionWitness ??
+                          projectionWitnessForRelationInput(
+                              input.relationInput,
+                          ),
+                      relationInput: input.relationInput,
+                  })
+                : undefined,
         description: input.description,
         expectedOutcome: "accept",
         loweredStatement: input.includeFullStatement
@@ -584,6 +1098,10 @@ const acceptingCase = (input: {
             ? undefined
             : summarizeStatement(result.statement),
         mutation: input.mutation ?? "none",
+        proofReadinessSummary:
+            proofReadinessManifests === undefined
+                ? undefined
+                : proofReadinessSummary(proofReadinessManifests),
         trace: {
             baselineRelationStatementDigest:
                 input.baselineRelationStatementDigest,
@@ -1037,6 +1555,7 @@ const mutatedMiniRelationInputs = (
 
 const main = async (): Promise<void> => {
     const miniInput = miniRelationInput();
+    const fullExplicitMiniInput = singleOptionRelationInput();
     const mandatoryInput = mandatoryRelationInput();
     const miniPublicContext = publicContextForRoster(miniInput, true);
     const miniDigestExpandedPublicContext = publicContextForRoster(
@@ -1064,11 +1583,25 @@ const main = async (): Promise<void> => {
         publicContext: miniPublicContext,
         relationInput: miniInput,
     });
+    const fullExplicitMiniContext =
+        explicitReceiverEncryptionContextForRelation(fullExplicitMiniInput);
+    const fullExplicitMiniCase = acceptingCase({
+        caseName: "mini-encoded-ballot-full-explicit-relation",
+        description:
+            "Mini encoded-score ballot relation with explicit share commitments, receiver ciphertext chunks, and receiver public keys for all five proof components.",
+        includeComponentProjectionSummaries: true,
+        includeExplicitComponentVerificationSummaries: true,
+        includeFullStatement: false,
+        projectionWitness: fullExplicitMiniContext.projectionWitness,
+        publicContext: fullExplicitMiniContext.publicContext,
+        relationInput: fullExplicitMiniInput,
+    });
     const miniBaselineDigest =
         miniExplicitShareCommitmentCase.trace.relationStatementDigest ?? "";
     const cases: EncodedBallotRelationVectorCase[] = [
         miniAcceptingCase,
         miniExplicitShareCommitmentCase,
+        fullExplicitMiniCase,
         acceptingCase({
             caseName: "mandatory-profile-encoded-ballot-relation",
             description:
@@ -1106,7 +1639,7 @@ const main = async (): Promise<void> => {
     };
 
     await mkdir(path.dirname(outputPath), { recursive: true });
-    await writeFile(outputPath, `${JSON.stringify(vectorFile, null, 4)}\n`);
+    await writeFile(outputPath, `${JSON.stringify(vectorFile)}\n`);
 };
 
 void main();

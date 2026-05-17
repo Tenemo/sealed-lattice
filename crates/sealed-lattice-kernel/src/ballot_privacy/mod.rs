@@ -18,6 +18,7 @@ pub mod polynomial_ring;
 pub mod polynomial_vector;
 pub mod proof_coder;
 pub mod receiver_key_vectors;
+pub mod sparse_linear_proof_statement;
 pub mod sparse_polynomial_matrix;
 pub mod sparse_polynomial_vector;
 

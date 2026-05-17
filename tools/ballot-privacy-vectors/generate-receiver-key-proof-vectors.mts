@@ -659,7 +659,7 @@ const main = async (): Promise<void> => {
     };
 
     await mkdir(path.dirname(outputPath), { recursive: true });
-    await writeFile(outputPath, `${JSON.stringify(vectorFile, null, 4)}\n`);
+    await writeFile(outputPath, `${JSON.stringify(vectorFile)}\n`);
 };
 
 await main();

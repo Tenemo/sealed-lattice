@@ -194,7 +194,7 @@ fn validate_demo_statement_inputs(
     Ok(())
 }
 
-fn validate_source_polynomial(
+pub(crate) fn validate_source_polynomial(
     parameter_set: &LinearProofParameterSet,
     polynomial: &[u64],
 ) -> CanonicalResult<()> {
@@ -272,7 +272,7 @@ fn transform_statement_matrix_to_proof_ring(
     Ok(transformed_entries)
 }
 
-fn transform_target_vector_to_proof_ring(
+pub(crate) fn transform_target_vector_to_proof_ring(
     target_vector_coefficients: &[Vec<u64>],
     parameter_set: &LinearProofParameterSet,
     proof_encoding: &LazerDemoProofEncoding,
@@ -310,7 +310,7 @@ fn transform_target_vector_to_proof_ring(
     Ok(transformed_entries)
 }
 
-fn split_centered_source_polynomial_into_proof_ring(
+pub(crate) fn split_centered_source_polynomial_into_proof_ring(
     source_polynomial: &[u64],
     source_modulus: u64,
     source_polynomial_split_factor: usize,
@@ -335,7 +335,7 @@ fn split_centered_source_polynomial_into_proof_ring(
     )
 }
 
-fn split_unsigned_polynomial_into_proof_ring(
+pub(crate) fn split_unsigned_polynomial_into_proof_ring(
     source_polynomial: &[u64],
     source_polynomial_split_factor: usize,
 ) -> CanonicalResult<Vec<Vec<i128>>> {
@@ -375,7 +375,7 @@ fn split_polynomial_into_proof_ring(
     Ok(split_polynomials)
 }
 
-fn rotate_left_negacyclic_signed_polynomial(polynomial: &[i128]) -> Vec<i128> {
+pub(crate) fn rotate_left_negacyclic_signed_polynomial(polynomial: &[i128]) -> Vec<i128> {
     let mut rotated = vec![0_i128; polynomial.len()];
     if polynomial.is_empty() {
         return rotated;
@@ -386,7 +386,7 @@ fn rotate_left_negacyclic_signed_polynomial(polynomial: &[i128]) -> Vec<i128> {
     rotated
 }
 
-fn scale_signed_polynomial_by_source_modulus_inverse(
+pub(crate) fn scale_signed_polynomial_by_source_modulus_inverse(
     signed_polynomial: &[i128],
     parameter_set: &LinearProofParameterSet,
     proof_encoding: &LazerDemoProofEncoding,

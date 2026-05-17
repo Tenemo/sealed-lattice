@@ -419,7 +419,7 @@ const deriveBigIntPolynomial = (
         deriveUniformBigInt(domain, { coefficientIndex, payload }, modulus),
     );
 
-const deriveReceiverPublicMatrix = (
+export const deriveReceiverPublicMatrix = (
     receiverEncryptionProfileDigest: ProtocolDigest,
     publicMatrixSeedDigest: ProtocolDigest,
 ): readonly (readonly (readonly number[])[])[] =>

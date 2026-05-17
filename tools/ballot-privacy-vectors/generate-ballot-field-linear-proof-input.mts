@@ -250,7 +250,7 @@ export const generateBallotFieldLinearProofOracleInput = async (
     };
 
     await mkdir(path.dirname(outputPath), { recursive: true });
-    await writeFile(outputPath, `${JSON.stringify(output, null, 4)}\n`);
+    await writeFile(outputPath, `${JSON.stringify(output)}\n`);
 };
 
 const main = async (): Promise<void> => {

@@ -911,7 +911,10 @@ def emit_vectors(repo_root: Path, lazer_root: Path, out_path: Path) -> None:
     }
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(json.dumps(output, indent=4, sort_keys=False) + "\n", encoding="utf-8")
+    out_path.write_text(
+        json.dumps(output, separators=(",", ":"), sort_keys=False) + "\n",
+        encoding="utf-8",
+    )
 
 
 def main() -> None:

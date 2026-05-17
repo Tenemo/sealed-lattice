@@ -106,6 +106,31 @@ linear-statement digest, ring degree, source column count, and witness bound
 without publishing witness vectors. The share-commitment projection keeps
 commitment-modulus coefficients as canonical decimal strings so JavaScript does
 not truncate values above `Number.MAX_SAFE_INTEGER`.
+The encoded relation vectors also include a public-only full-explicit mini
+relation case where public share commitment vectors, receiver ciphertext chunks,
+and receiver public key vectors are present for every receiver. That case has
+full component-bundle coverage and zero digest-expanded backend rows, and it
+records internal explicit-row satisfaction summaries for all five components
+without publishing scores, receiver shares, openings, encryption randomness,
+receiver secrets, or proof witnesses.
+The same vector now records a proof-readiness manifest for each component. The
+manifest makes the current blocker executable: the score/Shamir component is
+small enough for the existing dense LaZer oracle path. The payload and
+share-commitment components now have compact sparse component statement
+support: TypeScript emits public constant-polynomial sparse matrix entries and
+target entries, and the Rust/WASM kernel can expand and transform those sparse
+source matrices into the proof ring without materializing dense matrices. The
+receiver-encryption component still requires structured Module-LWE proof
+statement support before generated proof bytes can cover the full encoded
+ballot relation. The receiver-key binding rows are public zero-witness checks
+and remain bound to the separate receiver-key proof path.
+It also records digest-bound component proof-statement plans for the dense,
+sparse, structured Module-LWE, and public zero-witness formats. Those plans
+pin source/proof ring degrees, dense coefficient counts, sparse term counts,
+structured receiver/chunk counts, and component statement digests without
+publishing witness material. Generated proof bytes still remain unavailable for
+the sparse payload/share-commitment components and the structured
+receiver-encryption component.
 The relation compiler also emits a digest-bound component-bundle statement for
 those five components, and ballot proof records can now bind an ordered
 component proof bundle with one proof record per relation component. The

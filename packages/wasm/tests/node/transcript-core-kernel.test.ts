@@ -794,6 +794,11 @@ describe('transcript-core kernel in Node', () => {
                 vectorCase.caseName ===
                 'mini-encoded-ballot-share-commitment-explicit-relation',
         );
+        const fullExplicitCase = encodedRelationVectors.cases.find(
+            (vectorCase) =>
+                vectorCase.caseName ===
+                'mini-encoded-ballot-full-explicit-relation',
+        );
         const backendPreflightRejectCase = encodedRelationVectors.cases.find(
             (vectorCase) =>
                 vectorCase.caseName ===
@@ -846,6 +851,17 @@ describe('transcript-core kernel in Node', () => {
             ok: true,
             backendAvailable: false,
             caseName: 'mini-encoded-ballot-share-commitment-explicit-relation',
+            expectedOutcome: 'accept',
+            unresolvedReason: null,
+        });
+        expect(
+            kernel.verifyBallotPrivacyEncodedRelationVector({
+                vectorCase: fullExplicitCase,
+            }),
+        ).toMatchObject({
+            ok: true,
+            backendAvailable: false,
+            caseName: 'mini-encoded-ballot-full-explicit-relation',
             expectedOutcome: 'accept',
             unresolvedReason: null,
         });
