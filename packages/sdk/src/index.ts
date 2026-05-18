@@ -196,7 +196,7 @@ const unavailableFutureProtocolOperation = (
     refusedObjects: [
         {
             code: 'OperationUnavailable',
-            message: `${operation} is reserved for later protocol implementation and is not implemented in this package version.`,
+            message: `${operation} is reserved for later protocol implementation and is not implemented in this package build.`,
         },
     ],
     unresolvedReason: 'OperationUnavailable',

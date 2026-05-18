@@ -149,6 +149,136 @@ const rewriteSentenceCase = (content: string): string => {
     return rewritten;
 };
 
+const isStructuralMarkdownLine = (line: string): boolean =>
+    /^\s*$/.test(line) ||
+    /^\s{0,3}(#{1,6}\s|(```|~~~))/.test(line) ||
+    /^\s{0,3}([-*_])([\t ]*\1){2,}\s*$/.test(line) ||
+    /^\s*\|/.test(line) ||
+    /^\s*:?-{3,}:?(\s*\|\s*:?-{3,}:?)+\s*$/.test(line) ||
+    /^\s*([-+*]|\d+[.)])\s+/.test(line) ||
+    /^\s*\[[^\]]+]:\s+/.test(line) ||
+    /^\s*(:::+|---\s*$)/.test(line) ||
+    /^\s*(import\s|export\s)/.test(line) ||
+    /^\s*(<!--|-->|<\/?[A-Za-z][^>]*>?|{\/?[A-Za-z])/.test(line) ||
+    /^\s{4,}\S/.test(line);
+
+const isPlainQuoteLine = (line: string): boolean => {
+    const match = /^>\s*(.+)$/.exec(line);
+    if (match === null) {
+        return false;
+    }
+
+    const content = match[1];
+
+    return !/^\s{0,3}(#{1,6}\s|(```|~~~)|([-+*]|\d+[.)])\s+|\|)/.test(content);
+};
+
+const unwrapMarkdownProse = (content: string): string => {
+    const normalizedContent = content.replace(/\r\n/g, '\n');
+    const hasFinalLineEnding = normalizedContent.endsWith('\n');
+    const lines =
+        hasFinalLineEnding && normalizedContent.length > 0
+            ? normalizedContent.slice(0, -1).split('\n')
+            : normalizedContent.split('\n');
+    const outputLines: string[] = [];
+    const paragraphLines: string[] = [];
+    const quoteParagraphLines: string[] = [];
+    let inCodeFence = false;
+    let previousLineCanAcceptListContinuation = false;
+
+    const flushParagraph = (): void => {
+        if (paragraphLines.length === 0) {
+            return;
+        }
+
+        outputLines.push(
+            paragraphLines
+                .map((line) => line.trim())
+                .join(' ')
+                .replace(/\s+/g, ' '),
+        );
+        paragraphLines.length = 0;
+    };
+
+    const flushQuoteParagraph = (): void => {
+        if (quoteParagraphLines.length === 0) {
+            return;
+        }
+
+        outputLines.push(
+            `> ${quoteParagraphLines
+                .map((line) => line.trim())
+                .join(' ')
+                .replace(/\s+/g, ' ')}`,
+        );
+        quoteParagraphLines.length = 0;
+    };
+
+    for (const line of lines) {
+        if (/^\s{0,3}(```|~~~)/.test(line)) {
+            flushParagraph();
+            flushQuoteParagraph();
+            outputLines.push(line);
+            inCodeFence = !inCodeFence;
+            previousLineCanAcceptListContinuation = false;
+            continue;
+        }
+
+        if (inCodeFence) {
+            outputLines.push(line);
+            continue;
+        }
+
+        if (/^\s*$/.test(line)) {
+            flushParagraph();
+            flushQuoteParagraph();
+            outputLines.push(line);
+            previousLineCanAcceptListContinuation = false;
+            continue;
+        }
+
+        if (isPlainQuoteLine(line)) {
+            flushParagraph();
+            quoteParagraphLines.push(line.replace(/^>\s?/, '').trim());
+            previousLineCanAcceptListContinuation = false;
+            continue;
+        }
+
+        const listContinuationMatch = /^\s{1,3}(\S.*)$/.exec(line);
+        if (
+            previousLineCanAcceptListContinuation &&
+            listContinuationMatch !== null &&
+            !isStructuralMarkdownLine(line)
+        ) {
+            flushParagraph();
+            flushQuoteParagraph();
+            outputLines[outputLines.length - 1] = `${
+                outputLines[outputLines.length - 1]
+            } ${listContinuationMatch[1].trim()}`.replace(/\s+/g, ' ');
+            previousLineCanAcceptListContinuation = true;
+            continue;
+        }
+
+        if (isStructuralMarkdownLine(line)) {
+            flushParagraph();
+            flushQuoteParagraph();
+            outputLines.push(line);
+            previousLineCanAcceptListContinuation =
+                /^\s*([-+*]|\d+[.)])\s+/.test(line);
+            continue;
+        }
+
+        flushQuoteParagraph();
+        paragraphLines.push(line);
+        previousLineCanAcceptListContinuation = false;
+    }
+
+    flushParagraph();
+    flushQuoteParagraph();
+
+    return `${outputLines.join('\n')}\n`;
+};
+
 const normalizeNavigationTitles = (
     items: readonly NavigationItem[],
 ): NavigationItem[] =>
@@ -217,6 +347,7 @@ const main = async (): Promise<void> => {
         content = content.replace(generatedPreamblePattern, '');
         content = rewriteMarkdownLinks(content, relativePath);
         content = rewriteSentenceCase(content);
+        content = unwrapMarkdownProse(content);
 
         const frontmatterLines = [
             '---',

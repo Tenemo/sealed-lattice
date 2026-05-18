@@ -112,6 +112,7 @@ export type ProtocolRefusalCode =
     | 'AggregateShareInvalid'
     | 'BallotPackageInvalid'
     | 'BallotSetInvalid'
+    | 'BallotPrivacyProfileInvalid'
     | 'BoardConsistencyFailure'
     | 'BoardForkDetected'
     | 'CastReceiptInvalid'
@@ -189,7 +190,7 @@ export type StructuredProtocolVerificationResult = {
     readonly acceptedDigests: readonly ProtocolDigest[];
     readonly refusedObjects: readonly RefusalRecord[];
     readonly forkEvidence?: ConflictingHeadEvidence;
-    readonly unresolvedReason?: string;
+    readonly unresolvedReason?: string | null;
 };
 
 /** Fail-closed result returned by safe API entries reserved for later implementation. */

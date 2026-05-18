@@ -9,6 +9,11 @@ import {
 } from '@sealed-lattice/types';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import ballotFieldLinearProofBackendVectorsJson from '../../../../test-vectors/ballot-privacy/ballot-field-linear-proof-vectors.json';
+import encodedRelationVectorsJson from '../../../../test-vectors/ballot-privacy/encoded-ballot-linear-relation-vectors.json';
+import linearProofBackendVectorsJson from '../../../../test-vectors/ballot-privacy/proof-backend-linear-vectors.json';
+import receiverKeyLinearProofBackendVectorsJson from '../../../../test-vectors/ballot-privacy/receiver-key-linear-proof-vectors.json';
+import receiverKeyVectorsJson from '../../../../test-vectors/ballot-privacy/receiver-key-proof-vectors.json';
 import goldenTranscriptCoreFixturesJson from '../../../../test-vectors/transcript-core/golden-transcript-core.json';
 import malformedObjectFixturesJson from '../../../../test-vectors/transcript-core/malformed-objects.json';
 import {
@@ -43,6 +48,35 @@ const goldenTranscriptCoreFixtures =
     goldenTranscriptCoreFixturesJson as readonly GoldenTranscriptCoreFixture[];
 const malformedObjectFixtures =
     malformedObjectFixturesJson as readonly MalformedObjectFixture[];
+const linearProofBackendVectors = linearProofBackendVectorsJson as {
+    readonly requiredCaseNames: readonly string[];
+    readonly cases: readonly Record<string, unknown>[];
+};
+const receiverKeyLinearProofBackendVectors =
+    receiverKeyLinearProofBackendVectorsJson as {
+        readonly requiredCaseNames: readonly string[];
+        readonly cases: readonly Record<string, unknown>[];
+    };
+const ballotFieldLinearProofBackendVectors =
+    ballotFieldLinearProofBackendVectorsJson as {
+        readonly expectedProofSizeBytes: number;
+        readonly linearStatement: Record<string, unknown>;
+        readonly parameterSet: Record<string, unknown>;
+        readonly proofEncoding: Record<string, unknown>;
+        readonly proofHex: string;
+        readonly publicRandomnessHex: string;
+        readonly requiredCaseNames: readonly string[];
+        readonly targetCoefficientRepresentation: string;
+        readonly cases: readonly Record<string, unknown>[];
+    };
+const encodedRelationVectors = encodedRelationVectorsJson as {
+    readonly requiredCaseNames: readonly string[];
+    readonly cases: readonly Record<string, unknown>[];
+};
+const receiverKeyVectors = receiverKeyVectorsJson as {
+    readonly requiredCaseNames: readonly string[];
+    readonly cases: readonly Record<string, unknown>[];
+};
 
 const findFixture = <Fixture extends NamedFixture>(
     fixtures: readonly Fixture[],
@@ -56,6 +90,99 @@ const findFixture = <Fixture extends NamedFixture>(
     }
 
     return fixture;
+};
+
+const cloneJsonValue = <JsonValue>(value: JsonValue): JsonValue =>
+    JSON.parse(JSON.stringify(value)) as JsonValue;
+
+const patchInteger = (
+    patch: Record<string, unknown>,
+    fieldName: string,
+): number => {
+    const value = patch[fieldName];
+    if (typeof value !== 'number' || !Number.isInteger(value)) {
+        throw new Error(`${fieldName} must be an integer patch field.`);
+    }
+
+    return value;
+};
+
+const applyStatementMatrixPatch = (
+    statementMatrixCoefficients: unknown,
+    patch: Record<string, unknown>,
+): void => {
+    const matrix = statementMatrixCoefficients as number[][][];
+    matrix[patchInteger(patch, 'rowIndex')][patchInteger(patch, 'columnIndex')][
+        patchInteger(patch, 'coefficientIndex')
+    ] = patchInteger(patch, 'coefficient');
+};
+
+const applyTargetVectorPatch = (
+    targetVectorCoefficients: unknown,
+    patch: Record<string, unknown>,
+): void => {
+    const targetVector = targetVectorCoefficients as number[][];
+    targetVector[patchInteger(patch, 'rowIndex')][
+        patchInteger(patch, 'coefficientIndex')
+    ] = patchInteger(patch, 'coefficient');
+};
+
+const expandBallotFieldLinearProofVectorCase = (
+    compactCase: Record<string, unknown>,
+): Record<string, unknown> => {
+    const statementMatrixCoefficients = cloneJsonValue(
+        ballotFieldLinearProofBackendVectors.linearStatement
+            .statementMatrixCoefficients,
+    );
+    const targetVectorCoefficients = cloneJsonValue(
+        ballotFieldLinearProofBackendVectors.linearStatement
+            .targetVectorCoefficients,
+    );
+    const statementMatrixPatch = compactCase.statementMatrixPatch;
+    const targetVectorPatch = compactCase.targetVectorPatch;
+    if (
+        statementMatrixPatch !== undefined &&
+        statementMatrixPatch !== null &&
+        typeof statementMatrixPatch === 'object'
+    ) {
+        applyStatementMatrixPatch(
+            statementMatrixCoefficients,
+            statementMatrixPatch as Record<string, unknown>,
+        );
+    }
+    if (
+        targetVectorPatch !== undefined &&
+        targetVectorPatch !== null &&
+        typeof targetVectorPatch === 'object'
+    ) {
+        applyTargetVectorPatch(
+            targetVectorCoefficients,
+            targetVectorPatch as Record<string, unknown>,
+        );
+    }
+
+    return {
+        caseName: compactCase.caseName,
+        description: compactCase.description,
+        expectedOutcome: compactCase.expectedOutcome,
+        expectedProofSizeBytes:
+            ballotFieldLinearProofBackendVectors.expectedProofSizeBytes,
+        mutation: compactCase.mutation,
+        parameterSet: ballotFieldLinearProofBackendVectors.parameterSet,
+        proofEncoding: ballotFieldLinearProofBackendVectors.proofEncoding,
+        proofHex:
+            compactCase.proofHex ??
+            ballotFieldLinearProofBackendVectors.proofHex,
+        publicRandomnessHex:
+            compactCase.publicRandomnessHex ??
+            ballotFieldLinearProofBackendVectors.publicRandomnessHex,
+        statementMatrixCoefficients,
+        targetCoefficientRepresentation:
+            ballotFieldLinearProofBackendVectors.targetCoefficientRepresentation,
+        targetVectorCoefficients,
+        trace: compactCase.trace,
+        upstreamVectorAvailable: compactCase.upstreamVectorAvailable,
+    };
 };
 
 const fullyVerifiedPassiveFixture = findFixture(
@@ -436,6 +563,2641 @@ describe('transcript-core kernel in Node', () => {
         expect(kernel.listReservedRootNamespaces()).toContain(
             'sealed-lattice-root/poll-spec-digest-v1',
         );
+        expect(kernel.listReservedRootNamespaces()).toContain(
+            'sealed-lattice-root/proof-bytes-digest-v1',
+        );
+    });
+
+    it('keeps ballot privacy proof commands fail-closed until the backend is available', async () => {
+        const kernel = await loadTranscriptCoreKernel();
+        const backendStatus = kernel.describeBallotPrivacyProofBackend();
+
+        expect(backendStatus).toMatchObject({
+            backendAvailable: false,
+            portableRustWasmPortRequired: true,
+        });
+        expect(backendStatus.requiredComponents).toEqual(
+            expect.arrayContaining([
+                'ABDLop commitment key generation, commitment, and commitment hashing',
+                'tbox proof generation and verification',
+                'browser-safe prover randomness source',
+            ]),
+        );
+
+        expect(
+            kernel.verifyReceiverKeyProof({ receiverKeyProof: {} }),
+        ).toMatchObject({
+            ok: false,
+            backendAvailable: false,
+            backendStatus: {
+                portableRustWasmPortRequired: true,
+            },
+            operation: 'verifyReceiverKeyProof',
+            unresolvedReason: 'BallotPackageInvalid',
+        });
+        expect(
+            kernel.verifyBallotProof({ statement: {}, ballotProof: {} }),
+        ).toMatchObject({
+            ok: false,
+            backendAvailable: false,
+            backendStatus: {
+                portableRustWasmPortRequired: true,
+            },
+            operation: 'verifyBallotProof',
+            unresolvedReason: 'BallotPackageInvalid',
+        });
+        expect(
+            kernel
+                .verifyBallotProof({
+                    statement: {},
+                    ballotProof: {
+                        proofBytesDigest: '0'.repeat(128),
+                        proofSizeBytes: 1,
+                    },
+                    proofBytesHex: 'AA',
+                })
+                .refusedObjects.some((refusal) =>
+                    refusal.message.includes('proof bytes'),
+                ),
+        ).toBe(true);
+        expect(
+            kernel.verifyClaimBearingBallotPackage({ ballotPackage: {} }),
+        ).toMatchObject({
+            ok: false,
+            backendAvailable: false,
+            backendStatus: {
+                portableRustWasmPortRequired: true,
+            },
+            operation: 'verifyClaimBearingBallotPackage',
+            unresolvedReason: 'BallotPackageInvalid',
+        });
+    });
+
+    it('routes internal linear proof vectors through the WASM backend gate', async () => {
+        const kernel = await loadTranscriptCoreKernel();
+        const demoVectorCaseNames = new Set(
+            linearProofBackendVectors.cases.map((vectorCase) =>
+                String(vectorCase.caseName),
+            ),
+        );
+        const receiverKeyVectorCaseNames = new Set(
+            receiverKeyLinearProofBackendVectors.cases.map((vectorCase) =>
+                String(vectorCase.caseName),
+            ),
+        );
+        const ballotFieldVectorCaseNames = new Set(
+            ballotFieldLinearProofBackendVectors.cases.map((vectorCase) =>
+                String(vectorCase.caseName),
+            ),
+        );
+
+        for (const requiredCaseName of linearProofBackendVectors.requiredCaseNames) {
+            expect(demoVectorCaseNames.has(requiredCaseName)).toBe(true);
+        }
+        for (const requiredCaseName of receiverKeyLinearProofBackendVectors.requiredCaseNames) {
+            expect(receiverKeyVectorCaseNames.has(requiredCaseName)).toBe(true);
+        }
+        for (const requiredCaseName of ballotFieldLinearProofBackendVectors.requiredCaseNames) {
+            expect(ballotFieldVectorCaseNames.has(requiredCaseName)).toBe(true);
+        }
+
+        const demoVerification = kernel.verifyBallotPrivacyLinearProofVector({
+            vectorCase: linearProofBackendVectors.cases[0],
+        });
+
+        expect(demoVerification).toMatchObject({
+            ok: true,
+            backendAvailable: false,
+            caseName: 'valid-small-linear-proof',
+            vectorAvailable: true,
+            unresolvedReason: null,
+        });
+        expect(demoVerification.statusLabels).toContain(
+            'QuadraticChallengeRecomputed',
+        );
+
+        const receiverKeyLinearProofCases =
+            receiverKeyLinearProofBackendVectors.cases as readonly (Record<
+                string,
+                unknown
+            > &
+                NamedFixture)[];
+        const validReceiverKeyCase = findFixture(
+            receiverKeyLinearProofCases,
+            'valid-receiver-key-linear-proof',
+        );
+        const mutatedReceiverKeyCase = findFixture(
+            receiverKeyLinearProofCases,
+            'mutated-receiver-key-target-vector',
+        );
+        const receiverKeyVerification =
+            kernel.verifyBallotPrivacyLinearProofVector({
+                vectorCase: validReceiverKeyCase,
+            });
+        const mutatedReceiverKeyVerification =
+            kernel.verifyBallotPrivacyLinearProofVector({
+                vectorCase: mutatedReceiverKeyCase,
+            });
+
+        expect(receiverKeyVerification).toMatchObject({
+            ok: true,
+            backendAvailable: false,
+            caseName: 'valid-receiver-key-linear-proof',
+            vectorAvailable: true,
+            unresolvedReason: null,
+        });
+        expect(receiverKeyVerification.statusLabels).toContain(
+            'QuadraticChallengeRecomputed',
+        );
+        expect(mutatedReceiverKeyVerification).toMatchObject({
+            ok: false,
+            backendAvailable: false,
+            caseName: 'mutated-receiver-key-target-vector',
+            vectorAvailable: true,
+            unresolvedReason: 'InvalidFixture',
+        });
+
+        const ballotFieldLinearProofCases =
+            ballotFieldLinearProofBackendVectors.cases as readonly (Record<
+                string,
+                unknown
+            > &
+                NamedFixture)[];
+        const validBallotFieldCase = findFixture(
+            ballotFieldLinearProofCases,
+            'valid-encoded-score-field-linear-proof',
+        );
+        const mutatedBallotFieldCase = findFixture(
+            ballotFieldLinearProofCases,
+            'mutated-encoded-score-field-target-vector',
+        );
+        const ballotFieldVerification =
+            kernel.verifyBallotPrivacyLinearProofVector({
+                vectorCase:
+                    expandBallotFieldLinearProofVectorCase(
+                        validBallotFieldCase,
+                    ),
+            });
+        const mutatedBallotFieldVerification =
+            kernel.verifyBallotPrivacyLinearProofVector({
+                vectorCase: expandBallotFieldLinearProofVectorCase(
+                    mutatedBallotFieldCase,
+                ),
+            });
+
+        expect(ballotFieldVerification).toMatchObject({
+            ok: true,
+            backendAvailable: false,
+            caseName: 'valid-encoded-score-field-linear-proof',
+            vectorAvailable: true,
+            unresolvedReason: null,
+        });
+        expect(ballotFieldVerification.statusLabels).toContain(
+            'QuadraticChallengeRecomputed',
+        );
+        expect(mutatedBallotFieldVerification).toMatchObject({
+            ok: false,
+            backendAvailable: false,
+            caseName: 'mutated-encoded-score-field-target-vector',
+            vectorAvailable: true,
+            unresolvedReason: 'InvalidFixture',
+        });
+    });
+
+    it('routes encoded ballot relation vectors through the WASM backend gate', async () => {
+        const kernel = await loadTranscriptCoreKernel();
+        const vectorCaseNames = new Set(
+            encodedRelationVectors.cases.map((vectorCase) =>
+                String(vectorCase.caseName),
+            ),
+        );
+
+        for (const requiredCaseName of encodedRelationVectors.requiredCaseNames) {
+            expect(vectorCaseNames.has(requiredCaseName)).toBe(true);
+        }
+
+        const miniCase = encodedRelationVectors.cases.find(
+            (vectorCase) =>
+                vectorCase.caseName === 'mini-encoded-ballot-relation',
+        );
+        const rejectCase = encodedRelationVectors.cases.find(
+            (vectorCase) => vectorCase.caseName === 'wrong-quotient-rejects',
+        );
+        const digestChangeCase = encodedRelationVectors.cases.find(
+            (vectorCase) =>
+                vectorCase.caseName ===
+                'wrong-share-commitment-target-changes-digest',
+        );
+        const explicitShareCommitmentCase = encodedRelationVectors.cases.find(
+            (vectorCase) =>
+                vectorCase.caseName ===
+                'mini-encoded-ballot-share-commitment-explicit-relation',
+        );
+        const fullExplicitCase = encodedRelationVectors.cases.find(
+            (vectorCase) =>
+                vectorCase.caseName ===
+                'mini-encoded-ballot-full-explicit-relation',
+        );
+        const backendPreflightRejectCase = encodedRelationVectors.cases.find(
+            (vectorCase) =>
+                vectorCase.caseName ===
+                'noncanonical-backend-coefficient-rejects',
+        );
+        const proofComponentRejectCase = encodedRelationVectors.cases.find(
+            (vectorCase) =>
+                vectorCase.caseName ===
+                'backend-proof-component-mutation-rejects',
+        );
+
+        expect(
+            kernel.verifyBallotPrivacyEncodedRelationVector({
+                vectorCase: miniCase,
+            }),
+        ).toMatchObject({
+            ok: true,
+            backendAvailable: false,
+            caseName: 'mini-encoded-ballot-relation',
+            expectedOutcome: 'accept',
+            unresolvedReason: null,
+        });
+        expect(
+            kernel.verifyBallotPrivacyEncodedRelationVector({
+                vectorCase: rejectCase,
+            }),
+        ).toMatchObject({
+            ok: true,
+            backendAvailable: false,
+            caseName: 'wrong-quotient-rejects',
+            expectedOutcome: 'reject',
+            unresolvedReason: null,
+        });
+        expect(
+            kernel.verifyBallotPrivacyEncodedRelationVector({
+                vectorCase: digestChangeCase,
+            }),
+        ).toMatchObject({
+            ok: true,
+            backendAvailable: false,
+            caseName: 'wrong-share-commitment-target-changes-digest',
+            expectedOutcome: 'accept',
+            unresolvedReason: null,
+        });
+        expect(
+            kernel.verifyBallotPrivacyEncodedRelationVector({
+                vectorCase: explicitShareCommitmentCase,
+            }),
+        ).toMatchObject({
+            ok: true,
+            backendAvailable: false,
+            caseName: 'mini-encoded-ballot-share-commitment-explicit-relation',
+            expectedOutcome: 'accept',
+            unresolvedReason: null,
+        });
+        expect(
+            kernel.verifyBallotPrivacyEncodedRelationVector({
+                vectorCase: fullExplicitCase,
+            }),
+        ).toMatchObject({
+            ok: true,
+            backendAvailable: false,
+            caseName: 'mini-encoded-ballot-full-explicit-relation',
+            expectedOutcome: 'accept',
+            unresolvedReason: null,
+        });
+        expect(
+            kernel.verifyBallotPrivacyEncodedRelationVector({
+                vectorCase: backendPreflightRejectCase,
+            }),
+        ).toMatchObject({
+            ok: true,
+            backendAvailable: false,
+            caseName: 'noncanonical-backend-coefficient-rejects',
+            expectedOutcome: 'reject',
+            unresolvedReason: null,
+        });
+        expect(
+            kernel.verifyBallotPrivacyEncodedRelationVector({
+                vectorCase: proofComponentRejectCase,
+            }),
+        ).toMatchObject({
+            ok: true,
+            backendAvailable: false,
+            caseName: 'backend-proof-component-mutation-rejects',
+            expectedOutcome: 'reject',
+            unresolvedReason: null,
+        });
+    });
+
+    it('routes receiver-key proof vectors through the WASM backend gate', async () => {
+        const kernel = await loadTranscriptCoreKernel();
+        const vectorCaseNames = new Set(
+            receiverKeyVectors.cases.map((vectorCase) =>
+                String(vectorCase.caseName),
+            ),
+        );
+
+        for (const requiredCaseName of receiverKeyVectors.requiredCaseNames) {
+            expect(vectorCaseNames.has(requiredCaseName)).toBe(true);
+        }
+
+        const validCase = receiverKeyVectors.cases.find(
+            (vectorCase) =>
+                vectorCase.caseName ===
+                'valid-receiver-key-proof-backend-statement',
+        );
+        const constructionRejectCase = receiverKeyVectors.cases.find(
+            (vectorCase) =>
+                vectorCase.caseName === 'wrong-public-matrix-seed-rejects',
+        );
+        const backendPreflightRejectCase = receiverKeyVectors.cases.find(
+            (vectorCase) =>
+                vectorCase.caseName === 'noncanonical-backend-modulus-rejects',
+        );
+        const linearPreflightRejectCase = receiverKeyVectors.cases.find(
+            (vectorCase) =>
+                vectorCase.caseName ===
+                'mutated-linear-statement-target-rejects',
+        );
+        const proofShellRejectCase = receiverKeyVectors.cases.find(
+            (vectorCase) =>
+                vectorCase.caseName === 'mutated-proof-root-rejects',
+        );
+
+        expect(
+            kernel.verifyBallotPrivacyReceiverKeyVector({
+                vectorCase: validCase,
+            }),
+        ).toMatchObject({
+            ok: true,
+            backendAvailable: false,
+            caseName: 'valid-receiver-key-proof-backend-statement',
+            expectedOutcome: 'accept',
+            unresolvedReason: null,
+        });
+        expect(
+            kernel.verifyBallotPrivacyReceiverKeyVector({
+                vectorCase: constructionRejectCase,
+            }),
+        ).toMatchObject({
+            ok: true,
+            backendAvailable: false,
+            caseName: 'wrong-public-matrix-seed-rejects',
+            expectedOutcome: 'reject',
+            unresolvedReason: null,
+        });
+        expect(
+            kernel.verifyBallotPrivacyReceiverKeyVector({
+                vectorCase: backendPreflightRejectCase,
+            }),
+        ).toMatchObject({
+            ok: true,
+            backendAvailable: false,
+            caseName: 'noncanonical-backend-modulus-rejects',
+            expectedOutcome: 'reject',
+            unresolvedReason: null,
+        });
+        expect(
+            kernel.verifyBallotPrivacyReceiverKeyVector({
+                vectorCase: linearPreflightRejectCase,
+            }),
+        ).toMatchObject({
+            ok: true,
+            backendAvailable: false,
+            caseName: 'mutated-linear-statement-target-rejects',
+            expectedOutcome: 'reject',
+            unresolvedReason: null,
+        });
+        expect(
+            kernel.verifyBallotPrivacyReceiverKeyVector({
+                vectorCase: proofShellRejectCase,
+            }),
+        ).toMatchObject({
+            ok: true,
+            backendAvailable: false,
+            caseName: 'mutated-proof-root-rejects',
+            expectedOutcome: 'reject',
+            unresolvedReason: null,
+        });
+    });
+
+    it('verifies proof-byte-bearing receiver-key records through the WASM linear proof backend', async () => {
+        const kernel = await loadTranscriptCoreKernel();
+        const receiverKeyLinearProofCases =
+            receiverKeyLinearProofBackendVectors.cases as readonly (Record<
+                string,
+                unknown
+            > &
+                NamedFixture)[];
+        const validProofCase = findFixture(
+            receiverKeyLinearProofCases,
+            'valid-receiver-key-linear-proof',
+        );
+        const mutatedTargetCase = findFixture(
+            receiverKeyLinearProofCases,
+            'mutated-receiver-key-target-vector',
+        );
+        const proofBytesHex = String(validProofCase.proofHex);
+        const publicRandomnessHex = String(validProofCase.publicRandomnessHex);
+        const proofSizeBytes = proofBytesHex.length / 2;
+        const digest = (label: string): string =>
+            kernel.deriveProtocolDigest({
+                namespace: 'ChallengeDomainDigest',
+                value: {
+                    label,
+                    purpose: 'receiver-key-proof-record-wasm-test',
+                },
+            });
+        const createLinearStatement = (
+            targetVectorCoefficients: unknown,
+        ): Record<string, unknown> => {
+            const statementPayload = {
+                ceremonyId: 'ceremony-receiver-key-proof-record',
+                coefficientModulus: '12289',
+                keyMaterialDigest: digest('receiver-key-material'),
+                manifestDigest: digest('manifest'),
+                objectType: 'ReceiverKeyLinearProofStatement',
+                objectVersion: 1,
+                publicMatrixSeedDigest: digest('receiver-matrix-seed'),
+                receiverEncryptionProfileDigest: digest(
+                    'receiver-encryption-profile',
+                ),
+                receiverIdentity: 'receiver-1',
+                receiverPublicKeyDigest: digest('receiver-public-key'),
+                receiverRosterPosition: 1,
+                recoveryEpoch: 0,
+                relation: 'A*w + t = 0',
+                ringDegree: 256,
+                rosterDigest: digest('roster'),
+                sourceRing: 'Z_q[X]/(X^256 + 1)',
+                statementColumns: 8,
+                statementMatrixCoefficients:
+                    validProofCase.statementMatrixCoefficients,
+                statementMatrixDigest: digest('statement-matrix'),
+                statementProfileId:
+                    'receiver-key-linear-module-lwe-statement-v1',
+                statementRows: 4,
+                targetCoefficientRepresentation:
+                    validProofCase.targetCoefficientRepresentation,
+                targetVectorCoefficients,
+                targetVectorDigest: digest('target-vector'),
+                witnessInfinityNormBound: 2,
+                witnessL2BoundSquared: '8192',
+                witnessVectorLayout: [
+                    'receiver secret polynomial 0',
+                    'receiver secret polynomial 1',
+                    'receiver secret polynomial 2',
+                    'receiver secret polynomial 3',
+                    'receiver error polynomial 0',
+                    'receiver error polynomial 1',
+                    'receiver error polynomial 2',
+                    'receiver error polynomial 3',
+                ],
+            };
+
+            return {
+                ...statementPayload,
+                statementDigest: kernel.deriveProtocolDigest({
+                    namespace: 'ChallengeDomainDigest',
+                    value: {
+                        payload: statementPayload,
+                        purpose: 'receiver-key-linear-proof-statement-v1',
+                    },
+                }),
+            };
+        };
+        const createReceiverKeyProof = (
+            linearStatement: Record<string, unknown>,
+            proofInput: {
+                readonly parameterSet?: unknown;
+                readonly proofEncoding?: unknown;
+            } = {},
+        ): Record<string, unknown> => {
+            const parameterSet =
+                proofInput.parameterSet ?? validProofCase.parameterSet;
+            const proofEncoding =
+                proofInput.proofEncoding ?? validProofCase.proofEncoding;
+            const proofBytesDigest = kernel.deriveProtocolDigest({
+                namespace: 'ProofBytesDigest',
+                value: {
+                    objectType: 'ProofBytes',
+                    objectVersion: 1,
+                    proofBytesHex,
+                    proofSizeBytes,
+                },
+            });
+            const proofEncodingProfileDigest = kernel.deriveProtocolDigest({
+                namespace: 'ChallengeDomainDigest',
+                value: {
+                    proofEncoding,
+                    purpose: 'receiver-key-linear-proof-encoding-profile-v1',
+                },
+            });
+            const proofParameterSetDigest = kernel.deriveProtocolDigest({
+                namespace: 'ChallengeDomainDigest',
+                value: {
+                    parameterSet,
+                    purpose: 'receiver-key-linear-proof-parameter-set-v1',
+                },
+            });
+            const publicRandomnessDigest = kernel.deriveProtocolDigest({
+                namespace: 'ChallengeDomainDigest',
+                value: {
+                    publicRandomnessHex,
+                    purpose: 'receiver-key-linear-proof-public-randomness-v1',
+                },
+            });
+            const proofRoot = kernel.deriveProtocolDigest({
+                namespace: 'ReceiverKeyProofRoot',
+                value: {
+                    linearStatementDigest: linearStatement.statementDigest,
+                    proofBytesDigest,
+                    proofEncodingProfileDigest,
+                    proofParameterSetDigest,
+                    publicRandomnessDigest,
+                    purpose: 'receiver-key-linear-proof-record-root-v1',
+                },
+            });
+            const proofPayload = {
+                backendStatementDigest: digest('backend-statement'),
+                ceremonyId: 'ceremony-receiver-key-proof-record',
+                linearStatementDigest: linearStatement.statementDigest,
+                manifestDigest: digest('manifest'),
+                objectType: 'ReceiverKeyProof',
+                objectVersion: 1,
+                proofBackend: 'LocalLinearLatticeRelation',
+                proofBytesDigest,
+                proofEncodingProfileDigest,
+                proofParameterSetDigest,
+                proofRoot,
+                proofSizeBytes,
+                publicRandomnessDigest,
+                receiverEncryptionProfileDigest: digest(
+                    'receiver-encryption-profile',
+                ),
+                receiverIdentity: 'receiver-1',
+                receiverPublicKeyDigest: digest('receiver-public-key'),
+                receiverRosterPosition: 1,
+                recoveryEpoch: 0,
+                rosterDigest: digest('roster'),
+            };
+
+            return {
+                ...proofPayload,
+                receiverKeyProofRoot: kernel.deriveProtocolDigest({
+                    namespace: 'ReceiverKeyProofRoot',
+                    value: proofPayload,
+                }),
+            };
+        };
+        const validLinearStatement = createLinearStatement(
+            validProofCase.targetVectorCoefficients,
+        );
+        const validReceiverKeyProof =
+            createReceiverKeyProof(validLinearStatement);
+        const mutatedLinearStatement = createLinearStatement(
+            mutatedTargetCase.targetVectorCoefficients,
+        );
+        const mutatedReceiverKeyProof = createReceiverKeyProof(
+            mutatedLinearStatement,
+        );
+
+        expect(
+            kernel.verifyReceiverKeyProof({
+                linearStatement: validLinearStatement,
+                parameterSet: validProofCase.parameterSet,
+                proofBytesHex,
+                proofEncoding: validProofCase.proofEncoding,
+                publicRandomnessHex,
+                receiverKeyProof: validReceiverKeyProof,
+            }),
+        ).toMatchObject({
+            ok: true,
+            backendAvailable: false,
+            operation: 'verifyReceiverKeyProof',
+            unresolvedReason: null,
+        });
+        expect(
+            kernel.verifyReceiverKeyProof({
+                linearStatement: mutatedLinearStatement,
+                parameterSet: validProofCase.parameterSet,
+                proofBytesHex,
+                proofEncoding: validProofCase.proofEncoding,
+                publicRandomnessHex,
+                receiverKeyProof: mutatedReceiverKeyProof,
+            }),
+        ).toMatchObject({
+            ok: false,
+            backendAvailable: false,
+            operation: 'verifyReceiverKeyProof',
+            unresolvedReason: 'InvalidFixture',
+        });
+        expect(
+            kernel.verifyReceiverKeyProof({
+                linearStatement: validLinearStatement,
+                parameterSet: validProofCase.parameterSet,
+                proofBytesHex: proofBytesHex.slice(0, -2),
+                proofEncoding: validProofCase.proofEncoding,
+                publicRandomnessHex,
+                receiverKeyProof: validReceiverKeyProof,
+            }),
+        ).toMatchObject({
+            ok: false,
+            backendAvailable: false,
+            operation: 'verifyReceiverKeyProof',
+            unresolvedReason: 'BallotPackageInvalid',
+        });
+        const sizeUnboundParameterSet = {
+            ...(validProofCase.parameterSet as Record<string, unknown>),
+            expectedProofSizeBytes: proofSizeBytes + 1,
+        };
+        expect(
+            kernel.verifyReceiverKeyProof({
+                linearStatement: validLinearStatement,
+                parameterSet: sizeUnboundParameterSet,
+                proofBytesHex,
+                proofEncoding: validProofCase.proofEncoding,
+                publicRandomnessHex,
+                receiverKeyProof: createReceiverKeyProof(validLinearStatement, {
+                    parameterSet: sizeUnboundParameterSet,
+                }),
+            }),
+        ).toMatchObject({
+            ok: false,
+            backendAvailable: false,
+            operation: 'verifyReceiverKeyProof',
+            unresolvedReason: 'BallotPackageInvalid',
+        });
+        const sizeUnboundProofEncoding = {
+            ...(validProofCase.proofEncoding as Record<string, unknown>),
+            expectedProofSizeBytes: proofSizeBytes + 1,
+        };
+        expect(
+            kernel.verifyReceiverKeyProof({
+                linearStatement: validLinearStatement,
+                parameterSet: validProofCase.parameterSet,
+                proofBytesHex,
+                proofEncoding: sizeUnboundProofEncoding,
+                publicRandomnessHex,
+                receiverKeyProof: createReceiverKeyProof(validLinearStatement, {
+                    proofEncoding: sizeUnboundProofEncoding,
+                }),
+            }),
+        ).toMatchObject({
+            ok: false,
+            backendAvailable: false,
+            operation: 'verifyReceiverKeyProof',
+            unresolvedReason: 'BallotPackageInvalid',
+        });
+    });
+
+    it('prepares receiver-key proof generation witness material through WASM', async () => {
+        const kernel = await loadTranscriptCoreKernel();
+        const receiverKeyLinearProofCases =
+            receiverKeyLinearProofBackendVectors.cases as readonly (Record<
+                string,
+                unknown
+            > &
+                NamedFixture)[];
+        const validProofCase = findFixture(
+            receiverKeyLinearProofCases,
+            'valid-receiver-key-linear-proof',
+        );
+        const receiverKeyModulus = 12_289;
+        const receiverKeyRingDegree = 256;
+        const receiverKeyStatementRows = 4;
+        const receiverKeyStatementColumns = 8;
+        const createZeroPolynomial = (): number[] =>
+            Array.from({ length: receiverKeyRingDegree }, () => 0);
+        const createUnitPolynomial = (): number[] => {
+            const polynomial = createZeroPolynomial();
+            polynomial[0] = 1;
+
+            return polynomial;
+        };
+        const canonicalSignedPolynomial = (
+            polynomial: readonly number[],
+        ): number[] =>
+            polynomial.map((coefficient) =>
+                coefficient < 0
+                    ? receiverKeyModulus - Math.abs(coefficient)
+                    : Math.abs(coefficient),
+            );
+        const witnessVector: number[][] = Array.from(
+            { length: receiverKeyStatementColumns },
+            () => createZeroPolynomial(),
+        );
+        witnessVector[0][0] = 2;
+        witnessVector[0][5] = -1;
+        witnessVector[1][1] = 1;
+        witnessVector[4][0] = -2;
+        witnessVector[5][7] = 1;
+        const statementMatrixCoefficients = Array.from(
+            { length: receiverKeyStatementRows },
+            () =>
+                Array.from(
+                    { length: receiverKeyStatementColumns },
+                    createZeroPolynomial,
+                ),
+        );
+        for (
+            let rowIndex = 0;
+            rowIndex < receiverKeyStatementRows;
+            rowIndex += 1
+        ) {
+            const statementMatrixRow = statementMatrixCoefficients[rowIndex];
+            statementMatrixRow[rowIndex] = createUnitPolynomial();
+            statementMatrixRow[rowIndex + receiverKeyStatementRows] =
+                createUnitPolynomial();
+        }
+        const targetVectorCoefficients = Array.from(
+            { length: receiverKeyStatementRows },
+            (_, rowIndex) => {
+                const secretPolynomial = canonicalSignedPolynomial(
+                    witnessVector[rowIndex],
+                );
+                const errorPolynomial = canonicalSignedPolynomial(
+                    witnessVector[rowIndex + receiverKeyStatementRows],
+                );
+
+                return secretPolynomial.map((coefficient, coefficientIndex) => {
+                    const publicKeyCoefficient =
+                        (coefficient +
+                            (errorPolynomial[coefficientIndex] ?? 0)) %
+                        receiverKeyModulus;
+
+                    return publicKeyCoefficient === 0
+                        ? 0
+                        : receiverKeyModulus - publicKeyCoefficient;
+                });
+            },
+        );
+        const digest = (label: string): string =>
+            kernel.deriveProtocolDigest({
+                namespace: 'ChallengeDomainDigest',
+                value: {
+                    label,
+                    purpose: 'receiver-key-prover-preflight-wasm-test',
+                },
+            });
+        const linearStatementPayload = {
+            ceremonyId: 'ceremony-receiver-key-prover-preflight',
+            coefficientModulus: '12289',
+            keyMaterialDigest: digest('receiver-key-material'),
+            manifestDigest: digest('manifest'),
+            objectType: 'ReceiverKeyLinearProofStatement',
+            objectVersion: 1,
+            publicMatrixSeedDigest: digest('receiver-matrix-seed'),
+            receiverEncryptionProfileDigest: digest(
+                'receiver-encryption-profile',
+            ),
+            receiverIdentity: 'receiver-1',
+            receiverPublicKeyDigest: digest('receiver-public-key'),
+            receiverRosterPosition: 1,
+            recoveryEpoch: 0,
+            relation: 'A*w + t = 0',
+            ringDegree: receiverKeyRingDegree,
+            rosterDigest: digest('roster'),
+            sourceRing: 'Z_q[X]/(X^256 + 1)',
+            statementColumns: receiverKeyStatementColumns,
+            statementMatrixCoefficients,
+            statementMatrixDigest: digest('statement-matrix'),
+            statementProfileId: 'receiver-key-linear-module-lwe-statement-v1',
+            statementRows: receiverKeyStatementRows,
+            targetCoefficientRepresentation: 'centeredSignedSourceModulus',
+            targetVectorCoefficients,
+            targetVectorDigest: digest('target-vector'),
+            witnessInfinityNormBound: 2,
+            witnessL2BoundSquared: '8192',
+            witnessVectorLayout: [
+                'receiver secret polynomial 0',
+                'receiver secret polynomial 1',
+                'receiver secret polynomial 2',
+                'receiver secret polynomial 3',
+                'receiver error polynomial 0',
+                'receiver error polynomial 1',
+                'receiver error polynomial 2',
+                'receiver error polynomial 3',
+            ],
+        };
+        const linearStatement = {
+            ...linearStatementPayload,
+            statementDigest: kernel.deriveProtocolDigest({
+                namespace: 'ChallengeDomainDigest',
+                value: {
+                    payload: linearStatementPayload,
+                    purpose: 'receiver-key-linear-proof-statement-v1',
+                },
+            }),
+        };
+        const secretState = {
+            secretVector: witnessVector.slice(0, receiverKeyStatementRows),
+            errorVector: witnessVector.slice(receiverKeyStatementRows),
+        };
+        const preparation = kernel.prepareReceiverKeyProofGeneration({
+            linearStatement,
+            parameterSet: validProofCase.parameterSet,
+            proofEncoding: validProofCase.proofEncoding,
+            publicRandomnessHex: '00'.repeat(32),
+            secretState,
+            proverRandomnessHex: '09'.repeat(32),
+        });
+
+        expect(preparation).toMatchObject({
+            ok: true,
+            backendAvailable: false,
+            generatedProofBytes: false,
+            operation: 'prepareReceiverKeyProofGeneration',
+            summary: {
+                normSlack: '8181',
+                preparedShortWitnessPolynomialCount: 33,
+                relationWitnessPolynomialCount: 32,
+                shortWitnessPolynomialCount: 33,
+                witnessL2Squared: '11',
+                abdlopCommitment: {
+                    compressedCommitmentPolynomialCount: 19,
+                    openingRandomnessPolynomialCount: 55,
+                    openingRemainderPolynomialCount: 19,
+                    proverRandomnessSeedBytes: 32,
+                    subprotocolSeedBytes: 32,
+                },
+            },
+            unresolvedReason: null,
+        });
+        expect(preparation.statusLabels).toContain(
+            'ReceiverKeyProofRingWitnessPrepared',
+        );
+        expect(preparation.statusLabels).toContain(
+            'ReceiverKeyAbdlopCommitmentPrepared',
+        );
+        expect(
+            preparation.summary?.abdlopCommitment?.abdlopCommitmentHash,
+        ).toMatch(/^[0-9a-f]{64}$/u);
+
+        const generatedProof = kernel.generateReceiverKeyProof({
+            linearStatement,
+            parameterSet: validProofCase.parameterSet,
+            proofEncoding: validProofCase.proofEncoding,
+            publicRandomnessHex: '00'.repeat(32),
+            secretState,
+            proverRandomnessHex: '09'.repeat(32),
+        });
+        const repeatedGeneratedProof = kernel.generateReceiverKeyProof({
+            linearStatement,
+            parameterSet: validProofCase.parameterSet,
+            proofEncoding: validProofCase.proofEncoding,
+            publicRandomnessHex: '00'.repeat(32),
+            secretState,
+            proverRandomnessHex: '09'.repeat(32),
+        });
+        const changedGeneratedProof = kernel.generateReceiverKeyProof({
+            linearStatement,
+            parameterSet: validProofCase.parameterSet,
+            proofEncoding: validProofCase.proofEncoding,
+            publicRandomnessHex: '00'.repeat(32),
+            secretState,
+            proverRandomnessHex: '0a'.repeat(32),
+        });
+
+        expect(generatedProof).toMatchObject({
+            ok: true,
+            backendAvailable: false,
+            generatedProofBytes: true,
+            operation: 'generateReceiverKeyProof',
+            unresolvedReason: null,
+        });
+        expect(generatedProof.statusLabels).toContain(
+            'ReceiverKeyGeneratedProofVerified',
+        );
+        expect(generatedProof.proofBytesHex).toMatch(/^[0-9a-f]+$/u);
+        expect(generatedProof.proofSizeBytes).toBe(
+            String(generatedProof.proofBytesHex).length / 2,
+        );
+        expect(repeatedGeneratedProof.proofBytesHex).toBe(
+            generatedProof.proofBytesHex,
+        );
+        expect(changedGeneratedProof.proofBytesHex).not.toBe(
+            generatedProof.proofBytesHex,
+        );
+
+        const generatedVectorCase = {
+            caseName: 'generated-receiver-key-proof',
+            description:
+                'Receiver-key linear proof generated by the internal Rust prover.',
+            mutation: 'none',
+            expectedOutcome: 'accept',
+            upstreamVectorAvailable: true,
+            parameterSet: validProofCase.parameterSet,
+            proofEncoding: validProofCase.proofEncoding,
+            publicRandomnessHex: '00'.repeat(32),
+            statementMatrixCoefficients,
+            targetVectorCoefficients,
+            targetCoefficientRepresentation: 'centeredSignedSourceModulus',
+            proofHex: generatedProof.proofBytesHex,
+            expectedProofSizeBytes: generatedProof.proofSizeBytes,
+        };
+        const generatedVerification =
+            kernel.verifyBallotPrivacyLinearProofVector({
+                vectorCase: generatedVectorCase,
+            });
+        expect(generatedVerification).toMatchObject({
+            ok: true,
+            backendAvailable: false,
+            caseName: 'generated-receiver-key-proof',
+            unresolvedReason: null,
+        });
+
+        const mutatedGeneratedVectorCase = cloneJsonValue(generatedVectorCase);
+        mutatedGeneratedVectorCase.caseName =
+            'generated-receiver-key-proof-mutated-target';
+        mutatedGeneratedVectorCase.expectedOutcome = 'reject';
+        mutatedGeneratedVectorCase.targetVectorCoefficients[0][0] =
+            (mutatedGeneratedVectorCase.targetVectorCoefficients[0][0] + 1) %
+            receiverKeyModulus;
+        expect(
+            kernel.verifyBallotPrivacyLinearProofVector({
+                vectorCase: mutatedGeneratedVectorCase,
+            }),
+        ).toMatchObject({
+            ok: false,
+            backendAvailable: false,
+            caseName: 'generated-receiver-key-proof-mutated-target',
+            unresolvedReason: 'InvalidFixture',
+        });
+
+        const wrongSecretState = cloneJsonValue(secretState);
+        wrongSecretState.secretVector[0][0] = 3;
+        const rejection = kernel.prepareReceiverKeyProofGeneration({
+            linearStatement,
+            parameterSet: validProofCase.parameterSet,
+            proofEncoding: validProofCase.proofEncoding,
+            publicRandomnessHex: '00'.repeat(32),
+            secretState: wrongSecretState,
+            proverRandomnessHex: '09'.repeat(32),
+        });
+
+        expect(rejection).toMatchObject({
+            ok: false,
+            backendAvailable: false,
+            operation: 'prepareReceiverKeyProofGeneration',
+            unresolvedReason: 'BallotPackageInvalid',
+        });
+        expect(String(rejection.refusedObjects[0]?.message)).toContain(
+            'source witness',
+        );
+    });
+
+    it('rejects field-incomplete ballot records after WASM linear proof verification', async () => {
+        const kernel = await loadTranscriptCoreKernel();
+        const linearProofCases =
+            linearProofBackendVectors.cases as readonly (Record<
+                string,
+                unknown
+            > &
+                NamedFixture)[];
+        const validProofCase = findFixture(
+            linearProofCases,
+            'valid-small-linear-proof',
+        );
+        const mutatedTargetCase = findFixture(
+            linearProofCases,
+            'mutated-target-vector',
+        );
+        const proofBytesHex = String(validProofCase.proofHex);
+        const publicRandomnessHex = String(validProofCase.publicRandomnessHex);
+        const proofSizeBytes = proofBytesHex.length / 2;
+        const validParameterSet = {
+            ...cloneJsonValue(
+                validProofCase.parameterSet as Record<string, unknown>,
+            ),
+            expectedProofSizeBytes: proofSizeBytes,
+        };
+        const validProofEncoding = {
+            ...cloneJsonValue(
+                validProofCase.proofEncoding as Record<string, unknown>,
+            ),
+            expectedProofSizeBytes: proofSizeBytes,
+        };
+        const digest = (label: string): string =>
+            kernel.deriveProtocolDigest({
+                namespace: 'ChallengeDomainDigest',
+                value: {
+                    label,
+                    purpose: 'ballot-proof-record-wasm-test',
+                },
+            });
+        const createStatement = (): Record<string, unknown> => {
+            const statementPayload = {
+                actionContextDigest: digest('action-context'),
+                aggregateInputEncodingProfileDigest: digest(
+                    'aggregate-input-encoding-profile',
+                ),
+                ballotPackageDigest: digest('ballot-package'),
+                ballotProofProfileDigest: digest('ballot-proof-profile'),
+                ballotScoreEncodingProfileDigest: digest(
+                    'ballot-score-encoding-profile',
+                ),
+                ballotShareLayoutProfileDigest: digest(
+                    'ballot-share-layout-profile',
+                ),
+                ceremonyId: 'ceremony-ballot-proof-record',
+                challengeDomainDigest: digest('challenge-domain'),
+                duplicateBallotPolicyDigest: digest('duplicate-policy'),
+                encodedAggregateLayoutDigest: digest(
+                    'encoded-aggregate-layout',
+                ),
+                encodedShareVectorLayoutDigest: digest(
+                    'encoded-share-vector-layout',
+                ),
+                manifestDigest: digest('manifest'),
+                objectType: 'BallotProofStatement',
+                objectVersion: 1,
+                optionCount: 20,
+                pollSpecDigest: digest('poll-spec'),
+                receiverEncryptionProfileDigest: digest(
+                    'receiver-encryption-profile',
+                ),
+                receiverKeyProofRoot: digest('receiver-key-proof-root'),
+                receiverKeyRoot: digest('receiver-key-root'),
+                receiverPayloads: [
+                    {
+                        receiverIdentity: 'receiver-1',
+                        receiverPayloadCiphertextRoot: digest(
+                            'receiver-ciphertext-1',
+                        ),
+                        receiverPayloadDigest: digest('receiver-payload-1'),
+                        receiverRosterPosition: 1,
+                    },
+                ],
+                receiverPublicKeys: [
+                    {
+                        receiverIdentity: 'receiver-1',
+                        receiverPublicKeyDigest: digest(
+                            'receiver-public-key-1',
+                        ),
+                        receiverRosterPosition: 1,
+                    },
+                ],
+                rosterDigest: digest('roster'),
+                rosterExternalAcceptanceDigest: digest('external-acceptance'),
+                scoreDomainDigest: digest('score-domain'),
+                scoreMembershipProfileDigest: digest(
+                    'score-membership-profile',
+                ),
+                shareCommitmentMessageBoundCertDigest: digest(
+                    'share-commitment-bound-cert',
+                ),
+                shareCommitmentProfileDigest: digest(
+                    'share-commitment-profile',
+                ),
+                shareCommitments: [
+                    {
+                        receiverIdentity: 'receiver-1',
+                        receiverRosterPosition: 1,
+                        shareCommitmentDigest: digest('share-commitment-1'),
+                    },
+                ],
+                shareVectorWidth: 220,
+                thresholdProfileDigest: digest('threshold-profile'),
+                tiePolicyDigest: digest('tie-policy'),
+                topOptionCount: 3,
+                voterIdentityDigest: digest('voter-1'),
+                voterRosterPosition: 1,
+                voterSigningKeyDigest: digest('voter-signing-key'),
+            };
+
+            return {
+                ...statementPayload,
+                ballotProofStatementDigest: kernel.deriveProtocolDigest({
+                    namespace: 'BallotProofStatementDigest',
+                    value: statementPayload,
+                }),
+            };
+        };
+        const createLinearStatement = (
+            statement: Record<string, unknown>,
+            targetVectorCoefficients: unknown,
+        ): Record<string, unknown> => {
+            const linearStatementPayload = {
+                backendStatementDigest: digest('backend-statement'),
+                ballotProofStatementDigest:
+                    statement.ballotProofStatementDigest,
+                coefficientModulus: '4294962689',
+                objectType: 'BallotProofLinearProofStatement',
+                objectVersion: 1,
+                parameterProfileId: String(
+                    (validParameterSet as Record<string, unknown>).profileId,
+                ),
+                relation: 'A*w + t = 0',
+                relationStatementDigest: digest('relation-statement'),
+                ringDegree: 256,
+                statementColumns: 8,
+                statementMatrixCoefficients:
+                    validProofCase.statementMatrixCoefficients,
+                statementMatrixDigest: digest('statement-matrix'),
+                statementRows: 4,
+                targetCoefficientRepresentation:
+                    validProofCase.targetCoefficientRepresentation,
+                targetVectorCoefficients,
+                targetVectorDigest: digest('target-vector'),
+                witnessL2BoundSquared: '2048',
+            };
+
+            return {
+                ...linearStatementPayload,
+                statementDigest: kernel.deriveProtocolDigest({
+                    namespace: 'ChallengeDomainDigest',
+                    value: {
+                        payload: linearStatementPayload,
+                        purpose: 'ballot-proof-linear-proof-statement-v1',
+                    },
+                }),
+            };
+        };
+        const createBallotProof = (
+            statement: Record<string, unknown>,
+            linearStatement: Record<string, unknown>,
+            componentBundleStatement?: Record<string, unknown>,
+            componentProofBundle?: Record<string, unknown>,
+            parameterSet: Record<string, unknown> = validParameterSet,
+            proofEncoding: Record<string, unknown> = validProofEncoding,
+        ): Record<string, unknown> => {
+            const proofBytesDigest = kernel.deriveProtocolDigest({
+                namespace: 'ProofBytesDigest',
+                value: {
+                    objectType: 'ProofBytes',
+                    objectVersion: 1,
+                    proofBytesHex,
+                    proofSizeBytes,
+                },
+            });
+            const proofEncodingProfileDigest = kernel.deriveProtocolDigest({
+                namespace: 'ChallengeDomainDigest',
+                value: {
+                    proofEncoding,
+                    purpose: 'ballot-proof-linear-proof-encoding-profile-v1',
+                },
+            });
+            const proofParameterSetDigest = kernel.deriveProtocolDigest({
+                namespace: 'ChallengeDomainDigest',
+                value: {
+                    parameterSet,
+                    purpose: 'ballot-proof-linear-proof-parameter-set-v1',
+                },
+            });
+            const publicRandomnessDigest = kernel.deriveProtocolDigest({
+                namespace: 'ChallengeDomainDigest',
+                value: {
+                    publicRandomnessHex,
+                    purpose: 'ballot-proof-linear-proof-public-randomness-v1',
+                },
+            });
+            const proofRoot = kernel.deriveProtocolDigest({
+                namespace: 'BallotProofRecordDigest',
+                value: {
+                    linearStatementDigest: linearStatement.statementDigest,
+                    proofBytesDigest,
+                    proofEncodingProfileDigest,
+                    proofParameterSetDigest,
+                    publicRandomnessDigest,
+                    purpose: 'ballot-proof-linear-proof-record-root-v1',
+                },
+            });
+            const proofPayloadWithoutChallenge = {
+                backendStatementDigest: linearStatement.backendStatementDigest,
+                ballotProofProfileDigest: statement.ballotProofProfileDigest,
+                ballotProofStatementDigest:
+                    statement.ballotProofStatementDigest,
+                ...(componentBundleStatement === undefined
+                    ? {}
+                    : {
+                          componentBundleStatementDigest:
+                              componentBundleStatement.componentBundleStatementDigest,
+                      }),
+                ...(componentProofBundle === undefined
+                    ? {}
+                    : {
+                          componentProofBundleDigest:
+                              componentProofBundle.componentProofBundleDigest,
+                      }),
+                linearStatementDigest: linearStatement.statementDigest,
+                objectType: 'BallotProofRecord',
+                objectVersion: 1,
+                proofBackend: 'LocalLinearLatticeRelation',
+                proofBytesDigest,
+                proofEncodingProfileDigest,
+                proofParameterSetDigest,
+                proofRoot,
+                proofSizeBytes,
+                publicRandomnessDigest,
+                relationStatementDigest:
+                    linearStatement.relationStatementDigest,
+                statementMatrixDigest: linearStatement.statementMatrixDigest,
+                targetVectorDigest: linearStatement.targetVectorDigest,
+            };
+            const challengeDigest = kernel.deriveProtocolDigest({
+                namespace: 'ChallengeDomainDigest',
+                value: {
+                    backendStatementDigest:
+                        proofPayloadWithoutChallenge.backendStatementDigest,
+                    ballotProofStatementDigest:
+                        statement.ballotProofStatementDigest,
+                    challengeDomainDigest: statement.challengeDomainDigest,
+                    ...(componentBundleStatement === undefined
+                        ? {}
+                        : {
+                              componentBundleStatementDigest:
+                                  componentBundleStatement.componentBundleStatementDigest,
+                          }),
+                    ...(componentProofBundle === undefined
+                        ? {}
+                        : {
+                              componentProofBundleDigest:
+                                  componentProofBundle.componentProofBundleDigest,
+                          }),
+                    linearStatementDigest:
+                        proofPayloadWithoutChallenge.linearStatementDigest,
+                    proofBytesDigest:
+                        proofPayloadWithoutChallenge.proofBytesDigest,
+                    proofEncodingProfileDigest:
+                        proofPayloadWithoutChallenge.proofEncodingProfileDigest,
+                    proofParameterSetDigest:
+                        proofPayloadWithoutChallenge.proofParameterSetDigest,
+                    proofRoot: proofPayloadWithoutChallenge.proofRoot,
+                    publicRandomnessDigest:
+                        proofPayloadWithoutChallenge.publicRandomnessDigest,
+                    relationStatementDigest:
+                        proofPayloadWithoutChallenge.relationStatementDigest,
+                    statementMatrixDigest:
+                        proofPayloadWithoutChallenge.statementMatrixDigest,
+                    targetVectorDigest:
+                        proofPayloadWithoutChallenge.targetVectorDigest,
+                },
+            });
+            const proofPayload = {
+                ...proofPayloadWithoutChallenge,
+                challengeDigest,
+            };
+
+            return {
+                ...proofPayload,
+                ballotProofRecordDigest: kernel.deriveProtocolDigest({
+                    namespace: 'BallotProofRecordDigest',
+                    value: proofPayload,
+                }),
+            };
+        };
+        const statement = createStatement();
+        const validLinearStatement = createLinearStatement(
+            statement,
+            validProofCase.targetVectorCoefficients,
+        );
+        const validBallotProof = createBallotProof(
+            statement,
+            validLinearStatement,
+        );
+        const mutatedLinearStatement = createLinearStatement(
+            statement,
+            mutatedTargetCase.targetVectorCoefficients,
+        );
+        const mutatedBallotProof = createBallotProof(
+            statement,
+            mutatedLinearStatement,
+        );
+
+        expect(
+            kernel.verifyBallotProof({
+                ballotProof: validBallotProof,
+                linearStatement: validLinearStatement,
+                parameterSet: validParameterSet,
+                proofBytesHex,
+                proofEncoding: validProofEncoding,
+                publicRandomnessHex,
+                statement,
+            }),
+        ).toMatchObject({
+            ok: false,
+            backendAvailable: false,
+            operation: 'verifyBallotProof',
+            unresolvedReason: 'BallotPackageInvalid',
+        });
+        const sizeUnboundParameterSet = {
+            ...validParameterSet,
+            expectedProofSizeBytes: proofSizeBytes + 1,
+        };
+        const sizeUnboundParameterBallotProof = createBallotProof(
+            statement,
+            validLinearStatement,
+            undefined,
+            undefined,
+            sizeUnboundParameterSet,
+            validProofEncoding,
+        );
+        const sizeUnboundParameterVerification = kernel.verifyBallotProof({
+            ballotProof: sizeUnboundParameterBallotProof,
+            linearStatement: validLinearStatement,
+            parameterSet: sizeUnboundParameterSet,
+            proofBytesHex,
+            proofEncoding: validProofEncoding,
+            publicRandomnessHex,
+            statement,
+        });
+
+        expect(sizeUnboundParameterVerification).toMatchObject({
+            ok: false,
+            backendAvailable: false,
+            operation: 'verifyBallotProof',
+            unresolvedReason: 'BallotPackageInvalid',
+        });
+        expect(
+            sizeUnboundParameterVerification.refusedObjects.some((refusal) =>
+                refusal.message.includes('byte length'),
+            ),
+        ).toBe(true);
+
+        const sizeUnboundProofEncoding = {
+            ...validProofEncoding,
+            expectedProofSizeBytes: proofSizeBytes + 1,
+        };
+        const sizeUnboundEncodingBallotProof = createBallotProof(
+            statement,
+            validLinearStatement,
+            undefined,
+            undefined,
+            validParameterSet,
+            sizeUnboundProofEncoding,
+        );
+        const sizeUnboundEncodingVerification = kernel.verifyBallotProof({
+            ballotProof: sizeUnboundEncodingBallotProof,
+            linearStatement: validLinearStatement,
+            parameterSet: validParameterSet,
+            proofBytesHex,
+            proofEncoding: sizeUnboundProofEncoding,
+            publicRandomnessHex,
+            statement,
+        });
+
+        expect(sizeUnboundEncodingVerification).toMatchObject({
+            ok: false,
+            backendAvailable: false,
+            operation: 'verifyBallotProof',
+            unresolvedReason: 'BallotPackageInvalid',
+        });
+        expect(
+            sizeUnboundEncodingVerification.refusedObjects.some((refusal) =>
+                refusal.message.includes('byte length'),
+            ),
+        ).toBe(true);
+
+        const relabeledLinearStatement = cloneJsonValue(validLinearStatement);
+        delete relabeledLinearStatement.statementDigest;
+        relabeledLinearStatement.projectionCoverage =
+            'full-encoded-score-ballot-relation';
+        relabeledLinearStatement.statementDigest = kernel.deriveProtocolDigest({
+            namespace: 'ChallengeDomainDigest',
+            value: {
+                payload: relabeledLinearStatement,
+                purpose: 'ballot-proof-linear-proof-statement-v1',
+            },
+        });
+        const relabeledBallotProof = createBallotProof(
+            statement,
+            relabeledLinearStatement,
+        );
+        const relabeledVerification = kernel.verifyBallotProof({
+            ballotProof: relabeledBallotProof,
+            linearStatement: relabeledLinearStatement,
+            parameterSet: validParameterSet,
+            proofBytesHex,
+            proofEncoding: validProofEncoding,
+            publicRandomnessHex,
+            statement,
+        });
+
+        expect(relabeledVerification).toMatchObject({
+            ok: false,
+            backendAvailable: false,
+            operation: 'verifyBallotProof',
+            unresolvedReason: 'BallotPackageInvalid',
+        });
+        expect(
+            relabeledVerification.refusedObjects.some((refusal) =>
+                refusal.message.includes(
+                    'dedicated full-relation parameter profile',
+                ),
+            ),
+        ).toBe(true);
+        expect(
+            kernel.verifyBallotProof({
+                ballotProof: mutatedBallotProof,
+                linearStatement: mutatedLinearStatement,
+                parameterSet: validParameterSet,
+                proofBytesHex,
+                proofEncoding: validProofEncoding,
+                publicRandomnessHex,
+                statement,
+            }),
+        ).toMatchObject({
+            ok: false,
+            backendAvailable: false,
+            operation: 'verifyBallotProof',
+            unresolvedReason: 'InvalidFixture',
+        });
+        expect(
+            kernel.verifyBallotProof({
+                ballotProof: validBallotProof,
+                linearStatement: validLinearStatement,
+                parameterSet: validParameterSet,
+                proofBytesHex: proofBytesHex.slice(0, -2),
+                proofEncoding: validProofEncoding,
+                publicRandomnessHex,
+                statement,
+            }),
+        ).toMatchObject({
+            ok: false,
+            backendAvailable: false,
+            operation: 'verifyBallotProof',
+            unresolvedReason: 'BallotPackageInvalid',
+        });
+    });
+
+    it('rejects encoded-score field-only ballot proof records after WASM proof verification', async () => {
+        const kernel = await loadTranscriptCoreKernel();
+        const ballotFieldLinearProofCases =
+            ballotFieldLinearProofBackendVectors.cases as readonly (Record<
+                string,
+                unknown
+            > &
+                NamedFixture)[];
+        const validProofCase = expandBallotFieldLinearProofVectorCase(
+            findFixture(
+                ballotFieldLinearProofCases,
+                'valid-encoded-score-field-linear-proof',
+            ),
+        );
+        const mutatedTargetCase = expandBallotFieldLinearProofVectorCase(
+            findFixture(
+                ballotFieldLinearProofCases,
+                'mutated-encoded-score-field-target-vector',
+            ),
+        );
+        const proofBytesHex = String(validProofCase.proofHex);
+        const publicRandomnessHex = String(validProofCase.publicRandomnessHex);
+        const proofSizeBytes = proofBytesHex.length / 2;
+        const digest = (label: string): string =>
+            kernel.deriveProtocolDigest({
+                namespace: 'ChallengeDomainDigest',
+                value: {
+                    label,
+                    purpose:
+                        'encoded-score-field-ballot-proof-record-wasm-test',
+                },
+            });
+        const deriveProofBytesDigestForTest = (
+            proofBytesHexForTest: string,
+        ): string =>
+            kernel.deriveProtocolDigest({
+                namespace: 'ProofBytesDigest',
+                value: {
+                    objectType: 'ProofBytes',
+                    objectVersion: 1,
+                    proofBytesHex: proofBytesHexForTest,
+                    proofSizeBytes: proofBytesHexForTest.length / 2,
+                },
+            });
+        const deriveBallotProofEncodingDigestForTest = (
+            proofEncoding: unknown,
+        ): string =>
+            kernel.deriveProtocolDigest({
+                namespace: 'ChallengeDomainDigest',
+                value: {
+                    proofEncoding,
+                    purpose: 'ballot-proof-linear-proof-encoding-profile-v1',
+                },
+            });
+        const deriveBallotProofParameterSetDigestForTest = (
+            parameterSet: unknown,
+        ): string =>
+            kernel.deriveProtocolDigest({
+                namespace: 'ChallengeDomainDigest',
+                value: {
+                    parameterSet,
+                    purpose: 'ballot-proof-linear-proof-parameter-set-v1',
+                },
+            });
+        const deriveBallotProofPublicRandomnessDigestForTest = (
+            componentPublicRandomnessHex: string,
+        ): string =>
+            kernel.deriveProtocolDigest({
+                namespace: 'ChallengeDomainDigest',
+                value: {
+                    publicRandomnessHex: componentPublicRandomnessHex,
+                    purpose: 'ballot-proof-linear-proof-public-randomness-v1',
+                },
+            });
+        const createStatement = (): Record<string, unknown> => {
+            const statementPayload = {
+                actionContextDigest: digest('action-context'),
+                aggregateInputEncodingProfileDigest: digest(
+                    'aggregate-input-encoding-profile',
+                ),
+                ballotPackageDigest: digest('ballot-package'),
+                ballotProofProfileDigest: digest('ballot-proof-profile'),
+                ballotScoreEncodingProfileDigest: digest(
+                    'ballot-score-encoding-profile',
+                ),
+                ballotShareLayoutProfileDigest: digest(
+                    'ballot-share-layout-profile',
+                ),
+                ceremonyId: 'ceremony-encoded-score-field-ballot-proof-record',
+                challengeDomainDigest: digest('challenge-domain'),
+                duplicateBallotPolicyDigest: digest('duplicate-policy'),
+                encodedAggregateLayoutDigest: digest(
+                    'encoded-aggregate-layout',
+                ),
+                encodedShareVectorLayoutDigest: digest(
+                    'encoded-share-vector-layout',
+                ),
+                manifestDigest: digest('manifest'),
+                objectType: 'BallotProofStatement',
+                objectVersion: 1,
+                optionCount: 20,
+                pollSpecDigest: digest('poll-spec'),
+                receiverEncryptionProfileDigest: digest(
+                    'receiver-encryption-profile',
+                ),
+                receiverKeyProofRoot: digest('receiver-key-proof-root'),
+                receiverKeyRoot: digest('receiver-key-root'),
+                receiverPayloads: [
+                    {
+                        receiverIdentity: 'receiver-1',
+                        receiverPayloadCiphertextRoot: digest(
+                            'receiver-ciphertext-1',
+                        ),
+                        receiverPayloadDigest: digest('receiver-payload-1'),
+                        receiverRosterPosition: 1,
+                    },
+                ],
+                receiverPublicKeys: [
+                    {
+                        receiverIdentity: 'receiver-1',
+                        receiverPublicKeyDigest: digest(
+                            'receiver-public-key-1',
+                        ),
+                        receiverRosterPosition: 1,
+                    },
+                ],
+                rosterDigest: digest('roster'),
+                rosterExternalAcceptanceDigest: digest('external-acceptance'),
+                scoreDomainDigest: digest('score-domain'),
+                scoreMembershipProfileDigest: digest(
+                    'score-membership-profile',
+                ),
+                shareCommitmentMessageBoundCertDigest: digest(
+                    'share-commitment-bound-cert',
+                ),
+                shareCommitmentProfileDigest: digest(
+                    'share-commitment-profile',
+                ),
+                shareCommitments: [
+                    {
+                        receiverIdentity: 'receiver-1',
+                        receiverRosterPosition: 1,
+                        shareCommitmentDigest: digest('share-commitment-1'),
+                    },
+                ],
+                shareVectorWidth: 220,
+                thresholdProfileDigest: digest('threshold-profile'),
+                tiePolicyDigest: digest('tie-policy'),
+                topOptionCount: 3,
+                voterIdentityDigest: digest('voter-1'),
+                voterRosterPosition: 1,
+                voterSigningKeyDigest: digest('voter-signing-key'),
+            };
+
+            return {
+                ...statementPayload,
+                ballotProofStatementDigest: kernel.deriveProtocolDigest({
+                    namespace: 'BallotProofStatementDigest',
+                    value: statementPayload,
+                }),
+            };
+        };
+        const createLinearStatement = (
+            statement: Record<string, unknown>,
+            vectorCase: Record<string, unknown>,
+        ): Record<string, unknown> => {
+            const statementMatrixCoefficients =
+                vectorCase.statementMatrixCoefficients;
+            const targetVectorCoefficients =
+                vectorCase.targetVectorCoefficients;
+            const linearStatementPayload = {
+                ...cloneJsonValue(
+                    ballotFieldLinearProofBackendVectors.linearStatement,
+                ),
+                ballotProofStatementDigest:
+                    statement.ballotProofStatementDigest,
+                statementMatrixCoefficients,
+                statementMatrixDigest: kernel.deriveProtocolDigest({
+                    namespace: 'ChallengeDomainDigest',
+                    value: {
+                        purpose: 'ballot-proof-linear-statement-matrix-v1',
+                        statementMatrixCoefficients,
+                    },
+                }),
+                targetVectorCoefficients,
+                targetVectorDigest: kernel.deriveProtocolDigest({
+                    namespace: 'ChallengeDomainDigest',
+                    value: {
+                        purpose: 'ballot-proof-linear-target-vector-v1',
+                        targetVectorCoefficients,
+                    },
+                }),
+            } as Record<string, unknown>;
+            delete linearStatementPayload.statementDigest;
+
+            return {
+                ...linearStatementPayload,
+                statementDigest: kernel.deriveProtocolDigest({
+                    namespace: 'ChallengeDomainDigest',
+                    value: {
+                        payload: linearStatementPayload,
+                        purpose: 'ballot-proof-linear-proof-statement-v1',
+                    },
+                }),
+            };
+        };
+        const createBallotProof = (
+            statement: Record<string, unknown>,
+            linearStatement: Record<string, unknown>,
+            componentBundleStatement?: Record<string, unknown>,
+            componentProofBundle?: Record<string, unknown>,
+        ): Record<string, unknown> => {
+            const proofBytesDigest = kernel.deriveProtocolDigest({
+                namespace: 'ProofBytesDigest',
+                value: {
+                    objectType: 'ProofBytes',
+                    objectVersion: 1,
+                    proofBytesHex,
+                    proofSizeBytes,
+                },
+            });
+            const proofEncodingProfileDigest = kernel.deriveProtocolDigest({
+                namespace: 'ChallengeDomainDigest',
+                value: {
+                    proofEncoding: validProofCase.proofEncoding,
+                    purpose: 'ballot-proof-linear-proof-encoding-profile-v1',
+                },
+            });
+            const proofParameterSetDigest = kernel.deriveProtocolDigest({
+                namespace: 'ChallengeDomainDigest',
+                value: {
+                    parameterSet: validProofCase.parameterSet,
+                    purpose: 'ballot-proof-linear-proof-parameter-set-v1',
+                },
+            });
+            const publicRandomnessDigest = kernel.deriveProtocolDigest({
+                namespace: 'ChallengeDomainDigest',
+                value: {
+                    publicRandomnessHex,
+                    purpose: 'ballot-proof-linear-proof-public-randomness-v1',
+                },
+            });
+            const proofRoot = kernel.deriveProtocolDigest({
+                namespace: 'BallotProofRecordDigest',
+                value: {
+                    linearStatementDigest: linearStatement.statementDigest,
+                    proofBytesDigest,
+                    proofEncodingProfileDigest,
+                    proofParameterSetDigest,
+                    publicRandomnessDigest,
+                    purpose: 'ballot-proof-linear-proof-record-root-v1',
+                },
+            });
+            const proofPayloadWithoutChallenge = {
+                backendStatementDigest: linearStatement.backendStatementDigest,
+                ballotProofProfileDigest: statement.ballotProofProfileDigest,
+                ballotProofStatementDigest:
+                    statement.ballotProofStatementDigest,
+                ...(componentBundleStatement === undefined
+                    ? {}
+                    : {
+                          componentBundleStatementDigest:
+                              componentBundleStatement.componentBundleStatementDigest,
+                      }),
+                ...(componentProofBundle === undefined
+                    ? {}
+                    : {
+                          componentProofBundleDigest:
+                              componentProofBundle.componentProofBundleDigest,
+                      }),
+                linearStatementDigest: linearStatement.statementDigest,
+                objectType: 'BallotProofRecord',
+                objectVersion: 1,
+                proofBackend: 'LocalLinearLatticeRelation',
+                proofBytesDigest,
+                proofEncodingProfileDigest,
+                proofParameterSetDigest,
+                proofRoot,
+                proofSizeBytes,
+                publicRandomnessDigest,
+                relationStatementDigest:
+                    linearStatement.relationStatementDigest,
+                statementMatrixDigest: linearStatement.statementMatrixDigest,
+                targetVectorDigest: linearStatement.targetVectorDigest,
+            };
+            const challengeDigest = kernel.deriveProtocolDigest({
+                namespace: 'ChallengeDomainDigest',
+                value: {
+                    backendStatementDigest:
+                        proofPayloadWithoutChallenge.backendStatementDigest,
+                    ballotProofStatementDigest:
+                        statement.ballotProofStatementDigest,
+                    challengeDomainDigest: statement.challengeDomainDigest,
+                    ...(componentBundleStatement === undefined
+                        ? {}
+                        : {
+                              componentBundleStatementDigest:
+                                  componentBundleStatement.componentBundleStatementDigest,
+                          }),
+                    ...(componentProofBundle === undefined
+                        ? {}
+                        : {
+                              componentProofBundleDigest:
+                                  componentProofBundle.componentProofBundleDigest,
+                          }),
+                    linearStatementDigest:
+                        proofPayloadWithoutChallenge.linearStatementDigest,
+                    proofBytesDigest:
+                        proofPayloadWithoutChallenge.proofBytesDigest,
+                    proofEncodingProfileDigest:
+                        proofPayloadWithoutChallenge.proofEncodingProfileDigest,
+                    proofParameterSetDigest:
+                        proofPayloadWithoutChallenge.proofParameterSetDigest,
+                    proofRoot: proofPayloadWithoutChallenge.proofRoot,
+                    publicRandomnessDigest:
+                        proofPayloadWithoutChallenge.publicRandomnessDigest,
+                    relationStatementDigest:
+                        proofPayloadWithoutChallenge.relationStatementDigest,
+                    statementMatrixDigest:
+                        proofPayloadWithoutChallenge.statementMatrixDigest,
+                    targetVectorDigest:
+                        proofPayloadWithoutChallenge.targetVectorDigest,
+                },
+            });
+            const proofPayload = {
+                ...proofPayloadWithoutChallenge,
+                challengeDigest,
+            };
+
+            return {
+                ...proofPayload,
+                ballotProofRecordDigest: kernel.deriveProtocolDigest({
+                    namespace: 'BallotProofRecordDigest',
+                    value: proofPayload,
+                }),
+            };
+        };
+        const componentIds = [
+            'score-and-shamir-field-component',
+            'payload-plaintext-field-component',
+            'share-commitment-component',
+            'receiver-encryption-component',
+            'receiver-key-binding-component',
+        ];
+        const createComponentStatement = (
+            linearStatement: Record<string, unknown>,
+            statement: Record<string, unknown>,
+            componentId: string,
+            componentIndex: number,
+            proofLoweringStatus: string,
+        ): Record<string, unknown> => {
+            const componentPayload = {
+                backendStatementDigest: linearStatement.backendStatementDigest,
+                ballotProofStatementDigest:
+                    statement.ballotProofStatementDigest,
+                coefficientModulus: '65537',
+                componentDigest: digest(`${componentId}-component`),
+                componentId,
+                matrixDigest: digest(`${componentId}-matrix`),
+                objectType: 'BallotProofComponentStatement',
+                objectVersion: 1,
+                proofLoweringStatus,
+                relationStatementDigest:
+                    linearStatement.relationStatementDigest,
+                rowBatchMatrixDigests: [digest(`${componentId}-row-matrix`)],
+                rowBatchNames: [`${componentId}-rows`],
+                rowBatchTargetVectorDigests: [
+                    digest(`${componentId}-row-target`),
+                ],
+                rowCount: 1,
+                rowKinds: ['EncodedScoreFieldRows'],
+                targetVectorDigest: digest(`${componentId}-target`),
+                variableColumnCount: 1,
+                variableColumnIndices: [componentIndex],
+            };
+
+            return {
+                ...componentPayload,
+                componentStatementDigest: kernel.deriveProtocolDigest({
+                    namespace: 'ChallengeDomainDigest',
+                    value: {
+                        payload: componentPayload,
+                        purpose: 'ballot-proof-component-statement-v1',
+                    },
+                }),
+            };
+        };
+        const createComponentBundleStatement = (
+            linearStatement: Record<string, unknown>,
+            statement: Record<string, unknown>,
+            options: { readonly fullCoverage?: boolean } = {},
+        ): Record<string, unknown> => {
+            const componentStatements = componentIds.map(
+                (componentId, componentIndex) =>
+                    createComponentStatement(
+                        linearStatement,
+                        statement,
+                        componentId,
+                        componentIndex,
+                        options.fullCoverage === true || componentIndex === 0
+                            ? 'explicitRowsAvailable'
+                            : 'digestExpandedRowsPending',
+                    ),
+            );
+            const componentBundlePayload = {
+                backendStatementDigest: linearStatement.backendStatementDigest,
+                ballotProofStatementDigest:
+                    statement.ballotProofStatementDigest,
+                bundleCoverage:
+                    options.fullCoverage === true
+                        ? 'full-encoded-score-ballot-relation'
+                        : 'component-bundle-incomplete',
+                componentStatements,
+                objectType: 'BallotProofComponentBundleStatement',
+                objectVersion: 1,
+                relationLabel: 'BallotPrivacyPvssRelation',
+                relationStatementDigest:
+                    linearStatement.relationStatementDigest,
+                requiredComponentIds: componentIds,
+            };
+
+            return {
+                ...componentBundlePayload,
+                componentBundleStatementDigest: kernel.deriveProtocolDigest({
+                    namespace: 'ChallengeDomainDigest',
+                    value: {
+                        payload: componentBundlePayload,
+                        purpose: 'ballot-proof-component-bundle-statement-v1',
+                    },
+                }),
+            };
+        };
+        const createComponentProofStatement = (input: {
+            readonly componentId: string;
+            readonly componentProofStatementDigest?: string;
+            readonly componentStatementDigest: string;
+            readonly proofStatementFormat: string;
+        }): Record<string, unknown> => {
+            if (
+                input.proofStatementFormat ===
+                'dense-polynomial-matrix-linear-proof-v1'
+            ) {
+                const statementPayload = {
+                    componentId: input.componentId,
+                    componentStatementDigest: input.componentStatementDigest,
+                    objectType: 'BallotProofLinearProofStatement',
+                    objectVersion: 1,
+                    proofStatementFormat: input.proofStatementFormat,
+                };
+
+                return {
+                    ...statementPayload,
+                    statementDigest: kernel.deriveProtocolDigest({
+                        namespace: 'ChallengeDomainDigest',
+                        value: {
+                            payload: statementPayload,
+                            purpose: 'ballot-proof-linear-proof-statement-v1',
+                        },
+                    }),
+                };
+            }
+            if (
+                input.proofStatementFormat ===
+                'sparse-polynomial-matrix-linear-proof-v1'
+            ) {
+                const statementPayload = {
+                    componentId: input.componentId,
+                    componentStatementDigest: input.componentStatementDigest,
+                    objectType:
+                        'BallotProofSparseComponentLinearProofStatement',
+                    objectVersion: 1,
+                    proofStatementFormat: input.proofStatementFormat,
+                };
+
+                return {
+                    ...statementPayload,
+                    statementDigest: kernel.deriveProtocolDigest({
+                        namespace: 'ChallengeDomainDigest',
+                        value: {
+                            payload: statementPayload,
+                            purpose:
+                                'ballot-proof-sparse-linear-proof-statement-v1',
+                        },
+                    }),
+                };
+            }
+            const statementPayload = {
+                backendStatementDigest: digest(`${input.componentId}-backend`),
+                coefficientModulus:
+                    input.componentId === 'share-commitment-component'
+                        ? '18446744069414584321'
+                        : input.componentId ===
+                                'score-and-shamir-field-component' ||
+                            input.componentId ===
+                                'payload-plaintext-field-component'
+                          ? '65537'
+                          : '12289',
+                componentId: input.componentId,
+                componentStatementDigest: input.componentStatementDigest,
+                denseCoefficientCount:
+                    input.proofStatementFormat ===
+                    'structured-module-lwe-linear-proof-v1'
+                        ? '1024'
+                        : null,
+                matrixDigest: digest(`${input.componentId}-matrix`),
+                objectType: 'BallotProofComponentProofStatementPlan',
+                objectVersion: 1,
+                proofBytesAvailability:
+                    input.proofStatementFormat ===
+                    'structured-module-lwe-linear-proof-v1'
+                        ? 'requires-structured-proof-statement'
+                        : 'public-zero-witness-binding-check',
+                proofLoweringStatus: 'explicitRowsAvailable',
+                proofStatementFormat: input.proofStatementFormat,
+                proofSystemRingDegree:
+                    input.proofStatementFormat ===
+                    'structured-module-lwe-linear-proof-v1'
+                        ? 64
+                        : null,
+                relation: 'A*w + t = 0',
+                relationStatementDigest: digest(
+                    `${input.componentId}-relation`,
+                ),
+                rowBatchMatrixDigests: [
+                    digest(`${input.componentId}-row-matrix`),
+                ],
+                rowBatchNames: [
+                    input.proofStatementFormat ===
+                    'structured-module-lwe-linear-proof-v1'
+                        ? 'receiver_payload_encryption_equation_rows'
+                        : 'receiver_key_binding_rows',
+                ],
+                rowBatchTargetVectorDigests: [
+                    digest(`${input.componentId}-row-target`),
+                ],
+                rowBatchTermCounts: [
+                    input.proofStatementFormat ===
+                    'structured-module-lwe-linear-proof-v1'
+                        ? '1024'
+                        : '0',
+                ],
+                rowCount: 1,
+                sparseTermCount: null,
+                sourceRingDegree:
+                    input.proofStatementFormat ===
+                    'structured-module-lwe-linear-proof-v1'
+                        ? 256
+                        : null,
+                structuredCiphertextChunkCount:
+                    input.proofStatementFormat ===
+                    'structured-module-lwe-linear-proof-v1'
+                        ? 1
+                        : null,
+                structuredReceiverCount:
+                    input.proofStatementFormat ===
+                    'structured-module-lwe-linear-proof-v1'
+                        ? 1
+                        : null,
+                structuredWitnessTermCount:
+                    input.proofStatementFormat ===
+                    'structured-module-lwe-linear-proof-v1'
+                        ? '1024'
+                        : null,
+                targetVectorDigest: digest(`${input.componentId}-target`),
+                variableColumnCount:
+                    input.proofStatementFormat ===
+                    'structured-module-lwe-linear-proof-v1'
+                        ? 1
+                        : 0,
+                variableColumnIndices:
+                    input.proofStatementFormat ===
+                    'structured-module-lwe-linear-proof-v1'
+                        ? [0]
+                        : [],
+            };
+
+            return {
+                ...statementPayload,
+                componentProofStatementDigest:
+                    input.componentProofStatementDigest ??
+                    kernel.deriveProtocolDigest({
+                        namespace: 'ChallengeDomainDigest',
+                        value: {
+                            payload: statementPayload,
+                            purpose:
+                                'ballot-proof-component-proof-statement-plan-v1',
+                        },
+                    }),
+            };
+        };
+        const createComponentProofInput = (
+            componentId: string,
+            componentStatementDigest: string,
+        ): Record<string, unknown> => {
+            const componentIndex = componentIds.indexOf(componentId);
+            const publicRandomnessByte = (componentIndex + 1)
+                .toString(16)
+                .padStart(2, '0');
+            const proofStatementFormat =
+                componentId === 'receiver-encryption-component'
+                    ? 'structured-module-lwe-linear-proof-v1'
+                    : componentId === 'receiver-key-binding-component'
+                      ? 'public-zero-witness-binding-check-v1'
+                      : componentId === 'score-and-shamir-field-component'
+                        ? 'dense-polynomial-matrix-linear-proof-v1'
+                        : 'sparse-polynomial-matrix-linear-proof-v1';
+            const componentProofStatementDigest = digest(
+                `${componentId}-proof-statement`,
+            );
+            const proofStatement = createComponentProofStatement({
+                componentId,
+                componentProofStatementDigest:
+                    proofStatementFormat ===
+                        'structured-module-lwe-linear-proof-v1' ||
+                    proofStatementFormat ===
+                        'public-zero-witness-binding-check-v1'
+                        ? undefined
+                        : componentProofStatementDigest,
+                componentStatementDigest,
+                proofStatementFormat,
+            });
+            const suppliedComponentProofStatementDigest =
+                proofStatement.componentProofStatementDigest;
+            const boundComponentProofStatementDigest =
+                typeof suppliedComponentProofStatementDigest === 'string'
+                    ? suppliedComponentProofStatementDigest
+                    : componentProofStatementDigest;
+            const componentProofBytesHex =
+                proofStatementFormat === 'public-zero-witness-binding-check-v1'
+                    ? ''
+                    : digest(`${componentId}-proof-bytes-material`);
+
+            return {
+                componentId,
+                componentProofStatementDigest:
+                    boundComponentProofStatementDigest,
+                proofBytesHex: componentProofBytesHex,
+                proofEncoding: {
+                    profileId: 'ballot-proof-component-encoding-v1',
+                    componentId,
+                },
+                proofParameterSet: {
+                    profileId: 'ballot-proof-component-parameter-set-v1',
+                    componentId,
+                },
+                proofStatement,
+                proofStatementFormat,
+                publicRandomnessHex: publicRandomnessByte.repeat(32),
+                statementDigest: componentStatementDigest,
+            };
+        };
+        const createComponentProofRecord = (
+            linearStatement: Record<string, unknown>,
+            statement: Record<string, unknown>,
+            componentStatement: Record<string, unknown>,
+            componentId: string,
+        ): Record<string, unknown> => {
+            const componentProofInput = createComponentProofInput(
+                componentId,
+                String(componentStatement.componentStatementDigest),
+            );
+            const proofBytesDigest = deriveProofBytesDigestForTest(
+                String(componentProofInput.proofBytesHex),
+            );
+            const proofEncodingProfileDigest =
+                deriveBallotProofEncodingDigestForTest(
+                    componentProofInput.proofEncoding,
+                );
+            const proofParameterSetDigest =
+                deriveBallotProofParameterSetDigestForTest(
+                    componentProofInput.proofParameterSet,
+                );
+            const publicRandomnessDigest =
+                deriveBallotProofPublicRandomnessDigestForTest(
+                    String(componentProofInput.publicRandomnessHex),
+                );
+            const proofRoot = kernel.deriveProtocolDigest({
+                namespace: 'ChallengeDomainDigest',
+                value: {
+                    componentId,
+                    componentProofStatementDigest:
+                        componentProofInput.componentProofStatementDigest,
+                    componentStatementDigest:
+                        componentStatement.componentStatementDigest,
+                    proofBytesDigest,
+                    proofEncodingProfileDigest,
+                    proofParameterSetDigest,
+                    proofStatementFormat:
+                        componentProofInput.proofStatementFormat,
+                    publicRandomnessDigest,
+                    purpose: 'ballot-proof-component-proof-root-v1',
+                    statementDigest:
+                        componentStatement.componentStatementDigest,
+                },
+            });
+            const proofRecordPayload = {
+                backendStatementDigest: linearStatement.backendStatementDigest,
+                ballotProofStatementDigest:
+                    statement.ballotProofStatementDigest,
+                componentId,
+                componentProofStatementDigest:
+                    componentProofInput.componentProofStatementDigest,
+                componentStatementDigest:
+                    componentStatement.componentStatementDigest,
+                objectType: 'BallotProofComponentProofRecord',
+                objectVersion: 1,
+                proofBackend: 'LocalLinearLatticeRelation',
+                proofBytesDigest,
+                proofEncodingProfileDigest,
+                proofParameterSetDigest,
+                proofRoot,
+                proofSizeBytes:
+                    String(componentProofInput.proofBytesHex).length / 2,
+                publicRandomnessDigest,
+                relationStatementDigest:
+                    linearStatement.relationStatementDigest,
+            };
+
+            return {
+                ...proofRecordPayload,
+                componentProofRecordDigest: kernel.deriveProtocolDigest({
+                    namespace: 'ChallengeDomainDigest',
+                    value: {
+                        payload: proofRecordPayload,
+                        purpose: 'ballot-proof-component-proof-record-v1',
+                    },
+                }),
+            };
+        };
+        const createComponentProofInputs = (
+            componentProofs: readonly Record<string, unknown>[],
+        ): readonly Record<string, unknown>[] =>
+            componentProofs.map((componentProof) =>
+                createComponentProofInput(
+                    String(componentProof.componentId),
+                    String(componentProof.componentStatementDigest),
+                ),
+            );
+        const createComponentProofBundle = (
+            componentBundleStatement: Record<string, unknown>,
+            componentProofs: readonly Record<string, unknown>[],
+        ): Record<string, unknown> => {
+            const proofBundlePayload = {
+                backendStatementDigest:
+                    componentBundleStatement.backendStatementDigest,
+                ballotProofStatementDigest:
+                    componentBundleStatement.ballotProofStatementDigest,
+                bundleCoverage: componentBundleStatement.bundleCoverage,
+                componentBundleStatementDigest:
+                    componentBundleStatement.componentBundleStatementDigest,
+                componentProofs,
+                objectType: 'BallotProofComponentProofBundle',
+                objectVersion: 1,
+                relationStatementDigest:
+                    componentBundleStatement.relationStatementDigest,
+                requiredComponentIds: componentIds,
+            };
+
+            return {
+                ...proofBundlePayload,
+                componentProofBundleDigest: kernel.deriveProtocolDigest({
+                    namespace: 'ChallengeDomainDigest',
+                    value: {
+                        payload: proofBundlePayload,
+                        purpose: 'ballot-proof-component-proof-bundle-v1',
+                    },
+                }),
+            };
+        };
+        const statement = createStatement();
+        const validLinearStatement = createLinearStatement(
+            statement,
+            validProofCase,
+        );
+        const validBallotProof = createBallotProof(
+            statement,
+            validLinearStatement,
+        );
+        const mutatedLinearStatement = createLinearStatement(
+            statement,
+            mutatedTargetCase,
+        );
+        const mutatedBallotProof = createBallotProof(
+            statement,
+            mutatedLinearStatement,
+        );
+        const incompleteComponentBundleStatement =
+            createComponentBundleStatement(validLinearStatement, statement);
+        const proofBoundToIncompleteComponentBundle = createBallotProof(
+            statement,
+            validLinearStatement,
+            incompleteComponentBundleStatement,
+        );
+
+        expect(
+            kernel.verifyBallotProof({
+                ballotProof: validBallotProof,
+                linearStatement: validLinearStatement,
+                parameterSet: validProofCase.parameterSet,
+                proofBytesHex,
+                proofEncoding: validProofCase.proofEncoding,
+                publicRandomnessHex,
+                statement,
+            }),
+        ).toMatchObject({
+            ok: false,
+            backendAvailable: false,
+            operation: 'verifyBallotProof',
+            unresolvedReason: 'BallotPackageInvalid',
+        });
+        const relabeledEncodedLinearStatement =
+            cloneJsonValue(validLinearStatement);
+        delete relabeledEncodedLinearStatement.statementDigest;
+        relabeledEncodedLinearStatement.projectionCoverage =
+            'full-encoded-score-ballot-relation';
+        relabeledEncodedLinearStatement.statementDigest =
+            kernel.deriveProtocolDigest({
+                namespace: 'ChallengeDomainDigest',
+                value: {
+                    payload: relabeledEncodedLinearStatement,
+                    purpose: 'ballot-proof-linear-proof-statement-v1',
+                },
+            });
+        const relabeledEncodedBallotProof = createBallotProof(
+            statement,
+            relabeledEncodedLinearStatement,
+        );
+        const relabeledEncodedVerification = kernel.verifyBallotProof({
+            ballotProof: relabeledEncodedBallotProof,
+            linearStatement: relabeledEncodedLinearStatement,
+            parameterSet: validProofCase.parameterSet,
+            proofBytesHex,
+            proofEncoding: validProofCase.proofEncoding,
+            publicRandomnessHex,
+            statement,
+        });
+
+        expect(relabeledEncodedVerification).toMatchObject({
+            ok: false,
+            backendAvailable: false,
+            operation: 'verifyBallotProof',
+            unresolvedReason: 'BallotPackageInvalid',
+        });
+        expect(
+            relabeledEncodedVerification.refusedObjects.some((refusal) =>
+                refusal.message.includes(
+                    'dedicated full-relation parameter profile',
+                ),
+            ),
+        ).toBe(true);
+        expect(
+            kernel
+                .verifyBallotProof({
+                    ballotProof: proofBoundToIncompleteComponentBundle,
+                    componentBundleStatement:
+                        incompleteComponentBundleStatement,
+                    linearStatement: validLinearStatement,
+                    parameterSet: validProofCase.parameterSet,
+                    proofBytesHex,
+                    proofEncoding: validProofCase.proofEncoding,
+                    publicRandomnessHex,
+                    statement,
+                })
+                .refusedObjects.some((refusal) =>
+                    refusal.message.includes(
+                        'component bundle is still incomplete',
+                    ),
+                ),
+        ).toBe(true);
+
+        const fullComponentBundleStatement = createComponentBundleStatement(
+            validLinearStatement,
+            statement,
+            {
+                fullCoverage: true,
+            },
+        );
+        const fullComponentStatements =
+            fullComponentBundleStatement.componentStatements as readonly Record<
+                string,
+                unknown
+            >[];
+        const componentProofs = componentIds.map(
+            (componentId, componentIndex) =>
+                createComponentProofRecord(
+                    validLinearStatement,
+                    statement,
+                    fullComponentStatements[componentIndex] ?? {},
+                    componentId,
+                ),
+        );
+        const componentProofInputs =
+            createComponentProofInputs(componentProofs);
+        const componentProofBundle = createComponentProofBundle(
+            fullComponentBundleStatement,
+            componentProofs,
+        );
+        const proofBoundToComponentBundleWithoutProofBundle = createBallotProof(
+            statement,
+            validLinearStatement,
+            fullComponentBundleStatement,
+        );
+        const proofBoundToComponentProofBundle = createBallotProof(
+            statement,
+            validLinearStatement,
+            fullComponentBundleStatement,
+            componentProofBundle,
+        );
+
+        expect(
+            kernel
+                .verifyBallotProof({
+                    ballotProof: proofBoundToComponentBundleWithoutProofBundle,
+                    componentBundleStatement: fullComponentBundleStatement,
+                    linearStatement: validLinearStatement,
+                    parameterSet: validProofCase.parameterSet,
+                    proofBytesHex,
+                    proofEncoding: validProofCase.proofEncoding,
+                    publicRandomnessHex,
+                    statement,
+                })
+                .refusedObjects.some((refusal) =>
+                    refusal.message.includes(
+                        'requires a component proof bundle',
+                    ),
+                ),
+        ).toBe(true);
+        const validComponentBundlePreflight = kernel.verifyBallotProof({
+            ballotProof: proofBoundToComponentProofBundle,
+            componentBundleStatement: fullComponentBundleStatement,
+            componentProofBundle,
+            componentProofInputs,
+            linearStatement: validLinearStatement,
+            parameterSet: validProofCase.parameterSet,
+            proofBytesHex,
+            proofEncoding: validProofCase.proofEncoding,
+            publicRandomnessHex,
+            statement,
+        });
+        expect(
+            validComponentBundlePreflight.refusedObjects.some((refusal) =>
+                refusal.message.includes(
+                    'component proof bundle has an invalid canonical shape',
+                ),
+            ),
+        ).toBe(false);
+        expect(
+            kernel
+                .verifyBallotProof({
+                    ballotProof: proofBoundToComponentProofBundle,
+                    componentBundleStatement: fullComponentBundleStatement,
+                    componentProofBundle,
+                    linearStatement: validLinearStatement,
+                    parameterSet: validProofCase.parameterSet,
+                    proofBytesHex,
+                    proofEncoding: validProofCase.proofEncoding,
+                    publicRandomnessHex,
+                    statement,
+                })
+                .refusedObjects.some((refusal) =>
+                    refusal.message.includes(
+                        'requires public proof inputs for every component proof',
+                    ),
+                ),
+        ).toBe(true);
+        expect(
+            kernel
+                .verifyBallotProof({
+                    ballotProof: proofBoundToComponentProofBundle,
+                    componentBundleStatement: fullComponentBundleStatement,
+                    componentProofBundle,
+                    componentProofInputs: componentProofInputs.map(
+                        (componentProofInput, componentIndex) =>
+                            componentIndex === 0
+                                ? {
+                                      ...componentProofInput,
+                                      proofBytesHex: 'ff'.repeat(
+                                          String(
+                                              componentProofInput.proofBytesHex,
+                                          ).length / 2,
+                                      ),
+                                  }
+                                : componentProofInput,
+                    ),
+                    linearStatement: validLinearStatement,
+                    parameterSet: validProofCase.parameterSet,
+                    proofBytesHex,
+                    proofEncoding: validProofCase.proofEncoding,
+                    publicRandomnessHex,
+                    statement,
+                })
+                .refusedObjects.some((refusal) =>
+                    refusal.message.includes(
+                        'proof bytes do not match the proof record digest',
+                    ),
+                ),
+        ).toBe(true);
+        expect(
+            kernel
+                .verifyBallotProof({
+                    ballotProof: proofBoundToComponentProofBundle,
+                    componentBundleStatement: fullComponentBundleStatement,
+                    componentProofBundle,
+                    componentProofInputs: componentProofInputs.map(
+                        (componentProofInput, componentIndex) =>
+                            componentIndex === 0
+                                ? {
+                                      ...componentProofInput,
+                                      componentProofStatementDigest: digest(
+                                          'wrong-component-proof-statement',
+                                      ),
+                                  }
+                                : componentProofInput,
+                    ),
+                    linearStatement: validLinearStatement,
+                    parameterSet: validProofCase.parameterSet,
+                    proofBytesHex,
+                    proofEncoding: validProofCase.proofEncoding,
+                    publicRandomnessHex,
+                    statement,
+                })
+                .refusedObjects.some((refusal) =>
+                    refusal.message.includes(
+                        'proof statement for score-and-shamir-field-component does not match the proof record',
+                    ),
+                ),
+        ).toBe(true);
+        expect(
+            kernel
+                .verifyBallotProof({
+                    ballotProof: proofBoundToComponentProofBundle,
+                    componentBundleStatement: fullComponentBundleStatement,
+                    componentProofBundle,
+                    componentProofInputs: componentProofInputs.map(
+                        (componentProofInput, componentIndex) =>
+                            componentIndex === 3
+                                ? {
+                                      ...componentProofInput,
+                                      proofStatement:
+                                          createComponentProofStatement({
+                                              componentId: String(
+                                                  componentProofInput.componentId,
+                                              ),
+                                              componentProofStatementDigest:
+                                                  digest(
+                                                      'wrong-supplied-component-proof-statement-canonical-digest',
+                                                  ),
+                                              componentStatementDigest: String(
+                                                  componentProofInput.statementDigest,
+                                              ),
+                                              proofStatementFormat: String(
+                                                  componentProofInput.proofStatementFormat,
+                                              ),
+                                          }),
+                                  }
+                                : componentProofInput,
+                    ),
+                    linearStatement: validLinearStatement,
+                    parameterSet: validProofCase.parameterSet,
+                    proofBytesHex,
+                    proofEncoding: validProofCase.proofEncoding,
+                    publicRandomnessHex,
+                    statement,
+                })
+                .refusedObjects.some((refusal) =>
+                    refusal.message.includes(
+                        'proof statement digest for receiver-encryption-component does not match its canonical payload',
+                    ),
+                ),
+        ).toBe(true);
+        const reorderedComponentProofBundle = createComponentProofBundle(
+            fullComponentBundleStatement,
+            [...componentProofs].reverse(),
+        );
+        const reorderedComponentProofInputs = createComponentProofInputs(
+            [...componentProofs].reverse(),
+        );
+        const proofBoundToReorderedComponentProofBundle = createBallotProof(
+            statement,
+            validLinearStatement,
+            fullComponentBundleStatement,
+            reorderedComponentProofBundle,
+        );
+
+        expect(
+            kernel
+                .verifyBallotProof({
+                    ballotProof: proofBoundToReorderedComponentProofBundle,
+                    componentBundleStatement: fullComponentBundleStatement,
+                    componentProofBundle: reorderedComponentProofBundle,
+                    componentProofInputs: reorderedComponentProofInputs,
+                    linearStatement: validLinearStatement,
+                    parameterSet: validProofCase.parameterSet,
+                    proofBytesHex,
+                    proofEncoding: validProofCase.proofEncoding,
+                    publicRandomnessHex,
+                    statement,
+                })
+                .refusedObjects.some((refusal) =>
+                    refusal.message.includes('invalid canonical shape'),
+                ),
+        ).toBe(true);
+        const wrongComponentStatementProofs = [
+            createComponentProofRecord(
+                validLinearStatement,
+                statement,
+                { componentStatementDigest: digest('wrong-component') },
+                componentIds[0] ?? 'score-and-shamir-field-component',
+            ),
+            ...componentProofs.slice(1),
+        ];
+        const wrongComponentStatementProofBundle = createComponentProofBundle(
+            fullComponentBundleStatement,
+            wrongComponentStatementProofs,
+        );
+        const wrongComponentStatementProofInputs = createComponentProofInputs(
+            wrongComponentStatementProofs,
+        );
+        const proofBoundToWrongComponentStatementProofBundle =
+            createBallotProof(
+                statement,
+                validLinearStatement,
+                fullComponentBundleStatement,
+                wrongComponentStatementProofBundle,
+            );
+
+        expect(
+            kernel
+                .verifyBallotProof({
+                    ballotProof: proofBoundToWrongComponentStatementProofBundle,
+                    componentBundleStatement: fullComponentBundleStatement,
+                    componentProofBundle: wrongComponentStatementProofBundle,
+                    componentProofInputs: wrongComponentStatementProofInputs,
+                    linearStatement: validLinearStatement,
+                    parameterSet: validProofCase.parameterSet,
+                    proofBytesHex,
+                    proofEncoding: validProofCase.proofEncoding,
+                    publicRandomnessHex,
+                    statement,
+                })
+                .refusedObjects.some((refusal) =>
+                    refusal.message.includes(
+                        'not bound to the supplied component statement',
+                    ),
+                ),
+        ).toBe(true);
+        expect(
+            kernel.verifyBallotProof({
+                ballotProof: mutatedBallotProof,
+                linearStatement: mutatedLinearStatement,
+                parameterSet: validProofCase.parameterSet,
+                proofBytesHex,
+                proofEncoding: validProofCase.proofEncoding,
+                publicRandomnessHex,
+                statement,
+            }),
+        ).toMatchObject({
+            ok: false,
+            backendAvailable: false,
+            operation: 'verifyBallotProof',
+            unresolvedReason: 'InvalidFixture',
+        });
+        expect(
+            kernel.verifyBallotProof({
+                ballotProof: validBallotProof,
+                linearStatement: validLinearStatement,
+                parameterSet: validProofCase.parameterSet,
+                proofBytesHex: proofBytesHex.slice(0, -2),
+                proofEncoding: validProofCase.proofEncoding,
+                publicRandomnessHex,
+                statement,
+            }),
+        ).toMatchObject({
+            ok: false,
+            backendAvailable: false,
+            operation: 'verifyBallotProof',
+            unresolvedReason: 'BallotPackageInvalid',
+        });
     });
 
     it('deallocates command inputs and outputs', async () => {

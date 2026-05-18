@@ -9,7 +9,7 @@ export const cpadProfileId = 'CPAD-BGV-AsyncThreshold-v1';
 export const bridgeProofProfileId =
     'CommittedAggregateShare-TargetBasisData-HwangPiEnc-BGV-v1';
 
-/** Direct target-basis data bridge profile required by accepted manifests. */
+/** TargetBasisData bridge profile required by accepted manifests. */
 export const directTargetBasisDataBridgeProfileId =
     'CommittedAggregateShare-TargetBasisData-BGV-v1';
 
@@ -44,3 +44,42 @@ export const evaluationNoiseProfileId = 'he-evaluation-noise-profile-v1';
 
 /** Mobile profile required by accepted manifests. */
 export const mobileProfileId = 'mobile-flagship-profile-v1';
+
+/** Receiver encryption profile used by claim-bearing ballot privacy proofs. */
+export const receiverEncryptionProfileId =
+    'linear-module-lwe-receiver-encryption-v1';
+
+/** Share commitment profile used by ballot and aggregate privacy proofs. */
+export const shareCommitmentProfileId =
+    'module-sis-additive-share-commitment-v1';
+
+/** Ballot privacy proof profile used for the local lattice relation. */
+export const ballotProofProfileId = 'linear-lattice-ballot-privacy-proof-v1';
+
+/** Score membership profile for score values in the supported score domain. */
+export const scoreMembershipProfileId = 'one-hot-score-membership-v1';
+
+/** Ballot score encoding profile for scalar plus score-bucket coordinates. */
+export const ballotScoreEncodingProfileId = 'ScoreOneHotShares-v1';
+
+/** Ballot share layout profile for receiver share-vector coordinates. */
+export const ballotShareLayoutProfileId = 'ScalarScoreAndOneHotScoreShares-v1';
+
+/** Aggregate input encoding profile for later committed bridge inputs. */
+export const aggregateInputEncodingProfileId = 'AggregatedScoreHistogram-v1';
+
+/** Encoded receiver share-vector layout profile. */
+export const encodedShareVectorLayoutProfileId =
+    'encoded-share-vector-layout-scalar-score-and-one-hot-v1';
+
+/** Encoded aggregate layout profile. */
+export const encodedAggregateLayoutProfileId =
+    'encoded-aggregate-layout-score-histogram-v1';
+
+/** Field encoding profile for canonical GF(65537) representatives. */
+export const fieldEncodingProfileId =
+    'gf65537-canonical-representative-quotient-v1';
+
+/** Share commitment message-bound certificate profile. */
+export const shareCommitmentMessageBoundProfileId =
+    'share-commitment-message-bound-v1';

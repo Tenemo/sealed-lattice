@@ -40,6 +40,15 @@ const forbiddenPublishedRuntimePathFragments = [
     'dist/internal/election-foundation/plaintext-oracle/',
     'dist/internal/election-foundation/target-acceptance/',
 ] as const;
+const forbiddenPublishedTestVectorPathFragments = [
+    'test-vectors/',
+    'ballot-field-linear-proof-vectors.json',
+    'encoded-ballot-linear-relation-vectors.json',
+    'proof-backend-linear-vectors.json',
+    'proof-stack-profile.json',
+    'receiver-key-linear-proof-vectors.json',
+    'receiver-key-proof-vectors.json',
+] as const;
 const requiredPublishedPackageFilePaths = [
     'LICENSE',
     'dist/sealed-lattice-kernel.wasm',
@@ -302,6 +311,16 @@ export const validatePublishedPackageFilePaths = (
                     `Published package must not include internal protocol runtime: ${publishedPackageFilePath}`,
                 );
             }
+        }
+        if (
+            forbiddenPublishedTestVectorPathFragments.some(
+                (forbiddenPathFragment) =>
+                    publishedPackageFilePath.includes(forbiddenPathFragment),
+            )
+        ) {
+            failures.push(
+                `Published package must not include repository test vectors: ${publishedPackageFilePath}`,
+            );
         }
     }
 

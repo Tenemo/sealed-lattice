@@ -7,6 +7,12 @@ import {
     canonicalErrorCodes,
     createTranscriptCoreKernelLoader,
     TranscriptCoreKernelCommandError,
+    type BallotPrivacyEncodedRelationVectorVerification,
+    type BallotPrivacyKernelVerification,
+    type BallotPrivacyLinearProofVectorVerification,
+    type BallotPrivacyProofBackendStatus,
+    type BallotPrivacyReceiverKeyProofGenerationPreparation,
+    type BallotPrivacyReceiverKeyVectorVerification,
     type TranscriptCoreKernelSharePoint,
     type TranscriptCorePlaintextComparison,
     type TranscriptCoreKernel,
@@ -24,6 +30,12 @@ export {
 };
 export type {
     TranscriptCoreKernel,
+    BallotPrivacyEncodedRelationVectorVerification,
+    BallotPrivacyKernelVerification,
+    BallotPrivacyLinearProofVectorVerification,
+    BallotPrivacyProofBackendStatus,
+    BallotPrivacyReceiverKeyProofGenerationPreparation,
+    BallotPrivacyReceiverKeyVectorVerification,
     TranscriptCoreKernelSharePoint,
     TranscriptCorePlaintextComparison,
 };

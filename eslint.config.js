@@ -198,6 +198,14 @@ const config = [
         ],
     }),
     {
+        files: ['packages/*/tests/**/*.ts', 'tests/**/*.ts'],
+        languageOptions: {
+            parserOptions: {
+                project: './tsconfig.tools.json',
+            },
+        },
+    },
+    {
         ignores: [
             '.tmp',
             '.tmp/**',

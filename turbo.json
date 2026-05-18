@@ -12,7 +12,7 @@
             "outputs": ["dist/**"]
         },
         "check": {
-            "dependsOn": ["^build", "^check"],
+            "dependsOn": ["build", "^build", "^check"],
             "outputs": []
         }
     }

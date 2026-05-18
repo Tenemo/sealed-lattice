@@ -429,6 +429,138 @@ fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult<Value> {
 
             verify_fixture(&fixture)
         }
+        "DescribeBallotPrivacyProofBackend" => Ok(crate::ballot_privacy::describe_proof_backend()),
+        "VerifyBallotPrivacyLinearProofVector" => {
+            let vector_case = request.get("vectorCase").ok_or_else(|| {
+                CanonicalError::new(CanonicalErrorCode::InvalidFixture, "vectorCase is required")
+            })?;
+
+            Ok(crate::ballot_privacy::verify_linear_proof_vector_case(
+                vector_case,
+            ))
+        }
+        "VerifyBallotPrivacyEncodedRelationVector" => {
+            let vector_case = request.get("vectorCase").ok_or_else(|| {
+                CanonicalError::new(CanonicalErrorCode::InvalidFixture, "vectorCase is required")
+            })?;
+
+            Ok(crate::ballot_privacy::verify_encoded_relation_vector_case(
+                vector_case,
+            ))
+        }
+        "VerifyBallotPrivacyReceiverKeyVector" => {
+            let vector_case = request.get("vectorCase").ok_or_else(|| {
+                CanonicalError::new(CanonicalErrorCode::InvalidFixture, "vectorCase is required")
+            })?;
+
+            Ok(crate::ballot_privacy::verify_receiver_key_vector_case(
+                vector_case,
+            ))
+        }
+        "VerifyReceiverKeyProof" => {
+            let receiver_key_proof = request.get("receiverKeyProof").ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::InvalidFixture,
+                    "receiverKeyProof is required",
+                )
+            })?;
+            let linear_statement = request.get("linearStatement");
+            let proof_bytes_hex = request.get("proofBytesHex").and_then(Value::as_str);
+            let public_randomness_hex = request.get("publicRandomnessHex").and_then(Value::as_str);
+            let parameter_set = request.get("parameterSet");
+            let proof_encoding = request.get("proofEncoding");
+
+            Ok(crate::ballot_privacy::verify_receiver_key_proof(
+                receiver_key_proof,
+                linear_statement,
+                proof_bytes_hex,
+                public_randomness_hex,
+                parameter_set,
+                proof_encoding,
+            ))
+        }
+        "PrepareReceiverKeyProofGeneration" => {
+            let linear_statement = request.get("linearStatement");
+            let parameter_set = request.get("parameterSet");
+            let proof_encoding = request.get("proofEncoding");
+            let public_randomness_hex = request.get("publicRandomnessHex").and_then(Value::as_str);
+            let secret_state = request.get("secretState");
+            let prover_randomness_hex = request.get("proverRandomnessHex").and_then(Value::as_str);
+
+            Ok(
+                crate::ballot_privacy::prepare_receiver_key_proof_generation(
+                    linear_statement,
+                    parameter_set,
+                    proof_encoding,
+                    public_randomness_hex,
+                    secret_state,
+                    prover_randomness_hex,
+                ),
+            )
+        }
+        "GenerateReceiverKeyProof" => {
+            let linear_statement = request.get("linearStatement");
+            let parameter_set = request.get("parameterSet");
+            let proof_encoding = request.get("proofEncoding");
+            let public_randomness_hex = request.get("publicRandomnessHex").and_then(Value::as_str);
+            let secret_state = request.get("secretState");
+            let prover_randomness_hex = request.get("proverRandomnessHex").and_then(Value::as_str);
+
+            Ok(crate::ballot_privacy::generate_receiver_key_proof(
+                linear_statement,
+                parameter_set,
+                proof_encoding,
+                public_randomness_hex,
+                secret_state,
+                prover_randomness_hex,
+            ))
+        }
+        "VerifyBallotProof" => {
+            let statement = request.get("statement").ok_or_else(|| {
+                CanonicalError::new(CanonicalErrorCode::InvalidFixture, "statement is required")
+            })?;
+            let ballot_proof = request.get("ballotProof").ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::InvalidFixture,
+                    "ballotProof is required",
+                )
+            })?;
+            let proof_bytes_hex = request.get("proofBytesHex").and_then(Value::as_str);
+            let linear_statement = request.get("linearStatement");
+            let public_randomness_hex = request.get("publicRandomnessHex").and_then(Value::as_str);
+            let parameter_set = request.get("parameterSet");
+            let proof_encoding = request.get("proofEncoding");
+            let component_bundle_statement = request.get("componentBundleStatement");
+            let component_proof_bundle = request.get("componentProofBundle");
+            let component_proof_inputs = request.get("componentProofInputs");
+
+            Ok(crate::ballot_privacy::verify_ballot_proof(
+                statement,
+                ballot_proof,
+                crate::ballot_privacy::BallotProofVerificationInputs {
+                    component_bundle_statement,
+                    component_proof_inputs,
+                    component_proof_bundle,
+                    linear_statement,
+                    parameter_set,
+                    proof_bytes_hex,
+                    proof_encoding,
+                    public_randomness_hex,
+                },
+            ))
+        }
+        "VerifyClaimBearingBallotPackage" => {
+            let ballot_package = request.get("ballotPackage").ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::InvalidFixture,
+                    "ballotPackage is required",
+                )
+            })?;
+
+            Ok(crate::ballot_privacy::verify_claim_bearing_ballot_package(
+                ballot_package,
+            ))
+        }
         _ => invalid_response(
             CanonicalErrorCode::InvalidFixture,
             format!("unsupported command: {command}"),

@@ -29,7 +29,7 @@ concurrency:
 
 env:
     FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-    SEALED_LATTICE_TURBO_CACHE: 'local:,remote:'
+    SEALED_LATTICE_TURBO_CACHE: "local:,remote:"
 
 jobs:
     validate-dispatch:
@@ -218,10 +218,28 @@ jobs:
             - name: bump release version
               id: metadata
               run: |
-                  CURRENT_VERSION=$(node -e "console.log(JSON.parse(require('fs').readFileSync('packages/sdk/package.json', 'utf8')).version)")
+                  CURRENT_VERSION=$(node -e "console.log(JSON.parse(require('fs').readFileSync('package.json', 'utf8')).version)")
                   RELEASE_TYPE="${{ inputs.release_type }}"
+                  sync_sdk_version_from_root() {
+                    node --input-type=module <<'NODE'
+                  import { readFileSync, writeFileSync } from 'node:fs';
 
-                  pushd packages/sdk >/dev/null
+                  const rootPackageJson = JSON.parse(readFileSync('package.json', 'utf8'));
+                  const sdkPackageJsonPath = 'packages/sdk/package.json';
+                  const sdkPackageJson = JSON.parse(readFileSync(sdkPackageJsonPath, 'utf8'));
+
+                  if (typeof rootPackageJson.version !== 'string' || rootPackageJson.version.length === 0) {
+                    throw new Error('Root package.json must define the release version.');
+                  }
+
+                  if (sdkPackageJson.version !== rootPackageJson.version) {
+                    sdkPackageJson.version = rootPackageJson.version;
+                    writeFileSync(sdkPackageJsonPath, `${JSON.stringify(sdkPackageJson, null, 4)}\n`, 'utf8');
+                  }
+                  NODE
+                  }
+
+                  sync_sdk_version_from_root
 
                   case "${RELEASE_TYPE}" in
                     "beta next")
@@ -256,12 +274,18 @@ jobs:
                       ;;
                   esac
 
-                  popd >/dev/null
+                  sync_sdk_version_from_root
 
-                  VERSION=$(node -e "console.log(JSON.parse(require('fs').readFileSync('packages/sdk/package.json', 'utf8')).version)")
+                  VERSION=$(node -e "console.log(JSON.parse(require('fs').readFileSync('package.json', 'utf8')).version)")
+                  SDK_VERSION=$(node -e "console.log(JSON.parse(require('fs').readFileSync('packages/sdk/package.json', 'utf8')).version)")
 
                   if [[ "${VERSION}" == "${CURRENT_VERSION}" ]]; then
                     echo "Release version did not change." >&2
+                    exit 1
+                  fi
+
+                  if [[ "${SDK_VERSION}" != "${VERSION}" ]]; then
+                    echo "SDK package metadata version mismatch after sync: expected ${VERSION}, received ${SDK_VERSION}." >&2
                     exit 1
                   fi
 
@@ -334,7 +358,13 @@ jobs:
             - name: verify downloaded release artifact
               run: |
                   EXPECTED_VERSION="${{ needs.prepare-release.outputs.version }}"
+                  ROOT_VERSION=$(node -e "console.log(JSON.parse(require('fs').readFileSync('package.json', 'utf8')).version)")
                   ACTUAL_VERSION=$(node -e "console.log(JSON.parse(require('fs').readFileSync('packages/sdk/package.json', 'utf8')).version)")
+
+                  if [[ "${ROOT_VERSION}" != "${EXPECTED_VERSION}" ]]; then
+                    echo "Root package metadata version mismatch: expected ${EXPECTED_VERSION}, received ${ROOT_VERSION}." >&2
+                    exit 1
+                  fi
 
                   if [[ "${ACTUAL_VERSION}" != "${EXPECTED_VERSION}" ]]; then
                     echo "Downloaded release package metadata version mismatch: expected ${EXPECTED_VERSION}, received ${ACTUAL_VERSION}." >&2
@@ -351,7 +381,7 @@ jobs:
                   git config user.name "github-actions[bot]"
                   git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-                  git add packages/sdk/package.json pnpm-lock.yaml
+                  git add package.json packages/sdk/package.json pnpm-lock.yaml
 
                   if git diff --cached --quiet; then
                     echo "No release metadata changes were staged." >&2
@@ -417,7 +447,13 @@ jobs:
             - name: verify downloaded release artifact
               run: |
                   EXPECTED_VERSION="${{ needs.prepare-release.outputs.version }}"
+                  ROOT_VERSION=$(node -e "console.log(JSON.parse(require('fs').readFileSync('package.json', 'utf8')).version)")
                   ACTUAL_VERSION=$(node -e "console.log(JSON.parse(require('fs').readFileSync('packages/sdk/package.json', 'utf8')).version)")
+
+                  if [[ "${ROOT_VERSION}" != "${EXPECTED_VERSION}" ]]; then
+                    echo "Root package metadata version mismatch: expected ${EXPECTED_VERSION}, received ${ROOT_VERSION}." >&2
+                    exit 1
+                  fi
 
                   if [[ "${ACTUAL_VERSION}" != "${EXPECTED_VERSION}" ]]; then
                     echo "Downloaded release package metadata version mismatch: expected ${EXPECTED_VERSION}, received ${ACTUAL_VERSION}." >&2
