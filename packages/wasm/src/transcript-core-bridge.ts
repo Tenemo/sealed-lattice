@@ -93,6 +93,40 @@ export type BallotPrivacyReceiverKeyVectorVerification = {
     readonly expectedOutcome?: string;
 };
 
+export type BallotPrivacyReceiverKeyProofGenerationPreparation =
+    BallotPrivacyKernelVerification & {
+        readonly generatedProofBytes?: false;
+        readonly summary?: {
+            readonly relationWitnessPolynomialCount: number;
+            readonly shortWitnessPolynomialCount: number;
+            readonly preparedShortWitnessPolynomialCount: number;
+            readonly witnessL2Squared: string;
+            readonly witnessL2BoundSquared: string;
+            readonly normSlack: string;
+            readonly abdlopCommitment?: {
+                readonly compressedCommitmentPolynomialCount: number;
+                readonly openingRandomnessPolynomialCount: number;
+                readonly openingRemainderPolynomialCount: number;
+                readonly proverRandomnessSeedBytes: number;
+                readonly subprotocolSeedBytes: number;
+                readonly abdlopCommitmentHash: string;
+            } | null;
+        };
+    };
+
+export type BallotPrivacyReceiverKeyProofGeneration =
+    BallotPrivacyKernelVerification & {
+        readonly generatedProofBytes?: true;
+        readonly proofBytesHex?: string;
+        readonly proofSizeBytes?: number;
+        readonly summary?: {
+            readonly abdlopCommitmentHash: string;
+            readonly z34ChallengeHash: string;
+            readonly generatorChallengeHash: string;
+            readonly quadraticChallengeHash: string;
+        };
+    };
+
 export type TranscriptCoreKernel = {
     readonly exportedFunctionNames: readonly string[];
     analyzeCanonicalObject(input: {
@@ -140,6 +174,22 @@ export type TranscriptCoreKernel = {
         readonly publicRandomnessHex?: string;
         readonly receiverKeyProof: unknown;
     }): BallotPrivacyKernelVerification;
+    prepareReceiverKeyProofGeneration(input: {
+        readonly linearStatement: unknown;
+        readonly parameterSet: unknown;
+        readonly proofEncoding: unknown;
+        readonly publicRandomnessHex: string;
+        readonly secretState: unknown;
+        readonly proverRandomnessHex?: string;
+    }): BallotPrivacyReceiverKeyProofGenerationPreparation;
+    generateReceiverKeyProof(input: {
+        readonly linearStatement: unknown;
+        readonly parameterSet: unknown;
+        readonly proofEncoding: unknown;
+        readonly publicRandomnessHex: string;
+        readonly secretState: unknown;
+        readonly proverRandomnessHex: string;
+    }): BallotPrivacyReceiverKeyProofGeneration;
     verifyBallotProof(input: {
         readonly ballotProof: unknown;
         readonly componentBundleStatement?: unknown;
@@ -220,6 +270,24 @@ type TranscriptCoreKernelCommand =
           readonly proofEncoding?: unknown;
           readonly publicRandomnessHex?: string;
           readonly receiverKeyProof: unknown;
+      }
+    | {
+          readonly command: 'PrepareReceiverKeyProofGeneration';
+          readonly linearStatement: unknown;
+          readonly parameterSet: unknown;
+          readonly proofEncoding: unknown;
+          readonly publicRandomnessHex: string;
+          readonly secretState: unknown;
+          readonly proverRandomnessHex?: string;
+      }
+    | {
+          readonly command: 'GenerateReceiverKeyProof';
+          readonly linearStatement: unknown;
+          readonly parameterSet: unknown;
+          readonly proofEncoding: unknown;
+          readonly publicRandomnessHex: string;
+          readonly secretState: unknown;
+          readonly proverRandomnessHex: string;
       }
     | {
           readonly command: 'VerifyBallotProof';
@@ -330,6 +398,17 @@ const transcriptCoreKernelNormalizedSha256HexValues = [
     'c21dcd999f066cc09f175c5504c21107bbff71b9e5051074220a9bcd38b507ef',
     '23aeb78ca6b4c29121fcdcbb7fd14b90853457ff87ee30e2889c4081762abf0c',
     'dd740f39dbd4322dd35b2d89af8452f91d139baf137dfe148396c7cf09cd3e3c',
+    '84372ba7eed35158c1a4d7c31e851924ee32a70d63c80cca1c9c907b8aac7d49',
+    '110d7e588461ab37f774569e7713f7484ac9d083ee91b353a5f8df5fff6ee688',
+    'dc51e8d92823aeef8058dfe19741110e0c0b205bc5cb92cb49d33f386f24572d',
+    'e708e3f4c1a7bde696c9e0dfb454c75142fa011facb0c91132ed7e6a14c79d81',
+    '7c47432bb8ee9255ae8db072a8e75746e9e3d7c6a76e6c7443616e605885a29e',
+    'ad7f33458ec256b8fea4c42e998819f5068bcb45cb2474f97cf4bc26ffc83444',
+    '25295ab4587ea33a2f635bf11f34a0f7ca5c2ca45084146a82264ff951a6b052',
+    'e904bd1f6b3180c9d8952794c737099d0c02c2e35049099b3f39768041ffe21e',
+    'cec819f374e74b9453c6f10fac1e21181a84fe72a54d0d2f0e6fe2dbd135219d',
+    '8eebdf3c7a32bc495d150e9b2b053c08f2545752da839fea2801d0675b0fe52c',
+    '7707cc43a4a98d75135bd05ec0e1c27469c9f0be0cb2359edd3b4c58fdf5e661',
 ] as const;
 const defaultTranscriptCoreKernelNormalizedSha256HexValues = new Set<string>(
     transcriptCoreKernelNormalizedSha256HexValues,
@@ -1005,6 +1084,32 @@ export const createTranscriptCoreKernelLoader = (
                         proofEncoding: input.proofEncoding,
                         publicRandomnessHex: input.publicRandomnessHex,
                         receiverKeyProof: input.receiverKeyProof,
+                    }),
+                prepareReceiverKeyProofGeneration: (
+                    input,
+                ): BallotPrivacyReceiverKeyProofGenerationPreparation =>
+                    executeCommand<BallotPrivacyReceiverKeyProofGenerationPreparation>(
+                        {
+                            command: 'PrepareReceiverKeyProofGeneration',
+                            linearStatement: input.linearStatement,
+                            parameterSet: input.parameterSet,
+                            proofEncoding: input.proofEncoding,
+                            publicRandomnessHex: input.publicRandomnessHex,
+                            secretState: input.secretState,
+                            proverRandomnessHex: input.proverRandomnessHex,
+                        },
+                    ),
+                generateReceiverKeyProof: (
+                    input,
+                ): BallotPrivacyReceiverKeyProofGeneration =>
+                    executeCommand<BallotPrivacyReceiverKeyProofGeneration>({
+                        command: 'GenerateReceiverKeyProof',
+                        linearStatement: input.linearStatement,
+                        parameterSet: input.parameterSet,
+                        proofEncoding: input.proofEncoding,
+                        publicRandomnessHex: input.publicRandomnessHex,
+                        secretState: input.secretState,
+                        proverRandomnessHex: input.proverRandomnessHex,
                     }),
                 verifyBallotProof: (input): BallotPrivacyKernelVerification =>
                     executeCommand<BallotPrivacyKernelVerification>({

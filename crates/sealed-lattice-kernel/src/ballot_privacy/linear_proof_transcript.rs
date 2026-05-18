@@ -47,6 +47,30 @@ pub fn shake128_32(parts: &[&[u8]]) -> [u8; 32] {
     output
 }
 
+pub fn shake128_64(parts: &[&[u8]]) -> [u8; 64] {
+    let mut hasher = Shake128::default();
+    for part in parts {
+        hasher.update(part);
+    }
+    let mut reader = hasher.finalize_xof();
+    let mut output = [0_u8; 64];
+    reader.read(&mut output);
+
+    output
+}
+
+pub fn shake128_96(parts: &[&[u8]]) -> [u8; 96] {
+    let mut hasher = Shake128::default();
+    for part in parts {
+        hasher.update(part);
+    }
+    let mut reader = hasher.finalize_xof();
+    let mut output = [0_u8; 96];
+    reader.read(&mut output);
+
+    output
+}
+
 pub fn shake128_32_hex(parts: &[&[u8]]) -> String {
     to_hex(&shake128_32(parts))
 }

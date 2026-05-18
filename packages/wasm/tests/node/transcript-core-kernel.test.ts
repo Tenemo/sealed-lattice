@@ -1068,7 +1068,15 @@ describe('transcript-core kernel in Node', () => {
         };
         const createReceiverKeyProof = (
             linearStatement: Record<string, unknown>,
+            proofInput: {
+                readonly parameterSet?: unknown;
+                readonly proofEncoding?: unknown;
+            } = {},
         ): Record<string, unknown> => {
+            const parameterSet =
+                proofInput.parameterSet ?? validProofCase.parameterSet;
+            const proofEncoding =
+                proofInput.proofEncoding ?? validProofCase.proofEncoding;
             const proofBytesDigest = kernel.deriveProtocolDigest({
                 namespace: 'ProofBytesDigest',
                 value: {
@@ -1081,8 +1089,15 @@ describe('transcript-core kernel in Node', () => {
             const proofEncodingProfileDigest = kernel.deriveProtocolDigest({
                 namespace: 'ChallengeDomainDigest',
                 value: {
-                    proofEncoding: validProofCase.proofEncoding,
+                    proofEncoding,
                     purpose: 'receiver-key-linear-proof-encoding-profile-v1',
+                },
+            });
+            const proofParameterSetDigest = kernel.deriveProtocolDigest({
+                namespace: 'ChallengeDomainDigest',
+                value: {
+                    parameterSet,
+                    purpose: 'receiver-key-linear-proof-parameter-set-v1',
                 },
             });
             const publicRandomnessDigest = kernel.deriveProtocolDigest({
@@ -1098,6 +1113,7 @@ describe('transcript-core kernel in Node', () => {
                     linearStatementDigest: linearStatement.statementDigest,
                     proofBytesDigest,
                     proofEncodingProfileDigest,
+                    proofParameterSetDigest,
                     publicRandomnessDigest,
                     purpose: 'receiver-key-linear-proof-record-root-v1',
                 },
@@ -1112,6 +1128,7 @@ describe('transcript-core kernel in Node', () => {
                 proofBackend: 'LaZerStyleLocalLatticeRelation',
                 proofBytesDigest,
                 proofEncodingProfileDigest,
+                proofParameterSetDigest,
                 proofRoot,
                 proofSizeBytes,
                 publicRandomnessDigest,
@@ -1190,6 +1207,344 @@ describe('transcript-core kernel in Node', () => {
             operation: 'verifyReceiverKeyProof',
             unresolvedReason: 'BallotPackageInvalid',
         });
+        const sizeUnboundParameterSet = {
+            ...(validProofCase.parameterSet as Record<string, unknown>),
+            expectedProofSizeBytes: proofSizeBytes + 1,
+        };
+        expect(
+            kernel.verifyReceiverKeyProof({
+                linearStatement: validLinearStatement,
+                parameterSet: sizeUnboundParameterSet,
+                proofBytesHex,
+                proofEncoding: validProofCase.proofEncoding,
+                publicRandomnessHex,
+                receiverKeyProof: createReceiverKeyProof(validLinearStatement, {
+                    parameterSet: sizeUnboundParameterSet,
+                }),
+            }),
+        ).toMatchObject({
+            ok: false,
+            backendAvailable: false,
+            operation: 'verifyReceiverKeyProof',
+            unresolvedReason: 'BallotPackageInvalid',
+        });
+        const sizeUnboundProofEncoding = {
+            ...(validProofCase.proofEncoding as Record<string, unknown>),
+            expectedProofSizeBytes: proofSizeBytes + 1,
+        };
+        expect(
+            kernel.verifyReceiverKeyProof({
+                linearStatement: validLinearStatement,
+                parameterSet: validProofCase.parameterSet,
+                proofBytesHex,
+                proofEncoding: sizeUnboundProofEncoding,
+                publicRandomnessHex,
+                receiverKeyProof: createReceiverKeyProof(validLinearStatement, {
+                    proofEncoding: sizeUnboundProofEncoding,
+                }),
+            }),
+        ).toMatchObject({
+            ok: false,
+            backendAvailable: false,
+            operation: 'verifyReceiverKeyProof',
+            unresolvedReason: 'BallotPackageInvalid',
+        });
+    });
+
+    it('prepares receiver-key proof generation witness material through WASM', async () => {
+        const kernel = await loadTranscriptCoreKernel();
+        const receiverKeyLinearProofCases =
+            receiverKeyLinearProofBackendVectors.cases as readonly (Record<
+                string,
+                unknown
+            > &
+                NamedFixture)[];
+        const validProofCase = findFixture(
+            receiverKeyLinearProofCases,
+            'valid-receiver-key-linear-proof',
+        );
+        const receiverKeyModulus = 12_289;
+        const receiverKeyRingDegree = 256;
+        const receiverKeyStatementRows = 4;
+        const receiverKeyStatementColumns = 8;
+        const createZeroPolynomial = (): number[] =>
+            Array.from({ length: receiverKeyRingDegree }, () => 0);
+        const createUnitPolynomial = (): number[] => {
+            const polynomial = createZeroPolynomial();
+            polynomial[0] = 1;
+
+            return polynomial;
+        };
+        const canonicalSignedPolynomial = (
+            polynomial: readonly number[],
+        ): number[] =>
+            polynomial.map((coefficient) =>
+                coefficient < 0
+                    ? receiverKeyModulus - Math.abs(coefficient)
+                    : Math.abs(coefficient),
+            );
+        const witnessVector: number[][] = Array.from(
+            { length: receiverKeyStatementColumns },
+            () => createZeroPolynomial(),
+        );
+        witnessVector[0][0] = 2;
+        witnessVector[0][5] = -1;
+        witnessVector[1][1] = 1;
+        witnessVector[4][0] = -2;
+        witnessVector[5][7] = 1;
+        const statementMatrixCoefficients = Array.from(
+            { length: receiverKeyStatementRows },
+            () =>
+                Array.from(
+                    { length: receiverKeyStatementColumns },
+                    createZeroPolynomial,
+                ),
+        );
+        for (
+            let rowIndex = 0;
+            rowIndex < receiverKeyStatementRows;
+            rowIndex += 1
+        ) {
+            const statementMatrixRow = statementMatrixCoefficients[rowIndex];
+            statementMatrixRow[rowIndex] = createUnitPolynomial();
+            statementMatrixRow[rowIndex + receiverKeyStatementRows] =
+                createUnitPolynomial();
+        }
+        const targetVectorCoefficients = Array.from(
+            { length: receiverKeyStatementRows },
+            (_, rowIndex) => {
+                const secretPolynomial = canonicalSignedPolynomial(
+                    witnessVector[rowIndex],
+                );
+                const errorPolynomial = canonicalSignedPolynomial(
+                    witnessVector[rowIndex + receiverKeyStatementRows],
+                );
+
+                return secretPolynomial.map((coefficient, coefficientIndex) => {
+                    const publicKeyCoefficient =
+                        (coefficient +
+                            (errorPolynomial[coefficientIndex] ?? 0)) %
+                        receiverKeyModulus;
+
+                    return publicKeyCoefficient === 0
+                        ? 0
+                        : receiverKeyModulus - publicKeyCoefficient;
+                });
+            },
+        );
+        const digest = (label: string): string =>
+            kernel.deriveProtocolDigest({
+                namespace: 'ChallengeDomainDigest',
+                value: {
+                    label,
+                    purpose: 'receiver-key-prover-preflight-wasm-test',
+                },
+            });
+        const linearStatementPayload = {
+            ceremonyId: 'ceremony-receiver-key-prover-preflight',
+            coefficientModulus: '12289',
+            keyMaterialDigest: digest('receiver-key-material'),
+            manifestDigest: digest('manifest'),
+            objectType: 'ReceiverKeyLinearProofStatement',
+            objectVersion: 1,
+            publicMatrixSeedDigest: digest('receiver-matrix-seed'),
+            receiverEncryptionProfileDigest: digest(
+                'receiver-encryption-profile',
+            ),
+            receiverIdentity: 'receiver-1',
+            receiverPublicKeyDigest: digest('receiver-public-key'),
+            receiverRosterPosition: 1,
+            recoveryEpoch: 0,
+            relation: 'A*w + t = 0',
+            ringDegree: receiverKeyRingDegree,
+            rosterDigest: digest('roster'),
+            sourceRing: 'Z_q[X]/(X^256 + 1)',
+            statementColumns: receiverKeyStatementColumns,
+            statementMatrixCoefficients,
+            statementMatrixDigest: digest('statement-matrix'),
+            statementProfileId: 'receiver-key-linear-module-lwe-statement-v1',
+            statementRows: receiverKeyStatementRows,
+            targetCoefficientRepresentation: 'centeredSignedSourceModulus',
+            targetVectorCoefficients,
+            targetVectorDigest: digest('target-vector'),
+            witnessInfinityNormBound: 2,
+            witnessL2BoundSquared: '8192',
+            witnessVectorLayout: [
+                'receiver secret polynomial 0',
+                'receiver secret polynomial 1',
+                'receiver secret polynomial 2',
+                'receiver secret polynomial 3',
+                'receiver error polynomial 0',
+                'receiver error polynomial 1',
+                'receiver error polynomial 2',
+                'receiver error polynomial 3',
+            ],
+        };
+        const linearStatement = {
+            ...linearStatementPayload,
+            statementDigest: kernel.deriveProtocolDigest({
+                namespace: 'ChallengeDomainDigest',
+                value: {
+                    payload: linearStatementPayload,
+                    purpose: 'receiver-key-linear-proof-statement-v1',
+                },
+            }),
+        };
+        const secretState = {
+            secretVector: witnessVector.slice(0, receiverKeyStatementRows),
+            errorVector: witnessVector.slice(receiverKeyStatementRows),
+        };
+        const preparation = kernel.prepareReceiverKeyProofGeneration({
+            linearStatement,
+            parameterSet: validProofCase.parameterSet,
+            proofEncoding: validProofCase.proofEncoding,
+            publicRandomnessHex: '00'.repeat(32),
+            secretState,
+            proverRandomnessHex: '09'.repeat(32),
+        });
+
+        expect(preparation).toMatchObject({
+            ok: true,
+            backendAvailable: false,
+            generatedProofBytes: false,
+            operation: 'prepareReceiverKeyProofGeneration',
+            summary: {
+                normSlack: '8181',
+                preparedShortWitnessPolynomialCount: 33,
+                relationWitnessPolynomialCount: 32,
+                shortWitnessPolynomialCount: 33,
+                witnessL2Squared: '11',
+                abdlopCommitment: {
+                    compressedCommitmentPolynomialCount: 19,
+                    openingRandomnessPolynomialCount: 55,
+                    openingRemainderPolynomialCount: 19,
+                    proverRandomnessSeedBytes: 32,
+                    subprotocolSeedBytes: 32,
+                },
+            },
+            unresolvedReason: null,
+        });
+        expect(preparation.statusLabels).toContain(
+            'ReceiverKeyProofRingWitnessPrepared',
+        );
+        expect(preparation.statusLabels).toContain(
+            'ReceiverKeyAbdlopCommitmentPrepared',
+        );
+        expect(
+            preparation.summary?.abdlopCommitment?.abdlopCommitmentHash,
+        ).toMatch(/^[0-9a-f]{64}$/u);
+
+        const generatedProof = kernel.generateReceiverKeyProof({
+            linearStatement,
+            parameterSet: validProofCase.parameterSet,
+            proofEncoding: validProofCase.proofEncoding,
+            publicRandomnessHex: '00'.repeat(32),
+            secretState,
+            proverRandomnessHex: '09'.repeat(32),
+        });
+        const repeatedGeneratedProof = kernel.generateReceiverKeyProof({
+            linearStatement,
+            parameterSet: validProofCase.parameterSet,
+            proofEncoding: validProofCase.proofEncoding,
+            publicRandomnessHex: '00'.repeat(32),
+            secretState,
+            proverRandomnessHex: '09'.repeat(32),
+        });
+        const changedGeneratedProof = kernel.generateReceiverKeyProof({
+            linearStatement,
+            parameterSet: validProofCase.parameterSet,
+            proofEncoding: validProofCase.proofEncoding,
+            publicRandomnessHex: '00'.repeat(32),
+            secretState,
+            proverRandomnessHex: '0a'.repeat(32),
+        });
+
+        expect(generatedProof).toMatchObject({
+            ok: true,
+            backendAvailable: false,
+            generatedProofBytes: true,
+            operation: 'generateReceiverKeyProof',
+            unresolvedReason: null,
+        });
+        expect(generatedProof.statusLabels).toContain(
+            'ReceiverKeyGeneratedProofVerified',
+        );
+        expect(generatedProof.proofBytesHex).toMatch(/^[0-9a-f]+$/u);
+        expect(generatedProof.proofSizeBytes).toBe(
+            String(generatedProof.proofBytesHex).length / 2,
+        );
+        expect(repeatedGeneratedProof.proofBytesHex).toBe(
+            generatedProof.proofBytesHex,
+        );
+        expect(changedGeneratedProof.proofBytesHex).not.toBe(
+            generatedProof.proofBytesHex,
+        );
+
+        const generatedVectorCase = {
+            caseName: 'generated-receiver-key-proof',
+            description:
+                'Receiver-key linear proof generated by the internal Rust prover.',
+            mutation: 'none',
+            expectedOutcome: 'accept',
+            upstreamVectorAvailable: true,
+            parameterSet: validProofCase.parameterSet,
+            proofEncoding: validProofCase.proofEncoding,
+            publicRandomnessHex: '00'.repeat(32),
+            statementMatrixCoefficients,
+            targetVectorCoefficients,
+            targetCoefficientRepresentation: 'centeredSignedSourceModulus',
+            proofHex: generatedProof.proofBytesHex,
+            expectedProofSizeBytes: generatedProof.proofSizeBytes,
+        };
+        const generatedVerification =
+            kernel.verifyBallotPrivacyLinearProofVector({
+                vectorCase: generatedVectorCase,
+            });
+        expect(generatedVerification).toMatchObject({
+            ok: true,
+            backendAvailable: false,
+            caseName: 'generated-receiver-key-proof',
+            unresolvedReason: null,
+        });
+
+        const mutatedGeneratedVectorCase = cloneJsonValue(generatedVectorCase);
+        mutatedGeneratedVectorCase.caseName =
+            'generated-receiver-key-proof-mutated-target';
+        mutatedGeneratedVectorCase.expectedOutcome = 'reject';
+        mutatedGeneratedVectorCase.targetVectorCoefficients[0][0] =
+            (mutatedGeneratedVectorCase.targetVectorCoefficients[0][0] + 1) %
+            receiverKeyModulus;
+        expect(
+            kernel.verifyBallotPrivacyLinearProofVector({
+                vectorCase: mutatedGeneratedVectorCase,
+            }),
+        ).toMatchObject({
+            ok: false,
+            backendAvailable: false,
+            caseName: 'generated-receiver-key-proof-mutated-target',
+            unresolvedReason: 'InvalidFixture',
+        });
+
+        const wrongSecretState = cloneJsonValue(secretState);
+        wrongSecretState.secretVector[0][0] = 3;
+        const rejection = kernel.prepareReceiverKeyProofGeneration({
+            linearStatement,
+            parameterSet: validProofCase.parameterSet,
+            proofEncoding: validProofCase.proofEncoding,
+            publicRandomnessHex: '00'.repeat(32),
+            secretState: wrongSecretState,
+            proverRandomnessHex: '09'.repeat(32),
+        });
+
+        expect(rejection).toMatchObject({
+            ok: false,
+            backendAvailable: false,
+            operation: 'prepareReceiverKeyProofGeneration',
+            unresolvedReason: 'BallotPackageInvalid',
+        });
+        expect(String(rejection.refusedObjects[0]?.message)).toContain(
+            'source witness',
+        );
     });
 
     it('rejects field-incomplete ballot records after WASM linear proof verification', async () => {
@@ -1211,6 +1566,18 @@ describe('transcript-core kernel in Node', () => {
         const proofBytesHex = String(validProofCase.proofHex);
         const publicRandomnessHex = String(validProofCase.publicRandomnessHex);
         const proofSizeBytes = proofBytesHex.length / 2;
+        const validParameterSet = {
+            ...cloneJsonValue(
+                validProofCase.parameterSet as Record<string, unknown>,
+            ),
+            expectedProofSizeBytes: proofSizeBytes,
+        };
+        const validProofEncoding = {
+            ...cloneJsonValue(
+                validProofCase.proofEncoding as Record<string, unknown>,
+            ),
+            expectedProofSizeBytes: proofSizeBytes,
+        };
         const digest = (label: string): string =>
             kernel.deriveProtocolDigest({
                 namespace: 'ChallengeDomainDigest',
@@ -1350,6 +1717,8 @@ describe('transcript-core kernel in Node', () => {
             linearStatement: Record<string, unknown>,
             componentBundleStatement?: Record<string, unknown>,
             componentProofBundle?: Record<string, unknown>,
+            parameterSet: Record<string, unknown> = validParameterSet,
+            proofEncoding: Record<string, unknown> = validProofEncoding,
         ): Record<string, unknown> => {
             const proofBytesDigest = kernel.deriveProtocolDigest({
                 namespace: 'ProofBytesDigest',
@@ -1363,14 +1732,14 @@ describe('transcript-core kernel in Node', () => {
             const proofEncodingProfileDigest = kernel.deriveProtocolDigest({
                 namespace: 'ChallengeDomainDigest',
                 value: {
-                    proofEncoding: validProofCase.proofEncoding,
+                    proofEncoding,
                     purpose: 'ballot-proof-linear-proof-encoding-profile-v1',
                 },
             });
             const proofParameterSetDigest = kernel.deriveProtocolDigest({
                 namespace: 'ChallengeDomainDigest',
                 value: {
-                    parameterSet: validProofCase.parameterSet,
+                    parameterSet,
                     purpose: 'ballot-proof-linear-proof-parameter-set-v1',
                 },
             });
@@ -1498,9 +1867,9 @@ describe('transcript-core kernel in Node', () => {
             kernel.verifyBallotProof({
                 ballotProof: validBallotProof,
                 linearStatement: validLinearStatement,
-                parameterSet: validProofCase.parameterSet,
+                parameterSet: validParameterSet,
                 proofBytesHex,
-                proofEncoding: validProofCase.proofEncoding,
+                proofEncoding: validProofEncoding,
                 publicRandomnessHex,
                 statement,
             }),
@@ -1510,6 +1879,74 @@ describe('transcript-core kernel in Node', () => {
             operation: 'verifyBallotProof',
             unresolvedReason: 'BallotPackageInvalid',
         });
+        const sizeUnboundParameterSet = {
+            ...validParameterSet,
+            expectedProofSizeBytes: proofSizeBytes + 1,
+        };
+        const sizeUnboundParameterBallotProof = createBallotProof(
+            statement,
+            validLinearStatement,
+            undefined,
+            undefined,
+            sizeUnboundParameterSet,
+            validProofEncoding,
+        );
+        const sizeUnboundParameterVerification = kernel.verifyBallotProof({
+            ballotProof: sizeUnboundParameterBallotProof,
+            linearStatement: validLinearStatement,
+            parameterSet: sizeUnboundParameterSet,
+            proofBytesHex,
+            proofEncoding: validProofEncoding,
+            publicRandomnessHex,
+            statement,
+        });
+
+        expect(sizeUnboundParameterVerification).toMatchObject({
+            ok: false,
+            backendAvailable: false,
+            operation: 'verifyBallotProof',
+            unresolvedReason: 'BallotPackageInvalid',
+        });
+        expect(
+            sizeUnboundParameterVerification.refusedObjects.some((refusal) =>
+                refusal.message.includes('byte length'),
+            ),
+        ).toBe(true);
+
+        const sizeUnboundProofEncoding = {
+            ...validProofEncoding,
+            expectedProofSizeBytes: proofSizeBytes + 1,
+        };
+        const sizeUnboundEncodingBallotProof = createBallotProof(
+            statement,
+            validLinearStatement,
+            undefined,
+            undefined,
+            validParameterSet,
+            sizeUnboundProofEncoding,
+        );
+        const sizeUnboundEncodingVerification = kernel.verifyBallotProof({
+            ballotProof: sizeUnboundEncodingBallotProof,
+            linearStatement: validLinearStatement,
+            parameterSet: validParameterSet,
+            proofBytesHex,
+            proofEncoding: sizeUnboundProofEncoding,
+            publicRandomnessHex,
+            statement,
+        });
+
+        expect(sizeUnboundEncodingVerification).toMatchObject({
+            ok: false,
+            backendAvailable: false,
+            operation: 'verifyBallotProof',
+            unresolvedReason: 'BallotPackageInvalid',
+        });
+        expect(
+            sizeUnboundEncodingVerification.refusedObjects.some((refusal) =>
+                refusal.message.includes('byte length'),
+            ),
+        ).toBe(true);
+
         const relabeledLinearStatement = cloneJsonValue(validLinearStatement);
         delete relabeledLinearStatement.statementDigest;
         relabeledLinearStatement.projectionCoverage =
@@ -1528,9 +1965,9 @@ describe('transcript-core kernel in Node', () => {
         const relabeledVerification = kernel.verifyBallotProof({
             ballotProof: relabeledBallotProof,
             linearStatement: relabeledLinearStatement,
-            parameterSet: validProofCase.parameterSet,
+            parameterSet: validParameterSet,
             proofBytesHex,
-            proofEncoding: validProofCase.proofEncoding,
+            proofEncoding: validProofEncoding,
             publicRandomnessHex,
             statement,
         });
@@ -1552,9 +1989,9 @@ describe('transcript-core kernel in Node', () => {
             kernel.verifyBallotProof({
                 ballotProof: mutatedBallotProof,
                 linearStatement: mutatedLinearStatement,
-                parameterSet: validProofCase.parameterSet,
+                parameterSet: validParameterSet,
                 proofBytesHex,
-                proofEncoding: validProofCase.proofEncoding,
+                proofEncoding: validProofEncoding,
                 publicRandomnessHex,
                 statement,
             }),
@@ -1568,9 +2005,9 @@ describe('transcript-core kernel in Node', () => {
             kernel.verifyBallotProof({
                 ballotProof: validBallotProof,
                 linearStatement: validLinearStatement,
-                parameterSet: validProofCase.parameterSet,
+                parameterSet: validParameterSet,
                 proofBytesHex: proofBytesHex.slice(0, -2),
-                proofEncoding: validProofCase.proofEncoding,
+                proofEncoding: validProofEncoding,
                 publicRandomnessHex,
                 statement,
             }),
@@ -2069,11 +2506,93 @@ describe('transcript-core kernel in Node', () => {
                 };
             }
             const statementPayload = {
+                backendStatementDigest: digest(`${input.componentId}-backend`),
+                coefficientModulus:
+                    input.componentId === 'share-commitment-component'
+                        ? '18446744069414584321'
+                        : input.componentId ===
+                                'score-and-shamir-field-component' ||
+                            input.componentId ===
+                                'payload-plaintext-field-component'
+                          ? '65537'
+                          : '12289',
                 componentId: input.componentId,
                 componentStatementDigest: input.componentStatementDigest,
+                denseCoefficientCount:
+                    input.proofStatementFormat ===
+                    'structured-module-lwe-linear-proof-v1'
+                        ? '1024'
+                        : null,
+                matrixDigest: digest(`${input.componentId}-matrix`),
                 objectType: 'BallotProofComponentProofStatementPlan',
                 objectVersion: 1,
+                proofBytesAvailability:
+                    input.proofStatementFormat ===
+                    'structured-module-lwe-linear-proof-v1'
+                        ? 'requires-structured-proof-statement'
+                        : 'public-zero-witness-binding-check',
+                proofLoweringStatus: 'explicitRowsAvailable',
                 proofStatementFormat: input.proofStatementFormat,
+                proofSystemRingDegree:
+                    input.proofStatementFormat ===
+                    'structured-module-lwe-linear-proof-v1'
+                        ? 64
+                        : null,
+                relation: 'A*w + t = 0',
+                relationStatementDigest: digest(
+                    `${input.componentId}-relation`,
+                ),
+                rowBatchMatrixDigests: [
+                    digest(`${input.componentId}-row-matrix`),
+                ],
+                rowBatchNames: [
+                    input.proofStatementFormat ===
+                    'structured-module-lwe-linear-proof-v1'
+                        ? 'receiver_payload_encryption_equation_rows'
+                        : 'receiver_key_binding_rows',
+                ],
+                rowBatchTargetVectorDigests: [
+                    digest(`${input.componentId}-row-target`),
+                ],
+                rowBatchTermCounts: [
+                    input.proofStatementFormat ===
+                    'structured-module-lwe-linear-proof-v1'
+                        ? '1024'
+                        : '0',
+                ],
+                rowCount: 1,
+                sparseTermCount: null,
+                sourceRingDegree:
+                    input.proofStatementFormat ===
+                    'structured-module-lwe-linear-proof-v1'
+                        ? 256
+                        : null,
+                structuredCiphertextChunkCount:
+                    input.proofStatementFormat ===
+                    'structured-module-lwe-linear-proof-v1'
+                        ? 1
+                        : null,
+                structuredReceiverCount:
+                    input.proofStatementFormat ===
+                    'structured-module-lwe-linear-proof-v1'
+                        ? 1
+                        : null,
+                structuredWitnessTermCount:
+                    input.proofStatementFormat ===
+                    'structured-module-lwe-linear-proof-v1'
+                        ? '1024'
+                        : null,
+                targetVectorDigest: digest(`${input.componentId}-target`),
+                variableColumnCount:
+                    input.proofStatementFormat ===
+                    'structured-module-lwe-linear-proof-v1'
+                        ? 1
+                        : 0,
+                variableColumnIndices:
+                    input.proofStatementFormat ===
+                    'structured-module-lwe-linear-proof-v1'
+                        ? [0]
+                        : [],
             };
 
             return {
@@ -2127,12 +2646,16 @@ describe('transcript-core kernel in Node', () => {
                 typeof suppliedComponentProofStatementDigest === 'string'
                     ? suppliedComponentProofStatementDigest
                     : componentProofStatementDigest;
+            const componentProofBytesHex =
+                proofStatementFormat === 'public-zero-witness-binding-check-v1'
+                    ? ''
+                    : digest(`${componentId}-proof-bytes-material`);
 
             return {
                 componentId,
                 componentProofStatementDigest:
                     boundComponentProofStatementDigest,
-                proofBytesHex: digest(`${componentId}-proof-bytes-material`),
+                proofBytesHex: componentProofBytesHex,
                 proofEncoding: {
                     profileId: 'ballot-proof-component-encoding-v1',
                     componentId,

@@ -15,6 +15,7 @@ pub struct LinearProofParameterSet {
     pub statement_rows: usize,
     pub statement_columns: usize,
     pub witness_l2_bound_squared: u128,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expected_proof_size_bytes: Option<usize>,
 }
 
@@ -89,6 +90,8 @@ pub struct LazerDemoProofEncoding {
     pub euclidean_response_log2_standard_deviation: usize,
     pub infinity_response_log2_standard_deviation: usize,
     pub source: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_proof_size_bytes: Option<usize>,
 }
 
 impl LazerDemoProofEncoding {
@@ -100,6 +103,11 @@ impl LazerDemoProofEncoding {
         }
         if self.source.is_empty() {
             return Err(invalid_parameter("proofEncoding.source must not be empty"));
+        }
+        if self.expected_proof_size_bytes == Some(0) {
+            return Err(invalid_parameter(
+                "proofEncoding.expectedProofSizeBytes must be non-zero when present",
+            ));
         }
         if self.ring_degree == 0 || !self.ring_degree.is_power_of_two() {
             return Err(invalid_parameter(
@@ -311,6 +319,33 @@ pub fn demo_linear_proof_encoding_contract() -> LazerDemoProofEncoding {
         euclidean_response_log2_standard_deviation: 11,
         infinity_response_log2_standard_deviation: 16,
         source: "temp/lazer/python/demo/demo_params.h:_param".to_string(),
+        expected_proof_size_bytes: None,
+    }
+}
+
+pub fn receiver_key_linear_proof_encoding_contract() -> LazerDemoProofEncoding {
+    LazerDemoProofEncoding {
+        profile_id: "receiver-key-linear-proof-encoding-v1".to_string(),
+        ring_degree: 64,
+        coefficient_modulus: 274_877_908_477,
+        full_size_coefficient_bit_length: 39,
+        compressed_coefficient_bit_length: 29,
+        target_commitment_vector_length: 12,
+        hash_mask_vector_length: 2,
+        compressed_commitment_vector_length: 19,
+        challenge_coefficient_modulus: 17,
+        challenge_coefficient_bit_length: 5,
+        hint_vector_length: 19,
+        short_response_vector_length: 33,
+        randomness_response_vector_length: 36,
+        euclidean_response_vector_length: 4,
+        infinity_response_vector_length: 4,
+        short_response_log2_standard_deviation: 17,
+        randomness_response_log2_standard_deviation: 12,
+        euclidean_response_log2_standard_deviation: 12,
+        infinity_response_log2_standard_deviation: 17,
+        source: "temp/lazer/python/demo/receiver_key_params.h:receiver_key_param".to_string(),
+        expected_proof_size_bytes: None,
     }
 }
 
@@ -336,6 +371,7 @@ pub fn encoded_score_field_linear_proof_encoding_contract() -> LazerDemoProofEnc
         euclidean_response_log2_standard_deviation: 14,
         infinity_response_log2_standard_deviation: 22,
         source: "temp/lazer/python/demo/ballot_field_params.h:ballot_field_param".to_string(),
+        expected_proof_size_bytes: None,
     }
 }
 
@@ -427,6 +463,7 @@ mod tests {
         demo_linear_parameter_contract, demo_linear_proof_encoding_contract,
         encoded_score_field_linear_parameter_contract,
         encoded_score_field_linear_proof_encoding_contract, receiver_key_linear_parameter_contract,
+        receiver_key_linear_proof_encoding_contract,
     };
     use serde_json::json;
 
@@ -487,6 +524,24 @@ mod tests {
     }
 
     #[test]
+    fn receiver_key_linear_proof_encoding_contract_is_valid() {
+        let proof_encoding = receiver_key_linear_proof_encoding_contract();
+
+        proof_encoding
+            .validate()
+            .expect("receiver-key proof encoding should validate");
+        assert_eq!(
+            proof_encoding.profile_id,
+            "receiver-key-linear-proof-encoding-v1"
+        );
+        assert_eq!(proof_encoding.coefficient_modulus, 274_877_908_477);
+        assert_eq!(proof_encoding.full_size_coefficient_bit_length, 39);
+        assert_eq!(proof_encoding.compressed_coefficient_bit_length, 29);
+        assert_eq!(proof_encoding.compressed_commitment_vector_length, 19);
+        assert_eq!(proof_encoding.randomness_response_vector_length, 36);
+    }
+
+    #[test]
     fn encoded_score_field_linear_proof_encoding_contract_is_valid() {
         let proof_encoding = encoded_score_field_linear_proof_encoding_contract();
 
@@ -526,11 +581,13 @@ mod tests {
             "randomnessResponseLog2StandardDeviation": 12,
             "euclideanResponseLog2StandardDeviation": 11,
             "infinityResponseLog2StandardDeviation": 16,
-            "source": "temp/lazer/python/demo/demo_params.h:_param"
+            "source": "temp/lazer/python/demo/demo_params.h:_param",
+            "expectedProofSizeBytes": 1
         }))
         .expect("decimal string modulus should deserialize");
 
         assert_eq!(proof_encoding.coefficient_modulus, 36_028_797_018_964_597);
+        assert_eq!(proof_encoding.expected_proof_size_bytes, Some(1));
         proof_encoding
             .validate()
             .expect("decimal string modulus should preserve the validated value");

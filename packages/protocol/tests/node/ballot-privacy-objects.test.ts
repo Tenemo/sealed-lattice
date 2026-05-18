@@ -27,6 +27,7 @@ import {
     deriveBallotProofPublicRandomnessDigest,
     deriveProofBytesDigest,
     deriveReceiverKeyProofEncodingProfileDigest,
+    deriveReceiverKeyProofParameterSetDigest,
     deriveReceiverKeyProofPublicRandomnessDigest,
     describeBallotPrivacyProofBackend,
     verifyBallotProof,
@@ -185,11 +186,87 @@ function createComponentProofStatementFixture(input: {
         };
     }
     const statementPayload = {
+        backendStatementDigest: digest(`${input.componentId}-backend`),
+        coefficientModulus:
+            input.componentId === 'share-commitment-component'
+                ? '18446744069414584321'
+                : input.componentId === 'score-and-shamir-field-component' ||
+                    input.componentId === 'payload-plaintext-field-component'
+                  ? '65537'
+                  : '12289',
         componentId: input.componentId,
         componentStatementDigest: input.componentStatementDigest,
+        denseCoefficientCount:
+            input.proofStatementFormat ===
+            'structured-module-lwe-linear-proof-v1'
+                ? '1024'
+                : null,
+        matrixDigest: digest(`${input.componentId}-matrix`),
         objectType: 'BallotProofComponentProofStatementPlan',
         objectVersion: 1,
+        proofBytesAvailability:
+            input.proofStatementFormat ===
+            'structured-module-lwe-linear-proof-v1'
+                ? 'requires-structured-proof-statement'
+                : 'public-zero-witness-binding-check',
+        proofLoweringStatus: 'explicitRowsAvailable',
         proofStatementFormat: input.proofStatementFormat,
+        proofSystemRingDegree:
+            input.proofStatementFormat ===
+            'structured-module-lwe-linear-proof-v1'
+                ? 64
+                : null,
+        relation: 'A*w + t = 0',
+        relationStatementDigest: digest(`${input.componentId}-relation`),
+        rowBatchMatrixDigests: [digest(`${input.componentId}-row-matrix`)],
+        rowBatchNames: [
+            input.proofStatementFormat ===
+            'structured-module-lwe-linear-proof-v1'
+                ? 'receiver_payload_encryption_equation_rows'
+                : 'receiver_key_binding_rows',
+        ],
+        rowBatchTargetVectorDigests: [
+            digest(`${input.componentId}-row-target`),
+        ],
+        rowBatchTermCounts: [
+            input.proofStatementFormat ===
+            'structured-module-lwe-linear-proof-v1'
+                ? '1024'
+                : '0',
+        ],
+        rowCount: 1,
+        sparseTermCount: null,
+        sourceRingDegree:
+            input.proofStatementFormat ===
+            'structured-module-lwe-linear-proof-v1'
+                ? 256
+                : null,
+        structuredCiphertextChunkCount:
+            input.proofStatementFormat ===
+            'structured-module-lwe-linear-proof-v1'
+                ? 1
+                : null,
+        structuredReceiverCount:
+            input.proofStatementFormat ===
+            'structured-module-lwe-linear-proof-v1'
+                ? 1
+                : null,
+        structuredWitnessTermCount:
+            input.proofStatementFormat ===
+            'structured-module-lwe-linear-proof-v1'
+                ? '1024'
+                : null,
+        targetVectorDigest: digest(`${input.componentId}-target`),
+        variableColumnCount:
+            input.proofStatementFormat ===
+            'structured-module-lwe-linear-proof-v1'
+                ? 1
+                : 0,
+        variableColumnIndices:
+            input.proofStatementFormat ===
+            'structured-module-lwe-linear-proof-v1'
+                ? [0]
+                : [],
     };
 
     return {
@@ -233,11 +310,15 @@ function createComponentProofVerificationInputFixture(
     const boundComponentProofStatementDigest =
         proofStatement.componentProofStatementDigest ??
         componentProofStatementDigest;
+    const proofBytesHex =
+        proofStatementFormat === 'public-zero-witness-binding-check-v1'
+            ? ''
+            : digest(`${componentId}-proof-bytes-material`);
 
     return {
         componentId,
         componentProofStatementDigest: boundComponentProofStatementDigest,
-        proofBytesHex: digest(`${componentId}-proof-bytes-material`),
+        proofBytesHex,
         proofEncoding: {
             profileId: 'ballot-proof-component-encoding-v1',
             componentId,
@@ -265,6 +346,9 @@ const createComponentProofBundleFixture = (
             digest(`${componentId}-statement`),
         );
         const proofBytesDigest = deriveProofBytesDigest({
+            allowEmpty:
+                proofInput.proofStatementFormat ===
+                'public-zero-witness-binding-check-v1',
             proofBytesHex: proofInput.proofBytesHex,
         });
         const proofEncodingProfileDigest =
@@ -900,6 +984,65 @@ describe('ballot privacy proof object boundary', () => {
             unresolvedReason: 'BallotPackageInvalid',
         });
 
+        const publicZeroWithProofBytesInputs = componentProofInputs.map(
+            (componentProofInput) =>
+                componentProofInput.componentId ===
+                'receiver-key-binding-component'
+                    ? {
+                          ...componentProofInput,
+                          proofBytesHex: '00',
+                      }
+                    : componentProofInput,
+        );
+        const publicZeroWithProofBytesResult = verifyBallotProof({
+            ballotProof: proofRecord,
+            componentProofBundle,
+            componentProofInputs: publicZeroWithProofBytesInputs,
+            proofBytesHex,
+            statement,
+        });
+        expect(publicZeroWithProofBytesResult).toMatchObject({
+            ok: false,
+            unresolvedReason: 'BallotPackageInvalid',
+        });
+        expect(
+            publicZeroWithProofBytesResult.refusedObjects.some((refusal) =>
+                refusal.message.includes(
+                    'proof bytes for receiver-key-binding-component must be empty',
+                ),
+            ),
+        ).toBe(true);
+
+        const wrongReceiverEncryptionFormatInputs = componentProofInputs.map(
+            (componentProofInput) =>
+                componentProofInput.componentId ===
+                'receiver-encryption-component'
+                    ? {
+                          ...componentProofInput,
+                          proofStatementFormat:
+                              'sparse-polynomial-matrix-linear-proof-v1' as const,
+                      }
+                    : componentProofInput,
+        );
+        const wrongReceiverEncryptionFormatResult = verifyBallotProof({
+            ballotProof: proofRecord,
+            componentProofBundle,
+            componentProofInputs: wrongReceiverEncryptionFormatInputs,
+            proofBytesHex,
+            statement,
+        });
+        expect(wrongReceiverEncryptionFormatResult).toMatchObject({
+            ok: false,
+            unresolvedReason: 'BallotPackageInvalid',
+        });
+        expect(
+            wrongReceiverEncryptionFormatResult.refusedObjects.some((refusal) =>
+                refusal.message.includes(
+                    'proof statement format for receiver-encryption-component must be structured-module-lwe-linear-proof-v1',
+                ),
+            ),
+        ).toBe(true);
+
         const wrongSuppliedProofStatementInputs = componentProofInputs.map(
             (componentProofInput, componentIndex) =>
                 componentIndex === 3
@@ -1016,6 +1159,9 @@ describe('ballot privacy proof object boundary', () => {
         const proofEncoding = {
             profileId: 'receiver-key-linear-proof-encoding-v1',
         };
+        const proofParameterSet = {
+            profileId: 'receiver-key-linear-module-lwe-compatibility-v1',
+        };
         const publicRandomnessHex = '00'.repeat(32);
         const receiverKeyProof = createReceiverKeyProofShell({
             backendStatementDigest: digest('receiver-key-backend-statement'),
@@ -1028,6 +1174,9 @@ describe('ballot privacy proof object boundary', () => {
                 deriveReceiverKeyProofEncodingProfileDigest({
                     proofEncoding,
                 }),
+            proofParameterSetDigest: deriveReceiverKeyProofParameterSetDigest({
+                parameterSet: proofParameterSet,
+            }),
             proofRoot: digest('receiver-key-proof-root'),
             proofSizeBytes: proofBytesHex.length / 2,
             publicRandomnessDigest:

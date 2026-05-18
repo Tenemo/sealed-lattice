@@ -506,6 +506,74 @@ pub(crate) fn apply_lazer_tbox_z4_response_relations(
     Ok(())
 }
 
+pub(crate) fn apply_lazer_tbox_z4_response_relations_sparse(
+    accumulator_set: &mut LazerDemoTboxRelationAccumulatorSet,
+    transformed_statement_matrix: &SparsePolynomialMatrix,
+    transformed_target_vector: &PolynomialVector,
+    infinity_response_vector: &[Vec<i64>],
+    challenge_seed: &[u8; 32],
+    proof_encoding: &LazerDemoProofEncoding,
+) -> CanonicalResult<()> {
+    let tbox_profile = LazerTboxRelationProfile::from_proof_encoding(proof_encoding)?;
+    validate_lazer_demo_sparse_z4_inputs(
+        transformed_statement_matrix,
+        transformed_target_vector,
+        infinity_response_vector,
+        tbox_profile,
+    )?;
+    let proof_ring = tbox_profile.proof_ring;
+    let automorphic_statement_matrix = transformed_statement_matrix.automorphism()?;
+    let challenge_matrix = sample_lazer_demo_uniform_matrix(
+        LAZER_DEMO_TBOX_QUADRATIC_EVALUATION_REPETITIONS,
+        256,
+        proof_ring.modulus(),
+        tbox_profile.coefficient_bit_length,
+        challenge_seed,
+        LAZER_DEMO_TBOX_Z4_RESPONSE_DOMAIN_OFFSET,
+    )?;
+    let flattened_response = flatten_signed_response(
+        infinity_response_vector,
+        tbox_profile.infinity_response_vector_length,
+        proof_ring.degree(),
+    )?;
+    let response_rotation_matrix_products = compute_lazer_demo_response_rotation_products(
+        challenge_seed,
+        &challenge_matrix,
+        transformed_statement_matrix.rows(),
+        true,
+        proof_ring.modulus(),
+    )?;
+    let shifted_rotation_polynomial_matrix = convert_z4_rotation_products_to_polynomials(
+        proof_ring,
+        &response_rotation_matrix_products,
+        transformed_statement_matrix.rows(),
+    )?;
+    let statement_products = multiply_rows_by_sparse_polynomial_matrix(
+        proof_ring,
+        &shifted_rotation_polynomial_matrix,
+        &automorphic_statement_matrix,
+    )?;
+    let target_products = dot_rotation_products_with_target(
+        proof_ring,
+        &response_rotation_matrix_products,
+        transformed_target_vector,
+    )?;
+
+    for repetition_index in 0..LAZER_DEMO_TBOX_QUADRATIC_EVALUATION_REPETITIONS {
+        let relation = build_lazer_demo_z4_response_relation(
+            tbox_profile,
+            proof_ring,
+            &challenge_matrix[repetition_index],
+            &flattened_response,
+            &statement_products[repetition_index],
+            target_products[repetition_index],
+        )?;
+        accumulate_lazer_demo_repetition_relation(accumulator_set, repetition_index, &relation)?;
+    }
+
+    Ok(())
+}
+
 pub(crate) fn apply_lazer_demo_tbox_z3_response_relations(
     accumulator_set: &mut LazerDemoTboxRelationAccumulatorSet,
     transformed_statement_matrix: &PolynomialMatrix,
@@ -530,6 +598,60 @@ pub(crate) fn apply_lazer_tbox_z3_response_relations(
 ) -> CanonicalResult<()> {
     let tbox_profile = LazerTboxRelationProfile::from_proof_encoding(proof_encoding)?;
     validate_lazer_demo_z3_inputs(
+        transformed_statement_matrix,
+        euclidean_response_vector,
+        tbox_profile,
+    )?;
+    let proof_ring = tbox_profile.proof_ring;
+    let challenge_matrix = sample_lazer_demo_uniform_matrix(
+        LAZER_DEMO_TBOX_QUADRATIC_EVALUATION_REPETITIONS,
+        256,
+        proof_ring.modulus(),
+        tbox_profile.coefficient_bit_length,
+        challenge_seed,
+        LAZER_DEMO_TBOX_Z3_RESPONSE_DOMAIN_OFFSET,
+    )?;
+    let flattened_response = flatten_signed_response(
+        euclidean_response_vector,
+        tbox_profile.euclidean_response_vector_length,
+        proof_ring.degree(),
+    )?;
+    let response_rotation_matrix_products = compute_lazer_demo_response_rotation_products(
+        challenge_seed,
+        &challenge_matrix,
+        tbox_profile.extended_coordinates(),
+        false,
+        proof_ring.modulus(),
+    )?;
+    let rotation_polynomial_matrix = convert_z3_rotation_products_to_polynomials(
+        proof_ring,
+        &response_rotation_matrix_products,
+        tbox_profile.extended_coordinates(),
+    )?;
+
+    for repetition_index in 0..LAZER_DEMO_TBOX_QUADRATIC_EVALUATION_REPETITIONS {
+        let relation = build_lazer_demo_z3_response_relation(
+            tbox_profile,
+            proof_ring,
+            &challenge_matrix[repetition_index],
+            &flattened_response,
+            &rotation_polynomial_matrix[repetition_index],
+        )?;
+        accumulate_lazer_demo_repetition_relation(accumulator_set, repetition_index, &relation)?;
+    }
+
+    Ok(())
+}
+
+pub(crate) fn apply_lazer_tbox_z3_response_relations_sparse(
+    accumulator_set: &mut LazerDemoTboxRelationAccumulatorSet,
+    transformed_statement_matrix: &SparsePolynomialMatrix,
+    euclidean_response_vector: &[Vec<i64>],
+    challenge_seed: &[u8; 32],
+    proof_encoding: &LazerDemoProofEncoding,
+) -> CanonicalResult<()> {
+    let tbox_profile = LazerTboxRelationProfile::from_proof_encoding(proof_encoding)?;
+    validate_lazer_demo_sparse_z3_inputs(
         transformed_statement_matrix,
         euclidean_response_vector,
         tbox_profile,
@@ -709,6 +831,27 @@ fn validate_lazer_demo_z4_inputs(
     )
 }
 
+fn validate_lazer_demo_sparse_z4_inputs(
+    transformed_statement_matrix: &SparsePolynomialMatrix,
+    transformed_target_vector: &PolynomialVector,
+    infinity_response_vector: &[Vec<i64>],
+    tbox_profile: LazerTboxRelationProfile,
+) -> CanonicalResult<()> {
+    validate_lazer_demo_sparse_statement_matrix(transformed_statement_matrix, tbox_profile)?;
+    if transformed_target_vector.ring() != transformed_statement_matrix.ring()
+        || transformed_target_vector.len() != transformed_statement_matrix.rows()
+    {
+        return Err(invalid_tbox_relation(
+            "z4 response relation target vector does not match the demo transformed statement",
+        ));
+    }
+    validate_lazer_demo_response_vector(
+        infinity_response_vector,
+        tbox_profile.infinity_response_vector_length,
+        tbox_profile.proof_ring.degree(),
+    )
+}
+
 fn validate_lazer_demo_z3_inputs(
     transformed_statement_matrix: &PolynomialMatrix,
     euclidean_response_vector: &[Vec<i64>],
@@ -722,8 +865,38 @@ fn validate_lazer_demo_z3_inputs(
     )
 }
 
+fn validate_lazer_demo_sparse_z3_inputs(
+    transformed_statement_matrix: &SparsePolynomialMatrix,
+    euclidean_response_vector: &[Vec<i64>],
+    tbox_profile: LazerTboxRelationProfile,
+) -> CanonicalResult<()> {
+    validate_lazer_demo_sparse_statement_matrix(transformed_statement_matrix, tbox_profile)?;
+    validate_lazer_demo_response_vector(
+        euclidean_response_vector,
+        tbox_profile.euclidean_response_vector_length,
+        tbox_profile.proof_ring.degree(),
+    )
+}
+
 fn validate_lazer_demo_statement_matrix(
     transformed_statement_matrix: &PolynomialMatrix,
+    tbox_profile: LazerTboxRelationProfile,
+) -> CanonicalResult<()> {
+    let proof_ring = tbox_profile.proof_ring;
+    if transformed_statement_matrix.ring() != proof_ring
+        || transformed_statement_matrix.rows() == 0
+        || transformed_statement_matrix.columns() != tbox_profile.exact_norm_dimension()
+    {
+        return Err(invalid_tbox_relation(
+            "response relation statement matrix does not match the demo transformed statement shape",
+        ));
+    }
+
+    Ok(())
+}
+
+fn validate_lazer_demo_sparse_statement_matrix(
+    transformed_statement_matrix: &SparsePolynomialMatrix,
     tbox_profile: LazerTboxRelationProfile,
 ) -> CanonicalResult<()> {
     let proof_ring = tbox_profile.proof_ring;
@@ -911,6 +1084,31 @@ fn multiply_rows_by_polynomial_matrix(
                 accumulated_polynomial = ring.add(&accumulated_polynomial, &product)?;
             }
             output_row.push(accumulated_polynomial);
+        }
+        output_rows.push(output_row);
+    }
+
+    Ok(output_rows)
+}
+
+fn multiply_rows_by_sparse_polynomial_matrix(
+    ring: PolynomialRing,
+    polynomial_rows: &[Vec<Vec<u64>>],
+    matrix: &SparsePolynomialMatrix,
+) -> CanonicalResult<Vec<Vec<Vec<u64>>>> {
+    let mut output_rows = Vec::with_capacity(polynomial_rows.len());
+    for polynomial_row in polynomial_rows {
+        if polynomial_row.len() != matrix.rows() {
+            return Err(invalid_tbox_relation(
+                "polynomial row length does not match matrix row count",
+            ));
+        }
+        let mut output_row = vec![vec![0_u64; ring.degree()]; matrix.columns()];
+        for entry in matrix.entries() {
+            let product =
+                ring.mul_negacyclic(&polynomial_row[entry.row_index()], entry.coefficients())?;
+            output_row[entry.column_index()] =
+                ring.add(&output_row[entry.column_index()], &product)?;
         }
         output_rows.push(output_row);
     }

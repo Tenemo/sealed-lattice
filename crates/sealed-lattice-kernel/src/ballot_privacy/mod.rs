@@ -9,6 +9,7 @@ pub mod lazer_demo_rng;
 pub(crate) mod lazer_demo_tbox_relations;
 pub mod linear_proof_norms;
 pub mod linear_proof_parameters;
+pub(crate) mod linear_proof_prover;
 pub mod linear_proof_statement;
 pub mod linear_proof_tbox;
 pub mod linear_proof_transcript;
@@ -27,6 +28,24 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde_json::{Map, Value, json};
 
 use crate::{hashing::derive_protocol_digest, transcript_core::decode_hex};
+
+use self::{
+    linear_proof_parameters::{LazerDemoProofEncoding, LinearProofParameterSet},
+    linear_proof_prover::{
+        LinearProverCommitmentInput, LinearProverProofInput, LinearProverWitnessInput,
+        generate_lazer_receiver_key_linear_proof, prepare_lazer_linear_prover_commitment,
+        prepare_lazer_linear_prover_witness,
+    },
+    linear_proof_statement::{
+        LinearProofTargetCoefficientRepresentation, derive_lazer_demo_linear_statement_transcript,
+    },
+    polynomial_ring::PolynomialRing,
+    receiver_key_vectors::{
+        RECEIVER_ENCRYPTION_MODULE_DEGREE, RECEIVER_ENCRYPTION_MODULE_RANK,
+        RECEIVER_ENCRYPTION_MODULUS, derive_receiver_encryption_public_matrix,
+    },
+    sparse_polynomial_matrix::{SparsePolynomialMatrix, SparsePolynomialMatrixEntry},
+};
 
 pub const MODULE_MARKER: &str = "ballot-privacy";
 pub const BALLOT_PRIVACY_PROOF_BACKEND_AVAILABLE: bool = false;
@@ -54,6 +73,15 @@ const ALLOWED_BALLOT_PROOF_COMPONENT_STATEMENT_FORMATS: &[&str] = &[
     "structured-module-lwe-linear-proof-v1",
     "public-zero-witness-binding-check-v1",
 ];
+const DENSE_COMPONENT_PROOF_STATEMENT_FORMAT: &str = "dense-polynomial-matrix-linear-proof-v1";
+const SPARSE_COMPONENT_PROOF_STATEMENT_FORMAT: &str = "sparse-polynomial-matrix-linear-proof-v1";
+const STRUCTURED_RECEIVER_ENCRYPTION_PROOF_STATEMENT_FORMAT: &str =
+    "structured-module-lwe-linear-proof-v1";
+const PUBLIC_ZERO_PROOF_STATEMENT_FORMAT: &str = "public-zero-witness-binding-check-v1";
+const AVAILABLE_DENSE_PROOF_BYTES: &str = "available-for-small-dense-oracle";
+const REQUIRES_SPARSE_PROOF_STATEMENT: &str = "requires-sparse-proof-statement";
+const REQUIRES_STRUCTURED_PROOF_STATEMENT: &str = "requires-structured-proof-statement";
+const PUBLIC_ZERO_WITNESS_BINDING_CHECK: &str = "public-zero-witness-binding-check";
 
 pub const REQUIRED_LAZER_PORT_COMPONENTS: &[&str] = &[
     "generated linear proof parameters from lin-codegen.sage",
@@ -176,6 +204,40 @@ fn is_protocol_digest(value: &str) -> bool {
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
+fn unsigned_decimal_string(value: &str) -> bool {
+    value == "0" || (!value.starts_with('0') && value.bytes().all(|byte| byte.is_ascii_digit()))
+}
+
+fn expected_component_proof_statement_format(component_id: &str) -> Option<&'static str> {
+    match component_id {
+        "score-and-shamir-field-component" => Some(DENSE_COMPONENT_PROOF_STATEMENT_FORMAT),
+        "payload-plaintext-field-component" | "share-commitment-component" => {
+            Some(SPARSE_COMPONENT_PROOF_STATEMENT_FORMAT)
+        }
+        "receiver-encryption-component" => {
+            Some(STRUCTURED_RECEIVER_ENCRYPTION_PROOF_STATEMENT_FORMAT)
+        }
+        "receiver-key-binding-component" => Some(PUBLIC_ZERO_PROOF_STATEMENT_FORMAT),
+        _ => None,
+    }
+}
+
+fn expected_component_proof_bytes_availability(component_id: &str) -> Option<&'static str> {
+    match component_id {
+        "score-and-shamir-field-component" => Some(AVAILABLE_DENSE_PROOF_BYTES),
+        "payload-plaintext-field-component" | "share-commitment-component" => {
+            Some(REQUIRES_SPARSE_PROOF_STATEMENT)
+        }
+        "receiver-encryption-component" => Some(REQUIRES_STRUCTURED_PROOF_STATEMENT),
+        "receiver-key-binding-component" => Some(PUBLIC_ZERO_WITNESS_BINDING_CHECK),
+        _ => None,
+    }
+}
+
+fn component_proof_bytes_must_be_empty(component_id: &str) -> bool {
+    component_id == "receiver-key-binding-component"
+}
+
 fn positive_roster_position(value: &Value, field_name: &str) -> Option<u64> {
     let roster_position = object_map(value)?.get(field_name)?.as_u64()?;
     if roster_position == 0 {
@@ -274,6 +336,8 @@ fn collect_receiver_key_proof_refusals(
             .is_some_and(|digest| !is_protocol_digest(digest))
         || string_field(receiver_key_proof, "proofEncodingProfileDigest")
             .is_some_and(|digest| !is_protocol_digest(digest))
+        || string_field(receiver_key_proof, "proofParameterSetDigest")
+            .is_some_and(|digest| !is_protocol_digest(digest))
         || string_field(receiver_key_proof, "publicRandomnessDigest")
             .is_some_and(|digest| !is_protocol_digest(digest))
         || proof_size_bytes.is_some_and(|size| size == 0)
@@ -287,13 +351,14 @@ fn collect_receiver_key_proof_refusals(
         string_field(receiver_key_proof, "linearStatementDigest").is_some(),
         string_field(receiver_key_proof, "proofBytesDigest").is_some(),
         string_field(receiver_key_proof, "proofEncodingProfileDigest").is_some(),
+        string_field(receiver_key_proof, "proofParameterSetDigest").is_some(),
         string_field(receiver_key_proof, "publicRandomnessDigest").is_some(),
         proof_size_bytes.is_some(),
     ]
     .iter()
     .filter(|field_present| **field_present)
     .count();
-    if proof_metadata_field_count > 0 && proof_metadata_field_count != 5 {
+    if proof_metadata_field_count > 0 && proof_metadata_field_count != 6 {
         refused_objects.push(structural_refusal(
             "Receiver key proof byte metadata must be complete when any proof-byte field is present.",
             object_digest,
@@ -311,6 +376,7 @@ fn collect_receiver_key_proof_refusals(
         proof_size_bytes,
         object_digest,
         "Receiver key",
+        false,
     ));
     if expected_digest.as_deref() != object_digest {
         refused_objects.push(structural_refusal(
@@ -631,16 +697,22 @@ fn collect_proof_bytes_refusals(
     expected_proof_size_bytes: Option<u64>,
     proof_record_digest: Option<&str>,
     proof_label: &str,
+    allow_empty_proof_bytes: bool,
 ) -> Vec<Value> {
     let Some(proof_bytes_hex) = proof_bytes_hex else {
         return Vec::new();
     };
     let mut refused_objects = Vec::new();
     let proof_bytes = match decode_hex(proof_bytes_hex) {
-        Ok(proof_bytes) if !proof_bytes.is_empty() => proof_bytes,
+        Ok(proof_bytes) if allow_empty_proof_bytes || !proof_bytes.is_empty() => proof_bytes,
         _ => {
+            let required_shape = if allow_empty_proof_bytes {
+                "lowercase hexadecimal bytes"
+            } else {
+                "non-empty lowercase hexadecimal bytes"
+            };
             refused_objects.push(structural_refusal(
-                format!("{proof_label} proof bytes must be non-empty lowercase hexadecimal bytes."),
+                format!("{proof_label} proof bytes must be {required_shape}."),
                 proof_record_digest,
             ));
 
@@ -815,6 +887,7 @@ fn collect_claim_bearing_package_refusals(ballot_package: &Value) -> Vec<Value> 
             .and_then(Value::as_u64),
         string_field(ballot_proof, "ballotProofRecordDigest"),
         "Ballot",
+        false,
     ));
     refused_objects.extend(collect_ballot_component_proof_bundle_refusals(
         statement,
@@ -989,6 +1062,16 @@ fn derive_receiver_key_proof_encoding_profile_digest(proof_encoding: &Value) -> 
     )
 }
 
+fn derive_receiver_key_proof_parameter_set_digest(parameter_set: &Value) -> Option<String> {
+    derive_digest(
+        "ChallengeDomainDigest",
+        &json!({
+            "parameterSet": parameter_set,
+            "purpose": "receiver-key-linear-proof-parameter-set-v1"
+        }),
+    )
+}
+
 fn derive_receiver_key_public_randomness_digest(public_randomness_hex: &str) -> Option<String> {
     derive_digest(
         "ChallengeDomainDigest",
@@ -1062,6 +1145,19 @@ fn derive_ballot_sparse_linear_statement_digest(sparse_statement: &Value) -> Opt
     )
 }
 
+fn derive_ballot_structured_receiver_encryption_statement_digest(
+    structured_statement: &Value,
+) -> Option<String> {
+    let statement_payload = value_without_field(structured_statement, "statementDigest")?;
+    derive_digest(
+        "ChallengeDomainDigest",
+        &json!({
+            "payload": statement_payload,
+            "purpose": "ballot-proof-structured-receiver-encryption-proof-statement-v1"
+        }),
+    )
+}
+
 fn derive_ballot_component_proof_statement_plan_digest(plan: &Value) -> Option<String> {
     let statement_payload = value_without_field(plan, "componentProofStatementDigest")?;
     derive_digest(
@@ -1086,10 +1182,16 @@ fn verify_receiver_key_linear_proof_bytes(
     let linear_statement_digest = string_field(linear_statement, "statementDigest");
     let expected_proof_encoding_digest =
         derive_receiver_key_proof_encoding_profile_digest(proof_encoding);
+    let expected_parameter_set_digest =
+        derive_receiver_key_proof_parameter_set_digest(parameter_set);
     let expected_public_randomness_digest =
         derive_receiver_key_public_randomness_digest(public_randomness_hex);
     let expected_linear_statement_digest =
         derive_receiver_key_linear_statement_digest(linear_statement);
+    let proof_size_bytes = object_map(receiver_key_proof)
+        .and_then(|object| object.get("proofSizeBytes"))
+        .and_then(Value::as_u64)
+        .and_then(|proof_size_bytes| usize::try_from(proof_size_bytes).ok());
 
     if linear_statement_digest != expected_linear_statement_digest.as_deref() {
         refused_objects.push(structural_refusal(
@@ -1112,6 +1214,14 @@ fn verify_receiver_key_linear_proof_bytes(
             receiver_key_proof_root,
         ));
     }
+    if string_field(receiver_key_proof, "proofParameterSetDigest")
+        != expected_parameter_set_digest.as_deref()
+    {
+        refused_objects.push(structural_refusal(
+            "Receiver key proof record is not bound to the supplied proof parameter set.",
+            receiver_key_proof_root,
+        ));
+    }
     if string_field(receiver_key_proof, "publicRandomnessDigest")
         != expected_public_randomness_digest.as_deref()
     {
@@ -1119,6 +1229,36 @@ fn verify_receiver_key_linear_proof_bytes(
             "Receiver key proof record is not bound to the supplied public randomness.",
             receiver_key_proof_root,
         ));
+    }
+    match serde_json::from_value::<LinearProofParameterSet>(parameter_set.clone()) {
+        Ok(parameter_contract)
+            if parameter_contract.expected_proof_size_bytes != proof_size_bytes =>
+        {
+            refused_objects.push(structural_refusal(
+                "Receiver key proof parameter set is not bound to the proof record byte length.",
+                receiver_key_proof_root,
+            ));
+        }
+        Ok(_) => {}
+        Err(error) => refused_objects.push(structural_refusal(
+            format!("Receiver key proof parameter set is malformed: {error}"),
+            receiver_key_proof_root,
+        )),
+    }
+    match serde_json::from_value::<LazerDemoProofEncoding>(proof_encoding.clone()) {
+        Ok(proof_encoding_contract)
+            if proof_encoding_contract.expected_proof_size_bytes != proof_size_bytes =>
+        {
+            refused_objects.push(structural_refusal(
+                "Receiver key proof encoding is not bound to the proof record byte length.",
+                receiver_key_proof_root,
+            ));
+        }
+        Ok(_) => {}
+        Err(error) => refused_objects.push(structural_refusal(
+            format!("Receiver key proof encoding is malformed: {error}"),
+            receiver_key_proof_root,
+        )),
     }
     if !refused_objects.is_empty() {
         return structural_rejection("verifyReceiverKeyProof", refused_objects);
@@ -1200,6 +1340,7 @@ fn verify_receiver_key_linear_proof_bytes(
     let accepted_digests = [
         receiver_key_proof_root,
         string_field(receiver_key_proof, "proofBytesDigest"),
+        string_field(receiver_key_proof, "proofParameterSetDigest"),
         linear_statement_digest,
     ]
     .into_iter()
@@ -1268,6 +1409,480 @@ pub fn verify_receiver_key_proof(
     }
 
     fail_closed("verifyReceiverKeyProof")
+}
+
+pub fn prepare_receiver_key_proof_generation(
+    linear_statement: Option<&Value>,
+    parameter_set: Option<&Value>,
+    proof_encoding: Option<&Value>,
+    public_randomness_hex: Option<&str>,
+    secret_state: Option<&Value>,
+    prover_randomness_hex: Option<&str>,
+) -> Value {
+    match prepare_receiver_key_proof_generation_inner(
+        linear_statement,
+        parameter_set,
+        proof_encoding,
+        public_randomness_hex,
+        secret_state,
+        prover_randomness_hex,
+    ) {
+        Ok(value) => value,
+        Err(error) => structural_rejection(
+            "prepareReceiverKeyProofGeneration",
+            vec![error.to_json_value()],
+        ),
+    }
+}
+
+fn prepare_receiver_key_proof_generation_inner(
+    linear_statement: Option<&Value>,
+    parameter_set: Option<&Value>,
+    proof_encoding: Option<&Value>,
+    public_randomness_hex: Option<&str>,
+    secret_state: Option<&Value>,
+    prover_randomness_hex: Option<&str>,
+) -> crate::encoding::CanonicalResult<Value> {
+    let linear_statement = linear_statement.ok_or_else(|| {
+        invalid_preflight("linearStatement is required for receiver-key proof preparation")
+    })?;
+    let parameter_set = parameter_set.ok_or_else(|| {
+        invalid_preflight("parameterSet is required for receiver-key proof preparation")
+    })?;
+    let proof_encoding = proof_encoding.ok_or_else(|| {
+        invalid_preflight("proofEncoding is required for receiver-key proof preparation")
+    })?;
+    let public_randomness_hex = public_randomness_hex.ok_or_else(|| {
+        invalid_preflight("publicRandomnessHex is required for receiver-key proof preparation")
+    })?;
+    let secret_state = secret_state.ok_or_else(|| {
+        invalid_preflight("secretState is required for receiver-key proof preparation")
+    })?;
+
+    let parameter_set_value = parameter_set;
+    let proof_encoding_value = proof_encoding;
+    let parameter_set: LinearProofParameterSet =
+        serde_json::from_value(parameter_set_value.clone()).map_err(|error| {
+            invalid_preflight(format!(
+                "parameterSet is malformed for receiver-key proof preparation: {error}"
+            ))
+        })?;
+    let proof_encoding: LazerDemoProofEncoding =
+        serde_json::from_value(proof_encoding_value.clone()).map_err(|error| {
+            invalid_preflight(format!(
+                "proofEncoding is malformed for receiver-key proof preparation: {error}"
+            ))
+        })?;
+    let statement_matrix_coefficients: Vec<Vec<Vec<u64>>> = required_json_field(
+        linear_statement,
+        "statementMatrixCoefficients",
+        "linearStatement",
+    )
+    .and_then(|value| {
+        serde_json::from_value(value.clone()).map_err(|error| {
+            invalid_preflight(format!(
+                "linearStatement.statementMatrixCoefficients is malformed: {error}"
+            ))
+        })
+    })?;
+    let target_vector_coefficients: Vec<Vec<u64>> = required_json_field(
+        linear_statement,
+        "targetVectorCoefficients",
+        "linearStatement",
+    )
+    .and_then(|value| {
+        serde_json::from_value(value.clone()).map_err(|error| {
+            invalid_preflight(format!(
+                "linearStatement.targetVectorCoefficients is malformed: {error}"
+            ))
+        })
+    })?;
+    let target_coefficient_representation: LinearProofTargetCoefficientRepresentation =
+        required_json_field(
+            linear_statement,
+            "targetCoefficientRepresentation",
+            "linearStatement",
+        )
+        .and_then(|value| {
+            serde_json::from_value(value.clone()).map_err(|error| {
+                invalid_preflight(format!(
+                    "linearStatement.targetCoefficientRepresentation is malformed: {error}"
+                ))
+            })
+        })?;
+    let source_witness_coefficients = receiver_key_source_witness_coefficients(secret_state)?;
+    let public_randomness = decode_hex(public_randomness_hex)?;
+    if public_randomness.len() != 32 {
+        return Err(invalid_preflight(
+            "publicRandomnessHex must encode exactly 32 bytes for receiver-key proof preparation",
+        ));
+    }
+    let public_randomness_array: [u8; 32] = public_randomness
+        .as_slice()
+        .try_into()
+        .map_err(|_| {
+            invalid_preflight(
+                "publicRandomnessHex must encode exactly 32 bytes for receiver-key proof preparation",
+            )
+        })?;
+
+    let preparation = prepare_lazer_linear_prover_witness(LinearProverWitnessInput {
+        parameter_set: &parameter_set,
+        proof_encoding: &proof_encoding,
+        statement_matrix_coefficients: &statement_matrix_coefficients,
+        target_vector_coefficients: &target_vector_coefficients,
+        target_coefficient_representation,
+        source_witness_coefficients: &source_witness_coefficients,
+        public_randomness: &public_randomness,
+    })?;
+    let summary = preparation.summary();
+    let commitment_preparation = match prover_randomness_hex {
+        Some(prover_randomness_hex) => {
+            let prover_randomness = decode_hex(prover_randomness_hex)?;
+            if prover_randomness.len() != 32 {
+                return Err(invalid_preflight(
+                    "proverRandomnessHex must encode exactly 32 bytes for receiver-key proof preparation",
+                ));
+            }
+            let prover_randomness_array: [u8; 32] = prover_randomness
+                .as_slice()
+                .try_into()
+                .map_err(|_| {
+                    invalid_preflight(
+                        "proverRandomnessHex must encode exactly 32 bytes for receiver-key proof preparation",
+                    )
+                })?;
+            let statement_transcript = derive_lazer_demo_linear_statement_transcript(
+                &parameter_set,
+                &proof_encoding,
+                &statement_matrix_coefficients,
+                &target_vector_coefficients,
+                target_coefficient_representation,
+                &public_randomness,
+            )?;
+            Some(prepare_lazer_linear_prover_commitment(
+                LinearProverCommitmentInput {
+                    proof_encoding: &proof_encoding,
+                    public_randomness: &public_randomness_array,
+                    statement_transcript_hash: &statement_transcript
+                        .public_parameters_and_statement_hash,
+                    witness_preparation: &preparation,
+                    prover_randomness: &prover_randomness_array,
+                },
+            )?)
+        }
+        None => None,
+    };
+    let accepted_digests = [
+        derive_receiver_key_linear_statement_digest(linear_statement),
+        derive_receiver_key_proof_parameter_set_digest(parameter_set_value),
+        derive_receiver_key_proof_encoding_profile_digest(proof_encoding_value),
+        derive_receiver_key_public_randomness_digest(public_randomness_hex),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>();
+    let mut status_labels = vec![
+        "ReceiverKeySourceWitnessChecked",
+        "ReceiverKeyProofRingWitnessPrepared",
+        "ReceiverKeyNormSlackPrepared",
+    ];
+    if commitment_preparation.is_some() {
+        status_labels.push("ReceiverKeyAbdlopCommitmentPrepared");
+    }
+    let commitment_summary = commitment_preparation.as_ref().map(|commitment| {
+        let summary = commitment.summary();
+        json!({
+            "compressedCommitmentPolynomialCount": commitment.compressed_commitment_polynomial_count(),
+            "openingRandomnessPolynomialCount": summary.opening_randomness_polynomial_count,
+            "openingRemainderPolynomialCount": summary.opening_remainder_polynomial_count,
+            "proverRandomnessSeedBytes": summary.prover_randomness_seed_bytes,
+            "subprotocolSeedBytes": summary.subprotocol_seed_bytes,
+            "abdlopCommitmentHash": summary.abdlop_commitment_hash_hex
+        })
+    });
+
+    Ok(json!({
+        "ok": true,
+        "backendAvailable": BALLOT_PRIVACY_PROOF_BACKEND_AVAILABLE,
+        "backendStatus": describe_proof_backend(),
+        "operation": "prepareReceiverKeyProofGeneration",
+        "statusLabels": status_labels,
+        "acceptedDigests": accepted_digests,
+        "refusedObjects": [],
+        "unresolvedReason": Value::Null,
+        "generatedProofBytes": false,
+        "summary": {
+            "relationWitnessPolynomialCount": summary.relation_witness_polynomial_count,
+            "shortWitnessPolynomialCount": summary.short_witness_polynomial_count,
+            "preparedShortWitnessPolynomialCount": preparation.short_witness_polynomial_count(),
+            "witnessL2Squared": summary.witness_l2_squared.to_string(),
+            "witnessL2BoundSquared": summary.witness_l2_bound_squared.to_string(),
+            "normSlack": summary.norm_slack.to_string(),
+            "abdlopCommitment": commitment_summary
+        }
+    }))
+}
+
+pub fn generate_receiver_key_proof(
+    linear_statement: Option<&Value>,
+    parameter_set: Option<&Value>,
+    proof_encoding: Option<&Value>,
+    public_randomness_hex: Option<&str>,
+    secret_state: Option<&Value>,
+    prover_randomness_hex: Option<&str>,
+) -> Value {
+    match generate_receiver_key_proof_inner(
+        linear_statement,
+        parameter_set,
+        proof_encoding,
+        public_randomness_hex,
+        secret_state,
+        prover_randomness_hex,
+    ) {
+        Ok(value) => value,
+        Err(error) => structural_rejection("generateReceiverKeyProof", vec![error.to_json_value()]),
+    }
+}
+
+fn generate_receiver_key_proof_inner(
+    linear_statement: Option<&Value>,
+    parameter_set: Option<&Value>,
+    proof_encoding: Option<&Value>,
+    public_randomness_hex: Option<&str>,
+    secret_state: Option<&Value>,
+    prover_randomness_hex: Option<&str>,
+) -> crate::encoding::CanonicalResult<Value> {
+    let linear_statement = linear_statement.ok_or_else(|| {
+        invalid_preflight("linearStatement is required for receiver-key proof generation")
+    })?;
+    let parameter_set_value = parameter_set.ok_or_else(|| {
+        invalid_preflight("parameterSet is required for receiver-key proof generation")
+    })?;
+    let proof_encoding_value = proof_encoding.ok_or_else(|| {
+        invalid_preflight("proofEncoding is required for receiver-key proof generation")
+    })?;
+    let public_randomness_hex = public_randomness_hex.ok_or_else(|| {
+        invalid_preflight("publicRandomnessHex is required for receiver-key proof generation")
+    })?;
+    let secret_state = secret_state.ok_or_else(|| {
+        invalid_preflight("secretState is required for receiver-key proof generation")
+    })?;
+    let prover_randomness_hex = prover_randomness_hex.ok_or_else(|| {
+        invalid_preflight("proverRandomnessHex is required for receiver-key proof generation")
+    })?;
+
+    let parameter_set: LinearProofParameterSet =
+        serde_json::from_value(parameter_set_value.clone()).map_err(|error| {
+            invalid_preflight(format!(
+                "parameterSet is malformed for receiver-key proof generation: {error}"
+            ))
+        })?;
+    let proof_encoding: LazerDemoProofEncoding =
+        serde_json::from_value(proof_encoding_value.clone()).map_err(|error| {
+            invalid_preflight(format!(
+                "proofEncoding is malformed for receiver-key proof generation: {error}"
+            ))
+        })?;
+    let statement_matrix_coefficients: Vec<Vec<Vec<u64>>> = required_json_field(
+        linear_statement,
+        "statementMatrixCoefficients",
+        "linearStatement",
+    )
+    .and_then(|value| {
+        serde_json::from_value(value.clone()).map_err(|error| {
+            invalid_preflight(format!(
+                "linearStatement.statementMatrixCoefficients is malformed: {error}"
+            ))
+        })
+    })?;
+    let target_vector_coefficients: Vec<Vec<u64>> = required_json_field(
+        linear_statement,
+        "targetVectorCoefficients",
+        "linearStatement",
+    )
+    .and_then(|value| {
+        serde_json::from_value(value.clone()).map_err(|error| {
+            invalid_preflight(format!(
+                "linearStatement.targetVectorCoefficients is malformed: {error}"
+            ))
+        })
+    })?;
+    let target_coefficient_representation: LinearProofTargetCoefficientRepresentation =
+        required_json_field(
+            linear_statement,
+            "targetCoefficientRepresentation",
+            "linearStatement",
+        )
+        .and_then(|value| {
+            serde_json::from_value(value.clone()).map_err(|error| {
+                invalid_preflight(format!(
+                    "linearStatement.targetCoefficientRepresentation is malformed: {error}"
+                ))
+            })
+        })?;
+    let source_witness_coefficients = receiver_key_source_witness_coefficients(secret_state)?;
+    let public_randomness = decode_hex(public_randomness_hex)?;
+    if public_randomness.len() != 32 {
+        return Err(invalid_preflight(
+            "publicRandomnessHex must encode exactly 32 bytes for receiver-key proof generation",
+        ));
+    }
+    let public_randomness_array: [u8; 32] = public_randomness.as_slice().try_into().map_err(|_| {
+        invalid_preflight(
+            "publicRandomnessHex must encode exactly 32 bytes for receiver-key proof generation",
+        )
+    })?;
+    let prover_randomness = decode_hex(prover_randomness_hex)?;
+    if prover_randomness.len() != 32 {
+        return Err(invalid_preflight(
+            "proverRandomnessHex must encode exactly 32 bytes for receiver-key proof generation",
+        ));
+    }
+    let prover_randomness_array: [u8; 32] = prover_randomness.as_slice().try_into().map_err(|_| {
+        invalid_preflight(
+            "proverRandomnessHex must encode exactly 32 bytes for receiver-key proof generation",
+        )
+    })?;
+
+    let generation = generate_lazer_receiver_key_linear_proof(LinearProverProofInput {
+        parameter_set: &parameter_set,
+        proof_encoding: &proof_encoding,
+        statement_matrix_coefficients: &statement_matrix_coefficients,
+        target_vector_coefficients: &target_vector_coefficients,
+        target_coefficient_representation,
+        source_witness_coefficients: &source_witness_coefficients,
+        public_randomness: &public_randomness_array,
+        prover_randomness: &prover_randomness_array,
+    })?;
+    let proof_hex = crate::hashing::to_hex(&generation.proof_bytes);
+    let vector_case = json!({
+        "caseName": "generated-receiver-key-proof",
+        "description": "Receiver-key linear proof generated by the internal Rust prover.",
+        "mutation": "none",
+        "expectedOutcome": "accept",
+        "upstreamVectorAvailable": true,
+        "parameterSet": parameter_set_value,
+        "proofEncoding": proof_encoding_value,
+        "publicRandomnessHex": public_randomness_hex,
+        "statementMatrixCoefficients": statement_matrix_coefficients,
+        "targetVectorCoefficients": target_vector_coefficients,
+        "targetCoefficientRepresentation": target_coefficient_representation,
+        "proofHex": proof_hex,
+        "expectedProofSizeBytes": generation.summary.proof_size_bytes
+    });
+    let verification = linear_proof_verifier::verify_linear_proof_vector_case_value(&vector_case);
+    if verification
+        .as_object()
+        .and_then(|object| object.get("ok"))
+        .and_then(Value::as_bool)
+        != Some(true)
+    {
+        return Err(invalid_preflight(
+            "generated receiver-key proof did not verify against its public statement",
+        ));
+    }
+    let accepted_digests = [
+        derive_receiver_key_linear_statement_digest(linear_statement),
+        derive_receiver_key_proof_parameter_set_digest(parameter_set_value),
+        derive_receiver_key_proof_encoding_profile_digest(proof_encoding_value),
+        derive_receiver_key_public_randomness_digest(public_randomness_hex),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>();
+
+    Ok(json!({
+        "ok": true,
+        "backendAvailable": BALLOT_PRIVACY_PROOF_BACKEND_AVAILABLE,
+        "backendStatus": describe_proof_backend(),
+        "operation": "generateReceiverKeyProof",
+        "statusLabels": [
+            "ReceiverKeySourceWitnessChecked",
+            "ReceiverKeyProofRingWitnessPrepared",
+            "ReceiverKeyAbdlopCommitmentPrepared",
+            "ReceiverKeyTboxResponsesGenerated",
+            "ReceiverKeyQuadraticChallengeGenerated",
+            "ReceiverKeyProofBytesGenerated",
+            "ReceiverKeyGeneratedProofVerified"
+        ],
+        "acceptedDigests": accepted_digests,
+        "refusedObjects": [],
+        "unresolvedReason": Value::Null,
+        "generatedProofBytes": true,
+        "proofBytesHex": proof_hex,
+        "proofSizeBytes": generation.summary.proof_size_bytes,
+        "summary": {
+            "abdlopCommitmentHash": generation.summary.abdlop_commitment_hash_hex,
+            "z34ChallengeHash": generation.summary.z34_challenge_hash_hex,
+            "generatorChallengeHash": generation.summary.generator_challenge_hash_hex,
+            "quadraticChallengeHash": generation.summary.quadratic_challenge_hash_hex
+        }
+    }))
+}
+
+fn required_json_field<'value>(
+    value: &'value Value,
+    field_name: &str,
+    object_name: &str,
+) -> crate::encoding::CanonicalResult<&'value Value> {
+    object_map(value)
+        .and_then(|object| object.get(field_name))
+        .ok_or_else(|| invalid_preflight(format!("{object_name}.{field_name} is required")))
+}
+
+fn receiver_key_source_witness_coefficients(
+    secret_state: &Value,
+) -> crate::encoding::CanonicalResult<Vec<Vec<i64>>> {
+    let secret_state = object_map(secret_state)
+        .ok_or_else(|| invalid_preflight("secretState must be an object"))?;
+    let mut source_witness_coefficients =
+        signed_polynomial_vector_field(secret_state, "secretVector")?;
+    source_witness_coefficients
+        .extend(signed_polynomial_vector_field(secret_state, "errorVector")?);
+
+    Ok(source_witness_coefficients)
+}
+
+fn signed_polynomial_vector_field(
+    object: &Map<String, Value>,
+    field_name: &str,
+) -> crate::encoding::CanonicalResult<Vec<Vec<i64>>> {
+    let vector = object
+        .get(field_name)
+        .and_then(Value::as_array)
+        .ok_or_else(|| invalid_preflight(format!("secretState.{field_name} must be an array")))?;
+
+    vector
+        .iter()
+        .enumerate()
+        .map(|(polynomial_index, polynomial)| {
+            let coefficients = polynomial.as_array().ok_or_else(|| {
+                invalid_preflight(format!(
+                    "secretState.{field_name}[{polynomial_index}] must be an array"
+                ))
+            })?;
+
+            coefficients
+                .iter()
+                .enumerate()
+                .map(|(coefficient_index, coefficient)| {
+                    coefficient.as_i64().ok_or_else(|| {
+                        invalid_preflight(format!(
+                            "secretState.{field_name}[{polynomial_index}][{coefficient_index}] must be a signed integer"
+                        ))
+                    })
+                })
+                .collect()
+        })
+        .collect()
+}
+
+fn invalid_preflight(message: impl Into<String>) -> crate::encoding::CanonicalError {
+    crate::encoding::CanonicalError::new(
+        crate::encoding::CanonicalErrorCode::InvalidFixture,
+        message,
+    )
 }
 
 fn string_array_matches_expected(
@@ -1580,6 +2195,13 @@ fn collect_component_proof_record_refusals(
     let proof_size_bytes = object_map(component_proof)
         .and_then(|object| object.get("proofSizeBytes"))
         .and_then(Value::as_u64);
+    let proof_size_bytes_is_valid = proof_size_bytes.is_some_and(|proof_size_bytes| {
+        if component_proof_bytes_must_be_empty(expected_component_id) {
+            proof_size_bytes == 0
+        } else {
+            proof_size_bytes > 0
+        }
+    });
 
     if string_field(component_proof, "objectType") != Some("BallotProofComponentProofRecord")
         || object_map(component_proof)
@@ -1609,7 +2231,7 @@ fn collect_component_proof_record_refusals(
             .is_some_and(|digest| !is_protocol_digest(digest))
         || string_field(component_proof, "ballotProofStatementDigest")
             .is_some_and(|digest| !is_protocol_digest(digest))
-        || proof_size_bytes.is_none_or(|proof_size_bytes| proof_size_bytes == 0)
+        || !proof_size_bytes_is_valid
     {
         refused_objects.push(structural_refusal(
             format!(
@@ -1859,6 +2481,157 @@ fn supplied_component_proof_statement_digest<'a>(
     }
 }
 
+fn protocol_digest_field(value: &Value, field_name: &str) -> bool {
+    string_field(value, field_name).is_some_and(is_protocol_digest)
+}
+
+fn unsigned_decimal_string_field(value: &Value, field_name: &str) -> bool {
+    string_field(value, field_name).is_some_and(unsigned_decimal_string)
+}
+
+fn non_negative_u64_field(value: &Value, field_name: &str) -> Option<u64> {
+    object_map(value)?.get(field_name)?.as_u64()
+}
+
+fn string_array_field<'value>(value: &'value Value, field_name: &str) -> Option<Vec<&'value str>> {
+    array_field(value, field_name)?
+        .iter()
+        .map(Value::as_str)
+        .collect()
+}
+
+fn digest_array_field_is_valid(value: &Value, field_name: &str) -> bool {
+    array_field(value, field_name).is_some_and(|values| {
+        values
+            .iter()
+            .all(|entry| entry.as_str().is_some_and(is_protocol_digest))
+    })
+}
+
+fn u64_array_field_is_valid(value: &Value, field_name: &str) -> bool {
+    array_field(value, field_name)
+        .is_some_and(|values| values.iter().all(|entry| entry.as_u64().is_some()))
+}
+
+fn null_field(value: &Value, field_name: &str) -> bool {
+    object_map(value)
+        .and_then(|object| object.get(field_name))
+        .is_some_and(Value::is_null)
+}
+
+fn collect_component_proof_statement_plan_shape_refusals(
+    proof_statement: &Value,
+    expected_component_id: &str,
+    proof_record_digest: Option<&str>,
+) -> Vec<Value> {
+    if string_field(proof_statement, "objectType") != Some("BallotProofComponentProofStatementPlan")
+    {
+        return Vec::new();
+    }
+
+    let row_batch_names = string_array_field(proof_statement, "rowBatchNames");
+    let row_batch_term_counts = string_array_field(proof_statement, "rowBatchTermCounts");
+    let row_batch_count = row_batch_names
+        .as_ref()
+        .filter(|names| !names.is_empty())
+        .map(Vec::len);
+    let row_batch_lengths_match = row_batch_count.is_some_and(|row_batch_count| {
+        array_field(proof_statement, "rowBatchMatrixDigests")
+            .is_some_and(|digests| digests.len() == row_batch_count)
+            && array_field(proof_statement, "rowBatchTargetVectorDigests")
+                .is_some_and(|digests| digests.len() == row_batch_count)
+            && row_batch_term_counts
+                .as_ref()
+                .is_some_and(|counts| counts.len() == row_batch_count)
+    });
+    let variable_column_indices =
+        array_field(proof_statement, "variableColumnIndices").map(Vec::len);
+    let variable_column_count = non_negative_u64_field(proof_statement, "variableColumnCount");
+
+    let common_shape_is_valid = object_map(proof_statement)
+        .and_then(|object| object.get("objectVersion"))
+        .and_then(Value::as_u64)
+        == Some(1)
+        && string_field(proof_statement, "componentId") == Some(expected_component_id)
+        && string_field(proof_statement, "proofStatementFormat")
+            == expected_component_proof_statement_format(expected_component_id)
+        && string_field(proof_statement, "proofBytesAvailability")
+            == expected_component_proof_bytes_availability(expected_component_id)
+        && string_field(proof_statement, "proofLoweringStatus") == Some("explicitRowsAvailable")
+        && string_field(proof_statement, "relation") == Some("A*w + t = 0")
+        && unsigned_decimal_string_field(proof_statement, "coefficientModulus")
+        && protocol_digest_field(proof_statement, "backendStatementDigest")
+        && protocol_digest_field(proof_statement, "componentProofStatementDigest")
+        && protocol_digest_field(proof_statement, "componentStatementDigest")
+        && protocol_digest_field(proof_statement, "matrixDigest")
+        && protocol_digest_field(proof_statement, "relationStatementDigest")
+        && protocol_digest_field(proof_statement, "targetVectorDigest")
+        && digest_array_field_is_valid(proof_statement, "rowBatchMatrixDigests")
+        && row_batch_names.is_some()
+        && digest_array_field_is_valid(proof_statement, "rowBatchTargetVectorDigests")
+        && row_batch_term_counts.as_ref().is_some_and(|term_counts| {
+            term_counts
+                .iter()
+                .all(|term_count| unsigned_decimal_string(term_count))
+        })
+        && row_batch_lengths_match
+        && non_negative_u64_field(proof_statement, "rowCount")
+            .is_some_and(|row_count| row_count > 0)
+        && variable_column_count.is_some()
+        && u64_array_field_is_valid(proof_statement, "variableColumnIndices");
+
+    let component_specific_shape_is_valid = match expected_component_id {
+        "receiver-encryption-component" => {
+            object_map(proof_statement)
+                .and_then(|object| object.get("sourceRingDegree"))
+                .and_then(Value::as_u64)
+                == Some(256)
+                && object_map(proof_statement)
+                    .and_then(|object| object.get("proofSystemRingDegree"))
+                    .and_then(Value::as_u64)
+                    == Some(64)
+                && unsigned_decimal_string_field(proof_statement, "denseCoefficientCount")
+                && null_field(proof_statement, "sparseTermCount")
+                && non_negative_u64_field(proof_statement, "structuredCiphertextChunkCount")
+                    .is_some_and(|count| count > 0)
+                && non_negative_u64_field(proof_statement, "structuredReceiverCount")
+                    .is_some_and(|count| count > 0)
+                && string_field(proof_statement, "structuredWitnessTermCount")
+                    .is_some_and(|count| unsigned_decimal_string(count) && count != "0")
+                && variable_column_count.is_some_and(|count| count > 0)
+                && variable_column_indices
+                    .zip(variable_column_count)
+                    .is_some_and(|(indices_len, column_count)| indices_len as u64 == column_count)
+        }
+        "receiver-key-binding-component" => {
+            null_field(proof_statement, "sourceRingDegree")
+                && null_field(proof_statement, "proofSystemRingDegree")
+                && null_field(proof_statement, "denseCoefficientCount")
+                && null_field(proof_statement, "sparseTermCount")
+                && null_field(proof_statement, "structuredCiphertextChunkCount")
+                && null_field(proof_statement, "structuredReceiverCount")
+                && null_field(proof_statement, "structuredWitnessTermCount")
+                && variable_column_count == Some(0)
+                && variable_column_indices == Some(0)
+                && row_batch_term_counts.as_ref().is_some_and(|term_counts| {
+                    term_counts.iter().all(|term_count| *term_count == "0")
+                })
+        }
+        _ => true,
+    };
+
+    if common_shape_is_valid && component_specific_shape_is_valid {
+        Vec::new()
+    } else {
+        vec![structural_refusal(
+            format!(
+                "Ballot proof component proof statement plan for {expected_component_id} has an invalid canonical shape."
+            ),
+            proof_record_digest,
+        )]
+    }
+}
+
 fn collect_supplied_component_proof_statement_refusals(
     component_proof: &Value,
     expected_component_id: &str,
@@ -1882,6 +2655,11 @@ fn collect_supplied_component_proof_statement_refusals(
     }
 
     let proof_statement_format = string_field(proof_input, "proofStatementFormat").unwrap_or("");
+    refused_objects.extend(collect_component_proof_statement_plan_shape_refusals(
+        proof_statement,
+        expected_component_id,
+        proof_record_digest,
+    ));
     let (expected_statement_digest, digest_field_name) =
         supplied_component_proof_statement_digest(proof_statement, proof_statement_format);
     if expected_statement_digest.is_none() || digest_field_name.is_none() {
@@ -2065,6 +2843,29 @@ fn collect_ballot_component_proof_input_refusals(
                 proof_record_digest,
             ));
         }
+        if string_field(proof_input, "proofStatementFormat")
+            != expected_component_proof_statement_format(expected_component_id)
+        {
+            let expected_format = expected_component_proof_statement_format(expected_component_id)
+                .unwrap_or("unknown");
+            refused_objects.push(structural_refusal(
+                format!(
+                    "Ballot proof component proof statement format for {expected_component_id} must be {expected_format}."
+                ),
+                proof_record_digest,
+            ));
+        }
+        if component_proof_bytes_must_be_empty(expected_component_id)
+            && string_field(proof_input, "proofBytesHex")
+                .is_some_and(|proof_bytes_hex| !proof_bytes_hex.is_empty())
+        {
+            refused_objects.push(structural_refusal(
+                format!(
+                    "Ballot proof component proof bytes for {expected_component_id} must be empty for the public-zero witness binding check."
+                ),
+                proof_record_digest,
+            ));
+        }
         refused_objects.extend(collect_proof_bytes_refusals(
             string_field(proof_input, "proofBytesHex"),
             string_field(component_proof, "proofBytesDigest"),
@@ -2073,6 +2874,7 @@ fn collect_ballot_component_proof_input_refusals(
                 .and_then(Value::as_u64),
             proof_record_digest,
             "Ballot proof component",
+            component_proof_bytes_must_be_empty(expected_component_id),
         ));
         let expected_proof_encoding_digest = object_map(proof_input)
             .and_then(|object| object.get("proofEncoding"))
@@ -2208,6 +3010,1768 @@ fn component_proof_bundle_unavailable_result(
     })
 }
 
+fn component_proof_backend_rejection(
+    operation: &str,
+    component_id: &str,
+    refused_objects: Vec<Value>,
+    unresolved_reason: Value,
+) -> Value {
+    json!({
+        "ok": false,
+        "backendAvailable": BALLOT_PRIVACY_PROOF_BACKEND_AVAILABLE,
+        "backendStatus": describe_proof_backend(),
+        "operation": operation,
+        "statusLabels": [],
+        "acceptedDigests": [],
+        "refusedObjects": refused_objects,
+        "componentId": component_id,
+        "unresolvedReason": unresolved_reason
+    })
+}
+
+fn integer_value(value: &Value) -> Option<u64> {
+    match value {
+        Value::Number(number) => number.as_u64(),
+        Value::String(text)
+            if text == "0"
+                || (!text.starts_with('0') && text.bytes().all(|byte| byte.is_ascii_digit())) =>
+        {
+            text.parse::<u64>().ok()
+        }
+        _ => None,
+    }
+}
+
+fn usize_object_field(value: &Value, field_name: &str) -> Option<usize> {
+    object_map(value)?
+        .get(field_name)
+        .and_then(integer_value)
+        .and_then(|field_value| usize::try_from(field_value).ok())
+}
+
+fn u64_object_field(value: &Value, field_name: &str) -> Option<u64> {
+    object_map(value)?.get(field_name).and_then(integer_value)
+}
+
+fn derive_sparse_statement_matrix_digest(matrix_entries: &Value) -> Option<String> {
+    derive_digest(
+        "ChallengeDomainDigest",
+        &json!({
+            "purpose": "ballot-proof-sparse-linear-statement-matrix-v1",
+            "sparseStatementMatrixEntries": matrix_entries
+        }),
+    )
+}
+
+fn derive_sparse_target_vector_digest(target_entries: &Value) -> Option<String> {
+    derive_digest(
+        "ChallengeDomainDigest",
+        &json!({
+            "purpose": "ballot-proof-sparse-linear-target-vector-v1",
+            "targetVectorEntries": target_entries
+        }),
+    )
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ComponentProofBackendError {
+    code: &'static str,
+    message: String,
+}
+
+impl ComponentProofBackendError {
+    fn invalid(message: impl Into<String>) -> Self {
+        Self {
+            code: "BallotPackageInvalid",
+            message: message.into(),
+        }
+    }
+
+    fn unavailable(message: impl Into<String>) -> Self {
+        Self {
+            code: "OperationUnavailable",
+            message: message.into(),
+        }
+    }
+}
+
+struct ParsedSparseComponentProofStatement {
+    source_statement_matrix: SparsePolynomialMatrix,
+    target_vector_coefficients: Vec<Vec<u64>>,
+}
+
+fn parse_sparse_polynomial_entry(
+    entry: &Value,
+    constant_field_name: &str,
+    polynomial_field_name: &str,
+    source_ring_degree: usize,
+    coefficient_modulus: u64,
+    entry_label: &str,
+) -> Result<Vec<u64>, ComponentProofBackendError> {
+    let entry_object = object_map(entry).ok_or_else(|| {
+        ComponentProofBackendError::invalid(format!("{entry_label} must be an object."))
+    })?;
+    let constant_coefficient = entry_object
+        .get(constant_field_name)
+        .and_then(integer_value);
+    let polynomial_coefficients = entry_object.get(polynomial_field_name);
+
+    match (constant_coefficient, polynomial_coefficients) {
+        (Some(coefficient), None) => {
+            if coefficient >= coefficient_modulus {
+                return Err(ComponentProofBackendError::invalid(format!(
+                    "{entry_label} coefficient is not canonical."
+                )));
+            }
+            let mut coefficients = vec![0_u64; source_ring_degree];
+            coefficients[0] = coefficient;
+
+            Ok(coefficients)
+        }
+        (None, Some(polynomial_value)) => {
+            let polynomial_array = polynomial_value.as_array().ok_or_else(|| {
+                ComponentProofBackendError::invalid(format!(
+                    "{entry_label} polynomial coefficients must be an array."
+                ))
+            })?;
+            if polynomial_array.len() != source_ring_degree {
+                return Err(ComponentProofBackendError::invalid(format!(
+                    "{entry_label} polynomial degree does not match sourceRingDegree."
+                )));
+            }
+            let mut coefficients = Vec::with_capacity(source_ring_degree);
+            for coefficient_value in polynomial_array {
+                let coefficient = integer_value(coefficient_value).ok_or_else(|| {
+                    ComponentProofBackendError::invalid(format!(
+                        "{entry_label} polynomial coefficient is not a canonical integer."
+                    ))
+                })?;
+                if coefficient >= coefficient_modulus {
+                    return Err(ComponentProofBackendError::invalid(format!(
+                        "{entry_label} polynomial coefficient is not canonical."
+                    )));
+                }
+                coefficients.push(coefficient);
+            }
+
+            Ok(coefficients)
+        }
+        (Some(_), Some(_)) => Err(ComponentProofBackendError::invalid(format!(
+            "{entry_label} must use either {constant_field_name} or {polynomial_field_name}, not both."
+        ))),
+        (None, None) => Err(ComponentProofBackendError::invalid(format!(
+            "{entry_label} is missing {constant_field_name} or {polynomial_field_name}."
+        ))),
+    }
+}
+
+fn polynomial_is_zero(coefficients: &[u64]) -> bool {
+    coefficients.iter().all(|coefficient| *coefficient == 0)
+}
+
+fn sparse_matrix_from_sparse_component_statement(
+    sparse_statement: &Value,
+) -> Result<ParsedSparseComponentProofStatement, ComponentProofBackendError> {
+    let statement_rows =
+        usize_object_field(sparse_statement, "statementRows").ok_or_else(|| {
+            ComponentProofBackendError::invalid(
+                "Sparse component proof statement is missing statementRows.",
+            )
+        })?;
+    let statement_columns =
+        usize_object_field(sparse_statement, "statementColumns").ok_or_else(|| {
+            ComponentProofBackendError::invalid(
+                "Sparse component proof statement is missing statementColumns.",
+            )
+        })?;
+    let source_ring_degree =
+        usize_object_field(sparse_statement, "sourceRingDegree").ok_or_else(|| {
+            ComponentProofBackendError::invalid(
+                "Sparse component proof statement is missing sourceRingDegree.",
+            )
+        })?;
+    let coefficient_modulus =
+        u64_object_field(sparse_statement, "coefficientModulus").ok_or_else(|| {
+            ComponentProofBackendError::invalid(
+                "Sparse component proof statement is missing coefficientModulus.",
+            )
+        })?;
+    let matrix_entries_value = object_map(sparse_statement)
+        .and_then(|object| object.get("sparseStatementMatrixEntries"))
+        .ok_or_else(|| {
+            ComponentProofBackendError::invalid(
+                "Sparse component proof statement is missing sparseStatementMatrixEntries.",
+            )
+        })?;
+    let matrix_entries = matrix_entries_value.as_array().ok_or_else(|| {
+        ComponentProofBackendError::invalid(
+            "Sparse component proof statement matrix entries must be an array.",
+        )
+    })?;
+    let target_entries_value = object_map(sparse_statement)
+        .and_then(|object| object.get("targetVectorEntries"))
+        .ok_or_else(|| {
+            ComponentProofBackendError::invalid(
+                "Sparse component proof statement is missing targetVectorEntries.",
+            )
+        })?;
+    let target_entries = target_entries_value.as_array().ok_or_else(|| {
+        ComponentProofBackendError::invalid(
+            "Sparse component proof statement target entries must be an array.",
+        )
+    })?;
+
+    if usize_object_field(sparse_statement, "sparseStatementTermCount")
+        != Some(matrix_entries.len())
+    {
+        return Err(ComponentProofBackendError::invalid(
+            "Sparse component proof statement matrix term count does not match entries."
+                .to_string(),
+        ));
+    }
+    if usize_object_field(sparse_statement, "targetVectorEntryCount") != Some(target_entries.len())
+    {
+        return Err(ComponentProofBackendError::invalid(
+            "Sparse component proof statement target entry count does not match entries."
+                .to_string(),
+        ));
+    }
+    if string_field(sparse_statement, "sparseStatementMatrixDigest")
+        != derive_sparse_statement_matrix_digest(matrix_entries_value).as_deref()
+    {
+        return Err(ComponentProofBackendError::invalid(
+            "Sparse component proof statement matrix digest does not match entries.",
+        ));
+    }
+    if string_field(sparse_statement, "targetVectorDigest")
+        != derive_sparse_target_vector_digest(target_entries_value).as_deref()
+    {
+        return Err(ComponentProofBackendError::invalid(
+            "Sparse component proof statement target vector digest does not match entries."
+                .to_string(),
+        ));
+    }
+
+    let source_ring =
+        PolynomialRing::new(source_ring_degree, coefficient_modulus).map_err(|error| {
+            ComponentProofBackendError::invalid(format!(
+                "Sparse component proof statement ring is invalid: {}",
+                error.message
+            ))
+        })?;
+    let mut sparse_matrix_entries = Vec::with_capacity(matrix_entries.len());
+    let mut seen_matrix_positions = BTreeSet::new();
+    for matrix_entry in matrix_entries {
+        let row_index = usize_object_field(matrix_entry, "rowIndex").ok_or_else(|| {
+            ComponentProofBackendError::invalid("Sparse matrix entry is missing rowIndex.")
+        })?;
+        let column_index = usize_object_field(matrix_entry, "columnIndex").ok_or_else(|| {
+            ComponentProofBackendError::invalid("Sparse matrix entry is missing columnIndex.")
+        })?;
+        let coefficients = parse_sparse_polynomial_entry(
+            matrix_entry,
+            "constantCoefficient",
+            "polynomialCoefficients",
+            source_ring_degree,
+            coefficient_modulus,
+            "Sparse matrix entry",
+        )?;
+        if row_index >= statement_rows || column_index >= statement_columns {
+            return Err(ComponentProofBackendError::invalid(
+                "Sparse matrix entry index is outside the statement shape.",
+            ));
+        }
+        if polynomial_is_zero(&coefficients) {
+            return Err(ComponentProofBackendError::invalid(
+                "Sparse matrix entries must not store zero polynomials.",
+            ));
+        }
+        if !seen_matrix_positions.insert((row_index, column_index)) {
+            return Err(ComponentProofBackendError::invalid(
+                "Sparse matrix entries contain a duplicate position.",
+            ));
+        }
+        sparse_matrix_entries.push(SparsePolynomialMatrixEntry::new(
+            row_index,
+            column_index,
+            coefficients,
+        ));
+    }
+    sparse_matrix_entries.sort_by_key(|entry| (entry.row_index(), entry.column_index()));
+    let source_statement_matrix = SparsePolynomialMatrix::new(
+        source_ring,
+        statement_rows,
+        statement_columns,
+        sparse_matrix_entries,
+    )
+    .map_err(|error| {
+        ComponentProofBackendError::invalid(format!(
+            "Sparse component proof statement matrix is invalid: {}",
+            error.message
+        ))
+    })?;
+
+    let mut target_vector_coefficients = vec![vec![0_u64; source_ring_degree]; statement_rows];
+    let mut seen_target_positions = BTreeSet::new();
+    for target_entry in target_entries {
+        let row_index = usize_object_field(target_entry, "rowIndex").ok_or_else(|| {
+            ComponentProofBackendError::invalid("Sparse target entry is missing rowIndex.")
+        })?;
+        let coefficients = parse_sparse_polynomial_entry(
+            target_entry,
+            "constantCoefficient",
+            "polynomialCoefficients",
+            source_ring_degree,
+            coefficient_modulus,
+            "Sparse target entry",
+        )?;
+        if row_index >= statement_rows {
+            return Err(ComponentProofBackendError::invalid(
+                "Sparse target entry index is outside the statement shape.",
+            ));
+        }
+        if polynomial_is_zero(&coefficients) {
+            return Err(ComponentProofBackendError::invalid(
+                "Sparse target entries must not store zero polynomials.",
+            ));
+        }
+        if !seen_target_positions.insert(row_index) {
+            return Err(ComponentProofBackendError::invalid(
+                "Sparse target entries contain a duplicate position.",
+            ));
+        }
+        target_vector_coefficients[row_index] = coefficients;
+    }
+
+    Ok(ParsedSparseComponentProofStatement {
+        source_statement_matrix,
+        target_vector_coefficients,
+    })
+}
+
+#[cfg(test)]
+fn dense_matrix_from_sparse_component_statement(
+    sparse_statement: &Value,
+) -> Result<(Value, Value), ComponentProofBackendError> {
+    let parsed_sparse_statement = sparse_matrix_from_sparse_component_statement(sparse_statement)?;
+    Ok((
+        json!(
+            parsed_sparse_statement
+                .source_statement_matrix
+                .to_dense()
+                .map_err(|error| ComponentProofBackendError::invalid(format!(
+                    "Sparse component proof statement could not be densified for test compatibility: {}",
+                    error.message
+                )))?
+                .entries_by_row()
+        ),
+        json!(parsed_sparse_statement.target_vector_coefficients),
+    ))
+}
+
+fn structured_receiver_encryption_statement_as_sparse(
+    structured_statement: &Value,
+) -> Result<ParsedSparseComponentProofStatement, ComponentProofBackendError> {
+    if string_field(structured_statement, "objectType")
+        != Some("BallotProofStructuredReceiverEncryptionProofStatement")
+    {
+        return Err(ComponentProofBackendError::invalid(
+            "Structured receiver-encryption proof statement must use the structured public statement object.",
+        ));
+    }
+    if string_field(structured_statement, "proofStatementFormat")
+        != Some(STRUCTURED_RECEIVER_ENCRYPTION_PROOF_STATEMENT_FORMAT)
+    {
+        return Err(ComponentProofBackendError::invalid(
+            "Structured receiver-encryption proof statement format is invalid.",
+        ));
+    }
+    if string_field(structured_statement, "componentId") != Some("receiver-encryption-component") {
+        return Err(ComponentProofBackendError::invalid(
+            "Structured receiver-encryption proof statement is bound to the wrong component.",
+        ));
+    }
+    if u64_object_field(structured_statement, "objectVersion") != Some(1) {
+        return Err(ComponentProofBackendError::invalid(
+            "Structured receiver-encryption proof statement objectVersion must be 1.",
+        ));
+    }
+    if usize_object_field(structured_statement, "sourceRingDegree")
+        != Some(RECEIVER_ENCRYPTION_MODULE_DEGREE as usize)
+    {
+        return Err(ComponentProofBackendError::invalid(
+            "Structured receiver-encryption proof statement sourceRingDegree is not supported.",
+        ));
+    }
+    if u64_object_field(structured_statement, "coefficientModulus")
+        != Some(RECEIVER_ENCRYPTION_MODULUS)
+    {
+        return Err(ComponentProofBackendError::invalid(
+            "Structured receiver-encryption proof statement modulus is not supported.",
+        ));
+    }
+    let statement_rows =
+        usize_object_field(structured_statement, "statementRows").ok_or_else(|| {
+            ComponentProofBackendError::invalid(
+                "Structured receiver-encryption proof statement is missing statementRows.",
+            )
+        })?;
+    let statement_columns = usize_object_field(structured_statement, "statementColumns")
+        .ok_or_else(|| {
+            ComponentProofBackendError::invalid(
+                "Structured receiver-encryption proof statement is missing statementColumns.",
+            )
+        })?;
+    let receiver_encryption_profile_digest = string_field(
+        structured_statement,
+        "receiverEncryptionProfileDigest",
+    )
+    .ok_or_else(|| {
+        ComponentProofBackendError::invalid(
+            "Structured receiver-encryption proof statement is missing receiverEncryptionProfileDigest.",
+        )
+    })?;
+    let receiver_rows = object_map(structured_statement)
+        .and_then(|object| object.get("receiverRows"))
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            ComponentProofBackendError::invalid(
+                "Structured receiver-encryption proof statement receiverRows must be an array.",
+            )
+        })?;
+    if receiver_rows.is_empty() {
+        return Err(ComponentProofBackendError::invalid(
+            "Structured receiver-encryption proof statement must contain receiver rows.",
+        ));
+    }
+
+    let source_ring = PolynomialRing::new(
+        RECEIVER_ENCRYPTION_MODULE_DEGREE as usize,
+        RECEIVER_ENCRYPTION_MODULUS,
+    )
+    .map_err(|error| {
+        ComponentProofBackendError::invalid(format!(
+            "Structured receiver-encryption source ring is invalid: {}",
+            error.message
+        ))
+    })?;
+    let mut matrix_coefficients_by_position: BTreeMap<(usize, usize), u64> = BTreeMap::new();
+    let mut target_vector_coefficients =
+        vec![vec![0_u64; RECEIVER_ENCRYPTION_MODULE_DEGREE as usize]; statement_rows];
+    let mut covered_row_count = 0_usize;
+
+    for receiver_row in receiver_rows {
+        let receiver_object = object_map(receiver_row).ok_or_else(|| {
+            ComponentProofBackendError::invalid(
+                "Structured receiver-encryption receiver row must be an object.",
+            )
+        })?;
+        let row_offset_within_statement = usize_object_field(
+            receiver_row,
+            "rowOffsetWithinStatement",
+        )
+        .ok_or_else(|| {
+            ComponentProofBackendError::invalid(
+                "Structured receiver-encryption receiver row is missing rowOffsetWithinStatement.",
+            )
+        })?;
+        let row_count = usize_object_field(receiver_row, "rowCount").ok_or_else(|| {
+            ComponentProofBackendError::invalid(
+                "Structured receiver-encryption receiver row is missing rowCount.",
+            )
+        })?;
+        let ciphertext_chunks = receiver_object
+            .get("ciphertextChunks")
+            .and_then(Value::as_array)
+            .ok_or_else(|| {
+                ComponentProofBackendError::invalid(
+                    "Structured receiver-encryption receiver row ciphertextChunks must be an array.",
+                )
+            })?;
+        let expected_row_count = ciphertext_chunks
+            .len()
+            .checked_mul(
+                (RECEIVER_ENCRYPTION_MODULE_RANK as usize + 1)
+                    .checked_mul(RECEIVER_ENCRYPTION_MODULE_DEGREE as usize)
+                    .ok_or_else(|| {
+                        ComponentProofBackendError::invalid(
+                            "Structured receiver-encryption row count overflowed.",
+                        )
+                    })?,
+            )
+            .ok_or_else(|| {
+                ComponentProofBackendError::invalid(
+                    "Structured receiver-encryption row count overflowed.",
+                )
+            })?;
+        if row_count != expected_row_count {
+            return Err(ComponentProofBackendError::invalid(
+                "Structured receiver-encryption receiver row count does not match ciphertext chunks.",
+            ));
+        }
+        if row_offset_within_statement
+            .checked_add(row_count)
+            .is_none_or(|exclusive_end| exclusive_end > statement_rows)
+        {
+            return Err(ComponentProofBackendError::invalid(
+                "Structured receiver-encryption receiver rows exceed the statement shape.",
+            ));
+        }
+        covered_row_count = covered_row_count.checked_add(row_count).ok_or_else(|| {
+            ComponentProofBackendError::invalid(
+                "Structured receiver-encryption covered row count overflowed.",
+            )
+        })?;
+
+        let public_matrix_seed_digest = string_field(receiver_row, "publicMatrixSeedDigest")
+            .ok_or_else(|| {
+                ComponentProofBackendError::invalid(
+                    "Structured receiver-encryption receiver row is missing publicMatrixSeedDigest.",
+                )
+            })?;
+        let public_key_vector = parse_receiver_polynomial_vector(
+            receiver_object.get("publicKeyVector").ok_or_else(|| {
+                ComponentProofBackendError::invalid(
+                    "Structured receiver-encryption receiver row is missing publicKeyVector.",
+                )
+            })?,
+            "Structured receiver-encryption public key vector",
+        )?;
+        let public_matrix = derive_receiver_encryption_public_matrix(
+            receiver_encryption_profile_digest,
+            public_matrix_seed_digest,
+        )
+        .map_err(|error| {
+            ComponentProofBackendError::invalid(format!(
+                "Structured receiver-encryption public matrix could not be derived: {error}"
+            ))
+        })?;
+
+        for (chunk_position, ciphertext_chunk) in ciphertext_chunks.iter().enumerate() {
+            let chunk_object = object_map(ciphertext_chunk).ok_or_else(|| {
+                ComponentProofBackendError::invalid(
+                    "Structured receiver-encryption ciphertext chunk must be an object.",
+                )
+            })?;
+            let chunk_index =
+                usize_object_field(ciphertext_chunk, "chunkIndex").ok_or_else(|| {
+                    ComponentProofBackendError::invalid(
+                        "Structured receiver-encryption ciphertext chunk is missing chunkIndex.",
+                    )
+                })?;
+            if chunk_index != chunk_position {
+                return Err(ComponentProofBackendError::invalid(
+                    "Structured receiver-encryption ciphertext chunks must be in canonical order.",
+                ));
+            }
+            let first_ciphertext_vector = parse_receiver_polynomial_vector(
+                chunk_object.get("firstCiphertextVector").ok_or_else(|| {
+                    ComponentProofBackendError::invalid(
+                        "Structured receiver-encryption ciphertext chunk is missing firstCiphertextVector.",
+                    )
+                })?,
+                "Structured receiver-encryption first ciphertext vector",
+            )?;
+            let second_ciphertext_polynomial = parse_receiver_polynomial(
+                chunk_object.get("secondCiphertextPolynomial").ok_or_else(|| {
+                    ComponentProofBackendError::invalid(
+                        "Structured receiver-encryption ciphertext chunk is missing secondCiphertextPolynomial.",
+                    )
+                })?,
+                "Structured receiver-encryption second ciphertext polynomial",
+            )?;
+            let randomness_column_indices = parse_receiver_column_matrix(
+                chunk_object.get("randomnessColumnIndices").ok_or_else(|| {
+                    ComponentProofBackendError::invalid(
+                        "Structured receiver-encryption ciphertext chunk is missing randomnessColumnIndices.",
+                    )
+                })?,
+                statement_columns,
+                "Structured receiver-encryption randomness column indices",
+            )?;
+            let first_noise_column_indices = parse_receiver_column_matrix(
+                chunk_object.get("firstNoiseColumnIndices").ok_or_else(|| {
+                    ComponentProofBackendError::invalid(
+                        "Structured receiver-encryption ciphertext chunk is missing firstNoiseColumnIndices.",
+                    )
+                })?,
+                statement_columns,
+                "Structured receiver-encryption first-noise column indices",
+            )?;
+            let second_noise_column_indices = parse_receiver_column_vector(
+                chunk_object.get("secondNoiseColumnIndices").ok_or_else(|| {
+                    ComponentProofBackendError::invalid(
+                        "Structured receiver-encryption ciphertext chunk is missing secondNoiseColumnIndices.",
+                    )
+                })?,
+                RECEIVER_ENCRYPTION_MODULE_DEGREE as usize,
+                statement_columns,
+                "Structured receiver-encryption second-noise column indices",
+            )?;
+            let plaintext_bit_column_indices = parse_receiver_column_vector_with_max_len(
+                chunk_object.get("plaintextBitColumnIndices").ok_or_else(|| {
+                    ComponentProofBackendError::invalid(
+                        "Structured receiver-encryption ciphertext chunk is missing plaintextBitColumnIndices.",
+                    )
+                })?,
+                RECEIVER_ENCRYPTION_MODULE_DEGREE as usize,
+                statement_columns,
+                "Structured receiver-encryption plaintext-bit column indices",
+            )?;
+            let chunk_row_offset = row_offset_within_statement
+                .checked_add(
+                    chunk_index
+                        .checked_mul(
+                            (RECEIVER_ENCRYPTION_MODULE_RANK as usize + 1)
+                                * RECEIVER_ENCRYPTION_MODULE_DEGREE as usize,
+                        )
+                        .ok_or_else(|| {
+                            ComponentProofBackendError::invalid(
+                                "Structured receiver-encryption chunk row offset overflowed.",
+                            )
+                        })?,
+                )
+                .ok_or_else(|| {
+                    ComponentProofBackendError::invalid(
+                        "Structured receiver-encryption chunk row offset overflowed.",
+                    )
+                })?;
+
+            for ciphertext_vector_index in 0..RECEIVER_ENCRYPTION_MODULE_RANK as usize {
+                for output_coefficient_index in 0..RECEIVER_ENCRYPTION_MODULE_DEGREE as usize {
+                    let row_index = chunk_row_offset
+                        + ciphertext_vector_index * RECEIVER_ENCRYPTION_MODULE_DEGREE as usize
+                        + output_coefficient_index;
+                    target_vector_coefficients[row_index][0] = negate_receiver_coefficient(
+                        first_ciphertext_vector[ciphertext_vector_index][output_coefficient_index],
+                    );
+                    for randomness_vector_index in 0..RECEIVER_ENCRYPTION_MODULE_RANK as usize {
+                        for randomness_coefficient_index in
+                            0..RECEIVER_ENCRYPTION_MODULE_DEGREE as usize
+                        {
+                            let coefficient = negacyclic_receiver_coefficient(
+                                &public_matrix[randomness_vector_index][ciphertext_vector_index],
+                                output_coefficient_index,
+                                randomness_coefficient_index,
+                            );
+                            add_structured_constant_entry(
+                                &mut matrix_coefficients_by_position,
+                                row_index,
+                                randomness_column_indices[randomness_vector_index]
+                                    [randomness_coefficient_index],
+                                coefficient,
+                            )?;
+                        }
+                    }
+                    add_structured_constant_entry(
+                        &mut matrix_coefficients_by_position,
+                        row_index,
+                        first_noise_column_indices[ciphertext_vector_index]
+                            [output_coefficient_index],
+                        1,
+                    )?;
+                }
+            }
+
+            let second_ciphertext_row_offset = chunk_row_offset
+                + RECEIVER_ENCRYPTION_MODULE_RANK as usize
+                    * RECEIVER_ENCRYPTION_MODULE_DEGREE as usize;
+            for output_coefficient_index in 0..RECEIVER_ENCRYPTION_MODULE_DEGREE as usize {
+                let row_index = second_ciphertext_row_offset + output_coefficient_index;
+                target_vector_coefficients[row_index][0] = negate_receiver_coefficient(
+                    second_ciphertext_polynomial[output_coefficient_index],
+                );
+                for randomness_vector_index in 0..RECEIVER_ENCRYPTION_MODULE_RANK as usize {
+                    for randomness_coefficient_index in
+                        0..RECEIVER_ENCRYPTION_MODULE_DEGREE as usize
+                    {
+                        let coefficient = negacyclic_receiver_coefficient(
+                            &public_key_vector[randomness_vector_index],
+                            output_coefficient_index,
+                            randomness_coefficient_index,
+                        );
+                        add_structured_constant_entry(
+                            &mut matrix_coefficients_by_position,
+                            row_index,
+                            randomness_column_indices[randomness_vector_index]
+                                [randomness_coefficient_index],
+                            coefficient,
+                        )?;
+                    }
+                }
+                add_structured_constant_entry(
+                    &mut matrix_coefficients_by_position,
+                    row_index,
+                    second_noise_column_indices[output_coefficient_index],
+                    1,
+                )?;
+                if let Some(plaintext_column_index) =
+                    plaintext_bit_column_indices.get(output_coefficient_index)
+                {
+                    add_structured_constant_entry(
+                        &mut matrix_coefficients_by_position,
+                        row_index,
+                        *plaintext_column_index,
+                        RECEIVER_ENCRYPTION_MODULUS / 2,
+                    )?;
+                }
+            }
+        }
+    }
+    if covered_row_count != statement_rows {
+        return Err(ComponentProofBackendError::invalid(
+            "Structured receiver-encryption receiver rows do not cover the statement row count.",
+        ));
+    }
+
+    let sparse_matrix_entries = matrix_coefficients_by_position
+        .into_iter()
+        .filter_map(|((row_index, column_index), coefficient)| {
+            if coefficient == 0 {
+                None
+            } else {
+                let mut coefficients = vec![0_u64; RECEIVER_ENCRYPTION_MODULE_DEGREE as usize];
+                coefficients[0] = coefficient;
+                Some(SparsePolynomialMatrixEntry::new(
+                    row_index,
+                    column_index,
+                    coefficients,
+                ))
+            }
+        })
+        .collect::<Vec<_>>();
+    let source_statement_matrix = SparsePolynomialMatrix::new(
+        source_ring,
+        statement_rows,
+        statement_columns,
+        sparse_matrix_entries,
+    )
+    .map_err(|error| {
+        ComponentProofBackendError::invalid(format!(
+            "Structured receiver-encryption sparse statement matrix is invalid: {}",
+            error.message
+        ))
+    })?;
+
+    Ok(ParsedSparseComponentProofStatement {
+        source_statement_matrix,
+        target_vector_coefficients,
+    })
+}
+
+fn parse_receiver_polynomial(
+    value: &Value,
+    label: &str,
+) -> Result<Vec<u64>, ComponentProofBackendError> {
+    let coefficients = value
+        .as_array()
+        .ok_or_else(|| ComponentProofBackendError::invalid(format!("{label} must be an array.")))?;
+    if coefficients.len() != RECEIVER_ENCRYPTION_MODULE_DEGREE as usize {
+        return Err(ComponentProofBackendError::invalid(format!(
+            "{label} must have the frozen receiver-encryption degree."
+        )));
+    }
+    coefficients
+        .iter()
+        .map(|coefficient_value| {
+            let coefficient = integer_value(coefficient_value).ok_or_else(|| {
+                ComponentProofBackendError::invalid(format!(
+                    "{label} coefficient is not a canonical integer."
+                ))
+            })?;
+            if coefficient >= RECEIVER_ENCRYPTION_MODULUS {
+                return Err(ComponentProofBackendError::invalid(format!(
+                    "{label} coefficient is outside the receiver-encryption modulus."
+                )));
+            }
+            Ok(coefficient)
+        })
+        .collect()
+}
+
+fn parse_receiver_polynomial_vector(
+    value: &Value,
+    label: &str,
+) -> Result<Vec<Vec<u64>>, ComponentProofBackendError> {
+    let polynomials = value
+        .as_array()
+        .ok_or_else(|| ComponentProofBackendError::invalid(format!("{label} must be an array.")))?;
+    if polynomials.len() != RECEIVER_ENCRYPTION_MODULE_RANK as usize {
+        return Err(ComponentProofBackendError::invalid(format!(
+            "{label} must have the frozen receiver-encryption module rank."
+        )));
+    }
+    polynomials
+        .iter()
+        .enumerate()
+        .map(|(polynomial_index, polynomial)| {
+            parse_receiver_polynomial(
+                polynomial,
+                &format!("{label} polynomial {polynomial_index}"),
+            )
+        })
+        .collect()
+}
+
+fn parse_receiver_column_vector(
+    value: &Value,
+    expected_length: usize,
+    statement_columns: usize,
+    label: &str,
+) -> Result<Vec<usize>, ComponentProofBackendError> {
+    let column_indices = parse_receiver_column_vector_with_max_len(
+        value,
+        expected_length,
+        statement_columns,
+        label,
+    )?;
+    if column_indices.len() != expected_length {
+        return Err(ComponentProofBackendError::invalid(format!(
+            "{label} length does not match the expected receiver-encryption dimension."
+        )));
+    }
+
+    Ok(column_indices)
+}
+
+fn parse_receiver_column_vector_with_max_len(
+    value: &Value,
+    maximum_length: usize,
+    statement_columns: usize,
+    label: &str,
+) -> Result<Vec<usize>, ComponentProofBackendError> {
+    let column_values = value
+        .as_array()
+        .ok_or_else(|| ComponentProofBackendError::invalid(format!("{label} must be an array.")))?;
+    if column_values.len() > maximum_length {
+        return Err(ComponentProofBackendError::invalid(format!(
+            "{label} length exceeds the receiver-encryption degree."
+        )));
+    }
+    let mut column_indices = Vec::with_capacity(column_values.len());
+    for column_value in column_values {
+        let column_index = integer_value(column_value)
+            .and_then(|value| usize::try_from(value).ok())
+            .ok_or_else(|| {
+                ComponentProofBackendError::invalid(format!(
+                    "{label} entry is not a canonical column index."
+                ))
+            })?;
+        if column_index >= statement_columns {
+            return Err(ComponentProofBackendError::invalid(format!(
+                "{label} entry is outside the statement column range."
+            )));
+        }
+        column_indices.push(column_index);
+    }
+
+    Ok(column_indices)
+}
+
+fn parse_receiver_column_matrix(
+    value: &Value,
+    statement_columns: usize,
+    label: &str,
+) -> Result<Vec<Vec<usize>>, ComponentProofBackendError> {
+    let rows = value
+        .as_array()
+        .ok_or_else(|| ComponentProofBackendError::invalid(format!("{label} must be an array.")))?;
+    if rows.len() != RECEIVER_ENCRYPTION_MODULE_RANK as usize {
+        return Err(ComponentProofBackendError::invalid(format!(
+            "{label} must have the frozen receiver-encryption module rank."
+        )));
+    }
+    rows.iter()
+        .enumerate()
+        .map(|(row_index, row)| {
+            parse_receiver_column_vector(
+                row,
+                RECEIVER_ENCRYPTION_MODULE_DEGREE as usize,
+                statement_columns,
+                &format!("{label} row {row_index}"),
+            )
+        })
+        .collect()
+}
+
+fn negacyclic_receiver_coefficient(
+    polynomial: &[u64],
+    output_coefficient_index: usize,
+    witness_coefficient_index: usize,
+) -> u64 {
+    if output_coefficient_index >= witness_coefficient_index {
+        polynomial[output_coefficient_index - witness_coefficient_index]
+            % RECEIVER_ENCRYPTION_MODULUS
+    } else {
+        negate_receiver_coefficient(
+            polynomial[RECEIVER_ENCRYPTION_MODULE_DEGREE as usize + output_coefficient_index
+                - witness_coefficient_index],
+        )
+    }
+}
+
+fn negate_receiver_coefficient(coefficient: u64) -> u64 {
+    if coefficient == 0 {
+        0
+    } else {
+        RECEIVER_ENCRYPTION_MODULUS - coefficient
+    }
+}
+
+fn add_structured_constant_entry(
+    coefficients_by_position: &mut BTreeMap<(usize, usize), u64>,
+    row_index: usize,
+    column_index: usize,
+    coefficient: u64,
+) -> Result<(), ComponentProofBackendError> {
+    if coefficient >= RECEIVER_ENCRYPTION_MODULUS {
+        return Err(ComponentProofBackendError::invalid(
+            "Structured receiver-encryption coefficient is not canonical.",
+        ));
+    }
+    if coefficient == 0 {
+        return Ok(());
+    }
+    let current_coefficient = coefficients_by_position
+        .get(&(row_index, column_index))
+        .copied()
+        .unwrap_or(0);
+    let next_coefficient = (current_coefficient + coefficient) % RECEIVER_ENCRYPTION_MODULUS;
+    if next_coefficient == 0 {
+        coefficients_by_position.remove(&(row_index, column_index));
+    } else {
+        coefficients_by_position.insert((row_index, column_index), next_coefficient);
+    }
+
+    Ok(())
+}
+
+fn component_linear_proof_vector_case(
+    component_id: &str,
+    component_proof: &Value,
+    proof_input: &Value,
+) -> Result<Value, ComponentProofBackendError> {
+    let proof_statement = object_map(proof_input)
+        .and_then(|object| object.get("proofStatement"))
+        .ok_or_else(|| {
+            ComponentProofBackendError::invalid(format!(
+                "Ballot proof component proof input for {component_id} has no proof statement."
+            ))
+        })?;
+    let proof_statement_format =
+        string_field(proof_input, "proofStatementFormat").ok_or_else(|| {
+            ComponentProofBackendError::invalid(format!(
+                "Ballot proof component proof input for {component_id} has no statement format."
+            ))
+        })?;
+    let (statement_matrix_coefficients, target_vector_coefficients) = match proof_statement_format {
+        "dense-polynomial-matrix-linear-proof-v1" => (
+            object_map(proof_statement)
+                .and_then(|object| object.get("statementMatrixCoefficients"))
+                .cloned()
+                .ok_or_else(|| {
+                    ComponentProofBackendError::invalid(format!(
+                        "Dense component proof statement for {component_id} has no statement matrix."
+                    ))
+                })?,
+            object_map(proof_statement)
+                .and_then(|object| object.get("targetVectorCoefficients"))
+                .cloned()
+                .ok_or_else(|| {
+                    ComponentProofBackendError::invalid(format!(
+                        "Dense component proof statement for {component_id} has no target vector."
+                    ))
+                })?,
+        ),
+        "sparse-polynomial-matrix-linear-proof-v1" => {
+            return Err(ComponentProofBackendError::unavailable(format!(
+                "Sparse component proof statement for {component_id} must be verified through the sparse proof-byte backend."
+            )));
+        }
+        "structured-module-lwe-linear-proof-v1" => {
+            return Err(ComponentProofBackendError::unavailable(format!(
+                "Structured receiver-encryption proof bytes for {component_id} are not implemented in this backend slice."
+            )));
+        }
+        "public-zero-witness-binding-check-v1" => {
+            return Err(ComponentProofBackendError::unavailable(format!(
+                "Public-zero witness binding checks for {component_id} are structural only and are not LaZer proof bytes."
+            )));
+        }
+        _ => {
+            return Err(ComponentProofBackendError::invalid(format!(
+                "Ballot proof component proof statement format for {component_id} is not supported."
+            )));
+        }
+    };
+
+    let proof_bytes_hex = string_field(proof_input, "proofBytesHex").ok_or_else(|| {
+        ComponentProofBackendError::invalid(format!(
+            "Ballot proof component {component_id} has no proof bytes."
+        ))
+    })?;
+    let public_randomness_hex =
+        string_field(proof_input, "publicRandomnessHex").ok_or_else(|| {
+            ComponentProofBackendError::invalid(format!(
+                "Ballot proof component {component_id} has no public randomness."
+            ))
+        })?;
+    let parameter_set = object_map(proof_input)
+        .and_then(|object| object.get("proofParameterSet"))
+        .ok_or_else(|| {
+            ComponentProofBackendError::invalid(format!(
+                "Ballot proof component {component_id} has no parameter set."
+            ))
+        })?;
+    let proof_encoding = object_map(proof_input)
+        .and_then(|object| object.get("proofEncoding"))
+        .ok_or_else(|| {
+            ComponentProofBackendError::invalid(format!(
+                "Ballot proof component {component_id} has no proof encoding."
+            ))
+        })?;
+
+    Ok(json!({
+        "caseName": format!("{component_id}-component-proof"),
+        "description": format!("Ballot proof component {component_id} verification through the internal linear proof backend."),
+        "mutation": "none",
+        "expectedOutcome": "accept",
+        "upstreamVectorAvailable": true,
+        "parameterSet": parameter_set,
+        "proofEncoding": proof_encoding,
+        "publicRandomnessHex": public_randomness_hex,
+        "statementMatrixCoefficients": statement_matrix_coefficients,
+        "targetVectorCoefficients": target_vector_coefficients,
+        "targetCoefficientRepresentation": object_map(proof_statement)
+            .and_then(|object| object.get("targetCoefficientRepresentation"))
+            .cloned()
+            .unwrap_or(Value::Null),
+        "proofHex": proof_bytes_hex,
+        "expectedProofSizeBytes": object_map(component_proof)
+            .and_then(|object| object.get("proofSizeBytes"))
+            .cloned()
+            .unwrap_or(Value::Null)
+    }))
+}
+
+fn verify_component_linear_proof_bytes(
+    operation: &str,
+    component_id: &str,
+    component_proof: &Value,
+    proof_input: &Value,
+) -> Value {
+    if string_field(proof_input, "proofStatementFormat")
+        == Some(STRUCTURED_RECEIVER_ENCRYPTION_PROOF_STATEMENT_FORMAT)
+    {
+        let mut refused_objects = Vec::new();
+        if component_id != "receiver-encryption-component" {
+            refused_objects.push(json!({
+                "code": "BallotPackageInvalid",
+                "message": format!("Structured receiver-encryption proof statements are only valid for receiver-encryption-component, not {component_id}."),
+                "objectDigest": string_field(component_proof, "componentProofRecordDigest")
+            }));
+        }
+        if let Some(proof_statement) =
+            object_map(proof_input).and_then(|object| object.get("proofStatement"))
+        {
+            if string_field(proof_statement, "objectType")
+                == Some("BallotProofComponentProofStatementPlan")
+            {
+                refused_objects.push(json!({
+                    "code": "BallotPackageInvalid",
+                    "message": format!("Structured receiver-encryption proof bytes for {component_id} require a public structured proof statement, not only the proof statement plan."),
+                    "objectDigest": string_field(component_proof, "componentProofRecordDigest")
+                }));
+            } else if derive_ballot_structured_receiver_encryption_statement_digest(proof_statement)
+                .as_deref()
+                != string_field(proof_statement, "statementDigest")
+            {
+                refused_objects.push(json!({
+                    "code": "BallotPackageInvalid",
+                    "message": format!("Ballot proof component proof statement digest for {component_id} does not match its canonical payload."),
+                    "objectDigest": string_field(component_proof, "componentProofRecordDigest")
+                }));
+            }
+            if string_field(proof_statement, "statementDigest")
+                != string_field(proof_input, "statementDigest")
+            {
+                refused_objects.push(json!({
+                    "code": "BallotPackageInvalid",
+                    "message": format!("Ballot proof component proof statement for {component_id} is not bound to the supplied proof input."),
+                    "objectDigest": string_field(component_proof, "componentProofRecordDigest")
+                }));
+            }
+        } else {
+            refused_objects.push(json!({
+                "code": "BallotPackageInvalid",
+                "message": format!("Ballot proof component proof input for {component_id} must supply its public proof statement object."),
+                "objectDigest": string_field(component_proof, "componentProofRecordDigest")
+            }));
+        }
+        if !refused_objects.is_empty() {
+            return component_proof_backend_rejection(
+                operation,
+                component_id,
+                refused_objects,
+                json!("BallotPackageInvalid"),
+            );
+        }
+
+        let proof_statement = object_map(proof_input)
+            .and_then(|object| object.get("proofStatement"))
+            .expect("structured proof statement presence was checked");
+        let parsed_structured_statement = match structured_receiver_encryption_statement_as_sparse(
+            proof_statement,
+        ) {
+            Ok(parsed_structured_statement) => parsed_structured_statement,
+            Err(error) => {
+                return component_proof_backend_rejection(
+                    operation,
+                    component_id,
+                    vec![json!({
+                        "code": error.code,
+                        "message": error.message,
+                        "objectDigest": string_field(component_proof, "componentProofRecordDigest")
+                    })],
+                    json!(error.code),
+                );
+            }
+        };
+        let proof_bytes_hex = match string_field(proof_input, "proofBytesHex") {
+            Some(proof_bytes_hex) => proof_bytes_hex,
+            None => {
+                return component_proof_backend_rejection(
+                    operation,
+                    component_id,
+                    vec![json!({
+                        "code": "BallotPackageInvalid",
+                        "message": format!("Ballot proof component {component_id} has no proof bytes."),
+                        "objectDigest": string_field(component_proof, "componentProofRecordDigest")
+                    })],
+                    json!("BallotPackageInvalid"),
+                );
+            }
+        };
+        let public_randomness_hex = match string_field(proof_input, "publicRandomnessHex") {
+            Some(public_randomness_hex) => public_randomness_hex,
+            None => {
+                return component_proof_backend_rejection(
+                    operation,
+                    component_id,
+                    vec![json!({
+                        "code": "BallotPackageInvalid",
+                        "message": format!("Ballot proof component {component_id} has no public randomness."),
+                        "objectDigest": string_field(component_proof, "componentProofRecordDigest")
+                    })],
+                    json!("BallotPackageInvalid"),
+                );
+            }
+        };
+        let parameter_set_value = match object_map(proof_input)
+            .and_then(|object| object.get("proofParameterSet"))
+        {
+            Some(parameter_set_value) => parameter_set_value,
+            None => {
+                return component_proof_backend_rejection(
+                    operation,
+                    component_id,
+                    vec![json!({
+                        "code": "BallotPackageInvalid",
+                        "message": format!("Ballot proof component {component_id} has no parameter set."),
+                        "objectDigest": string_field(component_proof, "componentProofRecordDigest")
+                    })],
+                    json!("BallotPackageInvalid"),
+                );
+            }
+        };
+        let proof_encoding_value = match object_map(proof_input)
+            .and_then(|object| object.get("proofEncoding"))
+        {
+            Some(proof_encoding_value) => proof_encoding_value,
+            None => {
+                return component_proof_backend_rejection(
+                    operation,
+                    component_id,
+                    vec![json!({
+                        "code": "BallotPackageInvalid",
+                        "message": format!("Ballot proof component {component_id} has no proof encoding."),
+                        "objectDigest": string_field(component_proof, "componentProofRecordDigest")
+                    })],
+                    json!("BallotPackageInvalid"),
+                );
+            }
+        };
+        let parameter_set: LinearProofParameterSet = match serde_json::from_value(
+            parameter_set_value.clone(),
+        ) {
+            Ok(parameter_set) => parameter_set,
+            Err(error) => {
+                return component_proof_backend_rejection(
+                    operation,
+                    component_id,
+                    vec![json!({
+                        "code": "BallotPackageInvalid",
+                        "message": format!("Ballot proof component {component_id} parameter set is invalid: {error}."),
+                        "objectDigest": string_field(component_proof, "componentProofRecordDigest")
+                    })],
+                    json!("BallotPackageInvalid"),
+                );
+            }
+        };
+        let proof_encoding: LazerDemoProofEncoding = match serde_json::from_value(
+            proof_encoding_value.clone(),
+        ) {
+            Ok(proof_encoding) => proof_encoding,
+            Err(error) => {
+                return component_proof_backend_rejection(
+                    operation,
+                    component_id,
+                    vec![json!({
+                        "code": "BallotPackageInvalid",
+                        "message": format!("Ballot proof component {component_id} proof encoding is invalid: {error}."),
+                        "objectDigest": string_field(component_proof, "componentProofRecordDigest")
+                    })],
+                    json!("BallotPackageInvalid"),
+                );
+            }
+        };
+        let target_coefficient_representation: LinearProofTargetCoefficientRepresentation =
+            match serde_json::from_value(
+                object_map(proof_statement)
+                    .and_then(|object| object.get("targetCoefficientRepresentation"))
+                    .cloned()
+                    .unwrap_or(Value::Null),
+            ) {
+                Ok(target_coefficient_representation) => target_coefficient_representation,
+                Err(error) => {
+                    return component_proof_backend_rejection(
+                        operation,
+                        component_id,
+                        vec![json!({
+                            "code": "BallotPackageInvalid",
+                            "message": format!("Structured receiver-encryption proof statement for {component_id} has invalid targetCoefficientRepresentation: {error}."),
+                            "objectDigest": string_field(component_proof, "componentProofRecordDigest")
+                        })],
+                        json!("BallotPackageInvalid"),
+                    );
+                }
+            };
+        let expected_proof_size_bytes = object_map(component_proof)
+            .and_then(|object| object.get("proofSizeBytes"))
+            .and_then(Value::as_u64)
+            .and_then(|proof_size| usize::try_from(proof_size).ok());
+        let proof_verification = linear_proof_verifier::verify_sparse_linear_proof_components(
+            linear_proof_verifier::SparseLinearProofVerificationInput {
+                case_name: &format!("{component_id}-component-proof"),
+                parameter_set: &parameter_set,
+                proof_encoding: &proof_encoding,
+                public_randomness_hex,
+                source_statement_matrix: &parsed_structured_statement.source_statement_matrix,
+                target_vector_coefficients: &parsed_structured_statement.target_vector_coefficients,
+                target_coefficient_representation,
+                proof_hex: proof_bytes_hex,
+                expected_proof_size_bytes,
+            },
+        );
+        if proof_verification
+            .as_object()
+            .and_then(|object| object.get("ok"))
+            .and_then(Value::as_bool)
+            != Some(true)
+        {
+            return component_proof_backend_rejection(
+                operation,
+                component_id,
+                proof_verification
+                    .as_object()
+                    .and_then(|object| object.get("refusedObjects"))
+                    .and_then(Value::as_array)
+                    .cloned()
+                    .unwrap_or_else(|| {
+                        vec![json!({
+                            "code": "InvalidFixture",
+                            "message": format!("Ballot proof component {component_id} structured proof bytes failed without a structured refusal.")
+                        })]
+                    }),
+                proof_verification
+                    .as_object()
+                    .and_then(|object| object.get("unresolvedReason"))
+                    .cloned()
+                    .unwrap_or_else(|| json!("InvalidFixture")),
+            );
+        }
+
+        let mut status_labels = vec![
+            json!("BallotProofComponentProofBytesVerified"),
+            json!("BallotProofComponentLinearProofVerified"),
+            json!("BallotProofComponentStructuredReceiverEncryptionStatementVerified"),
+        ];
+        if let Some(proof_status_labels) = proof_verification
+            .as_object()
+            .and_then(|object| object.get("statusLabels"))
+            .and_then(Value::as_array)
+        {
+            status_labels.extend(proof_status_labels.iter().cloned());
+        }
+
+        return json!({
+            "ok": true,
+            "backendAvailable": BALLOT_PRIVACY_PROOF_BACKEND_AVAILABLE,
+            "backendStatus": describe_proof_backend(),
+            "operation": operation,
+            "componentId": component_id,
+            "statusLabels": status_labels,
+            "acceptedDigests": [
+                string_field(component_proof, "componentProofRecordDigest"),
+                string_field(component_proof, "proofBytesDigest"),
+                string_field(proof_input, "componentProofStatementDigest"),
+                string_field(proof_input, "statementDigest")
+            ],
+            "refusedObjects": [],
+            "unresolvedReason": Value::Null
+        });
+    }
+
+    if string_field(proof_input, "proofStatementFormat") == Some(PUBLIC_ZERO_PROOF_STATEMENT_FORMAT)
+    {
+        let mut refused_objects = Vec::new();
+        if component_id != "receiver-key-binding-component" {
+            refused_objects.push(json!({
+                "code": "BallotPackageInvalid",
+                "message": format!("Public-zero witness binding checks are only valid for receiver-key-binding-component, not {component_id}."),
+                "objectDigest": string_field(component_proof, "componentProofRecordDigest")
+            }));
+        }
+        if string_field(proof_input, "proofBytesHex") != Some("")
+            || object_map(component_proof)
+                .and_then(|object| object.get("proofSizeBytes"))
+                .and_then(Value::as_u64)
+                != Some(0)
+        {
+            refused_objects.push(json!({
+                "code": "BallotPackageInvalid",
+                "message": format!("Ballot proof component proof bytes for {component_id} must be empty for the public-zero witness binding check."),
+                "objectDigest": string_field(component_proof, "componentProofRecordDigest")
+            }));
+        }
+        if let Some(proof_statement) =
+            object_map(proof_input).and_then(|object| object.get("proofStatement"))
+        {
+            refused_objects.extend(collect_component_proof_statement_plan_shape_refusals(
+                proof_statement,
+                component_id,
+                string_field(component_proof, "componentProofRecordDigest"),
+            ));
+            if derive_ballot_component_proof_statement_plan_digest(proof_statement).as_deref()
+                != string_field(proof_statement, "componentProofStatementDigest")
+            {
+                refused_objects.push(json!({
+                    "code": "BallotPackageInvalid",
+                    "message": format!("Ballot proof component proof statement digest for {component_id} does not match its canonical payload."),
+                    "objectDigest": string_field(component_proof, "componentProofRecordDigest")
+                }));
+            }
+        } else {
+            refused_objects.push(json!({
+                "code": "BallotPackageInvalid",
+                "message": format!("Ballot proof component proof input for {component_id} must supply its public proof statement object."),
+                "objectDigest": string_field(component_proof, "componentProofRecordDigest")
+            }));
+        }
+        if !refused_objects.is_empty() {
+            return component_proof_backend_rejection(
+                operation,
+                component_id,
+                refused_objects,
+                json!("BallotPackageInvalid"),
+            );
+        }
+
+        return json!({
+            "ok": true,
+            "backendAvailable": BALLOT_PRIVACY_PROOF_BACKEND_AVAILABLE,
+            "backendStatus": describe_proof_backend(),
+            "operation": operation,
+            "componentId": component_id,
+            "statusLabels": [
+                "BallotProofComponentProofBytesVerified",
+                "BallotProofComponentPublicZeroWitnessBindingChecked"
+            ],
+            "acceptedDigests": [
+                string_field(component_proof, "componentProofRecordDigest"),
+                string_field(component_proof, "proofBytesDigest"),
+                string_field(proof_input, "componentProofStatementDigest"),
+                string_field(proof_input, "statementDigest")
+            ],
+            "refusedObjects": [],
+            "unresolvedReason": Value::Null
+        });
+    }
+
+    if string_field(proof_input, "proofStatementFormat")
+        == Some(SPARSE_COMPONENT_PROOF_STATEMENT_FORMAT)
+    {
+        let proof_statement = match object_map(proof_input)
+            .and_then(|object| object.get("proofStatement"))
+        {
+            Some(proof_statement) => proof_statement,
+            None => {
+                return component_proof_backend_rejection(
+                    operation,
+                    component_id,
+                    vec![json!({
+                        "code": "BallotPackageInvalid",
+                        "message": format!("Ballot proof component proof input for {component_id} must supply its sparse public proof statement object."),
+                        "objectDigest": string_field(component_proof, "componentProofRecordDigest")
+                    })],
+                    json!("BallotPackageInvalid"),
+                );
+            }
+        };
+        let parsed_sparse_statement = match sparse_matrix_from_sparse_component_statement(
+            proof_statement,
+        ) {
+            Ok(parsed_sparse_statement) => parsed_sparse_statement,
+            Err(error) => {
+                return component_proof_backend_rejection(
+                    operation,
+                    component_id,
+                    vec![json!({
+                        "code": error.code,
+                        "message": error.message,
+                        "objectDigest": string_field(component_proof, "componentProofRecordDigest")
+                    })],
+                    json!(error.code),
+                );
+            }
+        };
+        let proof_bytes_hex = match string_field(proof_input, "proofBytesHex") {
+            Some(proof_bytes_hex) => proof_bytes_hex,
+            None => {
+                return component_proof_backend_rejection(
+                    operation,
+                    component_id,
+                    vec![json!({
+                        "code": "BallotPackageInvalid",
+                        "message": format!("Ballot proof component {component_id} has no proof bytes."),
+                        "objectDigest": string_field(component_proof, "componentProofRecordDigest")
+                    })],
+                    json!("BallotPackageInvalid"),
+                );
+            }
+        };
+        let public_randomness_hex = match string_field(proof_input, "publicRandomnessHex") {
+            Some(public_randomness_hex) => public_randomness_hex,
+            None => {
+                return component_proof_backend_rejection(
+                    operation,
+                    component_id,
+                    vec![json!({
+                        "code": "BallotPackageInvalid",
+                        "message": format!("Ballot proof component {component_id} has no public randomness."),
+                        "objectDigest": string_field(component_proof, "componentProofRecordDigest")
+                    })],
+                    json!("BallotPackageInvalid"),
+                );
+            }
+        };
+        let parameter_set_value = match object_map(proof_input)
+            .and_then(|object| object.get("proofParameterSet"))
+        {
+            Some(parameter_set_value) => parameter_set_value,
+            None => {
+                return component_proof_backend_rejection(
+                    operation,
+                    component_id,
+                    vec![json!({
+                        "code": "BallotPackageInvalid",
+                        "message": format!("Ballot proof component {component_id} has no parameter set."),
+                        "objectDigest": string_field(component_proof, "componentProofRecordDigest")
+                    })],
+                    json!("BallotPackageInvalid"),
+                );
+            }
+        };
+        let proof_encoding_value = match object_map(proof_input)
+            .and_then(|object| object.get("proofEncoding"))
+        {
+            Some(proof_encoding_value) => proof_encoding_value,
+            None => {
+                return component_proof_backend_rejection(
+                    operation,
+                    component_id,
+                    vec![json!({
+                        "code": "BallotPackageInvalid",
+                        "message": format!("Ballot proof component {component_id} has no proof encoding."),
+                        "objectDigest": string_field(component_proof, "componentProofRecordDigest")
+                    })],
+                    json!("BallotPackageInvalid"),
+                );
+            }
+        };
+        let parameter_set: LinearProofParameterSet = match serde_json::from_value(
+            parameter_set_value.clone(),
+        ) {
+            Ok(parameter_set) => parameter_set,
+            Err(error) => {
+                return component_proof_backend_rejection(
+                    operation,
+                    component_id,
+                    vec![json!({
+                        "code": "BallotPackageInvalid",
+                        "message": format!("Ballot proof component {component_id} parameter set is invalid: {error}."),
+                        "objectDigest": string_field(component_proof, "componentProofRecordDigest")
+                    })],
+                    json!("BallotPackageInvalid"),
+                );
+            }
+        };
+        let proof_encoding: LazerDemoProofEncoding = match serde_json::from_value(
+            proof_encoding_value.clone(),
+        ) {
+            Ok(proof_encoding) => proof_encoding,
+            Err(error) => {
+                return component_proof_backend_rejection(
+                    operation,
+                    component_id,
+                    vec![json!({
+                        "code": "BallotPackageInvalid",
+                        "message": format!("Ballot proof component {component_id} proof encoding is invalid: {error}."),
+                        "objectDigest": string_field(component_proof, "componentProofRecordDigest")
+                    })],
+                    json!("BallotPackageInvalid"),
+                );
+            }
+        };
+        let target_coefficient_representation_value = match object_map(proof_statement)
+            .and_then(|object| object.get("targetCoefficientRepresentation"))
+        {
+            Some(target_coefficient_representation_value) => {
+                target_coefficient_representation_value.clone()
+            }
+            None => {
+                return component_proof_backend_rejection(
+                    operation,
+                    component_id,
+                    vec![json!({
+                        "code": "BallotPackageInvalid",
+                        "message": format!("Sparse component proof statement for {component_id} is missing targetCoefficientRepresentation."),
+                        "objectDigest": string_field(component_proof, "componentProofRecordDigest")
+                    })],
+                    json!("BallotPackageInvalid"),
+                );
+            }
+        };
+        let target_coefficient_representation: LinearProofTargetCoefficientRepresentation =
+            match serde_json::from_value(target_coefficient_representation_value) {
+                Ok(target_coefficient_representation) => target_coefficient_representation,
+                Err(error) => {
+                    return component_proof_backend_rejection(
+                        operation,
+                        component_id,
+                        vec![json!({
+                            "code": "BallotPackageInvalid",
+                            "message": format!("Sparse component proof statement for {component_id} has invalid targetCoefficientRepresentation: {error}."),
+                            "objectDigest": string_field(component_proof, "componentProofRecordDigest")
+                        })],
+                        json!("BallotPackageInvalid"),
+                    );
+                }
+            };
+        let expected_proof_size_bytes = object_map(component_proof)
+            .and_then(|object| object.get("proofSizeBytes"))
+            .and_then(Value::as_u64)
+            .and_then(|proof_size| usize::try_from(proof_size).ok());
+        let proof_verification = linear_proof_verifier::verify_sparse_linear_proof_components(
+            linear_proof_verifier::SparseLinearProofVerificationInput {
+                case_name: &format!("{component_id}-component-proof"),
+                parameter_set: &parameter_set,
+                proof_encoding: &proof_encoding,
+                public_randomness_hex,
+                source_statement_matrix: &parsed_sparse_statement.source_statement_matrix,
+                target_vector_coefficients: &parsed_sparse_statement.target_vector_coefficients,
+                target_coefficient_representation,
+                proof_hex: proof_bytes_hex,
+                expected_proof_size_bytes,
+            },
+        );
+        if proof_verification
+            .as_object()
+            .and_then(|object| object.get("ok"))
+            .and_then(Value::as_bool)
+            != Some(true)
+        {
+            return component_proof_backend_rejection(
+                operation,
+                component_id,
+                proof_verification
+                    .as_object()
+                    .and_then(|object| object.get("refusedObjects"))
+                    .and_then(Value::as_array)
+                    .cloned()
+                    .unwrap_or_else(|| {
+                        vec![json!({
+                            "code": "InvalidFixture",
+                            "message": format!("Ballot proof component {component_id} sparse proof bytes failed without a structured refusal.")
+                        })]
+                    }),
+                proof_verification
+                    .as_object()
+                    .and_then(|object| object.get("unresolvedReason"))
+                    .cloned()
+                    .unwrap_or_else(|| json!("InvalidFixture")),
+            );
+        }
+
+        let mut status_labels = vec![
+            json!("BallotProofComponentProofBytesVerified"),
+            json!("BallotProofComponentLinearProofVerified"),
+            json!("BallotProofComponentSparseStatementVerifiedWithoutDenseExpansion"),
+        ];
+        if let Some(proof_status_labels) = proof_verification
+            .as_object()
+            .and_then(|object| object.get("statusLabels"))
+            .and_then(Value::as_array)
+        {
+            status_labels.extend(proof_status_labels.iter().cloned());
+        }
+
+        return json!({
+            "ok": true,
+            "backendAvailable": BALLOT_PRIVACY_PROOF_BACKEND_AVAILABLE,
+            "backendStatus": describe_proof_backend(),
+            "operation": operation,
+            "componentId": component_id,
+            "statusLabels": status_labels,
+            "acceptedDigests": [
+                string_field(component_proof, "componentProofRecordDigest"),
+                string_field(component_proof, "proofBytesDigest"),
+                string_field(proof_input, "componentProofStatementDigest"),
+                string_field(proof_input, "statementDigest")
+            ],
+            "refusedObjects": [],
+            "unresolvedReason": Value::Null
+        });
+    }
+
+    let vector_case =
+        match component_linear_proof_vector_case(component_id, component_proof, proof_input) {
+            Ok(vector_case) => vector_case,
+            Err(error) => {
+                return component_proof_backend_rejection(
+                    operation,
+                    component_id,
+                    vec![json!({
+                        "code": error.code,
+                        "message": error.message,
+                        "objectDigest": string_field(component_proof, "componentProofRecordDigest")
+                    })],
+                    json!(error.code),
+                );
+            }
+        };
+    let proof_verification =
+        linear_proof_verifier::verify_linear_proof_vector_case_value(&vector_case);
+    if proof_verification
+        .as_object()
+        .and_then(|object| object.get("ok"))
+        .and_then(Value::as_bool)
+        != Some(true)
+    {
+        return component_proof_backend_rejection(
+            operation,
+            component_id,
+            proof_verification
+                .as_object()
+                .and_then(|object| object.get("refusedObjects"))
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_else(|| {
+                    vec![json!({
+                        "code": "InvalidFixture",
+                        "message": format!("Ballot proof component {component_id} proof bytes failed without a structured refusal.")
+                    })]
+                }),
+            proof_verification
+                .as_object()
+                .and_then(|object| object.get("unresolvedReason"))
+                .cloned()
+                .unwrap_or_else(|| json!("InvalidFixture")),
+        );
+    }
+
+    let mut status_labels = vec![
+        json!("BallotProofComponentProofBytesVerified"),
+        json!("BallotProofComponentLinearProofVerified"),
+    ];
+    if let Some(proof_status_labels) = proof_verification
+        .as_object()
+        .and_then(|object| object.get("statusLabels"))
+        .and_then(Value::as_array)
+    {
+        status_labels.extend(proof_status_labels.iter().cloned());
+    }
+
+    json!({
+        "ok": true,
+        "backendAvailable": BALLOT_PRIVACY_PROOF_BACKEND_AVAILABLE,
+        "backendStatus": describe_proof_backend(),
+        "operation": operation,
+        "componentId": component_id,
+        "statusLabels": status_labels,
+        "acceptedDigests": [
+            string_field(component_proof, "componentProofRecordDigest"),
+            string_field(component_proof, "proofBytesDigest"),
+            string_field(proof_input, "componentProofStatementDigest"),
+            string_field(proof_input, "statementDigest")
+        ],
+        "refusedObjects": [],
+        "unresolvedReason": Value::Null
+    })
+}
+
+fn verify_component_proof_bundle_backend(
+    operation: &str,
+    _accepted_object_digest: Option<&str>,
+    component_proof_bundle: &Value,
+    component_proof_inputs: Option<&Value>,
+) -> Option<Value> {
+    let component_proof_inputs = component_proof_inputs?;
+    let component_proof_inputs_array = component_proof_inputs.as_array()?;
+    let component_proofs = array_field(component_proof_bundle, "componentProofs")?;
+    let mut proof_inputs_by_component = BTreeMap::new();
+    for proof_input in component_proof_inputs_array {
+        if let Some(component_id) = string_field(proof_input, "componentId") {
+            proof_inputs_by_component.insert(component_id.to_string(), proof_input);
+        }
+    }
+
+    for component_proof in component_proofs {
+        let Some(component_id) = string_field(component_proof, "componentId") else {
+            continue;
+        };
+        let Some(proof_input) = proof_inputs_by_component.get(component_id) else {
+            continue;
+        };
+        let component_verification = verify_component_linear_proof_bytes(
+            operation,
+            component_id,
+            component_proof,
+            proof_input,
+        );
+        if component_verification
+            .as_object()
+            .and_then(|object| object.get("ok"))
+            .and_then(Value::as_bool)
+            != Some(true)
+        {
+            return Some(component_verification);
+        }
+    }
+
+    None
+}
+
 struct BallotLinearProofVerificationInputs<'a> {
     component_proof_bundle: Option<&'a Value>,
     component_proof_inputs: Option<&'a Value>,
@@ -2242,7 +4806,7 @@ fn verify_ballot_linear_proof_bytes(
     let proof_encoding = backend_inputs.proof_encoding;
     let component_bundle_statement = backend_inputs.component_bundle_statement;
     let component_proof_bundle = backend_inputs.component_proof_bundle;
-    let _component_proof_inputs = backend_inputs.component_proof_inputs;
+    let component_proof_inputs = backend_inputs.component_proof_inputs;
     let mut refused_objects = Vec::new();
     let ballot_proof_record_digest = string_field(ballot_proof, "ballotProofRecordDigest");
     let linear_statement_digest = string_field(linear_statement, "statementDigest");
@@ -2258,6 +4822,10 @@ fn verify_ballot_linear_proof_bytes(
     let linear_statement_parameter_profile_id =
         string_field(linear_statement, "parameterProfileId");
     let linear_statement_projection_coverage = string_field(linear_statement, "projectionCoverage");
+    let proof_size_bytes = object_map(ballot_proof)
+        .and_then(|object| object.get("proofSizeBytes"))
+        .and_then(Value::as_u64)
+        .and_then(|proof_size_bytes| usize::try_from(proof_size_bytes).ok());
 
     if linear_statement_digest != expected_linear_statement_digest.as_deref() {
         refused_objects.push(structural_refusal(
@@ -2359,6 +4927,36 @@ fn verify_ballot_linear_proof_bytes(
             ballot_proof_record_digest,
         ));
     }
+    match serde_json::from_value::<LinearProofParameterSet>(parameter_set.clone()) {
+        Ok(parameter_contract)
+            if parameter_contract.expected_proof_size_bytes != proof_size_bytes =>
+        {
+            refused_objects.push(structural_refusal(
+                "Ballot proof parameter set is not bound to the proof record byte length.",
+                ballot_proof_record_digest,
+            ));
+        }
+        Ok(_) => {}
+        Err(error) => refused_objects.push(structural_refusal(
+            format!("Ballot proof parameter set is malformed: {error}"),
+            ballot_proof_record_digest,
+        )),
+    }
+    match serde_json::from_value::<LazerDemoProofEncoding>(proof_encoding.clone()) {
+        Ok(proof_encoding_contract)
+            if proof_encoding_contract.expected_proof_size_bytes != proof_size_bytes =>
+        {
+            refused_objects.push(structural_refusal(
+                "Ballot proof encoding is not bound to the proof record byte length.",
+                ballot_proof_record_digest,
+            ));
+        }
+        Ok(_) => {}
+        Err(error) => refused_objects.push(structural_refusal(
+            format!("Ballot proof encoding is malformed: {error}"),
+            ballot_proof_record_digest,
+        )),
+    }
     refused_objects.extend(collect_ballot_component_bundle_refusals(
         statement,
         ballot_proof,
@@ -2370,12 +4968,14 @@ fn verify_ballot_linear_proof_bytes(
     }
     if linear_statement_projection_coverage == Some(FULL_BALLOT_PROOF_PROJECTION_COVERAGE)
         && let Some(component_proof_bundle) = component_proof_bundle
-    {
-        return component_proof_bundle_unavailable_result(
+        && let Some(component_backend_result) = verify_component_proof_bundle_backend(
             "verifyBallotProof",
             ballot_proof_record_digest,
             component_proof_bundle,
-        );
+            component_proof_inputs,
+        )
+    {
+        return component_backend_result;
     }
 
     let vector_case = json!({
@@ -2448,12 +5048,15 @@ fn verify_ballot_linear_proof_bytes(
             )],
         );
     }
-    if let Some(component_proof_bundle) = component_proof_bundle {
-        return component_proof_bundle_unavailable_result(
+    if let Some(component_proof_bundle) = component_proof_bundle
+        && let Some(component_backend_result) = verify_component_proof_bundle_backend(
             "verifyBallotProof",
             ballot_proof_record_digest,
             component_proof_bundle,
-        );
+            component_proof_inputs,
+        )
+    {
+        return component_backend_result;
     }
 
     let mut status_labels = vec![
@@ -2506,6 +5109,7 @@ pub(crate) fn verify_ballot_proof(
             .and_then(Value::as_u64),
         string_field(ballot_proof, "ballotProofRecordDigest"),
         "Ballot",
+        false,
     ));
     refused_objects.extend(collect_ballot_component_proof_bundle_refusals(
         statement,
@@ -2598,6 +5202,12 @@ pub fn verify_receiver_key_vector_case(vector_case: &Value) -> Value {
 
 #[cfg(test)]
 mod tests {
+    use crate::ballot_privacy::{
+        linear_proof_parameters::{
+            receiver_key_linear_parameter_contract, receiver_key_linear_proof_encoding_contract,
+        },
+        polynomial_ring::PolynomialRing,
+    };
     use serde_json::{Value, json};
 
     #[derive(Default)]
@@ -2758,6 +5368,217 @@ mod tests {
         );
     }
 
+    fn zero_receiver_key_source_polynomial() -> Vec<u64> {
+        vec![0_u64; 256]
+    }
+
+    fn zero_receiver_key_witness_polynomial() -> Vec<i64> {
+        vec![0_i64; 256]
+    }
+
+    fn unit_receiver_key_source_polynomial() -> Vec<u64> {
+        let mut polynomial = zero_receiver_key_source_polynomial();
+        polynomial[0] = 1;
+        polynomial
+    }
+
+    fn canonical_receiver_key_witness_polynomial(polynomial: &[i64], modulus: u64) -> Vec<u64> {
+        polynomial
+            .iter()
+            .map(|coefficient| {
+                if *coefficient < 0 {
+                    modulus - coefficient.unsigned_abs()
+                } else {
+                    coefficient.unsigned_abs()
+                }
+            })
+            .collect()
+    }
+
+    fn receiver_key_prover_preflight_fixture() -> (Value, Value, Value, Value) {
+        let parameter_set = receiver_key_linear_parameter_contract();
+        let proof_encoding = receiver_key_linear_proof_encoding_contract();
+        let source_ring =
+            PolynomialRing::new(parameter_set.ring_degree, parameter_set.coefficient_modulus)
+                .expect("source ring should validate");
+        let mut witness =
+            vec![zero_receiver_key_witness_polynomial(); parameter_set.statement_columns];
+        witness[0][0] = 2;
+        witness[0][5] = -1;
+        witness[1][1] = 1;
+        witness[4][0] = -2;
+        witness[5][7] = 1;
+
+        let mut statement_matrix =
+            vec![
+                vec![zero_receiver_key_source_polynomial(); parameter_set.statement_columns];
+                parameter_set.statement_rows
+            ];
+        for (row_index, statement_matrix_row) in statement_matrix
+            .iter_mut()
+            .enumerate()
+            .take(parameter_set.statement_rows)
+        {
+            statement_matrix_row[row_index] = unit_receiver_key_source_polynomial();
+            statement_matrix_row[row_index + 4] = unit_receiver_key_source_polynomial();
+        }
+
+        let target_vector = (0..parameter_set.statement_rows)
+            .map(|row_index| {
+                let secret_polynomial = canonical_receiver_key_witness_polynomial(
+                    &witness[row_index],
+                    parameter_set.coefficient_modulus,
+                );
+                let error_polynomial = canonical_receiver_key_witness_polynomial(
+                    &witness[row_index + 4],
+                    parameter_set.coefficient_modulus,
+                );
+                let public_key_polynomial = source_ring
+                    .add(&secret_polynomial, &error_polynomial)
+                    .expect("public key polynomial should add");
+                source_ring
+                    .neg(&public_key_polynomial)
+                    .expect("target polynomial should negate")
+            })
+            .collect::<Vec<_>>();
+        let linear_statement_payload = json!({
+            "ceremonyId": "ceremony-receiver-key-prover-preflight",
+            "coefficientModulus": "12289",
+            "keyMaterialDigest": test_digest("receiver-key-material"),
+            "manifestDigest": test_digest("manifest"),
+            "objectType": "ReceiverKeyLinearProofStatement",
+            "objectVersion": 1,
+            "publicMatrixSeedDigest": test_digest("receiver-matrix-seed"),
+            "receiverEncryptionProfileDigest": test_digest("receiver-encryption-profile"),
+            "receiverIdentity": "receiver-1",
+            "receiverPublicKeyDigest": test_digest("receiver-public-key"),
+            "receiverRosterPosition": 1,
+            "recoveryEpoch": 0,
+            "relation": "A*w + t = 0",
+            "ringDegree": 256,
+            "rosterDigest": test_digest("roster"),
+            "sourceRing": "Z_q[X]/(X^256 + 1)",
+            "statementColumns": 8,
+            "statementMatrixCoefficients": statement_matrix,
+            "statementMatrixDigest": test_digest("statement-matrix"),
+            "statementProfileId": "receiver-key-linear-module-lwe-statement-v1",
+            "statementRows": 4,
+            "targetCoefficientRepresentation": "centeredSignedSourceModulus",
+            "targetVectorCoefficients": target_vector,
+            "targetVectorDigest": test_digest("target-vector"),
+            "witnessInfinityNormBound": 2,
+            "witnessL2BoundSquared": "8192",
+            "witnessVectorLayout": [
+                "receiver secret polynomial 0",
+                "receiver secret polynomial 1",
+                "receiver secret polynomial 2",
+                "receiver secret polynomial 3",
+                "receiver error polynomial 0",
+                "receiver error polynomial 1",
+                "receiver error polynomial 2",
+                "receiver error polynomial 3"
+            ]
+        });
+        let linear_statement_digest =
+            super::derive_receiver_key_linear_statement_digest(&linear_statement_payload)
+                .expect("linear statement digest should derive");
+        let mut linear_statement = linear_statement_payload;
+        linear_statement
+            .as_object_mut()
+            .expect("linear statement should be an object")
+            .insert(
+                "statementDigest".to_string(),
+                json!(linear_statement_digest),
+            );
+        let secret_state = json!({
+            "secretVector": witness[..4].to_vec(),
+            "errorVector": witness[4..].to_vec()
+        });
+
+        (
+            linear_statement,
+            json!(parameter_set),
+            json!(proof_encoding),
+            secret_state,
+        )
+    }
+
+    #[test]
+    fn receiver_key_proof_generation_preflight_checks_source_and_proof_ring_witness() {
+        let (linear_statement, parameter_set, proof_encoding, secret_state) =
+            receiver_key_prover_preflight_fixture();
+        let preparation = super::prepare_receiver_key_proof_generation(
+            Some(&linear_statement),
+            Some(&parameter_set),
+            Some(&proof_encoding),
+            Some(&"00".repeat(32)),
+            Some(&secret_state),
+            Some(&"09".repeat(32)),
+        );
+
+        assert_eq!(preparation["ok"], true);
+        assert_eq!(
+            preparation["operation"],
+            "prepareReceiverKeyProofGeneration"
+        );
+        assert_eq!(preparation["generatedProofBytes"], false);
+        assert_eq!(preparation["summary"]["relationWitnessPolynomialCount"], 32);
+        assert_eq!(preparation["summary"]["shortWitnessPolynomialCount"], 33);
+        assert_eq!(
+            preparation["summary"]["preparedShortWitnessPolynomialCount"],
+            33
+        );
+        assert_eq!(preparation["summary"]["witnessL2Squared"], "11");
+        assert_eq!(preparation["summary"]["normSlack"], "8181");
+        assert!(
+            preparation["statusLabels"]
+                .as_array()
+                .expect("status labels should be an array")
+                .contains(&json!("ReceiverKeyProofRingWitnessPrepared"))
+        );
+        assert!(
+            preparation["statusLabels"]
+                .as_array()
+                .expect("status labels should be an array")
+                .contains(&json!("ReceiverKeyAbdlopCommitmentPrepared"))
+        );
+        assert_eq!(
+            preparation["summary"]["abdlopCommitment"]["compressedCommitmentPolynomialCount"],
+            json!(19)
+        );
+        assert_eq!(
+            preparation["summary"]["abdlopCommitment"]["openingRandomnessPolynomialCount"],
+            json!(55)
+        );
+        assert_eq!(
+            preparation["summary"]["abdlopCommitment"]["abdlopCommitmentHash"]
+                .as_str()
+                .expect("commitment hash should be present")
+                .len(),
+            64
+        );
+
+        let mut wrong_secret_state = secret_state;
+        wrong_secret_state["secretVector"][0][0] = json!(3);
+        let rejection = super::prepare_receiver_key_proof_generation(
+            Some(&linear_statement),
+            Some(&parameter_set),
+            Some(&proof_encoding),
+            Some(&"00".repeat(32)),
+            Some(&wrong_secret_state),
+            Some(&"09".repeat(32)),
+        );
+
+        assert_eq!(rejection["ok"], false);
+        assert_eq!(rejection["unresolvedReason"], json!("BallotPackageInvalid"));
+        assert!(
+            rejection["refusedObjects"][0]["message"]
+                .as_str()
+                .expect("refusal message should be a string")
+                .contains("source witness")
+        );
+    }
+
     #[test]
     fn proof_byte_bearing_receiver_key_record_verifies_against_linear_backend() {
         let vectors: Value = serde_json::from_str(include_str!(
@@ -2847,77 +5668,85 @@ mod tests {
 
             statement
         };
-        let create_receiver_key_proof = |linear_statement: &Value| {
-            let proof_bytes_digest = super::derive_digest(
-                "ProofBytesDigest",
-                &json!({
-                    "objectType": "ProofBytes",
-                    "objectVersion": 1,
-                    "proofBytesHex": proof_bytes_hex,
-                    "proofSizeBytes": proof_size_bytes
-                }),
-            )
-            .expect("proof bytes digest should derive");
-            let proof_encoding_profile_digest =
-                super::derive_receiver_key_proof_encoding_profile_digest(
-                    &valid_case["proofEncoding"],
+        let create_receiver_key_proof =
+            |linear_statement: &Value, parameter_set: &Value, proof_encoding: &Value| {
+                let proof_bytes_digest = super::derive_digest(
+                    "ProofBytesDigest",
+                    &json!({
+                        "objectType": "ProofBytes",
+                        "objectVersion": 1,
+                        "proofBytesHex": proof_bytes_hex,
+                        "proofSizeBytes": proof_size_bytes
+                    }),
                 )
-                .expect("proof encoding profile digest should derive");
-            let public_randomness_digest =
-                super::derive_receiver_key_public_randomness_digest(public_randomness_hex)
-                    .expect("public randomness digest should derive");
-            let linear_statement_digest = linear_statement["statementDigest"]
-                .as_str()
-                .expect("linear statement digest should be a string");
-            let proof_root = super::derive_digest(
-                "ReceiverKeyProofRoot",
-                &json!({
+                .expect("proof bytes digest should derive");
+                let proof_encoding_profile_digest =
+                    super::derive_receiver_key_proof_encoding_profile_digest(proof_encoding)
+                        .expect("proof encoding profile digest should derive");
+                let proof_parameter_set_digest =
+                    super::derive_receiver_key_proof_parameter_set_digest(parameter_set)
+                        .expect("proof parameter set digest should derive");
+                let public_randomness_digest =
+                    super::derive_receiver_key_public_randomness_digest(public_randomness_hex)
+                        .expect("public randomness digest should derive");
+                let linear_statement_digest = linear_statement["statementDigest"]
+                    .as_str()
+                    .expect("linear statement digest should be a string");
+                let proof_root = super::derive_digest(
+                    "ReceiverKeyProofRoot",
+                    &json!({
+                        "linearStatementDigest": linear_statement_digest,
+                        "proofBytesDigest": proof_bytes_digest,
+                        "proofEncodingProfileDigest": proof_encoding_profile_digest,
+                        "proofParameterSetDigest": proof_parameter_set_digest,
+                        "publicRandomnessDigest": public_randomness_digest,
+                        "purpose": "receiver-key-linear-proof-record-root-v1"
+                    }),
+                )
+                .expect("proof root should derive");
+                let proof_payload = json!({
+                    "backendStatementDigest": test_digest("backend-statement"),
+                    "ceremonyId": "ceremony-receiver-key-proof-record",
                     "linearStatementDigest": linear_statement_digest,
+                    "manifestDigest": test_digest("manifest"),
+                    "objectType": "ReceiverKeyProof",
+                    "objectVersion": 1,
+                    "proofBackend": "LaZerStyleLocalLatticeRelation",
                     "proofBytesDigest": proof_bytes_digest,
                     "proofEncodingProfileDigest": proof_encoding_profile_digest,
+                    "proofParameterSetDigest": proof_parameter_set_digest,
+                    "proofRoot": proof_root,
+                    "proofSizeBytes": proof_size_bytes,
                     "publicRandomnessDigest": public_randomness_digest,
-                    "purpose": "receiver-key-linear-proof-record-root-v1"
-                }),
-            )
-            .expect("proof root should derive");
-            let proof_payload = json!({
-                "backendStatementDigest": test_digest("backend-statement"),
-                "ceremonyId": "ceremony-receiver-key-proof-record",
-                "linearStatementDigest": linear_statement_digest,
-                "manifestDigest": test_digest("manifest"),
-                "objectType": "ReceiverKeyProof",
-                "objectVersion": 1,
-                "proofBackend": "LaZerStyleLocalLatticeRelation",
-                "proofBytesDigest": proof_bytes_digest,
-                "proofEncodingProfileDigest": proof_encoding_profile_digest,
-                "proofRoot": proof_root,
-                "proofSizeBytes": proof_size_bytes,
-                "publicRandomnessDigest": public_randomness_digest,
-                "receiverEncryptionProfileDigest": test_digest("receiver-encryption-profile"),
-                "receiverIdentity": "receiver-1",
-                "receiverPublicKeyDigest": test_digest("receiver-public-key"),
-                "receiverRosterPosition": 1,
-                "recoveryEpoch": 0,
-                "rosterDigest": test_digest("roster")
-            });
-            let receiver_key_proof_root =
-                super::derive_digest("ReceiverKeyProofRoot", &proof_payload)
-                    .expect("receiver key proof root should derive");
-            let mut receiver_key_proof = proof_payload;
-            receiver_key_proof
-                .as_object_mut()
-                .expect("receiver key proof should be an object")
-                .insert(
-                    "receiverKeyProofRoot".to_string(),
-                    json!(receiver_key_proof_root),
-                );
+                    "receiverEncryptionProfileDigest": test_digest("receiver-encryption-profile"),
+                    "receiverIdentity": "receiver-1",
+                    "receiverPublicKeyDigest": test_digest("receiver-public-key"),
+                    "receiverRosterPosition": 1,
+                    "recoveryEpoch": 0,
+                    "rosterDigest": test_digest("roster")
+                });
+                let receiver_key_proof_root =
+                    super::derive_digest("ReceiverKeyProofRoot", &proof_payload)
+                        .expect("receiver key proof root should derive");
+                let mut receiver_key_proof = proof_payload;
+                receiver_key_proof
+                    .as_object_mut()
+                    .expect("receiver key proof should be an object")
+                    .insert(
+                        "receiverKeyProofRoot".to_string(),
+                        json!(receiver_key_proof_root),
+                    );
 
-            receiver_key_proof
-        };
+                receiver_key_proof
+            };
 
         let valid_linear_statement =
             create_linear_statement(valid_case["targetVectorCoefficients"].clone());
-        let valid_receiver_key_proof = create_receiver_key_proof(&valid_linear_statement);
+        let valid_receiver_key_proof = create_receiver_key_proof(
+            &valid_linear_statement,
+            &valid_case["parameterSet"],
+            &valid_case["proofEncoding"],
+        );
         let valid_verification = super::verify_receiver_key_proof(
             &valid_receiver_key_proof,
             Some(&valid_linear_statement),
@@ -2938,7 +5767,11 @@ mod tests {
 
         let mutated_linear_statement =
             create_linear_statement(mutated_target_case["targetVectorCoefficients"].clone());
-        let mutated_receiver_key_proof = create_receiver_key_proof(&mutated_linear_statement);
+        let mutated_receiver_key_proof = create_receiver_key_proof(
+            &mutated_linear_statement,
+            &valid_case["parameterSet"],
+            &valid_case["proofEncoding"],
+        );
         let mutated_verification = super::verify_receiver_key_proof(
             &mutated_receiver_key_proof,
             Some(&mutated_linear_statement),
@@ -2950,6 +5783,97 @@ mod tests {
 
         assert_eq!(mutated_verification["ok"], false);
         assert_eq!(mutated_verification["unresolvedReason"], "InvalidFixture");
+
+        let mut wrong_parameter_set = valid_case["parameterSet"].clone();
+        wrong_parameter_set
+            .as_object_mut()
+            .expect("parameter set should be an object")
+            .insert(
+                "profileId".to_string(),
+                json!("receiver-key-linear-module-lwe-wrong-profile"),
+            );
+        let wrong_parameter_verification = super::verify_receiver_key_proof(
+            &valid_receiver_key_proof,
+            Some(&valid_linear_statement),
+            Some(proof_bytes_hex),
+            Some(public_randomness_hex),
+            Some(&wrong_parameter_set),
+            Some(&valid_case["proofEncoding"]),
+        );
+
+        assert_eq!(wrong_parameter_verification["ok"], false);
+        assert_eq!(
+            wrong_parameter_verification["unresolvedReason"],
+            "BallotPackageInvalid"
+        );
+
+        let mut size_unbound_parameter_set = valid_case["parameterSet"].clone();
+        size_unbound_parameter_set
+            .as_object_mut()
+            .expect("parameter set should be an object")
+            .insert(
+                "expectedProofSizeBytes".to_string(),
+                json!(proof_size_bytes + 1),
+            );
+        let size_unbound_receiver_key_proof = create_receiver_key_proof(
+            &valid_linear_statement,
+            &size_unbound_parameter_set,
+            &valid_case["proofEncoding"],
+        );
+        let size_unbound_parameter_verification = super::verify_receiver_key_proof(
+            &size_unbound_receiver_key_proof,
+            Some(&valid_linear_statement),
+            Some(proof_bytes_hex),
+            Some(public_randomness_hex),
+            Some(&size_unbound_parameter_set),
+            Some(&valid_case["proofEncoding"]),
+        );
+
+        assert_eq!(size_unbound_parameter_verification["ok"], false);
+        assert_eq!(
+            size_unbound_parameter_verification["unresolvedReason"],
+            "BallotPackageInvalid"
+        );
+        assert!(
+            size_unbound_parameter_verification["refusedObjects"][0]["message"]
+                .as_str()
+                .expect("refusal message should be a string")
+                .contains("byte length")
+        );
+
+        let mut size_unbound_proof_encoding = valid_case["proofEncoding"].clone();
+        size_unbound_proof_encoding
+            .as_object_mut()
+            .expect("proof encoding should be an object")
+            .insert(
+                "expectedProofSizeBytes".to_string(),
+                json!(proof_size_bytes + 1),
+            );
+        let size_unbound_encoding_receiver_key_proof = create_receiver_key_proof(
+            &valid_linear_statement,
+            &valid_case["parameterSet"],
+            &size_unbound_proof_encoding,
+        );
+        let size_unbound_encoding_verification = super::verify_receiver_key_proof(
+            &size_unbound_encoding_receiver_key_proof,
+            Some(&valid_linear_statement),
+            Some(proof_bytes_hex),
+            Some(public_randomness_hex),
+            Some(&valid_case["parameterSet"]),
+            Some(&size_unbound_proof_encoding),
+        );
+
+        assert_eq!(size_unbound_encoding_verification["ok"], false);
+        assert_eq!(
+            size_unbound_encoding_verification["unresolvedReason"],
+            "BallotPackageInvalid"
+        );
+        assert!(
+            size_unbound_encoding_verification["refusedObjects"][0]["message"]
+                .as_str()
+                .expect("refusal message should be a string")
+                .contains("byte length")
+        );
     }
 
     #[test]
@@ -3097,7 +6021,26 @@ mod tests {
 
             linear_statement
         };
-        let create_ballot_proof = |statement: &Value, linear_statement: &Value| {
+        let mut valid_parameter_set = valid_case["parameterSet"].clone();
+        valid_parameter_set
+            .as_object_mut()
+            .expect("parameter set should be an object")
+            .insert(
+                "expectedProofSizeBytes".to_string(),
+                json!(proof_size_bytes),
+            );
+        let mut valid_proof_encoding = valid_case["proofEncoding"].clone();
+        valid_proof_encoding
+            .as_object_mut()
+            .expect("proof encoding should be an object")
+            .insert(
+                "expectedProofSizeBytes".to_string(),
+                json!(proof_size_bytes),
+            );
+        let create_ballot_proof = |statement: &Value,
+                                   linear_statement: &Value,
+                                   parameter_set: &Value,
+                                   proof_encoding: &Value| {
             let proof_bytes_digest = super::derive_digest(
                 "ProofBytesDigest",
                 &json!({
@@ -3109,10 +6052,10 @@ mod tests {
             )
             .expect("proof bytes digest should derive");
             let proof_encoding_profile_digest =
-                super::derive_ballot_proof_encoding_profile_digest(&valid_case["proofEncoding"])
+                super::derive_ballot_proof_encoding_profile_digest(proof_encoding)
                     .expect("proof encoding profile digest should derive");
             let proof_parameter_set_digest =
-                super::derive_ballot_proof_parameter_set_digest(&valid_case["parameterSet"])
+                super::derive_ballot_proof_parameter_set_digest(parameter_set)
                     .expect("proof parameter set digest should derive");
             let public_randomness_digest =
                 super::derive_ballot_proof_public_randomness_digest(public_randomness_hex)
@@ -3174,7 +6117,12 @@ mod tests {
         let statement = create_statement();
         let valid_linear_statement =
             create_linear_statement(&statement, valid_case["targetVectorCoefficients"].clone());
-        let valid_ballot_proof = create_ballot_proof(&statement, &valid_linear_statement);
+        let valid_ballot_proof = create_ballot_proof(
+            &statement,
+            &valid_linear_statement,
+            &valid_parameter_set,
+            &valid_proof_encoding,
+        );
         let valid_verification = super::verify_ballot_proof(
             &statement,
             &valid_ballot_proof,
@@ -3182,8 +6130,8 @@ mod tests {
                 proof_bytes_hex: Some(proof_bytes_hex),
                 linear_statement: Some(&valid_linear_statement),
                 public_randomness_hex: Some(public_randomness_hex),
-                parameter_set: Some(&valid_case["parameterSet"]),
-                proof_encoding: Some(&valid_case["proofEncoding"]),
+                parameter_set: Some(&valid_parameter_set),
+                proof_encoding: Some(&valid_proof_encoding),
                 ..BallotProofBackendInputParts::default()
             }),
         );
@@ -3206,11 +6154,94 @@ mod tests {
                 .contains(&json!("BallotProofLinearProofVerified"))
         );
 
+        let mut size_unbound_parameter_set = valid_parameter_set.clone();
+        size_unbound_parameter_set
+            .as_object_mut()
+            .expect("parameter set should be an object")
+            .insert(
+                "expectedProofSizeBytes".to_string(),
+                json!(proof_size_bytes + 1),
+            );
+        let size_unbound_parameter_ballot_proof = create_ballot_proof(
+            &statement,
+            &valid_linear_statement,
+            &size_unbound_parameter_set,
+            &valid_proof_encoding,
+        );
+        let size_unbound_parameter_verification = super::verify_ballot_proof(
+            &statement,
+            &size_unbound_parameter_ballot_proof,
+            ballot_proof_backend_inputs(BallotProofBackendInputParts {
+                proof_bytes_hex: Some(proof_bytes_hex),
+                linear_statement: Some(&valid_linear_statement),
+                public_randomness_hex: Some(public_randomness_hex),
+                parameter_set: Some(&size_unbound_parameter_set),
+                proof_encoding: Some(&valid_proof_encoding),
+                ..BallotProofBackendInputParts::default()
+            }),
+        );
+
+        assert_eq!(size_unbound_parameter_verification["ok"], false);
+        assert_eq!(
+            size_unbound_parameter_verification["unresolvedReason"],
+            "BallotPackageInvalid"
+        );
+        assert!(
+            size_unbound_parameter_verification["refusedObjects"][0]["message"]
+                .as_str()
+                .expect("refusal message should be a string")
+                .contains("byte length")
+        );
+
+        let mut size_unbound_proof_encoding = valid_proof_encoding.clone();
+        size_unbound_proof_encoding
+            .as_object_mut()
+            .expect("proof encoding should be an object")
+            .insert(
+                "expectedProofSizeBytes".to_string(),
+                json!(proof_size_bytes + 1),
+            );
+        let size_unbound_encoding_ballot_proof = create_ballot_proof(
+            &statement,
+            &valid_linear_statement,
+            &valid_parameter_set,
+            &size_unbound_proof_encoding,
+        );
+        let size_unbound_encoding_verification = super::verify_ballot_proof(
+            &statement,
+            &size_unbound_encoding_ballot_proof,
+            ballot_proof_backend_inputs(BallotProofBackendInputParts {
+                proof_bytes_hex: Some(proof_bytes_hex),
+                linear_statement: Some(&valid_linear_statement),
+                public_randomness_hex: Some(public_randomness_hex),
+                parameter_set: Some(&valid_parameter_set),
+                proof_encoding: Some(&size_unbound_proof_encoding),
+                ..BallotProofBackendInputParts::default()
+            }),
+        );
+
+        assert_eq!(size_unbound_encoding_verification["ok"], false);
+        assert_eq!(
+            size_unbound_encoding_verification["unresolvedReason"],
+            "BallotPackageInvalid"
+        );
+        assert!(
+            size_unbound_encoding_verification["refusedObjects"][0]["message"]
+                .as_str()
+                .expect("refusal message should be a string")
+                .contains("byte length")
+        );
+
         let mutated_linear_statement = create_linear_statement(
             &statement,
             mutated_target_case["targetVectorCoefficients"].clone(),
         );
-        let mutated_ballot_proof = create_ballot_proof(&statement, &mutated_linear_statement);
+        let mutated_ballot_proof = create_ballot_proof(
+            &statement,
+            &mutated_linear_statement,
+            &valid_parameter_set,
+            &valid_proof_encoding,
+        );
         let mutated_verification = super::verify_ballot_proof(
             &statement,
             &mutated_ballot_proof,
@@ -3218,8 +6249,8 @@ mod tests {
                 proof_bytes_hex: Some(proof_bytes_hex),
                 linear_statement: Some(&mutated_linear_statement),
                 public_randomness_hex: Some(public_randomness_hex),
-                parameter_set: Some(&valid_case["parameterSet"]),
-                proof_encoding: Some(&valid_case["proofEncoding"]),
+                parameter_set: Some(&valid_parameter_set),
+                proof_encoding: Some(&valid_proof_encoding),
                 ..BallotProofBackendInputParts::default()
             }),
         );
@@ -3583,6 +6614,756 @@ mod tests {
         assert_eq!(mutated_verification["unresolvedReason"], "InvalidFixture");
     }
 
+    fn component_proof_record_for_vector(component_id: &str, proof_bytes_hex: &str) -> Value {
+        let proof_size_bytes = proof_bytes_hex.len() / 2;
+        json!({
+            "componentId": component_id,
+            "componentProofRecordDigest": test_digest(&format!("{component_id}-component-proof-record")),
+            "proofBytesDigest": super::derive_digest(
+                "ProofBytesDigest",
+                &json!({
+                    "objectType": "ProofBytes",
+                    "objectVersion": 1,
+                    "proofBytesHex": proof_bytes_hex,
+                    "proofSizeBytes": proof_size_bytes
+                }),
+            )
+            .expect("proof bytes digest should derive"),
+            "proofSizeBytes": proof_size_bytes
+        })
+    }
+
+    fn dense_component_proof_input_for_vector(
+        component_id: &str,
+        vectors: &Value,
+        vector_case: &Value,
+    ) -> Value {
+        let mut proof_statement = vectors["linearStatement"].clone();
+        {
+            let proof_statement_object = proof_statement
+                .as_object_mut()
+                .expect("proof statement should be an object");
+            proof_statement_object.insert(
+                "statementMatrixCoefficients".to_string(),
+                vector_case["statementMatrixCoefficients"].clone(),
+            );
+            proof_statement_object.insert(
+                "targetVectorCoefficients".to_string(),
+                vector_case["targetVectorCoefficients"].clone(),
+            );
+            proof_statement_object.insert(
+                "targetCoefficientRepresentation".to_string(),
+                vector_case["targetCoefficientRepresentation"].clone(),
+            );
+        }
+
+        json!({
+            "componentId": component_id,
+            "proofBytesHex": vector_case["proofHex"],
+            "proofEncoding": vectors["proofEncoding"],
+            "proofParameterSet": vectors["parameterSet"],
+            "proofStatement": proof_statement,
+            "proofStatementFormat": "dense-polynomial-matrix-linear-proof-v1",
+            "publicRandomnessHex": vector_case["publicRandomnessHex"],
+            "statementDigest": vectors["linearStatement"]["statementDigest"]
+        })
+    }
+
+    fn sparse_component_proof_statement_from_dense_statement(
+        component_id: &str,
+        dense_statement: &Value,
+    ) -> Value {
+        let statement_rows = integer_property(dense_statement, "statementRows");
+        let statement_columns = integer_property(dense_statement, "statementColumns");
+        let ring_degree = integer_property(dense_statement, "ringDegree");
+        let statement_matrix = dense_statement["statementMatrixCoefficients"]
+            .as_array()
+            .expect("dense statement matrix should be an array");
+        let target_vector = dense_statement["targetVectorCoefficients"]
+            .as_array()
+            .expect("dense target vector should be an array");
+        assert_eq!(
+            statement_matrix.len(),
+            statement_rows,
+            "dense statement matrix row count should match statementRows"
+        );
+        assert_eq!(
+            target_vector.len(),
+            statement_rows,
+            "dense target vector row count should match statementRows"
+        );
+        let mut sparse_matrix_entries = Vec::new();
+        for (row_index, matrix_row) in statement_matrix.iter().enumerate().take(statement_rows) {
+            let matrix_row_entries = matrix_row
+                .as_array()
+                .expect("matrix row should be an array");
+            assert_eq!(
+                matrix_row_entries.len(),
+                statement_columns,
+                "dense statement matrix column count should match statementColumns"
+            );
+            for (column_index, matrix_entry) in matrix_row_entries
+                .iter()
+                .enumerate()
+                .take(statement_columns)
+            {
+                let polynomial_coefficients = matrix_entry
+                    .as_array()
+                    .expect("matrix polynomial should be an array");
+                assert_eq!(
+                    polynomial_coefficients.len(),
+                    ring_degree,
+                    "matrix polynomial degree should match ring degree"
+                );
+                assert!(
+                    polynomial_coefficients
+                        .iter()
+                        .skip(1)
+                        .all(|coefficient| coefficient.as_u64() == Some(0)),
+                    "test sparse conversion only supports constant source polynomials"
+                );
+                if polynomial_coefficients[0].as_u64() != Some(0) {
+                    sparse_matrix_entries.push(json!({
+                        "rowIndex": row_index,
+                        "columnIndex": column_index,
+                        "constantCoefficient": polynomial_coefficients[0]
+                    }));
+                }
+            }
+        }
+
+        let mut target_entries = Vec::new();
+        for (row_index, target_entry) in target_vector.iter().enumerate().take(statement_rows) {
+            let polynomial_coefficients = target_entry
+                .as_array()
+                .expect("target polynomial should be an array");
+            assert_eq!(
+                polynomial_coefficients.len(),
+                ring_degree,
+                "target polynomial degree should match ring degree"
+            );
+            assert!(
+                polynomial_coefficients
+                    .iter()
+                    .skip(1)
+                    .all(|coefficient| coefficient.as_u64() == Some(0)),
+                "test sparse conversion only supports constant target polynomials"
+            );
+            if polynomial_coefficients[0].as_u64() != Some(0) {
+                target_entries.push(json!({
+                    "rowIndex": row_index,
+                    "constantCoefficient": polynomial_coefficients[0]
+                }));
+            }
+        }
+
+        let sparse_matrix_entries_value = json!(sparse_matrix_entries);
+        let target_entries_value = json!(target_entries);
+        let sparse_matrix_digest =
+            super::derive_sparse_statement_matrix_digest(&sparse_matrix_entries_value)
+                .expect("sparse matrix digest should derive");
+        let target_vector_digest = super::derive_sparse_target_vector_digest(&target_entries_value)
+            .expect("sparse target vector digest should derive");
+        let source_backend_column_indices = (0..statement_columns).collect::<Vec<_>>();
+        let sparse_statement_payload = json!({
+            "backendStatementDigest": dense_statement["backendStatementDigest"],
+            "ballotProofStatementDigest": dense_statement["ballotProofStatementDigest"],
+            "coefficientModulus": dense_statement["coefficientModulus"],
+            "componentId": component_id,
+            "objectType": "BallotProofSparseComponentLinearProofStatement",
+            "objectVersion": 1,
+            "parameterProfileId": dense_statement["parameterProfileId"],
+            "proofStatementFormat": "sparse-polynomial-matrix-linear-proof-v1",
+            "projectionCoverage": "payload-plaintext-field-rows-only",
+            "relation": dense_statement["relation"],
+            "relationStatementDigest": dense_statement["relationStatementDigest"],
+            "sourceBackendColumnIndices": source_backend_column_indices,
+            "sourceRingDegree": dense_statement["ringDegree"],
+            "sparseStatementMatrixDigest": sparse_matrix_digest,
+            "sparseStatementMatrixEntries": sparse_matrix_entries_value,
+            "sparseStatementTermCount": sparse_matrix_entries_value.as_array().expect("sparse matrix entries should be an array").len(),
+            "statementColumns": dense_statement["statementColumns"],
+            "statementRows": dense_statement["statementRows"],
+            "targetCoefficientRepresentation": dense_statement["targetCoefficientRepresentation"],
+            "targetVectorDigest": target_vector_digest,
+            "targetVectorEntries": target_entries_value,
+            "targetVectorEntryCount": target_entries_value.as_array().expect("target entries should be an array").len(),
+            "witnessL2BoundSquared": dense_statement["witnessL2BoundSquared"]
+        });
+        let sparse_statement_digest =
+            super::derive_ballot_sparse_linear_statement_digest(&sparse_statement_payload)
+                .expect("sparse statement digest should derive");
+        let mut sparse_statement = sparse_statement_payload;
+        sparse_statement
+            .as_object_mut()
+            .expect("sparse statement should be an object")
+            .insert(
+                "statementDigest".to_string(),
+                json!(sparse_statement_digest),
+            );
+
+        sparse_statement
+    }
+
+    fn sparse_component_proof_input_for_vector(
+        component_id: &str,
+        vectors: &Value,
+        vector_case: &Value,
+    ) -> Value {
+        let dense_component_proof_input =
+            dense_component_proof_input_for_vector(component_id, vectors, vector_case);
+        let sparse_statement = sparse_component_proof_statement_from_dense_statement(
+            component_id,
+            &dense_component_proof_input["proofStatement"],
+        );
+
+        json!({
+            "componentId": component_id,
+            "proofBytesHex": vector_case["proofHex"],
+            "proofEncoding": vectors["proofEncoding"],
+            "proofParameterSet": vectors["parameterSet"],
+            "proofStatement": sparse_statement,
+            "proofStatementFormat": "sparse-polynomial-matrix-linear-proof-v1",
+            "publicRandomnessHex": vector_case["publicRandomnessHex"],
+            "statementDigest": dense_component_proof_input["statementDigest"]
+        })
+    }
+
+    fn sparse_statement_for_dense_compatibility_test(
+        statement_rows: usize,
+        statement_columns: usize,
+        source_ring_degree: usize,
+        coefficient_modulus: u64,
+        matrix_entries_value: Value,
+        target_entries_value: Value,
+    ) -> Value {
+        let sparse_statement_matrix_digest =
+            super::derive_sparse_statement_matrix_digest(&matrix_entries_value)
+                .expect("sparse matrix digest should derive");
+        let target_vector_digest = super::derive_sparse_target_vector_digest(&target_entries_value)
+            .expect("sparse target digest should derive");
+        json!({
+            "coefficientModulus": coefficient_modulus.to_string(),
+            "objectType": "BallotProofSparseComponentLinearProofStatement",
+            "objectVersion": 1,
+            "sourceRingDegree": source_ring_degree,
+            "sparseStatementMatrixDigest": sparse_statement_matrix_digest,
+            "sparseStatementMatrixEntries": matrix_entries_value,
+            "sparseStatementTermCount": matrix_entries_value
+                .as_array()
+                .expect("matrix entries should be an array")
+                .len(),
+            "statementColumns": statement_columns,
+            "statementRows": statement_rows,
+            "targetVectorDigest": target_vector_digest,
+            "targetVectorEntries": target_entries_value,
+            "targetVectorEntryCount": target_entries_value
+                .as_array()
+                .expect("target entries should be an array")
+                .len()
+        })
+    }
+
+    #[test]
+    fn sparse_component_statement_parser_supports_polynomial_entries() {
+        let sparse_statement = sparse_statement_for_dense_compatibility_test(
+            2,
+            2,
+            4,
+            17,
+            json!([
+                {
+                    "rowIndex": 0,
+                    "columnIndex": 1,
+                    "polynomialCoefficients": [0, 2, 0, 16]
+                },
+                {
+                    "rowIndex": 1,
+                    "columnIndex": 0,
+                    "constantCoefficient": 5
+                }
+            ]),
+            json!([
+                {
+                    "rowIndex": 0,
+                    "polynomialCoefficients": [1, 0, 3, 0]
+                },
+                {
+                    "rowIndex": 1,
+                    "constantCoefficient": 7
+                }
+            ]),
+        );
+        let (dense_matrix, dense_target) =
+            super::dense_matrix_from_sparse_component_statement(&sparse_statement)
+                .expect("polynomial sparse statement should densify");
+
+        assert_eq!(
+            dense_matrix,
+            json!([[[0, 0, 0, 0], [0, 2, 0, 16]], [[5, 0, 0, 0], [0, 0, 0, 0]]])
+        );
+        assert_eq!(dense_target, json!([[1, 0, 3, 0], [7, 0, 0, 0]]));
+    }
+
+    #[test]
+    fn sparse_component_statement_parser_rejects_noncanonical_entries() {
+        let both_encodings_statement = sparse_statement_for_dense_compatibility_test(
+            1,
+            1,
+            4,
+            17,
+            json!([
+                {
+                    "rowIndex": 0,
+                    "columnIndex": 0,
+                    "constantCoefficient": 1,
+                    "polynomialCoefficients": [1, 0, 0, 0]
+                }
+            ]),
+            json!([]),
+        );
+        let both_encodings_error =
+            super::dense_matrix_from_sparse_component_statement(&both_encodings_statement)
+                .expect_err("sparse entries with both encodings should be rejected");
+        assert_eq!(both_encodings_error.code, "BallotPackageInvalid");
+        assert!(
+            both_encodings_error
+                .message
+                .contains("either constantCoefficient or polynomialCoefficients")
+        );
+
+        let noncanonical_statement = sparse_statement_for_dense_compatibility_test(
+            1,
+            1,
+            4,
+            17,
+            json!([
+                {
+                    "rowIndex": 0,
+                    "columnIndex": 0,
+                    "polynomialCoefficients": [1, 0, 17, 0]
+                }
+            ]),
+            json!([]),
+        );
+        let noncanonical_error =
+            super::dense_matrix_from_sparse_component_statement(&noncanonical_statement)
+                .expect_err("noncanonical sparse coefficients should be rejected");
+        assert_eq!(noncanonical_error.code, "BallotPackageInvalid");
+        assert!(noncanonical_error.message.contains("not canonical"));
+
+        let zero_entry_statement = sparse_statement_for_dense_compatibility_test(
+            1,
+            1,
+            4,
+            17,
+            json!([
+                {
+                    "rowIndex": 0,
+                    "columnIndex": 0,
+                    "polynomialCoefficients": [0, 0, 0, 0]
+                }
+            ]),
+            json!([]),
+        );
+        let zero_entry_error =
+            super::dense_matrix_from_sparse_component_statement(&zero_entry_statement)
+                .expect_err("zero sparse entries should be rejected");
+        assert_eq!(zero_entry_error.code, "BallotPackageInvalid");
+        assert!(zero_entry_error.message.contains("zero polynomials"));
+    }
+
+    #[test]
+    fn sparse_component_statement_large_shape_parses_without_dense_allocation() {
+        let sparse_statement =
+            sparse_statement_for_dense_compatibility_test(1024, 1024, 64, 17, json!([]), json!([]));
+        let parsed_sparse_statement =
+            super::sparse_matrix_from_sparse_component_statement(&sparse_statement)
+                .expect("large sparse statement should parse without dense allocation");
+
+        assert_eq!(parsed_sparse_statement.source_statement_matrix.rows(), 1024);
+        assert_eq!(
+            parsed_sparse_statement.source_statement_matrix.columns(),
+            1024
+        );
+
+        let component_id = "share-commitment-component";
+        let component_proof = component_proof_record_for_vector(component_id, "00");
+        let proof_input = json!({
+            "componentId": component_id,
+            "proofBytesHex": "00",
+            "proofEncoding": {
+                "profileId": "test-proof-encoding"
+            },
+            "proofParameterSet": {
+                "profileId": "test-proof-parameter-set"
+            },
+            "proofStatement": sparse_statement,
+            "proofStatementFormat": "sparse-polynomial-matrix-linear-proof-v1",
+            "publicRandomnessHex": "00".repeat(32),
+            "statementDigest": test_digest("large-sparse-statement")
+        });
+        let component_verification = super::verify_component_linear_proof_bytes(
+            "verifyBallotProof",
+            component_id,
+            &component_proof,
+            &proof_input,
+        );
+
+        assert_eq!(component_verification["ok"], false);
+        assert_eq!(
+            component_verification["unresolvedReason"],
+            "BallotPackageInvalid"
+        );
+        assert_ne!(
+            component_verification["unresolvedReason"],
+            "OperationUnavailable"
+        );
+    }
+
+    fn structured_receiver_encryption_statement_for_test(
+        first_ciphertext_coefficient: u64,
+    ) -> Value {
+        let module_degree = 256_usize;
+        let module_rank = 4_usize;
+        let randomness_columns = (0..module_rank)
+            .map(|vector_index| {
+                (0..module_degree)
+                    .map(|coefficient_index| vector_index * module_degree + coefficient_index)
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        let first_noise_columns = (0..module_rank)
+            .map(|vector_index| {
+                (0..module_degree)
+                    .map(|coefficient_index| {
+                        module_rank * module_degree
+                            + vector_index * module_degree
+                            + coefficient_index
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        let second_noise_columns = (0..module_degree)
+            .map(|coefficient_index| 2 * module_rank * module_degree + coefficient_index)
+            .collect::<Vec<_>>();
+        let zero_polynomial = vec![0_u64; module_degree];
+        let mut first_ciphertext_polynomial = zero_polynomial.clone();
+        first_ciphertext_polynomial[0] = first_ciphertext_coefficient;
+        let first_ciphertext_vector = vec![
+            first_ciphertext_polynomial,
+            zero_polynomial.clone(),
+            zero_polynomial.clone(),
+            zero_polynomial.clone(),
+        ];
+        let zero_vector = vec![
+            zero_polynomial.clone(),
+            zero_polynomial.clone(),
+            zero_polynomial.clone(),
+            zero_polynomial.clone(),
+        ];
+        let mut statement = json!({
+            "backendStatementDigest": test_digest("structured-backend-statement"),
+            "coefficientModulus": "12289",
+            "componentId": "receiver-encryption-component",
+            "componentStatementDigest": test_digest("structured-component-statement"),
+            "matrixDigest": test_digest("structured-matrix"),
+            "objectType": "BallotProofStructuredReceiverEncryptionProofStatement",
+            "objectVersion": 1,
+            "parameterProfileId": "receiver-encryption-structured-test-v1",
+            "proofStatementFormat": "structured-module-lwe-linear-proof-v1",
+            "proofSystemRingDegree": 64,
+            "receiverEncryptionProfileDigest": test_digest("receiver-encryption-profile"),
+            "receiverRows": [
+                {
+                    "ciphertextChunkCount": 1,
+                    "ciphertextChunks": [
+                        {
+                            "chunkIndex": 0,
+                            "firstCiphertextVector": first_ciphertext_vector,
+                            "firstNoiseColumnIndices": first_noise_columns,
+                            "plaintextBitColumnIndices": [],
+                            "randomnessColumnIndices": randomness_columns,
+                            "secondCiphertextPolynomial": zero_polynomial,
+                            "secondNoiseColumnIndices": second_noise_columns
+                        }
+                    ],
+                    "plaintextBitLength": 0,
+                    "publicKeyVector": zero_vector,
+                    "publicMatrixSeedDigest": test_digest("receiver-public-matrix-seed"),
+                    "receiverIdentity": "receiver-1",
+                    "receiverPayloadDigest": test_digest("receiver-payload"),
+                    "receiverPublicKeyDigest": test_digest("receiver-public-key"),
+                    "receiverRosterPosition": 1,
+                    "rowCount": 1280,
+                    "rowOffsetWithinStatement": 0
+                }
+            ],
+            "relation": "A*w + t = 0",
+            "relationStatementDigest": test_digest("structured-relation-statement"),
+            "sourceBackendColumnIndices": (0..2304).collect::<Vec<_>>(),
+            "sourceRingDegree": 256,
+            "statementColumns": 2304,
+            "statementRows": 1280,
+            "targetCoefficientRepresentation": "canonicalUnsignedSourceModulus",
+            "targetVectorDigest": test_digest("structured-target"),
+            "witnessL2BoundSquared": "8192"
+        });
+        let statement_digest =
+            super::derive_ballot_structured_receiver_encryption_statement_digest(&statement)
+                .expect("structured statement digest should derive");
+        statement
+            .as_object_mut()
+            .expect("structured statement should be an object")
+            .insert("statementDigest".to_string(), json!(statement_digest));
+
+        statement
+    }
+
+    #[test]
+    fn structured_receiver_encryption_statement_lowers_public_module_lwe_rows() {
+        let zero_ciphertext_statement = structured_receiver_encryption_statement_for_test(0);
+        let parsed_zero_statement =
+            super::structured_receiver_encryption_statement_as_sparse(&zero_ciphertext_statement)
+                .expect("structured statement should lower to sparse rows");
+
+        assert_eq!(parsed_zero_statement.source_statement_matrix.rows(), 1280);
+        assert_eq!(
+            parsed_zero_statement.source_statement_matrix.columns(),
+            2304
+        );
+        assert_eq!(parsed_zero_statement.target_vector_coefficients[0][0], 0);
+        assert!(
+            parsed_zero_statement
+                .source_statement_matrix
+                .entries()
+                .len()
+                > 1024
+        );
+
+        let changed_ciphertext_statement = structured_receiver_encryption_statement_for_test(1);
+        let parsed_changed_statement = super::structured_receiver_encryption_statement_as_sparse(
+            &changed_ciphertext_statement,
+        )
+        .expect("changed structured statement should lower");
+
+        assert_eq!(
+            parsed_changed_statement.target_vector_coefficients[0][0],
+            12288
+        );
+    }
+
+    #[test]
+    fn component_linear_proof_bytes_verify_dense_and_sparse_public_statements() {
+        let vectors: Value = serde_json::from_str(include_str!(
+            "../../../../test-vectors/ballot-privacy/ballot-field-linear-proof-vectors.json"
+        ))
+        .expect("encoded-score field vector file should parse");
+        let cases = vectors["cases"]
+            .as_array()
+            .expect("encoded-score field vector file should contain cases");
+        let valid_compact_case = cases
+            .iter()
+            .find(|vector_case| vector_case["caseName"] == "valid-encoded-score-field-linear-proof")
+            .expect("valid encoded-score field vector should exist");
+        let mutated_target_compact_case = cases
+            .iter()
+            .find(|vector_case| {
+                vector_case["caseName"] == "mutated-encoded-score-field-target-vector"
+            })
+            .expect("mutated encoded-score target vector should exist");
+        let valid_case = expand_encoded_score_field_vector_case(&vectors, valid_compact_case);
+        let mutated_target_case =
+            expand_encoded_score_field_vector_case(&vectors, mutated_target_compact_case);
+        let proof_bytes_hex = valid_case["proofHex"]
+            .as_str()
+            .expect("valid proof bytes should be a string");
+        let dense_component_id = "score-and-shamir-field-component";
+        let dense_component_proof =
+            component_proof_record_for_vector(dense_component_id, proof_bytes_hex);
+        let dense_proof_input =
+            dense_component_proof_input_for_vector(dense_component_id, &vectors, &valid_case);
+        let dense_verification = super::verify_component_linear_proof_bytes(
+            "verifyBallotProof",
+            dense_component_id,
+            &dense_component_proof,
+            &dense_proof_input,
+        );
+
+        assert_eq!(dense_verification["ok"], true);
+        assert!(
+            dense_verification["statusLabels"]
+                .as_array()
+                .expect("dense status labels should be an array")
+                .contains(&json!("BallotProofComponentLinearProofVerified"))
+        );
+
+        let mutated_dense_proof_input = dense_component_proof_input_for_vector(
+            dense_component_id,
+            &vectors,
+            &mutated_target_case,
+        );
+        let mutated_dense_verification = super::verify_component_linear_proof_bytes(
+            "verifyBallotProof",
+            dense_component_id,
+            &dense_component_proof,
+            &mutated_dense_proof_input,
+        );
+
+        assert_eq!(mutated_dense_verification["ok"], false);
+        assert_eq!(
+            mutated_dense_verification["unresolvedReason"],
+            "InvalidFixture"
+        );
+
+        let sparse_component_id = "payload-plaintext-field-component";
+        let sparse_component_proof =
+            component_proof_record_for_vector(sparse_component_id, proof_bytes_hex);
+        let sparse_proof_input =
+            sparse_component_proof_input_for_vector(sparse_component_id, &vectors, &valid_case);
+        let sparse_verification = super::verify_component_linear_proof_bytes(
+            "verifyBallotProof",
+            sparse_component_id,
+            &sparse_component_proof,
+            &sparse_proof_input,
+        );
+
+        assert_eq!(
+            sparse_verification["ok"], true,
+            "sparse statement expansion should verify against the same proof bytes: {sparse_verification}"
+        );
+
+        let mut sparse_input_with_stale_target_digest = sparse_proof_input.clone();
+        {
+            let sparse_statement = sparse_input_with_stale_target_digest["proofStatement"]
+                .as_object_mut()
+                .expect("sparse proof statement should be an object");
+            let target_entries = sparse_statement["targetVectorEntries"]
+                .as_array_mut()
+                .expect("target entries should be an array");
+            let first_target_entry = target_entries
+                .iter_mut()
+                .find(|target_entry| target_entry["constantCoefficient"].as_u64() != Some(0))
+                .expect("target should have a nonzero entry");
+            first_target_entry
+                .as_object_mut()
+                .expect("target entry should be an object")
+                .insert("constantCoefficient".to_string(), json!(3));
+        }
+        let stale_digest_verification = super::verify_component_linear_proof_bytes(
+            "verifyBallotProof",
+            sparse_component_id,
+            &sparse_component_proof,
+            &sparse_input_with_stale_target_digest,
+        );
+
+        assert_eq!(stale_digest_verification["ok"], false);
+        assert_eq!(
+            stale_digest_verification["refusedObjects"][0]["code"],
+            "BallotPackageInvalid"
+        );
+        assert!(
+            stale_digest_verification["refusedObjects"][0]["message"]
+                .as_str()
+                .expect("stale digest refusal should be a string")
+                .contains("target vector digest")
+        );
+
+        let public_zero_component_id = "receiver-key-binding-component";
+        let public_zero_component_statement_digest =
+            json!(test_digest("receiver-key-binding-component-statement"));
+        let public_zero_component_proof =
+            component_proof_record_for_vector(public_zero_component_id, "");
+        let public_zero_proof_input = component_proof_input_for_test(
+            public_zero_component_id,
+            &public_zero_component_statement_digest,
+        );
+        let public_zero_verification = super::verify_component_linear_proof_bytes(
+            "verifyBallotProof",
+            public_zero_component_id,
+            &public_zero_component_proof,
+            &public_zero_proof_input,
+        );
+
+        assert_eq!(public_zero_verification["ok"], true);
+        assert!(
+            public_zero_verification["statusLabels"]
+                .as_array()
+                .expect("public-zero status labels should be an array")
+                .contains(&json!(
+                    "BallotProofComponentPublicZeroWitnessBindingChecked"
+                ))
+        );
+
+        let mut public_zero_input_with_proof_bytes = public_zero_proof_input;
+        public_zero_input_with_proof_bytes["proofBytesHex"] = json!("00");
+        let public_zero_rejection = super::verify_component_linear_proof_bytes(
+            "verifyBallotProof",
+            public_zero_component_id,
+            &public_zero_component_proof,
+            &public_zero_input_with_proof_bytes,
+        );
+
+        assert_eq!(public_zero_rejection["ok"], false);
+        assert!(
+            public_zero_rejection["refusedObjects"][0]["message"]
+                .as_str()
+                .expect("public-zero refusal message should be a string")
+                .contains("must be empty")
+        );
+
+        let structured_component_id = "receiver-encryption-component";
+        let structured_component_statement_digest =
+            json!(test_digest("receiver-encryption-component-statement"));
+        let structured_component_proof = component_proof_for_test(
+            structured_component_id,
+            &structured_component_statement_digest,
+        );
+        let structured_proof_input = component_proof_input_for_test(
+            structured_component_id,
+            &structured_component_statement_digest,
+        );
+        let structured_verification = super::verify_component_linear_proof_bytes(
+            "verifyBallotProof",
+            structured_component_id,
+            &structured_component_proof,
+            &structured_proof_input,
+        );
+
+        assert_eq!(structured_verification["ok"], false);
+        assert_eq!(
+            structured_verification["unresolvedReason"],
+            "BallotPackageInvalid"
+        );
+        assert!(
+            structured_verification["refusedObjects"][0]["message"]
+                .as_str()
+                .expect("structured refusal message should be a string")
+                .contains("require a public structured proof statement")
+        );
+
+        let mut malformed_structured_input = structured_proof_input;
+        malformed_structured_input["proofStatement"]["structuredWitnessTermCount"] = json!("0");
+        let malformed_structured_verification = super::verify_component_linear_proof_bytes(
+            "verifyBallotProof",
+            structured_component_id,
+            &structured_component_proof,
+            &malformed_structured_input,
+        );
+
+        assert_eq!(malformed_structured_verification["ok"], false);
+        assert_eq!(
+            malformed_structured_verification["unresolvedReason"],
+            "BallotPackageInvalid"
+        );
+        assert!(
+            malformed_structured_verification["refusedObjects"][0]["message"]
+                .as_str()
+                .expect("malformed structured refusal should be a string")
+                .contains("require a public structured proof statement")
+        );
+    }
+
     fn test_digest(label: &str) -> String {
         super::derive_digest(
             "ChallengeDomainDigest",
@@ -3709,7 +7490,11 @@ mod tests {
         json!({
             "componentId": component_id,
             "componentProofStatementDigest": component_proof_statement_digest,
-            "proofBytesHex": test_digest(&format!("{component_id}-proof-bytes-material")),
+            "proofBytesHex": if proof_statement_format == "public-zero-witness-binding-check-v1" {
+                "".to_string()
+            } else {
+                test_digest(&format!("{component_id}-proof-bytes-material"))
+            },
             "proofEncoding": {
                 "profileId": "ballot-proof-component-encoding-v1",
                 "componentId": component_id,
@@ -3779,12 +7564,50 @@ mod tests {
 
             return statement;
         }
+        let is_structured = proof_statement_format == "structured-module-lwe-linear-proof-v1";
         let statement_payload = json!({
+            "backendStatementDigest": test_digest(&format!("{component_id}-backend")),
+            "coefficientModulus": if component_id == "share-commitment-component" {
+                "18446744069414584321"
+            } else if component_id == "score-and-shamir-field-component"
+                || component_id == "payload-plaintext-field-component" {
+                "65537"
+            } else {
+                "12289"
+            },
             "objectType": "BallotProofComponentProofStatementPlan",
             "objectVersion": 1,
             "componentId": component_id,
             "componentStatementDigest": component_statement_digest,
+            "denseCoefficientCount": if is_structured { json!("1024") } else { Value::Null },
+            "matrixDigest": test_digest(&format!("{component_id}-matrix")),
+            "proofBytesAvailability": if is_structured {
+                "requires-structured-proof-statement"
+            } else {
+                "public-zero-witness-binding-check"
+            },
+            "proofLoweringStatus": "explicitRowsAvailable",
             "proofStatementFormat": proof_statement_format,
+            "proofSystemRingDegree": if is_structured { json!(64) } else { Value::Null },
+            "relation": "A*w + t = 0",
+            "relationStatementDigest": test_digest(&format!("{component_id}-relation")),
+            "rowBatchMatrixDigests": [test_digest(&format!("{component_id}-row-matrix"))],
+            "rowBatchNames": [if is_structured {
+                "receiver_payload_encryption_equation_rows"
+            } else {
+                "receiver_key_binding_rows"
+            }],
+            "rowBatchTargetVectorDigests": [test_digest(&format!("{component_id}-row-target"))],
+            "rowBatchTermCounts": [if is_structured { "1024" } else { "0" }],
+            "rowCount": 1,
+            "sparseTermCount": Value::Null,
+            "sourceRingDegree": if is_structured { json!(256) } else { Value::Null },
+            "structuredCiphertextChunkCount": if is_structured { json!(1) } else { Value::Null },
+            "structuredReceiverCount": if is_structured { json!(1) } else { Value::Null },
+            "structuredWitnessTermCount": if is_structured { json!("1024") } else { Value::Null },
+            "targetVectorDigest": test_digest(&format!("{component_id}-target")),
+            "variableColumnCount": if is_structured { 1 } else { 0 },
+            "variableColumnIndices": if is_structured { json!([0]) } else { json!([]) },
         });
         let canonical_component_proof_statement_digest = super::derive_digest(
             "ChallengeDomainDigest",

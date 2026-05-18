@@ -11,8 +11,17 @@ pub fn encode_lazer_demo_abdlop_commitment(
     decoded_proof: &DecodedLazerDemoLinearProof,
     proof_encoding: &LazerDemoProofEncoding,
 ) -> CanonicalResult<Vec<u8>> {
+    encode_lazer_demo_compressed_commitment_vector(
+        decoded_proof.compressed_commitment_vector(),
+        proof_encoding,
+    )
+}
+
+pub(crate) fn encode_lazer_demo_compressed_commitment_vector(
+    compressed_commitment_vector: &[Vec<u64>],
+    proof_encoding: &LazerDemoProofEncoding,
+) -> CanonicalResult<Vec<u8>> {
     proof_encoding.validate()?;
-    let compressed_commitment_vector = decoded_proof.compressed_commitment_vector();
     if compressed_commitment_vector.len() != proof_encoding.compressed_commitment_vector_length {
         return Err(invalid_commitment(
             "compressed ABDLOP commitment length does not match the proof encoding",

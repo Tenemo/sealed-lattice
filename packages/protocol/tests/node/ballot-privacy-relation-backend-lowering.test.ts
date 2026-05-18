@@ -6,6 +6,7 @@ import {
     buildBallotProofComponentLinearProofProjection,
     buildBallotProofComponentProofStatementPlans,
     buildBallotProofSparseComponentLinearProofStatement,
+    buildBallotProofStructuredReceiverEncryptionProofStatement,
     buildEncodedScoreFieldLinearProofProjection,
     verifyBallotProofComponentExplicitRows,
     type BallotProofComponentProjectionWitness,
@@ -1328,6 +1329,159 @@ describe('ballot privacy relation backend lowering', () => {
             JSON.stringify([payloadStatement, shareCommitmentStatement]),
         ).not.toMatch(
             /normalizedScores|scoreOneHotWitnesses|receiverShareVector|privateWitness/u,
+        );
+    });
+
+    it('builds structured receiver-encryption proof statements with public Module-LWE material', () => {
+        const relationInput = singleOptionRelationInput();
+        const { context } = explicitReceiverEncryptionFixture(relationInput);
+        const loweringResult = lowerBallotPrivacyRelationToBackendStatement({
+            publicContext: context,
+            relationInput,
+        });
+
+        expect(loweringResult.ok).toBe(true);
+        if (!loweringResult.ok) {
+            throw new Error(
+                'valid explicit receiver-encryption input should lower',
+            );
+        }
+
+        const bundleStatement = buildBallotProofComponentBundleStatement({
+            ballotProofStatementDigest: context.ballotProofStatementDigest,
+            loweredStatement: loweringResult.statement,
+        });
+        const receiverEncryptionComponentStatement =
+            bundleStatement.componentStatements.find(
+                (componentStatement) =>
+                    componentStatement.componentId ===
+                    'receiver-encryption-component',
+            );
+        if (receiverEncryptionComponentStatement === undefined) {
+            throw new Error(
+                'Receiver-encryption component statement is missing.',
+            );
+        }
+        const structuredStatement =
+            buildBallotProofStructuredReceiverEncryptionProofStatement({
+                ballotProofStatementDigest: context.ballotProofStatementDigest,
+                componentStatement: receiverEncryptionComponentStatement,
+                loweredStatement: loweringResult.statement,
+                parameterProfileId:
+                    'receiver-encryption-structured-linear-proof-v1',
+                witnessL2BoundSquared: '8192',
+            });
+
+        expect(structuredStatement).toMatchObject({
+            coefficientModulus: '12289',
+            componentId: 'receiver-encryption-component',
+            objectType: 'BallotProofStructuredReceiverEncryptionProofStatement',
+            proofStatementFormat: 'structured-module-lwe-linear-proof-v1',
+            proofSystemRingDegree: 64,
+            sourceRingDegree: 256,
+            statementRows: 3 * 5_120,
+        });
+        expect(structuredStatement.receiverRows).toHaveLength(3);
+        expect(
+            structuredStatement.receiverRows[0]?.ciphertextChunks,
+        ).toHaveLength(4);
+        expect(
+            structuredStatement.receiverRows[0]?.ciphertextChunks[0]
+                ?.randomnessColumnIndices,
+        ).toHaveLength(receiverEncryptionModuleRank);
+        expect(
+            structuredStatement.receiverRows[0]?.ciphertextChunks[0]
+                ?.randomnessColumnIndices[0],
+        ).toHaveLength(receiverEncryptionModuleDegree);
+        expect(
+            structuredStatement.receiverRows[0]?.ciphertextChunks[0]
+                ?.plaintextBitColumnIndices.length,
+        ).toBeGreaterThan(0);
+        expect(structuredStatement.statementDigest).toMatch(/^[a-f0-9]{128}$/u);
+        expect(JSON.stringify(structuredStatement)).not.toMatch(
+            /encryptionRandomnessVector|firstNoiseVector|secondNoisePolynomial|receiverShareVector/u,
+        );
+
+        const changedContext: BallotPrivacyRelationBackendPublicContext = {
+            ...context,
+            receiverPayloads: context.receiverPayloads.map((receiverPayload) =>
+                receiverPayload.receiverRosterPosition === 1
+                    ? {
+                          ...receiverPayload,
+                          ciphertextChunks:
+                              receiverPayload.ciphertextChunks?.map(
+                                  (ciphertextChunk) =>
+                                      ciphertextChunk.chunkIndex === 0
+                                          ? {
+                                                ...ciphertextChunk,
+                                                firstCiphertextVector:
+                                                    ciphertextChunk.firstCiphertextVector.map(
+                                                        (
+                                                            polynomial,
+                                                            vectorIndex,
+                                                        ) =>
+                                                            vectorIndex === 0
+                                                                ? polynomial.map(
+                                                                      (
+                                                                          coefficient,
+                                                                          coefficientIndex,
+                                                                      ) =>
+                                                                          coefficientIndex ===
+                                                                          0
+                                                                              ? (coefficient +
+                                                                                    1) %
+                                                                                12_289
+                                                                              : coefficient,
+                                                                  )
+                                                                : polynomial,
+                                                    ),
+                                            }
+                                          : ciphertextChunk,
+                              ),
+                      }
+                    : receiverPayload,
+            ),
+        };
+        const changedLoweringResult =
+            lowerBallotPrivacyRelationToBackendStatement({
+                publicContext: changedContext,
+                relationInput,
+            });
+        expect(changedLoweringResult.ok).toBe(true);
+        if (!changedLoweringResult.ok) {
+            throw new Error('changed receiver-encryption input should lower');
+        }
+        const changedBundleStatement = buildBallotProofComponentBundleStatement(
+            {
+                ballotProofStatementDigest:
+                    changedContext.ballotProofStatementDigest,
+                loweredStatement: changedLoweringResult.statement,
+            },
+        );
+        const changedComponentStatement =
+            changedBundleStatement.componentStatements.find(
+                (componentStatement) =>
+                    componentStatement.componentId ===
+                    'receiver-encryption-component',
+            );
+        if (changedComponentStatement === undefined) {
+            throw new Error(
+                'Changed receiver-encryption component statement is missing.',
+            );
+        }
+        const changedStructuredStatement =
+            buildBallotProofStructuredReceiverEncryptionProofStatement({
+                ballotProofStatementDigest:
+                    changedContext.ballotProofStatementDigest,
+                componentStatement: changedComponentStatement,
+                loweredStatement: changedLoweringResult.statement,
+                parameterProfileId:
+                    'receiver-encryption-structured-linear-proof-v1',
+                witnessL2BoundSquared: '8192',
+            });
+
+        expect(changedStructuredStatement.statementDigest).not.toBe(
+            structuredStatement.statementDigest,
         );
     });
 

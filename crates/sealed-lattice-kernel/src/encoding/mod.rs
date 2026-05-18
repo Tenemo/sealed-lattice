@@ -479,6 +479,42 @@ fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult<Value> {
                 proof_encoding,
             ))
         }
+        "PrepareReceiverKeyProofGeneration" => {
+            let linear_statement = request.get("linearStatement");
+            let parameter_set = request.get("parameterSet");
+            let proof_encoding = request.get("proofEncoding");
+            let public_randomness_hex = request.get("publicRandomnessHex").and_then(Value::as_str);
+            let secret_state = request.get("secretState");
+            let prover_randomness_hex = request.get("proverRandomnessHex").and_then(Value::as_str);
+
+            Ok(
+                crate::ballot_privacy::prepare_receiver_key_proof_generation(
+                    linear_statement,
+                    parameter_set,
+                    proof_encoding,
+                    public_randomness_hex,
+                    secret_state,
+                    prover_randomness_hex,
+                ),
+            )
+        }
+        "GenerateReceiverKeyProof" => {
+            let linear_statement = request.get("linearStatement");
+            let parameter_set = request.get("parameterSet");
+            let proof_encoding = request.get("proofEncoding");
+            let public_randomness_hex = request.get("publicRandomnessHex").and_then(Value::as_str);
+            let secret_state = request.get("secretState");
+            let prover_randomness_hex = request.get("proverRandomnessHex").and_then(Value::as_str);
+
+            Ok(crate::ballot_privacy::generate_receiver_key_proof(
+                linear_statement,
+                parameter_set,
+                proof_encoding,
+                public_randomness_hex,
+                secret_state,
+                prover_randomness_hex,
+            ))
+        }
         "VerifyBallotProof" => {
             let statement = request.get("statement").ok_or_else(|| {
                 CanonicalError::new(CanonicalErrorCode::InvalidFixture, "statement is required")

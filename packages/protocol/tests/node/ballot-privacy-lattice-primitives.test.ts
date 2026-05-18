@@ -18,12 +18,23 @@ import {
     type ReceiverPayloadPlaintextWitness,
     type ShareCommitmentOpeningWitness,
 } from '../../src/ballot-privacy/lattice-primitives';
+import {
+    deriveProofBytesDigest,
+    deriveReceiverKeyProofEncodingProfileDigest,
+    deriveReceiverKeyProofParameterSetDigest,
+    deriveReceiverKeyProofPublicRandomnessDigest,
+} from '../../src/ballot-privacy/objects';
 import { createBallotPrivacyProfileSet } from '../../src/ballot-privacy/profiles';
 import { createReceiverKeyProofBackendStatement } from '../../src/ballot-privacy/receiver-key-backend-statement';
 import {
     createReceiverKeyLinearProofStatement,
     verifyReceiverKeyLinearWitness,
 } from '../../src/ballot-privacy/receiver-key-linear-statement';
+import {
+    createReceiverKeyLinearProofEncoding,
+    createReceiverKeyLinearProofParameterSet,
+    createReceiverKeyProofMaterial,
+} from '../../src/ballot-privacy/receiver-key-proof-parameters';
 
 const digest = (label: string): ProtocolDigest =>
     deriveProtocolDigest('ActionContextDigest', { label });
@@ -255,6 +266,118 @@ describe('ballot privacy lattice primitives', () => {
                 receiverPublicKey: receiverState.receiverPublicKey,
             }),
         ).toThrow(/public key material/u);
+    });
+
+    it('binds supplied receiver-key proof material into the generated proof record', () => {
+        const profileSet = createBallotPrivacyProfileSet();
+        const receiverState = generateReceiverState({
+            ceremonyId: 'ceremony-1',
+            manifestDigest: digest('manifest'),
+            randomnessSource: fixtureRandomness,
+            receiverEncryptionProfile: profileSet.receiverEncryptionProfile,
+            receiverIdentity: 'receiver-1',
+            receiverRosterPosition: 1,
+            recoveryEpoch: 0,
+            rosterDigest: digest('roster'),
+        });
+        const proofBytesHex = '001122aabbcc';
+        const publicRandomnessHex = '00'.repeat(32);
+        const proofMaterial = createReceiverKeyProofMaterial({
+            proofBytesHex,
+            publicRandomnessHex,
+        });
+        const { proofEncoding, proofParameterSet } = proofMaterial;
+        const backendStatement = createReceiverKeyProofBackendStatement({
+            publicKeyMaterial: receiverState.publicKeyMaterial,
+            receiverEncryptionProfile: profileSet.receiverEncryptionProfile,
+            receiverPublicKey: receiverState.receiverPublicKey,
+        });
+        const linearStatement = createReceiverKeyLinearProofStatement({
+            publicKeyMaterial: receiverState.publicKeyMaterial,
+            receiverEncryptionProfile: profileSet.receiverEncryptionProfile,
+            receiverPublicKey: receiverState.receiverPublicKey,
+        });
+        const proofRecord = createReceiverKeyProof({
+            proofMaterial,
+            publicKeyMaterial: receiverState.publicKeyMaterial,
+            receiverEncryptionProfile: profileSet.receiverEncryptionProfile,
+            receiverPublicKey: receiverState.receiverPublicKey,
+            secretState: receiverState.secretState,
+        });
+        const proofBytesDigest = deriveProofBytesDigest({ proofBytesHex });
+        const proofEncodingProfileDigest =
+            deriveReceiverKeyProofEncodingProfileDigest({ proofEncoding });
+        const proofParameterSetDigest =
+            deriveReceiverKeyProofParameterSetDigest({
+                parameterSet: proofParameterSet,
+            });
+        const publicRandomnessDigest =
+            deriveReceiverKeyProofPublicRandomnessDigest({
+                publicRandomnessHex,
+            });
+
+        expect(proofRecord).toMatchObject({
+            backendStatementDigest: backendStatement.backendStatementDigest,
+            linearStatementDigest: linearStatement.statementDigest,
+            proofBytesDigest,
+            proofEncodingProfileDigest,
+            proofParameterSetDigest,
+            proofSizeBytes: proofBytesHex.length / 2,
+            publicRandomnessDigest,
+        });
+        expect(proofRecord.proofRoot).toBe(
+            deriveProtocolDigest('ReceiverKeyProofRoot', {
+                linearStatementDigest: linearStatement.statementDigest,
+                proofBytesDigest,
+                proofEncodingProfileDigest,
+                proofParameterSetDigest,
+                publicRandomnessDigest,
+                purpose: 'receiver-key-linear-proof-record-root-v1',
+            }),
+        );
+        expect(() =>
+            createReceiverKeyProof({
+                proofMaterial: {
+                    proofBytesHex: '001122AABBCC',
+                    proofEncoding,
+                    proofParameterSet,
+                    publicRandomnessHex,
+                },
+                publicKeyMaterial: receiverState.publicKeyMaterial,
+                receiverEncryptionProfile: profileSet.receiverEncryptionProfile,
+                receiverPublicKey: receiverState.receiverPublicKey,
+                secretState: receiverState.secretState,
+            }),
+        ).toThrow(/lowercase hexadecimal/u);
+        expect(() =>
+            createReceiverKeyProof({
+                proofMaterial: {
+                    ...proofMaterial,
+                    proofEncoding: createReceiverKeyLinearProofEncoding(),
+                },
+                publicKeyMaterial: receiverState.publicKeyMaterial,
+                receiverEncryptionProfile: profileSet.receiverEncryptionProfile,
+                receiverPublicKey: receiverState.receiverPublicKey,
+                secretState: receiverState.secretState,
+            }),
+        ).toThrow(/proof encoding contract/u);
+        expect(() =>
+            createReceiverKeyProof({
+                proofMaterial: {
+                    ...proofMaterial,
+                    proofParameterSet: createReceiverKeyLinearProofParameterSet(
+                        {
+                            expectedProofSizeBytes:
+                                proofBytesHex.length / 2 + 1,
+                        },
+                    ),
+                },
+                publicKeyMaterial: receiverState.publicKeyMaterial,
+                receiverEncryptionProfile: profileSet.receiverEncryptionProfile,
+                receiverPublicKey: receiverState.receiverPublicKey,
+                secretState: receiverState.secretState,
+            }),
+        ).toThrow(/proof parameter contract/u);
     });
 
     it('computes additively homomorphic share commitments', () => {

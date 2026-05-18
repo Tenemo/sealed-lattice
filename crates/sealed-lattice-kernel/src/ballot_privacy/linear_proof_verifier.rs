@@ -19,7 +19,8 @@ use super::{
     lazer_demo_quadratic::validate_lazer_demo_quadratic_helper_port,
     lazer_demo_quadratic_challenge::validate_lazer_demo_quadratic_challenge,
     lazer_demo_tbox_relations::{
-        apply_lazer_tbox_z3_response_relations, apply_lazer_tbox_z4_response_relations,
+        apply_lazer_tbox_z3_response_relations, apply_lazer_tbox_z3_response_relations_sparse,
+        apply_lazer_tbox_z4_response_relations, apply_lazer_tbox_z4_response_relations_sparse,
         build_lazer_tbox_prefix_accumulators, validate_lazer_demo_tbox_relation_builder_port,
     },
     linear_proof_norms::validate_lazer_demo_linear_proof_norms,
@@ -40,6 +41,12 @@ use super::{
         LinearProofBytes, decode_lazer_demo_linear_proof, decode_lazer_demo_linear_proof_fields,
         encode_lazer_demo_linear_proof,
     },
+    sparse_linear_proof_statement::{
+        derive_dense_compatible_sparse_linear_statement_transcript,
+        transform_sparse_statement_matrix_to_proof_ring,
+        transform_sparse_target_vector_to_proof_ring,
+    },
+    sparse_polynomial_matrix::SparsePolynomialMatrix,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -66,6 +73,18 @@ pub struct LinearProofVectorCase {
 pub struct LinearProofVectorTrace {
     pub decoded_proof_field_lengths: Option<Value>,
     pub sealed_lattice_preflight_transcript: Option<Value>,
+}
+
+pub(crate) struct SparseLinearProofVerificationInput<'a> {
+    pub(crate) case_name: &'a str,
+    pub(crate) parameter_set: &'a LinearProofParameterSet,
+    pub(crate) proof_encoding: &'a LazerDemoProofEncoding,
+    pub(crate) public_randomness_hex: &'a str,
+    pub(crate) source_statement_matrix: &'a SparsePolynomialMatrix,
+    pub(crate) target_vector_coefficients: &'a [Vec<u64>],
+    pub(crate) target_coefficient_representation: LinearProofTargetCoefficientRepresentation,
+    pub(crate) proof_hex: &'a str,
+    pub(crate) expected_proof_size_bytes: Option<usize>,
 }
 
 impl LinearProofVectorCase {
@@ -365,6 +384,161 @@ fn decode_target_vector(
 
     let ring = PolynomialRing::new(parameter_set.ring_degree, parameter_set.coefficient_modulus)?;
     PolynomialVector::new(ring, coefficients.to_vec())
+}
+
+pub(crate) fn verify_sparse_linear_proof_components(
+    input: SparseLinearProofVerificationInput<'_>,
+) -> Value {
+    match verify_sparse_linear_proof_components_inner(&input) {
+        Ok(verified_status_labels) => json!({
+            "ok": true,
+            "backendAvailable": BALLOT_PRIVACY_PROOF_BACKEND_AVAILABLE,
+            "backendStatus": describe_proof_backend(),
+            "caseName": input.case_name,
+            "vectorAvailable": true,
+            "expectedOutcome": "accept",
+            "statusLabels": verified_status_labels,
+            "acceptedDigests": [],
+            "refusedObjects": [],
+            "unresolvedReason": null
+        }),
+        Err(error) => json!({
+            "ok": false,
+            "backendAvailable": BALLOT_PRIVACY_PROOF_BACKEND_AVAILABLE,
+            "backendStatus": describe_proof_backend(),
+            "caseName": input.case_name,
+            "vectorAvailable": true,
+            "expectedOutcome": "accept",
+            "statusLabels": [],
+            "acceptedDigests": [],
+            "refusedObjects": [
+                {
+                    "code": error.code.as_str(),
+                    "message": error.message
+                }
+            ],
+            "unresolvedReason": error.code.as_str()
+        }),
+    }
+}
+
+fn verify_sparse_linear_proof_components_inner(
+    input: &SparseLinearProofVerificationInput<'_>,
+) -> CanonicalResult<Value> {
+    input.parameter_set.validate()?;
+    input.proof_encoding.validate()?;
+    let public_randomness = decode_hex(input.public_randomness_hex)?;
+    if public_randomness.len() != 32 {
+        return Err(invalid_vector(
+            "publicRandomnessHex must encode exactly 32 bytes",
+        ));
+    }
+    let public_randomness_array: [u8; 32] = public_randomness
+        .as_slice()
+        .try_into()
+        .map_err(|_| invalid_vector("publicRandomnessHex must encode exactly 32 bytes"))?;
+    derive_lazer_demo_abdlop_public_parameters(&public_randomness_array)?;
+
+    let proof_bytes = LinearProofBytes::from_hex(input.proof_hex, input.expected_proof_size_bytes)?;
+    let decoded_proof = decode_lazer_demo_linear_proof(proof_bytes.bytes(), input.proof_encoding)?;
+    let reencoded_proof = encode_lazer_demo_linear_proof(&decoded_proof, input.proof_encoding)?;
+    if reencoded_proof != proof_bytes.bytes() {
+        return Err(invalid_vector(
+            "decoded proof object does not re-encode to the original canonical bytes",
+        ));
+    }
+    validate_lazer_demo_linear_proof_norms(&decoded_proof, input.proof_encoding)?;
+
+    let statement_transcript = derive_dense_compatible_sparse_linear_statement_transcript(
+        input.parameter_set,
+        input.proof_encoding,
+        input.source_statement_matrix,
+        input.target_vector_coefficients,
+        input.target_coefficient_representation,
+        &public_randomness,
+    )?;
+    let abdlop_commitment_hash = hash_lazer_demo_abdlop_commitment(
+        &statement_transcript.public_parameters_and_statement_hash,
+        &decoded_proof,
+        input.proof_encoding,
+    )?;
+    validate_lazer_demo_abdlop_linear_opening(
+        &abdlop_commitment_hash,
+        &public_randomness_array,
+        &decoded_proof,
+        input.proof_encoding,
+    )?;
+    let tbox_public_check_summary = validate_lazer_demo_tbox_public_checks(
+        &abdlop_commitment_hash,
+        &decoded_proof,
+        input.proof_encoding,
+    )?;
+    let transformed_statement_matrix = transform_sparse_statement_matrix_to_proof_ring(
+        input.parameter_set,
+        input.proof_encoding,
+        input.source_statement_matrix,
+    )?;
+    let transformed_target_vector = transform_sparse_target_vector_to_proof_ring(
+        input.parameter_set,
+        input.proof_encoding,
+        input.target_vector_coefficients,
+        input.target_coefficient_representation,
+    )?;
+    let z34_challenge_hash =
+        challenge_hash_from_hex(&tbox_public_check_summary.z34_challenge_hash)?;
+    let generator_challenge_hash =
+        challenge_hash_from_hex(&tbox_public_check_summary.generator_challenge_hash)?;
+    let mut tbox_accumulators =
+        build_lazer_tbox_prefix_accumulators(&generator_challenge_hash, input.proof_encoding)?;
+    apply_lazer_tbox_z4_response_relations_sparse(
+        &mut tbox_accumulators,
+        &transformed_statement_matrix,
+        &transformed_target_vector,
+        decoded_proof.infinity_response_vector(),
+        &z34_challenge_hash,
+        input.proof_encoding,
+    )?;
+    apply_lazer_tbox_z3_response_relations_sparse(
+        &mut tbox_accumulators,
+        &transformed_statement_matrix,
+        decoded_proof.euclidean_response_vector(),
+        &z34_challenge_hash,
+        input.proof_encoding,
+    )?;
+    let many_quadratic_equations = build_lazer_demo_many_quadratic_equations(
+        &tbox_accumulators,
+        decoded_proof.hash_mask_vector(),
+    )?;
+    let folded_many_quadratic_equation = fold_lazer_many_quadratic_equations(
+        &many_quadratic_equations,
+        &generator_challenge_hash,
+        input.proof_encoding.full_size_coefficient_bit_length,
+    )?;
+    validate_lazer_demo_quadratic_challenge(
+        &generator_challenge_hash,
+        &public_randomness_array,
+        &decoded_proof,
+        input.proof_encoding,
+        &folded_many_quadratic_equation,
+    )?;
+    validate_lazer_demo_quadratic_helper_port()?;
+    validate_lazer_demo_tbox_relation_builder_port()?;
+    validate_lazer_demo_many_quadratic_port()?;
+
+    Ok(json!([
+        "LinearProofBytesCanonical",
+        "LinearProofNormBoundsChecked",
+        "AbdlopPublicParametersExpanded",
+        "AbdlopLinearOpeningRecovered",
+        "TboxZ34ChallengeUpdated",
+        "TboxGeneratorChallengeUpdated",
+        "SparseLinearStatementStreamedAsDenseTranscript",
+        "QuadraticAccumulatorHelpersChecked",
+        "TboxRelationBuildersChecked",
+        "TboxResponseRelationBuildersChecked",
+        "ManyQuadraticEquationsFolded",
+        "QuadraticChallengeRecomputed"
+    ]))
 }
 
 pub fn verify_linear_proof_vector_case_value(vector_case: &Value) -> Value {

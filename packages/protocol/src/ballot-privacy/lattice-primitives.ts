@@ -22,12 +22,21 @@ import {
     createReceiverKeyProofShell,
     createReceiverPayloadShell,
     createShareCommitmentShell,
+    deriveProofBytesDigest,
+    deriveReceiverKeyProofEncodingProfileDigest,
+    deriveReceiverKeyProofParameterSetDigest,
+    deriveReceiverKeyProofPublicRandomnessDigest,
 } from './objects.js';
 import { createReceiverKeyProofBackendStatement } from './receiver-key-backend-statement.js';
 import {
     createReceiverKeyLinearProofStatement,
     verifyReceiverKeyLinearWitness,
 } from './receiver-key-linear-statement.js';
+import {
+    createReceiverKeyLinearProofEncoding,
+    createReceiverKeyLinearProofParameterSet,
+    type ReceiverKeyProofMaterial,
+} from './receiver-key-proof-parameters.js';
 
 const textEncoder = new TextEncoder();
 const receiverEncryptionModulus = 12_289;
@@ -1215,6 +1224,59 @@ const deriveReceiverKeyProofRoot = (input: {
         secretInfinityNormBound: receiverEncryptionCenteredBinomialEta,
     });
 
+const deriveReceiverKeyProofBytesRoot = (input: {
+    readonly linearStatementDigest: ProtocolDigest;
+    readonly proofBytesDigest: ProtocolDigest;
+    readonly proofEncodingProfileDigest: ProtocolDigest;
+    readonly proofParameterSetDigest: ProtocolDigest;
+    readonly publicRandomnessDigest: ProtocolDigest;
+}): ProtocolDigest =>
+    deriveProtocolDigest('ReceiverKeyProofRoot', {
+        linearStatementDigest: input.linearStatementDigest,
+        proofBytesDigest: input.proofBytesDigest,
+        proofEncodingProfileDigest: input.proofEncodingProfileDigest,
+        proofParameterSetDigest: input.proofParameterSetDigest,
+        publicRandomnessDigest: input.publicRandomnessDigest,
+        purpose: 'receiver-key-linear-proof-record-root-v1',
+    });
+
+const validateReceiverKeyProofMaterialContracts = (
+    proofMaterial: ReceiverKeyProofMaterial,
+): number => {
+    const proofBytesDigest = deriveProofBytesDigest({
+        proofBytesHex: proofMaterial.proofBytesHex,
+    });
+    void proofBytesDigest;
+    deriveReceiverKeyProofPublicRandomnessDigest({
+        publicRandomnessHex: proofMaterial.publicRandomnessHex,
+    });
+    const proofSizeBytes = proofMaterial.proofBytesHex.length / 2;
+    const expectedProofEncoding = createReceiverKeyLinearProofEncoding({
+        expectedProofSizeBytes: proofSizeBytes,
+    });
+    const expectedProofParameterSet = createReceiverKeyLinearProofParameterSet({
+        expectedProofSizeBytes: proofSizeBytes,
+    });
+
+    if (!canonicalEqual(proofMaterial.proofEncoding, expectedProofEncoding)) {
+        throw new RangeError(
+            'Receiver-key proof material must use the frozen proof encoding contract for its proof length.',
+        );
+    }
+    if (
+        !canonicalEqual(
+            proofMaterial.proofParameterSet,
+            expectedProofParameterSet,
+        )
+    ) {
+        throw new RangeError(
+            'Receiver-key proof material must use the frozen proof parameter contract for its proof length.',
+        );
+    }
+
+    return proofSizeBytes;
+};
+
 export const verifyReceiverKeyWitness = (input: {
     readonly receiverEncryptionProfile: ReceiverEncryptionProfile;
     readonly receiverPublicKey: ReceiverEncryptionPublicKey;
@@ -1320,6 +1382,7 @@ export const createReceiverKeyProof = (input: {
     readonly receiverPublicKey: ReceiverEncryptionPublicKey;
     readonly publicKeyMaterial: ReceiverEncryptionPublicKeyMaterial;
     readonly secretState: ReceiverEncryptionSecretState;
+    readonly proofMaterial?: ReceiverKeyProofMaterial;
 }): ReceiverKeyProof => {
     const refusedObjects = verifyReceiverKeyWitness(input);
     if (refusedObjects.length > 0) {
@@ -1343,16 +1406,78 @@ export const createReceiverKeyProof = (input: {
         receiverPublicKey: input.receiverPublicKey,
         secretState: input.secretState,
     });
+    const proofMaterialFields =
+        input.proofMaterial === undefined
+            ? undefined
+            : (() => {
+                  const proofSizeBytes =
+                      validateReceiverKeyProofMaterialContracts(
+                          input.proofMaterial,
+                      );
+                  const proofBytesDigest = deriveProofBytesDigest({
+                      proofBytesHex: input.proofMaterial.proofBytesHex,
+                  });
+                  const proofEncodingProfileDigest =
+                      deriveReceiverKeyProofEncodingProfileDigest({
+                          proofEncoding: input.proofMaterial.proofEncoding,
+                      });
+                  const proofParameterSetDigest =
+                      deriveReceiverKeyProofParameterSetDigest({
+                          parameterSet: input.proofMaterial.proofParameterSet,
+                      });
+                  const publicRandomnessDigest =
+                      deriveReceiverKeyProofPublicRandomnessDigest({
+                          publicRandomnessHex:
+                              input.proofMaterial.publicRandomnessHex,
+                      });
+
+                  return {
+                      backendStatementDigest:
+                          backendStatement.backendStatementDigest,
+                      linearStatementDigest: linearStatement.statementDigest,
+                      proofBytesDigest,
+                      proofEncodingProfileDigest,
+                      proofParameterSetDigest,
+                      proofRoot: deriveReceiverKeyProofBytesRoot({
+                          linearStatementDigest:
+                              linearStatement.statementDigest,
+                          proofBytesDigest,
+                          proofEncodingProfileDigest,
+                          proofParameterSetDigest,
+                          publicRandomnessDigest,
+                      }),
+                      proofSizeBytes,
+                      publicRandomnessDigest,
+                  };
+              })();
 
     return createReceiverKeyProofShell({
         ceremonyId: input.receiverPublicKey.ceremonyId,
         manifestDigest: input.receiverPublicKey.manifestDigest,
         proofBackend: 'LaZerStyleLocalLatticeRelation',
-        proofRoot: deriveReceiverKeyProofRoot({
-            ...input,
-            backendStatementDigest: backendStatement.backendStatementDigest,
-            linearStatementDigest: linearStatement.statementDigest,
-        }),
+        proofRoot:
+            proofMaterialFields?.proofRoot ??
+            deriveReceiverKeyProofRoot({
+                ...input,
+                backendStatementDigest: backendStatement.backendStatementDigest,
+                linearStatementDigest: linearStatement.statementDigest,
+            }),
+        ...(proofMaterialFields === undefined
+            ? {}
+            : {
+                  backendStatementDigest:
+                      proofMaterialFields.backendStatementDigest,
+                  linearStatementDigest:
+                      proofMaterialFields.linearStatementDigest,
+                  proofBytesDigest: proofMaterialFields.proofBytesDigest,
+                  proofEncodingProfileDigest:
+                      proofMaterialFields.proofEncodingProfileDigest,
+                  proofParameterSetDigest:
+                      proofMaterialFields.proofParameterSetDigest,
+                  proofSizeBytes: proofMaterialFields.proofSizeBytes,
+                  publicRandomnessDigest:
+                      proofMaterialFields.publicRandomnessDigest,
+              }),
         receiverEncryptionProfileDigest:
             input.receiverPublicKey.receiverEncryptionProfileDigest,
         receiverIdentity: input.receiverPublicKey.receiverIdentity,

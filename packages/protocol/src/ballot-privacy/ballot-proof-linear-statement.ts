@@ -28,10 +28,29 @@ type ConstantSparseMatrixEntry = {
     readonly constantCoefficient: DensePolynomialCoefficient;
 };
 
+type PolynomialSparseMatrixEntry = {
+    readonly rowIndex: number;
+    readonly columnIndex: number;
+    readonly polynomialCoefficients: DensePolynomial;
+};
+
+type SparseMatrixEntry =
+    | ConstantSparseMatrixEntry
+    | PolynomialSparseMatrixEntry;
+
 type ConstantSparseTargetVectorEntry = {
     readonly rowIndex: number;
     readonly constantCoefficient: DensePolynomialCoefficient;
 };
+
+type PolynomialSparseTargetVectorEntry = {
+    readonly rowIndex: number;
+    readonly polynomialCoefficients: DensePolynomial;
+};
+
+type SparseTargetVectorEntry =
+    | ConstantSparseTargetVectorEntry
+    | PolynomialSparseTargetVectorEntry;
 
 type FieldVariableColumn = {
     readonly bitIndex?: number;
@@ -116,15 +135,65 @@ export type BallotProofSparseComponentLinearProofStatement = {
     readonly sourceBackendColumnIndices: readonly number[];
     readonly sourceRingDegree: number;
     readonly sparseStatementMatrixDigest: ProtocolDigest;
-    readonly sparseStatementMatrixEntries: readonly ConstantSparseMatrixEntry[];
+    readonly sparseStatementMatrixEntries: readonly SparseMatrixEntry[];
     readonly sparseStatementTermCount: string;
     readonly statementColumns: number;
     readonly statementDigest: ProtocolDigest;
     readonly statementRows: number;
     readonly targetCoefficientRepresentation: 'canonicalUnsignedSourceModulus';
     readonly targetVectorDigest: ProtocolDigest;
-    readonly targetVectorEntries: readonly ConstantSparseTargetVectorEntry[];
+    readonly targetVectorEntries: readonly SparseTargetVectorEntry[];
     readonly targetVectorEntryCount: string;
+    readonly witnessL2BoundSquared: string;
+};
+
+type StructuredReceiverEncryptionCiphertextChunkStatement = {
+    readonly chunkIndex: number;
+    readonly firstCiphertextVector: readonly (readonly number[])[];
+    readonly firstNoiseColumnIndices: readonly (readonly number[])[];
+    readonly plaintextBitColumnIndices: readonly number[];
+    readonly randomnessColumnIndices: readonly (readonly number[])[];
+    readonly secondCiphertextPolynomial: readonly number[];
+    readonly secondNoiseColumnIndices: readonly number[];
+};
+
+type StructuredReceiverEncryptionReceiverStatement = {
+    readonly ciphertextChunkCount: number;
+    readonly ciphertextChunks: readonly StructuredReceiverEncryptionCiphertextChunkStatement[];
+    readonly plaintextBitLength: number;
+    readonly publicKeyVector: readonly (readonly number[])[];
+    readonly publicMatrixSeedDigest: ProtocolDigest;
+    readonly receiverIdentity: string;
+    readonly receiverPayloadDigest: ProtocolDigest;
+    readonly receiverPublicKeyDigest: ProtocolDigest;
+    readonly receiverRosterPosition: number;
+    readonly rowCount: number;
+    readonly rowOffsetWithinStatement: number;
+};
+
+type BallotProofStructuredReceiverEncryptionProofStatement = {
+    readonly backendStatementDigest: ProtocolDigest;
+    readonly ballotProofStatementDigest?: ProtocolDigest;
+    readonly coefficientModulus: string;
+    readonly componentId: 'receiver-encryption-component';
+    readonly componentStatementDigest: ProtocolDigest;
+    readonly matrixDigest: ProtocolDigest;
+    readonly objectType: 'BallotProofStructuredReceiverEncryptionProofStatement';
+    readonly objectVersion: 1;
+    readonly parameterProfileId: string;
+    readonly proofStatementFormat: 'structured-module-lwe-linear-proof-v1';
+    readonly proofSystemRingDegree: 64;
+    readonly receiverEncryptionProfileDigest: ProtocolDigest;
+    readonly receiverRows: readonly StructuredReceiverEncryptionReceiverStatement[];
+    readonly relation: 'A*w + t = 0';
+    readonly relationStatementDigest: ProtocolDigest;
+    readonly sourceBackendColumnIndices: readonly number[];
+    readonly sourceRingDegree: 256;
+    readonly statementColumns: number;
+    readonly statementDigest: ProtocolDigest;
+    readonly statementRows: number;
+    readonly targetCoefficientRepresentation: 'canonicalUnsignedSourceModulus';
+    readonly targetVectorDigest: ProtocolDigest;
     readonly witnessL2BoundSquared: string;
 };
 
@@ -515,6 +584,88 @@ const usedBackendColumnIndices = (
             ),
         ),
     ].sort((left, right) => left - right);
+
+const projectedColumnLookup = (
+    sourceBackendColumnIndices: readonly number[],
+): ReadonlyMap<number, number> =>
+    new Map(
+        sourceBackendColumnIndices.map((backendColumnIndex, projectedIndex) => [
+            backendColumnIndex,
+            projectedIndex,
+        ]),
+    );
+
+const requireProjectedColumn = (input: {
+    readonly description: string;
+    readonly projectedColumnByBackendColumn: ReadonlyMap<number, number>;
+    readonly variableColumns: readonly FieldVariableColumn[];
+    readonly variableMatches: (variableColumn: FieldVariableColumn) => boolean;
+}): number => {
+    const variableColumn = input.variableColumns.find(input.variableMatches);
+    if (variableColumn === undefined) {
+        throw new Error(`${input.description} variable is missing.`);
+    }
+    const projectedColumn = input.projectedColumnByBackendColumn.get(
+        variableColumn.columnIndex,
+    );
+    if (projectedColumn === undefined) {
+        throw new Error(
+            `${input.description} variable is outside the component projection.`,
+        );
+    }
+
+    return projectedColumn;
+};
+
+const receiverPayloadPlaintextBitColumnIndex = (input: {
+    readonly bitIndex: number;
+    readonly projectedColumnByBackendColumn: ReadonlyMap<number, number>;
+    readonly receiverRosterPosition: number;
+    readonly shareVectorWidth: number;
+    readonly variableColumns: readonly FieldVariableColumn[];
+}): number => {
+    const shareBitCount =
+        input.shareVectorWidth * receiverShareRepresentativeBitLength;
+    if (input.bitIndex < shareBitCount) {
+        const encodedCoordinateIndex = Math.floor(
+            input.bitIndex / receiverShareRepresentativeBitLength,
+        );
+        const localBitIndex =
+            input.bitIndex % receiverShareRepresentativeBitLength;
+
+        return requireProjectedColumn({
+            description: 'Receiver payload plaintext share bit',
+            projectedColumnByBackendColumn:
+                input.projectedColumnByBackendColumn,
+            variableColumns: input.variableColumns,
+            variableMatches: (variableColumn) =>
+                variableColumn.variableRole === 'ReceiverPayloadPlaintextBit' &&
+                variableColumn.receiverRosterPosition ===
+                    input.receiverRosterPosition &&
+                variableColumn.encodedCoordinateIndex ===
+                    encodedCoordinateIndex &&
+                variableColumn.bitIndex === localBitIndex,
+        });
+    }
+
+    const openingBitIndex = input.bitIndex - shareBitCount;
+    const openingCoordinateIndex = Math.floor(
+        openingBitIndex / receiverOpeningRandomnessBitLength,
+    );
+    const localBitIndex = openingBitIndex % receiverOpeningRandomnessBitLength;
+
+    return requireProjectedColumn({
+        description: 'Receiver payload plaintext opening bit',
+        projectedColumnByBackendColumn: input.projectedColumnByBackendColumn,
+        variableColumns: input.variableColumns,
+        variableMatches: (variableColumn) =>
+            variableColumn.variableRole === 'ReceiverPayloadPlaintextBit' &&
+            variableColumn.receiverRosterPosition ===
+                input.receiverRosterPosition &&
+            variableColumn.openingCoordinateIndex === openingCoordinateIndex &&
+            variableColumn.bitIndex === localBitIndex,
+    });
+};
 
 const receiverShareValue = (
     relationInput: BallotPrivacyRelationCompilerInput,
@@ -999,6 +1150,18 @@ const deriveSparseLinearStatementDigest = (
         purpose: 'ballot-proof-sparse-linear-proof-statement-v1',
     });
 
+const deriveStructuredReceiverEncryptionStatementDigest = (
+    statementPayload: Omit<
+        BallotProofStructuredReceiverEncryptionProofStatement,
+        'statementDigest'
+    >,
+): ProtocolDigest =>
+    deriveProtocolDigest('ChallengeDomainDigest', {
+        payload: statementPayload,
+        purpose:
+            'ballot-proof-structured-receiver-encryption-proof-statement-v1',
+    });
+
 const deriveComponentStatementDigest = (
     statementPayload: Omit<
         BallotProofComponentStatement,
@@ -1046,7 +1209,7 @@ const deriveStatementMatrixDigest = (
     });
 
 const deriveSparseStatementMatrixDigest = (
-    sparseStatementMatrixEntries: readonly ConstantSparseMatrixEntry[],
+    sparseStatementMatrixEntries: readonly SparseMatrixEntry[],
 ): ProtocolDigest =>
     deriveProtocolDigest('ChallengeDomainDigest', {
         purpose: 'ballot-proof-sparse-linear-statement-matrix-v1',
@@ -1062,7 +1225,7 @@ const deriveTargetVectorDigest = (
     });
 
 const deriveSparseTargetVectorDigest = (
-    targetVectorEntries: readonly ConstantSparseTargetVectorEntry[],
+    targetVectorEntries: readonly SparseTargetVectorEntry[],
 ): ProtocolDigest =>
     deriveProtocolDigest('ChallengeDomainDigest', {
         purpose: 'ballot-proof-sparse-linear-target-vector-v1',
@@ -2344,6 +2507,282 @@ export const buildBallotProofSparseComponentLinearProofStatement = (input: {
         statementDigest: deriveSparseLinearStatementDigest(statementPayload),
     };
 };
+
+export const buildBallotProofStructuredReceiverEncryptionProofStatement =
+    (input: {
+        readonly ballotProofStatementDigest?: ProtocolDigest;
+        readonly componentStatement: BallotProofComponentStatement;
+        readonly loweredStatement: BallotPrivacyLoweredLinearRelationStatement;
+        readonly parameterProfileId: string;
+        readonly witnessL2BoundSquared: string;
+    }): BallotProofStructuredReceiverEncryptionProofStatement => {
+        if (
+            input.componentStatement.componentId !==
+            'receiver-encryption-component'
+        ) {
+            throw new Error(
+                'Structured receiver-encryption proof statements require the receiver-encryption component statement.',
+            );
+        }
+        const component = componentById({
+            componentId: 'receiver-encryption-component',
+            loweredStatement: input.loweredStatement,
+        });
+        if (component.proofLoweringStatus !== 'explicitRowsAvailable') {
+            throw new Error(
+                'Structured receiver-encryption proof statements require explicit receiver-encryption rows.',
+            );
+        }
+        const structuredRowBatches = rowBatchesForComponent({
+            component,
+            loweredStatement: input.loweredStatement,
+        }).filter(
+            (
+                rowBatch,
+            ): rowBatch is Extract<
+                BackendRowBatchForComponentStatement,
+                {
+                    readonly batchKind: 'StructuredModuleLweReceiverEncryptionRows';
+                }
+            > =>
+                rowBatch.batchKind ===
+                'StructuredModuleLweReceiverEncryptionRows',
+        );
+        if (structuredRowBatches.length !== 1) {
+            throw new Error(
+                'Structured receiver-encryption proof statements require one structured row batch.',
+            );
+        }
+        const structuredRowBatch = structuredRowBatches[0];
+        if (component.variableColumnCount <= 0) {
+            throw new Error(
+                'Structured receiver-encryption proof statements require projected witness columns.',
+            );
+        }
+        const sourceBackendColumnIndices = component.variableColumnIndices;
+        const projectedColumnByBackendColumn = projectedColumnLookup(
+            sourceBackendColumnIndices,
+        );
+        const variableColumns = fieldVariableColumns(input.loweredStatement);
+        const publicKeysByReceiver = new Map(
+            input.loweredStatement.publicContext.receiverPublicKeys.map(
+                (publicKey) => [receiverReferenceKey(publicKey), publicKey],
+            ),
+        );
+        const payloadsByReceiver = new Map(
+            input.loweredStatement.publicContext.receiverPayloads.map(
+                (receiverPayload) => [
+                    receiverReferenceKey(receiverPayload),
+                    receiverPayload,
+                ],
+            ),
+        );
+        const shareVectorWidth =
+            input.loweredStatement.backendStatement.shareVectorWidth;
+        if (
+            !Number.isSafeInteger(shareVectorWidth) ||
+            Number(shareVectorWidth) <= 0
+        ) {
+            throw new Error(
+                'Structured receiver-encryption proof statement requires a valid share vector width.',
+            );
+        }
+        const receiverRows = structuredRowBatch.receiverRows.map(
+            (receiverRow): StructuredReceiverEncryptionReceiverStatement => {
+                const receiverKey = receiverReferenceKey(receiverRow);
+                const publicKey = publicKeysByReceiver.get(receiverKey);
+                const receiverPayload = payloadsByReceiver.get(receiverKey);
+                if (
+                    publicKey?.publicKeyVector === undefined ||
+                    publicKey.publicMatrixSeedDigest === undefined ||
+                    receiverPayload?.ciphertextChunks === undefined
+                ) {
+                    throw new Error(
+                        'Structured receiver-encryption proof statement is missing public key or ciphertext material.',
+                    );
+                }
+                if (
+                    receiverPayload.ciphertextChunks.length !==
+                    receiverRow.ciphertextChunkCount
+                ) {
+                    throw new Error(
+                        'Structured receiver-encryption ciphertext chunk count does not match the row descriptor.',
+                    );
+                }
+                const ciphertextChunks = receiverPayload.ciphertextChunks.map(
+                    (
+                        ciphertextChunk,
+                    ): StructuredReceiverEncryptionCiphertextChunkStatement => {
+                        const plaintextBitStart =
+                            ciphertextChunk.chunkIndex *
+                            receiverEncryptionModuleDegree;
+                        const plaintextBitEnd = Math.min(
+                            receiverRow.plaintextBitLength,
+                            plaintextBitStart + receiverEncryptionModuleDegree,
+                        );
+                        const plaintextBitColumnIndices = Array.from(
+                            {
+                                length: Math.max(
+                                    plaintextBitEnd - plaintextBitStart,
+                                    0,
+                                ),
+                            },
+                            (_unusedValue, localBitIndex) =>
+                                receiverPayloadPlaintextBitColumnIndex({
+                                    bitIndex: plaintextBitStart + localBitIndex,
+                                    projectedColumnByBackendColumn,
+                                    receiverRosterPosition:
+                                        receiverRow.receiverRosterPosition,
+                                    shareVectorWidth: Number(shareVectorWidth),
+                                    variableColumns,
+                                }),
+                        );
+                        const randomnessColumnIndices = Array.from(
+                            { length: receiverEncryptionModuleRank },
+                            (_unusedValue, ciphertextVectorIndex) =>
+                                Array.from(
+                                    { length: receiverEncryptionModuleDegree },
+                                    (_unusedCoefficient, coefficientIndex) =>
+                                        requireProjectedColumn({
+                                            description:
+                                                'Receiver encryption randomness',
+                                            projectedColumnByBackendColumn,
+                                            variableColumns,
+                                            variableMatches: (variableColumn) =>
+                                                variableColumn.variableRole ===
+                                                    'ReceiverEncryptionRandomness' &&
+                                                variableColumn.receiverRosterPosition ===
+                                                    receiverRow.receiverRosterPosition &&
+                                                variableColumn.chunkIndex ===
+                                                    ciphertextChunk.chunkIndex &&
+                                                variableColumn.ciphertextVectorIndex ===
+                                                    ciphertextVectorIndex &&
+                                                variableColumn.polynomialCoefficientIndex ===
+                                                    coefficientIndex,
+                                        }),
+                                ),
+                        );
+                        const firstNoiseColumnIndices = Array.from(
+                            { length: receiverEncryptionModuleRank },
+                            (_unusedValue, ciphertextVectorIndex) =>
+                                Array.from(
+                                    { length: receiverEncryptionModuleDegree },
+                                    (_unusedCoefficient, coefficientIndex) =>
+                                        requireProjectedColumn({
+                                            description:
+                                                'Receiver encryption first-noise',
+                                            projectedColumnByBackendColumn,
+                                            variableColumns,
+                                            variableMatches: (variableColumn) =>
+                                                variableColumn.variableRole ===
+                                                    'ReceiverEncryptionFirstNoise' &&
+                                                variableColumn.receiverRosterPosition ===
+                                                    receiverRow.receiverRosterPosition &&
+                                                variableColumn.chunkIndex ===
+                                                    ciphertextChunk.chunkIndex &&
+                                                variableColumn.ciphertextVectorIndex ===
+                                                    ciphertextVectorIndex &&
+                                                variableColumn.polynomialCoefficientIndex ===
+                                                    coefficientIndex,
+                                        }),
+                                ),
+                        );
+                        const secondNoiseColumnIndices = Array.from(
+                            { length: receiverEncryptionModuleDegree },
+                            (_unusedCoefficient, coefficientIndex) =>
+                                requireProjectedColumn({
+                                    description:
+                                        'Receiver encryption second-noise',
+                                    projectedColumnByBackendColumn,
+                                    variableColumns,
+                                    variableMatches: (variableColumn) =>
+                                        variableColumn.variableRole ===
+                                            'ReceiverEncryptionSecondNoise' &&
+                                        variableColumn.receiverRosterPosition ===
+                                            receiverRow.receiverRosterPosition &&
+                                        variableColumn.chunkIndex ===
+                                            ciphertextChunk.chunkIndex &&
+                                        variableColumn.polynomialCoefficientIndex ===
+                                            coefficientIndex,
+                                }),
+                        );
+
+                        return {
+                            chunkIndex: ciphertextChunk.chunkIndex,
+                            firstCiphertextVector:
+                                ciphertextChunk.firstCiphertextVector,
+                            firstNoiseColumnIndices,
+                            plaintextBitColumnIndices,
+                            randomnessColumnIndices,
+                            secondCiphertextPolynomial:
+                                ciphertextChunk.secondCiphertextPolynomial,
+                            secondNoiseColumnIndices,
+                        };
+                    },
+                );
+
+                return {
+                    ciphertextChunkCount: receiverRow.ciphertextChunkCount,
+                    ciphertextChunks,
+                    plaintextBitLength: receiverRow.plaintextBitLength,
+                    publicKeyVector: publicKey.publicKeyVector,
+                    publicMatrixSeedDigest: publicKey.publicMatrixSeedDigest,
+                    receiverIdentity: receiverRow.receiverIdentity,
+                    receiverPayloadDigest: receiverRow.receiverPayloadDigest,
+                    receiverPublicKeyDigest:
+                        receiverRow.receiverPublicKeyDigest,
+                    receiverRosterPosition: receiverRow.receiverRosterPosition,
+                    rowCount: receiverRow.rowCount,
+                    rowOffsetWithinStatement: receiverRow.rowOffsetWithinBatch,
+                };
+            },
+        );
+        const statementPayload: Omit<
+            BallotProofStructuredReceiverEncryptionProofStatement,
+            'statementDigest'
+        > = {
+            backendStatementDigest:
+                input.loweredStatement.backendStatement.backendStatementDigest,
+            ...(input.ballotProofStatementDigest === undefined
+                ? {}
+                : {
+                      ballotProofStatementDigest:
+                          input.ballotProofStatementDigest,
+                  }),
+            coefficientModulus: component.coefficientModulus,
+            componentId: 'receiver-encryption-component',
+            componentStatementDigest:
+                input.componentStatement.componentStatementDigest,
+            matrixDigest: input.componentStatement.matrixDigest,
+            objectType: 'BallotProofStructuredReceiverEncryptionProofStatement',
+            objectVersion: 1,
+            parameterProfileId: input.parameterProfileId,
+            proofStatementFormat: 'structured-module-lwe-linear-proof-v1',
+            proofSystemRingDegree: 64,
+            receiverEncryptionProfileDigest:
+                input.loweredStatement.publicContext
+                    .receiverEncryptionProfileDigest,
+            receiverRows,
+            relation: linearProofRelation,
+            relationStatementDigest:
+                input.loweredStatement.relationStatementDigest,
+            sourceBackendColumnIndices,
+            sourceRingDegree: 256,
+            statementColumns: sourceBackendColumnIndices.length,
+            statementRows: component.rowCount,
+            targetCoefficientRepresentation: 'canonicalUnsignedSourceModulus',
+            targetVectorDigest: input.componentStatement.targetVectorDigest,
+            witnessL2BoundSquared: input.witnessL2BoundSquared,
+        };
+
+        return {
+            ...statementPayload,
+            statementDigest:
+                deriveStructuredReceiverEncryptionStatementDigest(
+                    statementPayload,
+                ),
+        };
+    };
 
 export const verifyBallotProofComponentExplicitRows = (input: {
     readonly componentId: BallotPrivacyBackendProofComponentId;

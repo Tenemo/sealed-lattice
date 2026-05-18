@@ -406,6 +406,83 @@ pub fn encode_lazer_demo_linear_proof(
     writer.finish()
 }
 
+pub(crate) struct LazerDemoLinearProofComponents {
+    pub(crate) commitment_target_vector: Vec<Vec<u64>>,
+    pub(crate) hash_mask_vector: Vec<Vec<u64>>,
+    pub(crate) compressed_commitment_vector: Vec<Vec<u64>>,
+    pub(crate) centered_challenge_polynomial: Vec<i64>,
+    pub(crate) hint_vector: Vec<Vec<i64>>,
+    pub(crate) short_response_vector: Vec<Vec<i64>>,
+    pub(crate) randomness_response_vector: Vec<Vec<i64>>,
+    pub(crate) euclidean_response_vector: Vec<Vec<i64>>,
+    pub(crate) infinity_response_vector: Vec<Vec<i64>>,
+}
+
+pub(crate) fn encode_lazer_demo_linear_proof_components(
+    components: LazerDemoLinearProofComponents,
+    proof_encoding: &LazerDemoProofEncoding,
+) -> CanonicalResult<Vec<u8>> {
+    proof_encoding.validate()?;
+    if components.centered_challenge_polynomial.len() != proof_encoding.ring_degree {
+        return Err(invalid_proof(
+            "challenge polynomial degree does not match the proof encoding",
+        ));
+    }
+    let challenge_bound =
+        i64::try_from(proof_encoding.challenge_coefficient_modulus / 2).map_err(|_| {
+            invalid_proof("challenge coefficient modulus does not fit in a signed integer")
+        })?;
+    let encoded_challenge_polynomial = components
+        .centered_challenge_polynomial
+        .iter()
+        .map(|coefficient| {
+            if !(-challenge_bound..=challenge_bound).contains(coefficient) {
+                return Err(invalid_proof(
+                    "challenge coefficient is outside the centered encoding range",
+                ));
+            }
+            if *coefficient < 0 {
+                u64::try_from(
+                    i128::from(proof_encoding.challenge_coefficient_modulus)
+                        + i128::from(*coefficient),
+                )
+                .map_err(|_| invalid_proof("negative challenge coefficient cannot encode"))
+            } else {
+                u64::try_from(*coefficient)
+                    .map_err(|_| invalid_proof("challenge coefficient cannot encode"))
+            }
+        })
+        .collect::<CanonicalResult<Vec<_>>>()?;
+
+    let decoded_proof = DecodedLazerDemoLinearProof {
+        field_lengths: DecodedProofFieldLengths {
+            full_proof_bytes: 0,
+            fields: Vec::new(),
+            terminal_padding: DecodedProofFieldSpan {
+                name: "terminalPadding".to_string(),
+                bit_offset: 0,
+                bit_length: 0,
+                byte_start: 0,
+                byte_end_exclusive: 0,
+            },
+        },
+        commitment_target_vector: components.commitment_target_vector,
+        hash_mask_vector: components.hash_mask_vector,
+        compressed_commitment_vector: components.compressed_commitment_vector,
+        challenge_polynomial: DecodedChallengePolynomial {
+            encoded_coefficients: encoded_challenge_polynomial,
+            centered_coefficients: components.centered_challenge_polynomial,
+        },
+        hint_vector: components.hint_vector,
+        short_response_vector: components.short_response_vector,
+        randomness_response_vector: components.randomness_response_vector,
+        euclidean_response_vector: components.euclidean_response_vector,
+        infinity_response_vector: components.infinity_response_vector,
+    };
+
+    encode_lazer_demo_linear_proof(&decoded_proof, proof_encoding)
+}
+
 struct ProofBitReader<'proof> {
     proof_bytes: &'proof [u8],
     bit_offset: usize,

@@ -98,6 +98,8 @@ const unavailableProofBackendMessage =
     'Ballot privacy proof verification requires the frozen LaZer-style lattice proof backend, which is not implemented in this build.';
 const protocolDigestPattern = /^[a-f0-9]{128}$/u;
 const proofBytesHexPattern = /^(?:[a-f0-9]{2})+$/u;
+const proofBytesHexAllowEmptyPattern = /^(?:[a-f0-9]{2})*$/u;
+const unsignedDecimalStringPattern = /^(?:0|[1-9][0-9]*)$/u;
 const shareCommitmentModuleRank = 4;
 const shareCommitmentModuleDegree = 256;
 const shareCommitmentModulus = 18_446_744_069_414_584_321n;
@@ -116,6 +118,46 @@ const allowedBallotProofComponentStatementFormats = new Set<
     'structured-module-lwe-linear-proof-v1',
     'public-zero-witness-binding-check-v1',
 ]);
+type BallotProofComponentProofBytesAvailability =
+    | 'available-for-small-dense-oracle'
+    | 'requires-sparse-proof-statement'
+    | 'requires-structured-proof-statement'
+    | 'public-zero-witness-binding-check';
+type BallotProofComponentProofPolicy = {
+    readonly proofBytesAvailability: BallotProofComponentProofBytesAvailability;
+    readonly proofBytesMustBeEmpty: boolean;
+    readonly proofStatementFormat: BallotProofComponentProofVerificationInput['proofStatementFormat'];
+};
+const ballotProofComponentProofPolicyById = {
+    'score-and-shamir-field-component': {
+        proofBytesAvailability: 'available-for-small-dense-oracle',
+        proofBytesMustBeEmpty: false,
+        proofStatementFormat: 'dense-polynomial-matrix-linear-proof-v1',
+    },
+    'payload-plaintext-field-component': {
+        proofBytesAvailability: 'requires-sparse-proof-statement',
+        proofBytesMustBeEmpty: false,
+        proofStatementFormat: 'sparse-polynomial-matrix-linear-proof-v1',
+    },
+    'share-commitment-component': {
+        proofBytesAvailability: 'requires-sparse-proof-statement',
+        proofBytesMustBeEmpty: false,
+        proofStatementFormat: 'sparse-polynomial-matrix-linear-proof-v1',
+    },
+    'receiver-encryption-component': {
+        proofBytesAvailability: 'requires-structured-proof-statement',
+        proofBytesMustBeEmpty: false,
+        proofStatementFormat: 'structured-module-lwe-linear-proof-v1',
+    },
+    'receiver-key-binding-component': {
+        proofBytesAvailability: 'public-zero-witness-binding-check',
+        proofBytesMustBeEmpty: true,
+        proofStatementFormat: 'public-zero-witness-binding-check-v1',
+    },
+} as const satisfies Record<
+    BallotProofComponentId,
+    BallotProofComponentProofPolicy
+>;
 
 const requiredLazerPortComponents = [
     'generated linear proof parameters from lin-codegen.sage',
@@ -227,11 +269,18 @@ const deriveBallotProofComponentProofBundleDigest = (
     });
 
 export const deriveProofBytesDigest = (input: {
+    readonly allowEmpty?: boolean;
     readonly proofBytesHex: string;
 }): ProtocolDigest => {
-    if (!proofBytesHexPattern.test(input.proofBytesHex)) {
+    const proofBytesPattern =
+        input.allowEmpty === true
+            ? proofBytesHexAllowEmptyPattern
+            : proofBytesHexPattern;
+    if (!proofBytesPattern.test(input.proofBytesHex)) {
         throw new RangeError(
-            'Proof bytes must be non-empty lowercase hexadecimal bytes.',
+            input.allowEmpty === true
+                ? 'Proof bytes must be lowercase hexadecimal bytes.'
+                : 'Proof bytes must be non-empty lowercase hexadecimal bytes.',
         );
     }
 
@@ -279,6 +328,14 @@ export const deriveReceiverKeyProofEncodingProfileDigest = (input: {
     deriveProtocolDigest('ChallengeDomainDigest', {
         proofEncoding: input.proofEncoding,
         purpose: 'receiver-key-linear-proof-encoding-profile-v1',
+    });
+
+export const deriveReceiverKeyProofParameterSetDigest = (input: {
+    readonly parameterSet: unknown;
+}): ProtocolDigest =>
+    deriveProtocolDigest('ChallengeDomainDigest', {
+        parameterSet: input.parameterSet,
+        purpose: 'receiver-key-linear-proof-parameter-set-v1',
     });
 
 export const deriveReceiverKeyProofPublicRandomnessDigest = (input: {
@@ -758,6 +815,10 @@ const collectReceiverKeyProofStructuralRefusals = (
             !protocolDigestPattern.test(
                 receiverKeyProof.proofEncodingProfileDigest,
             )) ||
+        (receiverKeyProof.proofParameterSetDigest !== undefined &&
+            !protocolDigestPattern.test(
+                receiverKeyProof.proofParameterSetDigest,
+            )) ||
         (receiverKeyProof.publicRandomnessDigest !== undefined &&
             !protocolDigestPattern.test(
                 receiverKeyProof.publicRandomnessDigest,
@@ -778,6 +839,7 @@ const collectReceiverKeyProofStructuralRefusals = (
         'linearStatementDigest',
         'proofBytesDigest',
         'proofEncodingProfileDigest',
+        'proofParameterSetDigest',
         'proofSizeBytes',
         'publicRandomnessDigest',
     ] as const;
@@ -1127,6 +1189,23 @@ const deriveSuppliedComponentProofStatementDigest = (input: {
         };
     }
     if (
+        input.proofStatementFormat ===
+            'structured-module-lwe-linear-proof-v1' &&
+        objectType === 'BallotProofStructuredReceiverEncryptionProofStatement'
+    ) {
+        return {
+            digest: deriveProtocolDigest('ChallengeDomainDigest', {
+                payload: omitUnknownObjectProperty(
+                    input.proofStatement,
+                    'statementDigest',
+                ),
+                purpose:
+                    'ballot-proof-structured-receiver-encryption-proof-statement-v1',
+            }),
+            digestFieldName: 'statementDigest',
+        };
+    }
+    if (
         (input.proofStatementFormat ===
             'structured-module-lwe-linear-proof-v1' ||
             input.proofStatementFormat ===
@@ -1146,6 +1225,172 @@ const deriveSuppliedComponentProofStatementDigest = (input: {
     }
 
     return {};
+};
+
+const isProtocolDigestValue = (value: unknown): value is ProtocolDigest =>
+    typeof value === 'string' && protocolDigestPattern.test(value);
+
+const isUnsignedDecimalString = (value: unknown): value is string =>
+    typeof value === 'string' && unsignedDecimalStringPattern.test(value);
+
+const isNonNegativeSafeInteger = (value: unknown): value is number =>
+    typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+
+const isPositiveSafeInteger = (value: unknown): value is number =>
+    typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
+
+const isStringArray = (value: unknown): value is readonly string[] => {
+    if (!Array.isArray(value)) {
+        return false;
+    }
+
+    return value.every((entry: unknown) => typeof entry === 'string');
+};
+
+const isProtocolDigestArray = (
+    value: unknown,
+): value is readonly ProtocolDigest[] => {
+    if (!Array.isArray(value)) {
+        return false;
+    }
+
+    return value.every((entry: unknown) => isProtocolDigestValue(entry));
+};
+
+const isNonNegativeIntegerArray = (
+    value: unknown,
+): value is readonly number[] => {
+    if (!Array.isArray(value)) {
+        return false;
+    }
+
+    return value.every((entry: unknown) => isNonNegativeSafeInteger(entry));
+};
+
+const collectComponentProofStatementPlanShapeRefusals = (input: {
+    readonly expectedComponentId: BallotProofComponentId;
+    readonly proofRecordDigest: ProtocolDigest;
+    readonly proofStatement: UnknownObject;
+}): readonly RefusalRecord[] => {
+    const componentProofPolicy =
+        ballotProofComponentProofPolicyById[input.expectedComponentId];
+    if (
+        input.proofStatement.objectType !==
+        'BallotProofComponentProofStatementPlan'
+    ) {
+        return [];
+    }
+
+    const rowBatchNames = input.proofStatement.rowBatchNames;
+    const rowBatchMatrixDigests = input.proofStatement.rowBatchMatrixDigests;
+    const rowBatchTargetVectorDigests =
+        input.proofStatement.rowBatchTargetVectorDigests;
+    const rowBatchTermCounts = input.proofStatement.rowBatchTermCounts;
+    const variableColumnIndices = input.proofStatement.variableColumnIndices;
+    const rowBatchCount =
+        Array.isArray(rowBatchNames) && rowBatchNames.length > 0
+            ? rowBatchNames.length
+            : undefined;
+    const rowBatchFieldsMatch =
+        rowBatchCount !== undefined &&
+        Array.isArray(rowBatchMatrixDigests) &&
+        rowBatchMatrixDigests.length === rowBatchCount &&
+        Array.isArray(rowBatchTargetVectorDigests) &&
+        rowBatchTargetVectorDigests.length === rowBatchCount &&
+        Array.isArray(rowBatchTermCounts) &&
+        rowBatchTermCounts.length === rowBatchCount;
+    const commonShapeIsValid =
+        input.proofStatement.objectVersion === 1 &&
+        input.proofStatement.componentId === input.expectedComponentId &&
+        input.proofStatement.proofStatementFormat ===
+            componentProofPolicy.proofStatementFormat &&
+        input.proofStatement.proofBytesAvailability ===
+            componentProofPolicy.proofBytesAvailability &&
+        input.proofStatement.proofLoweringStatus === 'explicitRowsAvailable' &&
+        input.proofStatement.relation === 'A*w + t = 0' &&
+        isUnsignedDecimalString(input.proofStatement.coefficientModulus) &&
+        isProtocolDigestValue(input.proofStatement.backendStatementDigest) &&
+        isProtocolDigestValue(
+            input.proofStatement.componentProofStatementDigest,
+        ) &&
+        isProtocolDigestValue(input.proofStatement.componentStatementDigest) &&
+        isProtocolDigestValue(input.proofStatement.matrixDigest) &&
+        isProtocolDigestValue(input.proofStatement.relationStatementDigest) &&
+        isProtocolDigestValue(input.proofStatement.targetVectorDigest) &&
+        isProtocolDigestArray(rowBatchMatrixDigests) &&
+        isStringArray(rowBatchNames) &&
+        isProtocolDigestArray(rowBatchTargetVectorDigests) &&
+        Array.isArray(rowBatchTermCounts) &&
+        rowBatchTermCounts.every(isUnsignedDecimalString) &&
+        rowBatchFieldsMatch &&
+        isPositiveSafeInteger(input.proofStatement.rowCount) &&
+        isNonNegativeSafeInteger(input.proofStatement.variableColumnCount) &&
+        isNonNegativeIntegerArray(variableColumnIndices);
+
+    const componentSpecificShapeIsValid = (() => {
+        if (
+            input.expectedComponentId === 'receiver-encryption-component' &&
+            componentProofPolicy.proofStatementFormat ===
+                'structured-module-lwe-linear-proof-v1'
+        ) {
+            return (
+                input.proofStatement.sourceRingDegree === 256 &&
+                input.proofStatement.proofSystemRingDegree === 64 &&
+                isUnsignedDecimalString(
+                    input.proofStatement.denseCoefficientCount,
+                ) &&
+                input.proofStatement.sparseTermCount === null &&
+                isPositiveSafeInteger(
+                    input.proofStatement.structuredCiphertextChunkCount,
+                ) &&
+                isPositiveSafeInteger(
+                    input.proofStatement.structuredReceiverCount,
+                ) &&
+                isUnsignedDecimalString(
+                    input.proofStatement.structuredWitnessTermCount,
+                ) &&
+                input.proofStatement.structuredWitnessTermCount !== '0' &&
+                Number(input.proofStatement.variableColumnCount) > 0 &&
+                Array.isArray(variableColumnIndices) &&
+                variableColumnIndices.length ===
+                    input.proofStatement.variableColumnCount
+            );
+        }
+        if (
+            input.expectedComponentId === 'receiver-key-binding-component' &&
+            componentProofPolicy.proofStatementFormat ===
+                'public-zero-witness-binding-check-v1'
+        ) {
+            return (
+                input.proofStatement.sourceRingDegree === null &&
+                input.proofStatement.proofSystemRingDegree === null &&
+                input.proofStatement.denseCoefficientCount === null &&
+                input.proofStatement.sparseTermCount === null &&
+                input.proofStatement.structuredCiphertextChunkCount === null &&
+                input.proofStatement.structuredReceiverCount === null &&
+                input.proofStatement.structuredWitnessTermCount === null &&
+                input.proofStatement.variableColumnCount === 0 &&
+                Array.isArray(variableColumnIndices) &&
+                variableColumnIndices.length === 0 &&
+                Array.isArray(rowBatchTermCounts) &&
+                rowBatchTermCounts.every((termCount) => termCount === '0')
+            );
+        }
+
+        return true;
+    })();
+
+    if (!commonShapeIsValid || !componentSpecificShapeIsValid) {
+        return [
+            createRefusal(
+                'BallotPackageInvalid',
+                `Ballot proof component proof statement plan for ${input.expectedComponentId} has an invalid canonical shape.`,
+                input.proofRecordDigest,
+            ),
+        ];
+    }
+
+    return [];
 };
 
 const collectSuppliedComponentProofStatementRefusals = (input: {
@@ -1169,6 +1414,13 @@ const collectSuppliedComponentProofStatementRefusals = (input: {
     }
 
     const refusedObjects: RefusalRecord[] = [];
+    refusedObjects.push(
+        ...collectComponentProofStatementPlanShapeRefusals({
+            expectedComponentId: input.expectedComponentId,
+            proofRecordDigest: input.proofRecordDigest,
+            proofStatement,
+        }),
+    );
     const suppliedFormat = proofStatement.proofStatementFormat;
     const suppliedComponentId = proofStatement.componentId;
     const suppliedComponentStatementDigest =
@@ -1327,6 +1579,8 @@ function collectBallotProofComponentProofInputRefusals(input: {
     ) {
         const expectedComponentId =
             requiredBallotProofComponentIds[componentIndex];
+        const componentProofPolicy =
+            ballotProofComponentProofPolicyById[expectedComponentId];
         const componentProof =
             input.componentProofBundle.componentProofs[componentIndex];
         const proofInput = proofInputsByComponent.get(expectedComponentId);
@@ -1375,7 +1629,32 @@ function collectBallotProofComponentProofInputRefusals(input: {
                 ),
             );
         }
-        if (!proofBytesHexPattern.test(proofInput.proofBytesHex)) {
+        if (
+            proofInput.proofStatementFormat !==
+            componentProofPolicy.proofStatementFormat
+        ) {
+            refusedObjects.push(
+                createRefusal(
+                    'BallotPackageInvalid',
+                    `Ballot proof component proof statement format for ${expectedComponentId} must be ${componentProofPolicy.proofStatementFormat}.`,
+                    proofRecordDigest,
+                ),
+            );
+        }
+        const proofBytesPattern = componentProofPolicy.proofBytesMustBeEmpty
+            ? proofBytesHexAllowEmptyPattern
+            : proofBytesHexPattern;
+        if (componentProofPolicy.proofBytesMustBeEmpty) {
+            if (proofInput.proofBytesHex !== '') {
+                refusedObjects.push(
+                    createRefusal(
+                        'BallotPackageInvalid',
+                        `Ballot proof component proof bytes for ${expectedComponentId} must be empty for the public-zero witness binding check.`,
+                        proofRecordDigest,
+                    ),
+                );
+            }
+        } else if (!proofBytesHexPattern.test(proofInput.proofBytesHex)) {
             refusedObjects.push(
                 createRefusal(
                     'BallotPackageInvalid',
@@ -1385,7 +1664,18 @@ function collectBallotProofComponentProofInputRefusals(input: {
             );
             continue;
         }
+        if (!proofBytesPattern.test(proofInput.proofBytesHex)) {
+            refusedObjects.push(
+                createRefusal(
+                    'BallotPackageInvalid',
+                    `Ballot proof component proof bytes for ${expectedComponentId} must be lowercase hexadecimal bytes.`,
+                    proofRecordDigest,
+                ),
+            );
+            continue;
+        }
         const proofBytesDigest = deriveProofBytesDigest({
+            allowEmpty: componentProofPolicy.proofBytesMustBeEmpty,
             proofBytesHex: proofInput.proofBytesHex,
         });
         const proofSizeBytes = proofInput.proofBytesHex.length / 2;
@@ -1690,6 +1980,8 @@ const collectBallotProofComponentProofBundleRefusals = (input: {
     ) {
         const expectedComponentId =
             requiredBallotProofComponentIds[componentIndex];
+        const componentProofPolicy =
+            ballotProofComponentProofPolicyById[expectedComponentId];
         const componentProof =
             input.componentProofBundle.componentProofs[componentIndex];
         if (componentProof === undefined) {
@@ -1712,6 +2004,11 @@ const collectBallotProofComponentProofBundleRefusals = (input: {
         );
         const expectedComponentProofDigest =
             deriveBallotProofComponentProofRecordDigest(componentProofPayload);
+        const proofSizeBytesIsValid =
+            Number.isSafeInteger(componentProof.proofSizeBytes) &&
+            (componentProofPolicy.proofBytesMustBeEmpty
+                ? componentProof.proofSizeBytes === 0
+                : componentProof.proofSizeBytes > 0);
 
         if (
             componentProof.objectType !== 'BallotProofComponentProofRecord' ||
@@ -1749,8 +2046,7 @@ const collectBallotProofComponentProofBundleRefusals = (input: {
                 !protocolDigestPattern.test(
                     componentProof.ballotProofStatementDigest,
                 )) ||
-            !Number.isSafeInteger(componentProof.proofSizeBytes) ||
-            componentProof.proofSizeBytes <= 0
+            !proofSizeBytesIsValid
         ) {
             refusedObjects.push(
                 createRefusal(

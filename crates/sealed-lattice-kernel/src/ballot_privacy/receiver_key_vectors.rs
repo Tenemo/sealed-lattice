@@ -31,9 +31,9 @@ const RECEIVER_KEY_EQUATION_TARGET_EXPANSION_DOMAIN: &str =
     "sealed.vote/internal/receiver-key-proof/receiver-key-equation/target-expansion-v1";
 const RECEIVER_PUBLIC_MATRIX_EXPANSION_DOMAIN: &str =
     "sealed.vote/internal/receiver-encryption/public-matrix-v1";
-const RECEIVER_ENCRYPTION_MODULUS: u64 = 12_289;
-const RECEIVER_ENCRYPTION_MODULE_RANK: u64 = 4;
-const RECEIVER_ENCRYPTION_MODULE_DEGREE: u64 = 256;
+pub(crate) const RECEIVER_ENCRYPTION_MODULUS: u64 = 12_289;
+pub(crate) const RECEIVER_ENCRYPTION_MODULE_RANK: u64 = 4;
+pub(crate) const RECEIVER_ENCRYPTION_MODULE_DEGREE: u64 = 256;
 const RECEIVER_ENCRYPTION_SHORT_VECTOR_INFINITY_NORM_BOUND: u64 = 2;
 const RECEIVER_KEY_LINEAR_STATEMENT_ROW_COUNT: u64 = RECEIVER_ENCRYPTION_MODULE_RANK;
 const RECEIVER_KEY_LINEAR_STATEMENT_COLUMN_COUNT: u64 = RECEIVER_ENCRYPTION_MODULE_RANK * 2;
@@ -786,6 +786,16 @@ fn derive_receiver_public_matrix(
     }
 
     Ok(public_matrix)
+}
+
+pub(crate) fn derive_receiver_encryption_public_matrix(
+    receiver_encryption_profile_digest: &str,
+    public_matrix_seed_digest: &str,
+) -> Result<Vec<Vec<Vec<u64>>>, String> {
+    derive_receiver_public_matrix(
+        receiver_encryption_profile_digest,
+        public_matrix_seed_digest,
+    )
 }
 
 fn derive_number_polynomial(domain: &str, payload: &Value) -> Result<Vec<u64>, String> {

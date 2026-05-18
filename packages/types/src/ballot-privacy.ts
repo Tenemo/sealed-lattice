@@ -326,6 +326,7 @@ export type ReceiverKeyProof = {
     readonly linearStatementDigest?: ProtocolDigest;
     readonly proofBytesDigest?: ProtocolDigest;
     readonly proofEncodingProfileDigest?: ProtocolDigest;
+    readonly proofParameterSetDigest?: ProtocolDigest;
     readonly proofSizeBytes?: number;
     readonly publicRandomnessDigest?: ProtocolDigest;
     readonly proofRoot: ProtocolDigest;

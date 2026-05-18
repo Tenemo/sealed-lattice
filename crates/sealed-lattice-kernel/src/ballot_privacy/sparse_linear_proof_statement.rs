@@ -12,7 +12,8 @@ use crate::{
 use super::{
     linear_proof_parameters::{LazerDemoProofEncoding, LinearProofParameterSet},
     linear_proof_statement::{
-        LinearProofTargetCoefficientRepresentation, rotate_left_negacyclic_signed_polynomial,
+        LazerDemoLinearStatementTranscript, LinearProofTargetCoefficientRepresentation,
+        rotate_left_negacyclic_signed_polynomial,
         scale_signed_polynomial_by_source_modulus_inverse, source_polynomial_split_factor,
         split_unsigned_polynomial_into_proof_ring, transform_target_vector_to_proof_ring,
         validate_source_polynomial,
@@ -227,6 +228,51 @@ pub fn derive_sparse_linear_statement_transcript(
     })
 }
 
+pub fn derive_dense_compatible_sparse_linear_statement_transcript(
+    parameter_set: &LinearProofParameterSet,
+    proof_encoding: &LazerDemoProofEncoding,
+    source_statement_matrix: &SparsePolynomialMatrix,
+    target_vector_coefficients: &[Vec<u64>],
+    target_coefficient_representation: LinearProofTargetCoefficientRepresentation,
+    public_randomness: &[u8],
+) -> CanonicalResult<LazerDemoLinearStatementTranscript> {
+    if public_randomness.len() != 32 {
+        return Err(invalid_sparse_statement(
+            "sparse statement public randomness must be exactly 32 bytes",
+        ));
+    }
+    let transformed_statement_matrix = transform_sparse_statement_matrix_to_proof_ring(
+        parameter_set,
+        proof_encoding,
+        source_statement_matrix,
+    )?;
+    let transformed_target_vector = transform_sparse_target_vector_to_proof_ring(
+        parameter_set,
+        proof_encoding,
+        target_vector_coefficients,
+        target_coefficient_representation,
+    )?;
+    let (arithmetic_statement_hash, encoded_statement_bytes) =
+        hash_sparse_transformed_statement_as_dense(
+            proof_encoding,
+            &transformed_statement_matrix,
+            &transformed_target_vector,
+        )?;
+    let public_parameters_and_statement_hash =
+        shake128_32_from_parts(public_randomness, &arithmetic_statement_hash);
+
+    Ok(LazerDemoLinearStatementTranscript {
+        transformed_statement_matrix_rows: transformed_statement_matrix.rows(),
+        transformed_statement_matrix_columns: transformed_statement_matrix.columns(),
+        transformed_target_vector_length: transformed_target_vector.len(),
+        encoded_statement_bytes,
+        arithmetic_statement_hash,
+        arithmetic_statement_hash_hex: to_hex(&arithmetic_statement_hash),
+        public_parameters_and_statement_hash,
+        public_parameters_and_statement_hash_hex: to_hex(&public_parameters_and_statement_hash),
+    })
+}
+
 fn validate_sparse_statement_matrix_inputs(
     parameter_set: &LinearProofParameterSet,
     proof_encoding: &LazerDemoProofEncoding,
@@ -307,6 +353,52 @@ fn hash_sparse_transformed_statement(
     Ok(hasher.finish())
 }
 
+fn hash_sparse_transformed_statement_as_dense(
+    proof_encoding: &LazerDemoProofEncoding,
+    transformed_statement_matrix: &SparsePolynomialMatrix,
+    transformed_target_vector: &PolynomialVector,
+) -> CanonicalResult<([u8; 32], usize)> {
+    proof_encoding.validate()?;
+    if transformed_statement_matrix.ring() != transformed_target_vector.ring() {
+        return Err(invalid_sparse_statement(
+            "dense-compatible sparse statement matrix and target rings do not match",
+        ));
+    }
+    if transformed_statement_matrix.rows() != transformed_target_vector.len() {
+        return Err(invalid_sparse_statement(
+            "dense-compatible sparse statement target length does not match matrix rows",
+        ));
+    }
+
+    let zero_polynomial = vec![0_u64; proof_encoding.ring_degree];
+    let mut writer = DenseCompatibleStatementBitHasher::new();
+    let mut entry_index = 0_usize;
+    for row_index in 0..transformed_statement_matrix.rows() {
+        for column_index in 0..transformed_statement_matrix.columns() {
+            let polynomial = match transformed_statement_matrix.entries().get(entry_index) {
+                Some(entry)
+                    if entry.row_index() == row_index && entry.column_index() == column_index =>
+                {
+                    entry_index += 1;
+                    entry.coefficients()
+                }
+                _ => &zero_polynomial,
+            };
+            writer.write_polynomial(polynomial, proof_encoding)?;
+        }
+    }
+    if entry_index != transformed_statement_matrix.entries().len() {
+        return Err(invalid_sparse_statement(
+            "dense-compatible sparse statement entries are not in row-major order",
+        ));
+    }
+    for polynomial in transformed_target_vector.entries() {
+        writer.write_polynomial(polynomial, proof_encoding)?;
+    }
+
+    writer.finish()
+}
+
 fn shake128_32_from_parts(first_part: &[u8], second_part: &[u8]) -> [u8; 32] {
     let mut hasher = Shake128::default();
     hasher.update(first_part);
@@ -321,6 +413,107 @@ fn shake128_32_from_parts(first_part: &[u8], second_part: &[u8]) -> [u8; 32] {
 struct SparseStatementHasher {
     hasher: Shake128,
     encoded_bytes: usize,
+}
+
+struct DenseCompatibleStatementBitHasher {
+    hasher: Shake128,
+    byte_value: u8,
+    bit_offset_in_byte: usize,
+    encoded_bytes: usize,
+}
+
+impl DenseCompatibleStatementBitHasher {
+    fn new() -> Self {
+        Self {
+            hasher: Shake128::default(),
+            byte_value: 0,
+            bit_offset_in_byte: 0,
+            encoded_bytes: 0,
+        }
+    }
+
+    fn write_polynomial(
+        &mut self,
+        polynomial: &[u64],
+        proof_encoding: &LazerDemoProofEncoding,
+    ) -> CanonicalResult<()> {
+        if polynomial.len() != proof_encoding.ring_degree {
+            return Err(invalid_sparse_statement(
+                "dense-compatible sparse statement transformed polynomial degree does not match the proof encoding",
+            ));
+        }
+        for coefficient in polynomial {
+            if *coefficient >= proof_encoding.coefficient_modulus {
+                return Err(invalid_sparse_statement(
+                    "dense-compatible sparse statement transformed coefficient is not canonical",
+                ));
+            }
+            self.write_unsigned_little_endian_bits(
+                *coefficient,
+                proof_encoding.full_size_coefficient_bit_length,
+            )?;
+        }
+
+        Ok(())
+    }
+
+    fn write_unsigned_little_endian_bits(
+        &mut self,
+        value: u64,
+        bit_count: usize,
+    ) -> CanonicalResult<()> {
+        if bit_count == 0 || bit_count > 63 {
+            return Err(invalid_sparse_statement(
+                "dense-compatible sparse statement coder bit length must be between one and sixty-three",
+            ));
+        }
+        if value >= (1_u64 << bit_count) {
+            return Err(invalid_sparse_statement(
+                "dense-compatible sparse statement coefficient does not fit in the requested bit length",
+            ));
+        }
+        for bit_index in 0..bit_count {
+            self.write_bit(((value >> bit_index) & 1) as u8)?;
+        }
+
+        Ok(())
+    }
+
+    fn write_bit(&mut self, bit: u8) -> CanonicalResult<()> {
+        if bit > 1 {
+            return Err(invalid_sparse_statement(
+                "dense-compatible sparse statement bit must be zero or one",
+            ));
+        }
+        if bit == 1 {
+            self.byte_value |= 1_u8 << self.bit_offset_in_byte;
+        }
+        self.bit_offset_in_byte += 1;
+        if self.bit_offset_in_byte == 8 {
+            self.flush_byte();
+        }
+
+        Ok(())
+    }
+
+    fn flush_byte(&mut self) {
+        self.hasher.update(&[self.byte_value]);
+        self.byte_value = 0;
+        self.bit_offset_in_byte = 0;
+        self.encoded_bytes += 1;
+    }
+
+    fn finish(mut self) -> CanonicalResult<([u8; 32], usize)> {
+        self.write_bit(1)?;
+        while self.bit_offset_in_byte != 0 {
+            self.write_bit(0)?;
+        }
+        let mut reader = self.hasher.finalize_xof();
+        let mut output = [0_u8; 32];
+        reader.read(&mut output);
+
+        Ok((output, self.encoded_bytes))
+    }
 }
 
 impl SparseStatementHasher {
@@ -390,8 +583,9 @@ mod tests {
     use super::{
         ConstantCoefficientSparseMatrixEntry, LinearProofTargetCoefficientRepresentation,
         PolynomialRing, SparsePolynomialMatrix, SparsePolynomialMatrixEntry,
-        build_constant_coefficient_sparse_source_matrix, derive_sparse_linear_statement_transcript,
-        transform_sparse_statement_matrix_to_proof_ring,
+        build_constant_coefficient_sparse_source_matrix,
+        derive_dense_compatible_sparse_linear_statement_transcript,
+        derive_sparse_linear_statement_transcript, transform_sparse_statement_matrix_to_proof_ring,
         transform_sparse_target_vector_to_proof_ring,
     };
     use crate::ballot_privacy::{
@@ -682,6 +876,44 @@ mod tests {
         assert_ne!(
             sparse_transcript.public_parameters_and_statement_hash_hex,
             dense_transcript.public_parameters_and_statement_hash_hex
+        );
+    }
+
+    #[test]
+    fn dense_compatible_sparse_transcript_matches_dense_transcript_without_dense_matrix() {
+        let parameter_set = sparse_test_parameters();
+        let proof_encoding = sparse_test_proof_encoding();
+        let sparse_matrix = sparse_test_matrix();
+        let sparse_transcript = derive_dense_compatible_sparse_linear_statement_transcript(
+            &parameter_set,
+            &proof_encoding,
+            &sparse_matrix,
+            &target_vector(),
+            LinearProofTargetCoefficientRepresentation::CanonicalUnsignedSourceModulus,
+            &[3_u8; 32],
+        )
+        .expect("dense-compatible sparse transcript should derive");
+        let dense_transcript = derive_lazer_demo_linear_statement_transcript(
+            &parameter_set,
+            &proof_encoding,
+            &dense_test_matrix(),
+            &target_vector(),
+            LinearProofTargetCoefficientRepresentation::CanonicalUnsignedSourceModulus,
+            &[3_u8; 32],
+        )
+        .expect("dense transcript should derive");
+
+        assert_eq!(
+            sparse_transcript.arithmetic_statement_hash_hex,
+            dense_transcript.arithmetic_statement_hash_hex
+        );
+        assert_eq!(
+            sparse_transcript.public_parameters_and_statement_hash_hex,
+            dense_transcript.public_parameters_and_statement_hash_hex
+        );
+        assert_eq!(
+            sparse_transcript.encoded_statement_bytes,
+            dense_transcript.encoded_statement_bytes
         );
     }
 }
