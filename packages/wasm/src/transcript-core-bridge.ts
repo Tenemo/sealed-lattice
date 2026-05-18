@@ -326,95 +326,26 @@ type KernelFailureResponse = {
     readonly error: CanonicalError;
 };
 
-const transcriptCoreKernelNormalizedSha256HexValues = [
-    '7fb272f285f98a378ee53fc3f857a922415897da7abd93ff12bd42395629db84',
-    'e68ad9a15a76ecff354d4f14ecf0554f5e8e556665b12041f9de4159f43e967f',
-    'e2640736eb4b7985fe20760cb6de0061dc4aa49690c47a05e3bb172670d1c1f2',
-    '203e2ace56c4f4b55d477fcaf15bda338fb8a9ca2a25097a469c1dd06d358146',
-    '390b1d16a23c50225995a49427fb2db54ebe87bec4f9835c9706722fd22aebf3',
-    'd70e11274e11dffc3c500ab3a8acd2df817909edc85a6c3e266674dfdf071a8c',
-    '637c519e4fe1648cc7c366c86e159d3f9b04d08fcebb38bac380690fc31aa995',
-    'eb8e34683e6d6ceb778628e253a8067128a90f95f8351357c6b84f45c7ca33bc',
-    '9b0600143d67d29c44784d99e993972585d588da6eff718917d433947b842ab2',
-    '6e356bbf395c00dbf2a4e468e63f82116f9f4b48e1ea8ac62d3b4ca9ec2507f0',
-    'e99f4c32cf7572473b1fbb1117d052fd1d60627f8f2fc71285a211a4b1693ae4',
-    '8f0fa37a3e8f571be5d788c6666c6d24ae6ba0ecf7ebae5387e6cee2e854e5ad',
-    'aa02821ad2f6e7f01933f48704aea76a128876df2afbd447d36e3faf474b509d',
-    '567d2df11d7941e0b0cf33d5a6ebfb81e04b977c3d1ccfe3d4c6caa6244b142b',
-    '8ca4a23a74fff0cd38691d2d210f72a5a861dfdf67a17b7e73678dc1b85b6367',
-    'ca9c7df4bc0f5730654e9dfa6b233ad533c3dafa0d90ded75dda78f28617d57b',
-    '15112b7920ead0a440a61f76f45042660dfe215a2045e44363a4d844b7241401',
-    '5d1f6a92e4c8e982a2ac12b016db46e131b2aa3beca01b00319b262153f52d25',
-    'ed70c522d98f95dbc30d2c83c4a31c8e8f70925803f1bb050107be708fc1aad1',
-    '6d4fa5f041072fdd39b2d041b804f7b3c907acd92375971a2e9d38eba860eedf',
-    '2141ed25a0aa2e7ddc5a0d6b8c72f6dc07c9208923cc36fb3a0c562a70511182',
-    '287413585146cbe73e28b6932ebe9f3ac66a97723997a6d64a76f68b23e73f7a',
-    '6c75458c6615d7f2d3b6675b01892ea4d186e5e142e320112865600a347ae5f3',
-    '572f2fda7bc64bb7a1061f1bfa097c76cca52f100e921e82f8d30b7be2408ce8',
-    '804ab12b4bfdcacc5cf567f39db9be05e9167a304fee3ff4c8ce032f6cd8c451',
-    '77c9bf2b763c2c77235e62c6ec977eee031d3400b6081b3d18e900de44bc3efc',
-    'b484acc4843eba890eda530e8c451267cbe24fce28022e4d8c190d42f1d9d354',
-    '835cdd96bd6ffab881a53d176261acac59a35d6b5a24173962542be529299b9e',
-    'f898de6a6cd6993467df009656d50af5df86ae8212324385e94721622c0a27cd',
-    'd6912ccce0b059461a265ce080a0bc29b9feb68e1385c69fe011994c1a653fb7',
-    'fab065601bd3bbf54d65dc0065791699a26114f7898798d1af5a0533230226bc',
-    '3e76c9ecda96950a942f6315ea88f1be0a7209b0ce6a2eaaeea68ac6f3b0107c',
-    'd55186a40312c9a08dfebf9ef96b9b54a6934cec47c31fe31c7a5572b4a482b3',
-    'e5974f806c54a4765afeb4d9c5a28959e8187032d0b5a674bde23b5a4be74071',
-    'ad3ce283a108fa0fb2dba16ffd2948d3dd2ac415f543d45ecc7706d1fdfbca45',
-    'e32e1a5b1e4f3710cab62d16946927bb4d26a5b1f2297e7b178fd278a469ec5a',
-    '9d79b58a9ec23c9345eb4ce08d8e277b72208db5ffe940102c5c1e2a94f4ab71',
-    '15ec6fcde404afc33c42173f5d64b51db739d4f5a70497a646b197b77db1e5ce',
-    'd3b2085a01eb670b4d836f5411babdd595b24b59ba8d8bc33ff157b9fe3dd02d',
-    'c334fa5e3818f4c0a0a4a8f595e971c1c73109007d7c4ebd6b50c7a4cfcaf2a4',
-    'e5e554773bf462baaae47c4b66e3df8204742f7752e6b148d1f30f7c02b30340',
-    '5ab92007b6a4c31a9538396aa4a475fb2bf7dd50804309197b87f5cc5f6cd1c9',
-    '6c7879298bc0a76e35a5d6d2fcb7c5039795f26457d235f7b65f6140a9689405',
-    '3fd22ecfe4f39391ea77e4a94e65988909b7baf7fe29cbeefdf8b7a4f7ab7809',
-    'e69214b4a428a34d4f73ab767d50e013401b6ba58132bf60eea17ee52078c355',
-    'd77ccc2cb505e384040b20d2f69a3a7178059daeb7ba06385a9782aa0a5201f1',
-    'e6801dcf533d59fed729d6f02bbce746d4932293476236a75413b50f5124c7ec',
-    '00b6a63fcdb812f93e2074361adf6098e2148bc4075a946f34afdf98f2794e4f',
-    'e3f6b47734f3ab107f6a4d01e44415d9ba8033600f9fbc00331e5078a0a43bc4',
-    '813e3258b6c7d14366b8bb9cc5aefdc1223956acafff9ae49ddfa06c2f3de7d6',
-    '9e61680946c1cd9627a768d8321cfb2dc5409cc5d3f6dc664be2c48b7dccdf1f',
-    '67b6b4f8a9f01d042feffa9e05157124bb725fcf951b6f4a594f477903f41f73',
-    '0589a1ad67171e06bbfe3bb8edc32eb03c255a151f0172b4c447a024e8ccb13f',
-    'e5b1158dbb4cf28456a5a3b068f3a8973eb70585cbcff5afaa551202937919b7',
-    '50f3bd5adc915e43e1b58df62165f3b6cc8d68c84785e3925769e41dc5b35f37',
-    'ee9e015bcc384985070758bb4292fc1ed0e3fc780b7a25cae996d83e96ea80f9',
-    'feb22829dd3c208b9c9cb3adaca77ee25307b9c894850d6923ef832b465b2610',
-    '4c711dc81c70b0ac82b1e5ea89d7d2e49d42cd20f38af79590a3b6c83a78807f',
-    '9562457e0424fd40d90b9a7493acaf351ec397b10e967e83e68f0bd9f128a88d',
-    '5b000f2fdd7f7ccf6db9d91c64ca427a85f905202cbc4c3e2521d3c2d62008f6',
-    '7d68c10468efb9f60361567e0087ed4821988670f503648e60cfdb28ec11b119',
-    'd807255202275e58385160d64a266073cba216ff3e1d863ea55c776f74a158f7',
-    '5a7ad4a4d7ded9894ce36dc46352f5f815cfca04d7f7629b434544194b6a51b2',
-    '0820267a833515aadba4fc21186965b9fd6bfb11f71ee87f5c3168f34c326153',
-    '04751166b468d32fb541b5c0ec8b91250ad4abd3517cb5ca8ed494b07ce2041c',
-    'c21dcd999f066cc09f175c5504c21107bbff71b9e5051074220a9bcd38b507ef',
-    '23aeb78ca6b4c29121fcdcbb7fd14b90853457ff87ee30e2889c4081762abf0c',
-    'dd740f39dbd4322dd35b2d89af8452f91d139baf137dfe148396c7cf09cd3e3c',
-    '84372ba7eed35158c1a4d7c31e851924ee32a70d63c80cca1c9c907b8aac7d49',
-    '110d7e588461ab37f774569e7713f7484ac9d083ee91b353a5f8df5fff6ee688',
-    'dc51e8d92823aeef8058dfe19741110e0c0b205bc5cb92cb49d33f386f24572d',
-    'e708e3f4c1a7bde696c9e0dfb454c75142fa011facb0c91132ed7e6a14c79d81',
-    '7c47432bb8ee9255ae8db072a8e75746e9e3d7c6a76e6c7443616e605885a29e',
-    'ad7f33458ec256b8fea4c42e998819f5068bcb45cb2474f97cf4bc26ffc83444',
-    '25295ab4587ea33a2f635bf11f34a0f7ca5c2ca45084146a82264ff951a6b052',
-    'e904bd1f6b3180c9d8952794c737099d0c02c2e35049099b3f39768041ffe21e',
-    'cec819f374e74b9453c6f10fac1e21181a84fe72a54d0d2f0e6fe2dbd135219d',
-    '8eebdf3c7a32bc495d150e9b2b053c08f2545752da839fea2801d0675b0fe52c',
-    '7707cc43a4a98d75135bd05ec0e1c27469c9f0be0cb2359edd3b4c58fdf5e661',
-    '9b15ba1c3283b5edc36720a47c9a32da5debffb3ac06078a95e5a8967a7788d3',
-    '4c6e4895afb0a5826b723a9b167e0e591cb2b42f8b0d5dd0f49cdc37d61756ae',
-    '0fadcc1df4b89abc6a7f2be650944e588ebfce285d39f10f7688e71d6bbffd65',
-    'ff28503a1daa1824ea9fdb89cc7baaf4f03d944f706bd12a76125ea7e7161b2b',
-    '73691262c72912cb7cf5a9a85644acc39b8b81d7927269c95f52a37eecd11db9',
-    'fd77c6ac8e8ad766ba5e0262181e2c54dfa5c992752400bc36a64ddc9056451c',
-] as const;
-const defaultTranscriptCoreKernelNormalizedSha256HexValues = new Set<string>(
-    transcriptCoreKernelNormalizedSha256HexValues,
+export type TranscriptCoreKernelBuildRunner =
+    | 'githubActionsMacosLatest'
+    | 'githubActionsUbuntuLatest'
+    | 'windowsDeveloperBuild';
+
+type TranscriptCoreKernelDigestManifest = Readonly<
+    Record<TranscriptCoreKernelBuildRunner, string>
+>;
+
+export const currentTranscriptCoreKernelNormalizedSha256HexByBuildRunner: TranscriptCoreKernelDigestManifest =
+    {
+        windowsDeveloperBuild:
+            'ff28503a1daa1824ea9fdb89cc7baaf4f03d944f706bd12a76125ea7e7161b2b',
+        githubActionsUbuntuLatest:
+            '73691262c72912cb7cf5a9a85644acc39b8b81d7927269c95f52a37eecd11db9',
+        githubActionsMacosLatest:
+            'fd77c6ac8e8ad766ba5e0262181e2c54dfa5c992752400bc36a64ddc9056451c',
+    };
+const currentTranscriptCoreKernelNormalizedSha256HexValues = new Set<string>(
+    Object.values(currentTranscriptCoreKernelNormalizedSha256HexByBuildRunner),
 );
 
 const bridgeCanonicalErrorCodeValues = [
@@ -891,7 +822,7 @@ export const createTranscriptCoreKernelLoader = (
             const bytes = await resolveKernelBytes(transcriptCoreKernelUrl);
             const expectedSha256HexValues =
                 options.expectedKernelSha256Hex === undefined
-                    ? defaultTranscriptCoreKernelNormalizedSha256HexValues
+                    ? currentTranscriptCoreKernelNormalizedSha256HexValues
                     : new Set([options.expectedKernelSha256Hex]);
             await verifyKernelIntegrity(bytes, expectedSha256HexValues);
             const instantiatedSource = await WebAssembly.instantiate(bytes, {});

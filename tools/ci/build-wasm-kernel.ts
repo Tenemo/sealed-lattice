@@ -5,24 +5,31 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-import { normalizeTranscriptCoreKernelBytesForDigest } from '../../packages/wasm/src/transcript-core-bridge.js';
+import {
+    currentTranscriptCoreKernelNormalizedSha256HexByBuildRunner,
+    normalizeTranscriptCoreKernelBytesForDigest,
+    type TranscriptCoreKernelBuildRunner,
+} from '../../packages/wasm/src/transcript-core-bridge.js';
 import { isWithinDirectory } from '../internal/files.js';
 
 const repoRoot = path.resolve(
     fileURLToPath(new URL('../../', import.meta.url)),
 );
 const cargoTargetDirectory = path.resolve(repoRoot, 'target');
-const bridgeSourcePath = path.resolve(
-    repoRoot,
-    'packages',
-    'wasm',
-    'src',
-    'transcript-core-bridge.ts',
-);
-const expectedKernelDigestListPattern =
-    /const transcriptCoreKernelNormalizedSha256HexValues\s*=\s*\[([\s\S]*?)\]\s*as const/u;
-const expectedKernelDigestPattern = /['"]([a-f0-9]{64})['"]/gu;
 const encodedRustflagSeparator = '\x1f';
+const currentTranscriptCoreKernelBuildRunners = [
+    'windowsDeveloperBuild',
+    'githubActionsUbuntuLatest',
+    'githubActionsMacosLatest',
+] as const satisfies readonly TranscriptCoreKernelBuildRunner[];
+const currentTranscriptCoreKernelNormalizedSha256HexValues = new Set<string>(
+    currentTranscriptCoreKernelBuildRunners.map(
+        (buildRunner) =>
+            currentTranscriptCoreKernelNormalizedSha256HexByBuildRunner[
+                buildRunner
+            ],
+    ),
+);
 
 export const resolveOutputFilePath = (
     commandLineArguments: readonly string[],
@@ -130,46 +137,27 @@ const hashFileSha256Hex = async (filePath: string): Promise<string> => {
         .digest('hex');
 };
 
-const readExpectedKernelSha256HexValues = async (): Promise<
-    ReadonlySet<string>
-> => {
-    const sourceText = await readFile(bridgeSourcePath, 'utf8');
-    const listMatch = expectedKernelDigestListPattern.exec(sourceText);
-    if (listMatch?.[1] === undefined) {
-        throw new Error(
-            'Could not find transcriptCoreKernelNormalizedSha256HexValues in the WASM bridge source.',
-        );
-    }
-    const expectedSha256HexValues = new Set<string>();
-    for (const digestMatch of listMatch[1].matchAll(
-        expectedKernelDigestPattern,
-    )) {
-        const expectedSha256Hex = digestMatch[1];
-        if (expectedSha256Hex !== undefined) {
-            expectedSha256HexValues.add(expectedSha256Hex);
-        }
-    }
-    if (expectedSha256HexValues.size === 0) {
-        throw new Error(
-            'Could not find any transcript-core kernel digest values in the WASM bridge source.',
-        );
-    }
-
-    return expectedSha256HexValues;
-};
+const formatCurrentKernelDigestManifest = (): string =>
+    currentTranscriptCoreKernelBuildRunners
+        .map(
+            (buildRunner) =>
+                `${buildRunner}=${currentTranscriptCoreKernelNormalizedSha256HexByBuildRunner[buildRunner]}`,
+        )
+        .join(', ');
 
 const verifyKernelDigest = async (outputFilePath: string): Promise<string> => {
-    const [actualSha256Hex, expectedSha256HexValues] = await Promise.all([
-        hashFileSha256Hex(outputFilePath),
-        readExpectedKernelSha256HexValues(),
-    ]);
-    if (!expectedSha256HexValues.has(actualSha256Hex)) {
+    const actualSha256Hex = await hashFileSha256Hex(outputFilePath);
+    if (
+        !currentTranscriptCoreKernelNormalizedSha256HexValues.has(
+            actualSha256Hex,
+        )
+    ) {
         throw new Error(
             [
                 'Transcript-core WASM normalized digest mismatch.',
-                `Expected one of ${Array.from(expectedSha256HexValues).join(', ')}.`,
+                `Expected one current-kernel digest from ${formatCurrentKernelDigestManifest()}.`,
                 `Received ${actualSha256Hex}.`,
-                'Update transcriptCoreKernelNormalizedSha256HexValues in packages/wasm/src/transcript-core-bridge.ts after reviewing the kernel change.',
+                'Update currentTranscriptCoreKernelNormalizedSha256HexByBuildRunner in packages/wasm/src/transcript-core-bridge.ts after reviewing the kernel change.',
             ].join(' '),
         );
     }

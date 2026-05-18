@@ -23,8 +23,10 @@ import {
 } from '../../src/index';
 import {
     createTranscriptCoreKernelLoader,
+    currentTranscriptCoreKernelNormalizedSha256HexByBuildRunner,
     normalizeTranscriptCoreKernelBytesForDigest,
     TranscriptCoreKernelCommandError,
+    type TranscriptCoreKernelBuildRunner,
     type TranscriptCoreKernel,
 } from '../../src/transcript-core-bridge';
 
@@ -322,6 +324,30 @@ afterEach(() => {
 });
 
 describe('transcript-core kernel in Node', () => {
+    it('keeps the current kernel digest manifest scoped to supported build runners', () => {
+        const buildRunners = [
+            'githubActionsMacosLatest',
+            'githubActionsUbuntuLatest',
+            'windowsDeveloperBuild',
+        ] as const satisfies readonly TranscriptCoreKernelBuildRunner[];
+        const digestEntries = buildRunners.map((buildRunner) => [
+            buildRunner,
+            currentTranscriptCoreKernelNormalizedSha256HexByBuildRunner[
+                buildRunner
+            ],
+        ]);
+
+        expect(
+            digestEntries.map(([buildRunner]) => buildRunner).sort(),
+        ).toEqual([...buildRunners].sort());
+        expect(new Set(digestEntries.map(([, digest]) => digest)).size).toBe(
+            digestEntries.length,
+        );
+        for (const [, digest] of digestEntries) {
+            expect(digest).toMatch(/^[a-f0-9]{64}$/u);
+        }
+    });
+
     it('normalizes host-specific Rust source paths before digesting', () => {
         const windowsBytes = textEncoder.encode(
             [
