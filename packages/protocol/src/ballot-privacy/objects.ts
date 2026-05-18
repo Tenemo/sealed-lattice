@@ -95,7 +95,7 @@ type ClaimBearingBallotPackageVerificationShell = ClaimBearingBallotPackage & {
 };
 
 const unavailableProofBackendMessage =
-    'Ballot privacy proof verification requires the frozen LaZer-style lattice proof backend, which is not implemented in this build.';
+    'Ballot privacy proof verification requires the frozen linear lattice proof backend, which is not implemented in this build.';
 const protocolDigestPattern = /^[a-f0-9]{128}$/u;
 const proofBytesHexPattern = /^(?:[a-f0-9]{2})+$/u;
 const proofBytesHexAllowEmptyPattern = /^(?:[a-f0-9]{2})*$/u;
@@ -159,7 +159,7 @@ const ballotProofComponentProofPolicyById = {
     BallotProofComponentProofPolicy
 >;
 
-const requiredLazerPortComponents = [
+const requiredPortableBackendComponents = [
     'generated linear proof parameters from lin-codegen.sage',
     'portable polynomial ring arithmetic for Z_q[X]/(X^d + 1)',
     'portable polynomial vector and matrix arithmetic',
@@ -175,35 +175,12 @@ const requiredLazerPortComponents = [
     'browser-safe prover randomness source',
 ] as const;
 
-const upstreamLazerReferenceFiles = [
-    'src/lin-proofs.c',
-    'src/lnp.c',
-    'src/lnp-tbox.c',
-    'src/lnp-quad.c',
-    'src/lnp-quad-many.c',
-    'src/lnp-quad-eval.c',
-    'src/abdlop.c',
-    'src/poly.c',
-    'src/polyvec.c',
-    'src/polymat.c',
-    'src/spolyvec.c',
-    'src/spolymat.c',
-    'src/coder.c',
-    'src/rejection.c',
-    'src/rng.c',
-    'src/shake128.c',
-    'scripts/lin-codegen.sage',
-] as const;
-
 export const describeBallotPrivacyProofBackend =
     (): BallotPrivacyProofBackendStatus => ({
-        backendName: 'LaZer-style linear lattice proof backend',
+        backendName: 'linear lattice proof backend',
         backendAvailable: false,
-        upstreamReference: 'lazer-crypto/lazer',
-        upstreamDirectDependencyUsableInBrowser: false,
         portableRustWasmPortRequired: true,
-        requiredComponents: requiredLazerPortComponents,
-        upstreamReferenceFiles: upstreamLazerReferenceFiles,
+        requiredComponents: requiredPortableBackendComponents,
         blockedReason: unavailableProofBackendMessage,
     });
 
@@ -718,7 +695,7 @@ export const createBallotProofRecordShell = (input: {
             ? {}
             : { targetVectorDigest: input.targetVectorDigest }),
         ballotProofProfileDigest: input.statement.ballotProofProfileDigest,
-        proofBackend: 'LaZerStyleLocalLatticeRelation',
+        proofBackend: 'LocalLinearLatticeRelation',
         challengeDigest,
         proofRoot: input.proofRoot,
         proofBytesDigest: input.proofBytesDigest,
@@ -799,7 +776,7 @@ const collectReceiverKeyProofStructuralRefusals = (
     if (
         receiverKeyProof.objectType !== 'ReceiverKeyProof' ||
         receiverKeyProof.objectVersion !== 1 ||
-        receiverKeyProof.proofBackend !== 'LaZerStyleLocalLatticeRelation' ||
+        receiverKeyProof.proofBackend !== 'LocalLinearLatticeRelation' ||
         !protocolDigestPattern.test(receiverKeyProof.proofRoot) ||
         (receiverKeyProof.backendStatementDigest !== undefined &&
             !protocolDigestPattern.test(
@@ -1005,7 +982,7 @@ const collectBallotProofStructuralRefusals = (
     if (
         ballotProof.objectType !== 'BallotProofRecord' ||
         ballotProof.objectVersion !== 1 ||
-        ballotProof.proofBackend !== 'LaZerStyleLocalLatticeRelation' ||
+        ballotProof.proofBackend !== 'LocalLinearLatticeRelation' ||
         (ballotProof.backendStatementDigest !== undefined &&
             !protocolDigestPattern.test(ballotProof.backendStatementDigest)) ||
         (ballotProof.componentBundleStatementDigest !== undefined &&
@@ -2014,7 +1991,7 @@ const collectBallotProofComponentProofBundleRefusals = (input: {
             componentProof.objectType !== 'BallotProofComponentProofRecord' ||
             componentProof.objectVersion !== 1 ||
             componentProof.componentId !== expectedComponentId ||
-            componentProof.proofBackend !== 'LaZerStyleLocalLatticeRelation' ||
+            componentProof.proofBackend !== 'LocalLinearLatticeRelation' ||
             !protocolDigestPattern.test(
                 componentProof.componentProofRecordDigest,
             ) ||
@@ -2282,7 +2259,7 @@ const collectClaimBearingPackageStructuralRefusals = (
     );
 
     if (
-        ballotPackage.objectType !== 'BallotPackage' ||
+        ballotPackage.objectType !== 'ClaimBearingBallotPackage' ||
         ballotPackage.objectVersion !== 1 ||
         ballotPackage.ballotPackageDigest !== statement.ballotPackageDigest
     ) {

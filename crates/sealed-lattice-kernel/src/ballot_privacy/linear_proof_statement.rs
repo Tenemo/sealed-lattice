@@ -6,7 +6,7 @@ use crate::{
 };
 
 use super::{
-    linear_proof_parameters::{LazerDemoProofEncoding, LinearProofParameterSet},
+    linear_proof_parameters::{LinearProofEncoding, LinearProofParameterSet},
     linear_proof_transcript::shake128_32,
     polynomial_matrix::PolynomialMatrix,
     polynomial_ring::PolynomialRing,
@@ -14,7 +14,7 @@ use super::{
 };
 
 #[cfg(test)]
-const LAZER_DEMO_ORIGINAL_MODULUS_INVERSE_MOD_PROOF_MODULUS: i128 = 14_960_510_030_049_216;
+const LINEAR_PROOF_ORIGINAL_MODULUS_INVERSE_MOD_PROOF_MODULUS: i128 = 14_960_510_030_049_216;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -36,9 +36,9 @@ pub struct LazerDemoLinearStatementTranscript {
     pub public_parameters_and_statement_hash_hex: String,
 }
 
-pub fn derive_lazer_demo_linear_statement_transcript(
+pub fn derive_linear_statement_transcript(
     parameter_set: &LinearProofParameterSet,
-    proof_encoding: &LazerDemoProofEncoding,
+    proof_encoding: &LinearProofEncoding,
     statement_matrix_coefficients: &[Vec<Vec<u64>>],
     target_vector_coefficients: &[Vec<u64>],
     target_coefficient_representation: LinearProofTargetCoefficientRepresentation,
@@ -91,9 +91,9 @@ pub fn derive_lazer_demo_linear_statement_transcript(
     })
 }
 
-pub(crate) fn derive_lazer_demo_transformed_statement_matrix(
+pub(crate) fn derive_transformed_statement_matrix(
     parameter_set: &LinearProofParameterSet,
-    proof_encoding: &LazerDemoProofEncoding,
+    proof_encoding: &LinearProofEncoding,
     statement_matrix_coefficients: &[Vec<Vec<u64>>],
     target_vector_coefficients: &[Vec<u64>],
     _target_coefficient_representation: LinearProofTargetCoefficientRepresentation,
@@ -124,9 +124,9 @@ pub(crate) fn derive_lazer_demo_transformed_statement_matrix(
     )
 }
 
-pub(crate) fn derive_lazer_demo_transformed_target_vector(
+pub(crate) fn derive_transformed_target_vector(
     parameter_set: &LinearProofParameterSet,
-    proof_encoding: &LazerDemoProofEncoding,
+    proof_encoding: &LinearProofEncoding,
     statement_matrix_coefficients: &[Vec<Vec<u64>>],
     target_vector_coefficients: &[Vec<u64>],
     target_coefficient_representation: LinearProofTargetCoefficientRepresentation,
@@ -156,7 +156,7 @@ pub(crate) fn derive_lazer_demo_transformed_target_vector(
 
 fn validate_demo_statement_inputs(
     parameter_set: &LinearProofParameterSet,
-    proof_encoding: &LazerDemoProofEncoding,
+    proof_encoding: &LinearProofEncoding,
     statement_matrix_coefficients: &[Vec<Vec<u64>>],
     target_vector_coefficients: &[Vec<u64>],
     public_randomness: &[u8],
@@ -218,7 +218,7 @@ pub(crate) fn validate_source_polynomial(
 fn transform_statement_matrix_to_proof_ring(
     statement_matrix_coefficients: &[Vec<Vec<u64>>],
     parameter_set: &LinearProofParameterSet,
-    proof_encoding: &LazerDemoProofEncoding,
+    proof_encoding: &LinearProofEncoding,
 ) -> CanonicalResult<Vec<Vec<u64>>> {
     let source_polynomial_split_factor =
         source_polynomial_split_factor(parameter_set, proof_encoding)?;
@@ -275,7 +275,7 @@ fn transform_statement_matrix_to_proof_ring(
 pub(crate) fn transform_target_vector_to_proof_ring(
     target_vector_coefficients: &[Vec<u64>],
     parameter_set: &LinearProofParameterSet,
-    proof_encoding: &LazerDemoProofEncoding,
+    proof_encoding: &LinearProofEncoding,
     target_coefficient_representation: LinearProofTargetCoefficientRepresentation,
 ) -> CanonicalResult<Vec<Vec<u64>>> {
     let source_polynomial_split_factor =
@@ -389,7 +389,7 @@ pub(crate) fn rotate_left_negacyclic_signed_polynomial(polynomial: &[i128]) -> V
 pub(crate) fn scale_signed_polynomial_by_source_modulus_inverse(
     signed_polynomial: &[i128],
     parameter_set: &LinearProofParameterSet,
-    proof_encoding: &LazerDemoProofEncoding,
+    proof_encoding: &LinearProofEncoding,
 ) -> CanonicalResult<Vec<u64>> {
     let source_modulus_inverse = source_modulus_inverse_mod_proof_modulus(
         parameter_set.coefficient_modulus,
@@ -470,7 +470,7 @@ fn positive_mod_i128(value: i128, modulus: i128) -> CanonicalResult<u64> {
 
 pub(crate) fn source_polynomial_split_factor(
     parameter_set: &LinearProofParameterSet,
-    proof_encoding: &LazerDemoProofEncoding,
+    proof_encoding: &LinearProofEncoding,
 ) -> CanonicalResult<usize> {
     if parameter_set.proof_system_ring_degree != proof_encoding.ring_degree {
         return Err(invalid_statement(
@@ -499,7 +499,7 @@ pub(crate) fn source_polynomial_split_factor(
 fn encode_transformed_statement(
     transformed_statement_matrix: &[Vec<u64>],
     transformed_target_vector: &[Vec<u64>],
-    proof_encoding: &LazerDemoProofEncoding,
+    proof_encoding: &LinearProofEncoding,
 ) -> CanonicalResult<Vec<u8>> {
     let mut writer = StatementBitWriter::new();
     for polynomial in transformed_statement_matrix
@@ -598,14 +598,14 @@ fn invalid_statement(message: impl Into<String>) -> CanonicalError {
 #[cfg(test)]
 mod tests {
     use super::{
-        LAZER_DEMO_ORIGINAL_MODULUS_INVERSE_MOD_PROOF_MODULUS,
-        LinearProofTargetCoefficientRepresentation, derive_lazer_demo_linear_statement_transcript,
-        derive_lazer_demo_transformed_target_vector, source_modulus_inverse_mod_proof_modulus,
+        LINEAR_PROOF_ORIGINAL_MODULUS_INVERSE_MOD_PROOF_MODULUS,
+        LinearProofTargetCoefficientRepresentation, derive_linear_statement_transcript,
+        derive_transformed_target_vector, source_modulus_inverse_mod_proof_modulus,
         source_polynomial_split_factor,
     };
     use crate::{
         ballot_privacy::linear_proof_parameters::{
-            LazerDemoProofEncoding, LinearProofParameterSet, demo_linear_proof_encoding_contract,
+            LinearProofEncoding, LinearProofParameterSet, demo_linear_proof_encoding_contract,
             receiver_key_linear_parameter_contract,
         },
         transcript_core::decode_hex,
@@ -639,7 +639,7 @@ mod tests {
         let parameter_set: LinearProofParameterSet =
             serde_json::from_value(vector_case["parameterSet"].clone())
                 .expect("parameter set should deserialize");
-        let proof_encoding: LazerDemoProofEncoding =
+        let proof_encoding: LinearProofEncoding =
             serde_json::from_value(vector_case["proofEncoding"].clone())
                 .expect("proof encoding should deserialize");
         let statement_matrix_coefficients: Vec<Vec<Vec<u64>>> =
@@ -655,7 +655,7 @@ mod tests {
         )
         .expect("public randomness should decode");
 
-        let transcript = derive_lazer_demo_linear_statement_transcript(
+        let transcript = derive_linear_statement_transcript(
             &parameter_set,
             &proof_encoding,
             &statement_matrix_coefficients,
@@ -698,7 +698,7 @@ mod tests {
             let parameter_set: LinearProofParameterSet =
                 serde_json::from_value(vector_case["parameterSet"].clone())
                     .expect("parameter set should deserialize");
-            let proof_encoding: LazerDemoProofEncoding =
+            let proof_encoding: LinearProofEncoding =
                 serde_json::from_value(vector_case["proofEncoding"].clone())
                     .expect("proof encoding should deserialize");
             let statement_matrix_coefficients: Vec<Vec<Vec<u64>>> =
@@ -714,7 +714,7 @@ mod tests {
             )
             .expect("public randomness should decode");
 
-            derive_lazer_demo_linear_statement_transcript(
+            derive_linear_statement_transcript(
                 &parameter_set,
                 &proof_encoding,
                 &statement_matrix_coefficients,
@@ -751,7 +751,7 @@ mod tests {
             expected_proof_size_bytes: None,
         };
         let zero_statement_matrix = vec![vec![vec![0_u64; 4]]];
-        let transformed_target_vector = derive_lazer_demo_transformed_target_vector(
+        let transformed_target_vector = derive_transformed_target_vector(
             &parameter_set,
             &proof_encoding,
             &zero_statement_matrix,
@@ -794,7 +794,7 @@ mod tests {
             expected_proof_size_bytes: None,
         };
         let zero_statement_matrix = vec![vec![vec![0_u64; 4]]];
-        let transformed_target_vector = derive_lazer_demo_transformed_target_vector(
+        let transformed_target_vector = derive_transformed_target_vector(
             &parameter_set,
             &proof_encoding,
             &zero_statement_matrix,
@@ -835,7 +835,7 @@ mod tests {
 
         assert_eq!(
             demo_inverse,
-            LAZER_DEMO_ORIGINAL_MODULUS_INVERSE_MOD_PROOF_MODULUS
+            LINEAR_PROOF_ORIGINAL_MODULUS_INVERSE_MOD_PROOF_MODULUS
         );
         assert_ne!(demo_inverse, receiver_key_inverse);
         assert_eq!(
@@ -864,7 +864,7 @@ mod tests {
         let target_vector_coefficients = vec![zero_polynomial; parameter_set.statement_rows];
         let public_randomness = [7_u8; 32];
 
-        let transcript = derive_lazer_demo_linear_statement_transcript(
+        let transcript = derive_linear_statement_transcript(
             &parameter_set,
             &proof_encoding,
             &statement_matrix_coefficients,

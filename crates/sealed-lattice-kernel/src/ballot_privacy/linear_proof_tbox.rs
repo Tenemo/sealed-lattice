@@ -6,15 +6,14 @@ use crate::{
 };
 
 use super::{
-    linear_proof_norms::validate_lazer_demo_linear_proof_norms,
-    linear_proof_parameters::LazerDemoProofEncoding, linear_proof_transcript::shake128_32,
-    proof_coder::DecodedLazerDemoLinearProof,
+    linear_proof_norms::validate_linear_proof_norms, linear_proof_parameters::LinearProofEncoding,
+    linear_proof_transcript::shake128_32, proof_coder::DecodedLazerDemoLinearProof,
 };
 
-pub const LAZER_DEMO_TBOX_Z34_TARGET_VECTOR_LENGTH: usize = 9;
-pub const LAZER_DEMO_TBOX_GENERATOR_VECTOR_OFFSET: usize = 9;
-pub const LAZER_DEMO_TBOX_GENERATOR_VECTOR_LENGTH: usize = 2;
-pub const LAZER_DEMO_TBOX_HASH_MASK_ZERO_COEFFICIENTS: &[usize] = &[0, 32];
+pub const TBOX_Z34_TARGET_VECTOR_LENGTH: usize = 9;
+pub const TBOX_GENERATOR_VECTOR_OFFSET: usize = 9;
+pub const TBOX_GENERATOR_VECTOR_LENGTH: usize = 2;
+pub const TBOX_HASH_MASK_ZERO_COEFFICIENTS: &[usize] = &[0, 32];
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -25,18 +24,18 @@ pub struct LazerDemoTboxPublicCheckSummary {
     pub generator_challenge_hash: String,
 }
 
-pub fn validate_lazer_demo_tbox_public_checks(
+pub fn validate_linear_proof_tbox_public_checks(
     base_transcript_hash: &[u8; 32],
     decoded_proof: &DecodedLazerDemoLinearProof,
-    proof_encoding: &LazerDemoProofEncoding,
+    proof_encoding: &LinearProofEncoding,
 ) -> CanonicalResult<LazerDemoTboxPublicCheckSummary> {
     proof_encoding.validate()?;
-    validate_lazer_demo_linear_proof_norms(decoded_proof, proof_encoding)?;
+    validate_linear_proof_norms(decoded_proof, proof_encoding)?;
     validate_hash_mask_zero_positions(decoded_proof, proof_encoding)?;
 
     let target_commitment_vector = decoded_proof.commitment_target_vector();
-    let expected_minimum_target_length = LAZER_DEMO_TBOX_GENERATOR_VECTOR_OFFSET
-        .checked_add(LAZER_DEMO_TBOX_GENERATOR_VECTOR_LENGTH)
+    let expected_minimum_target_length = TBOX_GENERATOR_VECTOR_OFFSET
+        .checked_add(TBOX_GENERATOR_VECTOR_LENGTH)
         .ok_or_else(|| invalid_tbox("tbox target vector length overflowed"))?;
     if target_commitment_vector.len() < expected_minimum_target_length {
         return Err(invalid_tbox(
@@ -45,13 +44,13 @@ pub fn validate_lazer_demo_tbox_public_checks(
     }
 
     let z34_challenge_encoding = encode_uniform_polynomial_vector(
-        &target_commitment_vector[..LAZER_DEMO_TBOX_Z34_TARGET_VECTOR_LENGTH],
+        &target_commitment_vector[..TBOX_Z34_TARGET_VECTOR_LENGTH],
         proof_encoding,
     )?;
     let z34_challenge_hash = shake128_32(&[base_transcript_hash, &z34_challenge_encoding]);
 
-    let generator_range_start = LAZER_DEMO_TBOX_GENERATOR_VECTOR_OFFSET;
-    let generator_range_end = generator_range_start + LAZER_DEMO_TBOX_GENERATOR_VECTOR_LENGTH;
+    let generator_range_start = TBOX_GENERATOR_VECTOR_OFFSET;
+    let generator_range_end = generator_range_start + TBOX_GENERATOR_VECTOR_LENGTH;
     let generator_challenge_encoding = encode_uniform_polynomial_vector(
         &target_commitment_vector[generator_range_start..generator_range_end],
         proof_encoding,
@@ -69,7 +68,7 @@ pub fn validate_lazer_demo_tbox_public_checks(
 
 fn validate_hash_mask_zero_positions(
     decoded_proof: &DecodedLazerDemoLinearProof,
-    proof_encoding: &LazerDemoProofEncoding,
+    proof_encoding: &LinearProofEncoding,
 ) -> CanonicalResult<()> {
     let hash_mask_vector = decoded_proof.hash_mask_vector();
     if hash_mask_vector.len() != proof_encoding.hash_mask_vector_length {
@@ -84,7 +83,7 @@ fn validate_hash_mask_zero_positions(
                 "tbox hash-mask polynomial degree does not match the proof encoding",
             ));
         }
-        for coefficient_index in LAZER_DEMO_TBOX_HASH_MASK_ZERO_COEFFICIENTS {
+        for coefficient_index in TBOX_HASH_MASK_ZERO_COEFFICIENTS {
             if *coefficient_index >= polynomial.len() {
                 return Err(invalid_tbox(
                     "tbox hash-mask zero coefficient index is outside the ring degree",
@@ -103,7 +102,7 @@ fn validate_hash_mask_zero_positions(
 
 fn encode_uniform_polynomial_vector(
     polynomials: &[Vec<u64>],
-    proof_encoding: &LazerDemoProofEncoding,
+    proof_encoding: &LinearProofEncoding,
 ) -> CanonicalResult<Vec<u8>> {
     let mut writer = TboxBitWriter::new();
     for polynomial in polynomials {
@@ -194,18 +193,17 @@ fn invalid_tbox(message: impl Into<String>) -> CanonicalError {
 
 #[cfg(test)]
 mod tests {
-    use super::validate_lazer_demo_tbox_public_checks;
+    use super::validate_linear_proof_tbox_public_checks;
     use crate::{
         ballot_privacy::{
-            linear_proof_parameters::LazerDemoProofEncoding,
-            proof_coder::decode_lazer_demo_linear_proof,
+            linear_proof_parameters::LinearProofEncoding, proof_coder::decode_linear_proof,
         },
         transcript_core::decode_hex,
     };
 
     fn decoded_valid_proof() -> (
         crate::ballot_privacy::proof_coder::DecodedLazerDemoLinearProof,
-        LazerDemoProofEncoding,
+        LinearProofEncoding,
     ) {
         let vectors: serde_json::Value = serde_json::from_str(include_str!(
             "../../../../test-vectors/ballot-privacy/proof-backend-linear-vectors.json"
@@ -217,15 +215,15 @@ mod tests {
             .iter()
             .find(|vector_case| vector_case["caseName"] == "valid-small-linear-proof")
             .expect("valid generated vector should exist");
-        let proof_encoding: LazerDemoProofEncoding =
+        let proof_encoding: LinearProofEncoding =
             serde_json::from_value(vector_case["proofEncoding"].clone())
                 .expect("proof encoding should deserialize");
         let proof_hex = vector_case["proofHex"]
             .as_str()
             .expect("proof hex should be present");
         let proof_bytes = decode_hex(proof_hex).expect("proof bytes should decode");
-        let decoded_proof = decode_lazer_demo_linear_proof(&proof_bytes, &proof_encoding)
-            .expect("valid proof should decode");
+        let decoded_proof =
+            decode_linear_proof(&proof_bytes, &proof_encoding).expect("valid proof should decode");
 
         (decoded_proof, proof_encoding)
     }
@@ -235,7 +233,7 @@ mod tests {
         let (decoded_proof, proof_encoding) = decoded_valid_proof();
         let base_transcript_hash = [0_u8; 32];
 
-        let summary = validate_lazer_demo_tbox_public_checks(
+        let summary = validate_linear_proof_tbox_public_checks(
             &base_transcript_hash,
             &decoded_proof,
             &proof_encoding,
@@ -254,7 +252,7 @@ mod tests {
         decoded_proof.hash_mask_vector_mut()[0][0] = 1;
         let base_transcript_hash = [0_u8; 32];
 
-        let error = validate_lazer_demo_tbox_public_checks(
+        let error = validate_linear_proof_tbox_public_checks(
             &base_transcript_hash,
             &decoded_proof,
             &proof_encoding,
@@ -271,13 +269,13 @@ mod tests {
         let mut different_base_hash = [0_u8; 32];
         different_base_hash[0] = 1;
 
-        let zero_base_summary = validate_lazer_demo_tbox_public_checks(
+        let zero_base_summary = validate_linear_proof_tbox_public_checks(
             &zero_base_hash,
             &decoded_proof,
             &proof_encoding,
         )
         .expect("valid proof should pass public tbox checks");
-        let different_base_summary = validate_lazer_demo_tbox_public_checks(
+        let different_base_summary = validate_linear_proof_tbox_public_checks(
             &different_base_hash,
             &decoded_proof,
             &proof_encoding,
@@ -298,7 +296,7 @@ mod tests {
     fn z34_challenge_hash_binds_z34_target_slice() {
         let (mut decoded_proof, proof_encoding) = decoded_valid_proof();
         let base_transcript_hash = [0_u8; 32];
-        let original_summary = validate_lazer_demo_tbox_public_checks(
+        let original_summary = validate_linear_proof_tbox_public_checks(
             &base_transcript_hash,
             &decoded_proof,
             &proof_encoding,
@@ -308,7 +306,7 @@ mod tests {
             (decoded_proof.commitment_target_vector()[0][0] + 1)
                 % proof_encoding.coefficient_modulus;
 
-        let mutated_summary = validate_lazer_demo_tbox_public_checks(
+        let mutated_summary = validate_linear_proof_tbox_public_checks(
             &base_transcript_hash,
             &decoded_proof,
             &proof_encoding,
@@ -325,19 +323,17 @@ mod tests {
     fn generator_challenge_hash_binds_generator_target_slice_after_z34_hash() {
         let (mut decoded_proof, proof_encoding) = decoded_valid_proof();
         let base_transcript_hash = [0_u8; 32];
-        let original_summary = validate_lazer_demo_tbox_public_checks(
+        let original_summary = validate_linear_proof_tbox_public_checks(
             &base_transcript_hash,
             &decoded_proof,
             &proof_encoding,
         )
         .expect("valid proof should pass public tbox checks");
-        decoded_proof.commitment_target_vector_mut()
-            [super::LAZER_DEMO_TBOX_GENERATOR_VECTOR_OFFSET][0] = (decoded_proof
-            .commitment_target_vector()[super::LAZER_DEMO_TBOX_GENERATOR_VECTOR_OFFSET][0]
-            + 1)
-            % proof_encoding.coefficient_modulus;
+        decoded_proof.commitment_target_vector_mut()[super::TBOX_GENERATOR_VECTOR_OFFSET][0] =
+            (decoded_proof.commitment_target_vector()[super::TBOX_GENERATOR_VECTOR_OFFSET][0] + 1)
+                % proof_encoding.coefficient_modulus;
 
-        let mutated_summary = validate_lazer_demo_tbox_public_checks(
+        let mutated_summary = validate_linear_proof_tbox_public_checks(
             &base_transcript_hash,
             &decoded_proof,
             &proof_encoding,

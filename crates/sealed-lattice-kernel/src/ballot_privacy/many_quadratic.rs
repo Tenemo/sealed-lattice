@@ -1,29 +1,29 @@
 use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
 
 use super::{
-    lazer_demo_public_parameters::LAZER_DEMO_PROOF_COEFFICIENT_BIT_LENGTH,
-    lazer_demo_quadratic::LazerDemoQuadraticEquation,
-    lazer_demo_rng::sample_lazer_demo_uniform_u64_values,
-    lazer_demo_tbox_relations::{
-        LAZER_DEMO_TBOX_QUADRATIC_EVALUATION_MESSAGE_LENGTH,
-        LAZER_DEMO_TBOX_QUADRATIC_MANY_MESSAGE_LENGTH, LazerDemoTboxRelationAccumulatorSet,
-        constant_polynomial, lazer_demo_tbox_proof_ring, lazer_demo_tbox_quadratic_many_dimension,
-    },
+    linear_proof_public_parameters::LINEAR_PROOF_PROOF_COEFFICIENT_BIT_LENGTH,
+    linear_proof_rng::sample_linear_proof_uniform_u64_values,
     polynomial_ring::PolynomialRing,
+    quadratic_equation::LinearProofQuadraticEquation,
+    tbox_relations::{
+        TBOX_QUADRATIC_EVALUATION_MESSAGE_LENGTH, TBOX_QUADRATIC_MANY_MESSAGE_LENGTH,
+        TboxRelationAccumulatorSet, constant_polynomial, linear_proof_tbox_proof_ring,
+        linear_proof_tbox_quadratic_many_dimension,
+    },
 };
 
-const LAZER_DEMO_TBOX_HASH_MASK_POLYNOMIALS: usize = 2;
+const TBOX_HASH_MASK_POLYNOMIALS: usize = 2;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct LazerDemoManyQuadraticFold {
-    pub(crate) folded_equation: LazerDemoQuadraticEquation,
+pub(crate) struct ManyQuadraticFold {
+    pub(crate) folded_equation: LinearProofQuadraticEquation,
     pub(crate) challenge_polynomials: Vec<Vec<u64>>,
 }
 
-pub(crate) fn build_lazer_demo_many_quadratic_equations(
-    accumulator_set: &LazerDemoTboxRelationAccumulatorSet,
+pub(crate) fn build_many_quadratic_equations(
+    accumulator_set: &TboxRelationAccumulatorSet,
     hash_mask_vector: &[Vec<u64>],
-) -> CanonicalResult<Vec<LazerDemoQuadraticEquation>> {
+) -> CanonicalResult<Vec<LinearProofQuadraticEquation>> {
     let folded_tbox_equations = accumulator_set.auto_folded_equations()?;
     if folded_tbox_equations.len() != 4 {
         return Err(invalid_many_quadratic(
@@ -31,9 +31,9 @@ pub(crate) fn build_lazer_demo_many_quadratic_equations(
         ));
     }
     let proof_ring = folded_tbox_equations[0].ring();
-    validate_lazer_demo_hash_mask_vector(hash_mask_vector, proof_ring)?;
+    validate_linear_proof_hash_mask_vector(hash_mask_vector, proof_ring)?;
     let evaluation_dimension = folded_tbox_equations[0].dimension();
-    if evaluation_dimension < 2 * LAZER_DEMO_TBOX_QUADRATIC_EVALUATION_MESSAGE_LENGTH
+    if evaluation_dimension < 2 * TBOX_QUADRATIC_EVALUATION_MESSAGE_LENGTH
         || !evaluation_dimension.is_multiple_of(2)
     {
         return Err(invalid_many_quadratic(
@@ -41,13 +41,13 @@ pub(crate) fn build_lazer_demo_many_quadratic_equations(
         ));
     }
     let short_response_message_length =
-        evaluation_dimension / 2 - LAZER_DEMO_TBOX_QUADRATIC_EVALUATION_MESSAGE_LENGTH;
+        evaluation_dimension / 2 - TBOX_QUADRATIC_EVALUATION_MESSAGE_LENGTH;
     let many_quadratic_dimension =
-        2 * (short_response_message_length + LAZER_DEMO_TBOX_QUADRATIC_MANY_MESSAGE_LENGTH);
+        2 * (short_response_message_length + TBOX_QUADRATIC_MANY_MESSAGE_LENGTH);
 
     let hash_mask_linear_position_base = evaluation_dimension;
     let mut many_quadratic_equations = Vec::with_capacity(folded_tbox_equations.len());
-    for hash_mask_index in 0..LAZER_DEMO_TBOX_HASH_MASK_POLYNOMIALS {
+    for hash_mask_index in 0..TBOX_HASH_MASK_POLYNOMIALS {
         let expanded_equation =
             folded_tbox_equations[hash_mask_index].resize_dimension(many_quadratic_dimension)?;
         let linked_equation = expanded_equation
@@ -59,7 +59,7 @@ pub(crate) fn build_lazer_demo_many_quadratic_equations(
         many_quadratic_equations.push(linked_equation);
     }
 
-    for beta_norm_equation in &folded_tbox_equations[LAZER_DEMO_TBOX_HASH_MASK_POLYNOMIALS..] {
+    for beta_norm_equation in &folded_tbox_equations[TBOX_HASH_MASK_POLYNOMIALS..] {
         many_quadratic_equations
             .push(beta_norm_equation.resize_dimension(many_quadratic_dimension)?);
     }
@@ -67,22 +67,22 @@ pub(crate) fn build_lazer_demo_many_quadratic_equations(
     Ok(many_quadratic_equations)
 }
 
-pub(crate) fn fold_lazer_demo_many_quadratic_equations(
-    equations: &[LazerDemoQuadraticEquation],
+pub(crate) fn fold_default_many_quadratic_equations(
+    equations: &[LinearProofQuadraticEquation],
     challenge_seed: &[u8; 32],
-) -> CanonicalResult<LazerDemoManyQuadraticFold> {
-    fold_lazer_many_quadratic_equations(
+) -> CanonicalResult<ManyQuadraticFold> {
+    fold_many_quadratic_equations(
         equations,
         challenge_seed,
-        LAZER_DEMO_PROOF_COEFFICIENT_BIT_LENGTH,
+        LINEAR_PROOF_PROOF_COEFFICIENT_BIT_LENGTH,
     )
 }
 
-pub(crate) fn fold_lazer_many_quadratic_equations(
-    equations: &[LazerDemoQuadraticEquation],
+pub(crate) fn fold_many_quadratic_equations(
+    equations: &[LinearProofQuadraticEquation],
     challenge_seed: &[u8; 32],
     coefficient_bit_length: usize,
-) -> CanonicalResult<LazerDemoManyQuadraticFold> {
+) -> CanonicalResult<ManyQuadraticFold> {
     if equations.is_empty() {
         return Err(invalid_many_quadratic(
             "many-quadratic folding requires at least one equation",
@@ -91,7 +91,7 @@ pub(crate) fn fold_lazer_many_quadratic_equations(
 
     let proof_ring = equations[0].ring();
     let expected_dimension = equations[0].dimension();
-    let mut folded_equation = LazerDemoQuadraticEquation::zero(proof_ring, expected_dimension)?;
+    let mut folded_equation = LinearProofQuadraticEquation::zero(proof_ring, expected_dimension)?;
     let mut challenge_polynomials = Vec::with_capacity(equations.len());
     for (equation_index, equation) in equations.iter().enumerate() {
         if equation.ring() != proof_ring || equation.dimension() != expected_dimension {
@@ -100,7 +100,7 @@ pub(crate) fn fold_lazer_many_quadratic_equations(
             ));
         }
 
-        let challenge_polynomial = sample_lazer_demo_uniform_u64_values(
+        let challenge_polynomial = sample_linear_proof_uniform_u64_values(
             proof_ring.degree(),
             proof_ring.modulus(),
             coefficient_bit_length,
@@ -114,25 +114,29 @@ pub(crate) fn fold_lazer_many_quadratic_equations(
         challenge_polynomials.push(challenge_polynomial);
     }
 
-    Ok(LazerDemoManyQuadraticFold {
+    Ok(ManyQuadraticFold {
         folded_equation,
         challenge_polynomials,
     })
 }
 
-pub(crate) fn validate_lazer_demo_many_quadratic_port() -> CanonicalResult<()> {
-    let proof_ring = lazer_demo_tbox_proof_ring()?;
-    let first_equation =
-        LazerDemoQuadraticEquation::zero(proof_ring, lazer_demo_tbox_quadratic_many_dimension())?
-            .add_linear_polynomial_term(0, constant_polynomial(proof_ring, 1))?;
-    let second_equation =
-        LazerDemoQuadraticEquation::zero(proof_ring, lazer_demo_tbox_quadratic_many_dimension())?
-            .add_linear_polynomial_term(2, constant_polynomial(proof_ring, 5))?;
+pub(crate) fn validate_many_quadratic_self_check() -> CanonicalResult<()> {
+    let proof_ring = linear_proof_tbox_proof_ring()?;
+    let first_equation = LinearProofQuadraticEquation::zero(
+        proof_ring,
+        linear_proof_tbox_quadratic_many_dimension(),
+    )?
+    .add_linear_polynomial_term(0, constant_polynomial(proof_ring, 1))?;
+    let second_equation = LinearProofQuadraticEquation::zero(
+        proof_ring,
+        linear_proof_tbox_quadratic_many_dimension(),
+    )?
+    .add_linear_polynomial_term(2, constant_polynomial(proof_ring, 5))?;
     let fold =
-        fold_lazer_demo_many_quadratic_equations(&[first_equation, second_equation], &[17_u8; 32])?;
+        fold_default_many_quadratic_equations(&[first_equation, second_equation], &[17_u8; 32])?;
 
     if fold.challenge_polynomials.len() != 2
-        || fold.folded_equation.dimension() != lazer_demo_tbox_quadratic_many_dimension()
+        || fold.folded_equation.dimension() != linear_proof_tbox_quadratic_many_dimension()
         || fold.folded_equation.linear_terms().entries().len() != 2
     {
         return Err(invalid_many_quadratic(
@@ -151,11 +155,11 @@ pub(crate) fn validate_lazer_demo_many_quadratic_port() -> CanonicalResult<()> {
     Ok(())
 }
 
-fn validate_lazer_demo_hash_mask_vector(
+fn validate_linear_proof_hash_mask_vector(
     hash_mask_vector: &[Vec<u64>],
     proof_ring: PolynomialRing,
 ) -> CanonicalResult<()> {
-    if hash_mask_vector.len() != LAZER_DEMO_TBOX_HASH_MASK_POLYNOMIALS {
+    if hash_mask_vector.len() != TBOX_HASH_MASK_POLYNOMIALS {
         return Err(invalid_many_quadratic(
             "hash-mask vector length must match the demo tbox lambda halves",
         ));
@@ -179,37 +183,37 @@ fn invalid_many_quadratic(message: impl Into<String>) -> CanonicalError {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_lazer_demo_many_quadratic_equations, fold_lazer_demo_many_quadratic_equations,
-        validate_lazer_demo_many_quadratic_port,
+        build_many_quadratic_equations, fold_default_many_quadratic_equations,
+        validate_many_quadratic_self_check,
     };
     use crate::ballot_privacy::{
-        lazer_demo_tbox_relations::{
-            build_lazer_demo_tbox_prefix_accumulators, lazer_demo_tbox_proof_ring,
-            lazer_demo_tbox_quadratic_many_dimension,
-        },
         polynomial_ring::PolynomialRing,
+        tbox_relations::{
+            build_default_tbox_prefix_accumulators, linear_proof_tbox_proof_ring,
+            linear_proof_tbox_quadratic_many_dimension,
+        },
     };
 
     fn zero_hash_mask_vector() -> Vec<Vec<u64>> {
-        let proof_ring = lazer_demo_tbox_proof_ring().expect("proof ring should validate");
+        let proof_ring = linear_proof_tbox_proof_ring().expect("proof ring should validate");
         vec![vec![0_u64; proof_ring.degree()]; 2]
     }
 
     #[test]
     fn tbox_equations_expand_to_many_quadratic_dimension_and_bind_hash_mask() {
-        let accumulators = build_lazer_demo_tbox_prefix_accumulators(&[9_u8; 32])
+        let accumulators = build_default_tbox_prefix_accumulators(&[9_u8; 32])
             .expect("prefix accumulators should validate");
         let mut hash_mask_vector = zero_hash_mask_vector();
         hash_mask_vector[0][1] = 7;
 
-        let equations = build_lazer_demo_many_quadratic_equations(&accumulators, &hash_mask_vector)
+        let equations = build_many_quadratic_equations(&accumulators, &hash_mask_vector)
             .expect("many quadratic equations should build");
 
         assert_eq!(equations.len(), 4);
         assert!(
-            equations
-                .iter()
-                .all(|equation| equation.dimension() == lazer_demo_tbox_quadratic_many_dimension())
+            equations.iter().all(
+                |equation| equation.dimension() == linear_proof_tbox_quadratic_many_dimension()
+            )
         );
         assert_eq!(
             equations[0]
@@ -228,17 +232,16 @@ mod tests {
 
     #[test]
     fn many_quadratic_folding_uses_polyvec_urandom_domains() {
-        let accumulators = build_lazer_demo_tbox_prefix_accumulators(&[11_u8; 32])
+        let accumulators = build_default_tbox_prefix_accumulators(&[11_u8; 32])
             .expect("prefix accumulators should validate");
-        let equations =
-            build_lazer_demo_many_quadratic_equations(&accumulators, &zero_hash_mask_vector())
-                .expect("many quadratic equations should build");
+        let equations = build_many_quadratic_equations(&accumulators, &zero_hash_mask_vector())
+            .expect("many quadratic equations should build");
 
-        let first_fold = fold_lazer_demo_many_quadratic_equations(&equations, &[3_u8; 32])
+        let first_fold = fold_default_many_quadratic_equations(&equations, &[3_u8; 32])
             .expect("fold should validate");
-        let repeated_fold = fold_lazer_demo_many_quadratic_equations(&equations, &[3_u8; 32])
+        let repeated_fold = fold_default_many_quadratic_equations(&equations, &[3_u8; 32])
             .expect("fold should repeat");
-        let changed_fold = fold_lazer_demo_many_quadratic_equations(&equations, &[4_u8; 32])
+        let changed_fold = fold_default_many_quadratic_equations(&equations, &[4_u8; 32])
             .expect("changed seed fold should validate");
 
         assert_eq!(first_fold, repeated_fold);
@@ -258,14 +261,14 @@ mod tests {
 
     #[test]
     fn many_quadratic_builder_rejects_malformed_hash_masks() {
-        let accumulators = build_lazer_demo_tbox_prefix_accumulators(&[9_u8; 32])
+        let accumulators = build_default_tbox_prefix_accumulators(&[9_u8; 32])
             .expect("prefix accumulators should validate");
         let proof_ring =
             PolynomialRing::new(64, 36_028_797_018_964_597).expect("proof ring should validate");
         let mut malformed_hash_mask = vec![vec![0_u64; proof_ring.degree()]; 2];
         malformed_hash_mask[1][proof_ring.degree() / 2] = 1;
 
-        let error = build_lazer_demo_many_quadratic_equations(&accumulators, &malformed_hash_mask)
+        let error = build_many_quadratic_equations(&accumulators, &malformed_hash_mask)
             .expect_err("half-degree hash-mask coefficient should fail");
 
         assert!(error.message.contains("half-degree"));
@@ -273,6 +276,6 @@ mod tests {
 
     #[test]
     fn many_quadratic_self_check_passes() {
-        validate_lazer_demo_many_quadratic_port().expect("self-check should pass");
+        validate_many_quadratic_self_check().expect("self-check should pass");
     }
 }

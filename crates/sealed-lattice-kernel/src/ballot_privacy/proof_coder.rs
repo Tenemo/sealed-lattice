@@ -3,7 +3,7 @@ use crate::{
     transcript_core::decode_hex,
 };
 
-use super::linear_proof_parameters::LazerDemoProofEncoding;
+use super::linear_proof_parameters::LinearProofEncoding;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LinearProofBytes {
@@ -186,16 +186,16 @@ pub fn decode_little_endian_fixed_width_coefficients(
     Ok(coefficients)
 }
 
-pub fn decode_lazer_demo_linear_proof_fields(
+pub fn decode_linear_proof_fields(
     proof_bytes: &[u8],
-    proof_encoding: &LazerDemoProofEncoding,
+    proof_encoding: &LinearProofEncoding,
 ) -> CanonicalResult<DecodedProofFieldLengths> {
-    Ok(decode_lazer_demo_linear_proof(proof_bytes, proof_encoding)?.field_lengths)
+    Ok(decode_linear_proof(proof_bytes, proof_encoding)?.field_lengths)
 }
 
-pub fn decode_lazer_demo_linear_proof(
+pub fn decode_linear_proof(
     proof_bytes: &[u8],
-    proof_encoding: &LazerDemoProofEncoding,
+    proof_encoding: &LinearProofEncoding,
 ) -> CanonicalResult<DecodedLazerDemoLinearProof> {
     proof_encoding.validate()?;
     if proof_bytes.is_empty() {
@@ -326,9 +326,9 @@ pub fn decode_lazer_demo_linear_proof(
     })
 }
 
-pub fn encode_lazer_demo_linear_proof(
+pub fn encode_linear_proof(
     decoded_proof: &DecodedLazerDemoLinearProof,
-    proof_encoding: &LazerDemoProofEncoding,
+    proof_encoding: &LinearProofEncoding,
 ) -> CanonicalResult<Vec<u8>> {
     proof_encoding.validate()?;
 
@@ -418,9 +418,9 @@ pub(crate) struct LazerDemoLinearProofComponents {
     pub(crate) infinity_response_vector: Vec<Vec<i64>>,
 }
 
-pub(crate) fn encode_lazer_demo_linear_proof_components(
+pub(crate) fn encode_linear_proof_components(
     components: LazerDemoLinearProofComponents,
-    proof_encoding: &LazerDemoProofEncoding,
+    proof_encoding: &LinearProofEncoding,
 ) -> CanonicalResult<Vec<u8>> {
     proof_encoding.validate()?;
     if components.centered_challenge_polynomial.len() != proof_encoding.ring_degree {
@@ -480,7 +480,7 @@ pub(crate) fn encode_lazer_demo_linear_proof_components(
         infinity_response_vector: components.infinity_response_vector,
     };
 
-    encode_lazer_demo_linear_proof(&decoded_proof, proof_encoding)
+    encode_linear_proof(&decoded_proof, proof_encoding)
 }
 
 struct ProofBitReader<'proof> {
@@ -1018,12 +1018,12 @@ fn invalid_proof(message: impl Into<String>) -> CanonicalError {
 #[cfg(test)]
 mod tests {
     use super::{
-        LinearProofBytes, decode_lazer_demo_linear_proof, decode_lazer_demo_linear_proof_fields,
-        decode_little_endian_fixed_width_coefficients, encode_lazer_demo_linear_proof,
+        LinearProofBytes, decode_linear_proof, decode_linear_proof_fields,
+        decode_little_endian_fixed_width_coefficients, encode_linear_proof,
     };
     use crate::{
         ballot_privacy::linear_proof_parameters::{
-            LazerDemoProofEncoding, demo_linear_proof_encoding_contract,
+            LinearProofEncoding, demo_linear_proof_encoding_contract,
         },
         transcript_core::decode_hex,
     };
@@ -1072,7 +1072,7 @@ mod tests {
         let proof_encoding = demo_linear_proof_encoding_contract();
         let proof = vec![0_u8; proof_encoding.full_size_coefficient_bit_length];
 
-        let error = decode_lazer_demo_linear_proof_fields(&proof, &proof_encoding)
+        let error = decode_linear_proof_fields(&proof, &proof_encoding)
             .expect_err("short structured proof should fail before padding");
 
         assert!(
@@ -1085,7 +1085,7 @@ mod tests {
     #[test]
     fn decodes_generated_upstream_proof_objects() {
         let vector_case = generated_vector_case("valid-small-linear-proof");
-        let proof_encoding: LazerDemoProofEncoding =
+        let proof_encoding: LinearProofEncoding =
             serde_json::from_value(vector_case["proofEncoding"].clone())
                 .expect("proof encoding should deserialize");
         let proof_hex = vector_case["proofHex"]
@@ -1093,7 +1093,7 @@ mod tests {
             .expect("proof hex should be present");
         let proof_bytes = decode_hex(proof_hex).expect("proof bytes should decode");
 
-        let decoded_proof = decode_lazer_demo_linear_proof(&proof_bytes, &proof_encoding)
+        let decoded_proof = decode_linear_proof(&proof_bytes, &proof_encoding)
             .expect("valid generated proof bytes should decode");
 
         assert_eq!(decoded_proof.commitment_target_vector().len(), 12);
@@ -1132,17 +1132,17 @@ mod tests {
     #[test]
     fn reencodes_generated_upstream_proof_byte_identically() {
         let vector_case = generated_vector_case("valid-small-linear-proof");
-        let proof_encoding: LazerDemoProofEncoding =
+        let proof_encoding: LinearProofEncoding =
             serde_json::from_value(vector_case["proofEncoding"].clone())
                 .expect("proof encoding should deserialize");
         let proof_hex = vector_case["proofHex"]
             .as_str()
             .expect("proof hex should be present");
         let proof_bytes = decode_hex(proof_hex).expect("proof bytes should decode");
-        let decoded_proof = decode_lazer_demo_linear_proof(&proof_bytes, &proof_encoding)
+        let decoded_proof = decode_linear_proof(&proof_bytes, &proof_encoding)
             .expect("valid generated proof bytes should decode");
 
-        let encoded_proof = encode_lazer_demo_linear_proof(&decoded_proof, &proof_encoding)
+        let encoded_proof = encode_linear_proof(&decoded_proof, &proof_encoding)
             .expect("decoded proof should re-encode");
 
         assert_eq!(encoded_proof, proof_bytes);
@@ -1151,18 +1151,18 @@ mod tests {
     #[test]
     fn reencoding_changes_when_decoded_proof_object_changes() {
         let vector_case = generated_vector_case("valid-small-linear-proof");
-        let proof_encoding: LazerDemoProofEncoding =
+        let proof_encoding: LinearProofEncoding =
             serde_json::from_value(vector_case["proofEncoding"].clone())
                 .expect("proof encoding should deserialize");
         let proof_hex = vector_case["proofHex"]
             .as_str()
             .expect("proof hex should be present");
         let proof_bytes = decode_hex(proof_hex).expect("proof bytes should decode");
-        let mut decoded_proof = decode_lazer_demo_linear_proof(&proof_bytes, &proof_encoding)
+        let mut decoded_proof = decode_linear_proof(&proof_bytes, &proof_encoding)
             .expect("valid generated proof bytes should decode");
         decoded_proof.commitment_target_vector[0][0] += 1;
 
-        let encoded_proof = encode_lazer_demo_linear_proof(&decoded_proof, &proof_encoding)
+        let encoded_proof = encode_linear_proof(&decoded_proof, &proof_encoding)
             .expect("mutated decoded proof should re-encode");
 
         assert_ne!(encoded_proof, proof_bytes);
@@ -1178,7 +1178,7 @@ mod tests {
             ("extended-proof", "proof encoding contains trailing data"),
         ] {
             let vector_case = generated_vector_case(case_name);
-            let proof_encoding: LazerDemoProofEncoding =
+            let proof_encoding: LinearProofEncoding =
                 serde_json::from_value(vector_case["proofEncoding"].clone())
                     .expect("proof encoding should deserialize");
             let proof_hex = vector_case["proofHex"]
@@ -1186,7 +1186,7 @@ mod tests {
                 .expect("proof hex should be present");
             let proof_bytes = decode_hex(proof_hex).expect("proof bytes should decode");
 
-            let error = decode_lazer_demo_linear_proof(&proof_bytes, &proof_encoding)
+            let error = decode_linear_proof(&proof_bytes, &proof_encoding)
                 .expect_err("malformed generated proof should fail structured decoding");
 
             assert!(error.message.contains(expected_message));

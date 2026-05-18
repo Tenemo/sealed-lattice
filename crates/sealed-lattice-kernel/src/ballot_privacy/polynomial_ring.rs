@@ -80,7 +80,7 @@ impl PolynomialRing {
                 if *coefficient == 0 {
                     0
                 } else {
-                    self.modulus - coefficient
+                    self.modulus - *coefficient
                 }
             })
             .collect())
@@ -240,6 +240,14 @@ mod tests {
     }
 
     #[test]
+    fn negates_polynomial_coefficients() {
+        let ring = PolynomialRing::new(4, 17).expect("ring should validate");
+        let negated = ring.neg(&[0, 1, 8, 16]).expect("negation should succeed");
+
+        assert_eq!(negated, vec![0, 16, 9, 1]);
+    }
+
+    #[test]
     fn left_rotates_negacyclic_polynomials() {
         let ring = PolynomialRing::new(8, 17).expect("ring should validate");
         let rotated = ring
@@ -260,7 +268,7 @@ mod tests {
     }
 
     #[test]
-    fn applies_lazer_style_automorphism() {
+    fn applies_linear_proof_style_automorphism() {
         let ring = PolynomialRing::new(8, 17).expect("ring should validate");
         let transformed = ring
             .automorphism(&[1, 2, 3, 4, 5, 6, 7, 8])

@@ -10,7 +10,7 @@ use crate::{
     hashing::{canonical_json, to_hex},
 };
 
-pub const LINEAR_PROOF_PREFLIGHT_DOMAIN: &str = "sealed.vote/internal/lazer-linear-preflight-v1";
+pub const LINEAR_PROOF_PREFLIGHT_DOMAIN: &str = "sealed.vote/internal/linear-proof-preflight-v1";
 pub const LINEAR_PROOF_PREFLIGHT_HASH_NAME: &str = "SHAKE128-256";
 
 #[derive(Debug, Clone, PartialEq, Eq)]

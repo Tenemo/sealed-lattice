@@ -1,25 +1,25 @@
 use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
 
 use super::{
-    linear_proof_parameters::LazerDemoProofEncoding, linear_proof_transcript::shake128_32,
+    linear_proof_parameters::LinearProofEncoding, linear_proof_transcript::shake128_32,
     proof_coder::DecodedLazerDemoLinearProof,
 };
 
-pub const LAZER_DEMO_ABDLOP_COMMITMENT_HASH_BYTES: usize = 32;
+pub const LINEAR_PROOF_ABDLOP_COMMITMENT_HASH_BYTES: usize = 32;
 
-pub fn encode_lazer_demo_abdlop_commitment(
+pub fn encode_abdlop_commitment(
     decoded_proof: &DecodedLazerDemoLinearProof,
-    proof_encoding: &LazerDemoProofEncoding,
+    proof_encoding: &LinearProofEncoding,
 ) -> CanonicalResult<Vec<u8>> {
-    encode_lazer_demo_compressed_commitment_vector(
+    encode_compressed_commitment_vector(
         decoded_proof.compressed_commitment_vector(),
         proof_encoding,
     )
 }
 
-pub(crate) fn encode_lazer_demo_compressed_commitment_vector(
+pub(crate) fn encode_compressed_commitment_vector(
     compressed_commitment_vector: &[Vec<u64>],
-    proof_encoding: &LazerDemoProofEncoding,
+    proof_encoding: &LinearProofEncoding,
 ) -> CanonicalResult<Vec<u8>> {
     proof_encoding.validate()?;
     if compressed_commitment_vector.len() != proof_encoding.compressed_commitment_vector_length {
@@ -58,12 +58,12 @@ pub(crate) fn encode_lazer_demo_compressed_commitment_vector(
     writer.finish()
 }
 
-pub fn hash_lazer_demo_abdlop_commitment(
-    base_hash: &[u8; LAZER_DEMO_ABDLOP_COMMITMENT_HASH_BYTES],
+pub fn hash_abdlop_commitment(
+    base_hash: &[u8; LINEAR_PROOF_ABDLOP_COMMITMENT_HASH_BYTES],
     decoded_proof: &DecodedLazerDemoLinearProof,
-    proof_encoding: &LazerDemoProofEncoding,
-) -> CanonicalResult<[u8; LAZER_DEMO_ABDLOP_COMMITMENT_HASH_BYTES]> {
-    let encoded_commitment = encode_lazer_demo_abdlop_commitment(decoded_proof, proof_encoding)?;
+    proof_encoding: &LinearProofEncoding,
+) -> CanonicalResult<[u8; LINEAR_PROOF_ABDLOP_COMMITMENT_HASH_BYTES]> {
+    let encoded_commitment = encode_abdlop_commitment(decoded_proof, proof_encoding)?;
 
     Ok(shake128_32(&[base_hash, &encoded_commitment]))
 }
@@ -136,11 +136,10 @@ fn invalid_commitment(message: impl Into<String>) -> CanonicalError {
 
 #[cfg(test)]
 mod tests {
-    use super::{encode_lazer_demo_abdlop_commitment, hash_lazer_demo_abdlop_commitment};
+    use super::{encode_abdlop_commitment, hash_abdlop_commitment};
     use crate::{
         ballot_privacy::{
-            linear_proof_parameters::LazerDemoProofEncoding,
-            proof_coder::decode_lazer_demo_linear_proof,
+            linear_proof_parameters::LinearProofEncoding, proof_coder::decode_linear_proof,
         },
         hashing::to_hex,
         transcript_core::decode_hex,
@@ -148,7 +147,7 @@ mod tests {
 
     fn decoded_valid_proof() -> (
         crate::ballot_privacy::proof_coder::DecodedLazerDemoLinearProof,
-        LazerDemoProofEncoding,
+        LinearProofEncoding,
     ) {
         let vectors: serde_json::Value = serde_json::from_str(include_str!(
             "../../../../test-vectors/ballot-privacy/proof-backend-linear-vectors.json"
@@ -160,15 +159,15 @@ mod tests {
             .iter()
             .find(|vector_case| vector_case["caseName"] == "valid-small-linear-proof")
             .expect("valid generated vector should exist");
-        let proof_encoding: LazerDemoProofEncoding =
+        let proof_encoding: LinearProofEncoding =
             serde_json::from_value(vector_case["proofEncoding"].clone())
                 .expect("proof encoding should deserialize");
         let proof_hex = vector_case["proofHex"]
             .as_str()
             .expect("proof hex should be present");
         let proof_bytes = decode_hex(proof_hex).expect("proof bytes should decode");
-        let decoded_proof = decode_lazer_demo_linear_proof(&proof_bytes, &proof_encoding)
-            .expect("valid proof should decode");
+        let decoded_proof =
+            decode_linear_proof(&proof_bytes, &proof_encoding).expect("valid proof should decode");
 
         (decoded_proof, proof_encoding)
     }
@@ -177,9 +176,8 @@ mod tests {
     fn encodes_demo_abdlop_commitment_with_terminal_padding() {
         let (decoded_proof, proof_encoding) = decoded_valid_proof();
 
-        let encoded_commitment =
-            encode_lazer_demo_abdlop_commitment(&decoded_proof, &proof_encoding)
-                .expect("commitment should encode");
+        let encoded_commitment = encode_abdlop_commitment(&decoded_proof, &proof_encoding)
+            .expect("commitment should encode");
 
         assert_eq!(encoded_commitment.len(), 4_785);
         assert_eq!(encoded_commitment.last(), Some(&1));
@@ -192,15 +190,11 @@ mod tests {
         let mut different_base_hash = [0_u8; 32];
         different_base_hash[0] = 1;
 
-        let left_hash =
-            hash_lazer_demo_abdlop_commitment(&zero_base_hash, &decoded_proof, &proof_encoding)
+        let left_hash = hash_abdlop_commitment(&zero_base_hash, &decoded_proof, &proof_encoding)
+            .expect("commitment hash should compute");
+        let right_hash =
+            hash_abdlop_commitment(&different_base_hash, &decoded_proof, &proof_encoding)
                 .expect("commitment hash should compute");
-        let right_hash = hash_lazer_demo_abdlop_commitment(
-            &different_base_hash,
-            &decoded_proof,
-            &proof_encoding,
-        )
-        .expect("commitment hash should compute");
 
         assert_ne!(left_hash, right_hash);
         assert_eq!(to_hex(&left_hash).len(), 64);

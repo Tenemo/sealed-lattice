@@ -155,7 +155,7 @@ describe('ballot privacy lattice primitives', () => {
         expect(proofRecord).toMatchObject({
             ceremonyId: 'ceremony-1',
             objectType: 'ReceiverKeyProof',
-            proofBackend: 'LaZerStyleLocalLatticeRelation',
+            proofBackend: 'LocalLinearLatticeRelation',
             receiverIdentity: 'receiver-1',
             receiverRosterPosition: 1,
         });

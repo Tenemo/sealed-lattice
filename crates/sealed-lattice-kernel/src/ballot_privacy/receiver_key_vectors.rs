@@ -270,7 +270,7 @@ fn validate_proof_shell(
 ) -> Result<(), String> {
     if string_property(receiver_key_proof, "objectType")? != "ReceiverKeyProof"
         || u64_property(receiver_key_proof, "objectVersion")? != 1
-        || string_property(receiver_key_proof, "proofBackend")? != "LaZerStyleLocalLatticeRelation"
+        || string_property(receiver_key_proof, "proofBackend")? != "LocalLinearLatticeRelation"
         || !is_protocol_digest(&string_property(receiver_key_proof, "proofRoot")?)
     {
         return Err("receiver-key proof shell has an invalid canonical shape".to_string());

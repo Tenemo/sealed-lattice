@@ -247,6 +247,35 @@ describe('ballot privacy profile freeze', () => {
         );
     });
 
+    it('returns refusals instead of throwing for malformed aggregate bounds', () => {
+        const profileSet = createBallotPrivacyProfileSet();
+        const certificate = createShareCommitmentMessageBoundCert({
+            maximumCanonicalTurnout: 20,
+            shareCommitmentProfile: profileSet.shareCommitmentProfile,
+        });
+
+        for (const malformedMaximumAggregateInteger of [Number.NaN, -1, 1.5]) {
+            expect(() =>
+                verifyShareCommitmentMessageBoundCert({
+                    certificate: {
+                        ...certificate,
+                        maximumAggregateInteger:
+                            malformedMaximumAggregateInteger,
+                    },
+                }),
+            ).not.toThrow();
+            expect(
+                verifyShareCommitmentMessageBoundCert({
+                    certificate: {
+                        ...certificate,
+                        maximumAggregateInteger:
+                            malformedMaximumAggregateInteger,
+                    },
+                }).refusedObjects.map((refusal) => refusal.code),
+            ).toContain('BallotPrivacyProfileInvalid');
+        }
+    });
+
     it('reserves every ballot privacy digest namespace in the shared registry', () => {
         expect(protocolDigestNamespaceValues).toEqual(
             expect.arrayContaining([

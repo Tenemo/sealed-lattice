@@ -1753,7 +1753,7 @@ export const createBallotProofComponentProofRecord = (input: {
         componentStatementDigest: input.componentStatementDigest,
         objectType: 'BallotProofComponentProofRecord',
         objectVersion: 1,
-        proofBackend: 'LaZerStyleLocalLatticeRelation',
+        proofBackend: 'LocalLinearLatticeRelation',
         proofBytesDigest: input.proofBytesDigest,
         proofEncodingProfileDigest: input.proofEncodingProfileDigest,
         proofParameterSetDigest: input.proofParameterSetDigest,

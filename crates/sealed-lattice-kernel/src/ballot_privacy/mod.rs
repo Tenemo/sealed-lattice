@@ -1,27 +1,27 @@
 pub mod abdlop_commitment;
 pub mod encoded_relation_vectors;
-pub mod lazer_demo_abdlop;
-pub(crate) mod lazer_demo_many_quadratic;
-pub mod lazer_demo_public_parameters;
-pub(crate) mod lazer_demo_quadratic;
-pub(crate) mod lazer_demo_quadratic_challenge;
-pub mod lazer_demo_rng;
-pub(crate) mod lazer_demo_tbox_relations;
+pub mod linear_proof_abdlop;
 pub mod linear_proof_norms;
 pub mod linear_proof_parameters;
 pub(crate) mod linear_proof_prover;
+pub mod linear_proof_public_parameters;
+pub mod linear_proof_rng;
 pub mod linear_proof_statement;
 pub mod linear_proof_tbox;
 pub mod linear_proof_transcript;
 pub mod linear_proof_verifier;
+pub(crate) mod many_quadratic;
 pub mod polynomial_matrix;
 pub mod polynomial_ring;
 pub mod polynomial_vector;
 pub mod proof_coder;
+pub(crate) mod quadratic_challenge;
+pub(crate) mod quadratic_equation;
 pub mod receiver_key_vectors;
 pub mod sparse_linear_proof_statement;
 pub mod sparse_polynomial_matrix;
 pub mod sparse_polynomial_vector;
+pub(crate) mod tbox_relations;
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -30,14 +30,14 @@ use serde_json::{Map, Value, json};
 use crate::{hashing::derive_protocol_digest, transcript_core::decode_hex};
 
 use self::{
-    linear_proof_parameters::{LazerDemoProofEncoding, LinearProofParameterSet},
+    linear_proof_parameters::{LinearProofEncoding, LinearProofParameterSet},
     linear_proof_prover::{
         LinearProverCommitmentInput, LinearProverProofInput, LinearProverWitnessInput,
-        generate_lazer_receiver_key_linear_proof, prepare_lazer_linear_prover_commitment,
-        prepare_lazer_linear_prover_witness,
+        generate_receiver_key_linear_proof, prepare_linear_prover_commitment,
+        prepare_linear_prover_witness,
     },
     linear_proof_statement::{
-        LinearProofTargetCoefficientRepresentation, derive_lazer_demo_linear_statement_transcript,
+        LinearProofTargetCoefficientRepresentation, derive_linear_statement_transcript,
     },
     polynomial_ring::PolynomialRing,
     receiver_key_vectors::{
@@ -50,9 +50,8 @@ use self::{
 pub const MODULE_MARKER: &str = "ballot-privacy";
 pub const BALLOT_PRIVACY_PROOF_BACKEND_AVAILABLE: bool = false;
 
-const UNAVAILABLE_BACKEND_MESSAGE: &str = "Ballot privacy proof verification requires the frozen LaZer-style lattice proof backend, which is not implemented in this build.";
-const BACKEND_NAME: &str = "LaZer-style linear lattice proof backend";
-const UPSTREAM_LAZER_REFERENCE: &str = "lazer-crypto/lazer";
+const UNAVAILABLE_BACKEND_MESSAGE: &str = "Ballot privacy proof verification requires the frozen linear lattice proof backend, which is not implemented in this build.";
+const BACKEND_NAME: &str = "linear lattice proof backend";
 const ENCODED_COORDINATES_PER_OPTION: u64 = 11;
 const FULL_BALLOT_PROOF_PROJECTION_COVERAGE: &str = "full-encoded-score-ballot-relation";
 const FULL_BALLOT_PROOF_PARAMETER_PROFILE_ID: &str =
@@ -83,7 +82,7 @@ const REQUIRES_SPARSE_PROOF_STATEMENT: &str = "requires-sparse-proof-statement";
 const REQUIRES_STRUCTURED_PROOF_STATEMENT: &str = "requires-structured-proof-statement";
 const PUBLIC_ZERO_WITNESS_BINDING_CHECK: &str = "public-zero-witness-binding-check";
 
-pub const REQUIRED_LAZER_PORT_COMPONENTS: &[&str] = &[
+pub const REQUIRED_PORTABLE_BACKEND_COMPONENTS: &[&str] = &[
     "generated linear proof parameters from lin-codegen.sage",
     "portable polynomial ring arithmetic for Z_q[X]/(X^d + 1)",
     "portable polynomial vector and matrix arithmetic",
@@ -99,26 +98,6 @@ pub const REQUIRED_LAZER_PORT_COMPONENTS: &[&str] = &[
     "browser-safe prover randomness source",
 ];
 
-pub const UPSTREAM_LAZER_REFERENCE_FILES: &[&str] = &[
-    "src/lin-proofs.c",
-    "src/lnp.c",
-    "src/lnp-tbox.c",
-    "src/lnp-quad.c",
-    "src/lnp-quad-many.c",
-    "src/lnp-quad-eval.c",
-    "src/abdlop.c",
-    "src/poly.c",
-    "src/polyvec.c",
-    "src/polymat.c",
-    "src/spolyvec.c",
-    "src/spolymat.c",
-    "src/coder.c",
-    "src/rejection.c",
-    "src/rng.c",
-    "src/shake128.c",
-    "scripts/lin-codegen.sage",
-];
-
 fn encoded_share_vector_width(statement: &Value) -> Option<u64> {
     object_map(statement)
         .and_then(|object| object.get("optionCount"))
@@ -130,11 +109,8 @@ pub fn describe_proof_backend() -> Value {
     json!({
         "backendName": BACKEND_NAME,
         "backendAvailable": BALLOT_PRIVACY_PROOF_BACKEND_AVAILABLE,
-        "upstreamReference": UPSTREAM_LAZER_REFERENCE,
-        "upstreamDirectDependencyUsableInBrowser": false,
         "portableRustWasmPortRequired": true,
-        "requiredComponents": REQUIRED_LAZER_PORT_COMPONENTS,
-        "upstreamReferenceFiles": UPSTREAM_LAZER_REFERENCE_FILES,
+        "requiredComponents": REQUIRED_PORTABLE_BACKEND_COMPONENTS,
         "blockedReason": UNAVAILABLE_BACKEND_MESSAGE
     })
 }
@@ -324,8 +300,7 @@ fn collect_receiver_key_proof_refusals(
             .and_then(|object| object.get("objectVersion"))
             .and_then(Value::as_u64)
             != Some(1)
-        || string_field(receiver_key_proof, "proofBackend")
-            != Some("LaZerStyleLocalLatticeRelation")
+        || string_field(receiver_key_proof, "proofBackend") != Some("LocalLinearLatticeRelation")
         || string_field(receiver_key_proof, "proofRoot")
             .is_none_or(|proof_root| !is_protocol_digest(proof_root))
         || string_field(receiver_key_proof, "backendStatementDigest")
@@ -612,7 +587,7 @@ fn collect_ballot_proof_refusals(statement: &Value, ballot_proof: &Value) -> Vec
             .and_then(|object| object.get("objectVersion"))
             .and_then(Value::as_u64)
             != Some(1)
-        || string_field(ballot_proof, "proofBackend") != Some("LaZerStyleLocalLatticeRelation")
+        || string_field(ballot_proof, "proofBackend") != Some("LocalLinearLatticeRelation")
         || string_field(ballot_proof, "backendStatementDigest")
             .is_some_and(|digest| !is_protocol_digest(digest))
         || string_field(ballot_proof, "componentBundleStatementDigest")
@@ -898,7 +873,7 @@ fn collect_claim_bearing_package_refusals(ballot_package: &Value) -> Vec<Value> 
     ));
     let package_digest = string_field(ballot_package, "ballotPackageDigest");
 
-    if string_field(ballot_package, "objectType") != Some("BallotPackage")
+    if string_field(ballot_package, "objectType") != Some("ClaimBearingBallotPackage")
         || package_object.get("objectVersion").and_then(Value::as_u64) != Some(1)
         || package_digest != string_field(statement, "ballotPackageDigest")
     {
@@ -1245,7 +1220,7 @@ fn verify_receiver_key_linear_proof_bytes(
             receiver_key_proof_root,
         )),
     }
-    match serde_json::from_value::<LazerDemoProofEncoding>(proof_encoding.clone()) {
+    match serde_json::from_value::<LinearProofEncoding>(proof_encoding.clone()) {
         Ok(proof_encoding_contract)
             if proof_encoding_contract.expected_proof_size_bytes != proof_size_bytes =>
         {
@@ -1467,8 +1442,8 @@ fn prepare_receiver_key_proof_generation_inner(
                 "parameterSet is malformed for receiver-key proof preparation: {error}"
             ))
         })?;
-    let proof_encoding: LazerDemoProofEncoding =
-        serde_json::from_value(proof_encoding_value.clone()).map_err(|error| {
+    let proof_encoding: LinearProofEncoding = serde_json::from_value(proof_encoding_value.clone())
+        .map_err(|error| {
             invalid_preflight(format!(
                 "proofEncoding is malformed for receiver-key proof preparation: {error}"
             ))
@@ -1526,7 +1501,7 @@ fn prepare_receiver_key_proof_generation_inner(
             )
         })?;
 
-    let preparation = prepare_lazer_linear_prover_witness(LinearProverWitnessInput {
+    let preparation = prepare_linear_prover_witness(LinearProverWitnessInput {
         parameter_set: &parameter_set,
         proof_encoding: &proof_encoding,
         statement_matrix_coefficients: &statement_matrix_coefficients,
@@ -1552,7 +1527,7 @@ fn prepare_receiver_key_proof_generation_inner(
                         "proverRandomnessHex must encode exactly 32 bytes for receiver-key proof preparation",
                     )
                 })?;
-            let statement_transcript = derive_lazer_demo_linear_statement_transcript(
+            let statement_transcript = derive_linear_statement_transcript(
                 &parameter_set,
                 &proof_encoding,
                 &statement_matrix_coefficients,
@@ -1560,7 +1535,7 @@ fn prepare_receiver_key_proof_generation_inner(
                 target_coefficient_representation,
                 &public_randomness,
             )?;
-            Some(prepare_lazer_linear_prover_commitment(
+            Some(prepare_linear_prover_commitment(
                 LinearProverCommitmentInput {
                     proof_encoding: &proof_encoding,
                     public_randomness: &public_randomness_array,
@@ -1678,8 +1653,8 @@ fn generate_receiver_key_proof_inner(
                 "parameterSet is malformed for receiver-key proof generation: {error}"
             ))
         })?;
-    let proof_encoding: LazerDemoProofEncoding =
-        serde_json::from_value(proof_encoding_value.clone()).map_err(|error| {
+    let proof_encoding: LinearProofEncoding = serde_json::from_value(proof_encoding_value.clone())
+        .map_err(|error| {
             invalid_preflight(format!(
                 "proofEncoding is malformed for receiver-key proof generation: {error}"
             ))
@@ -1745,7 +1720,7 @@ fn generate_receiver_key_proof_inner(
         )
     })?;
 
-    let generation = generate_lazer_receiver_key_linear_proof(LinearProverProofInput {
+    let generation = generate_receiver_key_linear_proof(LinearProverProofInput {
         parameter_set: &parameter_set,
         proof_encoding: &proof_encoding,
         statement_matrix_coefficients: &statement_matrix_coefficients,
@@ -2209,7 +2184,7 @@ fn collect_component_proof_record_refusals(
             .and_then(Value::as_u64)
             != Some(1)
         || string_field(component_proof, "componentId") != Some(expected_component_id)
-        || string_field(component_proof, "proofBackend") != Some("LaZerStyleLocalLatticeRelation")
+        || string_field(component_proof, "proofBackend") != Some("LocalLinearLatticeRelation")
         || component_proof_record_digest.is_none_or(|digest| !is_protocol_digest(digest))
         || string_field(component_proof, "componentStatementDigest")
             .is_none_or(|digest| !is_protocol_digest(digest))
@@ -3995,7 +3970,7 @@ fn component_linear_proof_vector_case(
         }
         "public-zero-witness-binding-check-v1" => {
             return Err(ComponentProofBackendError::unavailable(format!(
-                "Public-zero witness binding checks for {component_id} are structural only and are not LaZer proof bytes."
+                "Public-zero witness binding checks for {component_id} are structural only and are not linear proof bytes."
             )));
         }
         _ => {
@@ -4218,7 +4193,7 @@ fn verify_component_linear_proof_bytes(
                 );
             }
         };
-        let proof_encoding: LazerDemoProofEncoding = match serde_json::from_value(
+        let proof_encoding: LinearProofEncoding = match serde_json::from_value(
             proof_encoding_value.clone(),
         ) {
             Ok(proof_encoding) => proof_encoding,
@@ -4526,7 +4501,7 @@ fn verify_component_linear_proof_bytes(
                 );
             }
         };
-        let proof_encoding: LazerDemoProofEncoding = match serde_json::from_value(
+        let proof_encoding: LinearProofEncoding = match serde_json::from_value(
             proof_encoding_value.clone(),
         ) {
             Ok(proof_encoding) => proof_encoding,
@@ -4942,7 +4917,7 @@ fn verify_ballot_linear_proof_bytes(
             ballot_proof_record_digest,
         )),
     }
-    match serde_json::from_value::<LazerDemoProofEncoding>(proof_encoding.clone()) {
+    match serde_json::from_value::<LinearProofEncoding>(proof_encoding.clone()) {
         Ok(proof_encoding_contract)
             if proof_encoding_contract.expected_proof_size_bytes != proof_size_bytes =>
         {
@@ -5317,7 +5292,7 @@ mod tests {
         let ballot_proof = json!({
             "objectType": "BallotProofRecord",
             "objectVersion": 1,
-            "proofBackend": "LaZerStyleLocalLatticeRelation",
+            "proofBackend": "LocalLinearLatticeRelation",
             "proofSizeBytes": 1024
         });
         let verification = super::verify_ballot_proof(
@@ -5349,7 +5324,7 @@ mod tests {
             &json!({
                 "objectType": "ReceiverKeyProof",
                 "objectVersion": 1,
-                "proofBackend": "LaZerStyleLocalLatticeRelation",
+                "proofBackend": "LocalLinearLatticeRelation",
                 "receiverKeyProofRoot": "00"
             }),
             None,
@@ -5711,7 +5686,7 @@ mod tests {
                     "manifestDigest": test_digest("manifest"),
                     "objectType": "ReceiverKeyProof",
                     "objectVersion": 1,
-                    "proofBackend": "LaZerStyleLocalLatticeRelation",
+                    "proofBackend": "LocalLinearLatticeRelation",
                     "proofBytesDigest": proof_bytes_digest,
                     "proofEncodingProfileDigest": proof_encoding_profile_digest,
                     "proofParameterSetDigest": proof_parameter_set_digest,
@@ -5981,46 +5956,47 @@ mod tests {
 
             statement
         };
-        let create_linear_statement = |statement: &Value, target_vector_coefficients: Value| {
-            let backend_statement_digest = test_digest("backend-statement");
-            let relation_statement_digest = test_digest("relation-statement");
-            let statement_matrix_digest = test_digest("statement-matrix");
-            let target_vector_digest = test_digest("target-vector");
-            let linear_statement_payload = json!({
-                "backendStatementDigest": backend_statement_digest,
-                "ballotProofStatementDigest": statement["ballotProofStatementDigest"],
-                "coefficientModulus": "4294962689",
-                "objectType": "BallotProofLinearProofStatement",
-                "objectVersion": 1,
-                "parameterProfileId": "lazer-linear-demo-compatibility-v1",
-                "relation": "A*w + t = 0",
-                "relationStatementDigest": relation_statement_digest,
-                "ringDegree": 256,
-                "statementColumns": 8,
-                "statementMatrixCoefficients": valid_case["statementMatrixCoefficients"].clone(),
-                "statementMatrixDigest": statement_matrix_digest,
-                "statementRows": 4,
-                "targetCoefficientRepresentation": "centeredSignedSourceModulus",
-                "targetVectorCoefficients": target_vector_coefficients,
-                "targetVectorDigest": target_vector_digest,
-                "witnessL2BoundSquared": "2048"
-            });
-            let statement_digest = super::derive_digest(
-                "ChallengeDomainDigest",
-                &json!({
-                    "payload": linear_statement_payload,
-                    "purpose": "ballot-proof-linear-proof-statement-v1"
-                }),
-            )
-            .expect("linear statement digest should derive");
-            let mut linear_statement = linear_statement_payload;
-            linear_statement
-                .as_object_mut()
-                .expect("linear statement should be an object")
-                .insert("statementDigest".to_string(), json!(statement_digest));
+        let create_linear_statement =
+            |statement: &Value, parameter_set: &Value, target_vector_coefficients: Value| {
+                let backend_statement_digest = test_digest("backend-statement");
+                let relation_statement_digest = test_digest("relation-statement");
+                let statement_matrix_digest = test_digest("statement-matrix");
+                let target_vector_digest = test_digest("target-vector");
+                let linear_statement_payload = json!({
+                    "backendStatementDigest": backend_statement_digest,
+                    "ballotProofStatementDigest": statement["ballotProofStatementDigest"],
+                    "coefficientModulus": "4294962689",
+                    "objectType": "BallotProofLinearProofStatement",
+                    "objectVersion": 1,
+                    "parameterProfileId": parameter_set["profileId"],
+                    "relation": "A*w + t = 0",
+                    "relationStatementDigest": relation_statement_digest,
+                    "ringDegree": 256,
+                    "statementColumns": 8,
+                    "statementMatrixCoefficients": valid_case["statementMatrixCoefficients"].clone(),
+                    "statementMatrixDigest": statement_matrix_digest,
+                    "statementRows": 4,
+                    "targetCoefficientRepresentation": "centeredSignedSourceModulus",
+                    "targetVectorCoefficients": target_vector_coefficients,
+                    "targetVectorDigest": target_vector_digest,
+                    "witnessL2BoundSquared": "2048"
+                });
+                let statement_digest = super::derive_digest(
+                    "ChallengeDomainDigest",
+                    &json!({
+                        "payload": linear_statement_payload,
+                        "purpose": "ballot-proof-linear-proof-statement-v1"
+                    }),
+                )
+                .expect("linear statement digest should derive");
+                let mut linear_statement = linear_statement_payload;
+                linear_statement
+                    .as_object_mut()
+                    .expect("linear statement should be an object")
+                    .insert("statementDigest".to_string(), json!(statement_digest));
 
-            linear_statement
-        };
+                linear_statement
+            };
         let mut valid_parameter_set = valid_case["parameterSet"].clone();
         valid_parameter_set
             .as_object_mut()
@@ -6080,7 +6056,7 @@ mod tests {
                 "linearStatementDigest": linear_statement["statementDigest"],
                 "objectType": "BallotProofRecord",
                 "objectVersion": 1,
-                "proofBackend": "LaZerStyleLocalLatticeRelation",
+                "proofBackend": "LocalLinearLatticeRelation",
                 "proofBytesDigest": proof_bytes_digest,
                 "proofEncodingProfileDigest": proof_encoding_profile_digest,
                 "proofParameterSetDigest": proof_parameter_set_digest,
@@ -6115,8 +6091,11 @@ mod tests {
         };
 
         let statement = create_statement();
-        let valid_linear_statement =
-            create_linear_statement(&statement, valid_case["targetVectorCoefficients"].clone());
+        let valid_linear_statement = create_linear_statement(
+            &statement,
+            &valid_parameter_set,
+            valid_case["targetVectorCoefficients"].clone(),
+        );
         let valid_ballot_proof = create_ballot_proof(
             &statement,
             &valid_linear_statement,
@@ -6145,7 +6124,8 @@ mod tests {
             valid_verification["refusedObjects"][0]["message"]
                 .as_str()
                 .expect("refusal message should be a string")
-                .contains("full encoded-score ballot relation")
+                .contains("full encoded-score ballot relation"),
+            "{valid_verification}"
         );
         assert!(
             !valid_verification["statusLabels"]
@@ -6234,6 +6214,7 @@ mod tests {
 
         let mutated_linear_statement = create_linear_statement(
             &statement,
+            &valid_parameter_set,
             mutated_target_case["targetVectorCoefficients"].clone(),
         );
         let mutated_ballot_proof = create_ballot_proof(
@@ -6472,7 +6453,7 @@ mod tests {
                 "linearStatementDigest": linear_statement["statementDigest"],
                 "objectType": "BallotProofRecord",
                 "objectVersion": 1,
-                "proofBackend": "LaZerStyleLocalLatticeRelation",
+                "proofBackend": "LocalLinearLatticeRelation",
                 "proofBytesDigest": proof_bytes_digest,
                 "proofEncodingProfileDigest": proof_encoding_profile_digest,
                 "proofParameterSetDigest": proof_parameter_set_digest,
@@ -7680,7 +7661,7 @@ mod tests {
             "componentId": component_id,
             "componentProofStatementDigest": proof_input["componentProofStatementDigest"],
             "componentStatementDigest": component_statement_digest,
-            "proofBackend": "LaZerStyleLocalLatticeRelation",
+            "proofBackend": "LocalLinearLatticeRelation",
             "proofBytesDigest": proof_bytes_digest,
             "proofEncodingProfileDigest": proof_encoding_profile_digest,
             "proofParameterSetDigest": proof_parameter_set_digest,

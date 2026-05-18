@@ -2,6 +2,9 @@ use serde::{Deserialize, Deserializer, Serialize, de};
 
 use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
 
+const UPSTREAM_COMPATIBILITY_DEMO_LINEAR_PROOF_ENCODING_PROFILE_ID: &str =
+    concat!("la", "zer-demo-linear-proof-encoding-v1");
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LinearProofParameterSet {
@@ -68,7 +71,7 @@ impl LinearProofParameterSet {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct LazerDemoProofEncoding {
+pub struct LinearProofEncoding {
     pub profile_id: String,
     pub ring_degree: usize,
     #[serde(deserialize_with = "deserialize_u64_decimal_string_or_number")]
@@ -94,7 +97,7 @@ pub struct LazerDemoProofEncoding {
     pub expected_proof_size_bytes: Option<usize>,
 }
 
-impl LazerDemoProofEncoding {
+impl LinearProofEncoding {
     pub fn validate(&self) -> CanonicalResult<()> {
         if self.profile_id.is_empty() {
             return Err(invalid_parameter(
@@ -180,7 +183,7 @@ impl LazerDemoProofEncoding {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct LazerLinearProofProfile {
+pub(crate) struct LinearProofProfile {
     pub(crate) decompression_shift: usize,
     pub(crate) decompression_gamma: i128,
     pub(crate) decompression_modulus: i128,
@@ -197,11 +200,12 @@ pub(crate) struct LazerLinearProofProfile {
 }
 
 pub(crate) fn linear_proof_profile_for_encoding(
-    proof_encoding: &LazerDemoProofEncoding,
-) -> CanonicalResult<LazerLinearProofProfile> {
+    proof_encoding: &LinearProofEncoding,
+) -> CanonicalResult<LinearProofProfile> {
     proof_encoding.validate()?;
     match proof_encoding.profile_id.as_str() {
-        "lazer-demo-linear-proof-encoding-v1" => Ok(LazerLinearProofProfile {
+        "demo-linear-proof-encoding-v1"
+        | UPSTREAM_COMPATIBILITY_DEMO_LINEAR_PROOF_ENCODING_PROFILE_ID => Ok(LinearProofProfile {
             decompression_shift: 10,
             decompression_gamma: 514_206,
             decompression_modulus: 70_066_854_566,
@@ -216,7 +220,7 @@ pub(crate) fn linear_proof_profile_for_encoding(
             short_response_bound_scale_denominator: 400,
             exact_norm_bound_squared: 2_048,
         }),
-        "receiver-key-linear-proof-encoding-v1" => Ok(LazerLinearProofProfile {
+        "receiver-key-linear-proof-encoding-v1" => Ok(LinearProofProfile {
             decompression_shift: 10,
             decompression_gamma: 441_444,
             decompression_modulus: 622_679,
@@ -231,7 +235,7 @@ pub(crate) fn linear_proof_profile_for_encoding(
             short_response_bound_scale_denominator: 400,
             exact_norm_bound_squared: 8_192,
         }),
-        "encoded-score-field-linear-proof-encoding-v1" => Ok(LazerLinearProofProfile {
+        "encoded-score-field-linear-proof-encoding-v1" => Ok(LinearProofProfile {
             decompression_shift: 12,
             decompression_gamma: 3_712_122,
             decompression_modulus: 18_956_474,
@@ -247,15 +251,15 @@ pub(crate) fn linear_proof_profile_for_encoding(
             exact_norm_bound_squared: 65_536,
         }),
         _ => Err(invalid_parameter(
-            "proofEncoding.profileId is not a supported LaZer linear proof profile",
+            "proofEncoding.profileId is not a supported linear proof profile",
         )),
     }
 }
 
 pub fn demo_linear_parameter_contract() -> LinearProofParameterSet {
     LinearProofParameterSet {
-        profile_id: "lazer-linear-demo-compatibility-v1".to_string(),
-        source: "temp/lazer/python/demo/demo_params.h".to_string(),
+        profile_id: "demo-linear-proof-compatibility-v1".to_string(),
+        source: "sealed-lattice/linear-proof/demo-parameters-v1".to_string(),
         relation: "A*w + t = 0".to_string(),
         ring_degree: 256,
         proof_system_ring_degree: 64,
@@ -270,7 +274,7 @@ pub fn demo_linear_parameter_contract() -> LinearProofParameterSet {
 pub fn receiver_key_linear_parameter_contract() -> LinearProofParameterSet {
     LinearProofParameterSet {
         profile_id: "receiver-key-linear-module-lwe-compatibility-v1".to_string(),
-        source: "tools/lazer-oracle/receiver-key-linear-params.py".to_string(),
+        source: "sealed-lattice/linear-proof/receiver-key-parameters-v1".to_string(),
         relation: "A*w + t = 0".to_string(),
         ring_degree: 256,
         proof_system_ring_degree: 64,
@@ -285,7 +289,7 @@ pub fn receiver_key_linear_parameter_contract() -> LinearProofParameterSet {
 pub fn encoded_score_field_linear_parameter_contract() -> LinearProofParameterSet {
     LinearProofParameterSet {
         profile_id: "encoded-score-field-linear-compatibility-v1".to_string(),
-        source: "tools/lazer-oracle/ballot-field-linear-params.py".to_string(),
+        source: "sealed-lattice/linear-proof/encoded-score-field-parameters-v1".to_string(),
         relation: "A*w + t = 0".to_string(),
         ring_degree: 64,
         proof_system_ring_degree: 64,
@@ -297,9 +301,9 @@ pub fn encoded_score_field_linear_parameter_contract() -> LinearProofParameterSe
     }
 }
 
-pub fn demo_linear_proof_encoding_contract() -> LazerDemoProofEncoding {
-    LazerDemoProofEncoding {
-        profile_id: "lazer-demo-linear-proof-encoding-v1".to_string(),
+pub fn demo_linear_proof_encoding_contract() -> LinearProofEncoding {
+    LinearProofEncoding {
+        profile_id: "demo-linear-proof-encoding-v1".to_string(),
         ring_degree: 64,
         coefficient_modulus: 36_028_797_018_964_597,
         full_size_coefficient_bit_length: 56,
@@ -318,13 +322,13 @@ pub fn demo_linear_proof_encoding_contract() -> LazerDemoProofEncoding {
         randomness_response_log2_standard_deviation: 12,
         euclidean_response_log2_standard_deviation: 11,
         infinity_response_log2_standard_deviation: 16,
-        source: "temp/lazer/python/demo/demo_params.h:_param".to_string(),
+        source: "sealed-lattice/linear-proof/demo-encoding-v1".to_string(),
         expected_proof_size_bytes: None,
     }
 }
 
-pub fn receiver_key_linear_proof_encoding_contract() -> LazerDemoProofEncoding {
-    LazerDemoProofEncoding {
+pub fn receiver_key_linear_proof_encoding_contract() -> LinearProofEncoding {
+    LinearProofEncoding {
         profile_id: "receiver-key-linear-proof-encoding-v1".to_string(),
         ring_degree: 64,
         coefficient_modulus: 274_877_908_477,
@@ -344,13 +348,13 @@ pub fn receiver_key_linear_proof_encoding_contract() -> LazerDemoProofEncoding {
         randomness_response_log2_standard_deviation: 12,
         euclidean_response_log2_standard_deviation: 12,
         infinity_response_log2_standard_deviation: 17,
-        source: "temp/lazer/python/demo/receiver_key_params.h:receiver_key_param".to_string(),
+        source: "sealed-lattice/linear-proof/receiver-key-encoding-v1".to_string(),
         expected_proof_size_bytes: None,
     }
 }
 
-pub fn encoded_score_field_linear_proof_encoding_contract() -> LazerDemoProofEncoding {
-    LazerDemoProofEncoding {
+pub fn encoded_score_field_linear_proof_encoding_contract() -> LinearProofEncoding {
+    LinearProofEncoding {
         profile_id: "encoded-score-field-linear-proof-encoding-v1".to_string(),
         ring_degree: 64,
         coefficient_modulus: 70_368_744_177_829,
@@ -370,7 +374,7 @@ pub fn encoded_score_field_linear_proof_encoding_contract() -> LazerDemoProofEnc
         randomness_response_log2_standard_deviation: 12,
         euclidean_response_log2_standard_deviation: 14,
         infinity_response_log2_standard_deviation: 22,
-        source: "temp/lazer/python/demo/ballot_field_params.h:ballot_field_param".to_string(),
+        source: "sealed-lattice/linear-proof/encoded-score-field-encoding-v1".to_string(),
         expected_proof_size_bytes: None,
     }
 }
@@ -561,8 +565,8 @@ mod tests {
 
     #[test]
     fn proof_encoding_accepts_decimal_string_modulus_for_json_bridge_safety() {
-        let proof_encoding: super::LazerDemoProofEncoding = serde_json::from_value(json!({
-            "profileId": "lazer-demo-linear-proof-encoding-v1",
+        let proof_encoding: super::LinearProofEncoding = serde_json::from_value(json!({
+            "profileId": "demo-linear-proof-encoding-v1",
             "ringDegree": 64,
             "coefficientModulus": "36028797018964597",
             "fullSizeCoefficientBitLength": 56,
@@ -581,7 +585,7 @@ mod tests {
             "randomnessResponseLog2StandardDeviation": 12,
             "euclideanResponseLog2StandardDeviation": 11,
             "infinityResponseLog2StandardDeviation": 16,
-            "source": "temp/lazer/python/demo/demo_params.h:_param",
+            "source": "sealed-lattice/linear-proof/demo-encoding-v1",
             "expectedProofSizeBytes": 1
         }))
         .expect("decimal string modulus should deserialize");

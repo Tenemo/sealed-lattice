@@ -22,11 +22,8 @@ export type TranscriptCorePlaintextComparison = {
 export type BallotPrivacyProofBackendStatus = {
     readonly backendName: string;
     readonly backendAvailable: false;
-    readonly upstreamReference: string;
-    readonly upstreamDirectDependencyUsableInBrowser: false;
     readonly portableRustWasmPortRequired: true;
     readonly requiredComponents: readonly string[];
-    readonly upstreamReferenceFiles: readonly string[];
     readonly blockedReason: string;
 };
 
@@ -409,6 +406,10 @@ const transcriptCoreKernelNormalizedSha256HexValues = [
     'cec819f374e74b9453c6f10fac1e21181a84fe72a54d0d2f0e6fe2dbd135219d',
     '8eebdf3c7a32bc495d150e9b2b053c08f2545752da839fea2801d0675b0fe52c',
     '7707cc43a4a98d75135bd05ec0e1c27469c9f0be0cb2359edd3b4c58fdf5e661',
+    '9b15ba1c3283b5edc36720a47c9a32da5debffb3ac06078a95e5a8967a7788d3',
+    '4c6e4895afb0a5826b723a9b167e0e591cb2b42f8b0d5dd0f49cdc37d61756ae',
+    '0fadcc1df4b89abc6a7f2be650944e588ebfce285d39f10f7688e71d6bbffd65',
+    'ff28503a1daa1824ea9fdb89cc7baaf4f03d944f706bd12a76125ea7e7161b2b',
 ] as const;
 const defaultTranscriptCoreKernelNormalizedSha256HexValues = new Set<string>(
     transcriptCoreKernelNormalizedSha256HexValues,

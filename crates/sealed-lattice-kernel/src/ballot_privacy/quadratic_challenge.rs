@@ -4,13 +4,13 @@ use crate::{
 };
 
 use super::{
-    lazer_demo_many_quadratic::LazerDemoManyQuadraticFold,
-    lazer_demo_public_parameters::{
-        LAZER_DEMO_PROOF_RING_DEGREE, derive_lazer_abdlop_public_parameters,
+    linear_proof_parameters::{LinearProofEncoding, linear_proof_profile_for_encoding},
+    linear_proof_public_parameters::{
+        LINEAR_PROOF_PROOF_RING_DEGREE, derive_abdlop_public_parameters,
     },
-    lazer_demo_rng::sample_lazer_demo_autostable_challenge_coefficients,
-    linear_proof_parameters::{LazerDemoProofEncoding, linear_proof_profile_for_encoding},
+    linear_proof_rng::sample_linear_proof_autostable_challenge_coefficients,
     linear_proof_transcript::shake128_32,
+    many_quadratic::ManyQuadraticFold,
     polynomial_matrix::PolynomialMatrix,
     polynomial_ring::PolynomialRing,
     polynomial_vector::PolynomialVector,
@@ -18,8 +18,8 @@ use super::{
     sparse_polynomial_vector::SparsePolynomialVector,
 };
 
-const LAZER_DEMO_QUADRATIC_TARGET_VECTOR_LENGTH: usize = 12;
-const LAZER_DEMO_QUADRATIC_MESSAGE_LENGTH: usize = 11;
+const QUADRATIC_TARGET_VECTOR_LENGTH: usize = 12;
+const QUADRATIC_MESSAGE_LENGTH: usize = 11;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct LazerDemoQuadraticChallengeSummary {
@@ -31,23 +31,22 @@ pub(crate) struct LazerDemoQuadraticChallengeSummary {
     pub(crate) hint_infinity_norm: u128,
 }
 
-pub(crate) fn validate_lazer_demo_quadratic_challenge(
+pub(crate) fn validate_quadratic_challenge(
     challenge_seed: &[u8; 32],
     public_randomness: &[u8; 32],
     decoded_proof: &DecodedLazerDemoLinearProof,
-    proof_encoding: &LazerDemoProofEncoding,
-    many_quadratic_fold: &LazerDemoManyQuadraticFold,
+    proof_encoding: &LinearProofEncoding,
+    many_quadratic_fold: &ManyQuadraticFold,
 ) -> CanonicalResult<LazerDemoQuadraticChallengeSummary> {
     proof_encoding.validate()?;
     let proof_profile = linear_proof_profile_for_encoding(proof_encoding)?;
-    validate_lazer_demo_quadratic_shapes(decoded_proof, proof_encoding, many_quadratic_fold)?;
+    validate_quadratic_equation_shapes(decoded_proof, proof_encoding, many_quadratic_fold)?;
 
     let proof_ring = PolynomialRing::new(
         proof_encoding.ring_degree,
         proof_encoding.coefficient_modulus,
     )?;
-    let public_parameters =
-        derive_lazer_abdlop_public_parameters(public_randomness, proof_encoding)?;
+    let public_parameters = derive_abdlop_public_parameters(public_randomness, proof_encoding)?;
     let challenge_polynomial = challenge_polynomial_to_canonical_proof_ring(
         proof_ring,
         decoded_proof.challenge_polynomial().centered_coefficients(),
@@ -72,7 +71,7 @@ pub(crate) fn validate_lazer_demo_quadratic_challenge(
         decoded_proof.commitment_target_vector().to_vec(),
     )?;
 
-    let recovery_input = recover_lazer_demo_quadratic_decompression_input(
+    let recovery_input = recover_quadratic_equation_decompression_input(
         proof_ring,
         &public_parameters.commitment_key_matrix,
         &public_parameters.opening_key_matrix,
@@ -81,13 +80,13 @@ pub(crate) fn validate_lazer_demo_quadratic_challenge(
         &shifted_challenge_polynomial,
         &compressed_commitment_vector,
     )?;
-    let recovered_high_bits = recover_lazer_demo_quadratic_high_bits(
+    let recovered_high_bits = recover_quadratic_equation_high_bits(
         recovery_input.entries(),
         decoded_proof.hint_vector(),
         proof_encoding,
         proof_profile,
     )?;
-    let low_part_l2_squared = compute_lazer_demo_quadratic_low_part_l2_squared(
+    let low_part_l2_squared = compute_quadratic_equation_low_part_l2_squared(
         proof_ring,
         recovery_input.entries(),
         &recovered_high_bits,
@@ -99,14 +98,14 @@ pub(crate) fn validate_lazer_demo_quadratic_challenge(
         ));
     }
 
-    let reconstructed_message_vector = recover_lazer_demo_quadratic_message_vector(
+    let reconstructed_message_vector = recover_quadratic_equation_message_vector(
         proof_ring,
         &public_parameters.message_key_matrix,
         &challenge_polynomial,
         &randomness_response_vector,
         &target_commitment_vector,
     )?;
-    let verifier_polynomial = recover_lazer_demo_quadratic_verifier_polynomial(
+    let verifier_polynomial = recover_quadratic_equation_verifier_polynomial(
         LazerDemoQuadraticVerifierPolynomialInput {
             proof_ring,
             challenge_polynomial: &challenge_polynomial,
@@ -118,16 +117,16 @@ pub(crate) fn validate_lazer_demo_quadratic_challenge(
             target_commitment_vector: &target_commitment_vector,
         },
     )?;
-    let challenge_encoding = encode_lazer_demo_quadratic_challenge_input(
+    let challenge_encoding = encode_quadratic_challenge_input(
         proof_ring,
-        &target_commitment_vector.entries()[LAZER_DEMO_QUADRATIC_MESSAGE_LENGTH..],
+        &target_commitment_vector.entries()[QUADRATIC_MESSAGE_LENGTH..],
         &verifier_polynomial,
         &recovered_high_bits,
         proof_encoding,
         proof_profile,
     )?;
     let recomputed_challenge_seed = shake128_32(&[challenge_seed, &challenge_encoding]);
-    let recomputed_challenge_coefficients = sample_lazer_demo_autostable_challenge_coefficients(
+    let recomputed_challenge_coefficients = sample_linear_proof_autostable_challenge_coefficients(
         proof_ring.degree(),
         proof_profile.challenge_centered_bound,
         proof_profile.challenge_coefficient_bit_length,
@@ -175,10 +174,10 @@ pub(crate) fn validate_lazer_demo_quadratic_challenge(
     })
 }
 
-fn validate_lazer_demo_quadratic_shapes(
+fn validate_quadratic_equation_shapes(
     decoded_proof: &DecodedLazerDemoLinearProof,
-    proof_encoding: &LazerDemoProofEncoding,
-    many_quadratic_fold: &LazerDemoManyQuadraticFold,
+    proof_encoding: &LinearProofEncoding,
+    many_quadratic_fold: &ManyQuadraticFold,
 ) -> CanonicalResult<()> {
     if decoded_proof.short_response_vector().len() != proof_encoding.short_response_vector_length {
         return Err(invalid_quadratic_challenge(
@@ -200,7 +199,7 @@ fn validate_lazer_demo_quadratic_shapes(
         ));
     }
     if many_quadratic_fold.folded_equation.dimension()
-        != 2 * (proof_encoding.short_response_vector_length + LAZER_DEMO_QUADRATIC_MESSAGE_LENGTH)
+        != 2 * (proof_encoding.short_response_vector_length + QUADRATIC_MESSAGE_LENGTH)
     {
         return Err(invalid_quadratic_challenge(
             "folded many-quadratic equation dimension does not match the proof profile",
@@ -210,7 +209,7 @@ fn validate_lazer_demo_quadratic_shapes(
     Ok(())
 }
 
-fn recover_lazer_demo_quadratic_decompression_input(
+fn recover_quadratic_equation_decompression_input(
     ring: PolynomialRing,
     commitment_key_matrix: &PolynomialMatrix,
     opening_key_matrix: &PolynomialMatrix,
@@ -231,15 +230,14 @@ fn recover_lazer_demo_quadratic_decompression_input(
     product_sum.sub(&shifted_challenge_commitment)
 }
 
-fn recover_lazer_demo_quadratic_message_vector(
+fn recover_quadratic_equation_message_vector(
     ring: PolynomialRing,
     message_key_matrix: &PolynomialMatrix,
     challenge_polynomial: &[u64],
     randomness_response_vector: &PolynomialVector,
     target_commitment_vector: &PolynomialVector,
 ) -> CanonicalResult<PolynomialVector> {
-    let message_target_entries = target_commitment_vector.entries()
-        [..LAZER_DEMO_QUADRATIC_MESSAGE_LENGTH]
+    let message_target_entries = target_commitment_vector.entries()[..QUADRATIC_MESSAGE_LENGTH]
         .iter()
         .map(|target_polynomial| ring.mul_negacyclic(challenge_polynomial, target_polynomial))
         .collect::<CanonicalResult<Vec<_>>>()?;
@@ -247,7 +245,7 @@ fn recover_lazer_demo_quadratic_message_vector(
     let message_binding_product = multiply_matrix_row_range_by_vector(
         message_key_matrix,
         0,
-        LAZER_DEMO_QUADRATIC_MESSAGE_LENGTH,
+        QUADRATIC_MESSAGE_LENGTH,
         randomness_response_vector,
     )?;
 
@@ -257,7 +255,7 @@ fn recover_lazer_demo_quadratic_message_vector(
 struct LazerDemoQuadraticVerifierPolynomialInput<'input> {
     proof_ring: PolynomialRing,
     challenge_polynomial: &'input [u64],
-    folded_equation: &'input super::lazer_demo_quadratic::LazerDemoQuadraticEquation,
+    folded_equation: &'input super::quadratic_equation::LinearProofQuadraticEquation,
     short_response_vector: &'input PolynomialVector,
     reconstructed_message_vector: &'input PolynomialVector,
     message_key_matrix: &'input PolynomialMatrix,
@@ -265,7 +263,7 @@ struct LazerDemoQuadraticVerifierPolynomialInput<'input> {
     target_commitment_vector: &'input PolynomialVector,
 }
 
-fn recover_lazer_demo_quadratic_verifier_polynomial(
+fn recover_quadratic_equation_verifier_polynomial(
     input: LazerDemoQuadraticVerifierPolynomialInput<'_>,
 ) -> CanonicalResult<Vec<u64>> {
     let proof_ring = input.proof_ring;
@@ -277,7 +275,7 @@ fn recover_lazer_demo_quadratic_verifier_polynomial(
     verifier_polynomial =
         proof_ring.mul_negacyclic(input.challenge_polynomial, &verifier_polynomial)?;
 
-    let witness_vector = build_lazer_demo_quadratic_witness_vector(
+    let witness_vector = build_quadratic_equation_witness_vector(
         proof_ring,
         input.short_response_vector,
         input.reconstructed_message_vector,
@@ -291,7 +289,7 @@ fn recover_lazer_demo_quadratic_verifier_polynomial(
     verifier_polynomial =
         proof_ring.mul_negacyclic(input.challenge_polynomial, &verifier_polynomial)?;
 
-    let external_target_polynomial = recover_lazer_demo_external_target_polynomial(
+    let external_target_polynomial = recover_linear_proof_external_target_polynomial(
         proof_ring,
         input.message_key_matrix,
         input.challenge_polynomial,
@@ -310,13 +308,13 @@ fn recover_lazer_demo_quadratic_verifier_polynomial(
     proof_ring.add(&verifier_polynomial, &quadratic_product)
 }
 
-fn build_lazer_demo_quadratic_witness_vector(
+fn build_quadratic_equation_witness_vector(
     ring: PolynomialRing,
     short_response_vector: &PolynomialVector,
     reconstructed_message_vector: &PolynomialVector,
 ) -> CanonicalResult<PolynomialVector> {
     let mut witness_entries =
-        Vec::with_capacity(2 * (short_response_vector.len() + LAZER_DEMO_QUADRATIC_MESSAGE_LENGTH));
+        Vec::with_capacity(2 * (short_response_vector.len() + QUADRATIC_MESSAGE_LENGTH));
     for short_response_polynomial in short_response_vector.entries() {
         witness_entries.push(short_response_polynomial.clone());
         witness_entries.push(ring.automorphism(short_response_polynomial)?);
@@ -329,7 +327,7 @@ fn build_lazer_demo_quadratic_witness_vector(
     PolynomialVector::new(ring, witness_entries)
 }
 
-fn recover_lazer_demo_external_target_polynomial(
+fn recover_linear_proof_external_target_polynomial(
     ring: PolynomialRing,
     message_key_matrix: &PolynomialMatrix,
     challenge_polynomial: &[u64],
@@ -337,13 +335,13 @@ fn recover_lazer_demo_external_target_polynomial(
     target_commitment_vector: &PolynomialVector,
     reconstructed_message_vector: &PolynomialVector,
 ) -> CanonicalResult<Vec<u64>> {
-    if reconstructed_message_vector.len() != LAZER_DEMO_QUADRATIC_MESSAGE_LENGTH {
+    if reconstructed_message_vector.len() != QUADRATIC_MESSAGE_LENGTH {
         return Err(invalid_quadratic_challenge(
             "reconstructed message vector length does not match the demo profile",
         ));
     }
 
-    if target_commitment_vector.len() != LAZER_DEMO_QUADRATIC_TARGET_VECTOR_LENGTH {
+    if target_commitment_vector.len() != QUADRATIC_TARGET_VECTOR_LENGTH {
         return Err(invalid_quadratic_challenge(
             "target commitment vector length does not match the demo profile",
         ));
@@ -351,11 +349,11 @@ fn recover_lazer_demo_external_target_polynomial(
 
     let scaled_external_target = ring.mul_negacyclic(
         challenge_polynomial,
-        &target_commitment_vector.entries()[LAZER_DEMO_QUADRATIC_MESSAGE_LENGTH],
+        &target_commitment_vector.entries()[QUADRATIC_MESSAGE_LENGTH],
     )?;
     let external_binding_product = multiply_matrix_row_range_by_vector(
         message_key_matrix,
-        LAZER_DEMO_QUADRATIC_MESSAGE_LENGTH,
+        QUADRATIC_MESSAGE_LENGTH,
         1,
         randomness_response_vector,
     )?;
@@ -366,11 +364,11 @@ fn recover_lazer_demo_external_target_polynomial(
     )
 }
 
-fn recover_lazer_demo_quadratic_high_bits(
+fn recover_quadratic_equation_high_bits(
     recovery_input: &[Vec<u64>],
     hint_vector: &[Vec<i64>],
-    proof_encoding: &LazerDemoProofEncoding,
-    proof_profile: super::linear_proof_parameters::LazerLinearProofProfile,
+    proof_encoding: &LinearProofEncoding,
+    proof_profile: super::linear_proof_parameters::LinearProofProfile,
 ) -> CanonicalResult<Vec<Vec<u64>>> {
     if recovery_input.len() != hint_vector.len() {
         return Err(invalid_quadratic_challenge(
@@ -407,8 +405,8 @@ fn recover_lazer_demo_quadratic_high_bits(
 
 fn gamma_decompression_high_bits(
     coefficient: u64,
-    proof_encoding: &LazerDemoProofEncoding,
-    proof_profile: super::linear_proof_parameters::LazerLinearProofProfile,
+    proof_encoding: &LinearProofEncoding,
+    proof_profile: super::linear_proof_parameters::LinearProofProfile,
 ) -> CanonicalResult<i128> {
     if coefficient >= proof_encoding.coefficient_modulus {
         return Err(invalid_quadratic_challenge(
@@ -431,11 +429,11 @@ fn gamma_decompression_high_bits(
     }
 }
 
-fn compute_lazer_demo_quadratic_low_part_l2_squared(
+fn compute_quadratic_equation_low_part_l2_squared(
     ring: PolynomialRing,
     recovery_input: &[Vec<u64>],
     recovered_high_bits: &[Vec<u64>],
-    proof_profile: super::linear_proof_parameters::LazerLinearProofProfile,
+    proof_profile: super::linear_proof_parameters::LinearProofProfile,
 ) -> CanonicalResult<u128> {
     if recovery_input.len() != recovered_high_bits.len() {
         return Err(invalid_quadratic_challenge(
@@ -481,13 +479,13 @@ fn compute_lazer_demo_quadratic_low_part_l2_squared(
     Ok(squared_sum)
 }
 
-fn encode_lazer_demo_quadratic_challenge_input(
+fn encode_quadratic_challenge_input(
     ring: PolynomialRing,
     target_tail_polynomials: &[Vec<u64>],
     verifier_polynomial: &[u64],
     recovered_high_bits: &[Vec<u64>],
-    proof_encoding: &LazerDemoProofEncoding,
-    proof_profile: super::linear_proof_parameters::LazerLinearProofProfile,
+    proof_encoding: &LinearProofEncoding,
+    proof_profile: super::linear_proof_parameters::LinearProofProfile,
 ) -> CanonicalResult<Vec<u8>> {
     if target_tail_polynomials.len() != 1 {
         return Err(invalid_quadratic_challenge(
@@ -529,7 +527,7 @@ fn encode_uniform_polynomial(
     modulus: u64,
     bit_length: usize,
 ) -> CanonicalResult<()> {
-    if polynomial.len() != LAZER_DEMO_PROOF_RING_DEGREE {
+    if polynomial.len() != LINEAR_PROOF_PROOF_RING_DEGREE {
         return Err(invalid_quadratic_challenge(
             "quadratic challenge polynomial degree does not match the proof ring",
         ));
@@ -744,8 +742,8 @@ fn signed_polynomial_infinity_norm(polynomials: &[Vec<i64>]) -> CanonicalResult<
 }
 
 fn short_response_l2_bound_squared(
-    proof_encoding: &LazerDemoProofEncoding,
-    proof_profile: super::linear_proof_parameters::LazerLinearProofProfile,
+    proof_encoding: &LinearProofEncoding,
+    proof_profile: super::linear_proof_parameters::LinearProofProfile,
 ) -> CanonicalResult<u128> {
     let base = 2_u128
         .checked_mul(proof_encoding.short_response_vector_length as u128)
@@ -862,37 +860,34 @@ fn invalid_quadratic_challenge(message: impl Into<String>) -> CanonicalError {
 mod tests {
     use super::{
         gamma_decompression_high_bits, short_response_l2_bound_squared,
-        validate_lazer_demo_quadratic_challenge,
+        validate_quadratic_challenge,
     };
     use crate::{
         ballot_privacy::{
-            abdlop_commitment::hash_lazer_demo_abdlop_commitment,
-            lazer_demo_many_quadratic::{
-                build_lazer_demo_many_quadratic_equations, fold_lazer_demo_many_quadratic_equations,
-            },
-            lazer_demo_tbox_relations::{
-                apply_lazer_demo_tbox_z3_response_relations,
-                apply_lazer_demo_tbox_z4_response_relations,
-                build_lazer_demo_tbox_prefix_accumulators,
-            },
-            linear_proof_parameters::{LazerDemoProofEncoding, LinearProofParameterSet},
+            abdlop_commitment::hash_abdlop_commitment,
+            linear_proof_parameters::{LinearProofEncoding, LinearProofParameterSet},
             linear_proof_parameters::{
                 demo_linear_proof_encoding_contract, linear_proof_profile_for_encoding,
             },
             linear_proof_statement::{
-                LinearProofTargetCoefficientRepresentation,
-                derive_lazer_demo_linear_statement_transcript,
-                derive_lazer_demo_transformed_statement_matrix,
-                derive_lazer_demo_transformed_target_vector,
+                LinearProofTargetCoefficientRepresentation, derive_linear_statement_transcript,
+                derive_transformed_statement_matrix, derive_transformed_target_vector,
             },
-            linear_proof_tbox::validate_lazer_demo_tbox_public_checks,
-            proof_coder::decode_lazer_demo_linear_proof,
+            linear_proof_tbox::validate_linear_proof_tbox_public_checks,
+            many_quadratic::{
+                build_many_quadratic_equations, fold_default_many_quadratic_equations,
+            },
+            proof_coder::decode_linear_proof,
+            tbox_relations::{
+                apply_default_tbox_z3_response_relations, apply_default_tbox_z4_response_relations,
+                build_default_tbox_prefix_accumulators,
+            },
         },
         transcript_core::decode_hex,
     };
 
     #[test]
-    fn gamma_decompression_matches_lazer_high_part_rule() {
+    fn gamma_decompression_matches_linear_proof_high_part_rule() {
         let proof_encoding = demo_linear_proof_encoding_contract();
         let proof_profile =
             linear_proof_profile_for_encoding(&proof_encoding).expect("profile should resolve");
@@ -940,7 +935,7 @@ mod tests {
         let parameter_set: LinearProofParameterSet =
             serde_json::from_value(vector_case["parameterSet"].clone())
                 .expect("parameter set should deserialize");
-        let proof_encoding: LazerDemoProofEncoding =
+        let proof_encoding: LinearProofEncoding =
             serde_json::from_value(vector_case["proofEncoding"].clone())
                 .expect("proof encoding should deserialize");
         let statement_matrix_coefficients: Vec<Vec<Vec<u64>>> =
@@ -963,9 +958,9 @@ mod tests {
                 .expect("proof hex should be present"),
         )
         .expect("proof bytes should decode");
-        let decoded_proof = decode_lazer_demo_linear_proof(&proof_bytes, &proof_encoding)
-            .expect("proof should decode");
-        let statement_transcript = derive_lazer_demo_linear_statement_transcript(
+        let decoded_proof =
+            decode_linear_proof(&proof_bytes, &proof_encoding).expect("proof should decode");
+        let statement_transcript = derive_linear_statement_transcript(
             &parameter_set,
             &proof_encoding,
             &statement_matrix_coefficients,
@@ -974,13 +969,13 @@ mod tests {
             &public_randomness,
         )
         .expect("statement transcript should derive");
-        let abdlop_commitment_hash = hash_lazer_demo_abdlop_commitment(
+        let abdlop_commitment_hash = hash_abdlop_commitment(
             &statement_transcript.public_parameters_and_statement_hash,
             &decoded_proof,
             &proof_encoding,
         )
         .expect("commitment hash should derive");
-        let tbox_summary = validate_lazer_demo_tbox_public_checks(
+        let tbox_summary = validate_linear_proof_tbox_public_checks(
             &abdlop_commitment_hash,
             &decoded_proof,
             &proof_encoding,
@@ -988,7 +983,7 @@ mod tests {
         .expect("tbox public checks should pass");
         let z34_challenge_hash = decode_hash(&tbox_summary.z34_challenge_hash);
         let generator_challenge_hash = decode_hash(&tbox_summary.generator_challenge_hash);
-        let transformed_statement_matrix = derive_lazer_demo_transformed_statement_matrix(
+        let transformed_statement_matrix = derive_transformed_statement_matrix(
             &parameter_set,
             &proof_encoding,
             &statement_matrix_coefficients,
@@ -997,7 +992,7 @@ mod tests {
             &public_randomness,
         )
         .expect("transformed statement should derive");
-        let transformed_target_vector = derive_lazer_demo_transformed_target_vector(
+        let transformed_target_vector = derive_transformed_target_vector(
             &parameter_set,
             &proof_encoding,
             &statement_matrix_coefficients,
@@ -1007,9 +1002,9 @@ mod tests {
         )
         .expect("transformed target should derive");
         let mut tbox_accumulators =
-            build_lazer_demo_tbox_prefix_accumulators(&generator_challenge_hash)
+            build_default_tbox_prefix_accumulators(&generator_challenge_hash)
                 .expect("prefix accumulators should build");
-        apply_lazer_demo_tbox_z4_response_relations(
+        apply_default_tbox_z4_response_relations(
             &mut tbox_accumulators,
             &transformed_statement_matrix,
             &transformed_target_vector,
@@ -1017,25 +1012,23 @@ mod tests {
             &z34_challenge_hash,
         )
         .expect("z4 response relations should build");
-        apply_lazer_demo_tbox_z3_response_relations(
+        apply_default_tbox_z3_response_relations(
             &mut tbox_accumulators,
             &transformed_statement_matrix,
             decoded_proof.euclidean_response_vector(),
             &z34_challenge_hash,
         )
         .expect("z3 response relations should build");
-        let many_quadratic_equations = build_lazer_demo_many_quadratic_equations(
-            &tbox_accumulators,
-            decoded_proof.hash_mask_vector(),
-        )
-        .expect("many quadratic equations should build");
-        let many_quadratic_fold = fold_lazer_demo_many_quadratic_equations(
+        let many_quadratic_equations =
+            build_many_quadratic_equations(&tbox_accumulators, decoded_proof.hash_mask_vector())
+                .expect("many quadratic equations should build");
+        let many_quadratic_fold = fold_default_many_quadratic_equations(
             &many_quadratic_equations,
             &generator_challenge_hash,
         )
         .expect("many quadratic equations should fold");
 
-        let summary = validate_lazer_demo_quadratic_challenge(
+        let summary = validate_quadratic_challenge(
             &generator_challenge_hash,
             &public_randomness,
             &decoded_proof,

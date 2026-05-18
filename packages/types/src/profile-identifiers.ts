@@ -54,7 +54,7 @@ export const shareCommitmentProfileId =
     'module-sis-additive-share-commitment-v1';
 
 /** Ballot privacy proof profile used for the local lattice relation. */
-export const ballotProofProfileId = 'lazer-linear-ballot-privacy-proof-v1';
+export const ballotProofProfileId = 'linear-lattice-ballot-privacy-proof-v1';
 
 /** Score membership profile for score values in the supported score domain. */
 export const scoreMembershipProfileId = 'one-hot-score-membership-v1';

@@ -15,7 +15,7 @@ from typing import Any
 
 
 VECTOR_PROFILE_ID = "lazer-linear-demo-compatibility-v1"
-LINEAR_PROOF_PREFLIGHT_DOMAIN = "sealed.vote/internal/lazer-linear-preflight-v1"
+LINEAR_PROOF_PREFLIGHT_DOMAIN = "sealed.vote/internal/linear-proof-preflight-v1"
 REQUIRED_CASE_NAMES = [
     "valid-small-linear-proof",
     "mutated-statement-matrix",

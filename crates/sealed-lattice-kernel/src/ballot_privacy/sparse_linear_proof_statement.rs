@@ -10,7 +10,7 @@ use crate::{
 };
 
 use super::{
-    linear_proof_parameters::{LazerDemoProofEncoding, LinearProofParameterSet},
+    linear_proof_parameters::{LinearProofEncoding, LinearProofParameterSet},
     linear_proof_statement::{
         LazerDemoLinearStatementTranscript, LinearProofTargetCoefficientRepresentation,
         rotate_left_negacyclic_signed_polynomial,
@@ -82,7 +82,7 @@ pub fn build_constant_coefficient_sparse_source_matrix(
 
 pub fn transform_sparse_statement_matrix_to_proof_ring(
     parameter_set: &LinearProofParameterSet,
-    proof_encoding: &LazerDemoProofEncoding,
+    proof_encoding: &LinearProofEncoding,
     source_statement_matrix: &SparsePolynomialMatrix,
 ) -> CanonicalResult<SparsePolynomialMatrix> {
     validate_sparse_statement_matrix_inputs(
@@ -155,7 +155,7 @@ pub fn transform_sparse_statement_matrix_to_proof_ring(
 
 pub fn transform_sparse_target_vector_to_proof_ring(
     parameter_set: &LinearProofParameterSet,
-    proof_encoding: &LazerDemoProofEncoding,
+    proof_encoding: &LinearProofEncoding,
     target_vector_coefficients: &[Vec<u64>],
     target_coefficient_representation: LinearProofTargetCoefficientRepresentation,
 ) -> CanonicalResult<PolynomialVector> {
@@ -180,7 +180,7 @@ pub fn transform_sparse_target_vector_to_proof_ring(
 
 pub fn derive_sparse_linear_statement_transcript(
     parameter_set: &LinearProofParameterSet,
-    proof_encoding: &LazerDemoProofEncoding,
+    proof_encoding: &LinearProofEncoding,
     source_statement_matrix: &SparsePolynomialMatrix,
     target_vector_coefficients: &[Vec<u64>],
     target_coefficient_representation: LinearProofTargetCoefficientRepresentation,
@@ -230,7 +230,7 @@ pub fn derive_sparse_linear_statement_transcript(
 
 pub fn derive_dense_compatible_sparse_linear_statement_transcript(
     parameter_set: &LinearProofParameterSet,
-    proof_encoding: &LazerDemoProofEncoding,
+    proof_encoding: &LinearProofEncoding,
     source_statement_matrix: &SparsePolynomialMatrix,
     target_vector_coefficients: &[Vec<u64>],
     target_coefficient_representation: LinearProofTargetCoefficientRepresentation,
@@ -275,7 +275,7 @@ pub fn derive_dense_compatible_sparse_linear_statement_transcript(
 
 fn validate_sparse_statement_matrix_inputs(
     parameter_set: &LinearProofParameterSet,
-    proof_encoding: &LazerDemoProofEncoding,
+    proof_encoding: &LinearProofEncoding,
     source_statement_matrix: &SparsePolynomialMatrix,
 ) -> CanonicalResult<()> {
     parameter_set.validate()?;
@@ -317,7 +317,7 @@ fn validate_sparse_target_vector(
 
 fn hash_sparse_transformed_statement(
     parameter_set: &LinearProofParameterSet,
-    proof_encoding: &LazerDemoProofEncoding,
+    proof_encoding: &LinearProofEncoding,
     target_coefficient_representation: LinearProofTargetCoefficientRepresentation,
     transformed_statement_matrix: &SparsePolynomialMatrix,
     transformed_target_vector: &PolynomialVector,
@@ -354,7 +354,7 @@ fn hash_sparse_transformed_statement(
 }
 
 fn hash_sparse_transformed_statement_as_dense(
-    proof_encoding: &LazerDemoProofEncoding,
+    proof_encoding: &LinearProofEncoding,
     transformed_statement_matrix: &SparsePolynomialMatrix,
     transformed_target_vector: &PolynomialVector,
 ) -> CanonicalResult<([u8; 32], usize)> {
@@ -435,7 +435,7 @@ impl DenseCompatibleStatementBitHasher {
     fn write_polynomial(
         &mut self,
         polynomial: &[u64],
-        proof_encoding: &LazerDemoProofEncoding,
+        proof_encoding: &LinearProofEncoding,
     ) -> CanonicalResult<()> {
         if polynomial.len() != proof_encoding.ring_degree {
             return Err(invalid_sparse_statement(
@@ -591,9 +591,8 @@ mod tests {
     use crate::ballot_privacy::{
         linear_proof_parameters::{LinearProofParameterSet, demo_linear_proof_encoding_contract},
         linear_proof_statement::{
-            derive_lazer_demo_linear_statement_transcript,
-            derive_lazer_demo_transformed_statement_matrix,
-            derive_lazer_demo_transformed_target_vector,
+            derive_linear_statement_transcript, derive_transformed_statement_matrix,
+            derive_transformed_target_vector,
         },
     };
 
@@ -613,7 +612,7 @@ mod tests {
     }
 
     fn sparse_test_proof_encoding()
-    -> crate::ballot_privacy::linear_proof_parameters::LazerDemoProofEncoding {
+    -> crate::ballot_privacy::linear_proof_parameters::LinearProofEncoding {
         let mut proof_encoding = demo_linear_proof_encoding_contract();
         proof_encoding.ring_degree = 4;
         proof_encoding.coefficient_modulus = 97;
@@ -711,7 +710,7 @@ mod tests {
             &sparse_matrix,
         )
         .expect("sparse statement should transform");
-        let transformed_dense_matrix = derive_lazer_demo_transformed_statement_matrix(
+        let transformed_dense_matrix = derive_transformed_statement_matrix(
             &parameter_set,
             &proof_encoding,
             &dense_test_matrix(),
@@ -740,7 +739,7 @@ mod tests {
             LinearProofTargetCoefficientRepresentation::CenteredSignedSourceModulus,
         )
         .expect("sparse target should transform");
-        let transformed_dense_target = derive_lazer_demo_transformed_target_vector(
+        let transformed_dense_target = derive_transformed_target_vector(
             &parameter_set,
             &proof_encoding,
             &dense_test_matrix(),
@@ -859,7 +858,7 @@ mod tests {
             &[3_u8; 32],
         )
         .expect("sparse transcript should derive");
-        let dense_transcript = derive_lazer_demo_linear_statement_transcript(
+        let dense_transcript = derive_linear_statement_transcript(
             &parameter_set,
             &proof_encoding,
             &dense_test_matrix(),
@@ -893,7 +892,7 @@ mod tests {
             &[3_u8; 32],
         )
         .expect("dense-compatible sparse transcript should derive");
-        let dense_transcript = derive_lazer_demo_linear_statement_transcript(
+        let dense_transcript = derive_linear_statement_transcript(
             &parameter_set,
             &proof_encoding,
             &dense_test_matrix(),

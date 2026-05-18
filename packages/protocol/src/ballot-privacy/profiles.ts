@@ -28,7 +28,10 @@ import {
     type ShareCommitmentProfile,
 } from '@sealed-lattice/types';
 
-import { createRefusal } from '../common/verification-helpers.js';
+import {
+    createRefusal,
+    isNonNegativeInteger,
+} from '../common/verification-helpers.js';
 import { fieldModulus } from '../plaintext-oracle/field.js';
 
 import {
@@ -373,9 +376,8 @@ const createBallotProofProfile = (): BallotProofProfile => {
         objectType: 'BallotProofProfile',
         objectVersion: 1,
         profileId: ballotProofProfileId,
-        proofSystem: 'LaZerStyleLocalLatticeRelation',
-        backendConstruction:
-            'LyubashevskyNguyenPlancon2022LinearProofsViaLaZer',
+        proofSystem: 'LocalLinearLatticeRelation',
+        backendConstruction: 'LyubashevskyNguyenPlancon2022LinearProofs',
         relationShape:
             'LinearLatticeRelationsWithShortVectorAndOneHotMembership',
         fiatShamirHash: 'Hash512-SHAKE256',
@@ -511,9 +513,22 @@ const verifyCanonicalDigest = (input: {
         shareCommitmentMessageBoundCertDigest,
         ...certificateWithoutDigest
     } = input.certificate;
-    const expectedDigest = deriveShareCommitmentMessageBoundCertDigest(
-        certificateWithoutDigest,
-    );
+    let expectedDigest: ProtocolDigest;
+    try {
+        expectedDigest = deriveShareCommitmentMessageBoundCertDigest(
+            certificateWithoutDigest,
+        );
+    } catch {
+        input.refusedObjects.push(
+            createRefusal(
+                'BallotPrivacyProfileInvalid',
+                'Share commitment message-bound certificate payload is not canonical.',
+                shareCommitmentMessageBoundCertDigest,
+            ),
+        );
+
+        return;
+    }
 
     if (shareCommitmentMessageBoundCertDigest !== expectedDigest) {
         input.refusedObjects.push(
@@ -600,7 +615,11 @@ export const verifyShareCommitmentMessageBoundCert = (input: {
             ),
         );
     }
+    const maximumAggregateIntegerIsCanonical = isNonNegativeInteger(
+        certificate.maximumAggregateInteger,
+    );
     const aggregateCanWrap =
+        !maximumAggregateIntegerIsCanonical ||
         !decimalIntegerPattern.test(certificate.commitmentMessageBound) ||
         compareDecimalIntegerStrings(
             String(certificate.maximumAggregateInteger),

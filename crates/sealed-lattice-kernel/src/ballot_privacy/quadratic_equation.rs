@@ -1,19 +1,19 @@
 use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
 
 use super::{
-    lazer_demo_rng::sample_lazer_demo_uniform_u64_values, polynomial_ring::PolynomialRing,
+    linear_proof_rng::sample_linear_proof_uniform_u64_values, polynomial_ring::PolynomialRing,
     sparse_polynomial_matrix::SparsePolynomialMatrix,
     sparse_polynomial_vector::SparsePolynomialVector,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct LazerDemoQuadraticEquation {
+pub(crate) struct LinearProofQuadraticEquation {
     quadratic_terms: SparsePolynomialMatrix,
     linear_terms: SparsePolynomialVector,
     constant_term: Option<Vec<u64>>,
 }
 
-impl LazerDemoQuadraticEquation {
+impl LinearProofQuadraticEquation {
     pub(crate) fn new(
         quadratic_terms: SparsePolynomialMatrix,
         linear_terms: SparsePolynomialVector,
@@ -215,7 +215,7 @@ impl LazerDemoQuadraticEquation {
 
     pub(crate) fn accumulate_weighted_equations(
         &self,
-        weighted_equations: &[WeightedLazerDemoQuadraticEquation<'_>],
+        weighted_equations: &[WeightedLinearProofQuadraticEquation<'_>],
     ) -> CanonicalResult<Self> {
         let mut accumulated_equation = self.clone();
         for weighted_equation in weighted_equations {
@@ -231,7 +231,7 @@ impl LazerDemoQuadraticEquation {
 
     pub(crate) fn accumulate_weighted_partial_equations(
         &self,
-        weighted_equations: &[WeightedLazerDemoQuadraticEquation<'_>],
+        weighted_equations: &[WeightedLinearProofQuadraticEquation<'_>],
     ) -> CanonicalResult<Self> {
         let mut accumulated_equation = self.clone();
         for weighted_equation in weighted_equations {
@@ -276,7 +276,7 @@ impl LazerDemoQuadraticEquation {
         {
             primary_accumulator.require_same_shape(secondary_accumulator)?;
             primary_accumulator.require_same_shape(first_input)?;
-            let challenge_scalars = sample_lazer_demo_uniform_u64_values(
+            let challenge_scalars = sample_linear_proof_uniform_u64_values(
                 input_count
                     .checked_mul(2)
                     .ok_or_else(|| invalid_quadratic("challenge count overflowed"))?,
@@ -289,7 +289,7 @@ impl LazerDemoQuadraticEquation {
                 .iter()
                 .zip(&challenge_scalars[..input_count])
                 .map(
-                    |(equation, challenge_scalar)| WeightedLazerDemoQuadraticEquation {
+                    |(equation, challenge_scalar)| WeightedLinearProofQuadraticEquation {
                         challenge_scalar: *challenge_scalar,
                         equation,
                     },
@@ -299,7 +299,7 @@ impl LazerDemoQuadraticEquation {
                 .iter()
                 .zip(&challenge_scalars[input_count..])
                 .map(
-                    |(equation, challenge_scalar)| WeightedLazerDemoQuadraticEquation {
+                    |(equation, challenge_scalar)| WeightedLinearProofQuadraticEquation {
                         challenge_scalar: *challenge_scalar,
                         equation,
                     },
@@ -323,7 +323,7 @@ impl LazerDemoQuadraticEquation {
 
     pub(crate) fn accumulate_unweighted_equations(
         &self,
-        equations: &[&LazerDemoQuadraticEquation],
+        equations: &[&LinearProofQuadraticEquation],
     ) -> CanonicalResult<Self> {
         let mut accumulated_equation = self.clone();
         for equation in equations {
@@ -421,21 +421,21 @@ impl LazerDemoQuadraticEquation {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct WeightedLazerDemoQuadraticEquation<'equation> {
+pub(crate) struct WeightedLinearProofQuadraticEquation<'equation> {
     pub(crate) challenge_scalar: u64,
-    pub(crate) equation: &'equation LazerDemoQuadraticEquation,
+    pub(crate) equation: &'equation LinearProofQuadraticEquation,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct LazerDemoQuadraticAccumulatorPairs {
-    pub(crate) primary_accumulators: Vec<LazerDemoQuadraticEquation>,
-    pub(crate) secondary_accumulators: Vec<LazerDemoQuadraticEquation>,
+    pub(crate) primary_accumulators: Vec<LinearProofQuadraticEquation>,
+    pub(crate) secondary_accumulators: Vec<LinearProofQuadraticEquation>,
     pub(crate) challenge_scalars_by_pair: Vec<Vec<u64>>,
 }
 
-pub(crate) fn validate_lazer_demo_quadratic_helper_port() -> CanonicalResult<()> {
+pub(crate) fn validate_quadratic_helper_self_check() -> CanonicalResult<()> {
     let ring = PolynomialRing::new(4, 17)?;
-    let first_equation = LazerDemoQuadraticEquation::new(
+    let first_equation = LinearProofQuadraticEquation::new(
         SparsePolynomialMatrix::new(
             ring,
             4,
@@ -474,7 +474,7 @@ pub(crate) fn validate_lazer_demo_quadratic_helper_port() -> CanonicalResult<()>
         )?,
         Some(vec![1, 2, 0, 0]),
     )?;
-    let second_equation = LazerDemoQuadraticEquation::new(
+    let second_equation = LinearProofQuadraticEquation::new(
         SparsePolynomialMatrix::new(
             ring,
             4,
@@ -516,7 +516,7 @@ pub(crate) fn validate_lazer_demo_quadratic_helper_port() -> CanonicalResult<()>
             .is_none_or(|constant_term| constant_term != [1, 1, 3, 16])
     {
         return Err(invalid_quadratic(
-            "quadratic auto-fold helper self-check did not match the LaZer formula",
+            "quadratic auto-fold helper self-check did not match the expected formula",
         ));
     }
     let unweighted_equation =
@@ -526,12 +526,12 @@ pub(crate) fn validate_lazer_demo_quadratic_helper_port() -> CanonicalResult<()>
         .is_none_or(|constant_term| constant_term != [4, 2, 1, 0])
     {
         return Err(invalid_quadratic(
-            "quadratic unweighted accumulator self-check did not match the LaZer formula",
+            "quadratic unweighted accumulator self-check did not match the expected formula",
         ));
     }
-    let accumulator_pairs = LazerDemoQuadraticEquation::accumulate_schwartz_zippel_pair_sets(
-        &[LazerDemoQuadraticEquation::zero(ring, 4)?],
-        &[LazerDemoQuadraticEquation::zero(ring, 4)?],
+    let accumulator_pairs = LinearProofQuadraticEquation::accumulate_schwartz_zippel_pair_sets(
+        &[LinearProofQuadraticEquation::zero(ring, 4)?],
+        &[LinearProofQuadraticEquation::zero(ring, 4)?],
         &[&first_equation, &second_equation],
         &[9_u8; 32],
         7,
@@ -607,14 +607,14 @@ fn invalid_quadratic(message: impl Into<String>) -> CanonicalError {
 
 #[cfg(test)]
 mod tests {
-    use super::{LazerDemoQuadraticEquation, WeightedLazerDemoQuadraticEquation};
+    use super::{LinearProofQuadraticEquation, WeightedLinearProofQuadraticEquation};
     use crate::ballot_privacy::{
         polynomial_ring::PolynomialRing,
         sparse_polynomial_matrix::{SparsePolynomialMatrix, SparsePolynomialMatrixEntry},
         sparse_polynomial_vector::{SparsePolynomialVector, SparsePolynomialVectorEntry},
     };
 
-    fn sample_equation_pair() -> (LazerDemoQuadraticEquation, LazerDemoQuadraticEquation) {
+    fn sample_equation_pair() -> (LinearProofQuadraticEquation, LinearProofQuadraticEquation) {
         let ring = PolynomialRing::new(4, 17).expect("ring should validate");
         let first_quadratic_terms = SparsePolynomialMatrix::new(
             ring,
@@ -636,7 +636,7 @@ mod tests {
             ],
         )
         .expect("first linear terms should validate");
-        let first_equation = LazerDemoQuadraticEquation::new(
+        let first_equation = LinearProofQuadraticEquation::new(
             first_quadratic_terms,
             first_linear_terms,
             Some(vec![1, 2, 0, 0]),
@@ -662,7 +662,7 @@ mod tests {
             ],
         )
         .expect("second linear terms should validate");
-        let second_equation = LazerDemoQuadraticEquation::new(
+        let second_equation = LinearProofQuadraticEquation::new(
             second_quadratic_terms,
             second_linear_terms,
             Some(vec![3, 0, 1, 0]),
@@ -673,7 +673,7 @@ mod tests {
     }
 
     #[test]
-    fn schwartz_zippel_auto_fold_matches_lazer_formula_for_sparse_terms() {
+    fn schwartz_zippel_auto_fold_matches_linear_proof_formula_for_sparse_terms() {
         let (first_equation, second_equation) = sample_equation_pair();
 
         let folded_equation = first_equation
@@ -754,7 +754,7 @@ mod tests {
         let (first_equation, second_equation) = sample_equation_pair();
 
         let accumulated_equation = first_equation
-            .accumulate_weighted_equations(&[WeightedLazerDemoQuadraticEquation {
+            .accumulate_weighted_equations(&[WeightedLinearProofQuadraticEquation {
                 challenge_scalar: 3,
                 equation: &second_equation,
             }])
@@ -796,7 +796,7 @@ mod tests {
         partial_equation.constant_term = None;
 
         let accumulated_equation = first_equation
-            .accumulate_weighted_partial_equations(&[WeightedLazerDemoQuadraticEquation {
+            .accumulate_weighted_partial_equations(&[WeightedLinearProofQuadraticEquation {
                 challenge_scalar: 3,
                 equation: &partial_equation,
             }])
@@ -835,12 +835,12 @@ mod tests {
         let (first_equation, second_equation) = sample_equation_pair();
         let ring = PolynomialRing::new(4, 17).expect("ring should validate");
         let primary_accumulator =
-            LazerDemoQuadraticEquation::zero(ring, 4).expect("primary zero should validate");
+            LinearProofQuadraticEquation::zero(ring, 4).expect("primary zero should validate");
         let secondary_accumulator =
-            LazerDemoQuadraticEquation::zero(ring, 4).expect("secondary zero should validate");
+            LinearProofQuadraticEquation::zero(ring, 4).expect("secondary zero should validate");
         let challenge_seed = [9_u8; 32];
 
-        let accumulator_pairs = LazerDemoQuadraticEquation::accumulate_schwartz_zippel_pair_sets(
+        let accumulator_pairs = LinearProofQuadraticEquation::accumulate_schwartz_zippel_pair_sets(
             std::slice::from_ref(&primary_accumulator),
             std::slice::from_ref(&secondary_accumulator),
             &[&first_equation, &second_equation],
@@ -849,7 +849,7 @@ mod tests {
             5,
         )
         .expect("pair accumulation should succeed");
-        let repeated_pairs = LazerDemoQuadraticEquation::accumulate_schwartz_zippel_pair_sets(
+        let repeated_pairs = LinearProofQuadraticEquation::accumulate_schwartz_zippel_pair_sets(
             std::slice::from_ref(&primary_accumulator),
             std::slice::from_ref(&secondary_accumulator),
             &[&first_equation, &second_equation],
@@ -870,11 +870,11 @@ mod tests {
 
         let primary_manual = primary_accumulator
             .accumulate_weighted_equations(&[
-                WeightedLazerDemoQuadraticEquation {
+                WeightedLinearProofQuadraticEquation {
                     challenge_scalar: accumulator_pairs.challenge_scalars_by_pair[0][0],
                     equation: &first_equation,
                 },
-                WeightedLazerDemoQuadraticEquation {
+                WeightedLinearProofQuadraticEquation {
                     challenge_scalar: accumulator_pairs.challenge_scalars_by_pair[0][1],
                     equation: &second_equation,
                 },
@@ -882,11 +882,11 @@ mod tests {
             .expect("manual primary accumulation should succeed");
         let secondary_manual = secondary_accumulator
             .accumulate_weighted_equations(&[
-                WeightedLazerDemoQuadraticEquation {
+                WeightedLinearProofQuadraticEquation {
                     challenge_scalar: accumulator_pairs.challenge_scalars_by_pair[0][2],
                     equation: &first_equation,
                 },
-                WeightedLazerDemoQuadraticEquation {
+                WeightedLinearProofQuadraticEquation {
                     challenge_scalar: accumulator_pairs.challenge_scalars_by_pair[0][3],
                     equation: &second_equation,
                 },
@@ -908,11 +908,11 @@ mod tests {
     fn schwartz_zippel_pair_accumulation_rejects_empty_input_equation_set() {
         let ring = PolynomialRing::new(4, 17).expect("ring should validate");
         let primary_accumulator =
-            LazerDemoQuadraticEquation::zero(ring, 4).expect("primary zero should validate");
+            LinearProofQuadraticEquation::zero(ring, 4).expect("primary zero should validate");
         let secondary_accumulator =
-            LazerDemoQuadraticEquation::zero(ring, 4).expect("secondary zero should validate");
+            LinearProofQuadraticEquation::zero(ring, 4).expect("secondary zero should validate");
 
-        let error = LazerDemoQuadraticEquation::accumulate_schwartz_zippel_pair_sets(
+        let error = LinearProofQuadraticEquation::accumulate_schwartz_zippel_pair_sets(
             &[primary_accumulator],
             &[secondary_accumulator],
             &[],
@@ -930,7 +930,7 @@ mod tests {
         let ring = PolynomialRing::new(4, 17).expect("ring should validate");
 
         let equation =
-            LazerDemoQuadraticEquation::zero(ring, 4).expect("zero equation should validate");
+            LinearProofQuadraticEquation::zero(ring, 4).expect("zero equation should validate");
 
         assert_eq!(equation.quadratic_terms().rows(), 4);
         assert!(equation.quadratic_terms().entries().is_empty());

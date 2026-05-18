@@ -1,219 +1,113 @@
 # sealed-lattice
 
-WORK IN PROGRESS - protocol-facing APIs remain under implementation and are not suitable for production or real elections.
-
----
+> `sealed-lattice` is under active implementation. The published package is
+> useful for deterministic transcript and election-foundation checks, but it is
+> not ready for production elections or real ballot confidentiality.
 
 [![npm downloads](https://img.shields.io/npm/dm/sealed-lattice?color=5FA04E)](https://www.npmjs.com/package/sealed-lattice)
-
----
-
-[![CI](https://img.shields.io/github/actions/workflow/status/Tenemo/sealed-lattice/ci.yml?branch=master&label=passing%20tests&color=5FA04E)](https://github.com/Tenemo/sealed-lattice/actions/workflows/ci.yml)
+[![CI](https://img.shields.io/github/actions/workflow/status/Tenemo/sealed-lattice/ci.yml?branch=master&label=tests&color=5FA04E)](https://github.com/Tenemo/sealed-lattice/actions/workflows/ci.yml)
 [![Tests coverage](https://img.shields.io/endpoint?url=https://tenemo.github.io/sealed-lattice/coverage-badge.json)](https://tenemo.github.io/sealed-lattice/coverage-summary.json)
 [![Documentation build](https://img.shields.io/github/actions/workflow/status/Tenemo/sealed-lattice/pages.yml?branch=master&label=docs&color=5FA04E)](https://github.com/Tenemo/sealed-lattice/actions/workflows/pages.yml)
-
----
-
 [![License](https://img.shields.io/github/license/Tenemo/sealed-lattice?color=5FA04E)](LICENSE)
 
----
-
 `sealed-lattice` is a browser-first, mobile-first, post-quantum threshold
-homomorphic voting library workspace.
+homomorphic voting library workspace. Its public package is intentionally
+narrow while the protocol implementation is still being built and verified.
 
-The repository uses a private Turborepo workspace with one published package
-and five private internal packages:
+## What the package exposes
 
-- `sealed-lattice`
-- `@sealed-lattice/types`
-- `@sealed-lattice/protocol`
-- `@sealed-lattice/crypto`
-- `@sealed-lattice/wasm`
-- `@sealed-lattice/testkit`
+The published `sealed-lattice` package currently exposes safe-by-default
+helpers for:
 
-The workspace also contains `crates/sealed-lattice-kernel`, the Rust transcript
-core used by the native test and WASM loading path. The internal WASM command
-surface covers transcript fixture verification, protocol digest derivation, and
-the current `GF(65537)` interpolation/comparison checks used to keep the
-TypeScript reference path pinned to the kernel behavior.
+- transcript-core fixture verification through the packaged Rust/WASM kernel;
+- threshold profile derivation and poll-spec validation;
+- lifecycle labels, lifecycle transitions, and action capability checks;
+- signed board consistency, cast receipt shells, close record shells, and
+  target finality checks;
+- roster manifest verification, participant roster acceptance, deterministic
+  first-valid ordering, and recovery-epoch checks.
 
-## Current public boundary
+Reserved complete-protocol entry points such as transcript verification,
+bridge-proof creation, bridge-proof verification, and one-shot share-policy
+verification currently fail closed with `OperationUnavailable`.
 
-The published `sealed-lattice` package currently exposes a safe transcript core
-fixture verifier plus the threshold, lifecycle, poll specification, capability,
-board/finality, roster-manifest, cast receipt, close record, validated ordering,
-and recovery-epoch election foundation helpers.
+```ts
+import { validatePollSpec, verifyTranscriptCoreFixture } from "sealed-lattice";
+```
 
-This keeps packaging, documentation, smoke checks, transcript fixtures, and
-release flow stable while the broader voting API remains future implementation.
+## What is internal
 
-Internal PVSS ballot-algebra helpers are deterministic test infrastructure only:
-they are not exported by the public package and must not be used for real ballot
-confidentiality.
-The internal ballot privacy plan targets ballot-level encoded score shares:
-scalar score coordinates plus hidden one-hot score-bucket coordinates. Those
-encoded aggregates feed TargetBasisData and a packed bit-sliced BGV evaluator.
-The current scalar PVSS helpers remain fixture/oracle infrastructure only.
-Claim-bearing ballot proof generation and verification, the encoded
-TargetBasisData bridge, and the bit-sliced evaluator are not implemented yet.
+Several protocol components exist only as workspace-internal implementation,
+test, or vector infrastructure:
 
-The internal LaZer-style proof verifier work uses upstream LaZer only as an
-offline deterministic oracle. Generated public vectors record upstream
-provenance and accept/reject outcomes, while the Rust/WASM port independently
-decodes canonical proof bytes, checks bounds, rebuilds the ABDLOP/tbox and
-many-quadratic verifier path, and recomputes the final challenge for the demo
-and receiver-key linear proof-vector profiles plus the compiler-derived
-encoded-score field-row proof-vector profile. The verifier now records the
-target coefficient representation explicitly: the demo and receiver-key oracle
-targets recover LaZer's centered signed internal target coefficients from
-positive JSON representatives, while the encoded-score field-row target uses
-canonical unsigned `GF(65537)` representatives. The receiver-key profile still
-carries an upstream `protocol-not-complete` warning, and the encoded-score
-profile covers only the compiler-emitted field-row projection, so this is
-compatibility evidence for the selected internal proof slice, not production
-ballot-proof availability.
+- plaintext `GF(65537)` arithmetic, Shamir interpolation, top-k tallying, and
+  sparse target fixtures;
+- deterministic PVSS ballot-algebra helpers used for regression tests;
+- ballot privacy profile, relation, proof-record, and receiver-key scaffolding;
+- Rust/WASM transcript-core commands used to keep TypeScript and native
+  canonicalization behavior aligned;
+- offline proof-oracle comparison tooling and generated public test vectors.
 
-The encoded ballot relation now lowers the score layout into a deterministic
-sparse linear-relation statement: one scalar score coordinate plus ten hidden
-one-hot bucket coordinates per option, plus a concrete internal backend
-statement with explicit signed sparse field rows and digest-expanded algebraic
-row batches for receiver-payload encryption and receiver-key binding. Public
-share commitment polynomial vectors are now transcript-safe commitment data:
-when they are present, the relation backend lowers
-`A_message * EncodeShareVector(S) + A_randomness * rho = CommitmentVector`
-into an explicit mixed-modulus share-commitment row batch; when only legacy
-commitment digests are present, the share-commitment component remains
-digest-expanded and fail-closed for claim-bearing proof coverage.
-Receiver-payload plaintext binding now lowers to an
-explicit field-row batch that equates hidden payload share/opening variables
-with the same hidden share and opening variables used by the public share
-commitment and the receiver-encryption component. Because the full ballot
-relation is mixed-modulus, the backend statement also records proof components
-that partition rows into the explicit score/Shamir field component, the
-explicit payload-plaintext field component, the share-commitment component, the
-receiver-encryption component, and the receiver-key binding component. Public
-vectors cover a full mini digest-expanded relation, a mini relation summary
-with explicit share-commitment lowering, the mandatory 20 option by 20 receiver
-shape, digest-changing public target mutations, malformed backend statements, a
-proof-component mutation, and hostile compiler mutations. Rust/WASM verifies
-those vector shapes, backend statement digests, row-batch continuity, proof
-component order and digests, variable columns, bounds, and statement digests.
-The explicit mini relation vector also records public-only linear projection
-summaries for the score/Shamir field component, the receiver-payload plaintext
-binding component, and the share-commitment component. Those summaries bind the
-projection coverage, source row batches, matrix digest, target-vector digest,
-linear-statement digest, ring degree, source column count, and witness bound
-without publishing witness vectors. The share-commitment projection keeps
-commitment-modulus coefficients as canonical decimal strings so JavaScript does
-not truncate values above `Number.MAX_SAFE_INTEGER`.
-The encoded relation vectors also include a public-only full-explicit mini
-relation case where public share commitment vectors, receiver ciphertext chunks,
-and receiver public key vectors are present for every receiver. That case has
-full component-bundle coverage and zero digest-expanded backend rows, and it
-records internal explicit-row satisfaction summaries for all five components
-without publishing scores, receiver shares, openings, encryption randomness,
-receiver secrets, or proof witnesses.
-The same vector now records a proof-readiness manifest for each component. The
-manifest makes the current blocker executable: the score/Shamir component is
-small enough for the existing dense LaZer oracle path. The payload and
-share-commitment components now have compact sparse component statement
-support: TypeScript emits public constant-polynomial sparse matrix entries and
-target entries, and the Rust/WASM kernel can expand and transform those sparse
-source matrices into the proof ring without materializing dense matrices. The
-receiver-encryption component still requires structured Module-LWE proof
-statement support before generated proof bytes can cover the full encoded
-ballot relation. The receiver-key binding rows are public zero-witness checks
-and remain bound to the separate receiver-key proof path.
-It also records digest-bound component proof-statement plans for the dense,
-sparse, structured Module-LWE, and public zero-witness formats. Those plans
-pin source/proof ring degrees, dense coefficient counts, sparse term counts,
-structured receiver/chunk counts, and component statement digests without
-publishing witness material. Generated proof bytes still remain unavailable for
-the sparse payload/share-commitment components and the structured
-receiver-encryption component.
-The relation compiler also emits a digest-bound component-bundle statement for
-those five components, and ballot proof records can now bind an ordered
-component proof bundle with one proof record per relation component. The
-ballot-proof verifier now also requires public component proof inputs for each
-supplied component proof bundle and checks that each input matches the proof
-record's proof bytes, proof encoding, parameter set, public randomness,
-component statement, and component proof-statement digest. Supplied component
-proof statement objects are also canonical-digest checked when present, so a
-ballot cannot substitute a malformed dense, sparse, structured-plan, or
-public-zero statement object under already-bound proof-byte metadata. TS,
-native, and WASM verification still fail closed after these preflight binding
-checks if an ordered component proof bundle is present but component proof byte
-verification for all required formats is not available. Component bundle
-statements, component proof bundles, and component proof inputs are rejected
-when they are missing, incomplete, reordered, duplicate-bearing, not bound to
-the ballot/backend/relation/component statements, or still backed by
-digest-expanded rows.
-Receiver-key proof records are generated only after the local key witness
-equation and norm checks pass, and can now carry proof-byte metadata bound to a
-canonical digest-expanded backend statement, a concrete public linear statement
-for `A * secret + error - public_key = 0 mod 12289`, proof encoding, and public
-randomness. Public
-receiver-key vectors cover valid context binding, digest-changing manifest
-input, malformed backend statements, mutated linear statement matrix/target
-coefficients, proof-root mutation, substituted matrix seed, wrong key material,
-and hostile witness-construction refusals. Rust/WASM verifies those vector
-shapes, recomputes the receiver-key linear statement matrix from the frozen
-seed/profile, derives the public key-material digest from the target vector,
-and recomputes the backend statement, linear statement, and proof roots. The
-internal Rust/WASM receiver-key proof command now accepts a proof-byte-bearing
-receiver-key record when its supplied public linear statement and proof bytes
-verify through the ported linear proof backend, and rejects target and proof-byte
-mutations. Ballot proof records now carry the lowered relation statement digest
-into their challenge binding and can also carry linear-backend proof metadata:
-backend statement digest, concrete linear statement digest, statement matrix
-digest, target vector digest, proof encoding digest, proof parameter-set digest,
-public randomness digest, proof bytes digest, and proof size. The internal
-Rust/WASM ballot-proof command verifies supplied proof bytes through the ported
-linear proof backend, but rejects the record unless the supplied public linear
-statement, parameter set, and proof encoding all use the dedicated full
-encoded-score ballot-relation coverage profile, a complete ordered component
-bundle statement, a complete ordered component proof bundle, and matching
-public component proof inputs. Relabeling a field-only proof as full coverage
-fails closed. The
-current encoded-score field-row proof-vector
-profile is still verified natively and in WASM as a backend compatibility slice,
-but it is explicitly labelled `encoded-score-field-rows-only` and cannot be
-accepted as a complete ballot proof. Claim-bearing ballot closure still waits
-for proof bytes covering the full encoded-score relation, including
-share-commitment, receiver-payload encryption, and receiver-key binding rows.
+These pieces are not exported as a public voting API and must not be used for
+real ballot secrecy.
 
-- workspace layout and package boundaries
-- packaging and tarball smoke checks
-- TypeScript, ESLint, browser, and Node verification
-- Astro documentation and TypeDoc generation
-- transcript core test vector manifest verification
-- election foundation board/finality, roster-manifest, ML-DSA-65 signed-root, cast receipt, close record, validated ordering, and recovery-epoch checks
-- the Rust-to-WASM transcript core toolchain
+## Ballot privacy status
 
-## Documentation
+The ballot privacy implementation is currently a fail-closed compatibility and
+verification scaffold.
 
-- Hosted documentation site: [tenemo.github.io/sealed-lattice](https://tenemo.github.io/sealed-lattice/)
-- Guides index: [tenemo.github.io/sealed-lattice/guides](https://tenemo.github.io/sealed-lattice/guides/)
-- Protocol spec: [tenemo.github.io/sealed-lattice/spec](https://tenemo.github.io/sealed-lattice/spec/)
-- API reference: [tenemo.github.io/sealed-lattice/api](https://tenemo.github.io/sealed-lattice/api/)
+Implemented internally:
 
-## Workspace layout
+- frozen ballot privacy profile objects and digest namespaces;
+- encoded score-share layout metadata for scalar score coordinates plus hidden
+  one-hot score-bucket coordinates;
+- relation lowering for score/Shamir rows, receiver-payload plaintext binding,
+  share-commitment rows, receiver-encryption structure, and receiver-key
+  binding;
+- receiver-key proof records with proof-byte metadata and Rust/WASM verification
+  for supported linear proof vectors;
+- ballot proof records that bind backend statements, component proof bundles,
+  proof bytes, proof encodings, proof parameter sets, and public randomness;
+- native and WASM verification of public vectors for the supported internal
+  linear proof slices.
+
+Still unavailable:
+
+- claim-bearing ballot proof generation for the full encoded-score relation;
+- portable proof bytes for every required component format;
+- the encoded aggregate bridge into the encrypted tally target;
+- the packed bit-sliced BGV evaluator and mandatory evaluation proof;
+- production target-bound decryption and result release.
+
+Until those are integrated, claim-bearing ballot verification remains
+intentionally fail-closed.
+
+## Repository layout
 
 ```text
 sealed-lattice/
-  docs/
-  implementation-documentation/
-  packages/
-    sdk/
-    protocol/
-    crypto/
-    wasm/
-    testkit/
   crates/
-    sealed-lattice-kernel/
-  tools/
-  typedoc/
+    sealed-lattice-kernel/      Rust transcript-core and proof-verifier kernel
+  docs/                         Public documentation site
+  implementation-documentation/ Internal protocol planning notes
+  packages/
+    crypto/                     Internal canonical JSON, digests, signatures
+    protocol/                   Internal protocol logic and reference paths
+    sdk/                        Published sealed-lattice package
+    testkit/                    Internal fixture loading helpers
+    types/                      Shared TypeScript type declarations
+    wasm/                       Internal WASM bridge package
+  test-vectors/                 Canonical public regression vectors
+  tools/                        CI, vector, packaging, and documentation tools
+  typedoc/                      API documentation generation support
 ```
+
+## Documentation
+
+- [Documentation site](https://tenemo.github.io/sealed-lattice/)
+- [Guides](https://tenemo.github.io/sealed-lattice/guides/)
+- [Protocol spec](https://tenemo.github.io/sealed-lattice/spec/)
+- [API reference](https://tenemo.github.io/sealed-lattice/api/)
 
 ## Installation
 
@@ -221,22 +115,45 @@ sealed-lattice/
 pnpm add sealed-lattice
 ```
 
-The package exports the current transcript core fixture verifier and safe
-election foundation helpers. It is not a usable voting library yet.
+The package is not a complete voting library yet. Treat it as a safe public
+foundation surface for the implemented transcript and election-foundation
+checks.
 
 ## Development
 
+Install dependencies:
+
 ```bash
 pnpm install
+```
+
+Run the main CI-equivalent check:
+
+```bash
 pnpm run check
+```
+
+Run targeted verification:
+
+```bash
 pnpm run vectors
-pnpm exec playwright install chromium firefox webkit
-pnpm run test
+pnpm run test:node
+pnpm run test:browser
 pnpm run verify:docs
-pnpm run docs:build:site
+```
+
+Build and package-smoke the published SDK:
+
+```bash
+pnpm run build
 pnpm run smoke:pack
 pnpm run smoke:pack:npm
-pnpm run build
+```
+
+Install browser engines before the first local browser test run:
+
+```bash
+pnpm exec playwright install chromium firefox webkit
 ```
 
 ## License

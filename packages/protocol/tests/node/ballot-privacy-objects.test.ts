@@ -576,7 +576,7 @@ describe('ballot privacy proof object boundary', () => {
             receiverPublicKeyDigest: receiverPublicKey.receiverPublicKeyDigest,
             receiverEncryptionProfileDigest:
                 receiverPublicKey.receiverEncryptionProfileDigest,
-            proofBackend: 'LaZerStyleLocalLatticeRelation',
+            proofBackend: 'LocalLinearLatticeRelation',
             proofRoot: digest('receiver-key-proof-root'),
         });
         const receiverPayload = createReceiverPayloadShell({
@@ -1168,7 +1168,7 @@ describe('ballot privacy proof object boundary', () => {
             ceremonyId: 'ceremony-1',
             linearStatementDigest: digest('receiver-key-linear-statement'),
             manifestDigest: digest('manifest'),
-            proofBackend: 'LaZerStyleLocalLatticeRelation',
+            proofBackend: 'LocalLinearLatticeRelation',
             proofBytesDigest: deriveProofBytesDigest({ proofBytesHex }),
             proofEncodingProfileDigest:
                 deriveReceiverKeyProofEncodingProfileDigest({
@@ -1196,7 +1196,7 @@ describe('ballot privacy proof object boundary', () => {
             ceremonyId: 'ceremony-1',
             linearStatementDigest: digest('receiver-key-linear-statement'),
             manifestDigest: digest('manifest'),
-            proofBackend: 'LaZerStyleLocalLatticeRelation',
+            proofBackend: 'LocalLinearLatticeRelation',
             proofRoot: digest('receiver-key-proof-root'),
             receiverEncryptionProfileDigest: digest(
                 'receiver-encryption-profile',
@@ -1264,7 +1264,7 @@ describe('ballot privacy proof object boundary', () => {
             receiverPublicKeyDigest: digest('receiver-public-key-1'),
             receiverEncryptionProfileDigest:
                 statement.receiverEncryptionProfileDigest,
-            proofBackend: 'LaZerStyleLocalLatticeRelation' as const,
+            proofBackend: 'LocalLinearLatticeRelation' as const,
             proofRoot: digest('receiver-key-proof'),
         });
         const structurallyBoundObjects = createStructurallyBoundObjects();
@@ -1283,7 +1283,6 @@ describe('ballot privacy proof object boundary', () => {
             backendAvailable: false,
             backendStatus: {
                 portableRustWasmPortRequired: true,
-                upstreamDirectDependencyUsableInBrowser: false,
             },
             unresolvedReason: 'OperationUnavailable',
         });
@@ -1299,7 +1298,7 @@ describe('ballot privacy proof object boundary', () => {
         expect(
             verifyClaimBearingBallotPackage({
                 ballotPackage: {
-                    objectType: 'BallotPackage',
+                    objectType: 'ClaimBearingBallotPackage',
                     objectVersion: 1,
                     ballotPackageDigest:
                         structurallyBoundObjects.statement.ballotPackageDigest,
@@ -1347,7 +1346,7 @@ describe('ballot privacy proof object boundary', () => {
         expect(
             verifyClaimBearingBallotPackage({
                 ballotPackage: {
-                    objectType: 'BallotPackage',
+                    objectType: 'ClaimBearingBallotPackage',
                     objectVersion: 1,
                     ballotPackageDigest:
                         structurallyBoundObjects.statement.ballotPackageDigest,
@@ -1399,7 +1398,7 @@ describe('ballot privacy proof object boundary', () => {
         };
         const packageWithChangedChallenge = verifyClaimBearingBallotPackage({
             ballotPackage: {
-                objectType: 'BallotPackage',
+                objectType: 'ClaimBearingBallotPackage',
                 objectVersion: 1,
                 ballotPackageDigest:
                     structurallyBoundObjects.statement.ballotPackageDigest,
@@ -1411,7 +1410,7 @@ describe('ballot privacy proof object boundary', () => {
         });
         const packageWithLeakedWitness = verifyClaimBearingBallotPackage({
             ballotPackage: {
-                objectType: 'BallotPackage',
+                objectType: 'ClaimBearingBallotPackage',
                 objectVersion: 1,
                 ballotPackageDigest:
                     structurallyBoundObjects.statement.ballotPackageDigest,
@@ -1445,7 +1444,7 @@ describe('ballot privacy proof object boundary', () => {
         const packageWithMalformedCommitmentVector =
             verifyClaimBearingBallotPackage({
                 ballotPackage: {
-                    objectType: 'BallotPackage',
+                    objectType: 'ClaimBearingBallotPackage',
                     objectVersion: 1,
                     ballotPackageDigest:
                         structurallyBoundObjects.statement.ballotPackageDigest,
@@ -1508,23 +1507,12 @@ describe('ballot privacy proof object boundary', () => {
 
         expect(backendStatus.backendAvailable).toBe(false);
         expect(backendStatus.portableRustWasmPortRequired).toBe(true);
-        expect(backendStatus.upstreamDirectDependencyUsableInBrowser).toBe(
-            false,
-        );
         expect(backendStatus.requiredComponents).toEqual(
             expect.arrayContaining([
                 'generated linear proof parameters from lin-codegen.sage',
                 'ABDLop commitment key generation, commitment, and commitment hashing',
                 'proof byte coder and decoder',
                 'browser-safe prover randomness source',
-            ]),
-        );
-        expect(backendStatus.upstreamReferenceFiles).toEqual(
-            expect.arrayContaining([
-                'src/lin-proofs.c',
-                'src/lnp-tbox.c',
-                'src/abdlop.c',
-                'scripts/lin-codegen.sage',
             ]),
         );
     });

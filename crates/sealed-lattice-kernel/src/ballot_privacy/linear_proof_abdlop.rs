@@ -6,8 +6,8 @@ use crate::{
 };
 
 use super::{
-    lazer_demo_public_parameters::derive_lazer_abdlop_public_parameters,
-    linear_proof_parameters::{LazerDemoProofEncoding, linear_proof_profile_for_encoding},
+    linear_proof_parameters::{LinearProofEncoding, linear_proof_profile_for_encoding},
+    linear_proof_public_parameters::derive_abdlop_public_parameters,
     linear_proof_transcript::shake128_32,
     polynomial_ring::PolynomialRing,
     polynomial_vector::PolynomialVector,
@@ -24,17 +24,16 @@ pub struct LazerDemoAbdlopLinearOpeningSummary {
     pub low_part_bound_squared: u128,
 }
 
-pub fn validate_lazer_demo_abdlop_linear_opening(
+pub fn validate_abdlop_linear_opening(
     base_transcript_hash: &[u8; 32],
     public_randomness: &[u8; 32],
     decoded_proof: &DecodedLazerDemoLinearProof,
-    proof_encoding: &LazerDemoProofEncoding,
+    proof_encoding: &LinearProofEncoding,
 ) -> CanonicalResult<LazerDemoAbdlopLinearOpeningSummary> {
     proof_encoding.validate()?;
     let proof_profile = linear_proof_profile_for_encoding(proof_encoding)?;
 
-    let public_parameters =
-        derive_lazer_abdlop_public_parameters(public_randomness, proof_encoding)?;
+    let public_parameters = derive_abdlop_public_parameters(public_randomness, proof_encoding)?;
     let proof_ring = PolynomialRing::new(
         proof_encoding.ring_degree,
         proof_encoding.coefficient_modulus,
@@ -82,8 +81,11 @@ pub fn validate_lazer_demo_abdlop_linear_opening(
             "ABDLOP decompression low part exceeds the proof profile l2 bound",
         ));
     }
-    let recovered_high_bits_encoding =
-        encode_lazer_demo_recovered_high_bits(&recovered_high_bits, proof_encoding, proof_profile)?;
+    let recovered_high_bits_encoding = encode_linear_proof_recovered_high_bits(
+        &recovered_high_bits,
+        proof_encoding,
+        proof_profile,
+    )?;
     let recovered_high_bits_hash =
         shake128_32(&[base_transcript_hash, &recovered_high_bits_encoding]);
 
@@ -121,7 +123,7 @@ fn signed_polynomial_vector_to_canonical(
 fn shifted_challenge_polynomial(
     decoded_proof: &DecodedLazerDemoLinearProof,
     ring: PolynomialRing,
-    proof_profile: super::linear_proof_parameters::LazerLinearProofProfile,
+    proof_profile: super::linear_proof_parameters::LinearProofProfile,
 ) -> CanonicalResult<Vec<u64>> {
     if decoded_proof
         .challenge_polynomial()
@@ -177,8 +179,8 @@ fn multiply_polynomial_by_vector(
 fn recover_decompressed_high_bits(
     recovery_input: &[Vec<u64>],
     hint_vector: &[Vec<i64>],
-    proof_encoding: &LazerDemoProofEncoding,
-    proof_profile: super::linear_proof_parameters::LazerLinearProofProfile,
+    proof_encoding: &LinearProofEncoding,
+    proof_profile: super::linear_proof_parameters::LinearProofProfile,
 ) -> CanonicalResult<Vec<Vec<u64>>> {
     if recovery_input.len() != hint_vector.len() {
         return Err(invalid_abdlop(
@@ -215,8 +217,8 @@ fn recover_decompressed_high_bits(
 
 fn decompression_high_bits(
     coefficient: u64,
-    proof_encoding: &LazerDemoProofEncoding,
-    proof_profile: super::linear_proof_parameters::LazerLinearProofProfile,
+    proof_encoding: &LinearProofEncoding,
+    proof_profile: super::linear_proof_parameters::LinearProofProfile,
 ) -> CanonicalResult<i128> {
     if coefficient >= proof_encoding.coefficient_modulus {
         return Err(invalid_abdlop(
@@ -245,7 +247,7 @@ fn compute_low_part_l2_squared(
     ring: PolynomialRing,
     recovery_input: &[Vec<u64>],
     recovered_high_bits: &[Vec<u64>],
-    proof_profile: super::linear_proof_parameters::LazerLinearProofProfile,
+    proof_profile: super::linear_proof_parameters::LinearProofProfile,
 ) -> CanonicalResult<u128> {
     if recovery_input.len() != recovered_high_bits.len() {
         return Err(invalid_abdlop("ABDLOP low-part input lengths do not match"));
@@ -285,10 +287,10 @@ fn compute_low_part_l2_squared(
     Ok(squared_sum)
 }
 
-fn encode_lazer_demo_recovered_high_bits(
+fn encode_linear_proof_recovered_high_bits(
     polynomials: &[Vec<u64>],
-    proof_encoding: &LazerDemoProofEncoding,
-    proof_profile: super::linear_proof_parameters::LazerLinearProofProfile,
+    proof_encoding: &LinearProofEncoding,
+    proof_profile: super::linear_proof_parameters::LinearProofProfile,
 ) -> CanonicalResult<Vec<u8>> {
     let mut writer = RecoveredHighBitsWriter::new();
     for polynomial in polynomials {
@@ -401,16 +403,15 @@ fn invalid_abdlop(message: impl Into<String>) -> CanonicalError {
 
 #[cfg(test)]
 mod tests {
-    use super::validate_lazer_demo_abdlop_linear_opening;
+    use super::validate_abdlop_linear_opening;
     use crate::{
         ballot_privacy::{
-            abdlop_commitment::hash_lazer_demo_abdlop_commitment,
-            linear_proof_parameters::{LazerDemoProofEncoding, LinearProofParameterSet},
+            abdlop_commitment::hash_abdlop_commitment,
+            linear_proof_parameters::{LinearProofEncoding, LinearProofParameterSet},
             linear_proof_statement::{
-                LinearProofTargetCoefficientRepresentation,
-                derive_lazer_demo_linear_statement_transcript,
+                LinearProofTargetCoefficientRepresentation, derive_linear_statement_transcript,
             },
-            proof_coder::decode_lazer_demo_linear_proof,
+            proof_coder::decode_linear_proof,
         },
         transcript_core::decode_hex,
     };
@@ -436,7 +437,7 @@ mod tests {
         let parameter_set: LinearProofParameterSet =
             serde_json::from_value(vector_case["parameterSet"].clone())
                 .expect("parameter set should deserialize");
-        let proof_encoding: LazerDemoProofEncoding =
+        let proof_encoding: LinearProofEncoding =
             serde_json::from_value(vector_case["proofEncoding"].clone())
                 .expect("proof encoding should deserialize");
         let statement_matrix_coefficients: Vec<Vec<Vec<u64>>> =
@@ -459,9 +460,9 @@ mod tests {
                 .expect("proof hex should be present"),
         )
         .expect("proof bytes should decode");
-        let decoded_proof = decode_lazer_demo_linear_proof(&proof_bytes, &proof_encoding)
-            .expect("proof should decode");
-        let statement_transcript = derive_lazer_demo_linear_statement_transcript(
+        let decoded_proof =
+            decode_linear_proof(&proof_bytes, &proof_encoding).expect("proof should decode");
+        let statement_transcript = derive_linear_statement_transcript(
             &parameter_set,
             &proof_encoding,
             &statement_matrix_coefficients,
@@ -470,14 +471,14 @@ mod tests {
             &public_randomness,
         )
         .expect("statement transcript should derive");
-        let abdlop_commitment_hash = hash_lazer_demo_abdlop_commitment(
+        let abdlop_commitment_hash = hash_abdlop_commitment(
             &statement_transcript.public_parameters_and_statement_hash,
             &decoded_proof,
             &proof_encoding,
         )
         .expect("ABDLOP commitment hash should derive");
 
-        let summary = validate_lazer_demo_abdlop_linear_opening(
+        let summary = validate_abdlop_linear_opening(
             &abdlop_commitment_hash,
             &public_randomness,
             &decoded_proof,
@@ -494,7 +495,7 @@ mod tests {
     #[test]
     fn abdlop_linear_opening_binds_public_randomness() {
         let vector_case = generated_vector_case("valid-small-linear-proof");
-        let proof_encoding: LazerDemoProofEncoding =
+        let proof_encoding: LinearProofEncoding =
             serde_json::from_value(vector_case["proofEncoding"].clone())
                 .expect("proof encoding should deserialize");
         let proof_bytes = decode_hex(
@@ -503,21 +504,21 @@ mod tests {
                 .expect("proof hex should be present"),
         )
         .expect("proof bytes should decode");
-        let decoded_proof = decode_lazer_demo_linear_proof(&proof_bytes, &proof_encoding)
-            .expect("proof should decode");
+        let decoded_proof =
+            decode_linear_proof(&proof_bytes, &proof_encoding).expect("proof should decode");
         let zero_public_randomness = [0_u8; 32];
         let mut changed_public_randomness = [0_u8; 32];
         changed_public_randomness[0] = 1;
         let base_hash = [0_u8; 32];
 
-        let zero_summary = validate_lazer_demo_abdlop_linear_opening(
+        let zero_summary = validate_abdlop_linear_opening(
             &base_hash,
             &zero_public_randomness,
             &decoded_proof,
             &proof_encoding,
         )
         .expect("zero-randomness opening should recover");
-        let changed_summary = validate_lazer_demo_abdlop_linear_opening(
+        let changed_summary = validate_abdlop_linear_opening(
             &base_hash,
             &changed_public_randomness,
             &decoded_proof,

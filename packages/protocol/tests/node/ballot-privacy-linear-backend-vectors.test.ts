@@ -290,7 +290,7 @@ describe('ballot privacy linear proof backend vectors', () => {
         expect(
             validCase?.trace?.sealedLatticePreflightTranscript,
         ).toMatchObject({
-            domain: 'sealed.vote/internal/lazer-linear-preflight-v1',
+            domain: 'sealed.vote/internal/linear-proof-preflight-v1',
             hash: 'SHAKE128-256',
         });
         const validPreflightTranscript =
@@ -522,7 +522,7 @@ describe('ballot privacy linear proof backend vectors', () => {
         expect(
             validCase?.trace?.sealedLatticePreflightTranscript,
         ).toMatchObject({
-            domain: 'sealed.vote/internal/lazer-linear-preflight-v1',
+            domain: 'sealed.vote/internal/linear-proof-preflight-v1',
             hash: 'SHAKE128-256',
         });
         const validPreflightDigest =

@@ -5,7 +5,7 @@ use aes::{
 
 use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
 
-pub fn generate_lazer_demo_aes256ctr_stream(
+pub fn generate_linear_proof_aes256ctr_stream(
     seed: &[u8; 32],
     domain_separator: u64,
     output_length: usize,
@@ -20,13 +20,13 @@ pub fn generate_lazer_demo_aes256ctr_stream(
         cipher.encrypt_block(&mut encrypted_block);
         let remaining_output = output_length - output.len();
         output.extend_from_slice(&encrypted_block[..remaining_output.min(16)]);
-        increment_lazer_demo_counter(&mut counter_block);
+        increment_linear_proof_counter(&mut counter_block);
     }
 
     output
 }
 
-pub fn sample_lazer_demo_uniform_u64_values(
+pub fn sample_linear_proof_uniform_u64_values(
     value_count: usize,
     modulus: u64,
     modulus_bit_length: usize,
@@ -75,7 +75,7 @@ pub fn sample_lazer_demo_uniform_u64_values(
     Ok(accepted_values)
 }
 
-pub fn sample_lazer_demo_autostable_challenge_coefficients(
+pub fn sample_linear_proof_autostable_challenge_coefficients(
     coefficient_count: usize,
     coefficient_bound: i64,
     modulus_bit_length: usize,
@@ -100,7 +100,7 @@ pub fn sample_lazer_demo_autostable_challenge_coefficients(
     )
     .map_err(|_| invalid_rng("autostable modulus does not fit in u64"))?;
     let sample_count = coefficient_count / 2;
-    let sampled_values = sample_lazer_demo_uniform_u64_values(
+    let sampled_values = sample_linear_proof_uniform_u64_values(
         sample_count,
         unsigned_modulus,
         modulus_bit_length,
@@ -141,7 +141,7 @@ impl LazerDemoAes256CtrCursor {
     fn read(&mut self, byte_count: usize) -> Vec<u8> {
         let required_total = self.consumed_bytes + byte_count;
         if self.buffered_bytes.len() < required_total {
-            self.buffered_bytes = generate_lazer_demo_aes256ctr_stream(
+            self.buffered_bytes = generate_linear_proof_aes256ctr_stream(
                 &self.seed,
                 self.domain_separator,
                 required_total,
@@ -154,7 +154,7 @@ impl LazerDemoAes256CtrCursor {
     }
 }
 
-fn increment_lazer_demo_counter(counter_block: &mut [u8; 16]) {
+fn increment_linear_proof_counter(counter_block: &mut [u8; 16]) {
     for byte_index in (0..counter_block.len()).rev() {
         let (updated_byte, overflowed) = counter_block[byte_index].overflowing_add(1);
         counter_block[byte_index] = updated_byte;
@@ -193,13 +193,14 @@ fn invalid_rng(message: impl Into<String>) -> CanonicalError {
 #[cfg(test)]
 mod tests {
     use super::{
-        generate_lazer_demo_aes256ctr_stream, sample_lazer_demo_autostable_challenge_coefficients,
-        sample_lazer_demo_uniform_u64_values,
+        generate_linear_proof_aes256ctr_stream,
+        sample_linear_proof_autostable_challenge_coefficients,
+        sample_linear_proof_uniform_u64_values,
     };
     use crate::{hashing::to_hex, transcript_core::decode_hex};
 
     #[test]
-    fn aes256ctr_stream_matches_upstream_lazer_known_answer() {
+    fn aes256ctr_stream_matches_upstream_linear_proof_known_answer() {
         let seed_bytes =
             decode_hex("ff7a617ce69148e4f1726e2f43581de2aa62d9f805532edff1eed687fb54153d")
                 .expect("seed should decode");
@@ -210,7 +211,7 @@ mod tests {
         domain_buffer.copy_from_slice(&domain_bytes);
         let domain_separator = u64::from_le_bytes(domain_buffer);
 
-        let stream = generate_lazer_demo_aes256ctr_stream(&seed, domain_separator, 36);
+        let stream = generate_linear_proof_aes256ctr_stream(&seed, domain_separator, 36);
 
         assert_eq!(
             to_hex(&stream),
@@ -221,9 +222,9 @@ mod tests {
     #[test]
     fn uniform_sampler_rejects_out_of_range_candidates_deterministically() {
         let seed = [7_u8; 32];
-        let first = sample_lazer_demo_uniform_u64_values(128, 17, 5, &seed, 9)
+        let first = sample_linear_proof_uniform_u64_values(128, 17, 5, &seed, 9)
             .expect("uniform sampling should succeed");
-        let second = sample_lazer_demo_uniform_u64_values(128, 17, 5, &seed, 9)
+        let second = sample_linear_proof_uniform_u64_values(128, 17, 5, &seed, 9)
             .expect("uniform sampling should repeat");
 
         assert_eq!(first, second);
@@ -234,8 +235,9 @@ mod tests {
     #[test]
     fn autostable_challenge_has_expected_symmetry() {
         let seed = [11_u8; 32];
-        let coefficients = sample_lazer_demo_autostable_challenge_coefficients(64, 8, 5, &seed, 0)
-            .expect("autostable sampling should succeed");
+        let coefficients =
+            sample_linear_proof_autostable_challenge_coefficients(64, 8, 5, &seed, 0)
+                .expect("autostable sampling should succeed");
 
         assert_eq!(coefficients[32], 0);
         assert!(

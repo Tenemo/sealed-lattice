@@ -3,13 +3,13 @@ use serde::{Deserialize, Serialize};
 use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
 
 use super::{
-    linear_proof_parameters::{LazerDemoProofEncoding, linear_proof_profile_for_encoding},
+    linear_proof_parameters::{LinearProofEncoding, linear_proof_profile_for_encoding},
     proof_coder::DecodedLazerDemoLinearProof,
 };
 
-pub const LAZER_DEMO_CHALLENGE_CENTERED_BOUND: i64 = 8;
-pub const LAZER_DEMO_EUCLIDEAN_RESPONSE_BOUND_SQUARED: u128 = 6_938_266_263;
-pub const LAZER_DEMO_INFINITY_RESPONSE_BOUND: u128 = 1_625_292;
+pub const LINEAR_PROOF_CHALLENGE_CENTERED_BOUND: i64 = 8;
+pub const LINEAR_PROOF_EUCLIDEAN_RESPONSE_BOUND_SQUARED: u128 = 6_938_266_263;
+pub const LINEAR_PROOF_INFINITY_RESPONSE_BOUND: u128 = 1_625_292;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -23,9 +23,9 @@ pub struct LinearProofNormSummary {
     pub infinity_response_bound: u128,
 }
 
-pub fn validate_lazer_demo_linear_proof_norms(
+pub fn validate_linear_proof_norms(
     decoded_proof: &DecodedLazerDemoLinearProof,
-    proof_encoding: &LazerDemoProofEncoding,
+    proof_encoding: &LinearProofEncoding,
 ) -> CanonicalResult<LinearProofNormSummary> {
     let proof_profile = linear_proof_profile_for_encoding(proof_encoding)?;
     let challenge_centered_linf =
@@ -70,8 +70,8 @@ pub fn validate_lazer_demo_linear_proof_norms(
 }
 
 fn short_response_bound_squared(
-    proof_encoding: &LazerDemoProofEncoding,
-    proof_profile: super::linear_proof_parameters::LazerLinearProofProfile,
+    proof_encoding: &LinearProofEncoding,
+    proof_profile: super::linear_proof_parameters::LinearProofProfile,
 ) -> CanonicalResult<u128> {
     let ring_degree = proof_encoding.ring_degree as u128;
     let standard_deviation_scale = 1_u128
@@ -135,13 +135,12 @@ fn invalid_norm(message: impl Into<String>) -> CanonicalError {
 #[cfg(test)]
 mod tests {
     use super::{
-        LAZER_DEMO_EUCLIDEAN_RESPONSE_BOUND_SQUARED, LAZER_DEMO_INFINITY_RESPONSE_BOUND,
-        validate_lazer_demo_linear_proof_norms,
+        LINEAR_PROOF_EUCLIDEAN_RESPONSE_BOUND_SQUARED, LINEAR_PROOF_INFINITY_RESPONSE_BOUND,
+        validate_linear_proof_norms,
     };
     use crate::{
         ballot_privacy::{
-            linear_proof_parameters::LazerDemoProofEncoding,
-            proof_coder::decode_lazer_demo_linear_proof,
+            linear_proof_parameters::LinearProofEncoding, proof_coder::decode_linear_proof,
         },
         transcript_core::decode_hex,
     };
@@ -163,18 +162,18 @@ mod tests {
 
     fn decoded_valid_proof() -> (
         crate::ballot_privacy::proof_coder::DecodedLazerDemoLinearProof,
-        LazerDemoProofEncoding,
+        LinearProofEncoding,
     ) {
         let vector_case = generated_vector_case("valid-small-linear-proof");
-        let proof_encoding: LazerDemoProofEncoding =
+        let proof_encoding: LinearProofEncoding =
             serde_json::from_value(vector_case["proofEncoding"].clone())
                 .expect("proof encoding should deserialize");
         let proof_hex = vector_case["proofHex"]
             .as_str()
             .expect("proof hex should be present");
         let proof_bytes = decode_hex(proof_hex).expect("proof bytes should decode");
-        let decoded_proof = decode_lazer_demo_linear_proof(&proof_bytes, &proof_encoding)
-            .expect("valid proof should decode");
+        let decoded_proof =
+            decode_linear_proof(&proof_bytes, &proof_encoding).expect("valid proof should decode");
 
         (decoded_proof, proof_encoding)
     }
@@ -183,23 +182,23 @@ mod tests {
     fn generated_valid_proof_passes_demo_norm_checks() {
         let (decoded_proof, proof_encoding) = decoded_valid_proof();
 
-        let summary = validate_lazer_demo_linear_proof_norms(&decoded_proof, &proof_encoding)
+        let summary = validate_linear_proof_norms(&decoded_proof, &proof_encoding)
             .expect("valid proof should pass norm checks");
 
         assert!(summary.short_response_l2_squared <= summary.short_response_bound_squared);
         assert!(
-            summary.euclidean_response_l2_squared <= LAZER_DEMO_EUCLIDEAN_RESPONSE_BOUND_SQUARED
+            summary.euclidean_response_l2_squared <= LINEAR_PROOF_EUCLIDEAN_RESPONSE_BOUND_SQUARED
         );
-        assert!(summary.infinity_response_linf <= LAZER_DEMO_INFINITY_RESPONSE_BOUND);
+        assert!(summary.infinity_response_linf <= LINEAR_PROOF_INFINITY_RESPONSE_BOUND);
     }
 
     #[test]
     fn euclidean_response_bound_failure_is_reported() {
         let (mut decoded_proof, proof_encoding) = decoded_valid_proof();
         decoded_proof.euclidean_response_vector_mut()[0][0] =
-            (LAZER_DEMO_EUCLIDEAN_RESPONSE_BOUND_SQUARED as f64).sqrt() as i64 + 10_000;
+            (LINEAR_PROOF_EUCLIDEAN_RESPONSE_BOUND_SQUARED as f64).sqrt() as i64 + 10_000;
 
-        let error = validate_lazer_demo_linear_proof_norms(&decoded_proof, &proof_encoding)
+        let error = validate_linear_proof_norms(&decoded_proof, &proof_encoding)
             .expect_err("oversized euclidean response should fail");
 
         assert!(error.message.contains("euclidean response"));
@@ -209,9 +208,10 @@ mod tests {
     fn infinity_response_bound_failure_is_reported() {
         let (mut decoded_proof, proof_encoding) = decoded_valid_proof();
         decoded_proof.infinity_response_vector_mut()[0][0] =
-            i64::try_from(LAZER_DEMO_INFINITY_RESPONSE_BOUND + 1).expect("bound should fit in i64");
+            i64::try_from(LINEAR_PROOF_INFINITY_RESPONSE_BOUND + 1)
+                .expect("bound should fit in i64");
 
-        let error = validate_lazer_demo_linear_proof_norms(&decoded_proof, &proof_encoding)
+        let error = validate_linear_proof_norms(&decoded_proof, &proof_encoding)
             .expect_err("oversized infinity response should fail");
 
         assert!(error.message.contains("infinity response"));

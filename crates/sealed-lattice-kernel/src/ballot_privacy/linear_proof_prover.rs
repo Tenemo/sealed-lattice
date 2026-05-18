@@ -4,32 +4,31 @@ use crate::{
 };
 
 use super::{
-    abdlop_commitment::encode_lazer_demo_compressed_commitment_vector,
-    lazer_demo_many_quadratic::{
-        build_lazer_demo_many_quadratic_equations, fold_lazer_many_quadratic_equations,
-    },
-    lazer_demo_public_parameters::derive_lazer_abdlop_public_parameters,
-    lazer_demo_quadratic::LazerDemoQuadraticEquation,
-    lazer_demo_rng::{
-        generate_lazer_demo_aes256ctr_stream, sample_lazer_demo_autostable_challenge_coefficients,
-        sample_lazer_demo_uniform_u64_values,
-    },
-    lazer_demo_tbox_relations::{
-        apply_lazer_tbox_z3_response_relations, apply_lazer_tbox_z4_response_relations,
-        build_lazer_tbox_prefix_accumulators,
-    },
+    abdlop_commitment::encode_compressed_commitment_vector,
     linear_proof_parameters::{
-        LazerDemoProofEncoding, LinearProofParameterSet, linear_proof_profile_for_encoding,
+        LinearProofEncoding, LinearProofParameterSet, linear_proof_profile_for_encoding,
+    },
+    linear_proof_public_parameters::derive_abdlop_public_parameters,
+    linear_proof_rng::{
+        generate_linear_proof_aes256ctr_stream,
+        sample_linear_proof_autostable_challenge_coefficients,
+        sample_linear_proof_uniform_u64_values,
     },
     linear_proof_statement::{
-        LinearProofTargetCoefficientRepresentation, derive_lazer_demo_transformed_statement_matrix,
-        derive_lazer_demo_transformed_target_vector, source_polynomial_split_factor,
+        LinearProofTargetCoefficientRepresentation, derive_transformed_statement_matrix,
+        derive_transformed_target_vector, source_polynomial_split_factor,
     },
     linear_proof_transcript::{shake128_32, shake128_64, shake128_96},
+    many_quadratic::{build_many_quadratic_equations, fold_many_quadratic_equations},
     polynomial_matrix::PolynomialMatrix,
     polynomial_ring::PolynomialRing,
     polynomial_vector::PolynomialVector,
-    proof_coder::{LazerDemoLinearProofComponents, encode_lazer_demo_linear_proof_components},
+    proof_coder::{LazerDemoLinearProofComponents, encode_linear_proof_components},
+    quadratic_equation::LinearProofQuadraticEquation,
+    tbox_relations::{
+        apply_tbox_z3_response_relations, apply_tbox_z4_response_relations,
+        build_tbox_prefix_accumulators,
+    },
 };
 
 const ABDLOP_OPENING_RANDOMNESS_BOUND_MODULUS: u64 = 3;
@@ -41,7 +40,7 @@ const RECEIVER_KEY_QUADRATIC_TARGET_TAIL_POLYNOMIALS: usize = 1;
 
 pub(crate) struct LinearProverWitnessInput<'a> {
     pub(crate) parameter_set: &'a LinearProofParameterSet,
-    pub(crate) proof_encoding: &'a LazerDemoProofEncoding,
+    pub(crate) proof_encoding: &'a LinearProofEncoding,
     pub(crate) statement_matrix_coefficients: &'a [Vec<Vec<u64>>],
     pub(crate) target_vector_coefficients: &'a [Vec<u64>],
     pub(crate) target_coefficient_representation: LinearProofTargetCoefficientRepresentation,
@@ -83,7 +82,7 @@ impl LinearProverWitnessPreparation {
 }
 
 pub(crate) struct LinearProverCommitmentInput<'a> {
-    pub(crate) proof_encoding: &'a LazerDemoProofEncoding,
+    pub(crate) proof_encoding: &'a LinearProofEncoding,
     pub(crate) public_randomness: &'a [u8; 32],
     pub(crate) statement_transcript_hash: &'a [u8; 32],
     pub(crate) witness_preparation: &'a LinearProverWitnessPreparation,
@@ -92,7 +91,7 @@ pub(crate) struct LinearProverCommitmentInput<'a> {
 
 pub(crate) struct LinearProverProofInput<'a> {
     pub(crate) parameter_set: &'a LinearProofParameterSet,
-    pub(crate) proof_encoding: &'a LazerDemoProofEncoding,
+    pub(crate) proof_encoding: &'a LinearProofEncoding,
     pub(crate) statement_matrix_coefficients: &'a [Vec<Vec<u64>>],
     pub(crate) target_vector_coefficients: &'a [Vec<u64>],
     pub(crate) target_coefficient_representation: LinearProofTargetCoefficientRepresentation,
@@ -165,7 +164,7 @@ impl LinearProverCommitmentPreparation {
     }
 }
 
-pub(crate) fn prepare_lazer_linear_prover_witness(
+pub(crate) fn prepare_linear_prover_witness(
     input: LinearProverWitnessInput<'_>,
 ) -> CanonicalResult<LinearProverWitnessPreparation> {
     input.parameter_set.validate()?;
@@ -203,7 +202,7 @@ pub(crate) fn prepare_lazer_linear_prover_witness(
     )?;
     let transformed_witness_vector =
         PolynomialVector::new(proof_ring, transformed_relation_witness.clone())?;
-    let transformed_statement_matrix = derive_lazer_demo_transformed_statement_matrix(
+    let transformed_statement_matrix = derive_transformed_statement_matrix(
         input.parameter_set,
         input.proof_encoding,
         input.statement_matrix_coefficients,
@@ -211,7 +210,7 @@ pub(crate) fn prepare_lazer_linear_prover_witness(
         input.target_coefficient_representation,
         input.public_randomness,
     )?;
-    let transformed_target_vector = derive_lazer_demo_transformed_target_vector(
+    let transformed_target_vector = derive_transformed_target_vector(
         input.parameter_set,
         input.proof_encoding,
         input.statement_matrix_coefficients,
@@ -260,7 +259,7 @@ pub(crate) fn prepare_lazer_linear_prover_witness(
     })
 }
 
-pub(crate) fn prepare_lazer_linear_prover_commitment(
+pub(crate) fn prepare_linear_prover_commitment(
     input: LinearProverCommitmentInput<'_>,
 ) -> CanonicalResult<LinearProverCommitmentPreparation> {
     input.proof_encoding.validate()?;
@@ -288,7 +287,7 @@ pub(crate) fn prepare_lazer_linear_prover_commitment(
         &commitment_randomness_seed,
     )?;
     let public_parameters =
-        derive_lazer_abdlop_public_parameters(input.public_randomness, input.proof_encoding)?;
+        derive_abdlop_public_parameters(input.public_randomness, input.proof_encoding)?;
     let opening_randomness_prefix = PolynomialVector::new(
         proof_ring,
         opening_randomness_vector.entries()
@@ -312,7 +311,7 @@ pub(crate) fn prepare_lazer_linear_prover_commitment(
         .add(&opening_randomness_suffix)?;
     let (compressed_commitment_vector, opening_remainder_vector) =
         power2round_abdlop_commitment(&uncompressed_commitment, input.proof_encoding)?;
-    let encoded_commitment = encode_lazer_demo_compressed_commitment_vector(
+    let encoded_commitment = encode_compressed_commitment_vector(
         compressed_commitment_vector.entries(),
         input.proof_encoding,
     )?;
@@ -336,7 +335,7 @@ pub(crate) fn prepare_lazer_linear_prover_commitment(
     })
 }
 
-pub(crate) fn generate_lazer_receiver_key_linear_proof(
+pub(crate) fn generate_receiver_key_linear_proof(
     input: LinearProverProofInput<'_>,
 ) -> CanonicalResult<LinearProverProofGeneration> {
     input.parameter_set.validate()?;
@@ -346,16 +345,15 @@ pub(crate) fn generate_lazer_receiver_key_linear_proof(
         input.proof_encoding.ring_degree,
         input.proof_encoding.coefficient_modulus,
     )?;
-    let statement_transcript =
-        super::linear_proof_statement::derive_lazer_demo_linear_statement_transcript(
-            input.parameter_set,
-            input.proof_encoding,
-            input.statement_matrix_coefficients,
-            input.target_vector_coefficients,
-            input.target_coefficient_representation,
-            input.public_randomness,
-        )?;
-    let witness_preparation = prepare_lazer_linear_prover_witness(LinearProverWitnessInput {
+    let statement_transcript = super::linear_proof_statement::derive_linear_statement_transcript(
+        input.parameter_set,
+        input.proof_encoding,
+        input.statement_matrix_coefficients,
+        input.target_vector_coefficients,
+        input.target_coefficient_representation,
+        input.public_randomness,
+    )?;
+    let witness_preparation = prepare_linear_prover_witness(LinearProverWitnessInput {
         parameter_set: input.parameter_set,
         proof_encoding: input.proof_encoding,
         statement_matrix_coefficients: input.statement_matrix_coefficients,
@@ -364,15 +362,14 @@ pub(crate) fn generate_lazer_receiver_key_linear_proof(
         source_witness_coefficients: input.source_witness_coefficients,
         public_randomness: input.public_randomness,
     })?;
-    let commitment_preparation =
-        prepare_lazer_linear_prover_commitment(LinearProverCommitmentInput {
-            proof_encoding: input.proof_encoding,
-            public_randomness: input.public_randomness,
-            statement_transcript_hash: &statement_transcript.public_parameters_and_statement_hash,
-            witness_preparation: &witness_preparation,
-            prover_randomness: input.prover_randomness,
-        })?;
-    let encoded_commitment = encode_lazer_demo_compressed_commitment_vector(
+    let commitment_preparation = prepare_linear_prover_commitment(LinearProverCommitmentInput {
+        proof_encoding: input.proof_encoding,
+        public_randomness: input.public_randomness,
+        statement_transcript_hash: &statement_transcript.public_parameters_and_statement_hash,
+        witness_preparation: &witness_preparation,
+        prover_randomness: input.prover_randomness,
+    })?;
+    let encoded_commitment = encode_compressed_commitment_vector(
         commitment_preparation
             .compressed_commitment_vector()
             .entries(),
@@ -383,7 +380,7 @@ pub(crate) fn generate_lazer_receiver_key_linear_proof(
         &encoded_commitment,
     ]);
     let public_parameters =
-        derive_lazer_abdlop_public_parameters(input.public_randomness, input.proof_encoding)?;
+        derive_abdlop_public_parameters(input.public_randomness, input.proof_encoding)?;
     let short_witness = witness_preparation.short_witness_vector();
     let opening_randomness = commitment_preparation.opening_randomness_vector();
     let opening_randomness_prefix = PolynomialVector::new(
@@ -408,7 +405,7 @@ pub(crate) fn generate_lazer_receiver_key_linear_proof(
         input.proof_encoding.full_size_coefficient_bit_length,
     )?;
     let z34_challenge_hash = shake128_32(&[&abdlop_commitment_hash, &z34_challenge_encoding]);
-    let transformed_statement_matrix = derive_lazer_demo_transformed_statement_matrix(
+    let transformed_statement_matrix = derive_transformed_statement_matrix(
         input.parameter_set,
         input.proof_encoding,
         input.statement_matrix_coefficients,
@@ -416,7 +413,7 @@ pub(crate) fn generate_lazer_receiver_key_linear_proof(
         input.target_coefficient_representation,
         input.public_randomness,
     )?;
-    let transformed_target_vector = derive_lazer_demo_transformed_target_vector(
+    let transformed_target_vector = derive_transformed_target_vector(
         input.parameter_set,
         input.proof_encoding,
         input.statement_matrix_coefficients,
@@ -462,8 +459,8 @@ pub(crate) fn generate_lazer_receiver_key_linear_proof(
         shake128_32(&[&z34_challenge_hash, &generator_challenge_encoding]);
 
     let mut tbox_accumulators =
-        build_lazer_tbox_prefix_accumulators(&generator_challenge_hash, input.proof_encoding)?;
-    apply_lazer_tbox_z4_response_relations(
+        build_tbox_prefix_accumulators(&generator_challenge_hash, input.proof_encoding)?;
+    apply_tbox_z4_response_relations(
         &mut tbox_accumulators,
         &transformed_statement_matrix,
         &transformed_target_vector,
@@ -471,7 +468,7 @@ pub(crate) fn generate_lazer_receiver_key_linear_proof(
         &z34_challenge_hash,
         input.proof_encoding,
     )?;
-    apply_lazer_tbox_z3_response_relations(
+    apply_tbox_z3_response_relations(
         &mut tbox_accumulators,
         &transformed_statement_matrix,
         &euclidean_response_vector,
@@ -497,8 +494,8 @@ pub(crate) fn generate_lazer_receiver_key_linear_proof(
         &tbox_z34_witness,
     )?;
     let many_quadratic_equations =
-        build_lazer_demo_many_quadratic_equations(&tbox_accumulators, &hash_mask_vector)?;
-    let many_quadratic_fold = fold_lazer_many_quadratic_equations(
+        build_many_quadratic_equations(&tbox_accumulators, &hash_mask_vector)?;
+    let many_quadratic_fold = fold_many_quadratic_equations(
         &many_quadratic_equations,
         &generator_challenge_hash,
         input.proof_encoding.full_size_coefficient_bit_length,
@@ -513,7 +510,7 @@ pub(crate) fn generate_lazer_receiver_key_linear_proof(
         short_witness.entries(),
         quadratic_message_vector.entries(),
     )?;
-    let folded_relation_value = evaluate_lazer_quadratic_equation(
+    let folded_relation_value = evaluate_quadratic_equation_equation(
         &many_quadratic_fold.folded_equation,
         &quadratic_witness,
     )?;
@@ -546,7 +543,7 @@ pub(crate) fn generate_lazer_receiver_key_linear_proof(
     )?;
     let quadratic_challenge_hash =
         shake128_32(&[&generator_challenge_hash, &quadratic_challenge_encoding]);
-    let centered_challenge_polynomial = sample_lazer_demo_autostable_challenge_coefficients(
+    let centered_challenge_polynomial = sample_linear_proof_autostable_challenge_coefficients(
         proof_ring.degree(),
         proof_profile.challenge_centered_bound,
         proof_profile.challenge_coefficient_bit_length,
@@ -571,7 +568,7 @@ pub(crate) fn generate_lazer_receiver_key_linear_proof(
         make_zero_high_bits_hint(proof_ring, recovery_input.entries(), input.proof_encoding)?;
     validate_zero_high_bits_low_part(proof_ring, recovery_input.entries(), input.proof_encoding)?;
 
-    let proof_bytes = encode_lazer_demo_linear_proof_components(
+    let proof_bytes = encode_linear_proof_components(
         LazerDemoLinearProofComponents {
             commitment_target_vector: target_commitment_vector,
             hash_mask_vector,
@@ -614,7 +611,7 @@ struct ReceiverKeyBetaSigns(i64, i64);
 fn receiver_key_tbox_beta_signs(
     seed: &[u8; RECEIVER_KEY_PROVER_RANDOMNESS_BYTES],
 ) -> ReceiverKeyBetaSigns {
-    let sign_byte = generate_lazer_demo_aes256ctr_stream(seed, 1, 1)[0];
+    let sign_byte = generate_linear_proof_aes256ctr_stream(seed, 1, 1)[0];
     let beta3 = if sign_byte & 1 == 0 { 1 } else { -1 };
     let beta4 = if sign_byte & 2 == 0 { 1 } else { -1 };
 
@@ -709,7 +706,7 @@ fn compute_receiver_key_tbox_z3_response(
     let flattened_witness = flatten_canonical_vector_to_centered_i64(proof_ring, short_witness)?;
     let mut flattened_response = vec![0_i64; 256];
     for (row_index, response_coefficient) in flattened_response.iter_mut().enumerate() {
-        let row = sample_lazer_demo_ternary_row(
+        let row = sample_linear_proof_ternary_row(
             flattened_witness.len(),
             challenge_seed,
             row_index as u64,
@@ -742,7 +739,7 @@ fn compute_receiver_key_tbox_z4_response(
     let flattened_secret = flatten_canonical_vector_to_centered_i64(proof_ring, tbox_z4_secret)?;
     let mut flattened_response = vec![0_i64; 256];
     for (row_index, response_coefficient) in flattened_response.iter_mut().enumerate() {
-        let row = sample_lazer_demo_ternary_row(
+        let row = sample_linear_proof_ternary_row(
             flattened_secret.len(),
             challenge_seed,
             u64::try_from(256 + row_index)
@@ -767,7 +764,7 @@ fn compute_receiver_key_tbox_z4_response(
     ))
 }
 
-fn sample_lazer_demo_ternary_row(
+fn sample_linear_proof_ternary_row(
     row_length: usize,
     seed: &[u8; RECEIVER_KEY_PROVER_RANDOMNESS_BYTES],
     domain_separator: u64,
@@ -776,7 +773,8 @@ fn sample_lazer_demo_ternary_row(
         .checked_mul(2)
         .ok_or_else(|| invalid_prover("ternary row bit length overflowed"))?
         .div_ceil(8);
-    let random_bytes = generate_lazer_demo_aes256ctr_stream(seed, domain_separator, output_length);
+    let random_bytes =
+        generate_linear_proof_aes256ctr_stream(seed, domain_separator, output_length);
     let mut row = vec![0_i8; row_length];
     for (row_index, row_value) in row.iter_mut().enumerate() {
         let positive_bit = read_bit(&random_bytes, row_index)?;
@@ -839,7 +837,7 @@ fn build_paired_quadratic_witness_vector(
 
 fn receiver_key_hash_mask_from_tbox_equations(
     proof_ring: PolynomialRing,
-    folded_tbox_equations: &[LazerDemoQuadraticEquation],
+    folded_tbox_equations: &[LinearProofQuadraticEquation],
     tbox_witness: &PolynomialVector,
     tbox_z34_witness: &PolynomialVector,
 ) -> CanonicalResult<Vec<Vec<u64>>> {
@@ -850,7 +848,7 @@ fn receiver_key_hash_mask_from_tbox_equations(
     }
     let mut hash_mask_vector = Vec::with_capacity(RECEIVER_KEY_TBOX_HASH_MASK_POLYNOMIALS);
     for equation in &folded_tbox_equations[..RECEIVER_KEY_TBOX_HASH_MASK_POLYNOMIALS] {
-        let evaluated_polynomial = evaluate_lazer_quadratic_equation_with_available_witnesses(
+        let evaluated_polynomial = evaluate_quadratic_equation_equation_with_available_witnesses(
             equation,
             tbox_witness,
             tbox_z34_witness,
@@ -863,7 +861,7 @@ fn receiver_key_hash_mask_from_tbox_equations(
         hash_mask_vector.push(evaluated_polynomial);
     }
     for equation in &folded_tbox_equations[RECEIVER_KEY_TBOX_HASH_MASK_POLYNOMIALS..] {
-        let evaluated_polynomial = evaluate_lazer_quadratic_equation_with_available_witnesses(
+        let evaluated_polynomial = evaluate_quadratic_equation_equation_with_available_witnesses(
             equation,
             tbox_witness,
             tbox_z34_witness,
@@ -878,15 +876,15 @@ fn receiver_key_hash_mask_from_tbox_equations(
     Ok(hash_mask_vector)
 }
 
-fn evaluate_lazer_quadratic_equation_with_available_witnesses(
-    equation: &LazerDemoQuadraticEquation,
+fn evaluate_quadratic_equation_equation_with_available_witnesses(
+    equation: &LinearProofQuadraticEquation,
     full_tbox_witness: &PolynomialVector,
     z34_tbox_witness: &PolynomialVector,
 ) -> CanonicalResult<Vec<u64>> {
     if equation.dimension() == full_tbox_witness.len() {
-        evaluate_lazer_quadratic_equation(equation, full_tbox_witness)
+        evaluate_quadratic_equation_equation(equation, full_tbox_witness)
     } else if equation.dimension() == z34_tbox_witness.len() {
-        evaluate_lazer_quadratic_equation(equation, z34_tbox_witness)
+        evaluate_quadratic_equation_equation(equation, z34_tbox_witness)
     } else {
         Err(invalid_prover(format!(
             "quadratic equation witness shape does not match the available receiver-key tbox witnesses: full {}, z34 {}, relation {}",
@@ -897,8 +895,8 @@ fn evaluate_lazer_quadratic_equation_with_available_witnesses(
     }
 }
 
-fn evaluate_lazer_quadratic_equation(
-    equation: &LazerDemoQuadraticEquation,
+fn evaluate_quadratic_equation_equation(
+    equation: &LinearProofQuadraticEquation,
     witness: &PolynomialVector,
 ) -> CanonicalResult<Vec<u64>> {
     let proof_ring = equation.ring();
@@ -1076,7 +1074,7 @@ fn split_flattened_signed_polynomials(
 fn make_zero_high_bits_hint(
     proof_ring: PolynomialRing,
     recovery_input: &[Vec<u64>],
-    proof_encoding: &LazerDemoProofEncoding,
+    proof_encoding: &LinearProofEncoding,
 ) -> CanonicalResult<Vec<Vec<i64>>> {
     let proof_profile = linear_proof_profile_for_encoding(proof_encoding)?;
     let decompression_modulus = proof_profile.decompression_modulus;
@@ -1110,7 +1108,7 @@ fn make_zero_high_bits_hint(
 fn validate_zero_high_bits_low_part(
     proof_ring: PolynomialRing,
     recovery_input: &[Vec<u64>],
-    proof_encoding: &LazerDemoProofEncoding,
+    proof_encoding: &LinearProofEncoding,
 ) -> CanonicalResult<()> {
     let proof_profile = linear_proof_profile_for_encoding(proof_encoding)?;
     let mut squared_sum = 0_u128;
@@ -1142,7 +1140,7 @@ fn validate_zero_high_bits_low_part(
 
 fn gamma_decompression_high_bits(
     coefficient: u64,
-    proof_encoding: &LazerDemoProofEncoding,
+    proof_encoding: &LinearProofEncoding,
 ) -> CanonicalResult<i128> {
     let proof_profile = linear_proof_profile_for_encoding(proof_encoding)?;
     if coefficient >= proof_encoding.coefficient_modulus {
@@ -1168,7 +1166,7 @@ fn encode_quadratic_challenge_input_for_hash(
     target_tail_polynomials: &[Vec<u64>],
     verifier_polynomial: &[u64],
     recovered_high_bits: &[Vec<u64>],
-    proof_encoding: &LazerDemoProofEncoding,
+    proof_encoding: &LinearProofEncoding,
 ) -> CanonicalResult<Vec<u8>> {
     if target_tail_polynomials.len() != RECEIVER_KEY_QUADRATIC_TARGET_TAIL_POLYNOMIALS {
         return Err(invalid_prover(
@@ -1436,7 +1434,7 @@ fn source_witness_l2_squared(source_witness_coefficients: &[Vec<i64>]) -> Canoni
 
 fn transform_source_witness_to_proof_ring(
     parameter_set: &LinearProofParameterSet,
-    proof_encoding: &LazerDemoProofEncoding,
+    proof_encoding: &LinearProofEncoding,
     source_witness_coefficients: &[Vec<i64>],
 ) -> CanonicalResult<Vec<Vec<u64>>> {
     let source_polynomial_split_factor =
@@ -1518,7 +1516,7 @@ fn binary_expansion_polynomial(
 
 fn sample_abdlop_opening_randomness_vector(
     proof_ring: PolynomialRing,
-    proof_encoding: &LazerDemoProofEncoding,
+    proof_encoding: &LinearProofEncoding,
     seed: &[u8; RECEIVER_KEY_PROVER_RANDOMNESS_BYTES],
 ) -> CanonicalResult<PolynomialVector> {
     let opening_randomness_length = proof_encoding
@@ -1529,7 +1527,7 @@ fn sample_abdlop_opening_randomness_vector(
     for polynomial_index in 0..opening_randomness_length {
         let domain_separator = u64::try_from(polynomial_index + 1)
             .map_err(|_| invalid_prover("linear prover randomness domain overflowed"))?;
-        let sampled_coefficients = sample_lazer_demo_uniform_u64_values(
+        let sampled_coefficients = sample_linear_proof_uniform_u64_values(
             proof_ring.degree(),
             ABDLOP_OPENING_RANDOMNESS_BOUND_MODULUS,
             ABDLOP_OPENING_RANDOMNESS_BOUND_BIT_LENGTH,
@@ -1551,7 +1549,7 @@ fn sample_abdlop_opening_randomness_vector(
 
 fn power2round_abdlop_commitment(
     uncompressed_commitment: &PolynomialVector,
-    proof_encoding: &LazerDemoProofEncoding,
+    proof_encoding: &LinearProofEncoding,
 ) -> CanonicalResult<(PolynomialVector, PolynomialVector)> {
     let proof_ring = uncompressed_commitment.ring();
     if proof_ring.degree() != proof_encoding.ring_degree
@@ -1662,8 +1660,8 @@ fn invalid_prover(message: impl Into<String>) -> CanonicalError {
 mod tests {
     use super::{
         LinearProverCommitmentInput, LinearProverProofInput, LinearProverWitnessInput,
-        generate_lazer_receiver_key_linear_proof, prepare_lazer_linear_prover_commitment,
-        prepare_lazer_linear_prover_witness,
+        generate_receiver_key_linear_proof, prepare_linear_prover_commitment,
+        prepare_linear_prover_witness,
     };
     use crate::{
         ballot_privacy::{
@@ -1671,8 +1669,7 @@ mod tests {
                 receiver_key_linear_parameter_contract, receiver_key_linear_proof_encoding_contract,
             },
             linear_proof_statement::{
-                LinearProofTargetCoefficientRepresentation,
-                derive_lazer_demo_linear_statement_transcript,
+                LinearProofTargetCoefficientRepresentation, derive_linear_statement_transcript,
             },
             linear_proof_verifier::verify_linear_proof_vector_case_value,
             polynomial_ring::PolynomialRing,
@@ -1764,7 +1761,7 @@ mod tests {
         let proof_encoding = receiver_key_linear_proof_encoding_contract();
         let (statement_matrix, target_vector, witness) = receiver_key_fixture();
 
-        let preparation = prepare_lazer_linear_prover_witness(LinearProverWitnessInput {
+        let preparation = prepare_linear_prover_witness(LinearProverWitnessInput {
             parameter_set: &parameter_set,
             proof_encoding: &proof_encoding,
             statement_matrix_coefficients: &statement_matrix,
@@ -1815,7 +1812,7 @@ mod tests {
         let (statement_matrix, mut target_vector, witness) = receiver_key_fixture();
         target_vector[0][0] = (target_vector[0][0] + 1) % parameter_set.coefficient_modulus;
 
-        let error = match prepare_lazer_linear_prover_witness(LinearProverWitnessInput {
+        let error = match prepare_linear_prover_witness(LinearProverWitnessInput {
             parameter_set: &parameter_set,
             proof_encoding: &proof_encoding,
             statement_matrix_coefficients: &statement_matrix,
@@ -1853,7 +1850,7 @@ mod tests {
             .neg(&public_key_polynomial)
             .expect("target polynomial should negate");
 
-        let error = match prepare_lazer_linear_prover_witness(LinearProverWitnessInput {
+        let error = match prepare_linear_prover_witness(LinearProverWitnessInput {
             parameter_set: &parameter_set,
             proof_encoding: &proof_encoding,
             statement_matrix_coefficients: &statement_matrix,
@@ -1876,7 +1873,7 @@ mod tests {
         let proof_encoding = receiver_key_linear_proof_encoding_contract();
         let (statement_matrix, target_vector, witness) = receiver_key_fixture();
         let public_randomness = [0_u8; 32];
-        let witness_preparation = prepare_lazer_linear_prover_witness(LinearProverWitnessInput {
+        let witness_preparation = prepare_linear_prover_witness(LinearProverWitnessInput {
             parameter_set: &parameter_set,
             proof_encoding: &proof_encoding,
             statement_matrix_coefficients: &statement_matrix,
@@ -1887,7 +1884,7 @@ mod tests {
             public_randomness: &public_randomness,
         })
         .expect("receiver-key witness should prepare");
-        let statement_transcript = derive_lazer_demo_linear_statement_transcript(
+        let statement_transcript = derive_linear_statement_transcript(
             &parameter_set,
             &proof_encoding,
             &statement_matrix,
@@ -1897,7 +1894,7 @@ mod tests {
         )
         .expect("statement transcript should derive");
 
-        let commitment = prepare_lazer_linear_prover_commitment(LinearProverCommitmentInput {
+        let commitment = prepare_linear_prover_commitment(LinearProverCommitmentInput {
             proof_encoding: &proof_encoding,
             public_randomness: &public_randomness,
             statement_transcript_hash: &statement_transcript.public_parameters_and_statement_hash,
@@ -1905,26 +1902,22 @@ mod tests {
             prover_randomness: &[9_u8; 32],
         })
         .expect("receiver-key commitment should prepare");
-        let repeated_commitment =
-            prepare_lazer_linear_prover_commitment(LinearProverCommitmentInput {
-                proof_encoding: &proof_encoding,
-                public_randomness: &public_randomness,
-                statement_transcript_hash: &statement_transcript
-                    .public_parameters_and_statement_hash,
-                witness_preparation: &witness_preparation,
-                prover_randomness: &[9_u8; 32],
-            })
-            .expect("receiver-key commitment should repeat");
-        let changed_commitment =
-            prepare_lazer_linear_prover_commitment(LinearProverCommitmentInput {
-                proof_encoding: &proof_encoding,
-                public_randomness: &public_randomness,
-                statement_transcript_hash: &statement_transcript
-                    .public_parameters_and_statement_hash,
-                witness_preparation: &witness_preparation,
-                prover_randomness: &[10_u8; 32],
-            })
-            .expect("changed receiver-key commitment should prepare");
+        let repeated_commitment = prepare_linear_prover_commitment(LinearProverCommitmentInput {
+            proof_encoding: &proof_encoding,
+            public_randomness: &public_randomness,
+            statement_transcript_hash: &statement_transcript.public_parameters_and_statement_hash,
+            witness_preparation: &witness_preparation,
+            prover_randomness: &[9_u8; 32],
+        })
+        .expect("receiver-key commitment should repeat");
+        let changed_commitment = prepare_linear_prover_commitment(LinearProverCommitmentInput {
+            proof_encoding: &proof_encoding,
+            public_randomness: &public_randomness,
+            statement_transcript_hash: &statement_transcript.public_parameters_and_statement_hash,
+            witness_preparation: &witness_preparation,
+            prover_randomness: &[10_u8; 32],
+        })
+        .expect("changed receiver-key commitment should prepare");
 
         assert_eq!(
             commitment.summary().compressed_commitment_polynomial_count,
@@ -1961,7 +1954,7 @@ mod tests {
         let proof_encoding = receiver_key_linear_proof_encoding_contract();
         let (statement_matrix, target_vector, witness) = receiver_key_fixture();
         let public_randomness = [0_u8; 32];
-        let first_generation = generate_lazer_receiver_key_linear_proof(LinearProverProofInput {
+        let first_generation = generate_receiver_key_linear_proof(LinearProverProofInput {
             parameter_set: &parameter_set,
             proof_encoding: &proof_encoding,
             statement_matrix_coefficients: &statement_matrix,
@@ -1973,20 +1966,19 @@ mod tests {
             prover_randomness: &[9_u8; 32],
         })
         .expect("receiver-key proof generation should succeed");
-        let repeated_generation =
-            generate_lazer_receiver_key_linear_proof(LinearProverProofInput {
-                parameter_set: &parameter_set,
-                proof_encoding: &proof_encoding,
-                statement_matrix_coefficients: &statement_matrix,
-                target_vector_coefficients: &target_vector,
-                target_coefficient_representation:
-                    LinearProofTargetCoefficientRepresentation::CenteredSignedSourceModulus,
-                source_witness_coefficients: &witness,
-                public_randomness: &public_randomness,
-                prover_randomness: &[9_u8; 32],
-            })
-            .expect("receiver-key proof generation should repeat");
-        let changed_generation = generate_lazer_receiver_key_linear_proof(LinearProverProofInput {
+        let repeated_generation = generate_receiver_key_linear_proof(LinearProverProofInput {
+            parameter_set: &parameter_set,
+            proof_encoding: &proof_encoding,
+            statement_matrix_coefficients: &statement_matrix,
+            target_vector_coefficients: &target_vector,
+            target_coefficient_representation:
+                LinearProofTargetCoefficientRepresentation::CenteredSignedSourceModulus,
+            source_witness_coefficients: &witness,
+            public_randomness: &public_randomness,
+            prover_randomness: &[9_u8; 32],
+        })
+        .expect("receiver-key proof generation should repeat");
+        let changed_generation = generate_receiver_key_linear_proof(LinearProverProofInput {
             parameter_set: &parameter_set,
             proof_encoding: &proof_encoding,
             statement_matrix_coefficients: &statement_matrix,

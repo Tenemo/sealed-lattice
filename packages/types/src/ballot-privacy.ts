@@ -155,8 +155,8 @@ export type BallotProofProfile = {
     readonly objectVersion: 1;
     readonly profileId: string;
     readonly ballotProofProfileDigest: ProtocolDigest;
-    readonly proofSystem: 'LaZerStyleLocalLatticeRelation';
-    readonly backendConstruction: 'LyubashevskyNguyenPlancon2022LinearProofsViaLaZer';
+    readonly proofSystem: 'LocalLinearLatticeRelation';
+    readonly backendConstruction: 'LyubashevskyNguyenPlancon2022LinearProofs';
     readonly relationShape: 'LinearLatticeRelationsWithShortVectorAndOneHotMembership';
     readonly fiatShamirHash: 'Hash512-SHAKE256';
     readonly fiatShamirModel: 'QROMAccountedRequired';
@@ -256,7 +256,7 @@ export type BallotProofComponentProofRecord = {
     readonly backendStatementDigest: ProtocolDigest;
     readonly ballotProofStatementDigest?: ProtocolDigest;
     readonly relationStatementDigest: ProtocolDigest;
-    readonly proofBackend: 'LaZerStyleLocalLatticeRelation';
+    readonly proofBackend: 'LocalLinearLatticeRelation';
     readonly proofRoot: ProtocolDigest;
     readonly proofBytesDigest: ProtocolDigest;
     readonly proofEncodingProfileDigest: ProtocolDigest;
@@ -321,7 +321,7 @@ export type ReceiverKeyProof = {
     readonly recoveryEpoch: number;
     readonly receiverPublicKeyDigest: ProtocolDigest;
     readonly receiverEncryptionProfileDigest: ProtocolDigest;
-    readonly proofBackend: 'LaZerStyleLocalLatticeRelation';
+    readonly proofBackend: 'LocalLinearLatticeRelation';
     readonly backendStatementDigest?: ProtocolDigest;
     readonly linearStatementDigest?: ProtocolDigest;
     readonly proofBytesDigest?: ProtocolDigest;
@@ -418,7 +418,7 @@ export type BallotProofRecord = {
     readonly statementMatrixDigest?: ProtocolDigest;
     readonly targetVectorDigest?: ProtocolDigest;
     readonly ballotProofProfileDigest: ProtocolDigest;
-    readonly proofBackend: 'LaZerStyleLocalLatticeRelation';
+    readonly proofBackend: 'LocalLinearLatticeRelation';
     readonly challengeDigest: ProtocolDigest;
     readonly proofRoot: ProtocolDigest;
     readonly proofBytesDigest: ProtocolDigest;
@@ -429,7 +429,7 @@ export type BallotProofRecord = {
 };
 
 export type ClaimBearingBallotPackage = {
-    readonly objectType: 'BallotPackage';
+    readonly objectType: 'ClaimBearingBallotPackage';
     readonly objectVersion: 1;
     readonly ballotPackageDigest: ProtocolDigest;
     readonly ballotProofStatement: BallotProofStatement;
@@ -442,13 +442,10 @@ export type ClaimBearingBallotPackage = {
 };
 
 export type BallotPrivacyProofBackendStatus = {
-    readonly backendName: 'LaZer-style linear lattice proof backend';
+    readonly backendName: 'linear lattice proof backend';
     readonly backendAvailable: false;
-    readonly upstreamReference: 'lazer-crypto/lazer';
-    readonly upstreamDirectDependencyUsableInBrowser: false;
     readonly portableRustWasmPortRequired: true;
     readonly requiredComponents: readonly string[];
-    readonly upstreamReferenceFiles: readonly string[];
     readonly blockedReason: string;
 };
 

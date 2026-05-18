@@ -1,6 +1,6 @@
 export type ReceiverKeyLinearProofParameterSet = {
     readonly profileId: 'receiver-key-linear-module-lwe-compatibility-v1';
-    readonly source: 'tools/lazer-oracle/receiver-key-linear-params.py';
+    readonly source: 'sealed-lattice/linear-proof/receiver-key-parameters-v1';
     readonly relation: 'A*w + t = 0';
     readonly ringDegree: 256;
     readonly proofSystemRingDegree: 64;
@@ -31,7 +31,7 @@ export type ReceiverKeyLinearProofEncoding = {
     readonly randomnessResponseLog2StandardDeviation: 12;
     readonly euclideanResponseLog2StandardDeviation: 12;
     readonly infinityResponseLog2StandardDeviation: 17;
-    readonly source: 'temp/lazer/python/demo/receiver_key_params.h:receiver_key_param';
+    readonly source: 'sealed-lattice/linear-proof/receiver-key-encoding-v1';
     readonly expectedProofSizeBytes?: number;
 };
 
@@ -66,7 +66,7 @@ export const createReceiverKeyLinearProofParameterSet = (input?: {
 
     return {
         profileId: 'receiver-key-linear-module-lwe-compatibility-v1',
-        source: 'tools/lazer-oracle/receiver-key-linear-params.py',
+        source: 'sealed-lattice/linear-proof/receiver-key-parameters-v1',
         relation: 'A*w + t = 0',
         ringDegree: 256,
         proofSystemRingDegree: 64,
@@ -105,7 +105,7 @@ export const createReceiverKeyLinearProofEncoding = (input?: {
         randomnessResponseLog2StandardDeviation: 12,
         euclideanResponseLog2StandardDeviation: 12,
         infinityResponseLog2StandardDeviation: 17,
-        source: 'temp/lazer/python/demo/receiver_key_params.h:receiver_key_param',
+        source: 'sealed-lattice/linear-proof/receiver-key-encoding-v1',
         ...(input?.expectedProofSizeBytes === undefined
             ? {}
             : { expectedProofSizeBytes: input.expectedProofSizeBytes }),

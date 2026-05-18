@@ -1454,7 +1454,7 @@ export const createReceiverKeyProof = (input: {
     return createReceiverKeyProofShell({
         ceremonyId: input.receiverPublicKey.ceremonyId,
         manifestDigest: input.receiverPublicKey.manifestDigest,
-        proofBackend: 'LaZerStyleLocalLatticeRelation',
+        proofBackend: 'LocalLinearLatticeRelation',
         proofRoot:
             proofMaterialFields?.proofRoot ??
             deriveReceiverKeyProofRoot({

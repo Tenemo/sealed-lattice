@@ -3,7 +3,7 @@
   "entries": [
     {
       "path": "ballot-privacy/ballot-field-linear-proof-vectors.json",
-      "sha256": "2a8bd691637a30e003d5de44f156a526e28147ccdc0ad2945aa6229705318075"
+      "sha256": "8f50514b7fec3c2820dac376e9f4194d8f53175fdddafbfeeaea692bffabe72d"
     },
     {
       "path": "ballot-privacy/encoded-ballot-linear-relation-vectors.json",
@@ -11,11 +11,11 @@
     },
     {
       "path": "ballot-privacy/proof-backend-linear-vectors.json",
-      "sha256": "4d661f43dc4e5c7f33b5d377b021b65507b6ff335aeb3606936a7ca568d3d52c"
+      "sha256": "8d58928f9d9203a64c7ddcc3a53a26618cb9eda023332672f435c121cd2f3d25"
     },
     {
       "path": "ballot-privacy/proof-stack-profile.json",
-      "sha256": "64b521a60145d51ec1170c7a99898c75ee0fb0edbd490a702b7040b4814f2fe6"
+      "sha256": "00a7ab75af2f6b576d967db8ff4ee6f627faa6107e76419abcc6035262c79d8b"
     },
     {
       "path": "ballot-privacy/README.md",
@@ -23,11 +23,11 @@
     },
     {
       "path": "ballot-privacy/receiver-key-linear-proof-vectors.json",
-      "sha256": "9c88d0839aa2dab574717e822ea2720db09a2817c53a639ccd85f1d03b80da4c"
+      "sha256": "e5702788cc41b7aae3173dca8fd792bf0a92eb6947660bc8ef0fc38694019661"
     },
     {
       "path": "ballot-privacy/receiver-key-proof-vectors.json",
-      "sha256": "e7ef286a47feb2da94ef6225398e10956ef498d1155fd57c23fa309e0bd6c0ba"
+      "sha256": "0bb4ef04a51751470d42c7538a13d762dce115407234701ee7364b160e4c2962"
     },
     {
       "path": "election-foundation/board-finality.json",

@@ -1,23 +1,23 @@
 use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
 
 use super::{
-    lazer_demo_rng::sample_lazer_demo_uniform_u64_values,
-    linear_proof_parameters::{LazerDemoProofEncoding, demo_linear_proof_encoding_contract},
+    linear_proof_parameters::{LinearProofEncoding, demo_linear_proof_encoding_contract},
+    linear_proof_rng::sample_linear_proof_uniform_u64_values,
     polynomial_matrix::PolynomialMatrix,
     polynomial_ring::PolynomialRing,
 };
 
-pub const LAZER_DEMO_PROOF_RING_DEGREE: usize = 64;
-pub const LAZER_DEMO_PROOF_COEFFICIENT_MODULUS: u64 = 36_028_797_018_964_597;
-pub const LAZER_DEMO_PROOF_COEFFICIENT_BIT_LENGTH: usize = 56;
-pub const LAZER_DEMO_TBOX_SHORT_MESSAGE_LENGTH: usize = 33;
-pub const LAZER_DEMO_TBOX_RANDOMNESS_LENGTH: usize = 60;
-pub const LAZER_DEMO_TBOX_COMPRESSED_OPENING_LENGTH: usize = 13;
-pub const LAZER_DEMO_TBOX_MESSAGE_EXTENSION_LENGTH: usize = 12;
+pub const LINEAR_PROOF_PROOF_RING_DEGREE: usize = 64;
+pub const LINEAR_PROOF_PROOF_COEFFICIENT_MODULUS: u64 = 36_028_797_018_964_597;
+pub const LINEAR_PROOF_PROOF_COEFFICIENT_BIT_LENGTH: usize = 56;
+pub const TBOX_SHORT_MESSAGE_LENGTH: usize = 33;
+pub const TBOX_RANDOMNESS_LENGTH: usize = 60;
+pub const TBOX_COMPRESSED_OPENING_LENGTH: usize = 13;
+pub const TBOX_MESSAGE_EXTENSION_LENGTH: usize = 12;
 
-const LAZER_DEMO_ABDLOP_COMMITMENT_KEY_DOMAIN: u32 = 0;
-const LAZER_DEMO_ABDLOP_OPENING_KEY_DOMAIN: u32 = 1;
-const LAZER_DEMO_ABDLOP_MESSAGE_KEY_DOMAIN: u32 = 2;
+const LINEAR_PROOF_ABDLOP_COMMITMENT_KEY_DOMAIN: u32 = 0;
+const LINEAR_PROOF_ABDLOP_OPENING_KEY_DOMAIN: u32 = 1;
+const LINEAR_PROOF_ABDLOP_MESSAGE_KEY_DOMAIN: u32 = 2;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LazerDemoAbdlopPublicParameters {
@@ -26,16 +26,16 @@ pub struct LazerDemoAbdlopPublicParameters {
     pub message_key_matrix: PolynomialMatrix,
 }
 
-pub fn derive_lazer_demo_abdlop_public_parameters(
+pub fn derive_default_abdlop_public_parameters(
     public_randomness: &[u8; 32],
 ) -> CanonicalResult<LazerDemoAbdlopPublicParameters> {
     let proof_encoding = demo_linear_proof_encoding_contract();
-    derive_lazer_abdlop_public_parameters(public_randomness, &proof_encoding)
+    derive_abdlop_public_parameters(public_randomness, &proof_encoding)
 }
 
-pub fn derive_lazer_abdlop_public_parameters(
+pub fn derive_abdlop_public_parameters(
     public_randomness: &[u8; 32],
-    proof_encoding: &LazerDemoProofEncoding,
+    proof_encoding: &LinearProofEncoding,
 ) -> CanonicalResult<LazerDemoAbdlopPublicParameters> {
     proof_encoding.validate()?;
     let proof_ring = PolynomialRing::new(
@@ -43,28 +43,28 @@ pub fn derive_lazer_abdlop_public_parameters(
         proof_encoding.coefficient_modulus,
     )?;
 
-    let commitment_key_matrix = expand_lazer_demo_uniform_polynomial_matrix(
+    let commitment_key_matrix = expand_linear_proof_uniform_polynomial_matrix(
         proof_ring,
         proof_encoding.compressed_commitment_vector_length,
         proof_encoding.short_response_vector_length,
         public_randomness,
-        LAZER_DEMO_ABDLOP_COMMITMENT_KEY_DOMAIN,
+        LINEAR_PROOF_ABDLOP_COMMITMENT_KEY_DOMAIN,
         proof_encoding.full_size_coefficient_bit_length,
     )?;
-    let opening_key_matrix = expand_lazer_demo_uniform_polynomial_matrix(
+    let opening_key_matrix = expand_linear_proof_uniform_polynomial_matrix(
         proof_ring,
         proof_encoding.compressed_commitment_vector_length,
         proof_encoding.randomness_response_vector_length,
         public_randomness,
-        LAZER_DEMO_ABDLOP_OPENING_KEY_DOMAIN,
+        LINEAR_PROOF_ABDLOP_OPENING_KEY_DOMAIN,
         proof_encoding.full_size_coefficient_bit_length,
     )?;
-    let message_key_matrix = expand_lazer_demo_uniform_polynomial_matrix(
+    let message_key_matrix = expand_linear_proof_uniform_polynomial_matrix(
         proof_ring,
         proof_encoding.target_commitment_vector_length,
         proof_encoding.randomness_response_vector_length,
         public_randomness,
-        LAZER_DEMO_ABDLOP_MESSAGE_KEY_DOMAIN,
+        LINEAR_PROOF_ABDLOP_MESSAGE_KEY_DOMAIN,
         proof_encoding.full_size_coefficient_bit_length,
     )?;
 
@@ -75,7 +75,7 @@ pub fn derive_lazer_abdlop_public_parameters(
     })
 }
 
-pub fn expand_lazer_demo_uniform_polynomial_matrix(
+pub fn expand_linear_proof_uniform_polynomial_matrix(
     ring: PolynomialRing,
     row_count: usize,
     column_count: usize,
@@ -93,19 +93,19 @@ pub fn expand_lazer_demo_uniform_polynomial_matrix(
         .ok_or_else(|| invalid_public_parameters("uniform matrix entry count overflowed"))?;
     if entry_count > u32::MAX as usize {
         return Err(invalid_public_parameters(
-            "uniform matrix entry count does not fit in the LaZer domain layout",
+            "uniform matrix entry count does not fit in the proof domain layout",
         ));
     }
 
     let mut entries = Vec::with_capacity(entry_count);
     for entry_index in 0..entry_count {
-        let entry_domain_separator = compose_lazer_demo_matrix_domain(
+        let entry_domain_separator = compose_linear_proof_matrix_domain(
             matrix_domain_separator,
             u32::try_from(entry_index).map_err(|_| {
                 invalid_public_parameters("uniform matrix entry index does not fit in u32")
             })?,
         );
-        entries.push(sample_lazer_demo_uniform_u64_values(
+        entries.push(sample_linear_proof_uniform_u64_values(
             ring.degree(),
             ring.modulus(),
             coefficient_bit_length,
@@ -117,7 +117,7 @@ pub fn expand_lazer_demo_uniform_polynomial_matrix(
     PolynomialMatrix::new(ring, row_count, column_count, entries)
 }
 
-fn compose_lazer_demo_matrix_domain(matrix_domain_separator: u32, entry_index: u32) -> u64 {
+fn compose_linear_proof_matrix_domain(matrix_domain_separator: u32, entry_index: u32) -> u64 {
     (u64::from(matrix_domain_separator) << 32) | u64::from(entry_index)
 }
 
@@ -128,8 +128,8 @@ fn invalid_public_parameters(message: impl Into<String>) -> CanonicalError {
 #[cfg(test)]
 mod tests {
     use super::{
-        LAZER_DEMO_PROOF_COEFFICIENT_MODULUS, LAZER_DEMO_PROOF_RING_DEGREE,
-        derive_lazer_demo_abdlop_public_parameters, expand_lazer_demo_uniform_polynomial_matrix,
+        LINEAR_PROOF_PROOF_COEFFICIENT_MODULUS, LINEAR_PROOF_PROOF_RING_DEGREE,
+        derive_default_abdlop_public_parameters, expand_linear_proof_uniform_polynomial_matrix,
     };
     use crate::{
         ballot_privacy::polynomial_ring::PolynomialRing, hashing::to_hex,
@@ -167,7 +167,7 @@ mod tests {
                 .expect("statement matrix should deserialize");
         let source_ring = PolynomialRing::new(256, 4_294_962_689).expect("ring should validate");
 
-        let expanded_statement_matrix = expand_lazer_demo_uniform_polynomial_matrix(
+        let expanded_statement_matrix = expand_linear_proof_uniform_polynomial_matrix(
             source_ring,
             4,
             8,
@@ -187,7 +187,7 @@ mod tests {
     fn abdlop_public_parameter_expansion_has_demo_shapes() {
         let public_randomness = [0_u8; 32];
 
-        let public_parameters = derive_lazer_demo_abdlop_public_parameters(&public_randomness)
+        let public_parameters = derive_default_abdlop_public_parameters(&public_randomness)
             .expect("public parameters should expand");
 
         assert_eq!(public_parameters.commitment_key_matrix.rows(), 13);
@@ -198,11 +198,11 @@ mod tests {
         assert_eq!(public_parameters.message_key_matrix.columns(), 47);
         assert_eq!(
             public_parameters.commitment_key_matrix.ring().degree(),
-            LAZER_DEMO_PROOF_RING_DEGREE
+            LINEAR_PROOF_PROOF_RING_DEGREE
         );
         assert_eq!(
             public_parameters.commitment_key_matrix.ring().modulus(),
-            LAZER_DEMO_PROOF_COEFFICIENT_MODULUS
+            LINEAR_PROOF_PROOF_COEFFICIENT_MODULUS
         );
     }
 
@@ -212,9 +212,9 @@ mod tests {
         let mut changed_randomness = [0_u8; 32];
         changed_randomness[0] = 1;
 
-        let zero_parameters = derive_lazer_demo_abdlop_public_parameters(&zero_randomness)
+        let zero_parameters = derive_default_abdlop_public_parameters(&zero_randomness)
             .expect("zero public parameters should expand");
-        let changed_parameters = derive_lazer_demo_abdlop_public_parameters(&changed_randomness)
+        let changed_parameters = derive_default_abdlop_public_parameters(&changed_randomness)
             .expect("changed public parameters should expand");
 
         let zero_first_entry = zero_parameters

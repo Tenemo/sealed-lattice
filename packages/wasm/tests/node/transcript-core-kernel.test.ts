@@ -575,7 +575,6 @@ describe('transcript-core kernel in Node', () => {
         expect(backendStatus).toMatchObject({
             backendAvailable: false,
             portableRustWasmPortRequired: true,
-            upstreamDirectDependencyUsableInBrowser: false,
         });
         expect(backendStatus.requiredComponents).toEqual(
             expect.arrayContaining([
@@ -1125,7 +1124,7 @@ describe('transcript-core kernel in Node', () => {
                 manifestDigest: digest('manifest'),
                 objectType: 'ReceiverKeyProof',
                 objectVersion: 1,
-                proofBackend: 'LaZerStyleLocalLatticeRelation',
+                proofBackend: 'LocalLinearLatticeRelation',
                 proofBytesDigest,
                 proofEncodingProfileDigest,
                 proofParameterSetDigest,
@@ -1685,7 +1684,9 @@ describe('transcript-core kernel in Node', () => {
                 coefficientModulus: '4294962689',
                 objectType: 'BallotProofLinearProofStatement',
                 objectVersion: 1,
-                parameterProfileId: 'lazer-linear-demo-compatibility-v1',
+                parameterProfileId: String(
+                    (validParameterSet as Record<string, unknown>).profileId,
+                ),
                 relation: 'A*w + t = 0',
                 relationStatementDigest: digest('relation-statement'),
                 ringDegree: 256,
@@ -1781,7 +1782,7 @@ describe('transcript-core kernel in Node', () => {
                 linearStatementDigest: linearStatement.statementDigest,
                 objectType: 'BallotProofRecord',
                 objectVersion: 1,
-                proofBackend: 'LaZerStyleLocalLatticeRelation',
+                proofBackend: 'LocalLinearLatticeRelation',
                 proofBytesDigest,
                 proofEncodingProfileDigest,
                 proofParameterSetDigest,
@@ -2292,7 +2293,7 @@ describe('transcript-core kernel in Node', () => {
                 linearStatementDigest: linearStatement.statementDigest,
                 objectType: 'BallotProofRecord',
                 objectVersion: 1,
-                proofBackend: 'LaZerStyleLocalLatticeRelation',
+                proofBackend: 'LocalLinearLatticeRelation',
                 proofBytesDigest,
                 proofEncodingProfileDigest,
                 proofParameterSetDigest,
@@ -2725,7 +2726,7 @@ describe('transcript-core kernel in Node', () => {
                     componentStatement.componentStatementDigest,
                 objectType: 'BallotProofComponentProofRecord',
                 objectVersion: 1,
-                proofBackend: 'LaZerStyleLocalLatticeRelation',
+                proofBackend: 'LocalLinearLatticeRelation',
                 proofBytesDigest,
                 proofEncodingProfileDigest,
                 proofParameterSetDigest,
