@@ -16,6 +16,7 @@ import receiverKeyLinearProofBackendVectorsJson from '../../../../test-vectors/b
 import receiverKeyVectorsJson from '../../../../test-vectors/ballot-privacy/receiver-key-proof-vectors.json';
 import goldenTranscriptCoreFixturesJson from '../../../../test-vectors/transcript-core/golden-transcript-core.json';
 import malformedObjectFixturesJson from '../../../../test-vectors/transcript-core/malformed-objects.json';
+import { createWasmBallotProofRecordGenerationFixture } from '../../../../tests/support/ballot-privacy-proof-record-generation-fixtures';
 import {
     loadTranscriptCoreKernel,
     roundTripBytesThroughKernel,
@@ -1690,6 +1691,90 @@ describe('transcript-core kernel in Node', () => {
             unresolvedReason: 'BallotPackageInvalid',
         });
     });
+
+    it('generates a component-statement-bound ballot proof record through WASM', async () => {
+        const kernel = await loadTranscriptCoreKernel();
+        const { request } = createWasmBallotProofRecordGenerationFixture();
+
+        const generation = kernel.generateBallotProofRecord(request);
+
+        expect(generation).toMatchObject({
+            ok: true,
+            backendAvailable: false,
+            generatedProofBytes: true,
+            operation: 'generateBallotProofRecord',
+            unresolvedReason: null,
+        });
+        expect(generation.statusLabels).toEqual(
+            expect.arrayContaining([
+                'BallotComponentProofBundleGenerated',
+                'BallotProofRecordGenerated',
+                'BallotProofRecordGeneratedProofVerified',
+            ]),
+        );
+        expect(generation.verification).toMatchObject({
+            ok: true,
+            operation: 'verifyBallotProof',
+            unresolvedReason: null,
+        });
+        expect(generation.proofBytesHex).toMatch(/^[0-9a-f]+$/u);
+        expect(generation.proofSizeBytes).toBe(
+            String(generation.proofBytesHex).length / 2,
+        );
+        const componentProofBundle = generation.componentProofBundle as {
+            readonly componentProofs: readonly {
+                readonly componentId: string;
+                readonly proofSizeBytes: number;
+            }[];
+        };
+        const componentProofInputs =
+            generation.componentProofInputs as readonly {
+                readonly componentId: string;
+                readonly proofBytesHex: string;
+                readonly proofStatementFormat: string;
+            }[];
+        expect(componentProofBundle.componentProofs).toHaveLength(5);
+        expect(
+            componentProofInputs.map((proofInput) => [
+                proofInput.componentId,
+                proofInput.proofStatementFormat,
+            ]),
+        ).toEqual([
+            [
+                'score-and-shamir-field-component',
+                'dense-polynomial-matrix-linear-proof-v1',
+            ],
+            [
+                'payload-plaintext-field-component',
+                'sparse-polynomial-matrix-linear-proof-v1',
+            ],
+            [
+                'share-commitment-component',
+                'sparse-polynomial-matrix-linear-proof-v1',
+            ],
+            [
+                'receiver-encryption-component',
+                'structured-module-lwe-linear-proof-v1',
+            ],
+            [
+                'receiver-key-binding-component',
+                'public-zero-witness-binding-check-v1',
+            ],
+        ]);
+        expect(
+            componentProofInputs.find(
+                (proofInput) =>
+                    proofInput.componentId === 'receiver-key-binding-component',
+            )?.proofBytesHex,
+        ).toBe('');
+        expect(
+            componentProofBundle.componentProofs.find(
+                (componentProof) =>
+                    componentProof.componentId ===
+                    'receiver-key-binding-component',
+            )?.proofSizeBytes,
+        ).toBe(0);
+    }, 900_000);
 
     it('rejects field-incomplete ballot records after WASM linear proof verification', async () => {
         const kernel = await loadTranscriptCoreKernel();
