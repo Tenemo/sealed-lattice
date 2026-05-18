@@ -5,9 +5,7 @@ sidebar:
     order: 4
 ---
 
-`sealed-lattice` currently ships a stable package boundary, transcript core
-fixture verification, and deterministic election foundation helpers, not a published
-voting API.
+`sealed-lattice` currently ships a stable package boundary, transcript core fixture verification, and deterministic election foundation helpers, not a published voting API.
 
 ## What the current release guarantees
 
@@ -26,8 +24,7 @@ voting API.
 - no threshold voting workflow is published yet
 - no ballot, tally, proof, semantic target-acceptance, or decryption API is public yet
 - no voting correctness or secrecy claim is added by the transcript core fixture path
-- internal deterministic PVSS ballot-algebra helpers are test infrastructure and
-  do not provide production ballot confidentiality
+- internal deterministic PVSS ballot-algebra helpers are test infrastructure and do not provide production ballot confidentiality
 - no caller should rely on private package names or future public subpaths becoming stable
 
 ## Caller responsibilities

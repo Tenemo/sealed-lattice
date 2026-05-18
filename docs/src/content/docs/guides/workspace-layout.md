@@ -5,8 +5,7 @@ sidebar:
     order: 2
 ---
 
-The repo is a private workspace with one published package and five private
-internal packages.
+The repo is a private workspace with one published package and five private internal packages.
 
 ## Package map
 
@@ -30,9 +29,7 @@ internal packages.
 
 ## Why the public facade stays narrow
 
-The goal of the current release is to freeze packaging and package boundaries
-before the full voting API is real enough to publish safely. Shipping only the
-safe transcript core fixture verifier is deliberate.
+The goal of the current release is to freeze packaging and package boundaries before the full voting API is real enough to publish safely. Shipping only the safe transcript core fixture verifier is deliberate.
 
 ## Enforcement
 

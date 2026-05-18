@@ -1,35 +1,22 @@
 # sealed-lattice
 
-> `sealed-lattice` is under active implementation. The published package is
-> useful for deterministic transcript and election-foundation checks, but it is
-> not ready for production elections or real ballot confidentiality.
+> `sealed-lattice` is under active implementation. The published package is useful for deterministic transcript and election-foundation checks, but it is not ready for production elections or real ballot confidentiality.
 
-[![npm downloads](https://img.shields.io/npm/dm/sealed-lattice?color=5FA04E)](https://www.npmjs.com/package/sealed-lattice)
-[![CI](https://img.shields.io/github/actions/workflow/status/Tenemo/sealed-lattice/ci.yml?branch=master&label=tests&color=5FA04E)](https://github.com/Tenemo/sealed-lattice/actions/workflows/ci.yml)
-[![Tests coverage](https://img.shields.io/endpoint?url=https://tenemo.github.io/sealed-lattice/coverage-badge.json)](https://tenemo.github.io/sealed-lattice/coverage-summary.json)
-[![Documentation build](https://img.shields.io/github/actions/workflow/status/Tenemo/sealed-lattice/pages.yml?branch=master&label=docs&color=5FA04E)](https://github.com/Tenemo/sealed-lattice/actions/workflows/pages.yml)
-[![License](https://img.shields.io/github/license/Tenemo/sealed-lattice?color=5FA04E)](LICENSE)
+[![npm downloads](https://img.shields.io/npm/dm/sealed-lattice?color=5FA04E)](https://www.npmjs.com/package/sealed-lattice) [![CI](https://img.shields.io/github/actions/workflow/status/Tenemo/sealed-lattice/ci.yml?branch=master&label=tests&color=5FA04E)](https://github.com/Tenemo/sealed-lattice/actions/workflows/ci.yml) [![Tests coverage](https://img.shields.io/endpoint?url=https://tenemo.github.io/sealed-lattice/coverage-badge.json)](https://tenemo.github.io/sealed-lattice/coverage-summary.json) [![Documentation build](https://img.shields.io/github/actions/workflow/status/Tenemo/sealed-lattice/pages.yml?branch=master&label=docs&color=5FA04E)](https://github.com/Tenemo/sealed-lattice/actions/workflows/pages.yml) [![License](https://img.shields.io/github/license/Tenemo/sealed-lattice?color=5FA04E)](LICENSE)
 
-`sealed-lattice` is a browser-first, mobile-first, post-quantum threshold
-homomorphic voting library workspace. Its public package is intentionally
-narrow while the protocol implementation is still being built and verified.
+`sealed-lattice` is a browser-first, mobile-first, post-quantum threshold homomorphic voting library workspace. Its public package is intentionally narrow while the protocol implementation is still being built and verified.
 
 ## What the package exposes
 
-The published `sealed-lattice` package currently exposes safe-by-default
-helpers for:
+The published `sealed-lattice` package currently exposes safe-by-default helpers for:
 
 - transcript-core fixture verification through the packaged Rust/WASM kernel;
 - threshold profile derivation and poll-spec validation;
 - lifecycle labels, lifecycle transitions, and action capability checks;
-- signed board consistency, cast receipt shells, close record shells, and
-  target finality checks;
-- roster manifest verification, participant roster acceptance, deterministic
-  first-valid ordering, and recovery-epoch checks.
+- signed board consistency, cast receipt shells, close record shells, and target finality checks;
+- roster manifest verification, participant roster acceptance, deterministic first-valid ordering, and recovery-epoch checks.
 
-Reserved complete-protocol entry points such as transcript verification,
-bridge-proof creation, bridge-proof verification, and one-shot share-policy
-verification currently fail closed with `OperationUnavailable`.
+Reserved complete-protocol entry points such as transcript verification, bridge-proof creation, bridge-proof verification, and one-shot share-policy verification currently fail closed with `OperationUnavailable`.
 
 ```ts
 import { validatePollSpec, verifyTranscriptCoreFixture } from "sealed-lattice";
@@ -37,39 +24,28 @@ import { validatePollSpec, verifyTranscriptCoreFixture } from "sealed-lattice";
 
 ## What is internal
 
-Several protocol components exist only as workspace-internal implementation,
-test, or vector infrastructure:
+Several protocol components exist only as workspace-internal implementation, test, or vector infrastructure:
 
-- plaintext `GF(65537)` arithmetic, Shamir interpolation, top-k tallying, and
-  sparse target fixtures;
+- plaintext `GF(65537)` arithmetic, Shamir interpolation, top-k tallying, and sparse target fixtures;
 - deterministic PVSS ballot-algebra helpers used for regression tests;
 - ballot privacy profile, relation, proof-record, and receiver-key scaffolding;
-- Rust/WASM transcript-core commands used to keep TypeScript and native
-  canonicalization behavior aligned;
+- Rust/WASM transcript-core commands used to keep TypeScript and native canonicalization behavior aligned;
 - offline proof-oracle comparison tooling and generated public test vectors.
 
-These pieces are not exported as a public voting API and must not be used for
-real ballot secrecy.
+These pieces are not exported as a public voting API and must not be used for real ballot secrecy.
 
 ## Ballot privacy status
 
-The ballot privacy implementation is currently a fail-closed compatibility and
-verification scaffold.
+The ballot privacy implementation is currently a fail-closed compatibility and verification scaffold.
 
 Implemented internally:
 
 - frozen ballot privacy profile objects and digest namespaces;
-- encoded score-share layout metadata for scalar score coordinates plus hidden
-  one-hot score-bucket coordinates;
-- relation lowering for score/Shamir rows, receiver-payload plaintext binding,
-  share-commitment rows, receiver-encryption structure, and receiver-key
-  binding;
-- receiver-key proof records with proof-byte metadata and Rust/WASM verification
-  for supported linear proof vectors;
-- ballot proof records that bind backend statements, component proof bundles,
-  proof bytes, proof encodings, proof parameter sets, and public randomness;
-- native and WASM verification of public vectors for the supported internal
-  linear proof slices.
+- encoded score-share layout metadata for scalar score coordinates plus hidden one-hot score-bucket coordinates;
+- relation lowering for score/Shamir rows, receiver-payload plaintext binding, share-commitment rows, receiver-encryption structure, and receiver-key binding;
+- receiver-key proof records with proof-byte metadata and Rust/WASM verification for supported linear proof vectors;
+- ballot proof records that bind backend statements, component proof bundles, proof bytes, proof encodings, proof parameter sets, and public randomness;
+- native and WASM verification of public vectors for the supported internal linear proof slices.
 
 Still unavailable:
 
@@ -79,8 +55,7 @@ Still unavailable:
 - the packed bit-sliced BGV evaluator and mandatory evaluation proof;
 - production target-bound decryption and result release.
 
-Until those are integrated, claim-bearing ballot verification remains
-intentionally fail-closed.
+Until those are integrated, claim-bearing ballot verification remains intentionally fail-closed.
 
 ## Repository layout
 
@@ -115,9 +90,7 @@ sealed-lattice/
 pnpm add sealed-lattice
 ```
 
-The package is not a complete voting library yet. Treat it as a safe public
-foundation surface for the implemented transcript and election-foundation
-checks.
+The package is not a complete voting library yet. Treat it as a safe public foundation surface for the implemented transcript and election-foundation checks.
 
 ## Development
 

@@ -5,8 +5,7 @@ sidebar:
     order: 3
 ---
 
-The workspace is only in a good state when the checks, docs, smoke tests, and
-Rust/WASM transcript core path all pass together.
+The workspace is only in a good state when the checks, docs, smoke tests, and Rust/WASM transcript core path all pass together.
 
 ## Prerequisites
 
@@ -41,5 +40,4 @@ pnpm run build
 
 ## Release-facing rule
 
-The release workflow bumps and publishes only `packages/sdk`. The workspace
-root is private and is never published.
+The release workflow bumps and publishes only `packages/sdk`. The workspace root is private and is never published.

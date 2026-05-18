@@ -5,8 +5,7 @@ sidebar:
     order: 1
 ---
 
-Start with the public package name and the current rule: `sealed-lattice`
-exposes the safe transcript core fixture verifier and election foundation.
+Start with the public package name and the current rule: `sealed-lattice` exposes the safe transcript core fixture verifier and election foundation.
 
 ## Public package rules
 
@@ -25,10 +24,7 @@ import {
 } from "sealed-lattice";
 ```
 
-The verifier accepts transcript core fixture objects and returns deterministic
-verification or rejection labels. The election foundation helpers validate public poll shape,
-derive threshold profiles, check lifecycle transitions, derive status labels,
-and refuse premature protocol actions. They do not implement voting.
+The verifier accepts transcript core fixture objects and returns deterministic verification or rejection labels. The election foundation helpers validate public poll shape, derive threshold profiles, check lifecycle transitions, derive status labels, and refuse premature protocol actions. They do not implement voting.
 
 ## What the current release includes
 
