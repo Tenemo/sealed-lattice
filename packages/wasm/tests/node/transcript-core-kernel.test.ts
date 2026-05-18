@@ -1572,6 +1572,125 @@ describe('transcript-core kernel in Node', () => {
         );
     });
 
+    it('generates ballot and dense component proof bytes through WASM', async () => {
+        const kernel = await loadTranscriptCoreKernel();
+        const ringDegree = 64;
+        const coefficientModulus = 65_537;
+        const createZeroPolynomial = (): number[] =>
+            Array.from({ length: ringDegree }, () => 0);
+        const unitPolynomial = createZeroPolynomial();
+        unitPolynomial[0] = 1;
+        const targetPolynomial = createZeroPolynomial();
+        targetPolynomial[0] = coefficientModulus - 5;
+        const witnessPolynomial = createZeroPolynomial();
+        witnessPolynomial[0] = 5;
+        const parameterSet = {
+            profileId: 'full-encoded-score-ballot-linear-compatibility-v1',
+            source: 'sealed-lattice/linear-proof/full-encoded-score-ballot-wasm-test-parameters-v1',
+            relation: 'A*w + t = 0',
+            ringDegree,
+            proofSystemRingDegree: ringDegree,
+            coefficientModulus,
+            statementRows: 1,
+            statementColumns: 1,
+            witnessL2BoundSquared: 65_536,
+        };
+        const proofEncoding = {
+            ...cloneJsonValue(
+                ballotFieldLinearProofBackendVectors.proofEncoding,
+            ),
+            profileId: 'full-encoded-score-ballot-linear-proof-encoding-v1',
+            source: 'sealed-lattice/linear-proof/full-encoded-score-ballot-wasm-test-encoding-v1',
+            shortResponseVectorLength: 2,
+        };
+        const linearStatement = {
+            objectType: 'BallotProofLinearProofStatement',
+            objectVersion: 1,
+            parameterProfileId: parameterSet.profileId,
+            projectionCoverage: 'full-encoded-score-ballot-relation',
+            relation: 'A*w + t = 0',
+            statementMatrixCoefficients: [[unitPolynomial]],
+            targetCoefficientRepresentation: 'centeredSignedSourceModulus',
+            targetVectorCoefficients: [targetPolynomial],
+        };
+        const secretState = {
+            sourceWitnessCoefficients: [witnessPolynomial],
+        };
+        const publicRandomnessHex = '00'.repeat(32);
+        const proverRandomnessHex = '07'.repeat(32);
+
+        const generatedProof = kernel.generateBallotProof({
+            linearStatement,
+            parameterSet,
+            proofEncoding,
+            publicRandomnessHex,
+            secretState,
+            proverRandomnessHex,
+        });
+
+        expect(generatedProof).toMatchObject({
+            ok: true,
+            backendAvailable: false,
+            generatedProofBytes: true,
+            operation: 'generateBallotProof',
+            unresolvedReason: null,
+        });
+        expect(generatedProof.statusLabels).toContain(
+            'BallotGeneratedProofVerified',
+        );
+        expect(generatedProof.proofBytesHex).toMatch(/^[0-9a-f]+$/u);
+        expect(generatedProof.proofSizeBytes).toBe(
+            String(generatedProof.proofBytesHex).length / 2,
+        );
+
+        const proofInput = {
+            componentId: 'score-and-shamir-field-component',
+            proofStatementFormat: 'dense-polynomial-matrix-linear-proof-v1',
+            proofStatement: linearStatement,
+            proofParameterSet: parameterSet,
+            proofEncoding,
+            publicRandomnessHex,
+        };
+        const componentProof = kernel.generateBallotComponentProof({
+            componentId: 'score-and-shamir-field-component',
+            proofInput,
+            secretState,
+            proverRandomnessHex,
+        });
+
+        expect(componentProof).toMatchObject({
+            ok: true,
+            backendAvailable: false,
+            generatedProofBytes: true,
+            operation: 'generateBallotComponentProof',
+            unresolvedReason: null,
+        });
+        expect(componentProof.statusLabels).toContain(
+            'BallotComponentGeneratedProofVerified',
+        );
+
+        const wrongSecretState = {
+            sourceWitnessCoefficients: [
+                [6, ...createZeroPolynomial().slice(1)],
+            ],
+        };
+        expect(
+            kernel.generateBallotProof({
+                linearStatement,
+                parameterSet,
+                proofEncoding,
+                publicRandomnessHex,
+                secretState: wrongSecretState,
+                proverRandomnessHex,
+            }),
+        ).toMatchObject({
+            ok: false,
+            backendAvailable: false,
+            operation: 'generateBallotProof',
+            unresolvedReason: 'BallotPackageInvalid',
+        });
+    });
+
     it('rejects field-incomplete ballot records after WASM linear proof verification', async () => {
         const kernel = await loadTranscriptCoreKernel();
         const linearProofCases =

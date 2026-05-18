@@ -515,6 +515,65 @@ fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult<Value> {
                 prover_randomness_hex,
             ))
         }
+        "GenerateBallotProof" => {
+            let linear_statement = request.get("linearStatement");
+            let parameter_set = request.get("parameterSet");
+            let proof_encoding = request.get("proofEncoding");
+            let public_randomness_hex = request.get("publicRandomnessHex").and_then(Value::as_str);
+            let secret_state = request.get("secretState");
+            let prover_randomness_hex = request.get("proverRandomnessHex").and_then(Value::as_str);
+
+            Ok(crate::ballot_privacy::generate_ballot_proof(
+                linear_statement,
+                parameter_set,
+                proof_encoding,
+                public_randomness_hex,
+                secret_state,
+                prover_randomness_hex,
+            ))
+        }
+        "GenerateBallotComponentProof" => {
+            let component_id = request.get("componentId").and_then(Value::as_str);
+            let proof_input = request.get("proofInput");
+            let secret_state = request.get("secretState");
+            let prover_randomness_hex = request.get("proverRandomnessHex").and_then(Value::as_str);
+
+            Ok(crate::ballot_privacy::generate_ballot_component_proof(
+                component_id,
+                proof_input,
+                secret_state,
+                prover_randomness_hex,
+            ))
+        }
+        "GenerateBallotProofRecord" => {
+            let statement = request.get("statement");
+            let linear_statement = request.get("linearStatement");
+            let parameter_set = request.get("parameterSet");
+            let proof_encoding = request.get("proofEncoding");
+            let public_randomness_hex = request.get("publicRandomnessHex").and_then(Value::as_str);
+            let component_bundle_statement = request.get("componentBundleStatement");
+            let component_proof_inputs = request.get("componentProofInputs");
+            let secret_state = request.get("secretState");
+            let prover_randomness_hex = request.get("proverRandomnessHex").and_then(Value::as_str);
+            let component_prover_randomness_hexes = request.get("componentProverRandomnessHexes");
+            let component_secret_states = request.get("componentSecretStates");
+
+            Ok(crate::ballot_privacy::generate_ballot_proof_record(
+                crate::ballot_privacy::BallotProofRecordGenerationInput {
+                    statement,
+                    linear_statement,
+                    parameter_set,
+                    proof_encoding,
+                    public_randomness_hex,
+                    component_bundle_statement,
+                    component_proof_inputs,
+                    secret_state,
+                    prover_randomness_hex,
+                    component_prover_randomness_hexes,
+                    component_secret_states,
+                },
+            ))
+        }
         "VerifyBallotProof" => {
             let statement = request.get("statement").ok_or_else(|| {
                 CanonicalError::new(CanonicalErrorCode::InvalidFixture, "statement is required")

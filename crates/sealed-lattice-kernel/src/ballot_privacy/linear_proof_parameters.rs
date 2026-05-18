@@ -250,10 +250,39 @@ pub(crate) fn linear_proof_profile_for_encoding(
             short_response_bound_scale_denominator: 400,
             exact_norm_bound_squared: 65_536,
         }),
+        "full-encoded-score-ballot-linear-proof-encoding-v1"
+        | "payload-plaintext-field-linear-proof-encoding-v1"
+        | "receiver-encryption-linear-proof-encoding-v1" => {
+            encoded_score_compatible_profile(proof_encoding, 65_536)
+        }
+        "share-commitment-linear-proof-encoding-v1" => {
+            encoded_score_compatible_profile(proof_encoding, 1_048_576)
+        }
         _ => Err(invalid_parameter(
             "proofEncoding.profileId is not a supported linear proof profile",
         )),
     }
+}
+
+fn encoded_score_compatible_profile(
+    proof_encoding: &LinearProofEncoding,
+    exact_norm_bound_squared: u64,
+) -> CanonicalResult<LinearProofProfile> {
+    Ok(LinearProofProfile {
+        decompression_shift: 12,
+        decompression_gamma: 3_712_122,
+        decompression_modulus: 18_956_474,
+        decompression_log2_modulus: 25,
+        decompression_low_part_bound_squared: 5_369_976_544_106_605,
+        challenge_centered_bound: 8,
+        challenge_coefficient_bit_length: 5,
+        euclidean_response_bound_squared: 1_u128 << 96,
+        infinity_response_bound: 1_u128 << 48,
+        short_response_message_length: proof_encoding.short_response_vector_length as u128,
+        short_response_bound_scale_numerator: 962,
+        short_response_bound_scale_denominator: 400,
+        exact_norm_bound_squared,
+    })
 }
 
 pub fn demo_linear_parameter_contract() -> LinearProofParameterSet {

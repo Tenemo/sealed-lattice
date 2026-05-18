@@ -33,7 +33,8 @@ use self::{
     linear_proof_parameters::{LinearProofEncoding, LinearProofParameterSet},
     linear_proof_prover::{
         LinearProverCommitmentInput, LinearProverProofInput, LinearProverWitnessInput,
-        generate_receiver_key_linear_proof, prepare_linear_prover_commitment,
+        SparseLinearProverProofInput, generate_linear_proof, generate_receiver_key_linear_proof,
+        generate_sparse_linear_proof, prepare_linear_prover_commitment,
         prepare_linear_prover_witness,
     },
     linear_proof_statement::{
@@ -1796,6 +1797,1275 @@ fn generate_receiver_key_proof_inner(
     }))
 }
 
+pub fn generate_ballot_proof(
+    linear_statement: Option<&Value>,
+    parameter_set: Option<&Value>,
+    proof_encoding: Option<&Value>,
+    public_randomness_hex: Option<&str>,
+    secret_state: Option<&Value>,
+    prover_randomness_hex: Option<&str>,
+) -> Value {
+    match generate_ballot_proof_inner(
+        linear_statement,
+        parameter_set,
+        proof_encoding,
+        public_randomness_hex,
+        secret_state,
+        prover_randomness_hex,
+    ) {
+        Ok(value) => value,
+        Err(error) => structural_rejection("generateBallotProof", vec![error.to_json_value()]),
+    }
+}
+
+fn generate_ballot_proof_inner(
+    linear_statement: Option<&Value>,
+    parameter_set: Option<&Value>,
+    proof_encoding: Option<&Value>,
+    public_randomness_hex: Option<&str>,
+    secret_state: Option<&Value>,
+    prover_randomness_hex: Option<&str>,
+) -> crate::encoding::CanonicalResult<Value> {
+    let linear_statement = linear_statement.ok_or_else(|| {
+        invalid_preflight("linearStatement is required for ballot proof generation")
+    })?;
+    if string_field(linear_statement, "projectionCoverage")
+        != Some(FULL_BALLOT_PROOF_PROJECTION_COVERAGE)
+    {
+        return Err(invalid_preflight(
+            "ballot proof generation requires a full encoded-score relation statement",
+        ));
+    }
+    let parameter_set_value = parameter_set
+        .ok_or_else(|| invalid_preflight("parameterSet is required for ballot proof generation"))?;
+    let proof_encoding_value = proof_encoding.ok_or_else(|| {
+        invalid_preflight("proofEncoding is required for ballot proof generation")
+    })?;
+    if string_field(parameter_set_value, "profileId")
+        != Some(FULL_BALLOT_PROOF_PARAMETER_PROFILE_ID)
+    {
+        return Err(invalid_preflight(
+            "ballot proof generation requires the full-relation parameter profile",
+        ));
+    }
+    if string_field(proof_encoding_value, "profileId")
+        != Some(FULL_BALLOT_PROOF_ENCODING_PROFILE_ID)
+    {
+        return Err(invalid_preflight(
+            "ballot proof generation requires the full-relation proof encoding profile",
+        ));
+    }
+    let public_randomness_hex = public_randomness_hex.ok_or_else(|| {
+        invalid_preflight("publicRandomnessHex is required for ballot proof generation")
+    })?;
+    let secret_state = secret_state
+        .ok_or_else(|| invalid_preflight("secretState is required for ballot proof generation"))?;
+    let prover_randomness_hex = prover_randomness_hex.ok_or_else(|| {
+        invalid_preflight("proverRandomnessHex is required for ballot proof generation")
+    })?;
+
+    let parameter_set: LinearProofParameterSet =
+        serde_json::from_value(parameter_set_value.clone()).map_err(|error| {
+            invalid_preflight(format!(
+                "parameterSet is malformed for ballot proof generation: {error}"
+            ))
+        })?;
+    let proof_encoding: LinearProofEncoding = serde_json::from_value(proof_encoding_value.clone())
+        .map_err(|error| {
+            invalid_preflight(format!(
+                "proofEncoding is malformed for ballot proof generation: {error}"
+            ))
+        })?;
+    let statement_matrix_coefficients: Vec<Vec<Vec<u64>>> = required_json_field(
+        linear_statement,
+        "statementMatrixCoefficients",
+        "linearStatement",
+    )
+    .and_then(|value| {
+        serde_json::from_value(value.clone()).map_err(|error| {
+            invalid_preflight(format!(
+                "linearStatement.statementMatrixCoefficients is malformed: {error}"
+            ))
+        })
+    })?;
+    let target_vector_coefficients: Vec<Vec<u64>> = required_json_field(
+        linear_statement,
+        "targetVectorCoefficients",
+        "linearStatement",
+    )
+    .and_then(|value| {
+        serde_json::from_value(value.clone()).map_err(|error| {
+            invalid_preflight(format!(
+                "linearStatement.targetVectorCoefficients is malformed: {error}"
+            ))
+        })
+    })?;
+    let target_coefficient_representation: LinearProofTargetCoefficientRepresentation =
+        required_json_field(
+            linear_statement,
+            "targetCoefficientRepresentation",
+            "linearStatement",
+        )
+        .and_then(|value| {
+            serde_json::from_value(value.clone()).map_err(|error| {
+                invalid_preflight(format!(
+                    "linearStatement.targetCoefficientRepresentation is malformed: {error}"
+                ))
+            })
+        })?;
+    let source_witness_coefficients = source_witness_coefficients(secret_state)?;
+    let public_randomness_array = decode_32_byte_hex(public_randomness_hex, "publicRandomnessHex")?;
+    let prover_randomness_array = decode_32_byte_hex(prover_randomness_hex, "proverRandomnessHex")?;
+
+    let generation = generate_linear_proof(LinearProverProofInput {
+        parameter_set: &parameter_set,
+        proof_encoding: &proof_encoding,
+        statement_matrix_coefficients: &statement_matrix_coefficients,
+        target_vector_coefficients: &target_vector_coefficients,
+        target_coefficient_representation,
+        source_witness_coefficients: &source_witness_coefficients,
+        public_randomness: &public_randomness_array,
+        prover_randomness: &prover_randomness_array,
+    })?;
+    let proof_hex = crate::hashing::to_hex(&generation.proof_bytes);
+    let vector_case = json!({
+        "caseName": "generated-ballot-proof",
+        "description": "Ballot linear proof generated by the internal Rust prover.",
+        "mutation": "none",
+        "expectedOutcome": "accept",
+        "upstreamVectorAvailable": true,
+        "parameterSet": parameter_set_value,
+        "proofEncoding": proof_encoding_value,
+        "publicRandomnessHex": public_randomness_hex,
+        "statementMatrixCoefficients": statement_matrix_coefficients,
+        "targetVectorCoefficients": target_vector_coefficients,
+        "targetCoefficientRepresentation": target_coefficient_representation,
+        "proofHex": proof_hex,
+        "expectedProofSizeBytes": generation.summary.proof_size_bytes
+    });
+    let verification = linear_proof_verifier::verify_linear_proof_vector_case_value(&vector_case);
+    if verification
+        .as_object()
+        .and_then(|object| object.get("ok"))
+        .and_then(Value::as_bool)
+        != Some(true)
+    {
+        return Err(invalid_preflight(
+            "generated ballot proof did not verify against its public statement",
+        ));
+    }
+
+    Ok(generated_proof_success(
+        "generateBallotProof",
+        "BallotGeneratedProofVerified",
+        proof_hex,
+        generation.summary,
+    ))
+}
+
+pub fn generate_ballot_component_proof(
+    component_id: Option<&str>,
+    proof_input: Option<&Value>,
+    secret_state: Option<&Value>,
+    prover_randomness_hex: Option<&str>,
+) -> Value {
+    match generate_ballot_component_proof_inner(
+        component_id,
+        proof_input,
+        secret_state,
+        prover_randomness_hex,
+    ) {
+        Ok(value) => value,
+        Err(error) => {
+            structural_rejection("generateBallotComponentProof", vec![error.to_json_value()])
+        }
+    }
+}
+
+fn generate_ballot_component_proof_inner(
+    component_id: Option<&str>,
+    proof_input: Option<&Value>,
+    secret_state: Option<&Value>,
+    prover_randomness_hex: Option<&str>,
+) -> crate::encoding::CanonicalResult<Value> {
+    let component_id = component_id.ok_or_else(|| {
+        invalid_preflight("componentId is required for component proof generation")
+    })?;
+    let proof_input = proof_input.ok_or_else(|| {
+        invalid_preflight("proofInput is required for component proof generation")
+    })?;
+    let secret_state = secret_state.ok_or_else(|| {
+        invalid_preflight("secretState is required for component proof generation")
+    })?;
+    let prover_randomness_hex = prover_randomness_hex.ok_or_else(|| {
+        invalid_preflight("proverRandomnessHex is required for component proof generation")
+    })?;
+    if string_field(proof_input, "componentId") != Some(component_id) {
+        return Err(invalid_preflight(
+            "component proof input is not bound to the requested component",
+        ));
+    }
+
+    let proof_statement_format =
+        string_field(proof_input, "proofStatementFormat").ok_or_else(|| {
+            invalid_preflight(
+                "proofInput.proofStatementFormat is required for component proof generation",
+            )
+        })?;
+    if proof_statement_format == PUBLIC_ZERO_PROOF_STATEMENT_FORMAT {
+        if component_id != "receiver-key-binding-component" {
+            return Err(invalid_preflight(
+                "public-zero component proof generation is only valid for the receiver-key binding component",
+            ));
+        }
+        return Ok(json!({
+            "ok": true,
+            "backendAvailable": BALLOT_PRIVACY_PROOF_BACKEND_AVAILABLE,
+            "backendStatus": describe_proof_backend(),
+            "operation": "generateBallotComponentProof",
+            "componentId": component_id,
+            "statusLabels": [
+                "BallotComponentPublicZeroProofBytesGenerated"
+            ],
+            "acceptedDigests": [],
+            "refusedObjects": [],
+            "unresolvedReason": Value::Null,
+            "generatedProofBytes": true,
+            "proofBytesHex": "",
+            "proofSizeBytes": 0
+        }));
+    }
+
+    let proof_statement = required_json_field(proof_input, "proofStatement", "proofInput")?;
+    let parameter_set_value = required_json_field(proof_input, "proofParameterSet", "proofInput")?;
+    let proof_encoding_value = required_json_field(proof_input, "proofEncoding", "proofInput")?;
+    let public_randomness_hex =
+        string_field(proof_input, "publicRandomnessHex").ok_or_else(|| {
+            invalid_preflight(
+                "proofInput.publicRandomnessHex is required for component proof generation",
+            )
+        })?;
+    let parameter_set: LinearProofParameterSet =
+        serde_json::from_value(parameter_set_value.clone()).map_err(|error| {
+            invalid_preflight(format!(
+                "proofInput.proofParameterSet is malformed for component proof generation: {error}"
+            ))
+        })?;
+    let proof_encoding: LinearProofEncoding = serde_json::from_value(proof_encoding_value.clone())
+        .map_err(|error| {
+            invalid_preflight(format!(
+                "proofInput.proofEncoding is malformed for component proof generation: {error}"
+            ))
+        })?;
+    let target_coefficient_representation: LinearProofTargetCoefficientRepresentation =
+        required_json_field(
+            proof_statement,
+            "targetCoefficientRepresentation",
+            "proofInput.proofStatement",
+        )
+        .and_then(|value| {
+            serde_json::from_value(value.clone()).map_err(|error| {
+                invalid_preflight(format!(
+                    "proofInput.proofStatement.targetCoefficientRepresentation is malformed: {error}"
+                ))
+            })
+        })?;
+    let source_witness_coefficients = source_witness_coefficients(secret_state)?;
+    let public_randomness_array =
+        decode_32_byte_hex(public_randomness_hex, "proofInput.publicRandomnessHex")?;
+    let prover_randomness_array = decode_32_byte_hex(prover_randomness_hex, "proverRandomnessHex")?;
+
+    let generation = match proof_statement_format {
+        DENSE_COMPONENT_PROOF_STATEMENT_FORMAT => {
+            let statement_matrix_coefficients: Vec<Vec<Vec<u64>>> = required_json_field(
+                proof_statement,
+                "statementMatrixCoefficients",
+                "proofInput.proofStatement",
+            )
+            .and_then(|value| {
+                serde_json::from_value(value.clone()).map_err(|error| {
+                    invalid_preflight(format!(
+                        "proofInput.proofStatement.statementMatrixCoefficients is malformed: {error}"
+                    ))
+                })
+            })?;
+            let target_vector_coefficients: Vec<Vec<u64>> = required_json_field(
+                proof_statement,
+                "targetVectorCoefficients",
+                "proofInput.proofStatement",
+            )
+            .and_then(|value| {
+                serde_json::from_value(value.clone()).map_err(|error| {
+                    invalid_preflight(format!(
+                        "proofInput.proofStatement.targetVectorCoefficients is malformed: {error}"
+                    ))
+                })
+            })?;
+            let generation = generate_linear_proof(LinearProverProofInput {
+                parameter_set: &parameter_set,
+                proof_encoding: &proof_encoding,
+                statement_matrix_coefficients: &statement_matrix_coefficients,
+                target_vector_coefficients: &target_vector_coefficients,
+                target_coefficient_representation,
+                source_witness_coefficients: &source_witness_coefficients,
+                public_randomness: &public_randomness_array,
+                prover_randomness: &prover_randomness_array,
+            })?;
+            let proof_hex = crate::hashing::to_hex(&generation.proof_bytes);
+            let vector_case = json!({
+                "caseName": format!("{component_id}-generated-component-proof"),
+                "description": "Ballot component proof generated by the internal Rust prover.",
+                "mutation": "none",
+                "expectedOutcome": "accept",
+                "upstreamVectorAvailable": true,
+                "parameterSet": parameter_set_value,
+                "proofEncoding": proof_encoding_value,
+                "publicRandomnessHex": public_randomness_hex,
+                "statementMatrixCoefficients": statement_matrix_coefficients,
+                "targetVectorCoefficients": target_vector_coefficients,
+                "targetCoefficientRepresentation": target_coefficient_representation,
+                "proofHex": proof_hex,
+                "expectedProofSizeBytes": generation.summary.proof_size_bytes
+            });
+            let verification =
+                linear_proof_verifier::verify_linear_proof_vector_case_value(&vector_case);
+            if verification
+                .as_object()
+                .and_then(|object| object.get("ok"))
+                .and_then(Value::as_bool)
+                != Some(true)
+            {
+                return Err(invalid_preflight(
+                    "generated dense component proof did not verify against its public statement",
+                ));
+            }
+
+            generation
+        }
+        SPARSE_COMPONENT_PROOF_STATEMENT_FORMAT => {
+            let parsed_sparse_statement =
+                sparse_matrix_from_sparse_component_statement(proof_statement)
+                    .map_err(|error| invalid_preflight(error.message))?;
+            let generation = generate_sparse_linear_proof(SparseLinearProverProofInput {
+                parameter_set: &parameter_set,
+                proof_encoding: &proof_encoding,
+                source_statement_matrix: &parsed_sparse_statement.source_statement_matrix,
+                target_vector_coefficients: &parsed_sparse_statement.target_vector_coefficients,
+                target_coefficient_representation,
+                source_witness_coefficients: &source_witness_coefficients,
+                public_randomness: &public_randomness_array,
+                prover_randomness: &prover_randomness_array,
+            })?;
+            verify_generated_sparse_component_proof(GeneratedSparseComponentProofCheck {
+                component_id,
+                parameter_set: &parameter_set,
+                proof_encoding: &proof_encoding,
+                public_randomness_hex,
+                source_statement_matrix: &parsed_sparse_statement.source_statement_matrix,
+                target_vector_coefficients: &parsed_sparse_statement.target_vector_coefficients,
+                target_coefficient_representation,
+                generation: &generation,
+            })?;
+
+            generation
+        }
+        STRUCTURED_RECEIVER_ENCRYPTION_PROOF_STATEMENT_FORMAT => {
+            let parsed_structured_statement =
+                structured_receiver_encryption_statement_as_sparse(proof_statement)
+                    .map_err(|error| invalid_preflight(error.message))?;
+            let generation = generate_sparse_linear_proof(SparseLinearProverProofInput {
+                parameter_set: &parameter_set,
+                proof_encoding: &proof_encoding,
+                source_statement_matrix: &parsed_structured_statement.source_statement_matrix,
+                target_vector_coefficients: &parsed_structured_statement.target_vector_coefficients,
+                target_coefficient_representation,
+                source_witness_coefficients: &source_witness_coefficients,
+                public_randomness: &public_randomness_array,
+                prover_randomness: &prover_randomness_array,
+            })?;
+            verify_generated_sparse_component_proof(GeneratedSparseComponentProofCheck {
+                component_id,
+                parameter_set: &parameter_set,
+                proof_encoding: &proof_encoding,
+                public_randomness_hex,
+                source_statement_matrix: &parsed_structured_statement.source_statement_matrix,
+                target_vector_coefficients: &parsed_structured_statement.target_vector_coefficients,
+                target_coefficient_representation,
+                generation: &generation,
+            })?;
+
+            generation
+        }
+        _ => {
+            return Err(invalid_preflight(
+                "component proof statement format is not supported for proof generation",
+            ));
+        }
+    };
+
+    let proof_hex = crate::hashing::to_hex(&generation.proof_bytes);
+    Ok(generated_proof_success(
+        "generateBallotComponentProof",
+        "BallotComponentGeneratedProofVerified",
+        proof_hex,
+        generation.summary,
+    ))
+}
+
+struct GeneratedSparseComponentProofCheck<'a> {
+    component_id: &'a str,
+    parameter_set: &'a LinearProofParameterSet,
+    proof_encoding: &'a LinearProofEncoding,
+    public_randomness_hex: &'a str,
+    source_statement_matrix: &'a SparsePolynomialMatrix,
+    target_vector_coefficients: &'a [Vec<u64>],
+    target_coefficient_representation: LinearProofTargetCoefficientRepresentation,
+    generation: &'a linear_proof_prover::LinearProverProofGeneration,
+}
+
+fn verify_generated_sparse_component_proof(
+    input: GeneratedSparseComponentProofCheck<'_>,
+) -> crate::encoding::CanonicalResult<()> {
+    let proof_hex = crate::hashing::to_hex(&input.generation.proof_bytes);
+    let verification = linear_proof_verifier::verify_sparse_linear_proof_components(
+        linear_proof_verifier::SparseLinearProofVerificationInput {
+            case_name: &format!("{}-generated-component-proof", input.component_id),
+            parameter_set: input.parameter_set,
+            proof_encoding: input.proof_encoding,
+            public_randomness_hex: input.public_randomness_hex,
+            source_statement_matrix: input.source_statement_matrix,
+            target_vector_coefficients: input.target_vector_coefficients,
+            target_coefficient_representation: input.target_coefficient_representation,
+            proof_hex: &proof_hex,
+            expected_proof_size_bytes: Some(input.generation.summary.proof_size_bytes),
+        },
+    );
+    if verification
+        .as_object()
+        .and_then(|object| object.get("ok"))
+        .and_then(Value::as_bool)
+        != Some(true)
+    {
+        return Err(invalid_preflight(
+            "generated sparse component proof did not verify against its public statement",
+        ));
+    }
+
+    Ok(())
+}
+
+fn generated_proof_success(
+    operation: &str,
+    verified_status_label: &str,
+    proof_hex: String,
+    summary: linear_proof_prover::LinearProverProofSummary,
+) -> Value {
+    json!({
+        "ok": true,
+        "backendAvailable": BALLOT_PRIVACY_PROOF_BACKEND_AVAILABLE,
+        "backendStatus": describe_proof_backend(),
+        "operation": operation,
+        "statusLabels": [
+            "LinearProofSourceWitnessChecked",
+            "LinearProofRingWitnessPrepared",
+            "LinearProofAbdlopCommitmentPrepared",
+            "LinearProofTboxResponsesGenerated",
+            "LinearProofQuadraticChallengeGenerated",
+            "LinearProofBytesGenerated",
+            verified_status_label
+        ],
+        "acceptedDigests": [],
+        "refusedObjects": [],
+        "unresolvedReason": Value::Null,
+        "generatedProofBytes": true,
+        "proofBytesHex": proof_hex,
+        "proofSizeBytes": summary.proof_size_bytes,
+        "summary": {
+            "abdlopCommitmentHash": summary.abdlop_commitment_hash_hex,
+            "z34ChallengeHash": summary.z34_challenge_hash_hex,
+            "generatorChallengeHash": summary.generator_challenge_hash_hex,
+            "quadraticChallengeHash": summary.quadratic_challenge_hash_hex
+        }
+    })
+}
+
+pub struct BallotProofRecordGenerationInput<'a> {
+    pub statement: Option<&'a Value>,
+    pub linear_statement: Option<&'a Value>,
+    pub parameter_set: Option<&'a Value>,
+    pub proof_encoding: Option<&'a Value>,
+    pub public_randomness_hex: Option<&'a str>,
+    pub component_bundle_statement: Option<&'a Value>,
+    pub component_proof_inputs: Option<&'a Value>,
+    pub secret_state: Option<&'a Value>,
+    pub prover_randomness_hex: Option<&'a str>,
+    pub component_prover_randomness_hexes: Option<&'a Value>,
+    pub component_secret_states: Option<&'a Value>,
+}
+
+pub fn generate_ballot_proof_record(input: BallotProofRecordGenerationInput<'_>) -> Value {
+    match generate_ballot_proof_record_inner(input) {
+        Ok(value) => value,
+        Err(error) => {
+            structural_rejection("generateBallotProofRecord", vec![error.to_json_value()])
+        }
+    }
+}
+
+fn generate_ballot_proof_record_inner(
+    input: BallotProofRecordGenerationInput<'_>,
+) -> crate::encoding::CanonicalResult<Value> {
+    let statement = input.statement.ok_or_else(|| {
+        invalid_preflight("statement is required for ballot proof record generation")
+    })?;
+    let linear_statement = input.linear_statement.ok_or_else(|| {
+        invalid_preflight("linearStatement is required for ballot proof record generation")
+    })?;
+    let parameter_set = input.parameter_set.ok_or_else(|| {
+        invalid_preflight("parameterSet is required for ballot proof record generation")
+    })?;
+    let proof_encoding = input.proof_encoding.ok_or_else(|| {
+        invalid_preflight("proofEncoding is required for ballot proof record generation")
+    })?;
+    let public_randomness_hex = input.public_randomness_hex.ok_or_else(|| {
+        invalid_preflight("publicRandomnessHex is required for ballot proof record generation")
+    })?;
+    let component_bundle_statement = input.component_bundle_statement.ok_or_else(|| {
+        invalid_preflight("componentBundleStatement is required for ballot proof record generation")
+    })?;
+    let component_proof_inputs = input.component_proof_inputs.ok_or_else(|| {
+        invalid_preflight("componentProofInputs is required for ballot proof record generation")
+    })?;
+    let secret_state = input.secret_state.ok_or_else(|| {
+        invalid_preflight("secretState is required for ballot proof record generation")
+    })?;
+    let prover_randomness_hex = input.prover_randomness_hex.ok_or_else(|| {
+        invalid_preflight("proverRandomnessHex is required for ballot proof record generation")
+    })?;
+    let component_prover_randomness_hexes =
+        input.component_prover_randomness_hexes.ok_or_else(|| {
+            invalid_preflight(
+                "componentProverRandomnessHexes is required for ballot proof record generation",
+            )
+        })?;
+    let component_secret_states = input.component_secret_states;
+
+    if string_field(linear_statement, "projectionCoverage")
+        != Some(FULL_BALLOT_PROOF_PROJECTION_COVERAGE)
+    {
+        return Err(invalid_preflight(
+            "ballot proof record generation requires a full encoded-score linear statement",
+        ));
+    }
+    if string_field(component_bundle_statement, "bundleCoverage")
+        != Some(FULL_BALLOT_PROOF_PROJECTION_COVERAGE)
+    {
+        return Err(invalid_preflight(
+            "ballot proof record generation requires a full component bundle statement",
+        ));
+    }
+
+    let component_inputs_array = component_proof_inputs.as_array().ok_or_else(|| {
+        invalid_preflight("componentProofInputs must be an array for ballot proof generation")
+    })?;
+    if component_inputs_array.len() != REQUIRED_BALLOT_PROOF_COMPONENT_IDS.len() {
+        return Err(invalid_preflight(
+            "componentProofInputs must contain exactly the required ballot proof components",
+        ));
+    }
+    let mut component_inputs_by_id = BTreeMap::new();
+    for component_input in component_inputs_array {
+        let component_id = string_field(component_input, "componentId")
+            .ok_or_else(|| invalid_preflight("component proof input is missing componentId"))?;
+        if object_map(component_input).is_some_and(|object| object.contains_key("proofBytesHex")) {
+            return Err(invalid_preflight(
+                "component proof inputs for generation must not pre-supply proofBytesHex",
+            ));
+        }
+        if component_inputs_by_id
+            .insert(component_id.to_string(), component_input)
+            .is_some()
+        {
+            return Err(invalid_preflight(
+                "component proof inputs contain a duplicate component",
+            ));
+        }
+    }
+
+    let mut generated_component_proofs = Vec::new();
+    let mut generated_component_inputs = Vec::new();
+    for component_id in REQUIRED_BALLOT_PROOF_COMPONENT_IDS {
+        let proof_input = component_inputs_by_id.get(*component_id).ok_or_else(|| {
+            invalid_preflight(format!(
+                "component proof input for {component_id} is missing"
+            ))
+        })?;
+        let component_prover_randomness_hex =
+            component_generation_randomness_hex(component_id, component_prover_randomness_hexes)?;
+        let component_secret_state =
+            component_generation_secret_state(component_id, secret_state, component_secret_states)?;
+        let component_generation = generate_ballot_component_proof_inner(
+            Some(component_id),
+            Some(proof_input),
+            Some(component_secret_state),
+            Some(&component_prover_randomness_hex),
+        )
+        .map_err(|error| {
+            invalid_preflight(format!(
+                "component proof generation failed for {component_id}: {}",
+                error.message
+            ))
+        })?;
+        let component_proof_bytes_hex = string_field(&component_generation, "proofBytesHex")
+            .ok_or_else(|| {
+                invalid_preflight(format!(
+                    "generated component proof for {component_id} did not return proofBytesHex"
+                ))
+            })?
+            .to_string();
+        let component_proof_size_bytes = object_map(&component_generation)
+            .and_then(|object| object.get("proofSizeBytes"))
+            .and_then(Value::as_u64)
+            .and_then(|proof_size| usize::try_from(proof_size).ok())
+            .ok_or_else(|| {
+                invalid_preflight(format!(
+                    "generated component proof for {component_id} did not return proofSizeBytes"
+                ))
+            })?;
+        let generated_component_input = generated_component_proof_input(
+            proof_input,
+            &component_proof_bytes_hex,
+            component_proof_size_bytes,
+        )?;
+        let component_proof = generated_component_proof_record(
+            component_id,
+            statement,
+            component_bundle_statement,
+            &generated_component_input,
+            &component_proof_bytes_hex,
+            component_proof_size_bytes,
+        )?;
+        generated_component_inputs.push(generated_component_input);
+        generated_component_proofs.push(component_proof);
+    }
+    let component_proof_bundle =
+        generated_component_proof_bundle(component_bundle_statement, generated_component_proofs)?;
+
+    let ballot_generation = generate_ballot_proof_inner(
+        Some(linear_statement),
+        Some(parameter_set),
+        Some(proof_encoding),
+        Some(public_randomness_hex),
+        Some(secret_state),
+        Some(prover_randomness_hex),
+    )
+    .map_err(|error| {
+        invalid_preflight(format!(
+            "full ballot proof generation failed: {}",
+            error.message
+        ))
+    })?;
+    let proof_bytes_hex = string_field(&ballot_generation, "proofBytesHex")
+        .ok_or_else(|| invalid_preflight("generated ballot proof did not return proofBytesHex"))?
+        .to_string();
+    let proof_size_bytes = object_map(&ballot_generation)
+        .and_then(|object| object.get("proofSizeBytes"))
+        .and_then(Value::as_u64)
+        .and_then(|proof_size| usize::try_from(proof_size).ok())
+        .ok_or_else(|| invalid_preflight("generated ballot proof did not return proofSizeBytes"))?;
+    let bound_parameter_set =
+        proof_contract_with_expected_size(parameter_set, proof_size_bytes, "parameterSet")?;
+    let bound_proof_encoding =
+        proof_contract_with_expected_size(proof_encoding, proof_size_bytes, "proofEncoding")?;
+    let ballot_proof = generated_ballot_proof_record(GeneratedBallotProofRecordInput {
+        statement,
+        linear_statement,
+        parameter_set: &bound_parameter_set,
+        proof_encoding: &bound_proof_encoding,
+        public_randomness_hex,
+        component_bundle_statement,
+        component_proof_bundle: &component_proof_bundle,
+        proof_bytes_hex: &proof_bytes_hex,
+        proof_size_bytes,
+    })?;
+    let component_proof_inputs = Value::Array(generated_component_inputs);
+    let verification = verify_ballot_proof(
+        statement,
+        &ballot_proof,
+        BallotProofVerificationInputs {
+            component_bundle_statement: Some(component_bundle_statement),
+            component_proof_bundle: Some(&component_proof_bundle),
+            component_proof_inputs: Some(&component_proof_inputs),
+            linear_statement: Some(linear_statement),
+            parameter_set: Some(&bound_parameter_set),
+            proof_bytes_hex: Some(&proof_bytes_hex),
+            proof_encoding: Some(&bound_proof_encoding),
+            public_randomness_hex: Some(public_randomness_hex),
+        },
+    );
+    if verification
+        .as_object()
+        .and_then(|object| object.get("ok"))
+        .and_then(Value::as_bool)
+        != Some(true)
+    {
+        return Err(invalid_preflight(format!(
+            "generated ballot proof record did not verify: {verification}"
+        )));
+    }
+
+    Ok(json!({
+        "ok": true,
+        "backendAvailable": BALLOT_PRIVACY_PROOF_BACKEND_AVAILABLE,
+        "backendStatus": describe_proof_backend(),
+        "operation": "generateBallotProofRecord",
+        "statusLabels": [
+            "BallotGeneratedProofVerified",
+            "BallotComponentProofBundleGenerated",
+            "BallotProofRecordGenerated",
+            "BallotProofRecordGeneratedProofVerified"
+        ],
+        "acceptedDigests": [
+            string_field(&ballot_proof, "ballotProofRecordDigest"),
+            string_field(&component_proof_bundle, "componentProofBundleDigest"),
+            string_field(&ballot_proof, "proofBytesDigest")
+        ],
+        "refusedObjects": [],
+        "unresolvedReason": Value::Null,
+        "generatedProofBytes": true,
+        "proofBytesHex": proof_bytes_hex,
+        "proofSizeBytes": proof_size_bytes,
+        "parameterSet": bound_parameter_set,
+        "proofEncoding": bound_proof_encoding,
+        "ballotProof": ballot_proof,
+        "componentProofBundle": component_proof_bundle,
+        "componentProofInputs": component_proof_inputs,
+        "verification": verification
+    }))
+}
+
+fn component_generation_randomness_hex(
+    component_id: &str,
+    component_prover_randomness_hexes: &Value,
+) -> crate::encoding::CanonicalResult<String> {
+    if component_proof_bytes_must_be_empty(component_id) {
+        return Ok("00".repeat(32));
+    }
+    object_map(component_prover_randomness_hexes)
+        .and_then(|object| object.get(component_id))
+        .and_then(Value::as_str)
+        .map(ToString::to_string)
+        .ok_or_else(|| {
+            invalid_preflight(format!(
+                "componentProverRandomnessHexes.{component_id} is required for proof generation"
+            ))
+        })
+}
+
+fn component_generation_secret_state<'a>(
+    component_id: &str,
+    default_secret_state: &'a Value,
+    component_secret_states: Option<&'a Value>,
+) -> crate::encoding::CanonicalResult<&'a Value> {
+    let Some(component_secret_states) = component_secret_states else {
+        return Ok(default_secret_state);
+    };
+    let component_secret_states = object_map(component_secret_states).ok_or_else(|| {
+        invalid_preflight("componentSecretStates must be an object for ballot proof generation")
+    })?;
+
+    Ok(component_secret_states
+        .get(component_id)
+        .unwrap_or(default_secret_state))
+}
+
+fn proof_contract_with_expected_size(
+    proof_contract: &Value,
+    proof_size_bytes: usize,
+    field_name: &str,
+) -> crate::encoding::CanonicalResult<Value> {
+    let mut proof_contract = object_map(proof_contract)
+        .ok_or_else(|| invalid_preflight(format!("{field_name} must be an object")))?
+        .clone();
+    proof_contract.insert(
+        "expectedProofSizeBytes".to_string(),
+        json!(proof_size_bytes),
+    );
+
+    Ok(Value::Object(proof_contract))
+}
+
+fn proof_bytes_digest(
+    proof_bytes_hex: &str,
+    allow_empty: bool,
+) -> crate::encoding::CanonicalResult<String> {
+    let proof_bytes = decode_hex(proof_bytes_hex).map_err(|_| {
+        invalid_preflight("generated proof bytes must be lowercase hexadecimal bytes")
+    })?;
+    if !allow_empty && proof_bytes.is_empty() {
+        return Err(invalid_preflight(
+            "generated proof bytes must be non-empty for this proof record",
+        ));
+    }
+    derive_digest(
+        "ProofBytesDigest",
+        &json!({
+            "objectType": "ProofBytes",
+            "objectVersion": 1,
+            "proofBytesHex": proof_bytes_hex,
+            "proofSizeBytes": proof_bytes.len(),
+        }),
+    )
+    .ok_or_else(|| invalid_preflight("generated proof bytes digest could not be derived"))
+}
+
+fn generated_component_proof_input(
+    proof_input: &Value,
+    proof_bytes_hex: &str,
+    proof_size_bytes: usize,
+) -> crate::encoding::CanonicalResult<Value> {
+    let mut proof_input = object_map(proof_input)
+        .ok_or_else(|| invalid_preflight("component proof input must be an object"))?
+        .clone();
+    let parameter_set = proof_input
+        .get("proofParameterSet")
+        .cloned()
+        .ok_or_else(|| invalid_preflight("component proof input is missing proofParameterSet"))?;
+    let proof_encoding = proof_input
+        .get("proofEncoding")
+        .cloned()
+        .ok_or_else(|| invalid_preflight("component proof input is missing proofEncoding"))?;
+    proof_input.insert(
+        "proofParameterSet".to_string(),
+        proof_contract_with_expected_size(
+            &parameter_set,
+            proof_size_bytes,
+            "component proof parameter set",
+        )?,
+    );
+    proof_input.insert(
+        "proofEncoding".to_string(),
+        proof_contract_with_expected_size(
+            &proof_encoding,
+            proof_size_bytes,
+            "component proof encoding",
+        )?,
+    );
+    if !proof_input.contains_key("componentProofStatementDigest") {
+        let proof_statement = proof_input
+            .get("proofStatement")
+            .ok_or_else(|| invalid_preflight("component proof input is missing proofStatement"))?;
+        let proof_statement_format = proof_input
+            .get("proofStatementFormat")
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                invalid_preflight("component proof input is missing proofStatementFormat")
+            })?;
+        if let (Some(component_proof_statement_digest), _) =
+            supplied_component_proof_statement_digest(proof_statement, proof_statement_format)
+        {
+            proof_input.insert(
+                "componentProofStatementDigest".to_string(),
+                json!(component_proof_statement_digest),
+            );
+        }
+    }
+    proof_input.insert("proofBytesHex".to_string(), json!(proof_bytes_hex));
+
+    Ok(Value::Object(proof_input))
+}
+
+fn generated_component_proof_record(
+    component_id: &str,
+    statement: &Value,
+    component_bundle_statement: &Value,
+    component_proof_input: &Value,
+    proof_bytes_hex: &str,
+    proof_size_bytes: usize,
+) -> crate::encoding::CanonicalResult<Value> {
+    let allow_empty_proof_bytes = component_proof_bytes_must_be_empty(component_id);
+    let proof_bytes_digest = proof_bytes_digest(proof_bytes_hex, allow_empty_proof_bytes)?;
+    let proof_encoding = required_json_field(
+        component_proof_input,
+        "proofEncoding",
+        "componentProofInput",
+    )?;
+    let proof_parameter_set = required_json_field(
+        component_proof_input,
+        "proofParameterSet",
+        "componentProofInput",
+    )?;
+    let public_randomness_hex = string_field(component_proof_input, "publicRandomnessHex")
+        .ok_or_else(|| invalid_preflight("component proof input is missing publicRandomnessHex"))?;
+    let proof_encoding_profile_digest = derive_ballot_proof_encoding_profile_digest(proof_encoding)
+        .ok_or_else(|| invalid_preflight("component proof encoding digest could not be derived"))?;
+    let proof_parameter_set_digest = derive_ballot_proof_parameter_set_digest(proof_parameter_set)
+        .ok_or_else(|| {
+            invalid_preflight("component proof parameter-set digest could not be derived")
+        })?;
+    let public_randomness_digest =
+        derive_ballot_proof_public_randomness_digest(public_randomness_hex).ok_or_else(|| {
+            invalid_preflight("component proof public randomness digest could not be derived")
+        })?;
+    let component_statement_digest = string_field(component_proof_input, "statementDigest")
+        .ok_or_else(|| invalid_preflight("component proof input is missing statementDigest"))?;
+
+    let mut proof_root_payload = Map::new();
+    proof_root_payload.insert("componentId".to_string(), json!(component_id));
+    if let Some(component_proof_statement_digest) =
+        string_field(component_proof_input, "componentProofStatementDigest")
+    {
+        proof_root_payload.insert(
+            "componentProofStatementDigest".to_string(),
+            json!(component_proof_statement_digest),
+        );
+    }
+    proof_root_payload.insert(
+        "componentStatementDigest".to_string(),
+        json!(component_statement_digest),
+    );
+    proof_root_payload.insert("proofBytesDigest".to_string(), json!(proof_bytes_digest));
+    proof_root_payload.insert(
+        "proofEncodingProfileDigest".to_string(),
+        json!(proof_encoding_profile_digest),
+    );
+    proof_root_payload.insert(
+        "proofParameterSetDigest".to_string(),
+        json!(proof_parameter_set_digest),
+    );
+    proof_root_payload.insert(
+        "proofStatementFormat".to_string(),
+        json!(
+            string_field(component_proof_input, "proofStatementFormat").ok_or_else(|| {
+                invalid_preflight("component proof input is missing proofStatementFormat")
+            })?
+        ),
+    );
+    proof_root_payload.insert(
+        "publicRandomnessDigest".to_string(),
+        json!(public_randomness_digest),
+    );
+    proof_root_payload.insert(
+        "purpose".to_string(),
+        json!("ballot-proof-component-proof-root-v1"),
+    );
+    proof_root_payload.insert(
+        "statementDigest".to_string(),
+        json!(component_statement_digest),
+    );
+    let proof_root = derive_digest("ChallengeDomainDigest", &Value::Object(proof_root_payload))
+        .ok_or_else(|| invalid_preflight("component proof root could not be derived"))?;
+
+    let mut component_proof_payload = Map::new();
+    component_proof_payload.insert(
+        "backendStatementDigest".to_string(),
+        json!(
+            string_field(component_bundle_statement, "backendStatementDigest").ok_or_else(
+                || invalid_preflight(
+                    "component bundle statement is missing backendStatementDigest"
+                )
+            )?
+        ),
+    );
+    if let Some(ballot_proof_statement_digest) =
+        string_field(statement, "ballotProofStatementDigest")
+    {
+        component_proof_payload.insert(
+            "ballotProofStatementDigest".to_string(),
+            json!(ballot_proof_statement_digest),
+        );
+    }
+    component_proof_payload.insert("componentId".to_string(), json!(component_id));
+    if let Some(component_proof_statement_digest) =
+        string_field(component_proof_input, "componentProofStatementDigest")
+    {
+        component_proof_payload.insert(
+            "componentProofStatementDigest".to_string(),
+            json!(component_proof_statement_digest),
+        );
+    }
+    component_proof_payload.insert(
+        "componentStatementDigest".to_string(),
+        json!(component_statement_digest),
+    );
+    component_proof_payload.insert(
+        "objectType".to_string(),
+        json!("BallotProofComponentProofRecord"),
+    );
+    component_proof_payload.insert("objectVersion".to_string(), json!(1));
+    component_proof_payload.insert(
+        "proofBackend".to_string(),
+        json!("LocalLinearLatticeRelation"),
+    );
+    component_proof_payload.insert("proofBytesDigest".to_string(), json!(proof_bytes_digest));
+    component_proof_payload.insert(
+        "proofEncodingProfileDigest".to_string(),
+        json!(proof_encoding_profile_digest),
+    );
+    component_proof_payload.insert(
+        "proofParameterSetDigest".to_string(),
+        json!(proof_parameter_set_digest),
+    );
+    component_proof_payload.insert("proofRoot".to_string(), json!(proof_root));
+    component_proof_payload.insert("proofSizeBytes".to_string(), json!(proof_size_bytes));
+    component_proof_payload.insert(
+        "publicRandomnessDigest".to_string(),
+        json!(public_randomness_digest),
+    );
+    component_proof_payload.insert(
+        "relationStatementDigest".to_string(),
+        json!(
+            string_field(component_bundle_statement, "relationStatementDigest").ok_or_else(
+                || invalid_preflight(
+                    "component bundle statement is missing relationStatementDigest"
+                )
+            )?
+        ),
+    );
+    let component_proof_payload_value = Value::Object(component_proof_payload.clone());
+    let component_proof_record_digest = derive_ballot_component_proof_record_digest(
+        &component_proof_payload_value,
+    )
+    .ok_or_else(|| invalid_preflight("component proof record digest could not be derived"))?;
+    component_proof_payload.insert(
+        "componentProofRecordDigest".to_string(),
+        json!(component_proof_record_digest),
+    );
+
+    Ok(Value::Object(component_proof_payload))
+}
+
+fn generated_component_proof_bundle(
+    component_bundle_statement: &Value,
+    component_proofs: Vec<Value>,
+) -> crate::encoding::CanonicalResult<Value> {
+    let mut component_proof_bundle_payload = Map::new();
+    component_proof_bundle_payload.insert(
+        "backendStatementDigest".to_string(),
+        json!(
+            string_field(component_bundle_statement, "backendStatementDigest").ok_or_else(
+                || invalid_preflight(
+                    "component bundle statement is missing backendStatementDigest"
+                )
+            )?
+        ),
+    );
+    if let Some(ballot_proof_statement_digest) =
+        string_field(component_bundle_statement, "ballotProofStatementDigest")
+    {
+        component_proof_bundle_payload.insert(
+            "ballotProofStatementDigest".to_string(),
+            json!(ballot_proof_statement_digest),
+        );
+    }
+    component_proof_bundle_payload.insert(
+        "bundleCoverage".to_string(),
+        json!(FULL_BALLOT_PROOF_PROJECTION_COVERAGE),
+    );
+    component_proof_bundle_payload.insert(
+        "componentBundleStatementDigest".to_string(),
+        json!(
+            string_field(component_bundle_statement, "componentBundleStatementDigest").ok_or_else(
+                || invalid_preflight(
+                    "component bundle statement is missing componentBundleStatementDigest"
+                )
+            )?
+        ),
+    );
+    component_proof_bundle_payload.insert("componentProofs".to_string(), json!(component_proofs));
+    component_proof_bundle_payload.insert(
+        "objectType".to_string(),
+        json!("BallotProofComponentProofBundle"),
+    );
+    component_proof_bundle_payload.insert("objectVersion".to_string(), json!(1));
+    component_proof_bundle_payload.insert(
+        "relationStatementDigest".to_string(),
+        json!(
+            string_field(component_bundle_statement, "relationStatementDigest").ok_or_else(
+                || invalid_preflight(
+                    "component bundle statement is missing relationStatementDigest"
+                )
+            )?
+        ),
+    );
+    component_proof_bundle_payload.insert(
+        "requiredComponentIds".to_string(),
+        json!(REQUIRED_BALLOT_PROOF_COMPONENT_IDS),
+    );
+    let component_proof_bundle_value = Value::Object(component_proof_bundle_payload.clone());
+    let component_proof_bundle_digest = derive_ballot_component_proof_bundle_digest(
+        &component_proof_bundle_value,
+    )
+    .ok_or_else(|| invalid_preflight("component proof bundle digest could not be derived"))?;
+    component_proof_bundle_payload.insert(
+        "componentProofBundleDigest".to_string(),
+        json!(component_proof_bundle_digest),
+    );
+
+    Ok(Value::Object(component_proof_bundle_payload))
+}
+
+struct GeneratedBallotProofRecordInput<'a> {
+    statement: &'a Value,
+    linear_statement: &'a Value,
+    parameter_set: &'a Value,
+    proof_encoding: &'a Value,
+    public_randomness_hex: &'a str,
+    component_bundle_statement: &'a Value,
+    component_proof_bundle: &'a Value,
+    proof_bytes_hex: &'a str,
+    proof_size_bytes: usize,
+}
+
+fn generated_ballot_proof_record(
+    input: GeneratedBallotProofRecordInput<'_>,
+) -> crate::encoding::CanonicalResult<Value> {
+    let statement = input.statement;
+    let linear_statement = input.linear_statement;
+    let parameter_set = input.parameter_set;
+    let proof_encoding = input.proof_encoding;
+    let public_randomness_hex = input.public_randomness_hex;
+    let component_bundle_statement = input.component_bundle_statement;
+    let component_proof_bundle = input.component_proof_bundle;
+    let proof_bytes_hex = input.proof_bytes_hex;
+    let proof_size_bytes = input.proof_size_bytes;
+    let proof_bytes_digest = proof_bytes_digest(proof_bytes_hex, false)?;
+    let proof_encoding_profile_digest = derive_ballot_proof_encoding_profile_digest(proof_encoding)
+        .ok_or_else(|| invalid_preflight("ballot proof encoding digest could not be derived"))?;
+    let proof_parameter_set_digest = derive_ballot_proof_parameter_set_digest(parameter_set)
+        .ok_or_else(|| {
+            invalid_preflight("ballot proof parameter-set digest could not be derived")
+        })?;
+    let public_randomness_digest =
+        derive_ballot_proof_public_randomness_digest(public_randomness_hex).ok_or_else(|| {
+            invalid_preflight("ballot proof public randomness digest could not be derived")
+        })?;
+    let linear_statement_digest = string_field(linear_statement, "statementDigest")
+        .ok_or_else(|| invalid_preflight("linear statement is missing statementDigest"))?;
+    let proof_root = derive_digest(
+        "BallotProofRecordDigest",
+        &json!({
+            "linearStatementDigest": linear_statement_digest,
+            "proofBytesDigest": proof_bytes_digest,
+            "proofEncodingProfileDigest": proof_encoding_profile_digest,
+            "proofParameterSetDigest": proof_parameter_set_digest,
+            "publicRandomnessDigest": public_randomness_digest,
+            "purpose": "ballot-proof-linear-proof-record-root-v1",
+        }),
+    )
+    .ok_or_else(|| invalid_preflight("ballot proof root could not be derived"))?;
+
+    let mut proof_payload = Map::new();
+    proof_payload.insert(
+        "backendStatementDigest".to_string(),
+        json!(
+            string_field(linear_statement, "backendStatementDigest").ok_or_else(|| {
+                invalid_preflight("linear statement is missing backendStatementDigest")
+            })?
+        ),
+    );
+    proof_payload.insert(
+        "ballotProofProfileDigest".to_string(),
+        json!(
+            string_field(statement, "ballotProofProfileDigest").ok_or_else(|| {
+                invalid_preflight("statement is missing ballotProofProfileDigest")
+            })?
+        ),
+    );
+    proof_payload.insert(
+        "ballotProofStatementDigest".to_string(),
+        json!(
+            string_field(statement, "ballotProofStatementDigest").ok_or_else(|| {
+                invalid_preflight("statement is missing ballotProofStatementDigest")
+            })?
+        ),
+    );
+    proof_payload.insert(
+        "componentBundleStatementDigest".to_string(),
+        json!(
+            string_field(component_bundle_statement, "componentBundleStatementDigest").ok_or_else(
+                || invalid_preflight(
+                    "component bundle statement is missing componentBundleStatementDigest"
+                )
+            )?
+        ),
+    );
+    proof_payload.insert(
+        "componentProofBundleDigest".to_string(),
+        json!(
+            string_field(component_proof_bundle, "componentProofBundleDigest").ok_or_else(
+                || invalid_preflight(
+                    "component proof bundle is missing componentProofBundleDigest"
+                )
+            )?
+        ),
+    );
+    proof_payload.insert(
+        "linearStatementDigest".to_string(),
+        json!(linear_statement_digest),
+    );
+    proof_payload.insert("objectType".to_string(), json!("BallotProofRecord"));
+    proof_payload.insert("objectVersion".to_string(), json!(1));
+    proof_payload.insert(
+        "proofBackend".to_string(),
+        json!("LocalLinearLatticeRelation"),
+    );
+    proof_payload.insert("proofBytesDigest".to_string(), json!(proof_bytes_digest));
+    proof_payload.insert(
+        "proofEncodingProfileDigest".to_string(),
+        json!(proof_encoding_profile_digest),
+    );
+    proof_payload.insert(
+        "proofParameterSetDigest".to_string(),
+        json!(proof_parameter_set_digest),
+    );
+    proof_payload.insert("proofRoot".to_string(), json!(proof_root));
+    proof_payload.insert("proofSizeBytes".to_string(), json!(proof_size_bytes));
+    proof_payload.insert(
+        "publicRandomnessDigest".to_string(),
+        json!(public_randomness_digest),
+    );
+    proof_payload.insert(
+        "relationStatementDigest".to_string(),
+        json!(
+            string_field(linear_statement, "relationStatementDigest").ok_or_else(|| {
+                invalid_preflight("linear statement is missing relationStatementDigest")
+            })?
+        ),
+    );
+    proof_payload.insert(
+        "statementMatrixDigest".to_string(),
+        json!(
+            string_field(linear_statement, "statementMatrixDigest").ok_or_else(|| {
+                invalid_preflight("linear statement is missing statementMatrixDigest")
+            })?
+        ),
+    );
+    proof_payload.insert(
+        "targetVectorDigest".to_string(),
+        json!(
+            string_field(linear_statement, "targetVectorDigest").ok_or_else(|| {
+                invalid_preflight("linear statement is missing targetVectorDigest")
+            })?
+        ),
+    );
+    let challenge_digest =
+        derive_ballot_proof_challenge_digest(statement, &Value::Object(proof_payload.clone()))
+            .ok_or_else(|| {
+                invalid_preflight("ballot proof challenge digest could not be derived")
+            })?;
+    proof_payload.insert("challengeDigest".to_string(), json!(challenge_digest));
+    let proof_payload_value = Value::Object(proof_payload.clone());
+    let ballot_proof_record_digest = derive_digest("BallotProofRecordDigest", &proof_payload_value)
+        .ok_or_else(|| invalid_preflight("ballot proof record digest could not be derived"))?;
+    proof_payload.insert(
+        "ballotProofRecordDigest".to_string(),
+        json!(ballot_proof_record_digest),
+    );
+
+    Ok(Value::Object(proof_payload))
+}
+
 fn required_json_field<'value>(
     value: &'value Value,
     field_name: &str,
@@ -1804,6 +3074,31 @@ fn required_json_field<'value>(
     object_map(value)
         .and_then(|object| object.get(field_name))
         .ok_or_else(|| invalid_preflight(format!("{object_name}.{field_name} is required")))
+}
+
+fn decode_32_byte_hex(
+    hex_value: &str,
+    field_name: &str,
+) -> crate::encoding::CanonicalResult<[u8; 32]> {
+    let bytes = decode_hex(hex_value)?;
+    if bytes.len() != 32 {
+        return Err(invalid_preflight(format!(
+            "{field_name} must encode exactly 32 bytes"
+        )));
+    }
+
+    bytes
+        .as_slice()
+        .try_into()
+        .map_err(|_| invalid_preflight(format!("{field_name} must encode exactly 32 bytes")))
+}
+
+fn source_witness_coefficients(
+    secret_state: &Value,
+) -> crate::encoding::CanonicalResult<Vec<Vec<i64>>> {
+    let secret_state = object_map(secret_state)
+        .ok_or_else(|| invalid_preflight("secretState must be an object"))?;
+    signed_polynomial_vector_field(secret_state, "sourceWitnessCoefficients")
 }
 
 fn receiver_key_source_witness_coefficients(
@@ -2451,6 +3746,13 @@ fn supplied_component_proof_statement_digest<'a>(
         ) => (
             derive_ballot_component_proof_statement_plan_digest(proof_statement),
             Some("componentProofStatementDigest"),
+        ),
+        (
+            Some("BallotProofStructuredReceiverEncryptionProofStatement"),
+            "structured-module-lwe-linear-proof-v1",
+        ) => (
+            derive_ballot_structured_receiver_encryption_statement_digest(proof_statement),
+            Some("statementDigest"),
         ),
         _ => (None, None),
     }
@@ -4068,7 +5370,7 @@ fn verify_component_linear_proof_bytes(
                 }));
             }
             if string_field(proof_statement, "statementDigest")
-                != string_field(proof_input, "statementDigest")
+                != string_field(proof_input, "componentProofStatementDigest")
             {
                 refused_objects.push(json!({
                     "code": "BallotPackageInvalid",
@@ -5179,6 +6481,7 @@ pub fn verify_receiver_key_vector_case(vector_case: &Value) -> Value {
 mod tests {
     use crate::ballot_privacy::{
         linear_proof_parameters::{
+            LinearProofParameterSet, encoded_score_field_linear_proof_encoding_contract,
             receiver_key_linear_parameter_contract, receiver_key_linear_proof_encoding_contract,
         },
         polynomial_ring::PolynomialRing,
@@ -5316,6 +6619,839 @@ mod tests {
                 ))
         );
         assert_eq!(verification["unresolvedReason"], "BallotPackageInvalid");
+    }
+
+    #[test]
+    fn ballot_proof_generation_command_emits_verifying_dense_proof_bytes() {
+        let mut proof_encoding = encoded_score_field_linear_proof_encoding_contract();
+        proof_encoding.profile_id = super::FULL_BALLOT_PROOF_ENCODING_PROFILE_ID.to_string();
+        proof_encoding.source =
+            "sealed-lattice/linear-proof/full-encoded-score-ballot-test-encoding-v1".to_string();
+        proof_encoding.short_response_vector_length = 2;
+        let parameter_set = LinearProofParameterSet {
+            profile_id: super::FULL_BALLOT_PROOF_PARAMETER_PROFILE_ID.to_string(),
+            source: "sealed-lattice/linear-proof/full-encoded-score-ballot-test-parameters-v1"
+                .to_string(),
+            relation: "A*w + t = 0".to_string(),
+            ring_degree: 64,
+            proof_system_ring_degree: 64,
+            coefficient_modulus: 65_537,
+            statement_rows: 1,
+            statement_columns: 1,
+            witness_l2_bound_squared: 65_536,
+            expected_proof_size_bytes: None,
+        };
+        let mut unit_polynomial = vec![0_u64; 64];
+        unit_polynomial[0] = 1;
+        let mut target_polynomial = vec![0_u64; 64];
+        target_polynomial[0] = 65_537 - 5;
+        let mut witness_polynomial = vec![0_i64; 64];
+        witness_polynomial[0] = 5;
+        let linear_statement = json!({
+            "objectType": "BallotProofLinearProofStatement",
+            "objectVersion": 1,
+            "projectionCoverage": super::FULL_BALLOT_PROOF_PROJECTION_COVERAGE,
+            "parameterProfileId": super::FULL_BALLOT_PROOF_PARAMETER_PROFILE_ID,
+            "relation": "A*w + t = 0",
+            "statementMatrixCoefficients": [[unit_polynomial]],
+            "targetVectorCoefficients": [target_polynomial],
+            "targetCoefficientRepresentation": "centeredSignedSourceModulus"
+        });
+        let parameter_set_value =
+            serde_json::to_value(&parameter_set).expect("parameter set should serialize");
+        let proof_encoding_value =
+            serde_json::to_value(&proof_encoding).expect("proof encoding should serialize");
+        let public_randomness_hex = "00".repeat(32);
+        let prover_randomness_hex = "07".repeat(32);
+        let secret_state = json!({
+            "sourceWitnessCoefficients": [witness_polynomial]
+        });
+
+        let generation = super::generate_ballot_proof(
+            Some(&linear_statement),
+            Some(&parameter_set_value),
+            Some(&proof_encoding_value),
+            Some(&public_randomness_hex),
+            Some(&secret_state),
+            Some(&prover_randomness_hex),
+        );
+
+        assert_eq!(
+            generation["ok"], true,
+            "generated ballot proof should verify: {generation}"
+        );
+        assert_eq!(generation["generatedProofBytes"], true);
+        assert!(
+            generation["statusLabels"]
+                .as_array()
+                .expect("status labels should be present")
+                .contains(&json!("BallotGeneratedProofVerified"))
+        );
+        assert!(
+            generation["proofBytesHex"]
+                .as_str()
+                .expect("proof bytes should be hex")
+                .len()
+                > 100
+        );
+
+        let proof_input = json!({
+            "componentId": "score-and-shamir-field-component",
+            "proofStatementFormat": "dense-polynomial-matrix-linear-proof-v1",
+            "proofStatement": linear_statement,
+            "proofParameterSet": parameter_set_value,
+            "proofEncoding": proof_encoding_value,
+            "publicRandomnessHex": public_randomness_hex
+        });
+        let component_generation = super::generate_ballot_component_proof(
+            Some("score-and-shamir-field-component"),
+            Some(&proof_input),
+            Some(&secret_state),
+            Some(&prover_randomness_hex),
+        );
+
+        assert_eq!(
+            component_generation["ok"], true,
+            "generated dense component proof should verify: {component_generation}"
+        );
+        assert!(
+            component_generation["statusLabels"]
+                .as_array()
+                .expect("status labels should be present")
+                .contains(&json!("BallotComponentGeneratedProofVerified"))
+        );
+    }
+
+    #[test]
+    fn ballot_proof_record_generation_emits_bound_component_bundle() {
+        fn proof_encoding_value(
+            profile_id: &str,
+            source: &str,
+            short_response_vector_length: usize,
+        ) -> Value {
+            let mut proof_encoding = encoded_score_field_linear_proof_encoding_contract();
+            proof_encoding.profile_id = profile_id.to_string();
+            proof_encoding.source = source.to_string();
+            proof_encoding.short_response_vector_length = short_response_vector_length;
+            serde_json::to_value(&proof_encoding).expect("proof encoding should serialize")
+        }
+
+        fn parameter_set_value(
+            profile_id: &str,
+            source: &str,
+            ring_degree: usize,
+            coefficient_modulus: u64,
+            statement_rows: usize,
+            statement_columns: usize,
+            witness_l2_bound_squared: u128,
+        ) -> Value {
+            json!({
+                "profileId": profile_id,
+                "source": source,
+                "relation": "A*w + t = 0",
+                "ringDegree": ring_degree,
+                "proofSystemRingDegree": 64,
+                "coefficientModulus": coefficient_modulus.to_string(),
+                "statementRows": statement_rows,
+                "statementColumns": statement_columns,
+                "witnessL2BoundSquared": witness_l2_bound_squared,
+            })
+        }
+
+        fn digest_for_payload(namespace: &str, value: &Value) -> String {
+            super::derive_digest(namespace, value).expect("digest should derive")
+        }
+
+        fn statement_digest_for_payload(purpose: &str, payload: &Value) -> String {
+            digest_for_payload(
+                "ChallengeDomainDigest",
+                &json!({
+                    "payload": payload,
+                    "purpose": purpose
+                }),
+            )
+        }
+
+        #[allow(clippy::too_many_arguments)]
+        fn component_statement(
+            component_id: &str,
+            component_statement_digest_label: &str,
+            backend_statement_digest: &str,
+            relation_statement_digest: &str,
+            ballot_proof_statement_digest: &str,
+            coefficient_modulus: &str,
+            row_count: usize,
+            variable_column_count: usize,
+        ) -> Value {
+            let variable_column_indices = (0..variable_column_count).collect::<Vec<_>>();
+            let component_payload = json!({
+                "objectType": "BallotProofComponentStatement",
+                "objectVersion": 1,
+                "backendStatementDigest": backend_statement_digest,
+                "ballotProofStatementDigest": ballot_proof_statement_digest,
+                "coefficientModulus": coefficient_modulus,
+                "componentDigest": test_digest(&format!("{component_id}-component")),
+                "componentId": component_id,
+                "matrixDigest": test_digest(&format!("{component_id}-matrix")),
+                "proofLoweringStatus": "explicitRowsAvailable",
+                "relationStatementDigest": relation_statement_digest,
+                "rowBatchMatrixDigests": [test_digest(&format!("{component_id}-row-matrix"))],
+                "rowBatchNames": [format!("{component_id}-rows")],
+                "rowBatchTargetVectorDigests": [test_digest(&format!("{component_id}-row-target"))],
+                "rowCount": row_count,
+                "rowKinds": [format!("{component_id}-rows")],
+                "targetVectorDigest": test_digest(&format!("{component_id}-target")),
+                "variableColumnCount": variable_column_count,
+                "variableColumnIndices": variable_column_indices,
+            });
+            let mut component_statement = component_payload;
+            component_statement
+                .as_object_mut()
+                .expect("component statement should be an object")
+                .insert(
+                    "componentStatementDigest".to_string(),
+                    json!(test_digest(component_statement_digest_label)),
+                );
+            let canonical_digest =
+                super::derive_ballot_component_statement_digest(&component_statement)
+                    .expect("component statement digest should derive");
+            component_statement
+                .as_object_mut()
+                .expect("component statement should be an object")
+                .insert(
+                    "componentStatementDigest".to_string(),
+                    json!(canonical_digest),
+                );
+            component_statement
+        }
+
+        #[allow(clippy::too_many_arguments)]
+        fn dense_linear_statement(
+            component_id: &str,
+            component_statement_digest: &Value,
+            parameter_profile_id: &str,
+            backend_statement_digest: &str,
+            relation_statement_digest: &str,
+            ballot_proof_statement_digest: &str,
+            statement_matrix_digest: &str,
+            target_vector_digest: &str,
+            projection_coverage: &str,
+            statement_columns: usize,
+        ) -> Value {
+            let mut unit_polynomial = vec![0_u64; 64];
+            unit_polynomial[0] = 1;
+            let mut target_polynomial = vec![0_u64; 64];
+            target_polynomial[0] = 65_537 - 5;
+            let mut statement_matrix_row = vec![vec![0_u64; 64]; statement_columns];
+            statement_matrix_row[0] = unit_polynomial;
+            let mut statement_payload = json!({
+                "objectType": "BallotProofLinearProofStatement",
+                "objectVersion": 1,
+                "backendStatementDigest": backend_statement_digest,
+                "ballotProofStatementDigest": ballot_proof_statement_digest,
+                "coefficientModulus": "65537",
+                "componentId": component_id,
+                "componentStatementDigest": component_statement_digest,
+                "parameterProfileId": parameter_profile_id,
+                "projectionCoverage": projection_coverage,
+                "relation": "A*w + t = 0",
+                "relationStatementDigest": relation_statement_digest,
+                "ringDegree": 64,
+                "statementColumns": statement_columns,
+                "statementMatrixCoefficients": [statement_matrix_row],
+                "statementMatrixDigest": statement_matrix_digest,
+                "statementRows": 1,
+                "targetCoefficientRepresentation": "centeredSignedSourceModulus",
+                "targetVectorCoefficients": [target_polynomial],
+                "targetVectorDigest": target_vector_digest,
+                "witnessL2BoundSquared": "65536",
+            });
+            let statement_digest = statement_digest_for_payload(
+                "ballot-proof-linear-proof-statement-v1",
+                &statement_payload,
+            );
+            statement_payload
+                .as_object_mut()
+                .expect("linear statement should be an object")
+                .insert("statementDigest".to_string(), json!(statement_digest));
+            statement_payload
+        }
+
+        #[allow(clippy::too_many_arguments)]
+        fn sparse_statement(
+            component_id: &str,
+            component_statement_digest: &Value,
+            parameter_profile_id: &str,
+            backend_statement_digest: &str,
+            relation_statement_digest: &str,
+            ballot_proof_statement_digest: &str,
+            coefficient_modulus: &str,
+            projection_coverage: &str,
+            target_constant_coefficient: Option<&str>,
+            witness_l2_bound_squared: &str,
+        ) -> Value {
+            let matrix_entries = json!([
+                {
+                    "rowIndex": 0,
+                    "columnIndex": 0,
+                    "constantCoefficient": 1
+                }
+            ]);
+            let target_entries = target_constant_coefficient.map_or_else(
+                || json!([]),
+                |constant_coefficient| {
+                    json!([
+                        {
+                            "rowIndex": 0,
+                            "constantCoefficient": constant_coefficient
+                        }
+                    ])
+                },
+            );
+            let target_entry_count = if target_constant_coefficient.is_some() {
+                1
+            } else {
+                0
+            };
+            let mut statement_payload = json!({
+                "objectType": "BallotProofSparseComponentLinearProofStatement",
+                "objectVersion": 1,
+                "backendStatementDigest": backend_statement_digest,
+                "ballotProofStatementDigest": ballot_proof_statement_digest,
+                "coefficientModulus": coefficient_modulus,
+                "componentId": component_id,
+                "componentStatementDigest": component_statement_digest,
+                "parameterProfileId": parameter_profile_id,
+                "proofStatementFormat": "sparse-polynomial-matrix-linear-proof-v1",
+                "projectionCoverage": projection_coverage,
+                "relation": "A*w + t = 0",
+                "relationStatementDigest": relation_statement_digest,
+                "sourceBackendColumnIndices": [0],
+                "sourceRingDegree": 64,
+                "sparseStatementMatrixDigest": super::derive_sparse_statement_matrix_digest(&matrix_entries)
+                    .expect("sparse matrix digest should derive"),
+                "sparseStatementMatrixEntries": matrix_entries,
+                "sparseStatementTermCount": 1,
+                "statementColumns": 1,
+                "statementRows": 1,
+                "targetCoefficientRepresentation": "centeredSignedSourceModulus",
+                "targetVectorDigest": super::derive_sparse_target_vector_digest(&target_entries)
+                    .expect("sparse target digest should derive"),
+                "targetVectorEntries": target_entries,
+                "targetVectorEntryCount": target_entry_count,
+                "witnessL2BoundSquared": witness_l2_bound_squared
+            });
+            let statement_digest = statement_digest_for_payload(
+                "ballot-proof-sparse-linear-proof-statement-v1",
+                &statement_payload,
+            );
+            statement_payload
+                .as_object_mut()
+                .expect("sparse statement should be an object")
+                .insert("statementDigest".to_string(), json!(statement_digest));
+            statement_payload
+        }
+
+        fn structured_statement(
+            component_statement_digest: &Value,
+            backend_statement_digest: &str,
+            relation_statement_digest: &str,
+            ballot_proof_statement_digest: &str,
+        ) -> Value {
+            let module_degree = 256_usize;
+            let module_rank = 4_usize;
+            let zero_polynomial = vec![0_u64; module_degree];
+            let zero_vector = vec![
+                zero_polynomial.clone(),
+                zero_polynomial.clone(),
+                zero_polynomial.clone(),
+                zero_polynomial.clone(),
+            ];
+            let repeated_column_matrix = vec![vec![0_usize; module_degree]; module_rank];
+            let repeated_column_vector = vec![0_usize; module_degree];
+            let mut statement_payload = json!({
+                "objectType": "BallotProofStructuredReceiverEncryptionProofStatement",
+                "objectVersion": 1,
+                "backendStatementDigest": backend_statement_digest,
+                "ballotProofStatementDigest": ballot_proof_statement_digest,
+                "coefficientModulus": "12289",
+                "componentId": "receiver-encryption-component",
+                "componentStatementDigest": component_statement_digest,
+                "matrixDigest": test_digest("receiver-encryption-matrix"),
+                "parameterProfileId": "receiver-encryption-test-compatibility-v1",
+                "proofStatementFormat": "structured-module-lwe-linear-proof-v1",
+                "proofSystemRingDegree": 64,
+                "receiverEncryptionProfileDigest": test_digest("receiver-encryption-profile"),
+                "receiverRows": [
+                    {
+                        "ciphertextChunkCount": 1,
+                        "ciphertextChunks": [
+                            {
+                                "chunkIndex": 0,
+                                "firstCiphertextVector": zero_vector,
+                                "firstNoiseColumnIndices": repeated_column_matrix,
+                                "plaintextBitColumnIndices": [],
+                                "randomnessColumnIndices": repeated_column_matrix,
+                                "secondCiphertextPolynomial": zero_polynomial,
+                                "secondNoiseColumnIndices": repeated_column_vector
+                            }
+                        ],
+                        "plaintextBitLength": 0,
+                        "publicKeyVector": zero_vector,
+                        "publicMatrixSeedDigest": test_digest("receiver-public-matrix-seed"),
+                        "receiverIdentity": "receiver-1",
+                        "receiverPayloadDigest": test_digest("receiver-payload"),
+                        "receiverPublicKeyDigest": test_digest("receiver-public-key"),
+                        "receiverRosterPosition": 1,
+                        "rowCount": 1280,
+                        "rowOffsetWithinStatement": 0
+                    }
+                ],
+                "relation": "A*w + t = 0",
+                "relationStatementDigest": relation_statement_digest,
+                "sourceBackendColumnIndices": [0],
+                "sourceRingDegree": 256,
+                "statementColumns": 1,
+                "statementRows": 1280,
+                "targetCoefficientRepresentation": "canonicalUnsignedSourceModulus",
+                "targetVectorDigest": test_digest("receiver-encryption-target"),
+                "witnessL2BoundSquared": "65536"
+            });
+            let statement_digest = statement_digest_for_payload(
+                "ballot-proof-structured-receiver-encryption-proof-statement-v1",
+                &statement_payload,
+            );
+            statement_payload
+                .as_object_mut()
+                .expect("structured statement should be an object")
+                .insert("statementDigest".to_string(), json!(statement_digest));
+            statement_payload
+        }
+
+        let backend_statement_digest = test_digest("generated-backend-statement");
+        let relation_statement_digest = test_digest("generated-relation-statement");
+        let statement_matrix_digest = test_digest("generated-statement-matrix");
+        let target_vector_digest = test_digest("generated-target-vector");
+        let ballot_statement_payload = json!({
+            "objectType": "BallotProofStatement",
+            "objectVersion": 1,
+            "actionContextDigest": test_digest("action-context"),
+            "aggregateInputEncodingProfileDigest": test_digest("aggregate-input-encoding-profile"),
+            "ballotPackageDigest": test_digest("ballot-package"),
+            "ballotProofProfileDigest": test_digest("ballot-proof-profile"),
+            "ballotScoreEncodingProfileDigest": test_digest("ballot-score-encoding-profile"),
+            "ballotShareLayoutProfileDigest": test_digest("ballot-share-layout-profile"),
+            "ceremonyId": "ceremony-generated-ballot-proof-record",
+            "challengeDomainDigest": test_digest("challenge-domain"),
+            "duplicateBallotPolicyDigest": test_digest("duplicate-ballot-policy"),
+            "encodedAggregateLayoutDigest": test_digest("encoded-aggregate-layout"),
+            "encodedShareVectorLayoutDigest": test_digest("encoded-share-vector-layout"),
+            "manifestDigest": test_digest("manifest"),
+            "optionCount": 1,
+            "pollSpecDigest": test_digest("poll-spec"),
+            "receiverEncryptionProfileDigest": test_digest("receiver-encryption-profile"),
+            "receiverKeyProofRoot": test_digest("receiver-key-proof-root"),
+            "receiverKeyRoot": test_digest("receiver-key-root"),
+            "receiverPayloads": [
+                {
+                    "receiverIdentity": "receiver-1",
+                    "receiverPayloadCiphertextRoot": test_digest("payload-ciphertext-root"),
+                    "receiverPayloadDigest": test_digest("payload"),
+                    "receiverRosterPosition": 1
+                }
+            ],
+            "receiverPublicKeys": [
+                {
+                    "receiverIdentity": "receiver-1",
+                    "receiverPublicKeyDigest": test_digest("receiver-public-key"),
+                    "receiverRosterPosition": 1
+                }
+            ],
+            "rosterDigest": test_digest("roster"),
+            "rosterExternalAcceptanceDigest": test_digest("roster-acceptance"),
+            "scoreDomainDigest": test_digest("score-domain"),
+            "scoreMembershipProfileDigest": test_digest("score-membership-profile"),
+            "shareCommitmentMessageBoundCertDigest": test_digest("share-commitment-bound-cert"),
+            "shareCommitmentProfileDigest": test_digest("share-commitment-profile"),
+            "shareCommitments": [
+                {
+                    "receiverIdentity": "receiver-1",
+                    "receiverRosterPosition": 1,
+                    "shareCommitmentDigest": test_digest("share-commitment")
+                }
+            ],
+            "shareVectorWidth": 11,
+            "thresholdProfileDigest": test_digest("threshold-profile"),
+            "tiePolicyDigest": test_digest("tie-policy"),
+            "topOptionCount": 1,
+            "voterIdentityDigest": test_digest("voter-identity"),
+            "voterRosterPosition": 1,
+            "voterSigningKeyDigest": test_digest("voter-signing-key")
+        });
+        let mut statement = ballot_statement_payload;
+        let ballot_proof_statement_digest =
+            digest_for_payload("BallotProofStatementDigest", &statement);
+        statement
+            .as_object_mut()
+            .expect("statement should be an object")
+            .insert(
+                "ballotProofStatementDigest".to_string(),
+                json!(ballot_proof_statement_digest),
+            );
+        let ballot_proof_statement_digest = statement["ballotProofStatementDigest"]
+            .as_str()
+            .expect("ballot proof statement digest should be a string")
+            .to_string();
+        let score_component = component_statement(
+            "score-and-shamir-field-component",
+            "score-component-statement",
+            &backend_statement_digest,
+            &relation_statement_digest,
+            &ballot_proof_statement_digest,
+            "65537",
+            1,
+            1,
+        );
+        let payload_component = component_statement(
+            "payload-plaintext-field-component",
+            "payload-component-statement",
+            &backend_statement_digest,
+            &relation_statement_digest,
+            &ballot_proof_statement_digest,
+            "65537",
+            1,
+            1,
+        );
+        let share_component = component_statement(
+            "share-commitment-component",
+            "share-component-statement",
+            &backend_statement_digest,
+            &relation_statement_digest,
+            &ballot_proof_statement_digest,
+            "18446744069414584321",
+            1,
+            1,
+        );
+        let receiver_encryption_component = component_statement(
+            "receiver-encryption-component",
+            "receiver-encryption-component-statement",
+            &backend_statement_digest,
+            &relation_statement_digest,
+            &ballot_proof_statement_digest,
+            "12289",
+            1280,
+            1,
+        );
+        let receiver_key_component = component_statement(
+            "receiver-key-binding-component",
+            "receiver-key-binding-component-statement",
+            &backend_statement_digest,
+            &relation_statement_digest,
+            &ballot_proof_statement_digest,
+            "12289",
+            1,
+            0,
+        );
+        let component_statements = vec![
+            score_component.clone(),
+            payload_component.clone(),
+            share_component.clone(),
+            receiver_encryption_component.clone(),
+            receiver_key_component.clone(),
+        ];
+        let component_bundle_payload = json!({
+            "objectType": "BallotProofComponentBundleStatement",
+            "objectVersion": 1,
+            "backendStatementDigest": backend_statement_digest,
+            "ballotProofStatementDigest": ballot_proof_statement_digest,
+            "bundleCoverage": super::FULL_BALLOT_PROOF_PROJECTION_COVERAGE,
+            "componentStatements": component_statements,
+            "relationLabel": "BallotPrivacyPvssRelation",
+            "relationStatementDigest": relation_statement_digest,
+            "requiredComponentIds": super::REQUIRED_BALLOT_PROOF_COMPONENT_IDS,
+        });
+        let mut component_bundle_statement = component_bundle_payload;
+        let component_bundle_statement_digest =
+            super::derive_ballot_component_bundle_statement_digest(&component_bundle_statement)
+                .expect("component bundle statement digest should derive");
+        component_bundle_statement
+            .as_object_mut()
+            .expect("component bundle statement should be an object")
+            .insert(
+                "componentBundleStatementDigest".to_string(),
+                json!(component_bundle_statement_digest),
+            );
+        let linear_statement = dense_linear_statement(
+            "full-ballot-proof",
+            &Value::Null,
+            super::FULL_BALLOT_PROOF_PARAMETER_PROFILE_ID,
+            &backend_statement_digest,
+            &relation_statement_digest,
+            &ballot_proof_statement_digest,
+            &statement_matrix_digest,
+            &target_vector_digest,
+            super::FULL_BALLOT_PROOF_PROJECTION_COVERAGE,
+            1,
+        );
+        let full_parameter_set = parameter_set_value(
+            super::FULL_BALLOT_PROOF_PARAMETER_PROFILE_ID,
+            "sealed-lattice/linear-proof/generated-full-record-test-parameters-v1",
+            64,
+            65_537,
+            1,
+            1,
+            65_536,
+        );
+        let full_proof_encoding = proof_encoding_value(
+            super::FULL_BALLOT_PROOF_ENCODING_PROFILE_ID,
+            "sealed-lattice/linear-proof/generated-full-record-test-encoding-v1",
+            2,
+        );
+        let score_parameter_set = parameter_set_value(
+            "encoded-score-field-linear-compatibility-v1",
+            "sealed-lattice/linear-proof/generated-score-test-parameters-v1",
+            64,
+            65_537,
+            1,
+            1,
+            65_536,
+        );
+        let payload_parameter_set = parameter_set_value(
+            "payload-plaintext-field-linear-compatibility-v1",
+            "sealed-lattice/linear-proof/generated-payload-test-parameters-v1",
+            64,
+            65_537,
+            1,
+            1,
+            65_536,
+        );
+        let share_parameter_set = parameter_set_value(
+            "share-commitment-linear-compatibility-v1",
+            "sealed-lattice/linear-proof/generated-share-test-parameters-v1",
+            64,
+            18_446_744_069_414_584_321,
+            1,
+            1,
+            1_048_576,
+        );
+        let receiver_encryption_parameter_set = parameter_set_value(
+            "receiver-encryption-linear-compatibility-v1",
+            "sealed-lattice/linear-proof/generated-receiver-encryption-test-parameters-v1",
+            256,
+            12_289,
+            1280,
+            1,
+            65_536,
+        );
+        let component_proof_inputs = json!([
+            {
+                "componentId": "score-and-shamir-field-component",
+                "proofEncoding": proof_encoding_value(
+                    "encoded-score-field-linear-proof-encoding-v1",
+                    "sealed-lattice/linear-proof/generated-score-component-test-encoding-v1",
+                    2
+                ),
+                "proofParameterSet": score_parameter_set,
+                "proofStatement": dense_linear_statement(
+                    "score-and-shamir-field-component",
+                    &score_component["componentStatementDigest"],
+                    "encoded-score-field-linear-compatibility-v1",
+                    &backend_statement_digest,
+                    &relation_statement_digest,
+                    &ballot_proof_statement_digest,
+                    &statement_matrix_digest,
+                    &target_vector_digest,
+                    "encoded-score-field-rows-only",
+                    1
+                ),
+                "proofStatementFormat": "dense-polynomial-matrix-linear-proof-v1",
+                "publicRandomnessHex": "11".repeat(32),
+                "statementDigest": score_component["componentStatementDigest"],
+            },
+            {
+                "componentId": "payload-plaintext-field-component",
+                "proofEncoding": proof_encoding_value(
+                    "payload-plaintext-field-linear-proof-encoding-v1",
+                    "sealed-lattice/linear-proof/generated-payload-component-test-encoding-v1",
+                    2
+                ),
+                "proofParameterSet": payload_parameter_set,
+                "proofStatement": sparse_statement(
+                    "payload-plaintext-field-component",
+                    &payload_component["componentStatementDigest"],
+                    "payload-plaintext-field-linear-compatibility-v1",
+                    &backend_statement_digest,
+                    &relation_statement_digest,
+                    &ballot_proof_statement_digest,
+                    "65537",
+                    "payload-plaintext-field-rows-only",
+                    None,
+                    "65536"
+                ),
+                "proofStatementFormat": "sparse-polynomial-matrix-linear-proof-v1",
+                "publicRandomnessHex": "22".repeat(32),
+                "statementDigest": payload_component["componentStatementDigest"],
+            },
+            {
+                "componentId": "share-commitment-component",
+                "proofEncoding": proof_encoding_value(
+                    "share-commitment-linear-proof-encoding-v1",
+                    "sealed-lattice/linear-proof/generated-share-component-test-encoding-v1",
+                    2
+                ),
+                "proofParameterSet": share_parameter_set,
+                "proofStatement": sparse_statement(
+                    "share-commitment-component",
+                    &share_component["componentStatementDigest"],
+                    "share-commitment-linear-compatibility-v1",
+                    &backend_statement_digest,
+                    &relation_statement_digest,
+                    &ballot_proof_statement_digest,
+                    "18446744069414584321",
+                    "share-commitment-rows-only",
+                    Some("18446744069414584316"),
+                    "1048576"
+                ),
+                "proofStatementFormat": "sparse-polynomial-matrix-linear-proof-v1",
+                "publicRandomnessHex": "00".repeat(32),
+                "statementDigest": share_component["componentStatementDigest"],
+            },
+            {
+                "componentId": "receiver-encryption-component",
+                "proofEncoding": proof_encoding_value(
+                    "receiver-encryption-linear-proof-encoding-v1",
+                    "sealed-lattice/linear-proof/generated-receiver-encryption-component-test-encoding-v1",
+                    5
+                ),
+                "proofParameterSet": receiver_encryption_parameter_set,
+                "proofStatement": structured_statement(
+                    &receiver_encryption_component["componentStatementDigest"],
+                    &backend_statement_digest,
+                    &relation_statement_digest,
+                    &ballot_proof_statement_digest
+                ),
+                "proofStatementFormat": "structured-module-lwe-linear-proof-v1",
+                "publicRandomnessHex": "44".repeat(32),
+                "statementDigest": receiver_encryption_component["componentStatementDigest"],
+            },
+            {
+                "componentId": "receiver-key-binding-component",
+                "proofEncoding": proof_encoding_value(
+                    "receiver-encryption-linear-proof-encoding-v1",
+                    "sealed-lattice/linear-proof/generated-receiver-key-binding-component-test-encoding-v1",
+                    2
+                ),
+                "proofParameterSet": parameter_set_value(
+                    "receiver-key-binding-linear-compatibility-v1",
+                    "sealed-lattice/linear-proof/generated-receiver-key-binding-test-parameters-v1",
+                    64,
+                    12_289,
+                    1,
+                    1,
+                    65_536
+                ),
+                "proofStatement": component_proof_statement_for_test(
+                    "receiver-key-binding-component",
+                    &receiver_key_component["componentStatementDigest"],
+                    None,
+                    "public-zero-witness-binding-check-v1"
+                ),
+                "proofStatementFormat": "public-zero-witness-binding-check-v1",
+                "publicRandomnessHex": "55".repeat(32),
+                "statementDigest": receiver_key_component["componentStatementDigest"],
+            }
+        ]);
+        let mut dense_witness_polynomial = vec![0_i64; 64];
+        dense_witness_polynomial[0] = 5;
+        let secret_state = json!({
+            "sourceWitnessCoefficients": [dense_witness_polynomial.clone()]
+        });
+        let dense_component_secret_state = json!({
+            "sourceWitnessCoefficients": [dense_witness_polynomial]
+        });
+        let scalar_component_secret_state = json!({
+            "sourceWitnessCoefficients": [vec![0_i64; 64]]
+        });
+        let mut share_witness_polynomial = vec![0_i64; 64];
+        share_witness_polynomial[0] = 5;
+        let share_component_secret_state = json!({
+            "sourceWitnessCoefficients": [share_witness_polynomial]
+        });
+        let receiver_encryption_component_secret_state = json!({
+            "sourceWitnessCoefficients": [vec![0_i64; 256]]
+        });
+        let component_secret_states = json!({
+            "score-and-shamir-field-component": dense_component_secret_state,
+            "payload-plaintext-field-component": scalar_component_secret_state.clone(),
+            "share-commitment-component": share_component_secret_state,
+            "receiver-encryption-component": receiver_encryption_component_secret_state,
+        });
+        let generation =
+            super::generate_ballot_proof_record(super::BallotProofRecordGenerationInput {
+                statement: Some(&statement),
+                linear_statement: Some(&linear_statement),
+                parameter_set: Some(&full_parameter_set),
+                proof_encoding: Some(&full_proof_encoding),
+                public_randomness_hex: Some(&"00".repeat(32)),
+                component_bundle_statement: Some(&component_bundle_statement),
+                component_proof_inputs: Some(&component_proof_inputs),
+                secret_state: Some(&secret_state),
+                prover_randomness_hex: Some(&"07".repeat(32)),
+                component_prover_randomness_hexes: Some(&json!({
+                    "score-and-shamir-field-component": "07".repeat(32),
+                    "payload-plaintext-field-component": "a2".repeat(32),
+                    "share-commitment-component": "0c".repeat(32),
+                    "receiver-encryption-component": "a4".repeat(32)
+                })),
+                component_secret_states: Some(&component_secret_states),
+            });
+
+        assert_eq!(
+            generation["ok"], true,
+            "generated ballot proof record should verify: {generation}"
+        );
+        assert_eq!(generation["verification"]["ok"], true);
+        assert_eq!(
+            generation["componentProofBundle"]["componentProofs"]
+                .as_array()
+                .expect("component proofs should be an array")
+                .len(),
+            super::REQUIRED_BALLOT_PROOF_COMPONENT_IDS.len()
+        );
+        assert!(
+            generation["componentProofInputs"]
+                .as_array()
+                .expect("component proof inputs should be an array")
+                .iter()
+                .all(|component_input| component_input
+                    .get("proofBytesHex")
+                    .and_then(Value::as_str)
+                    .is_some())
+        );
+
+        let mut wrong_secret_state = secret_state.clone();
+        wrong_secret_state["sourceWitnessCoefficients"][0][0] = json!(1);
+        let wrong_generation =
+            super::generate_ballot_proof_record(super::BallotProofRecordGenerationInput {
+                statement: Some(&statement),
+                linear_statement: Some(&linear_statement),
+                parameter_set: Some(&full_parameter_set),
+                proof_encoding: Some(&full_proof_encoding),
+                public_randomness_hex: Some(&"00".repeat(32)),
+                component_bundle_statement: Some(&component_bundle_statement),
+                component_proof_inputs: Some(&component_proof_inputs),
+                secret_state: Some(&wrong_secret_state),
+                prover_randomness_hex: Some(&"07".repeat(32)),
+                component_prover_randomness_hexes: Some(&json!({
+                    "score-and-shamir-field-component": "07".repeat(32),
+                    "payload-plaintext-field-component": "a2".repeat(32),
+                    "share-commitment-component": "0c".repeat(32),
+                    "receiver-encryption-component": "a4".repeat(32)
+                })),
+                component_secret_states: Some(&component_secret_states),
+            });
+        assert_eq!(wrong_generation["ok"], false);
+        assert_eq!(wrong_generation["unresolvedReason"], "BallotPackageInvalid");
     }
 
     #[test]

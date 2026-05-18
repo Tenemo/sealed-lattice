@@ -124,6 +124,16 @@ export type BallotPrivacyReceiverKeyProofGeneration =
         };
     };
 
+export type BallotPrivacyProofGeneration =
+    BallotPrivacyReceiverKeyProofGeneration & {
+        readonly ballotProof?: unknown;
+        readonly componentProofBundle?: unknown;
+        readonly componentProofInputs?: readonly unknown[];
+        readonly parameterSet?: unknown;
+        readonly proofEncoding?: unknown;
+        readonly verification?: BallotPrivacyKernelVerification;
+    };
+
 export type TranscriptCoreKernel = {
     readonly exportedFunctionNames: readonly string[];
     analyzeCanonicalObject(input: {
@@ -187,6 +197,35 @@ export type TranscriptCoreKernel = {
         readonly secretState: unknown;
         readonly proverRandomnessHex: string;
     }): BallotPrivacyReceiverKeyProofGeneration;
+    generateBallotProof(input: {
+        readonly linearStatement: unknown;
+        readonly parameterSet: unknown;
+        readonly proofEncoding: unknown;
+        readonly publicRandomnessHex: string;
+        readonly secretState: unknown;
+        readonly proverRandomnessHex: string;
+    }): BallotPrivacyProofGeneration;
+    generateBallotComponentProof(input: {
+        readonly componentId: string;
+        readonly proofInput: unknown;
+        readonly secretState: unknown;
+        readonly proverRandomnessHex: string;
+    }): BallotPrivacyProofGeneration;
+    generateBallotProofRecord(input: {
+        readonly statement: unknown;
+        readonly linearStatement: unknown;
+        readonly parameterSet: unknown;
+        readonly proofEncoding: unknown;
+        readonly publicRandomnessHex: string;
+        readonly componentBundleStatement: unknown;
+        readonly componentProofInputs: readonly unknown[];
+        readonly secretState: unknown;
+        readonly proverRandomnessHex: string;
+        readonly componentProverRandomnessHexes: Readonly<
+            Record<string, string>
+        >;
+        readonly componentSecretStates?: Readonly<Record<string, unknown>>;
+    }): BallotPrivacyProofGeneration;
     verifyBallotProof(input: {
         readonly ballotProof: unknown;
         readonly componentBundleStatement?: unknown;
@@ -287,6 +326,38 @@ type TranscriptCoreKernelCommand =
           readonly proverRandomnessHex: string;
       }
     | {
+          readonly command: 'GenerateBallotProof';
+          readonly linearStatement: unknown;
+          readonly parameterSet: unknown;
+          readonly proofEncoding: unknown;
+          readonly publicRandomnessHex: string;
+          readonly secretState: unknown;
+          readonly proverRandomnessHex: string;
+      }
+    | {
+          readonly command: 'GenerateBallotComponentProof';
+          readonly componentId: string;
+          readonly proofInput: unknown;
+          readonly secretState: unknown;
+          readonly proverRandomnessHex: string;
+      }
+    | {
+          readonly command: 'GenerateBallotProofRecord';
+          readonly statement: unknown;
+          readonly linearStatement: unknown;
+          readonly parameterSet: unknown;
+          readonly proofEncoding: unknown;
+          readonly publicRandomnessHex: string;
+          readonly componentBundleStatement: unknown;
+          readonly componentProofInputs: readonly unknown[];
+          readonly secretState: unknown;
+          readonly proverRandomnessHex: string;
+          readonly componentProverRandomnessHexes: Readonly<
+              Record<string, string>
+          >;
+          readonly componentSecretStates?: Readonly<Record<string, unknown>>;
+      }
+    | {
           readonly command: 'VerifyBallotProof';
           readonly ballotProof: unknown;
           readonly componentBundleStatement?: unknown;
@@ -335,10 +406,12 @@ type TranscriptCoreKernelDigestManifest = Readonly<
     Record<TranscriptCoreKernelBuildRunner, string>
 >;
 
+// These are reviewed current-kernel build outputs from tools/ci/build-wasm-kernel.ts.
+// Add a digest only after confirming the Rust/WASM kernel change is expected.
 export const currentTranscriptCoreKernelNormalizedSha256HexByBuildRunner: TranscriptCoreKernelDigestManifest =
     {
         windowsDeveloperBuild:
-            'ff28503a1daa1824ea9fdb89cc7baaf4f03d944f706bd12a76125ea7e7161b2b',
+            'e6555df1fb9ccaa775840092f79e2a60017fe9760bae0b4f1da8e1d235162076',
         githubActionsUbuntuLatest:
             '73691262c72912cb7cf5a9a85644acc39b8b81d7927269c95f52a37eecd11db9',
         githubActionsMacosLatest:
@@ -1044,6 +1117,45 @@ export const createTranscriptCoreKernelLoader = (
                         publicRandomnessHex: input.publicRandomnessHex,
                         secretState: input.secretState,
                         proverRandomnessHex: input.proverRandomnessHex,
+                    }),
+                generateBallotProof: (input): BallotPrivacyProofGeneration =>
+                    executeCommand<BallotPrivacyProofGeneration>({
+                        command: 'GenerateBallotProof',
+                        linearStatement: input.linearStatement,
+                        parameterSet: input.parameterSet,
+                        proofEncoding: input.proofEncoding,
+                        publicRandomnessHex: input.publicRandomnessHex,
+                        secretState: input.secretState,
+                        proverRandomnessHex: input.proverRandomnessHex,
+                    }),
+                generateBallotComponentProof: (
+                    input,
+                ): BallotPrivacyProofGeneration =>
+                    executeCommand<BallotPrivacyProofGeneration>({
+                        command: 'GenerateBallotComponentProof',
+                        componentId: input.componentId,
+                        proofInput: input.proofInput,
+                        secretState: input.secretState,
+                        proverRandomnessHex: input.proverRandomnessHex,
+                    }),
+                generateBallotProofRecord: (
+                    input,
+                ): BallotPrivacyProofGeneration =>
+                    executeCommand<BallotPrivacyProofGeneration>({
+                        command: 'GenerateBallotProofRecord',
+                        statement: input.statement,
+                        linearStatement: input.linearStatement,
+                        parameterSet: input.parameterSet,
+                        proofEncoding: input.proofEncoding,
+                        publicRandomnessHex: input.publicRandomnessHex,
+                        componentBundleStatement:
+                            input.componentBundleStatement,
+                        componentProofInputs: input.componentProofInputs,
+                        secretState: input.secretState,
+                        proverRandomnessHex: input.proverRandomnessHex,
+                        componentProverRandomnessHexes:
+                            input.componentProverRandomnessHexes,
+                        componentSecretStates: input.componentSecretStates,
                     }),
                 verifyBallotProof: (input): BallotPrivacyKernelVerification =>
                     executeCommand<BallotPrivacyKernelVerification>({

@@ -25,8 +25,15 @@ use super::{
     polynomial_vector::PolynomialVector,
     proof_coder::{LazerDemoLinearProofComponents, encode_linear_proof_components},
     quadratic_equation::LinearProofQuadraticEquation,
+    sparse_linear_proof_statement::{
+        derive_dense_compatible_sparse_linear_statement_transcript,
+        transform_sparse_statement_matrix_to_proof_ring,
+        transform_sparse_target_vector_to_proof_ring,
+    },
+    sparse_polynomial_matrix::SparsePolynomialMatrix,
     tbox_relations::{
-        apply_tbox_z3_response_relations, apply_tbox_z4_response_relations,
+        apply_tbox_z3_response_relations, apply_tbox_z3_response_relations_sparse,
+        apply_tbox_z4_response_relations, apply_tbox_z4_response_relations_sparse,
         build_tbox_prefix_accumulators,
     },
 };
@@ -46,6 +53,15 @@ pub(crate) struct LinearProverWitnessInput<'a> {
     pub(crate) target_coefficient_representation: LinearProofTargetCoefficientRepresentation,
     pub(crate) source_witness_coefficients: &'a [Vec<i64>],
     pub(crate) public_randomness: &'a [u8],
+}
+
+pub(crate) struct SparseLinearProverWitnessInput<'a> {
+    pub(crate) parameter_set: &'a LinearProofParameterSet,
+    pub(crate) proof_encoding: &'a LinearProofEncoding,
+    pub(crate) source_statement_matrix: &'a SparsePolynomialMatrix,
+    pub(crate) target_vector_coefficients: &'a [Vec<u64>],
+    pub(crate) target_coefficient_representation: LinearProofTargetCoefficientRepresentation,
+    pub(crate) source_witness_coefficients: &'a [Vec<i64>],
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -93,6 +109,17 @@ pub(crate) struct LinearProverProofInput<'a> {
     pub(crate) parameter_set: &'a LinearProofParameterSet,
     pub(crate) proof_encoding: &'a LinearProofEncoding,
     pub(crate) statement_matrix_coefficients: &'a [Vec<Vec<u64>>],
+    pub(crate) target_vector_coefficients: &'a [Vec<u64>],
+    pub(crate) target_coefficient_representation: LinearProofTargetCoefficientRepresentation,
+    pub(crate) source_witness_coefficients: &'a [Vec<i64>],
+    pub(crate) public_randomness: &'a [u8; RECEIVER_KEY_PROVER_RANDOMNESS_BYTES],
+    pub(crate) prover_randomness: &'a [u8; RECEIVER_KEY_PROVER_RANDOMNESS_BYTES],
+}
+
+pub(crate) struct SparseLinearProverProofInput<'a> {
+    pub(crate) parameter_set: &'a LinearProofParameterSet,
+    pub(crate) proof_encoding: &'a LinearProofEncoding,
+    pub(crate) source_statement_matrix: &'a SparsePolynomialMatrix,
     pub(crate) target_vector_coefficients: &'a [Vec<u64>],
     pub(crate) target_coefficient_representation: LinearProofTargetCoefficientRepresentation,
     pub(crate) source_witness_coefficients: &'a [Vec<i64>],
@@ -259,6 +286,107 @@ pub(crate) fn prepare_linear_prover_witness(
     })
 }
 
+pub(crate) fn prepare_sparse_linear_prover_witness(
+    input: SparseLinearProverWitnessInput<'_>,
+) -> CanonicalResult<LinearProverWitnessPreparation> {
+    input.parameter_set.validate()?;
+    input.proof_encoding.validate()?;
+    validate_source_witness_shape(input.parameter_set, input.source_witness_coefficients)?;
+    if input.source_statement_matrix.rows() != input.parameter_set.statement_rows
+        || input.source_statement_matrix.columns() != input.parameter_set.statement_columns
+        || input.source_statement_matrix.ring().degree() != input.parameter_set.ring_degree
+        || input.source_statement_matrix.ring().modulus() != input.parameter_set.coefficient_modulus
+    {
+        return Err(invalid_prover(
+            "linear prover sparse statement matrix does not match the parameter set",
+        ));
+    }
+
+    let source_witness_vector =
+        source_witness_to_canonical_vector(input.parameter_set, input.source_witness_coefficients)?;
+    let source_target_vector =
+        source_target_vector(input.parameter_set, input.target_vector_coefficients)?;
+    let source_relation_output = input
+        .source_statement_matrix
+        .multiply_vector(&source_witness_vector)?
+        .add(&source_target_vector)?;
+    if !is_zero_polynomial_vector(&source_relation_output) {
+        return Err(invalid_prover(
+            "linear prover source witness does not satisfy A*w + t = 0",
+        ));
+    }
+
+    let witness_l2_squared = source_witness_l2_squared(input.source_witness_coefficients)?;
+    if witness_l2_squared > input.parameter_set.witness_l2_bound_squared {
+        return Err(invalid_prover(
+            "linear prover source witness exceeds the l2 bound",
+        ));
+    }
+
+    let transformed_relation_witness = transform_source_witness_to_proof_ring(
+        input.parameter_set,
+        input.proof_encoding,
+        input.source_witness_coefficients,
+    )?;
+    let proof_ring = PolynomialRing::new(
+        input.proof_encoding.ring_degree,
+        input.proof_encoding.coefficient_modulus,
+    )?;
+    let transformed_witness_vector =
+        PolynomialVector::new(proof_ring, transformed_relation_witness.clone())?;
+    let transformed_statement_matrix = transform_sparse_statement_matrix_to_proof_ring(
+        input.parameter_set,
+        input.proof_encoding,
+        input.source_statement_matrix,
+    )?;
+    let transformed_target_vector = transform_sparse_target_vector_to_proof_ring(
+        input.parameter_set,
+        input.proof_encoding,
+        input.target_vector_coefficients,
+        input.target_coefficient_representation,
+    )?;
+    let transformed_relation_output = transformed_statement_matrix
+        .multiply_vector(&transformed_witness_vector)?
+        .add(&transformed_target_vector)?;
+    if !is_zero_polynomial_vector(&transformed_relation_output) {
+        return Err(invalid_prover(
+            "linear prover transformed witness does not satisfy the proof-ring relation",
+        ));
+    }
+
+    let relation_witness_polynomial_count = transformed_relation_witness.len();
+    let expected_short_witness_polynomial_count = relation_witness_polynomial_count
+        .checked_add(1)
+        .ok_or_else(|| invalid_prover("linear prover short witness length overflowed"))?;
+    if input.proof_encoding.short_response_vector_length != expected_short_witness_polynomial_count
+    {
+        return Err(invalid_prover(
+            "linear prover witness layout does not match the proof encoding",
+        ));
+    }
+
+    let norm_slack = input
+        .parameter_set
+        .witness_l2_bound_squared
+        .checked_sub(witness_l2_squared)
+        .ok_or_else(|| invalid_prover("linear prover norm slack underflowed"))?;
+    let mut short_witness_entries = transformed_relation_witness;
+    short_witness_entries.push(binary_expansion_polynomial(proof_ring, norm_slack)?);
+    let short_witness_vector = PolynomialVector::new(proof_ring, short_witness_entries)?;
+    let summary = LinearProverWitnessSummary {
+        relation_witness_polynomial_count,
+        short_witness_polynomial_count: expected_short_witness_polynomial_count,
+        witness_l2_squared,
+        witness_l2_bound_squared: input.parameter_set.witness_l2_bound_squared,
+        norm_slack,
+    };
+
+    Ok(LinearProverWitnessPreparation {
+        short_witness_vector,
+        summary,
+    })
+}
+
 pub(crate) fn prepare_linear_prover_commitment(
     input: LinearProverCommitmentInput<'_>,
 ) -> CanonicalResult<LinearProverCommitmentPreparation> {
@@ -335,7 +463,7 @@ pub(crate) fn prepare_linear_prover_commitment(
     })
 }
 
-pub(crate) fn generate_receiver_key_linear_proof(
+pub(crate) fn generate_linear_proof(
     input: LinearProverProofInput<'_>,
 ) -> CanonicalResult<LinearProverProofGeneration> {
     input.parameter_set.validate()?;
@@ -469,6 +597,282 @@ pub(crate) fn generate_receiver_key_linear_proof(
         input.proof_encoding,
     )?;
     apply_tbox_z3_response_relations(
+        &mut tbox_accumulators,
+        &transformed_statement_matrix,
+        &euclidean_response_vector,
+        &z34_challenge_hash,
+        input.proof_encoding,
+    )?;
+    let tbox_witness = build_receiver_key_tbox_witness_vector(
+        proof_ring,
+        short_witness,
+        &z34_message_vector,
+        &hash_mask_blinding_vector,
+    )?;
+    let tbox_z34_witness = build_paired_quadratic_witness_vector(
+        proof_ring,
+        short_witness.entries(),
+        z34_message_vector.entries(),
+    )?;
+    let folded_tbox_equations = tbox_accumulators.auto_folded_equations()?;
+    let hash_mask_vector = receiver_key_hash_mask_from_tbox_equations(
+        proof_ring,
+        &folded_tbox_equations,
+        &tbox_witness,
+        &tbox_z34_witness,
+    )?;
+    let many_quadratic_equations =
+        build_many_quadratic_equations(&tbox_accumulators, &hash_mask_vector)?;
+    let many_quadratic_fold = fold_many_quadratic_equations(
+        &many_quadratic_equations,
+        &generator_challenge_hash,
+        input.proof_encoding.full_size_coefficient_bit_length,
+    )?;
+    let quadratic_message_vector = receiver_key_quadratic_message_vector(
+        proof_ring,
+        &z34_message_vector,
+        &hash_mask_blinding_vector,
+    )?;
+    let quadratic_witness = build_paired_quadratic_witness_vector(
+        proof_ring,
+        short_witness.entries(),
+        quadratic_message_vector.entries(),
+    )?;
+    let folded_relation_value = evaluate_quadratic_equation_equation(
+        &many_quadratic_fold.folded_equation,
+        &quadratic_witness,
+    )?;
+    if !is_zero_polynomial(&folded_relation_value) {
+        return Err(invalid_prover(
+            "receiver-key many-quadratic relation is not satisfied by the prover witness",
+        ));
+    }
+
+    let quadratic_target_tail = receiver_key_target_commitment_rows(
+        &public_parameters.message_key_matrix,
+        &opening_randomness_prefix,
+        RECEIVER_KEY_TBOX_Z34_MESSAGE_POLYNOMIALS + RECEIVER_KEY_TBOX_HASH_MASK_POLYNOMIALS,
+        &receiver_key_zero_message_vector(
+            proof_ring,
+            RECEIVER_KEY_QUADRATIC_TARGET_TAIL_POLYNOMIALS,
+        )?,
+    )?;
+    target_commitment_vector.extend(quadratic_target_tail);
+    let zero_verifier_polynomial = vec![0_u64; proof_ring.degree()];
+    let zero_recovered_high_bits =
+        vec![vec![0_u64; proof_ring.degree()]; input.proof_encoding.hint_vector_length];
+    let quadratic_challenge_encoding = encode_quadratic_challenge_input_for_hash(
+        proof_ring,
+        &target_commitment_vector
+            [RECEIVER_KEY_TBOX_Z34_MESSAGE_POLYNOMIALS + RECEIVER_KEY_TBOX_HASH_MASK_POLYNOMIALS..],
+        &zero_verifier_polynomial,
+        &zero_recovered_high_bits,
+        input.proof_encoding,
+    )?;
+    let quadratic_challenge_hash =
+        shake128_32(&[&generator_challenge_hash, &quadratic_challenge_encoding]);
+    let centered_challenge_polynomial = sample_linear_proof_autostable_challenge_coefficients(
+        proof_ring.degree(),
+        proof_profile.challenge_centered_bound,
+        proof_profile.challenge_coefficient_bit_length,
+        &quadratic_challenge_hash,
+        0,
+    )?;
+    let challenge_polynomial =
+        signed_polynomial_to_canonical(proof_ring, &centered_challenge_polynomial)?;
+    let short_response_vector =
+        multiply_polynomial_by_vector(proof_ring, &challenge_polynomial, short_witness)?;
+    let randomness_response_vector = multiply_polynomial_by_vector(
+        proof_ring,
+        &challenge_polynomial,
+        &opening_randomness_prefix,
+    )?;
+    let recovery_input = multiply_polynomial_by_vector(
+        proof_ring,
+        &challenge_polynomial,
+        commitment_preparation.opening_remainder_vector(),
+    )?;
+    let hint_vector =
+        make_zero_high_bits_hint(proof_ring, recovery_input.entries(), input.proof_encoding)?;
+    validate_zero_high_bits_low_part(proof_ring, recovery_input.entries(), input.proof_encoding)?;
+
+    let proof_bytes = encode_linear_proof_components(
+        LazerDemoLinearProofComponents {
+            commitment_target_vector: target_commitment_vector,
+            hash_mask_vector,
+            compressed_commitment_vector: commitment_preparation
+                .compressed_commitment_vector()
+                .entries()
+                .to_vec(),
+            centered_challenge_polynomial,
+            hint_vector,
+            short_response_vector: canonical_vector_to_centered_entries(
+                proof_ring,
+                short_response_vector.entries(),
+            )?,
+            randomness_response_vector: canonical_vector_to_centered_entries(
+                proof_ring,
+                randomness_response_vector.entries(),
+            )?,
+            euclidean_response_vector,
+            infinity_response_vector,
+        },
+        input.proof_encoding,
+    )?;
+    let summary = LinearProverProofSummary {
+        proof_size_bytes: proof_bytes.len(),
+        abdlop_commitment_hash_hex: to_hex(&abdlop_commitment_hash),
+        z34_challenge_hash_hex: to_hex(&z34_challenge_hash),
+        generator_challenge_hash_hex: to_hex(&generator_challenge_hash),
+        quadratic_challenge_hash_hex: to_hex(&quadratic_challenge_hash),
+    };
+
+    Ok(LinearProverProofGeneration {
+        proof_bytes,
+        summary,
+    })
+}
+
+pub(crate) fn generate_receiver_key_linear_proof(
+    input: LinearProverProofInput<'_>,
+) -> CanonicalResult<LinearProverProofGeneration> {
+    generate_linear_proof(input)
+}
+
+pub(crate) fn generate_sparse_linear_proof(
+    input: SparseLinearProverProofInput<'_>,
+) -> CanonicalResult<LinearProverProofGeneration> {
+    input.parameter_set.validate()?;
+    input.proof_encoding.validate()?;
+    let proof_profile = linear_proof_profile_for_encoding(input.proof_encoding)?;
+    let proof_ring = PolynomialRing::new(
+        input.proof_encoding.ring_degree,
+        input.proof_encoding.coefficient_modulus,
+    )?;
+    let statement_transcript = derive_dense_compatible_sparse_linear_statement_transcript(
+        input.parameter_set,
+        input.proof_encoding,
+        input.source_statement_matrix,
+        input.target_vector_coefficients,
+        input.target_coefficient_representation,
+        input.public_randomness,
+    )?;
+    let witness_preparation =
+        prepare_sparse_linear_prover_witness(SparseLinearProverWitnessInput {
+            parameter_set: input.parameter_set,
+            proof_encoding: input.proof_encoding,
+            source_statement_matrix: input.source_statement_matrix,
+            target_vector_coefficients: input.target_vector_coefficients,
+            target_coefficient_representation: input.target_coefficient_representation,
+            source_witness_coefficients: input.source_witness_coefficients,
+        })?;
+    let commitment_preparation = prepare_linear_prover_commitment(LinearProverCommitmentInput {
+        proof_encoding: input.proof_encoding,
+        public_randomness: input.public_randomness,
+        statement_transcript_hash: &statement_transcript.public_parameters_and_statement_hash,
+        witness_preparation: &witness_preparation,
+        prover_randomness: input.prover_randomness,
+    })?;
+    let encoded_commitment = encode_compressed_commitment_vector(
+        commitment_preparation
+            .compressed_commitment_vector()
+            .entries(),
+        input.proof_encoding,
+    )?;
+    let abdlop_commitment_hash = shake128_32(&[
+        &statement_transcript.public_parameters_and_statement_hash,
+        &encoded_commitment,
+    ]);
+    let public_parameters =
+        derive_abdlop_public_parameters(input.public_randomness, input.proof_encoding)?;
+    let short_witness = witness_preparation.short_witness_vector();
+    let opening_randomness = commitment_preparation.opening_randomness_vector();
+    let opening_randomness_prefix = PolynomialVector::new(
+        proof_ring,
+        opening_randomness.entries()[..input.proof_encoding.randomness_response_vector_length]
+            .to_vec(),
+    )?;
+    let subprotocol_seeds = shake128_96(&[commitment_preparation.subprotocol_seed()]);
+    let mut z34_seed = [0_u8; RECEIVER_KEY_PROVER_RANDOMNESS_BYTES];
+    z34_seed.copy_from_slice(&subprotocol_seeds[..RECEIVER_KEY_PROVER_RANDOMNESS_BYTES]);
+
+    let beta_signs = receiver_key_tbox_beta_signs(&z34_seed);
+    let z34_message_vector = receiver_key_z34_message_vector(proof_ring, beta_signs)?;
+    let mut target_commitment_vector = receiver_key_target_commitment_prefix(
+        &public_parameters.message_key_matrix,
+        &opening_randomness_prefix,
+        &z34_message_vector,
+    )?;
+    let z34_challenge_encoding = encode_uniform_polynomial_vector_for_hash(
+        &target_commitment_vector[..RECEIVER_KEY_TBOX_Z34_MESSAGE_POLYNOMIALS],
+        proof_ring,
+        input.proof_encoding.full_size_coefficient_bit_length,
+    )?;
+    let z34_challenge_hash = shake128_32(&[&abdlop_commitment_hash, &z34_challenge_encoding]);
+    let transformed_statement_matrix = transform_sparse_statement_matrix_to_proof_ring(
+        input.parameter_set,
+        input.proof_encoding,
+        input.source_statement_matrix,
+    )?;
+    let transformed_target_vector = transform_sparse_target_vector_to_proof_ring(
+        input.parameter_set,
+        input.proof_encoding,
+        input.target_vector_coefficients,
+        input.target_coefficient_representation,
+    )?;
+    let transformed_relation_witness = PolynomialVector::new(
+        proof_ring,
+        short_witness.entries()[..short_witness.len() - 1].to_vec(),
+    )?;
+    let tbox_z4_secret = transformed_statement_matrix
+        .multiply_vector(&transformed_relation_witness)?
+        .add(&transformed_target_vector)?;
+    let euclidean_response_vector = compute_receiver_key_tbox_z3_response(
+        proof_ring,
+        short_witness,
+        beta_signs.0,
+        &z34_challenge_hash,
+    )?;
+    let infinity_response_vector = if is_zero_polynomial_vector(&tbox_z4_secret) {
+        vec![vec![0_i64; proof_ring.degree()]; input.proof_encoding.infinity_response_vector_length]
+    } else {
+        compute_receiver_key_tbox_z4_response(
+            proof_ring,
+            &tbox_z4_secret,
+            beta_signs.1,
+            &z34_challenge_hash,
+        )?
+    };
+
+    let hash_mask_blinding_vector =
+        receiver_key_zero_message_vector(proof_ring, RECEIVER_KEY_TBOX_HASH_MASK_POLYNOMIALS)?;
+    let hash_mask_target_commitment = receiver_key_target_commitment_rows(
+        &public_parameters.message_key_matrix,
+        &opening_randomness_prefix,
+        RECEIVER_KEY_TBOX_Z34_MESSAGE_POLYNOMIALS,
+        &hash_mask_blinding_vector,
+    )?;
+    target_commitment_vector.extend(hash_mask_target_commitment);
+    let generator_challenge_encoding = encode_uniform_polynomial_vector_for_hash(
+        &target_commitment_vector[RECEIVER_KEY_TBOX_Z34_MESSAGE_POLYNOMIALS
+            ..RECEIVER_KEY_TBOX_Z34_MESSAGE_POLYNOMIALS + RECEIVER_KEY_TBOX_HASH_MASK_POLYNOMIALS],
+        proof_ring,
+        input.proof_encoding.full_size_coefficient_bit_length,
+    )?;
+    let generator_challenge_hash =
+        shake128_32(&[&z34_challenge_hash, &generator_challenge_encoding]);
+
+    let mut tbox_accumulators =
+        build_tbox_prefix_accumulators(&generator_challenge_hash, input.proof_encoding)?;
+    apply_tbox_z4_response_relations_sparse(
+        &mut tbox_accumulators,
+        &transformed_statement_matrix,
+        &transformed_target_vector,
+        &infinity_response_vector,
+        &z34_challenge_hash,
+        input.proof_encoding,
+    )?;
+    apply_tbox_z3_response_relations_sparse(
         &mut tbox_accumulators,
         &transformed_statement_matrix,
         &euclidean_response_vector,
@@ -1660,7 +2064,8 @@ fn invalid_prover(message: impl Into<String>) -> CanonicalError {
 mod tests {
     use super::{
         LinearProverCommitmentInput, LinearProverProofInput, LinearProverWitnessInput,
-        generate_receiver_key_linear_proof, prepare_linear_prover_commitment,
+        SparseLinearProverProofInput, generate_receiver_key_linear_proof,
+        generate_sparse_linear_proof, prepare_linear_prover_commitment,
         prepare_linear_prover_witness,
     };
     use crate::{
@@ -1671,8 +2076,12 @@ mod tests {
             linear_proof_statement::{
                 LinearProofTargetCoefficientRepresentation, derive_linear_statement_transcript,
             },
-            linear_proof_verifier::verify_linear_proof_vector_case_value,
+            linear_proof_verifier::{
+                SparseLinearProofVerificationInput, verify_linear_proof_vector_case_value,
+                verify_sparse_linear_proof_components,
+            },
             polynomial_ring::PolynomialRing,
+            sparse_polynomial_matrix::{SparsePolynomialMatrix, SparsePolynomialMatrixEntry},
         },
         hashing::to_hex,
     };
@@ -2044,6 +2453,79 @@ mod tests {
         assert_eq!(
             mutated_verification["ok"], false,
             "mutated receiver-key target should fail: {mutated_verification}"
+        );
+    }
+
+    #[test]
+    fn sparse_generated_proof_bytes_match_dense_compatible_statement() {
+        let parameter_set = receiver_key_linear_parameter_contract();
+        let proof_encoding = receiver_key_linear_proof_encoding_contract();
+        let (statement_matrix, target_vector, witness) = receiver_key_fixture();
+        let public_randomness = [0_u8; 32];
+        let dense_generation = generate_receiver_key_linear_proof(LinearProverProofInput {
+            parameter_set: &parameter_set,
+            proof_encoding: &proof_encoding,
+            statement_matrix_coefficients: &statement_matrix,
+            target_vector_coefficients: &target_vector,
+            target_coefficient_representation:
+                LinearProofTargetCoefficientRepresentation::CenteredSignedSourceModulus,
+            source_witness_coefficients: &witness,
+            public_randomness: &public_randomness,
+            prover_randomness: &[12_u8; 32],
+        })
+        .expect("dense proof generation should succeed");
+        let mut sparse_entries = Vec::new();
+        for (row_index, row) in statement_matrix.iter().enumerate() {
+            for (column_index, polynomial) in row.iter().enumerate() {
+                if polynomial.iter().any(|coefficient| *coefficient != 0) {
+                    sparse_entries.push(SparsePolynomialMatrixEntry::new(
+                        row_index,
+                        column_index,
+                        polynomial.clone(),
+                    ));
+                }
+            }
+        }
+        let sparse_statement_matrix = SparsePolynomialMatrix::new(
+            PolynomialRing::new(parameter_set.ring_degree, parameter_set.coefficient_modulus)
+                .expect("source ring should validate"),
+            parameter_set.statement_rows,
+            parameter_set.statement_columns,
+            sparse_entries,
+        )
+        .expect("sparse statement matrix should validate");
+        let sparse_generation = generate_sparse_linear_proof(SparseLinearProverProofInput {
+            parameter_set: &parameter_set,
+            proof_encoding: &proof_encoding,
+            source_statement_matrix: &sparse_statement_matrix,
+            target_vector_coefficients: &target_vector,
+            target_coefficient_representation:
+                LinearProofTargetCoefficientRepresentation::CenteredSignedSourceModulus,
+            source_witness_coefficients: &witness,
+            public_randomness: &public_randomness,
+            prover_randomness: &[12_u8; 32],
+        })
+        .expect("sparse proof generation should succeed");
+
+        assert_eq!(sparse_generation.proof_bytes, dense_generation.proof_bytes);
+
+        let verification =
+            verify_sparse_linear_proof_components(SparseLinearProofVerificationInput {
+                case_name: "generated-sparse-receiver-key-compatible-proof",
+                parameter_set: &parameter_set,
+                proof_encoding: &proof_encoding,
+                public_randomness_hex: &to_hex(&public_randomness),
+                source_statement_matrix: &sparse_statement_matrix,
+                target_vector_coefficients: &target_vector,
+                target_coefficient_representation:
+                    LinearProofTargetCoefficientRepresentation::CenteredSignedSourceModulus,
+                proof_hex: &to_hex(&sparse_generation.proof_bytes),
+                expected_proof_size_bytes: Some(sparse_generation.proof_bytes.len()),
+            });
+
+        assert_eq!(
+            verification["ok"], true,
+            "generated sparse proof should verify: {verification}"
         );
     }
 }
