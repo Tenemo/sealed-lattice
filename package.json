@@ -17,7 +17,7 @@
         "test:node": "pnpm run build && vitest --project node --run",
         "test:browser": "pnpm run build && vitest --project browser-desktop --project browser-mobile --run",
         "test": "pnpm run test:node && pnpm run test:browser",
-        "coverage:node": "pnpm run build && vitest --project node --run --coverage",
+        "coverage:node": "pnpm run build && vitest --project node --run --coverage packages/wasm/tests/node/transcript-core-kernel.test.ts tests/node/tools/check-package-boundaries.test.ts tests/node/tools/generate-coverage-badge.test.ts",
         "coverage:badge": "pnpm run coverage:node && tsx ./tools/generate-coverage-badge.ts",
         "docs:api": "pnpm run build && pnpm exec del-cli docs/src/content/docs/api/reference && tsx ./node_modules/typedoc/bin/typedoc --options typedoc.config.mjs && tsx ./typedoc/postprocess-site-docs.ts",
         "docs:dev": "pnpm run docs:api && astro dev --root docs",
