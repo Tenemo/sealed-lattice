@@ -421,6 +421,57 @@ fn derive_ballot_component_proof_bundle_digest(component_proof_bundle: &Value) -
     )
 }
 
+fn derive_ballot_component_proof_root(
+    component_proof: &Value,
+    proof_input: &Value,
+    expected_component_id: &str,
+) -> Option<String> {
+    let mut proof_root_payload = Map::new();
+    proof_root_payload.insert("componentId".to_string(), json!(expected_component_id));
+    if let Some(component_proof_statement_digest) =
+        string_field(proof_input, "componentProofStatementDigest")
+    {
+        proof_root_payload.insert(
+            "componentProofStatementDigest".to_string(),
+            json!(component_proof_statement_digest),
+        );
+    }
+    proof_root_payload.insert(
+        "componentStatementDigest".to_string(),
+        json!(string_field(component_proof, "componentStatementDigest")?),
+    );
+    proof_root_payload.insert(
+        "proofBytesDigest".to_string(),
+        json!(string_field(component_proof, "proofBytesDigest")?),
+    );
+    proof_root_payload.insert(
+        "proofEncodingProfileDigest".to_string(),
+        json!(string_field(component_proof, "proofEncodingProfileDigest")?),
+    );
+    proof_root_payload.insert(
+        "proofParameterSetDigest".to_string(),
+        json!(string_field(component_proof, "proofParameterSetDigest")?),
+    );
+    proof_root_payload.insert(
+        "proofStatementFormat".to_string(),
+        json!(string_field(proof_input, "proofStatementFormat")?),
+    );
+    proof_root_payload.insert(
+        "publicRandomnessDigest".to_string(),
+        json!(string_field(component_proof, "publicRandomnessDigest")?),
+    );
+    proof_root_payload.insert(
+        "purpose".to_string(),
+        json!("ballot-proof-component-proof-root-v1"),
+    );
+    proof_root_payload.insert(
+        "statementDigest".to_string(),
+        json!(string_field(proof_input, "statementDigest")?),
+    );
+
+    derive_digest("ChallengeDomainDigest", &Value::Object(proof_root_payload))
+}
+
 fn collect_ballot_proof_refusals(statement: &Value, ballot_proof: &Value) -> Vec<Value> {
     let mut refused_objects = Vec::new();
     let statement_digest = string_field(statement, "ballotProofStatementDigest");
@@ -756,6 +807,22 @@ fn collect_claim_bearing_package_refusals(ballot_package: &Value) -> Vec<Value> 
         .unwrap_or(&Value::Null);
     let ballot_proof = package_object.get("ballotProof").unwrap_or(&Value::Null);
     let mut refused_objects = collect_ballot_proof_refusals(statement, ballot_proof);
+    refused_objects.extend(collect_proof_bytes_refusals(
+        package_object.get("proofBytesHex").and_then(Value::as_str),
+        string_field(ballot_proof, "proofBytesDigest"),
+        object_map(ballot_proof)
+            .and_then(|object| object.get("proofSizeBytes"))
+            .and_then(Value::as_u64),
+        string_field(ballot_proof, "ballotProofRecordDigest"),
+        "Ballot",
+    ));
+    refused_objects.extend(collect_ballot_component_proof_bundle_refusals(
+        statement,
+        ballot_proof,
+        None,
+        package_object.get("componentProofBundle"),
+        package_object.get("componentProofInputs"),
+    ));
     let package_digest = string_field(ballot_package, "ballotPackageDigest");
 
     if string_field(ballot_package, "objectType") != Some("BallotPackage")
@@ -764,6 +831,14 @@ fn collect_claim_bearing_package_refusals(ballot_package: &Value) -> Vec<Value> 
     {
         refused_objects.push(structural_refusal(
             "Claim-bearing ballot package shell digest or shape is invalid.",
+            package_digest,
+        ));
+    }
+    if package_object.contains_key("componentProofBundle")
+        && !package_object.contains_key("proofBytesHex")
+    {
+        refused_objects.push(structural_refusal(
+            "Claim-bearing ballot package verification requires the public ballot proof bytes when a component proof bundle is supplied.",
             package_digest,
         ));
     }
@@ -972,6 +1047,28 @@ fn derive_ballot_proof_linear_statement_digest(linear_statement: &Value) -> Opti
         &json!({
             "payload": statement_payload,
             "purpose": "ballot-proof-linear-proof-statement-v1"
+        }),
+    )
+}
+
+fn derive_ballot_sparse_linear_statement_digest(sparse_statement: &Value) -> Option<String> {
+    let statement_payload = value_without_field(sparse_statement, "statementDigest")?;
+    derive_digest(
+        "ChallengeDomainDigest",
+        &json!({
+            "payload": statement_payload,
+            "purpose": "ballot-proof-sparse-linear-proof-statement-v1"
+        }),
+    )
+}
+
+fn derive_ballot_component_proof_statement_plan_digest(plan: &Value) -> Option<String> {
+    let statement_payload = value_without_field(plan, "componentProofStatementDigest")?;
+    derive_digest(
+        "ChallengeDomainDigest",
+        &json!({
+            "payload": statement_payload,
+            "purpose": "ballot-proof-component-proof-statement-plan-v1"
         }),
     )
 }
@@ -1732,6 +1829,144 @@ fn collect_ballot_component_proof_bundle_refusals(
     refused_objects
 }
 
+fn supplied_component_proof_statement_digest<'a>(
+    proof_statement: &'a Value,
+    proof_statement_format: &str,
+) -> (Option<String>, Option<&'a str>) {
+    match (
+        string_field(proof_statement, "objectType"),
+        proof_statement_format,
+    ) {
+        (Some("BallotProofLinearProofStatement"), "dense-polynomial-matrix-linear-proof-v1") => (
+            derive_ballot_proof_linear_statement_digest(proof_statement),
+            Some("statementDigest"),
+        ),
+        (
+            Some("BallotProofSparseComponentLinearProofStatement"),
+            "sparse-polynomial-matrix-linear-proof-v1",
+        ) => (
+            derive_ballot_sparse_linear_statement_digest(proof_statement),
+            Some("statementDigest"),
+        ),
+        (
+            Some("BallotProofComponentProofStatementPlan"),
+            "structured-module-lwe-linear-proof-v1" | "public-zero-witness-binding-check-v1",
+        ) => (
+            derive_ballot_component_proof_statement_plan_digest(proof_statement),
+            Some("componentProofStatementDigest"),
+        ),
+        _ => (None, None),
+    }
+}
+
+fn collect_supplied_component_proof_statement_refusals(
+    component_proof: &Value,
+    expected_component_id: &str,
+    proof_input: &Value,
+    proof_record_digest: Option<&str>,
+) -> Vec<Value> {
+    let mut refused_objects = Vec::new();
+    let Some(proof_statement) =
+        object_map(proof_input).and_then(|object| object.get("proofStatement"))
+    else {
+        return refused_objects;
+    };
+    if object_map(proof_statement).is_none() {
+        refused_objects.push(structural_refusal(
+            format!(
+                "Ballot proof component proof statement object for {expected_component_id} is malformed."
+            ),
+            proof_record_digest,
+        ));
+        return refused_objects;
+    }
+
+    let proof_statement_format = string_field(proof_input, "proofStatementFormat").unwrap_or("");
+    let (expected_statement_digest, digest_field_name) =
+        supplied_component_proof_statement_digest(proof_statement, proof_statement_format);
+    if expected_statement_digest.is_none() || digest_field_name.is_none() {
+        refused_objects.push(structural_refusal(
+            format!(
+                "Ballot proof component proof statement object for {expected_component_id} does not match its declared statement format."
+            ),
+            proof_record_digest,
+        ));
+    }
+    if string_field(proof_statement, "proofStatementFormat")
+        .is_some_and(|supplied_format| supplied_format != proof_statement_format)
+    {
+        refused_objects.push(structural_refusal(
+            format!(
+                "Ballot proof component proof statement format for {expected_component_id} does not match the supplied proof input."
+            ),
+            proof_record_digest,
+        ));
+    }
+    if string_field(proof_statement, "componentId")
+        .is_some_and(|component_id| component_id != expected_component_id)
+    {
+        refused_objects.push(structural_refusal(
+            format!(
+                "Ballot proof component proof statement for {expected_component_id} is bound to the wrong component."
+            ),
+            proof_record_digest,
+        ));
+    }
+    if string_field(proof_statement, "componentStatementDigest").is_some_and(
+        |component_statement_digest| {
+            Some(component_statement_digest)
+                != string_field(component_proof, "componentStatementDigest")
+        },
+    ) {
+        refused_objects.push(structural_refusal(
+            format!(
+                "Ballot proof component proof statement for {expected_component_id} is not bound to the component statement."
+            ),
+            proof_record_digest,
+        ));
+    }
+    match digest_field_name {
+        Some("statementDigest") => {
+            if string_field(proof_statement, "statementDigest")
+                != expected_statement_digest.as_deref()
+            {
+                refused_objects.push(structural_refusal(
+                    format!(
+                        "Ballot proof component proof statement digest for {expected_component_id} does not match its canonical payload."
+                    ),
+                    proof_record_digest,
+                ));
+            }
+        }
+        Some("componentProofStatementDigest") => {
+            if string_field(proof_statement, "componentProofStatementDigest")
+                != expected_statement_digest.as_deref()
+            {
+                refused_objects.push(structural_refusal(
+                    format!(
+                        "Ballot proof component proof statement digest for {expected_component_id} does not match its canonical payload."
+                    ),
+                    proof_record_digest,
+                ));
+            }
+            if string_field(component_proof, "componentProofStatementDigest").is_some()
+                && string_field(proof_statement, "componentProofStatementDigest")
+                    != string_field(component_proof, "componentProofStatementDigest")
+            {
+                refused_objects.push(structural_refusal(
+                    format!(
+                        "Ballot proof component proof statement for {expected_component_id} does not match the proof record digest."
+                    ),
+                    proof_record_digest,
+                ));
+            }
+        }
+        _ => {}
+    }
+
+    refused_objects
+}
+
 fn collect_ballot_component_proof_input_refusals(
     ballot_proof: &Value,
     component_proof_bundle: &Value,
@@ -1887,12 +2122,95 @@ fn collect_ballot_component_proof_input_refusals(
                 proof_record_digest,
             ));
         }
+        if object_map(proof_input)
+            .and_then(|object| object.get("proofStatement"))
+            .is_none()
+        {
+            refused_objects.push(structural_refusal(
+                format!(
+                    "Ballot proof component proof input for {expected_component_id} must supply its public proof statement object."
+                ),
+                proof_record_digest,
+            ));
+        }
+        if derive_ballot_component_proof_root(component_proof, proof_input, expected_component_id)
+            .as_deref()
+            != string_field(component_proof, "proofRoot")
+        {
+            refused_objects.push(structural_refusal(
+                format!(
+                    "Ballot proof component proof root for {expected_component_id} does not match the supplied public proof input."
+                ),
+                proof_record_digest,
+            ));
+        }
+        refused_objects.extend(collect_supplied_component_proof_statement_refusals(
+            component_proof,
+            expected_component_id,
+            proof_input,
+            proof_record_digest,
+        ));
     }
 
     refused_objects
 }
 
+fn component_proof_bundle_unavailable_result(
+    operation: &str,
+    accepted_object_digest: Option<&str>,
+    component_proof_bundle: &Value,
+) -> Value {
+    let mut status_labels = vec![
+        json!("BallotProofRecordDigestRecomputed"),
+        json!("BallotProofBytesDigestChecked"),
+        json!("BallotProofComponentBundleBound"),
+        json!("BallotProofComponentProofInputsBound"),
+        json!("BallotProofComponentProofRootsVerified"),
+    ];
+    if operation == "verifyClaimBearingBallotPackage" {
+        status_labels.push(json!("ClaimBearingBallotPackageDigestRecomputed"));
+    }
+    let mut accepted_digests = accepted_object_digest
+        .into_iter()
+        .map(Value::from)
+        .collect::<Vec<_>>();
+    if let Some(component_proof_bundle_digest) =
+        string_field(component_proof_bundle, "componentProofBundleDigest")
+    {
+        accepted_digests.push(json!(component_proof_bundle_digest));
+    }
+    if let Some(component_proofs) = array_field(component_proof_bundle, "componentProofs") {
+        accepted_digests.extend(
+            component_proofs
+                .iter()
+                .filter_map(|component_proof| {
+                    string_field(component_proof, "componentProofRecordDigest")
+                })
+                .map(Value::from),
+        );
+    }
+
+    json!({
+        "ok": false,
+        "backendAvailable": BALLOT_PRIVACY_PROOF_BACKEND_AVAILABLE,
+        "backendStatus": describe_proof_backend(),
+        "operation": operation,
+        "statusLabels": status_labels,
+        "acceptedDigests": accepted_digests,
+        "refusedObjects": [
+            {
+                "code": "OperationUnavailable",
+                "message": format!("{operation}: component proof bundle preflight succeeded, but proof-byte verification for every ballot component format is not complete."),
+                "objectDigest": accepted_object_digest
+            }
+        ],
+        "unresolvedReason": "OperationUnavailable"
+    })
+}
+
 struct BallotLinearProofVerificationInputs<'a> {
+    component_proof_bundle: Option<&'a Value>,
+    component_proof_inputs: Option<&'a Value>,
     linear_statement: &'a Value,
     proof_bytes_hex: &'a str,
     public_randomness_hex: &'a str,
@@ -1923,6 +2241,8 @@ fn verify_ballot_linear_proof_bytes(
     let parameter_set = backend_inputs.parameter_set;
     let proof_encoding = backend_inputs.proof_encoding;
     let component_bundle_statement = backend_inputs.component_bundle_statement;
+    let component_proof_bundle = backend_inputs.component_proof_bundle;
+    let _component_proof_inputs = backend_inputs.component_proof_inputs;
     let mut refused_objects = Vec::new();
     let ballot_proof_record_digest = string_field(ballot_proof, "ballotProofRecordDigest");
     let linear_statement_digest = string_field(linear_statement, "statementDigest");
@@ -2048,6 +2368,15 @@ fn verify_ballot_linear_proof_bytes(
     if !refused_objects.is_empty() {
         return structural_rejection("verifyBallotProof", refused_objects);
     }
+    if linear_statement_projection_coverage == Some(FULL_BALLOT_PROOF_PROJECTION_COVERAGE)
+        && let Some(component_proof_bundle) = component_proof_bundle
+    {
+        return component_proof_bundle_unavailable_result(
+            "verifyBallotProof",
+            ballot_proof_record_digest,
+            component_proof_bundle,
+        );
+    }
 
     let vector_case = json!({
         "caseName": "ballot-proof-record",
@@ -2117,6 +2446,13 @@ fn verify_ballot_linear_proof_bytes(
                 "Ballot proof linear statement does not cover the full encoded-score ballot relation.",
                 ballot_proof_record_digest,
             )],
+        );
+    }
+    if let Some(component_proof_bundle) = component_proof_bundle {
+        return component_proof_bundle_unavailable_result(
+            "verifyBallotProof",
+            ballot_proof_record_digest,
+            component_proof_bundle,
         );
     }
 
@@ -2206,6 +2542,8 @@ pub(crate) fn verify_ballot_proof(
                 ballot_proof,
                 BallotLinearProofVerificationInputs {
                     component_bundle_statement,
+                    component_proof_bundle: backend_inputs.component_proof_bundle,
+                    component_proof_inputs: backend_inputs.component_proof_inputs,
                     linear_statement,
                     parameter_set,
                     proof_bytes_hex,
@@ -2232,6 +2570,15 @@ pub fn verify_claim_bearing_ballot_package(ballot_package: &Value) -> Value {
     let refused_objects = collect_claim_bearing_package_refusals(ballot_package);
     if !refused_objects.is_empty() {
         return structural_rejection("verifyClaimBearingBallotPackage", refused_objects);
+    }
+    if let Some(component_proof_bundle) = object_map(ballot_package)
+        .and_then(|package_object| package_object.get("componentProofBundle"))
+    {
+        return component_proof_bundle_unavailable_result(
+            "verifyClaimBearingBallotPackage",
+            string_field(ballot_package, "ballotPackageDigest"),
+            component_proof_bundle,
+        );
     }
 
     fail_closed("verifyClaimBearingBallotPackage")
@@ -3333,9 +3680,35 @@ mod tests {
             .expect("component id should be required");
         let public_randomness_byte = format!("{:02x}", component_index + 1);
 
+        let proof_statement_format = if component_id == "receiver-encryption-component" {
+            "structured-module-lwe-linear-proof-v1"
+        } else if component_id == "receiver-key-binding-component" {
+            "public-zero-witness-binding-check-v1"
+        } else if component_id == "score-and-shamir-field-component" {
+            "dense-polynomial-matrix-linear-proof-v1"
+        } else {
+            "sparse-polynomial-matrix-linear-proof-v1"
+        };
+        let proof_statement = component_proof_statement_for_test(
+            component_id,
+            component_statement_digest,
+            if proof_statement_format == "structured-module-lwe-linear-proof-v1"
+                || proof_statement_format == "public-zero-witness-binding-check-v1"
+            {
+                None
+            } else {
+                Some(test_digest(&format!("{component_id}-proof-statement")))
+            },
+            proof_statement_format,
+        );
+        let component_proof_statement_digest =
+            super::string_field(&proof_statement, "componentProofStatementDigest")
+                .map(ToString::to_string)
+                .unwrap_or_else(|| test_digest(&format!("{component_id}-proof-statement")));
+
         json!({
             "componentId": component_id,
-            "componentProofStatementDigest": test_digest(&format!("{component_id}-proof-statement")),
+            "componentProofStatementDigest": component_proof_statement_digest,
             "proofBytesHex": test_digest(&format!("{component_id}-proof-bytes-material")),
             "proofEncoding": {
                 "profileId": "ballot-proof-component-encoding-v1",
@@ -3345,14 +3718,95 @@ mod tests {
                 "profileId": "ballot-proof-component-parameter-set-v1",
                 "componentId": component_id,
             },
-            "proofStatementFormat": if component_id == "receiver-encryption-component" {
-                "structured-module-lwe-linear-proof-v1"
-            } else {
-                "sparse-polynomial-matrix-linear-proof-v1"
-            },
+            "proofStatement": proof_statement,
+            "proofStatementFormat": proof_statement_format,
             "publicRandomnessHex": public_randomness_byte.repeat(32),
             "statementDigest": component_statement_digest,
         })
+    }
+
+    fn component_proof_statement_for_test(
+        component_id: &str,
+        component_statement_digest: &Value,
+        component_proof_statement_digest: Option<String>,
+        proof_statement_format: &str,
+    ) -> Value {
+        if proof_statement_format == "dense-polynomial-matrix-linear-proof-v1" {
+            let statement_payload = json!({
+                "objectType": "BallotProofLinearProofStatement",
+                "objectVersion": 1,
+                "componentId": component_id,
+                "componentStatementDigest": component_statement_digest,
+                "proofStatementFormat": proof_statement_format,
+            });
+            let statement_digest = super::derive_digest(
+                "ChallengeDomainDigest",
+                &json!({
+                    "payload": statement_payload,
+                    "purpose": "ballot-proof-linear-proof-statement-v1"
+                }),
+            )
+            .expect("dense component proof statement digest should derive");
+            let mut statement = statement_payload;
+            statement
+                .as_object_mut()
+                .expect("dense component proof statement should be an object")
+                .insert("statementDigest".to_string(), json!(statement_digest));
+
+            return statement;
+        }
+        if proof_statement_format == "sparse-polynomial-matrix-linear-proof-v1" {
+            let statement_payload = json!({
+                "objectType": "BallotProofSparseComponentLinearProofStatement",
+                "objectVersion": 1,
+                "componentId": component_id,
+                "componentStatementDigest": component_statement_digest,
+                "proofStatementFormat": proof_statement_format,
+            });
+            let statement_digest = super::derive_digest(
+                "ChallengeDomainDigest",
+                &json!({
+                    "payload": statement_payload,
+                    "purpose": "ballot-proof-sparse-linear-proof-statement-v1"
+                }),
+            )
+            .expect("sparse component proof statement digest should derive");
+            let mut statement = statement_payload;
+            statement
+                .as_object_mut()
+                .expect("sparse component proof statement should be an object")
+                .insert("statementDigest".to_string(), json!(statement_digest));
+
+            return statement;
+        }
+        let statement_payload = json!({
+            "objectType": "BallotProofComponentProofStatementPlan",
+            "objectVersion": 1,
+            "componentId": component_id,
+            "componentStatementDigest": component_statement_digest,
+            "proofStatementFormat": proof_statement_format,
+        });
+        let canonical_component_proof_statement_digest = super::derive_digest(
+            "ChallengeDomainDigest",
+            &json!({
+                "payload": statement_payload,
+                "purpose": "ballot-proof-component-proof-statement-plan-v1"
+            }),
+        )
+        .expect("component proof statement plan digest should derive");
+        let mut statement_plan = statement_payload;
+        statement_plan
+            .as_object_mut()
+            .expect("component proof statement plan should be an object")
+            .insert(
+                "componentProofStatementDigest".to_string(),
+                json!(
+                    component_proof_statement_digest
+                        .unwrap_or(canonical_component_proof_statement_digest)
+                ),
+            );
+
+        statement_plan
     }
 
     fn component_proof_for_test(component_id: &str, component_statement_digest: &Value) -> Value {
@@ -3369,6 +3823,32 @@ mod tests {
         let public_randomness_hex = proof_input["publicRandomnessHex"]
             .as_str()
             .expect("component proof public randomness should be a string");
+        let proof_bytes_digest = proof_bytes_digest_for_test(proof_bytes_hex);
+        let proof_encoding_profile_digest =
+            super::derive_ballot_proof_encoding_profile_digest(proof_encoding)
+                .expect("component proof encoding digest should derive");
+        let proof_parameter_set_digest =
+            super::derive_ballot_proof_parameter_set_digest(proof_parameter_set)
+                .expect("component proof parameter set digest should derive");
+        let public_randomness_digest =
+            super::derive_ballot_proof_public_randomness_digest(public_randomness_hex)
+                .expect("component proof public randomness digest should derive");
+        let proof_root = super::derive_digest(
+            "ChallengeDomainDigest",
+            &json!({
+                "componentId": component_id,
+                "componentProofStatementDigest": proof_input["componentProofStatementDigest"],
+                "componentStatementDigest": component_statement_digest,
+                "proofBytesDigest": proof_bytes_digest,
+                "proofEncodingProfileDigest": proof_encoding_profile_digest,
+                "proofParameterSetDigest": proof_parameter_set_digest,
+                "proofStatementFormat": proof_input["proofStatementFormat"],
+                "publicRandomnessDigest": public_randomness_digest,
+                "purpose": "ballot-proof-component-proof-root-v1",
+                "statementDigest": component_statement_digest,
+            }),
+        )
+        .expect("component proof root should derive");
         let component_proof_payload = json!({
             "objectType": "BallotProofComponentProofRecord",
             "objectVersion": 1,
@@ -3378,15 +3858,12 @@ mod tests {
             "componentProofStatementDigest": proof_input["componentProofStatementDigest"],
             "componentStatementDigest": component_statement_digest,
             "proofBackend": "LaZerStyleLocalLatticeRelation",
-            "proofBytesDigest": proof_bytes_digest_for_test(proof_bytes_hex),
-            "proofEncodingProfileDigest": super::derive_ballot_proof_encoding_profile_digest(proof_encoding)
-                .expect("component proof encoding digest should derive"),
-            "proofParameterSetDigest": super::derive_ballot_proof_parameter_set_digest(proof_parameter_set)
-                .expect("component proof parameter set digest should derive"),
-            "proofRoot": test_digest(&format!("{component_id}-proof-root")),
+            "proofBytesDigest": proof_bytes_digest,
+            "proofEncodingProfileDigest": proof_encoding_profile_digest,
+            "proofParameterSetDigest": proof_parameter_set_digest,
+            "proofRoot": proof_root,
             "proofSizeBytes": proof_bytes_hex.len() / 2,
-            "publicRandomnessDigest": super::derive_ballot_proof_public_randomness_digest(public_randomness_hex)
-                .expect("component proof public randomness digest should derive"),
+            "publicRandomnessDigest": public_randomness_digest,
             "relationStatementDigest": test_digest("relation-statement"),
         });
         let component_proof_record_digest =
@@ -3589,6 +4066,37 @@ mod tests {
                         .as_str()
                         .expect("refusal message should be a string")
                         .contains("proof statement for score-and-shamir-field-component does not match the proof record")
+                })
+        );
+
+        let mut wrong_supplied_proof_statement_inputs = component_proof_inputs.clone();
+        wrong_supplied_proof_statement_inputs[3]["proofStatement"] =
+            component_proof_statement_for_test(
+                "receiver-encryption-component",
+                &component_bundle_statement["componentStatements"][3]["componentStatementDigest"],
+                Some(test_digest(
+                    "wrong-supplied-component-proof-statement-canonical-digest",
+                )),
+                "structured-module-lwe-linear-proof-v1",
+            );
+        let wrong_supplied_proof_statement_refusals =
+            super::collect_ballot_component_proof_bundle_refusals(
+                &statement,
+                &ballot_proof,
+                Some(&component_bundle_statement),
+                Some(&component_proof_bundle),
+                Some(&wrong_supplied_proof_statement_inputs),
+            );
+        assert!(
+            wrong_supplied_proof_statement_refusals
+                .iter()
+                .any(|refusal| {
+                    refusal["message"]
+                        .as_str()
+                        .expect("refusal message should be a string")
+                        .contains(
+                            "proof statement digest for receiver-encryption-component does not match its canonical payload",
+                        )
                 })
         );
 

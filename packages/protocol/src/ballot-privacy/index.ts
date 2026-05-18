@@ -16,6 +16,7 @@ export {
     createReceiverKeyProofShell,
     createReceiverPayloadShell,
     createShareCommitmentShell,
+    deriveBallotProofComponentProofRoot,
     deriveBallotProofEncodingProfileDigest,
     deriveBallotProofParameterSetDigest,
     deriveBallotProofPublicRandomnessDigest,

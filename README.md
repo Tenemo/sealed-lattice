@@ -138,9 +138,15 @@ ballot-proof verifier now also requires public component proof inputs for each
 supplied component proof bundle and checks that each input matches the proof
 record's proof bytes, proof encoding, parameter set, public randomness,
 component statement, and component proof-statement digest. Supplied component
-bundle statements, component proof bundles, and component proof inputs are
-rejected when they are missing, incomplete, reordered, duplicate-bearing, not
-bound to the ballot/backend/relation/component statements, or still backed by
+proof statement objects are also canonical-digest checked when present, so a
+ballot cannot substitute a malformed dense, sparse, structured-plan, or
+public-zero statement object under already-bound proof-byte metadata. TS,
+native, and WASM verification still fail closed after these preflight binding
+checks if an ordered component proof bundle is present but component proof byte
+verification for all required formats is not available. Component bundle
+statements, component proof bundles, and component proof inputs are rejected
+when they are missing, incomplete, reordered, duplicate-bearing, not bound to
+the ballot/backend/relation/component statements, or still backed by
 digest-expanded rows.
 Receiver-key proof records are generated only after the local key witness
 equation and norm checks pass, and can now carry proof-byte metadata bound to a

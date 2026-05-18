@@ -278,6 +278,24 @@ export type BallotProofComponentProofBundle = {
     readonly componentProofs: readonly BallotProofComponentProofRecord[];
 };
 
+export type BallotProofComponentProofStatementFormat =
+    | 'dense-polynomial-matrix-linear-proof-v1'
+    | 'sparse-polynomial-matrix-linear-proof-v1'
+    | 'structured-module-lwe-linear-proof-v1'
+    | 'public-zero-witness-binding-check-v1';
+
+export type BallotProofComponentProofVerificationInput = {
+    readonly componentId: BallotProofComponentId;
+    readonly componentProofStatementDigest?: ProtocolDigest;
+    readonly proofBytesHex: string;
+    readonly proofEncoding: unknown;
+    readonly proofParameterSet: unknown;
+    readonly proofStatement?: unknown;
+    readonly proofStatementFormat: BallotProofComponentProofStatementFormat;
+    readonly publicRandomnessHex: string;
+    readonly statementDigest: ProtocolDigest;
+};
+
 export type ReceiverEncryptionPublicKey = {
     readonly objectType: 'ReceiverEncryptionPublicKey';
     readonly objectVersion: 1;
@@ -415,7 +433,9 @@ export type ClaimBearingBallotPackage = {
     readonly ballotPackageDigest: ProtocolDigest;
     readonly ballotProofStatement: BallotProofStatement;
     readonly ballotProof: BallotProofRecord;
+    readonly proofBytesHex?: string;
     readonly componentProofBundle?: BallotProofComponentProofBundle;
+    readonly componentProofInputs?: readonly BallotProofComponentProofVerificationInput[];
     readonly receiverPayloads: readonly ReceiverPayload[];
     readonly shareCommitments: readonly ShareCommitment[];
 };
