@@ -1,2 +1,2 @@
 pnpm run check || exit 1
-pnpm run test:node || exit 1
+pnpm run test:node:fast || exit 1

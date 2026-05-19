@@ -27,11 +27,9 @@ import {
 } from '../../src/index';
 import {
     createTranscriptCoreKernelLoader,
-    currentTranscriptCoreKernelNormalizedSha256HexByBuildRunner,
     normalizeTranscriptCoreKernelBytesForDigest,
     TranscriptCoreKernelCommandError,
     type BallotPrivacyKernelVerification,
-    type TranscriptCoreKernelBuildRunner,
     type TranscriptCoreKernel,
 } from '../../src/transcript-core-bridge';
 
@@ -232,6 +230,7 @@ const createMockKernelExports = ({
     onCommand,
     outputLengthAllocationPointer = 512,
     roundTripPointer = allocationPointer,
+    skipExpectedKernelSha256Hex = false,
 }: {
     readonly allocationPointer?: number;
     readonly commandPointer?: number;
@@ -240,6 +239,7 @@ const createMockKernelExports = ({
     readonly onCommand?: () => void;
     readonly outputLengthAllocationPointer?: number;
     readonly roundTripPointer?: number;
+    readonly skipExpectedKernelSha256Hex?: boolean;
 } = {}): {
     readonly deallocate: ReturnType<typeof vi.fn>;
     readonly encodedCommandResponseLength: number;
@@ -318,7 +318,7 @@ const createMockKernelExports = ({
         getInstantiateCallCount: () => instantiate.mock.calls.length,
         loadMockKernel: createTranscriptCoreKernelLoader(
             pathToFileURL(path.resolve('mock-sealed-lattice-kernel.wasm')),
-            { expectedKernelSha256Hex },
+            skipExpectedKernelSha256Hex ? {} : { expectedKernelSha256Hex },
         ),
         rejectNextInstantiation: (error: Error): void => {
             instantiate.mockRejectedValueOnce(error);
@@ -340,30 +340,6 @@ afterEach(() => {
 });
 
 describe('transcript-core kernel in Node', () => {
-    it('keeps the current kernel digest manifest scoped to supported build runners', () => {
-        const buildRunners = [
-            'githubActionsMacosLatest',
-            'githubActionsUbuntuLatest',
-            'windowsDeveloperBuild',
-        ] as const satisfies readonly TranscriptCoreKernelBuildRunner[];
-        const digestEntries = buildRunners.map((buildRunner) => [
-            buildRunner,
-            currentTranscriptCoreKernelNormalizedSha256HexByBuildRunner[
-                buildRunner
-            ],
-        ]);
-
-        expect(
-            digestEntries.map(([buildRunner]) => buildRunner).sort(),
-        ).toEqual([...buildRunners].sort());
-        expect(new Set(digestEntries.map(([, digest]) => digest)).size).toBe(
-            digestEntries.length,
-        );
-        for (const [, digest] of digestEntries) {
-            expect(digest).toMatch(/^[a-f0-9]{64}$/u);
-        }
-    });
-
     it('normalizes host-specific Rust source paths before digesting', () => {
         const windowsBytes = textEncoder.encode(
             [
@@ -1842,6 +1818,8 @@ describe('transcript-core kernel in Node', () => {
         ).toBe(0);
     }, 900_000);
 
+    // Heavy kernel integration test: this exercises the largest mandatory
+    // profile proof-generation path and can take roughly 10 to 12 minutes.
     it('generates a mandatory-profile ballot proof record with packed field components through WASM', async () => {
         const kernel = await loadTranscriptCoreKernel();
         const { request } =
@@ -3931,6 +3909,18 @@ describe('transcript-core kernel in Node', () => {
             'The transcript-core kernel failed integrity verification',
         );
         expect(getInstantiateCallCount()).toBe(0);
+    });
+
+    it('does not require source-pinned kernel digests for local loader use', async () => {
+        const { getInstantiateCallCount, loadMockKernel } =
+            createMockKernelExports({
+                skipExpectedKernelSha256Hex: true,
+            });
+
+        const kernel = await loadMockKernel();
+
+        expect(kernel.exportedFunctionNames).toContain('memory');
+        expect(getInstantiateCallCount()).toBe(1);
     });
 
     it('rejects invalid command response shapes', async () => {

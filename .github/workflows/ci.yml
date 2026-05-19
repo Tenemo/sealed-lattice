@@ -119,4 +119,8 @@ jobs:
             - run: pnpm run docs:build:site
             - run: pnpm run smoke:pack
             - run: pnpm run smoke:pack:npm
-            - run: cd packages/sdk && npm pack --dry-run --ignore-scripts
+            - run: |
+                  PUBLIC_PACKAGE_DIR="$(mktemp -d)"
+                  node ./tools/ci/stage-public-package.mjs --out "${PUBLIC_PACKAGE_DIR}"
+                  cd "${PUBLIC_PACKAGE_DIR}"
+                  npm pack --dry-run --ignore-scripts

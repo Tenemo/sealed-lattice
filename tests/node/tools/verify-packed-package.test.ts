@@ -3,10 +3,14 @@ import { describe, expect, it } from 'vitest';
 import {
     createPackageManagerSpawnCommand,
     detectPackageManager,
+    extractPublishedKernelDigest,
     getPackageManagerExecutableName,
+    hashPublishedKernelBytesSha256Hex,
     parsePackDryRunFilePaths,
     parsePackageManagerOverride,
     resolvePackageManagerRunner,
+    validatePublishedKernelIntegrity,
+    validatePublishedPackageMetadata,
     validatePublishedPackageFilePaths,
 } from '../../../tools/ci/verify-packed-package';
 
@@ -147,6 +151,7 @@ describe('packed package smoke helpers', () => {
             ]),
         ).toEqual([
             'Published package is missing required file: LICENSE',
+            'Published package is missing required file: dist/kernel.js',
             'Published package is missing required file: dist/sealed-lattice-kernel.wasm',
             'Published package is missing required file: dist/internal/board-target.d.ts',
             'Published package is missing required file: dist/internal/lifecycle.d.ts',
@@ -162,6 +167,30 @@ describe('packed package smoke helpers', () => {
         ]);
     });
 
+    it('rejects public package description metadata', () => {
+        expect(
+            validatePublishedPackageMetadata({
+                name: 'sealed-lattice',
+                description: 'temporary package summary',
+                devDependencies: {
+                    '@sealed-lattice/types': 'workspace:*',
+                },
+                scripts: {
+                    build: 'pnpm run build',
+                },
+            }),
+        ).toEqual([
+            'Published package metadata must not include a description field',
+            'Published package metadata must not include devDependencies',
+            'Published package metadata must not include scripts',
+        ]);
+        expect(
+            validatePublishedPackageMetadata({
+                name: 'sealed-lattice',
+            }),
+        ).toEqual([]);
+    });
+
     it('accepts the intended published package file layout', () => {
         expect(
             validatePublishedPackageFilePaths([
@@ -170,6 +199,7 @@ describe('packed package smoke helpers', () => {
                 'dist/index.d.ts',
                 'dist/index.js',
                 'dist/index.js.map',
+                'dist/kernel.js',
                 'dist/internal/board-target.d.ts',
                 'dist/internal/lifecycle.d.ts',
                 'dist/internal/plaintext-oracle.d.ts',
@@ -182,5 +212,38 @@ describe('packed package smoke helpers', () => {
                 'public-surface.json',
             ]),
         ).toEqual([]);
+    });
+
+    it('validates the published kernel digest pin against the packaged WASM bytes', () => {
+        const kernelBytes = Uint8Array.from([0]);
+        const digest = hashPublishedKernelBytesSha256Hex(kernelBytes);
+        const kernelRuntimeText = `const packagedTranscriptCoreKernelNormalizedSha256Hex = '${digest}';`;
+
+        expect(extractPublishedKernelDigest(kernelRuntimeText)).toBe(digest);
+        expect(
+            validatePublishedKernelIntegrity(kernelRuntimeText, kernelBytes),
+        ).toEqual([]);
+    });
+
+    it('rejects unpinned and mismatched published kernel digest metadata', () => {
+        const kernelBytes = Uint8Array.from([0]);
+        const wrongDigest = '0'.repeat(64);
+
+        expect(
+            validatePublishedKernelIntegrity(
+                'const packagedTranscriptCoreKernelNormalizedSha256Hex = undefined;',
+                kernelBytes,
+            ),
+        ).toEqual([
+            'Published package kernel loader must pin the packaged transcript-core WASM digest',
+        ]);
+        expect(
+            validatePublishedKernelIntegrity(
+                `const packagedTranscriptCoreKernelNormalizedSha256Hex = '${wrongDigest}';`,
+                kernelBytes,
+            ),
+        ).toEqual([
+            `Published package kernel digest mismatch: expected ${wrongDigest}, received ${hashPublishedKernelBytesSha256Hex(kernelBytes)}`,
+        ]);
     });
 });

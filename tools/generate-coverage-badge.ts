@@ -26,6 +26,20 @@ export type ShieldsBadge = {
     schemaVersion: 1;
 };
 
+export type CoverageArtifactsOptions = {
+    requiredEntryPaths?: readonly string[];
+};
+
+export const defaultRequiredCoverageEntryPaths = [
+    'packages/crypto/src/canonical-json.ts',
+    'packages/protocol/src/lifecycle/thresholds.ts',
+    'packages/protocol/src/ballot-privacy/objects.ts',
+    'packages/sdk/src/index.ts',
+    'packages/wasm/src/transcript-core-bridge.ts',
+    'tools/ci/check-package-boundaries.ts',
+    'tools/ci/stage-public-package.mjs',
+] as const;
+
 const repoRoot = process.cwd();
 const coverageSummaryPath = path.resolve(
     repoRoot,
@@ -138,20 +152,37 @@ export const buildCoverageBadge = (summary: CoverageSummary): ShieldsBadge => {
 
     return {
         schemaVersion: 1,
-        label: 'coverage',
+        label: 'node source coverage',
         message: `${percent}%`,
         color: colorForCoverage(percent),
     };
 };
 
+export const validateCoverageScope = (
+    summary: CoverageSummary,
+    requiredEntryPaths: readonly string[] = defaultRequiredCoverageEntryPaths,
+): void => {
+    const missingEntryPaths = requiredEntryPaths.filter(
+        (requiredEntryPath) => summary[requiredEntryPath] === undefined,
+    );
+
+    if (missingEntryPaths.length > 0) {
+        throw new Error(
+            `Coverage summary is missing required source entries: ${missingEntryPaths.join(', ')}`,
+        );
+    }
+};
+
 export const createCoverageArtifacts = (
     rawSummary: CoverageSummary,
     projectRoot: string,
+    options: CoverageArtifactsOptions = {},
 ): {
     badge: ShieldsBadge;
     summary: CoverageSummary;
 } => {
     const summary = normalizeCoverageSummary(rawSummary, projectRoot);
+    validateCoverageScope(summary, options.requiredEntryPaths);
     const badge = buildCoverageBadge(summary);
 
     return { badge, summary };

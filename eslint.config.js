@@ -251,6 +251,7 @@ const config = [
             },
         },
         rules: {
+            '@typescript-eslint/explicit-module-boundary-types': OFF,
             '@typescript-eslint/explicit-function-return-type': OFF,
             '@typescript-eslint/no-unsafe-argument': OFF,
         },

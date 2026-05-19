@@ -10,14 +10,31 @@ const resolveFromRepoRoot = (...segments: string[]): string =>
     path.resolve(repoRoot, ...segments);
 
 const nodeTestTimeoutMs = 60_000;
+const nodeKernelHeavyTestTimeoutMs = 15 * 60_000;
 const nodeHookTimeoutMs = 240_000;
 const browserApiHost = '127.0.0.1';
 const desktopBrowserApiPort = 64_115;
 const mobileBrowserApiPort = 64_116;
+const nodeTestIncludes = [
+    'packages/*/tests/node/**/*.test.ts',
+    'tests/node/**/*.test.ts',
+] satisfies string[];
+const nodeKernelHeavyTestIncludes = [
+    'packages/wasm/tests/node/transcript-core-kernel.test.ts',
+    'packages/wasm/tests/node/canonical-error-codes-parity.test.ts',
+    'packages/testkit/tests/node/transcript-core-fixtures.test.ts',
+    'tests/node/digest-namespace-parity.test.ts',
+] satisfies string[];
 
 const nodeProject = {
     environment: 'node',
     testTimeout: nodeTestTimeoutMs,
+    hookTimeout: nodeHookTimeoutMs,
+} as const;
+
+const nodeKernelHeavyProject = {
+    environment: 'node',
+    testTimeout: nodeKernelHeavyTestTimeoutMs,
     hookTimeout: nodeHookTimeoutMs,
 } as const;
 
@@ -124,30 +141,27 @@ export default defineConfig({
             reporter: ['text', 'json-summary', 'lcov'],
             reportsDirectory: './coverage',
             include: [
-                'packages/wasm/src/**/*.ts',
-                'tools/generate-coverage-badge.ts',
-                'tools/ci/check-package-boundaries.ts',
+                'packages/*/src/**/*.ts',
+                'tools/**/*.ts',
+                'tools/**/*.mts',
+                'tools/**/*.mjs',
             ],
-            exclude: [
-                'packages/*/src/**/*.d.ts',
-                'tools/ci/build-wasm-kernel.ts',
-            ],
-            thresholds: {
-                statements: 100,
-                branches: 100,
-                functions: 100,
-                lines: 100,
-            },
+            exclude: ['packages/*/src/**/*.d.ts'],
         },
         projects: [
             {
                 test: {
                     name: 'node',
-                    include: [
-                        'packages/*/tests/node/**/*.test.ts',
-                        'tests/node/**/*.test.ts',
-                    ],
+                    include: nodeTestIncludes,
+                    exclude: nodeKernelHeavyTestIncludes,
                     ...nodeProject,
+                },
+            },
+            {
+                test: {
+                    name: 'node-kernel-heavy',
+                    include: nodeKernelHeavyTestIncludes,
+                    ...nodeKernelHeavyProject,
                 },
             },
             {

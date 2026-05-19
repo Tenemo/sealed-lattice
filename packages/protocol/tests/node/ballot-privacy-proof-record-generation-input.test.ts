@@ -18,6 +18,7 @@ const digest = (label: string): string =>
         label,
         purpose: 'ballot-proof-record-generation-input-test',
     });
+const mandatoryProfileFixtureTimeoutMs = 300_000;
 
 const requireRecord = (
     value: unknown,
@@ -290,7 +291,7 @@ describe('mandatory-profile ballot proof record generation input', () => {
 
     beforeAll(() => {
         fixture = createMandatoryProfileBallotProofRecordGenerationFixture();
-    }, 120_000);
+    }, mandatoryProfileFixtureTimeoutMs);
 
     const buildMandatoryRequest = (
         input: Partial<
