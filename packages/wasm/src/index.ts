@@ -45,7 +45,9 @@ export type {
 };
 
 export const loadTranscriptCoreKernel: () => Promise<TranscriptCoreKernel> =
-    createTranscriptCoreKernelLoader(transcriptCoreKernelUrl);
+    createTranscriptCoreKernelLoader(transcriptCoreKernelUrl, {
+        allowUnpinnedKernel: true,
+    });
 
 export const verifyTranscriptCoreFixture = async (
     fixture: TranscriptCoreFixture,

@@ -13,7 +13,7 @@ sidebar:
 - the published package identity is stable
 - the public runtime facade exposes transcript core fixture verification plus deterministic election foundation helpers
 - the election foundation verifies ML-DSA-65 signed-root envelopes for the current board, finality, roster-manifest, cast receipt, close record, and recovery helpers
-- the Rust transcript core builds, and the internal WASM loader path verifies the packaged kernel hash before instantiation in Node and browsers
+- the Rust transcript core builds, the published SDK loader verifies the packaged kernel hash before instantiation, and unpinned local WASM loader use requires an explicit test-only opt-in
 - internal Rust/WASM commands derive reserved protocol digests and check the current `GF(65537)` interpolation/comparison relations used by the TypeScript reference layer
 - local replay record, target-accepted-record, and decryption-share shell checks remain internal protocol coverage
 - target-bound decryption capabilities fail closed unless a threshold profile includes a target-bound share-selection profile and the relevant proof certificates are explicitly present

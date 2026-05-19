@@ -429,6 +429,7 @@ export const canonicalErrorCodes: ReadonlySet<CanonicalErrorCode> = new Set(
 const wasm32UsizeByteLength = 4;
 const wasmHeaderByteLength = 8;
 const wasmCustomSectionId = 0;
+const sha256HexPattern = /^[a-f0-9]{64}$/u;
 const textDecoder = new TextDecoder('utf-8', { fatal: true });
 const textEncoder = new TextEncoder();
 
@@ -631,6 +632,12 @@ const verifyKernelIntegrity = async (
     bytes: ArrayBuffer,
     expectedSha256Hex: string,
 ): Promise<void> => {
+    if (!sha256HexPattern.test(expectedSha256Hex)) {
+        throw new Error(
+            `The transcript-core kernel expected integrity digest is invalid: ${expectedSha256Hex}.`,
+        );
+    }
+
     const actualSha256Hex = await hashSha256Hex(
         normalizeTranscriptCoreKernelBytesForDigest(new Uint8Array(bytes)),
     );
@@ -639,6 +646,33 @@ const verifyKernelIntegrity = async (
             `The transcript-core kernel failed integrity verification: expected ${expectedSha256Hex}, received ${actualSha256Hex}.`,
         );
     }
+};
+
+export type TranscriptCoreKernelLoaderOptions = {
+    readonly allowUnpinnedKernel?: boolean;
+    readonly expectedKernelSha256Hex?: string;
+};
+
+const requireKernelIntegrityExpectation = (
+    options: TranscriptCoreKernelLoaderOptions,
+): string | undefined => {
+    const { expectedKernelSha256Hex } = options;
+    if (expectedKernelSha256Hex !== undefined) {
+        if (!sha256HexPattern.test(expectedKernelSha256Hex)) {
+            throw new Error(
+                `The transcript-core kernel expected integrity digest is invalid: ${expectedKernelSha256Hex}.`,
+            );
+        }
+
+        return expectedKernelSha256Hex;
+    }
+    if (options.allowUnpinnedKernel === true) {
+        return undefined;
+    }
+
+    throw new Error(
+        'The transcript-core kernel loader requires expectedKernelSha256Hex unless allowUnpinnedKernel is explicitly enabled.',
+    );
 };
 
 export class TranscriptCoreKernelCommandError extends Error {
@@ -860,20 +894,17 @@ const runKernelCommand = <T>(
 
 export const createTranscriptCoreKernelLoader = (
     transcriptCoreKernelUrl: URL,
-    options: {
-        readonly expectedKernelSha256Hex?: string;
-    } = {},
+    options: TranscriptCoreKernelLoaderOptions = {},
 ): (() => Promise<TranscriptCoreKernel>) => {
     let kernelPromise: Promise<TranscriptCoreKernel> | undefined;
 
     return async (): Promise<TranscriptCoreKernel> => {
         kernelPromise ??= (async (): Promise<TranscriptCoreKernel> => {
+            const expectedKernelSha256Hex =
+                requireKernelIntegrityExpectation(options);
             const bytes = await resolveKernelBytes(transcriptCoreKernelUrl);
-            if (options.expectedKernelSha256Hex !== undefined) {
-                await verifyKernelIntegrity(
-                    bytes,
-                    options.expectedKernelSha256Hex,
-                );
+            if (expectedKernelSha256Hex !== undefined) {
+                await verifyKernelIntegrity(bytes, expectedKernelSha256Hex);
             }
             const instantiatedSource = await WebAssembly.instantiate(bytes, {});
             const exports = instantiatedSource.instance

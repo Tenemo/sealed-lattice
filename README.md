@@ -111,9 +111,10 @@ Run targeted verification:
 ```bash
 pnpm run vectors
 pnpm run test:node:fast
-pnpm run test:node:kernel-heavy
+pnpm run test:node:heavy:kernel
 pnpm run test:node
 pnpm run test:browser
+pnpm run test:proof-benchmarks
 pnpm run verify:docs
 ```
 

@@ -24,6 +24,7 @@ pnpm exec playwright install chromium firefox webkit
 pnpm run test:node:fast
 pnpm run test:node:heavy:kernel
 pnpm run test
+pnpm run test:proof-benchmarks
 pnpm run verify:docs
 pnpm run docs:build:site
 pnpm run smoke:pack
@@ -38,9 +39,10 @@ pnpm run build
 - `pnpm run test:node:fast`: pre-commit-friendly Node tests, excluding the slow kernel-heavy WASM integration suite
 - `pnpm run test:node:heavy:kernel`: transcript-core WASM loader, parity, fixture, proof-generation, and proof-record integration tests
 - `pnpm run test`: fast Node tests, kernel-heavy Node tests, and browser tests
+- `pnpm run test:proof-benchmarks`: full proof benchmark lane for Node, desktop Chromium, and calibrated mobile Chromium proof generation and verification
 - `pnpm run verify:docs`: generated API pages and docs link structure stay consistent
 - `pnpm run smoke:pack` and `pnpm run smoke:pack:npm`: the published package tarball installs cleanly and exposes the transcript core fixture verifier plus election foundation helpers
-- `pnpm run build`: every package builds, the private crypto/runtime bridge is vendored into the SDK, and the WASM transcript core artifact is copied into the internal loader package
+- `pnpm run build`: every package builds, the private crypto/runtime bridge is vendored into the SDK, the WASM transcript core artifact is copied into the internal loader package, and the published SDK loader is pinned to the packaged kernel digest
 
 ## Release-facing rule
 

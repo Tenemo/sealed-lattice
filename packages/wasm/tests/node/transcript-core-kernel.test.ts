@@ -226,12 +226,13 @@ const createMockKernelExports = ({
             hash512: 'feedface',
         },
     },
+    allowUnpinnedKernel = false,
     expectedKernelSha256Hex = singleZeroByteSha256Hex,
     onCommand,
     outputLengthAllocationPointer = 512,
     roundTripPointer = allocationPointer,
-    skipExpectedKernelSha256Hex = false,
 }: {
+    readonly allowUnpinnedKernel?: boolean;
     readonly allocationPointer?: number;
     readonly commandPointer?: number;
     readonly commandResponse?: unknown;
@@ -239,7 +240,6 @@ const createMockKernelExports = ({
     readonly onCommand?: () => void;
     readonly outputLengthAllocationPointer?: number;
     readonly roundTripPointer?: number;
-    readonly skipExpectedKernelSha256Hex?: boolean;
 } = {}): {
     readonly deallocate: ReturnType<typeof vi.fn>;
     readonly encodedCommandResponseLength: number;
@@ -318,7 +318,9 @@ const createMockKernelExports = ({
         getInstantiateCallCount: () => instantiate.mock.calls.length,
         loadMockKernel: createTranscriptCoreKernelLoader(
             pathToFileURL(path.resolve('mock-sealed-lattice-kernel.wasm')),
-            skipExpectedKernelSha256Hex ? {} : { expectedKernelSha256Hex },
+            allowUnpinnedKernel
+                ? { allowUnpinnedKernel: true }
+                : { expectedKernelSha256Hex },
         ),
         rejectNextInstantiation: (error: Error): void => {
             instantiate.mockRejectedValueOnce(error);
@@ -3911,10 +3913,32 @@ describe('transcript-core kernel in Node', () => {
         expect(getInstantiateCallCount()).toBe(0);
     });
 
-    it('does not require source-pinned kernel digests for local loader use', async () => {
+    it('rejects invalid transcript-core kernel integrity digest metadata', async () => {
         const { getInstantiateCallCount, loadMockKernel } =
             createMockKernelExports({
-                skipExpectedKernelSha256Hex: true,
+                expectedKernelSha256Hex: 'not-a-sha256-digest',
+            });
+
+        await expect(loadMockKernel()).rejects.toThrow(
+            'The transcript-core kernel expected integrity digest is invalid',
+        );
+        expect(getInstantiateCallCount()).toBe(0);
+    });
+
+    it('requires either a pinned digest or an explicit unpinned local-loader opt-in', async () => {
+        const loadMockKernel = createTranscriptCoreKernelLoader(
+            pathToFileURL(path.resolve('mock-sealed-lattice-kernel.wasm')),
+        );
+
+        await expect(loadMockKernel()).rejects.toThrow(
+            'The transcript-core kernel loader requires expectedKernelSha256Hex unless allowUnpinnedKernel is explicitly enabled.',
+        );
+    });
+
+    it('allows explicit unpinned local loader use', async () => {
+        const { getInstantiateCallCount, loadMockKernel } =
+            createMockKernelExports({
+                allowUnpinnedKernel: true,
             });
 
         const kernel = await loadMockKernel();
