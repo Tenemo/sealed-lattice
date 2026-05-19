@@ -5,6 +5,7 @@ import {
     buildBallotProofRecordGenerationRequest,
     type BallotProofRecordGenerationProofContracts,
 } from '../../src/ballot-privacy/ballot-proof-linear-statement';
+import { lowerBallotPrivacyRelationToBackendStatement } from '../../src/ballot-privacy/relation-backend-lowering';
 
 import {
     type BallotProofRecordGenerationFixture,
@@ -403,6 +404,73 @@ describe('mandatory-profile ballot proof record generation input', () => {
         expect(receiverEncryptionStatement).toMatchObject({
             statementColumns: 3600,
             statementRows: 1800,
+        });
+        const loweringResult = lowerBallotPrivacyRelationToBackendStatement({
+            publicContext: fixture.publicContext,
+            relationInput: fixture.relationInput,
+        });
+        expect(loweringResult.ok).toBe(true);
+        if (!loweringResult.ok) {
+            throw new Error('mandatory profile relation input should lower');
+        }
+        const backendStatement = loweringResult.statement.backendStatement;
+        const receiverEncryptionComponent =
+            backendStatement.proofComponents.find(
+                (component) =>
+                    component.componentId === 'receiver-encryption-component',
+            );
+        if (receiverEncryptionComponent === undefined) {
+            throw new Error('Receiver-encryption component should be present.');
+        }
+        const firstReceiverEncryptionSourceColumn =
+            receiverEncryptionComponent.variableColumnIndices[0];
+        const lastReceiverEncryptionSourceColumn =
+            receiverEncryptionComponent.variableColumnIndices[
+                receiverEncryptionComponent.variableColumnIndices.length - 1
+            ];
+        if (
+            firstReceiverEncryptionSourceColumn === undefined ||
+            lastReceiverEncryptionSourceColumn === undefined
+        ) {
+            throw new Error(
+                'Receiver-encryption component should expose source columns.',
+            );
+        }
+        expect(backendStatement.variableColumns).toHaveLength(
+            backendStatement.columnCount,
+        );
+        expect(receiverEncryptionComponent.variableColumnIndices).toHaveLength(
+            receiverEncryptionStatement.statementColumns,
+        );
+        expect(receiverEncryptionStatement.sourceBackendColumnIndices).toEqual(
+            receiverEncryptionComponent.variableColumnIndices,
+        );
+        expect(firstReceiverEncryptionSourceColumn).toBe(
+            loweringResult.statement.variables.length,
+        );
+        expect(lastReceiverEncryptionSourceColumn).toBeLessThan(
+            backendStatement.columnCount,
+        );
+        expect(
+            backendStatement.variableColumns[
+                firstReceiverEncryptionSourceColumn
+            ],
+        ).toMatchObject({
+            chunkIndex: 0,
+            ciphertextVectorIndex: 0,
+            columnIndex: firstReceiverEncryptionSourceColumn,
+            receiverRosterPosition: 1,
+            variableRole: 'ReceiverEncryptionRandomnessPolynomial',
+        });
+        expect(
+            backendStatement.variableColumns[
+                lastReceiverEncryptionSourceColumn
+            ],
+        ).toMatchObject({
+            chunkIndex: 17,
+            columnIndex: lastReceiverEncryptionSourceColumn,
+            receiverRosterPosition: 20,
+            variableRole: 'ReceiverPayloadPlaintextPolynomial',
         });
         expect(
             request.componentSecretStates['receiver-encryption-component']

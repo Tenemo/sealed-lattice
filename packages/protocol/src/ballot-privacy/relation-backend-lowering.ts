@@ -131,6 +131,10 @@ type BallotPrivacyLinearRelationVariableRole =
     | 'ReceiverEncryptionRandomness'
     | 'ReceiverEncryptionFirstNoise'
     | 'ReceiverEncryptionSecondNoise'
+    | 'ReceiverEncryptionRandomnessPolynomial'
+    | 'ReceiverEncryptionFirstNoisePolynomial'
+    | 'ReceiverEncryptionSecondNoisePolynomial'
+    | 'ReceiverPayloadPlaintextPolynomial'
     | 'ReceiverEncryptionNoise';
 
 type BallotPrivacyLinearRelationVariable = {
@@ -549,6 +553,32 @@ const receiverEncryptionSecondNoiseVariableName = (
     polynomialCoefficientIndex: number,
 ): string =>
     `receiver_${receiverRosterPosition}_receiver_encryption_chunk_${chunkIndex}_second_noise_coefficient_${polynomialCoefficientIndex}`;
+
+const receiverEncryptionRandomnessPolynomialVariableName = (
+    receiverRosterPosition: number,
+    chunkIndex: number,
+    ciphertextVectorIndex: number,
+): string =>
+    `receiver_${receiverRosterPosition}_receiver_encryption_chunk_${chunkIndex}_randomness_vector_${ciphertextVectorIndex}_polynomial`;
+
+const receiverEncryptionFirstNoisePolynomialVariableName = (
+    receiverRosterPosition: number,
+    chunkIndex: number,
+    ciphertextVectorIndex: number,
+): string =>
+    `receiver_${receiverRosterPosition}_receiver_encryption_chunk_${chunkIndex}_first_noise_vector_${ciphertextVectorIndex}_polynomial`;
+
+const receiverEncryptionSecondNoisePolynomialVariableName = (
+    receiverRosterPosition: number,
+    chunkIndex: number,
+): string =>
+    `receiver_${receiverRosterPosition}_receiver_encryption_chunk_${chunkIndex}_second_noise_polynomial`;
+
+const receiverPayloadPlaintextPolynomialVariableName = (
+    receiverRosterPosition: number,
+    chunkIndex: number,
+): string =>
+    `receiver_${receiverRosterPosition}_receiver_encryption_chunk_${chunkIndex}_payload_plaintext_polynomial`;
 
 const addScalarConstantVariable = (
     registry: VariableRegistry,
@@ -1433,6 +1463,86 @@ const backendVariableColumns = (
         columnIndex,
     }));
 
+const compactReceiverEncryptionWitnessVariableColumns = (input: {
+    readonly ciphertextChunkCount: number;
+    readonly firstColumnIndex: number;
+    readonly receiverRosterPosition: number;
+}): readonly BallotPrivacyBackendStatementVariableColumn[] => {
+    const columns: BallotPrivacyBackendStatementVariableColumn[] = [];
+    let columnIndex = input.firstColumnIndex;
+
+    for (
+        let chunkIndex = 0;
+        chunkIndex < input.ciphertextChunkCount;
+        chunkIndex += 1
+    ) {
+        for (
+            let vectorIndex = 0;
+            vectorIndex < receiverEncryptionModuleRank;
+            vectorIndex += 1
+        ) {
+            columns.push({
+                chunkIndex,
+                ciphertextVectorIndex: vectorIndex,
+                columnIndex,
+                receiverRosterPosition: input.receiverRosterPosition,
+                variableName:
+                    receiverEncryptionRandomnessPolynomialVariableName(
+                        input.receiverRosterPosition,
+                        chunkIndex,
+                        vectorIndex,
+                    ),
+                variableRole: 'ReceiverEncryptionRandomnessPolynomial',
+            });
+            columnIndex += 1;
+        }
+        for (
+            let vectorIndex = 0;
+            vectorIndex < receiverEncryptionModuleRank;
+            vectorIndex += 1
+        ) {
+            columns.push({
+                chunkIndex,
+                ciphertextVectorIndex: vectorIndex,
+                columnIndex,
+                receiverRosterPosition: input.receiverRosterPosition,
+                variableName:
+                    receiverEncryptionFirstNoisePolynomialVariableName(
+                        input.receiverRosterPosition,
+                        chunkIndex,
+                        vectorIndex,
+                    ),
+                variableRole: 'ReceiverEncryptionFirstNoisePolynomial',
+            });
+            columnIndex += 1;
+        }
+        columns.push({
+            chunkIndex,
+            columnIndex,
+            receiverRosterPosition: input.receiverRosterPosition,
+            variableName: receiverEncryptionSecondNoisePolynomialVariableName(
+                input.receiverRosterPosition,
+                chunkIndex,
+            ),
+            variableRole: 'ReceiverEncryptionSecondNoisePolynomial',
+        });
+        columnIndex += 1;
+        columns.push({
+            chunkIndex,
+            columnIndex,
+            receiverRosterPosition: input.receiverRosterPosition,
+            variableName: receiverPayloadPlaintextPolynomialVariableName(
+                input.receiverRosterPosition,
+                chunkIndex,
+            ),
+            variableRole: 'ReceiverPayloadPlaintextPolynomial',
+        });
+        columnIndex += 1;
+    }
+
+    return columns;
+};
+
 const backendTermsForLinearRow = (
     row: BallotPrivacyLinearRelationRow,
     columnLookup: ReadonlyMap<string, number>,
@@ -2007,11 +2117,17 @@ const receiverPayloadEncryptionVariableColumnIndices = (input: {
 
 const buildReceiverPayloadEncryptionRowBatch = (input: {
     readonly columnLookup: ReadonlyMap<string, number>;
+    readonly firstCompactWitnessColumnIndex: number;
     readonly publicContext: BallotPrivacyRelationBackendPublicContext;
     readonly receivers: readonly ReceiverReference[];
     readonly rowOffset: number;
     readonly shareVectorWidth: number;
-}): BallotPrivacyBackendStatementRowBatch | undefined => {
+}):
+    | {
+          readonly compactWitnessVariableColumns: readonly BallotPrivacyBackendStatementVariableColumn[];
+          readonly rowBatch: BallotPrivacyBackendStatementRowBatch;
+      }
+    | undefined => {
     const publicKeysByReceiver = referencesByReceiver(
         input.publicContext.receiverPublicKeys,
     );
@@ -2021,7 +2137,9 @@ const buildReceiverPayloadEncryptionRowBatch = (input: {
     const receiverRows: BallotPrivacyBackendStatementReceiverEncryptionRowDescriptor[] =
         [];
     const variableColumnIndices: number[] = [];
-    let nextCompactWitnessColumnIndex = input.columnLookup.size;
+    const compactWitnessVariableColumns: BallotPrivacyBackendStatementVariableColumn[] =
+        [];
+    let nextCompactWitnessColumnIndex = input.firstCompactWitnessColumnIndex;
     let rowOffsetWithinBatch = 0;
 
     for (const receiver of input.receivers) {
@@ -2066,17 +2184,23 @@ const buildReceiverPayloadEncryptionRowBatch = (input: {
                 shareVectorWidth: input.shareVectorWidth,
             })
         ) {
-            const compactWitnessColumnCount =
-                receiverPayload.ciphertextChunks.length *
-                (2 * receiverEncryptionModuleRank + 2);
+            const receiverCompactWitnessVariableColumns =
+                compactReceiverEncryptionWitnessVariableColumns({
+                    ciphertextChunkCount:
+                        receiverPayload.ciphertextChunks.length,
+                    firstColumnIndex: nextCompactWitnessColumnIndex,
+                    receiverRosterPosition: receiver.receiverRosterPosition,
+                });
+            compactWitnessVariableColumns.push(
+                ...receiverCompactWitnessVariableColumns,
+            );
             variableColumnIndices.push(
-                ...Array.from(
-                    { length: compactWitnessColumnCount },
-                    (_unusedValue, columnIndex) =>
-                        nextCompactWitnessColumnIndex + columnIndex,
+                ...receiverCompactWitnessVariableColumns.map(
+                    (variableColumn) => variableColumn.columnIndex,
                 ),
             );
-            nextCompactWitnessColumnIndex += compactWitnessColumnCount;
+            nextCompactWitnessColumnIndex +=
+                receiverCompactWitnessVariableColumns.length;
         } else {
             variableColumnIndices.push(
                 ...receiverPayloadEncryptionVariableColumnIndices({
@@ -2116,38 +2240,45 @@ const buildReceiverPayloadEncryptionRowBatch = (input: {
     };
 
     return {
-        batchKind: 'StructuredModuleLweReceiverEncryptionRows',
-        batchName: 'receiver_payload_encryption_equation_rows',
-        matrixDigest: deriveBackendDigest(explicitBackendMatrixDigestPurpose, {
-            ...digestPayload,
-            matrixKind: 'module-lwe-receiver-encryption-rows',
-        }),
-        modulus: decimalString(receiverEncryptionModulus),
-        receiverRows,
-        rowCount: rowOffsetWithinBatch,
-        rowKind: 'ReceiverPayloadEncryptionEquationRows',
-        rowOffset: input.rowOffset,
-        targetVectorDigest: deriveBackendDigest(
-            explicitBackendTargetVectorDigestPurpose,
-            {
-                ciphertextChunks: input.publicContext.receiverPayloads.map(
-                    (receiverPayload) => ({
-                        ciphertextChunkDigest:
-                            receiverPayload.ciphertextChunkDigest,
-                        receiverIdentity: receiverPayload.receiverIdentity,
-                        receiverPayloadCiphertextRoot:
-                            receiverPayload.receiverPayloadCiphertextRoot,
-                        receiverPayloadDigest:
-                            receiverPayload.receiverPayloadDigest,
-                        receiverRosterPosition:
-                            receiverPayload.receiverRosterPosition,
-                    }),
-                ),
-                ...digestPayload,
-                targetKind: 'module-lwe-receiver-encryption-ciphertext-rows',
-            },
-        ),
-        variableColumnIndices: sortedVariableColumnIndices,
+        compactWitnessVariableColumns,
+        rowBatch: {
+            batchKind: 'StructuredModuleLweReceiverEncryptionRows',
+            batchName: 'receiver_payload_encryption_equation_rows',
+            matrixDigest: deriveBackendDigest(
+                explicitBackendMatrixDigestPurpose,
+                {
+                    ...digestPayload,
+                    matrixKind: 'module-lwe-receiver-encryption-rows',
+                },
+            ),
+            modulus: decimalString(receiverEncryptionModulus),
+            receiverRows,
+            rowCount: rowOffsetWithinBatch,
+            rowKind: 'ReceiverPayloadEncryptionEquationRows',
+            rowOffset: input.rowOffset,
+            targetVectorDigest: deriveBackendDigest(
+                explicitBackendTargetVectorDigestPurpose,
+                {
+                    ciphertextChunks: input.publicContext.receiverPayloads.map(
+                        (receiverPayload) => ({
+                            ciphertextChunkDigest:
+                                receiverPayload.ciphertextChunkDigest,
+                            receiverIdentity: receiverPayload.receiverIdentity,
+                            receiverPayloadCiphertextRoot:
+                                receiverPayload.receiverPayloadCiphertextRoot,
+                            receiverPayloadDigest:
+                                receiverPayload.receiverPayloadDigest,
+                            receiverRosterPosition:
+                                receiverPayload.receiverRosterPosition,
+                        }),
+                    ),
+                    ...digestPayload,
+                    targetKind:
+                        'module-lwe-receiver-encryption-ciphertext-rows',
+                },
+            ),
+            variableColumnIndices: sortedVariableColumnIndices,
+        },
     };
 };
 
@@ -2547,14 +2678,16 @@ const buildBackendStatement = (input: {
     const explicitReceiverEncryptionRowBatch =
         buildReceiverPayloadEncryptionRowBatch({
             columnLookup,
+            firstCompactWitnessColumnIndex: input.variables.length,
             publicContext: input.publicContext,
             receivers: input.receivers,
             rowOffset: nextExplicitRowOffset,
             shareVectorWidth: input.shareVectorWidth,
         });
     if (explicitReceiverEncryptionRowBatch !== undefined) {
-        explicitBatches.push(explicitReceiverEncryptionRowBatch);
-        nextExplicitRowOffset += explicitReceiverEncryptionRowBatch.rowCount;
+        explicitBatches.push(explicitReceiverEncryptionRowBatch.rowBatch);
+        nextExplicitRowOffset +=
+            explicitReceiverEncryptionRowBatch.rowBatch.rowCount;
     }
     const explicitReceiverKeyRows = buildReceiverKeyBindingRows({
         publicContext: input.publicContext,
@@ -2656,6 +2789,11 @@ const buildBackendStatement = (input: {
             proofComponents,
         },
     );
+    const variableColumns = [
+        ...backendVariableColumns(input.variables),
+        ...(explicitReceiverEncryptionRowBatch?.compactWitnessVariableColumns ??
+            []),
+    ];
     const backendStatementPayload: Omit<
         BallotPrivacyProofBackendStatement,
         'backendStatementDigest'
@@ -2663,7 +2801,7 @@ const buildBackendStatement = (input: {
         backendStatementFormat,
         bounds: backendBounds,
         boundsDigest,
-        columnCount: input.variables.length,
+        columnCount: variableColumns.length,
         digestExpandedRowCount,
         encodedCoordinateCount: input.encodedCoordinateCount,
         explicitRowCount,
@@ -2682,7 +2820,7 @@ const buildBackendStatement = (input: {
         shareVectorWidth: input.shareVectorWidth,
         sourceRelationStatementFormat: relationStatementFormat,
         targetVectorDigest,
-        variableColumns: backendVariableColumns(input.variables),
+        variableColumns,
     };
     const backendStatementDigestPayload = {
         backendStatementFormat: backendStatementPayload.backendStatementFormat,
@@ -2726,7 +2864,7 @@ const buildBackendStatement = (input: {
         sourceRelationStatementFormat:
             backendStatementPayload.sourceRelationStatementFormat,
         targetVectorDigest,
-        variableColumnCount: input.variables.length,
+        variableColumnCount: backendStatementPayload.variableColumns.length,
     };
 
     return {

@@ -22,7 +22,7 @@ pnpm run check
 pnpm run vectors
 pnpm exec playwright install chromium firefox webkit
 pnpm run test:node:fast
-pnpm run test:node:kernel-heavy
+pnpm run test:node:heavy:kernel
 pnpm run test
 pnpm run verify:docs
 pnpm run docs:build:site
@@ -36,7 +36,7 @@ pnpm run build
 - `pnpm run check`: package typechecks, repo lint, Rust checks, package-boundary checks, vector manifest verification, and dead-code analysis
 - `pnpm run vectors`: committed test vector files match `test-vectors/manifest.json`
 - `pnpm run test:node:fast`: pre-commit-friendly Node tests, excluding the slow kernel-heavy WASM integration suite
-- `pnpm run test:node:kernel-heavy`: transcript-core WASM loader, parity, fixture, proof-generation, and proof-record integration tests
+- `pnpm run test:node:heavy:kernel`: transcript-core WASM loader, parity, fixture, proof-generation, and proof-record integration tests
 - `pnpm run test`: fast Node tests, kernel-heavy Node tests, and browser tests
 - `pnpm run verify:docs`: generated API pages and docs link structure stay consistent
 - `pnpm run smoke:pack` and `pnpm run smoke:pack:npm`: the published package tarball installs cleanly and exposes the transcript core fixture verifier plus election foundation helpers

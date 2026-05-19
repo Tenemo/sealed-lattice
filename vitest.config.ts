@@ -11,13 +11,22 @@ const resolveFromRepoRoot = (...segments: string[]): string =>
 
 const nodeTestTimeoutMs = 60_000;
 const nodeKernelHeavyTestTimeoutMs = 15 * 60_000;
+const proofBenchmarkTestTimeoutMs = 60 * 60_000;
 const nodeHookTimeoutMs = 240_000;
 const browserApiHost = '127.0.0.1';
 const desktopBrowserApiPort = 64_115;
 const mobileBrowserApiPort = 64_116;
+const desktopProofBenchmarkBrowserApiPort = 64_117;
+const mobileProofBenchmarkBrowserApiPort = 64_118;
 const nodeTestIncludes = [
     'packages/*/tests/node/**/*.test.ts',
     'tests/node/**/*.test.ts',
+] satisfies string[];
+const nodeProofBenchmarkTestIncludes = [
+    'packages/wasm/tests/node/ballot-privacy-proof-benchmarks.benchmark.ts',
+] satisfies string[];
+const browserProofBenchmarkTestIncludes = [
+    'packages/wasm/tests/browser/ballot-privacy-proof-benchmarks.browser.benchmark.ts',
 ] satisfies string[];
 const nodeKernelHeavyTestIncludes = [
     'packages/wasm/tests/node/transcript-core-kernel.test.ts',
@@ -35,6 +44,13 @@ const nodeProject = {
 const nodeKernelHeavyProject = {
     environment: 'node',
     testTimeout: nodeKernelHeavyTestTimeoutMs,
+    hookTimeout: nodeHookTimeoutMs,
+} as const;
+
+const nodeProofBenchmarkProject = {
+    environment: 'node',
+    fileParallelism: false,
+    testTimeout: proofBenchmarkTestTimeoutMs,
     hookTimeout: nodeHookTimeoutMs,
 } as const;
 
@@ -71,6 +87,22 @@ const mobileContextOptions = {
     },
 } as const;
 
+const desktopProofBenchmarkContextOptions = {
+    userAgent:
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.7727.15 Safari/537.36',
+    viewport: {
+        width: 1280,
+        height: 720,
+    },
+    screen: {
+        width: 1280,
+        height: 720,
+    },
+    deviceScaleFactor: 1,
+    isMobile: false,
+    hasTouch: false,
+} as const;
+
 const desktopBrowserInstances: BrowserInstanceOption[] = [
     { browser: 'chromium', name: 'chromium-desktop' },
     { browser: 'firefox', name: 'firefox-desktop' },
@@ -90,6 +122,26 @@ const mobileBrowserInstances: BrowserInstanceOption[] = [
         name: 'webkit-mobile',
         provider: playwright({
             contextOptions: mobileContextOptions['iPhone 12'],
+        }),
+    },
+];
+
+const desktopProofBenchmarkBrowserInstances: BrowserInstanceOption[] = [
+    {
+        browser: 'chromium',
+        name: 'chromium-desktop-proof-benchmark',
+        provider: playwright({
+            contextOptions: desktopProofBenchmarkContextOptions,
+        }),
+    },
+];
+
+const mobileProofBenchmarkBrowserInstances: BrowserInstanceOption[] = [
+    {
+        browser: 'chromium',
+        name: 'chromium-mobile-proof-benchmark',
+        provider: playwright({
+            contextOptions: mobileContextOptions['Pixel 5'],
         }),
     },
 ];
@@ -166,6 +218,13 @@ export default defineConfig({
             },
             {
                 test: {
+                    name: 'node-proof-benchmark',
+                    include: nodeProofBenchmarkTestIncludes,
+                    ...nodeProofBenchmarkProject,
+                },
+            },
+            {
+                test: {
                     name: 'browser-desktop',
                     include: ['packages/*/tests/browser/**/*.browser.test.ts'],
                     browser: {
@@ -195,6 +254,46 @@ export default defineConfig({
                         provider: playwright(),
                         headless: true,
                         instances: mobileBrowserInstances,
+                    },
+                },
+            },
+            {
+                test: {
+                    name: 'browser-desktop-proof-benchmark',
+                    include: browserProofBenchmarkTestIncludes,
+                    fileParallelism: false,
+                    testTimeout: proofBenchmarkTestTimeoutMs,
+                    hookTimeout: nodeHookTimeoutMs,
+                    browser: {
+                        enabled: true,
+                        api: {
+                            host: browserApiHost,
+                            port: desktopProofBenchmarkBrowserApiPort,
+                            strictPort: false,
+                        },
+                        provider: playwright(),
+                        headless: true,
+                        instances: desktopProofBenchmarkBrowserInstances,
+                    },
+                },
+            },
+            {
+                test: {
+                    name: 'browser-mobile-proof-benchmark',
+                    include: browserProofBenchmarkTestIncludes,
+                    fileParallelism: false,
+                    testTimeout: proofBenchmarkTestTimeoutMs,
+                    hookTimeout: nodeHookTimeoutMs,
+                    browser: {
+                        enabled: true,
+                        api: {
+                            host: browserApiHost,
+                            port: mobileProofBenchmarkBrowserApiPort,
+                            strictPort: false,
+                        },
+                        provider: playwright(),
+                        headless: true,
+                        instances: mobileProofBenchmarkBrowserInstances,
                     },
                 },
             },
