@@ -564,6 +564,90 @@ pub(crate) fn apply_tbox_z4_response_relations_sparse(
     Ok(())
 }
 
+pub(crate) struct TboxZ4ResponseRelationInputs<'a> {
+    pub(crate) transformed_statement_rows: usize,
+    pub(crate) transformed_statement_columns: usize,
+    pub(crate) transformed_target_vector: &'a PolynomialVector,
+    pub(crate) infinity_response_vector: &'a [Vec<i64>],
+    pub(crate) challenge_seed: &'a [u8; 32],
+    pub(crate) proof_encoding: &'a LinearProofEncoding,
+}
+
+pub(crate) fn apply_tbox_z4_response_relations_with_product_builder(
+    accumulator_set: &mut TboxRelationAccumulatorSet,
+    input: TboxZ4ResponseRelationInputs<'_>,
+    build_statement_products: impl FnOnce(
+        PolynomialRing,
+        &[Vec<Vec<u64>>],
+    ) -> CanonicalResult<Vec<Vec<Vec<u64>>>>,
+) -> CanonicalResult<()> {
+    let tbox_profile = TboxRelationProfile::from_proof_encoding(input.proof_encoding)?;
+    validate_linear_proof_statement_shape(
+        input.transformed_statement_rows,
+        input.transformed_statement_columns,
+        tbox_profile,
+    )?;
+    if input.transformed_target_vector.ring() != tbox_profile.proof_ring
+        || input.transformed_target_vector.len() != input.transformed_statement_rows
+    {
+        return Err(invalid_tbox_relation(
+            "z4 response relation target vector does not match the streamed transformed statement",
+        ));
+    }
+    validate_linear_proof_response_vector(
+        input.infinity_response_vector,
+        tbox_profile.infinity_response_vector_length,
+        tbox_profile.proof_ring.degree(),
+    )?;
+    let proof_ring = tbox_profile.proof_ring;
+    let challenge_matrix = sample_linear_proof_uniform_matrix(
+        TBOX_QUADRATIC_EVALUATION_REPETITIONS,
+        256,
+        proof_ring.modulus(),
+        tbox_profile.coefficient_bit_length,
+        input.challenge_seed,
+        TBOX_Z4_RESPONSE_DOMAIN_OFFSET,
+    )?;
+    let flattened_response = flatten_signed_response(
+        input.infinity_response_vector,
+        tbox_profile.infinity_response_vector_length,
+        proof_ring.degree(),
+    )?;
+    let response_rotation_matrix_products = compute_linear_proof_response_rotation_products(
+        input.challenge_seed,
+        &challenge_matrix,
+        input.transformed_statement_rows,
+        true,
+        proof_ring.modulus(),
+    )?;
+    let shifted_rotation_polynomial_matrix = convert_z4_rotation_products_to_polynomials(
+        proof_ring,
+        &response_rotation_matrix_products,
+        input.transformed_statement_rows,
+    )?;
+    let statement_products =
+        build_statement_products(proof_ring, &shifted_rotation_polynomial_matrix)?;
+    let target_products = dot_rotation_products_with_target(
+        proof_ring,
+        &response_rotation_matrix_products,
+        input.transformed_target_vector,
+    )?;
+
+    for repetition_index in 0..TBOX_QUADRATIC_EVALUATION_REPETITIONS {
+        let relation = build_linear_proof_z4_response_relation(
+            tbox_profile,
+            proof_ring,
+            &challenge_matrix[repetition_index],
+            &flattened_response,
+            &statement_products[repetition_index],
+            target_products[repetition_index],
+        )?;
+        accumulate_linear_proof_repetition_relation(accumulator_set, repetition_index, &relation)?;
+    }
+
+    Ok(())
+}
+
 pub(crate) fn apply_default_tbox_z3_response_relations(
     accumulator_set: &mut TboxRelationAccumulatorSet,
     transformed_statement_matrix: &PolynomialMatrix,
@@ -645,6 +729,66 @@ pub(crate) fn apply_tbox_z3_response_relations_sparse(
         transformed_statement_matrix,
         euclidean_response_vector,
         tbox_profile,
+    )?;
+    let proof_ring = tbox_profile.proof_ring;
+    let challenge_matrix = sample_linear_proof_uniform_matrix(
+        TBOX_QUADRATIC_EVALUATION_REPETITIONS,
+        256,
+        proof_ring.modulus(),
+        tbox_profile.coefficient_bit_length,
+        challenge_seed,
+        TBOX_Z3_RESPONSE_DOMAIN_OFFSET,
+    )?;
+    let flattened_response = flatten_signed_response(
+        euclidean_response_vector,
+        tbox_profile.euclidean_response_vector_length,
+        proof_ring.degree(),
+    )?;
+    let response_rotation_matrix_products = compute_linear_proof_response_rotation_products(
+        challenge_seed,
+        &challenge_matrix,
+        tbox_profile.extended_coordinates(),
+        false,
+        proof_ring.modulus(),
+    )?;
+    let rotation_polynomial_matrix = convert_z3_rotation_products_to_polynomials(
+        proof_ring,
+        &response_rotation_matrix_products,
+        tbox_profile.extended_coordinates(),
+    )?;
+
+    for repetition_index in 0..TBOX_QUADRATIC_EVALUATION_REPETITIONS {
+        let relation = build_linear_proof_z3_response_relation(
+            tbox_profile,
+            proof_ring,
+            &challenge_matrix[repetition_index],
+            &flattened_response,
+            &rotation_polynomial_matrix[repetition_index],
+        )?;
+        accumulate_linear_proof_repetition_relation(accumulator_set, repetition_index, &relation)?;
+    }
+
+    Ok(())
+}
+
+pub(crate) fn apply_tbox_z3_response_relations_for_statement_shape(
+    accumulator_set: &mut TboxRelationAccumulatorSet,
+    transformed_statement_rows: usize,
+    transformed_statement_columns: usize,
+    euclidean_response_vector: &[Vec<i64>],
+    challenge_seed: &[u8; 32],
+    proof_encoding: &LinearProofEncoding,
+) -> CanonicalResult<()> {
+    let tbox_profile = TboxRelationProfile::from_proof_encoding(proof_encoding)?;
+    validate_linear_proof_statement_shape(
+        transformed_statement_rows,
+        transformed_statement_columns,
+        tbox_profile,
+    )?;
+    validate_linear_proof_response_vector(
+        euclidean_response_vector,
+        tbox_profile.euclidean_response_vector_length,
+        tbox_profile.proof_ring.degree(),
     )?;
     let proof_ring = tbox_profile.proof_ring;
     let challenge_matrix = sample_linear_proof_uniform_matrix(
@@ -871,9 +1015,25 @@ fn validate_linear_proof_statement_matrix(
     tbox_profile: TboxRelationProfile,
 ) -> CanonicalResult<()> {
     let proof_ring = tbox_profile.proof_ring;
-    if transformed_statement_matrix.ring() != proof_ring
-        || transformed_statement_matrix.rows() == 0
-        || transformed_statement_matrix.columns() != tbox_profile.exact_norm_dimension()
+    if transformed_statement_matrix.ring() != proof_ring {
+        return Err(invalid_tbox_relation(
+            "response relation statement matrix does not match the demo transformed statement shape",
+        ));
+    }
+    validate_linear_proof_statement_shape(
+        transformed_statement_matrix.rows(),
+        transformed_statement_matrix.columns(),
+        tbox_profile,
+    )
+}
+
+fn validate_linear_proof_statement_shape(
+    transformed_statement_rows: usize,
+    transformed_statement_columns: usize,
+    tbox_profile: TboxRelationProfile,
+) -> CanonicalResult<()> {
+    if transformed_statement_rows == 0
+        || transformed_statement_columns != tbox_profile.exact_norm_dimension()
     {
         return Err(invalid_tbox_relation(
             "response relation statement matrix does not match the demo transformed statement shape",
@@ -888,16 +1048,16 @@ fn validate_linear_proof_sparse_statement_matrix(
     tbox_profile: TboxRelationProfile,
 ) -> CanonicalResult<()> {
     let proof_ring = tbox_profile.proof_ring;
-    if transformed_statement_matrix.ring() != proof_ring
-        || transformed_statement_matrix.rows() == 0
-        || transformed_statement_matrix.columns() != tbox_profile.exact_norm_dimension()
-    {
+    if transformed_statement_matrix.ring() != proof_ring {
         return Err(invalid_tbox_relation(
             "response relation statement matrix does not match the demo transformed statement shape",
         ));
     }
-
-    Ok(())
+    validate_linear_proof_statement_shape(
+        transformed_statement_matrix.rows(),
+        transformed_statement_matrix.columns(),
+        tbox_profile,
+    )
 }
 
 fn validate_linear_proof_response_vector(
@@ -1079,7 +1239,7 @@ fn multiply_rows_by_polynomial_matrix(
     Ok(output_rows)
 }
 
-fn multiply_rows_by_sparse_polynomial_matrix(
+pub(crate) fn multiply_rows_by_sparse_polynomial_matrix(
     ring: PolynomialRing,
     polynomial_rows: &[Vec<Vec<u64>>],
     matrix: &SparsePolynomialMatrix,

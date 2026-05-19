@@ -1160,7 +1160,7 @@ describe('ballot privacy proof object boundary', () => {
             profileId: 'receiver-key-linear-proof-encoding-v1',
         };
         const proofParameterSet = {
-            profileId: 'receiver-key-linear-module-lwe-compatibility-v1',
+            profileId: 'receiver-key-linear-module-lwe-v1',
         };
         const publicRandomnessHex = '00'.repeat(32);
         const receiverKeyProof = createReceiverKeyProofShell({

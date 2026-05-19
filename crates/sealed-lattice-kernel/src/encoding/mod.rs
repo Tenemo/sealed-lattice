@@ -605,6 +605,7 @@ fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult<Value> {
                     proof_bytes_hex,
                     proof_encoding,
                     public_randomness_hex,
+                    skip_component_backend_verification: false,
                 },
             ))
         }

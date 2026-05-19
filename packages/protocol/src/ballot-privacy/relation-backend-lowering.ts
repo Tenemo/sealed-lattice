@@ -23,6 +23,8 @@ const relationStatementFormat =
     'SparseIntegerRowsModuloGF65537WithBoundGadgets-v1';
 const relationStatementDigestPurpose =
     'ballot-privacy-linear-relation-statement-v1';
+const relationPublicContextDigestPurpose =
+    'ballot-privacy-linear-relation-public-context-v1';
 const backendStatementFormat = 'SparseSignedIntegerBackendStatement-v1';
 const backendStatementDigestPurpose = 'ballot-privacy-backend-statement-v1';
 const explicitBackendMatrixDigestPurpose =
@@ -33,6 +35,10 @@ const digestExpandedBackendMatrixDigestPurpose =
     'ballot-privacy-backend-digest-expanded-matrix-v1';
 const digestExpandedBackendTargetVectorDigestPurpose =
     'ballot-privacy-backend-digest-expanded-target-vector-v1';
+const structuredShareCommitmentBackendMatrixDigestPurpose =
+    'ballot-privacy-backend-structured-share-commitment-matrix-v1';
+const structuredShareCommitmentBackendTargetVectorDigestPurpose =
+    'ballot-privacy-backend-structured-share-commitment-target-vector-v1';
 const backendMatrixDigestPurpose = 'ballot-privacy-backend-matrix-v1';
 const backendTargetVectorDigestPurpose =
     'ballot-privacy-backend-target-vector-v1';
@@ -234,6 +240,16 @@ type BallotPrivacyBackendStatementReceiverEncryptionRowDescriptor = {
     readonly rowOffsetWithinBatch: number;
 };
 
+type BallotPrivacyBackendStatementShareCommitmentRowDescriptor = {
+    readonly commitmentBodyDigest: ProtocolDigest;
+    readonly commitmentPolynomialVectorDigest: ProtocolDigest;
+    readonly receiverIdentity: string;
+    readonly receiverRosterPosition: number;
+    readonly rowCount: number;
+    readonly rowOffsetWithinBatch: number;
+    readonly shareCommitmentDigest: ProtocolDigest;
+};
+
 type BallotPrivacyBackendStatementRowBatch =
     | {
           readonly batchKind: 'ExplicitSparseRows';
@@ -256,6 +272,18 @@ type BallotPrivacyBackendStatementRowBatch =
               | 'ReceiverPayloadPlaintextBindingRows';
           readonly rowOffset: number;
           readonly rows: readonly BallotPrivacyBackendStatementExplicitRow[];
+          readonly targetVectorDigest: ProtocolDigest;
+          readonly variableColumnIndices: readonly number[];
+      }
+    | {
+          readonly batchKind: 'StructuredModuleSisShareCommitmentRows';
+          readonly batchName: 'share_commitment_equation_rows';
+          readonly matrixDigest: ProtocolDigest;
+          readonly modulus: string;
+          readonly rowCount: number;
+          readonly rowKind: 'ShareCommitmentEquationRows';
+          readonly rowOffset: number;
+          readonly shareCommitmentRows: readonly BallotPrivacyBackendStatementShareCommitmentRowDescriptor[];
           readonly targetVectorDigest: ProtocolDigest;
           readonly variableColumnIndices: readonly number[];
       }
@@ -1725,6 +1753,105 @@ const buildExplicitShareCommitmentRowBatch = (input: {
     };
 };
 
+const shouldUseStructuredShareCommitmentRows = (input: {
+    readonly shareVectorWidth: number;
+}): boolean => input.shareVectorWidth > 64;
+
+const shouldUseCompactReceiverEncryptionWitnessColumns = (input: {
+    readonly shareVectorWidth: number;
+}): boolean => input.shareVectorWidth > 64;
+
+const buildStructuredShareCommitmentRowBatch = (input: {
+    readonly columnLookup: ReadonlyMap<string, number>;
+    readonly rowOffset: number;
+    readonly shareCommitmentProfileDigest: ProtocolDigest;
+    readonly shareCommitmentRows: readonly BallotPrivacyAlgebraicRelationRow[];
+    readonly shareVectorWidth: number;
+}): BallotPrivacyBackendStatementRowBatch => {
+    const shareCommitmentRows = input.shareCommitmentRows.map(
+        (shareCommitmentRow, receiverIndex) => {
+            if (
+                shareCommitmentRow.shareCommitmentPolynomialVector?.length !==
+                shareCommitmentModuleRank
+            ) {
+                throw new Error(
+                    'Structured share-commitment rows require explicit commitment polynomial vectors.',
+                );
+            }
+
+            return {
+                commitmentBodyDigest:
+                    shareCommitmentRow.publicInputDigests.commitmentBodyDigest,
+                commitmentPolynomialVectorDigest:
+                    shareCommitmentRow.publicInputDigests
+                        .commitmentPolynomialVectorDigest,
+                receiverIdentity: shareCommitmentRow.receiverIdentity,
+                receiverRosterPosition:
+                    shareCommitmentRow.receiverRosterPosition,
+                rowCount: shareCommitmentModuleRank,
+                rowOffsetWithinBatch: receiverIndex * shareCommitmentModuleRank,
+                shareCommitmentDigest:
+                    shareCommitmentRow.publicInputDigests.shareCommitmentDigest,
+            };
+        },
+    );
+    const variableColumnIndices = [
+        ...new Set(
+            input.shareCommitmentRows.flatMap((row) =>
+                row.variableNames.map((variableName) =>
+                    requireColumnIndex(input.columnLookup, variableName),
+                ),
+            ),
+        ),
+    ].sort((leftColumn, rightColumn) => leftColumn - rightColumn);
+    const targetRows = input.shareCommitmentRows.flatMap(
+        (shareCommitmentRow, receiverIndex) =>
+            (shareCommitmentRow.shareCommitmentPolynomialVector ?? []).map(
+                (polynomialCoefficients, moduleRowIndex) => ({
+                    polynomialCoefficients,
+                    receiverIdentity: shareCommitmentRow.receiverIdentity,
+                    receiverRosterPosition:
+                        shareCommitmentRow.receiverRosterPosition,
+                    rowIndex:
+                        receiverIndex * shareCommitmentModuleRank +
+                        moduleRowIndex,
+                }),
+            ),
+    );
+
+    return {
+        batchKind: 'StructuredModuleSisShareCommitmentRows',
+        batchName: 'share_commitment_equation_rows',
+        matrixDigest: deriveBackendDigest(
+            structuredShareCommitmentBackendMatrixDigestPurpose,
+            {
+                matrixDerivation:
+                    'share-commitment-profile-digest-expanded-polynomial-matrix',
+                rowCount:
+                    input.shareCommitmentRows.length *
+                    shareCommitmentModuleRank,
+                shareCommitmentProfileDigest:
+                    input.shareCommitmentProfileDigest,
+                shareCommitmentRows,
+                shareVectorWidth: input.shareVectorWidth,
+                variableColumnIndices,
+            },
+        ),
+        modulus: shareCommitmentModulus,
+        rowCount: input.shareCommitmentRows.length * shareCommitmentModuleRank,
+        rowKind: 'ShareCommitmentEquationRows',
+        rowOffset: input.rowOffset,
+        shareCommitmentRows,
+        targetVectorDigest: deriveBackendDigest(
+            structuredShareCommitmentBackendTargetVectorDigestPurpose,
+            {
+                targetRows,
+            },
+        ),
+        variableColumnIndices,
+    };
+};
+
 const buildExplicitBackendRowBatch = (input: {
     readonly batchName:
         | 'receiver_key_binding_rows'
@@ -1894,6 +2021,7 @@ const buildReceiverPayloadEncryptionRowBatch = (input: {
     const receiverRows: BallotPrivacyBackendStatementReceiverEncryptionRowDescriptor[] =
         [];
     const variableColumnIndices: number[] = [];
+    let nextCompactWitnessColumnIndex = input.columnLookup.size;
     let rowOffsetWithinBatch = 0;
 
     for (const receiver of input.receivers) {
@@ -1933,15 +2061,34 @@ const buildReceiverPayloadEncryptionRowBatch = (input: {
             receiverPayload.ciphertextChunks.length *
             (receiverEncryptionModuleRank + 1) *
             receiverEncryptionModuleDegree;
-        variableColumnIndices.push(
-            ...receiverPayloadEncryptionVariableColumnIndices({
-                ciphertextChunkCount: receiverPayload.ciphertextChunks.length,
-                columnLookup: input.columnLookup,
-                plaintextBitLength,
-                receiverRosterPosition: receiver.receiverRosterPosition,
+        if (
+            shouldUseCompactReceiverEncryptionWitnessColumns({
                 shareVectorWidth: input.shareVectorWidth,
-            }),
-        );
+            })
+        ) {
+            const compactWitnessColumnCount =
+                receiverPayload.ciphertextChunks.length *
+                (2 * receiverEncryptionModuleRank + 2);
+            variableColumnIndices.push(
+                ...Array.from(
+                    { length: compactWitnessColumnCount },
+                    (_unusedValue, columnIndex) =>
+                        nextCompactWitnessColumnIndex + columnIndex,
+                ),
+            );
+            nextCompactWitnessColumnIndex += compactWitnessColumnCount;
+        } else {
+            variableColumnIndices.push(
+                ...receiverPayloadEncryptionVariableColumnIndices({
+                    ciphertextChunkCount:
+                        receiverPayload.ciphertextChunks.length,
+                    columnLookup: input.columnLookup,
+                    plaintextBitLength,
+                    receiverRosterPosition: receiver.receiverRosterPosition,
+                    shareVectorWidth: input.shareVectorWidth,
+                }),
+            );
+        }
         receiverRows.push({
             ciphertextChunkCount: receiverPayload.ciphertextChunks.length,
             plaintextBitLength,
@@ -2362,20 +2509,40 @@ const buildBackendStatement = (input: {
             algebraicRow.rowKind === 'ShareCommitmentEquation' &&
             algebraicRow.shareCommitmentPolynomialVector !== undefined,
     );
-    const explicitShareCommitmentRows = buildShareCommitmentEquationRows({
-        columnLookup,
-        shareCommitmentProfileDigest: input.shareCommitmentProfileDigest,
-        shareCommitmentRows: shareCommitmentRowsWithPublicVectors,
-        shareVectorWidth: input.shareVectorWidth,
-    });
-    if (explicitShareCommitmentRows.length > 0) {
-        const explicitShareCommitmentRowBatch =
-            buildExplicitShareCommitmentRowBatch({
-                rowOffset: nextExplicitRowOffset,
-                rows: explicitShareCommitmentRows,
-            });
-        explicitBatches.push(explicitShareCommitmentRowBatch);
-        nextExplicitRowOffset += explicitShareCommitmentRowBatch.rowCount;
+    if (shareCommitmentRowsWithPublicVectors.length > 0) {
+        if (
+            shouldUseStructuredShareCommitmentRows({
+                shareVectorWidth: input.shareVectorWidth,
+            })
+        ) {
+            const structuredShareCommitmentRowBatch =
+                buildStructuredShareCommitmentRowBatch({
+                    columnLookup,
+                    rowOffset: nextExplicitRowOffset,
+                    shareCommitmentProfileDigest:
+                        input.shareCommitmentProfileDigest,
+                    shareCommitmentRows: shareCommitmentRowsWithPublicVectors,
+                    shareVectorWidth: input.shareVectorWidth,
+                });
+            explicitBatches.push(structuredShareCommitmentRowBatch);
+            nextExplicitRowOffset += structuredShareCommitmentRowBatch.rowCount;
+        } else {
+            const explicitShareCommitmentRows =
+                buildShareCommitmentEquationRows({
+                    columnLookup,
+                    shareCommitmentProfileDigest:
+                        input.shareCommitmentProfileDigest,
+                    shareCommitmentRows: shareCommitmentRowsWithPublicVectors,
+                    shareVectorWidth: input.shareVectorWidth,
+                });
+            const explicitShareCommitmentRowBatch =
+                buildExplicitShareCommitmentRowBatch({
+                    rowOffset: nextExplicitRowOffset,
+                    rows: explicitShareCommitmentRows,
+                });
+            explicitBatches.push(explicitShareCommitmentRowBatch);
+            nextExplicitRowOffset += explicitShareCommitmentRowBatch.rowCount;
+        }
     }
     const explicitReceiverEncryptionRowBatch =
         buildReceiverPayloadEncryptionRowBatch({
@@ -2517,12 +2684,56 @@ const buildBackendStatement = (input: {
         targetVectorDigest,
         variableColumns: backendVariableColumns(input.variables),
     };
+    const backendStatementDigestPayload = {
+        backendStatementFormat: backendStatementPayload.backendStatementFormat,
+        boundsDigest,
+        columnCount: backendStatementPayload.columnCount,
+        digestExpandedRowCount,
+        encodedCoordinateCount: backendStatementPayload.encodedCoordinateCount,
+        explicitRowCount,
+        fieldModulus,
+        matrixDigest,
+        objectType: backendStatementPayload.objectType,
+        objectVersion: backendStatementPayload.objectVersion,
+        optionCount: input.optionCount,
+        proofComponents: proofComponents.map((component) => ({
+            coefficientModulus: component.coefficientModulus,
+            componentDigest: component.componentDigest,
+            componentId: component.componentId,
+            proofLoweringStatus: component.proofLoweringStatus,
+            rowBatchNames: component.rowBatchNames,
+            rowCount: component.rowCount,
+            rowKinds: component.rowKinds,
+            variableColumnCount: component.variableColumnCount,
+        })),
+        proofComponentsDigest,
+        pvssThreshold: input.pvssThreshold,
+        relationLabel: backendStatementPayload.relationLabel,
+        rosterSize: input.rosterSize,
+        rowBatches: rowBatches.map((batch) => ({
+            batchKind: batch.batchKind,
+            batchName: batch.batchName,
+            matrixDigest: batch.matrixDigest,
+            modulus: batch.modulus,
+            rowCount: batch.rowCount,
+            rowKind: batch.rowKind,
+            rowOffset: batch.rowOffset,
+            targetVectorDigest: batch.targetVectorDigest,
+            variableColumnCount: batch.variableColumnIndices.length,
+        })),
+        rowCount: backendStatementPayload.rowCount,
+        shareVectorWidth: input.shareVectorWidth,
+        sourceRelationStatementFormat:
+            backendStatementPayload.sourceRelationStatementFormat,
+        targetVectorDigest,
+        variableColumnCount: input.variables.length,
+    };
 
     return {
         ...backendStatementPayload,
         backendStatementDigest: deriveBackendDigest(
             backendStatementDigestPurpose,
-            backendStatementPayload,
+            backendStatementDigestPayload,
         ),
     };
 };
@@ -2648,11 +2859,15 @@ const buildAlgebraicRows = (
                   )
                 : [];
         const encryptionVariableNames = hasExplicitReceiverEncryptionRows
-            ? receiverEncryptionVariableNames(
-                  registry,
-                  receiverRosterPosition,
-                  ciphertextChunkCount,
-              )
+            ? shouldUseCompactReceiverEncryptionWitnessColumns({
+                  shareVectorWidth: encodedCoordinateCount,
+              })
+                ? []
+                : receiverEncryptionVariableNames(
+                      registry,
+                      receiverRosterPosition,
+                      ciphertextChunkCount,
+                  )
             : [
                   addDigestExpandedReceiverEncryptionRandomnessVariable(
                       registry,
@@ -2899,8 +3114,179 @@ const deriveRelationStatementDigest = (
     >,
 ): ProtocolDigest =>
     deriveProtocolDigest('ChallengeDomainDigest', {
+        compactStatementPayload: {
+            algebraicRowCount: statementPayload.algebraicRows.length,
+            backendBoundsDigest: statementPayload.backendStatement.boundsDigest,
+            backendMatrixDigest: statementPayload.backendStatement.matrixDigest,
+            backendProofComponentsDigest:
+                statementPayload.backendStatement.proofComponentsDigest,
+            backendStatementDigest:
+                statementPayload.backendStatement.backendStatementDigest,
+            backendTargetVectorDigest:
+                statementPayload.backendStatement.targetVectorDigest,
+            boundCount: statementPayload.bounds.length,
+            encodedCoordinateCount: statementPayload.encodedCoordinateCount,
+            fieldModulus: statementPayload.fieldModulus,
+            linearRowCount: statementPayload.linearRows.length,
+            objectType: statementPayload.objectType,
+            objectVersion: statementPayload.objectVersion,
+            optionCount: statementPayload.optionCount,
+            publicContextDigest: deriveBackendDigest(
+                relationPublicContextDigestPurpose,
+                {
+                    actionContextDigest:
+                        statementPayload.publicContext.actionContextDigest,
+                    aggregateInputEncodingProfileDigest:
+                        statementPayload.publicContext
+                            .aggregateInputEncodingProfileDigest,
+                    ballotProofProfileDigest:
+                        statementPayload.publicContext.ballotProofProfileDigest,
+                    ...(statementPayload.publicContext
+                        .ballotProofStatementDigest === undefined
+                        ? {}
+                        : {
+                              ballotProofStatementDigest:
+                                  statementPayload.publicContext
+                                      .ballotProofStatementDigest,
+                          }),
+                    ballotScoreEncodingProfileDigest:
+                        statementPayload.publicContext
+                            .ballotScoreEncodingProfileDigest,
+                    ballotShareLayoutProfileDigest:
+                        statementPayload.publicContext
+                            .ballotShareLayoutProfileDigest,
+                    ceremonyId: statementPayload.publicContext.ceremonyId,
+                    encodedAggregateLayoutDigest:
+                        statementPayload.publicContext
+                            .encodedAggregateLayoutDigest,
+                    encodedShareVectorLayoutDigest:
+                        statementPayload.publicContext
+                            .encodedShareVectorLayoutDigest,
+                    manifestDigest:
+                        statementPayload.publicContext.manifestDigest,
+                    pollSpecDigest:
+                        statementPayload.publicContext.pollSpecDigest,
+                    receiverEncryptionProfileDigest:
+                        statementPayload.publicContext
+                            .receiverEncryptionProfileDigest,
+                    receiverKeyProofRoot:
+                        statementPayload.publicContext.receiverKeyProofRoot,
+                    receiverKeyRoot:
+                        statementPayload.publicContext.receiverKeyRoot,
+                    receiverPayloads:
+                        statementPayload.publicContext.receiverPayloads.map(
+                            (receiverPayload) => ({
+                                ...(receiverPayload.ciphertextBodyDigest ===
+                                undefined
+                                    ? {}
+                                    : {
+                                          ciphertextBodyDigest:
+                                              receiverPayload.ciphertextBodyDigest,
+                                      }),
+                                ...(receiverPayload.ciphertextChunkCount ===
+                                undefined
+                                    ? {}
+                                    : {
+                                          ciphertextChunkCount:
+                                              receiverPayload.ciphertextChunkCount,
+                                      }),
+                                ...(receiverPayload.ciphertextChunkDigest ===
+                                undefined
+                                    ? {}
+                                    : {
+                                          ciphertextChunkDigest:
+                                              receiverPayload.ciphertextChunkDigest,
+                                      }),
+                                ...(receiverPayload.plaintextBitLength ===
+                                undefined
+                                    ? {}
+                                    : {
+                                          plaintextBitLength:
+                                              receiverPayload.plaintextBitLength,
+                                      }),
+                                receiverIdentity:
+                                    receiverPayload.receiverIdentity,
+                                receiverPayloadCiphertextRoot:
+                                    receiverPayload.receiverPayloadCiphertextRoot,
+                                receiverPayloadDigest:
+                                    receiverPayload.receiverPayloadDigest,
+                                receiverRosterPosition:
+                                    receiverPayload.receiverRosterPosition,
+                            }),
+                        ),
+                    receiverPublicKeys:
+                        statementPayload.publicContext.receiverPublicKeys.map(
+                            (receiverPublicKey) => ({
+                                ...(receiverPublicKey.keyMaterialDigest ===
+                                undefined
+                                    ? {}
+                                    : {
+                                          keyMaterialDigest:
+                                              receiverPublicKey.keyMaterialDigest,
+                                      }),
+                                ...(receiverPublicKey.publicMatrixSeedDigest ===
+                                undefined
+                                    ? {}
+                                    : {
+                                          publicMatrixSeedDigest:
+                                              receiverPublicKey.publicMatrixSeedDigest,
+                                      }),
+                                receiverIdentity:
+                                    receiverPublicKey.receiverIdentity,
+                                receiverPublicKeyDigest:
+                                    receiverPublicKey.receiverPublicKeyDigest,
+                                receiverRosterPosition:
+                                    receiverPublicKey.receiverRosterPosition,
+                            }),
+                        ),
+                    rosterDigest: statementPayload.publicContext.rosterDigest,
+                    rosterExternalAcceptanceDigest:
+                        statementPayload.publicContext
+                            .rosterExternalAcceptanceDigest,
+                    scoreMembershipProfileDigest:
+                        statementPayload.publicContext
+                            .scoreMembershipProfileDigest,
+                    shareCommitmentMessageBoundCertDigest:
+                        statementPayload.publicContext
+                            .shareCommitmentMessageBoundCertDigest,
+                    shareCommitmentProfileDigest:
+                        statementPayload.publicContext
+                            .shareCommitmentProfileDigest,
+                    shareCommitments:
+                        statementPayload.publicContext.shareCommitments.map(
+                            (shareCommitment) => ({
+                                ...(shareCommitment.commitmentBodyDigest ===
+                                undefined
+                                    ? {}
+                                    : {
+                                          commitmentBodyDigest:
+                                              shareCommitment.commitmentBodyDigest,
+                                      }),
+                                ...(shareCommitment.commitmentPolynomialVectorDigest ===
+                                undefined
+                                    ? {}
+                                    : {
+                                          commitmentPolynomialVectorDigest:
+                                              shareCommitment.commitmentPolynomialVectorDigest,
+                                      }),
+                                receiverIdentity:
+                                    shareCommitment.receiverIdentity,
+                                receiverRosterPosition:
+                                    shareCommitment.receiverRosterPosition,
+                                shareCommitmentDigest:
+                                    shareCommitment.shareCommitmentDigest,
+                            }),
+                        ),
+                },
+            ),
+            pvssThreshold: statementPayload.pvssThreshold,
+            relationLabel: statementPayload.relationLabel,
+            relationStatementFormat: statementPayload.relationStatementFormat,
+            rosterSize: statementPayload.rosterSize,
+            shareVectorWidth: statementPayload.shareVectorWidth,
+            variableCount: statementPayload.variables.length,
+        },
         purpose: relationStatementDigestPurpose,
-        statementPayload,
     });
 
 export const lowerBallotPrivacyRelationToBackendStatement = (input: {

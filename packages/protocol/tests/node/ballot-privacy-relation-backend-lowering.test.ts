@@ -10,7 +10,6 @@ import {
     buildEncodedScoreFieldLinearProofProjection,
     verifyBallotProofComponentExplicitRows,
     type BallotProofComponentProjectionWitness,
-    type BallotProofSparseComponentLinearProofStatement,
 } from '../../src/ballot-privacy/ballot-proof-linear-statement';
 import {
     createBallotPrivacyProfileSet,
@@ -1263,7 +1262,7 @@ describe('ballot privacy relation backend lowering', () => {
             throw new Error('valid relation input should lower');
         }
 
-        const payloadStatement: BallotProofSparseComponentLinearProofStatement =
+        const payloadStatement =
             buildBallotProofSparseComponentLinearProofStatement({
                 ballotProofStatementDigest: context.ballotProofStatementDigest,
                 componentId: 'payload-plaintext-field-component',
@@ -1272,7 +1271,7 @@ describe('ballot privacy relation backend lowering', () => {
                 sourceRingDegree: 64,
                 witnessL2BoundSquared: '65536',
             });
-        const shareCommitmentStatement: BallotProofSparseComponentLinearProofStatement =
+        const shareCommitmentStatement =
             buildBallotProofSparseComponentLinearProofStatement({
                 ballotProofStatementDigest: context.ballotProofStatementDigest,
                 componentId: 'share-commitment-component',
@@ -1281,6 +1280,14 @@ describe('ballot privacy relation backend lowering', () => {
                 sourceRingDegree: 256,
                 witnessL2BoundSquared: '1048576',
             });
+        if (
+            payloadStatement.proofStatementFormat !==
+                'sparse-polynomial-matrix-linear-proof-v1' ||
+            shareCommitmentStatement.proofStatementFormat !==
+                'sparse-polynomial-matrix-linear-proof-v1'
+        ) {
+            throw new Error('Expected sparse component proof statements.');
+        }
         const shareCommitmentRowBatch =
             loweringResult.statement.backendStatement.rowBatches.find(
                 (rowBatch) =>
@@ -1379,7 +1386,8 @@ describe('ballot privacy relation backend lowering', () => {
             proofStatementFormat: 'structured-module-lwe-linear-proof-v1',
             proofSystemRingDegree: 64,
             sourceRingDegree: 256,
-            statementRows: 3 * 5_120,
+            statementColumns: 3 * 4 * 10,
+            statementRows: 3 * 4 * 5,
         });
         expect(structuredStatement.receiverRows).toHaveLength(3);
         expect(
@@ -1387,16 +1395,16 @@ describe('ballot privacy relation backend lowering', () => {
         ).toHaveLength(4);
         expect(
             structuredStatement.receiverRows[0]?.ciphertextChunks[0]
-                ?.randomnessColumnIndices,
+                ?.randomnessPolynomialColumnIndices,
         ).toHaveLength(receiverEncryptionModuleRank);
         expect(
             structuredStatement.receiverRows[0]?.ciphertextChunks[0]
-                ?.randomnessColumnIndices[0],
-        ).toHaveLength(receiverEncryptionModuleDegree);
+                ?.firstNoisePolynomialColumnIndices,
+        ).toHaveLength(receiverEncryptionModuleRank);
         expect(
             structuredStatement.receiverRows[0]?.ciphertextChunks[0]
-                ?.plaintextBitColumnIndices.length,
-        ).toBeGreaterThan(0);
+                ?.plaintextPolynomialColumnIndex,
+        ).toEqual(expect.any(Number));
         expect(structuredStatement.statementDigest).toMatch(/^[a-f0-9]{128}$/u);
         expect(JSON.stringify(structuredStatement)).not.toMatch(
             /encryptionRandomnessVector|firstNoiseVector|secondNoisePolynomial|receiverShareVector/u,
@@ -1570,6 +1578,15 @@ describe('ballot privacy relation backend lowering', () => {
                 sourceRingDegree: 256,
                 witnessL2BoundSquared: '1048576',
             });
+
+        if (
+            originalStatement.proofStatementFormat !==
+                'sparse-polynomial-matrix-linear-proof-v1' ||
+            changedStatement.proofStatementFormat !==
+                'sparse-polynomial-matrix-linear-proof-v1'
+        ) {
+            throw new Error('Expected sparse share-commitment statements.');
+        }
 
         expect(originalStatement.sparseStatementMatrixDigest).toBe(
             changedStatement.sparseStatementMatrixDigest,

@@ -302,7 +302,7 @@ pub fn demo_linear_parameter_contract() -> LinearProofParameterSet {
 
 pub fn receiver_key_linear_parameter_contract() -> LinearProofParameterSet {
     LinearProofParameterSet {
-        profile_id: "receiver-key-linear-module-lwe-compatibility-v1".to_string(),
+        profile_id: "receiver-key-linear-module-lwe-v1".to_string(),
         source: "sealed-lattice/linear-proof/receiver-key-parameters-v1".to_string(),
         relation: "A*w + t = 0".to_string(),
         ring_degree: 256,
@@ -514,6 +514,10 @@ mod tests {
         parameter_contract
             .validate()
             .expect("receiver-key parameter contract should validate");
+        assert_eq!(
+            parameter_contract.profile_id,
+            "receiver-key-linear-module-lwe-v1"
+        );
         assert_eq!(parameter_contract.coefficient_modulus, 12_289);
         assert_eq!(parameter_contract.witness_l2_bound_squared, 8_192);
         assert_eq!(parameter_contract.statement_rows, 4);

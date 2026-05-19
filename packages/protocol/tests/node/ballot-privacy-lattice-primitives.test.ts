@@ -287,6 +287,9 @@ describe('ballot privacy lattice primitives', () => {
             publicRandomnessHex,
         });
         const { proofEncoding, proofParameterSet } = proofMaterial;
+        expect(proofParameterSet.profileId).toBe(
+            'receiver-key-linear-module-lwe-v1',
+        );
         const backendStatement = createReceiverKeyProofBackendStatement({
             publicKeyMaterial: receiverState.publicKeyMaterial,
             receiverEncryptionProfile: profileSet.receiverEncryptionProfile,
@@ -371,6 +374,22 @@ describe('ballot privacy lattice primitives', () => {
                                 proofBytesHex.length / 2 + 1,
                         },
                     ),
+                },
+                publicKeyMaterial: receiverState.publicKeyMaterial,
+                receiverEncryptionProfile: profileSet.receiverEncryptionProfile,
+                receiverPublicKey: receiverState.receiverPublicKey,
+                secretState: receiverState.secretState,
+            }),
+        ).toThrow(/proof parameter contract/u);
+        expect(() =>
+            createReceiverKeyProof({
+                proofMaterial: {
+                    ...proofMaterial,
+                    proofParameterSet: {
+                        ...proofMaterial.proofParameterSet,
+                        profileId:
+                            'receiver-key-linear-module-lwe-compatibility-v1',
+                    } as unknown as typeof proofMaterial.proofParameterSet,
                 },
                 publicKeyMaterial: receiverState.publicKeyMaterial,
                 receiverEncryptionProfile: profileSet.receiverEncryptionProfile,

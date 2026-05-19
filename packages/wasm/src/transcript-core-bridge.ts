@@ -411,7 +411,7 @@ type TranscriptCoreKernelDigestManifest = Readonly<
 export const currentTranscriptCoreKernelNormalizedSha256HexByBuildRunner: TranscriptCoreKernelDigestManifest =
     {
         windowsDeveloperBuild:
-            'e6555df1fb9ccaa775840092f79e2a60017fe9760bae0b4f1da8e1d235162076',
+            '5af96265df4f0f582f107ea0f8fd4d2462b26069394cbacc60afab35e8fbeceb',
         githubActionsUbuntuLatest:
             '73691262c72912cb7cf5a9a85644acc39b8b81d7927269c95f52a37eecd11db9',
         githubActionsMacosLatest:

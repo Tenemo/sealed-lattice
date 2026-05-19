@@ -1,5 +1,5 @@
 export type ReceiverKeyLinearProofParameterSet = {
-    readonly profileId: 'receiver-key-linear-module-lwe-compatibility-v1';
+    readonly profileId: 'receiver-key-linear-module-lwe-v1';
     readonly source: 'sealed-lattice/linear-proof/receiver-key-parameters-v1';
     readonly relation: 'A*w + t = 0';
     readonly ringDegree: 256;
@@ -65,7 +65,7 @@ export const createReceiverKeyLinearProofParameterSet = (input?: {
     validateExpectedProofSizeBytes(input?.expectedProofSizeBytes);
 
     return {
-        profileId: 'receiver-key-linear-module-lwe-compatibility-v1',
+        profileId: 'receiver-key-linear-module-lwe-v1',
         source: 'sealed-lattice/linear-proof/receiver-key-parameters-v1',
         relation: 'A*w + t = 0',
         ringDegree: 256,

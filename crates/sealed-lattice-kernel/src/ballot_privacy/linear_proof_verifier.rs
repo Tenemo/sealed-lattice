@@ -15,8 +15,11 @@ use super::{
     linear_proof_parameters::{LinearProofEncoding, LinearProofParameterSet},
     linear_proof_public_parameters::derive_default_abdlop_public_parameters,
     linear_proof_statement::{
-        LinearProofTargetCoefficientRepresentation, derive_linear_statement_transcript,
-        derive_transformed_statement_matrix, derive_transformed_target_vector,
+        LinearProofMatrixCoefficientRepresentation, LinearProofTargetCoefficientRepresentation,
+        StreamedLinearProofStatement,
+        derive_linear_statement_transcript_with_matrix_coefficient_representation,
+        derive_transformed_statement_matrix_with_coefficient_representation,
+        derive_transformed_target_vector,
     },
     linear_proof_tbox::validate_linear_proof_tbox_public_checks,
     linear_proof_transcript::{
@@ -33,15 +36,18 @@ use super::{
     quadratic_challenge::validate_quadratic_challenge,
     quadratic_equation::validate_quadratic_helper_self_check,
     sparse_linear_proof_statement::{
-        derive_dense_compatible_sparse_linear_statement_transcript,
-        transform_sparse_statement_matrix_to_proof_ring,
+        derive_dense_compatible_sparse_linear_statement_transcript_with_matrix_coefficient_representation,
+        transform_sparse_statement_matrix_to_proof_ring_with_coefficient_representation,
         transform_sparse_target_vector_to_proof_ring,
     },
     sparse_polynomial_matrix::SparsePolynomialMatrix,
     tbox_relations::{
-        apply_tbox_z3_response_relations, apply_tbox_z3_response_relations_sparse,
-        apply_tbox_z4_response_relations, apply_tbox_z4_response_relations_sparse,
-        build_tbox_prefix_accumulators, validate_tbox_relation_builder_self_check,
+        TboxZ4ResponseRelationInputs, apply_tbox_z3_response_relations,
+        apply_tbox_z3_response_relations_for_statement_shape,
+        apply_tbox_z3_response_relations_sparse, apply_tbox_z4_response_relations,
+        apply_tbox_z4_response_relations_sparse,
+        apply_tbox_z4_response_relations_with_product_builder, build_tbox_prefix_accumulators,
+        validate_tbox_relation_builder_self_check,
     },
 };
 
@@ -58,6 +64,7 @@ pub struct LinearProofVectorCase {
     pub public_randomness_hex: Option<String>,
     pub statement_matrix_coefficients: Option<Vec<Vec<Vec<u64>>>>,
     pub target_vector_coefficients: Option<Vec<Vec<u64>>>,
+    pub matrix_coefficient_representation: Option<LinearProofMatrixCoefficientRepresentation>,
     pub target_coefficient_representation: Option<LinearProofTargetCoefficientRepresentation>,
     pub proof_hex: Option<String>,
     pub expected_proof_size_bytes: Option<usize>,
@@ -78,6 +85,22 @@ pub(crate) struct SparseLinearProofVerificationInput<'a> {
     pub(crate) public_randomness_hex: &'a str,
     pub(crate) source_statement_matrix: &'a SparsePolynomialMatrix,
     pub(crate) target_vector_coefficients: &'a [Vec<u64>],
+    pub(crate) matrix_coefficient_representation: LinearProofMatrixCoefficientRepresentation,
+    pub(crate) target_coefficient_representation: LinearProofTargetCoefficientRepresentation,
+    pub(crate) proof_hex: &'a str,
+    pub(crate) expected_proof_size_bytes: Option<usize>,
+}
+
+pub(crate) struct StreamedLinearProofVerificationInput<'a, Statement>
+where
+    Statement: StreamedLinearProofStatement,
+{
+    pub(crate) case_name: &'a str,
+    pub(crate) parameter_set: &'a LinearProofParameterSet,
+    pub(crate) proof_encoding: &'a LinearProofEncoding,
+    pub(crate) public_randomness_hex: &'a str,
+    pub(crate) statement: &'a Statement,
+    pub(crate) matrix_coefficient_representation: LinearProofMatrixCoefficientRepresentation,
     pub(crate) target_coefficient_representation: LinearProofTargetCoefficientRepresentation,
     pub(crate) proof_hex: &'a str,
     pub(crate) expected_proof_size_bytes: Option<usize>,
@@ -229,18 +252,22 @@ impl LinearProofVectorCase {
                 self.target_coefficient_representation.ok_or_else(|| {
                     invalid_vector("available vectors require targetCoefficientRepresentation")
                 })?;
+            let matrix_coefficient_representation =
+                self.matrix_coefficient_representation.unwrap_or_default();
             if let (Some(proof_encoding), Some(decoded_proof)) = (
                 self.proof_encoding.as_ref(),
                 decoded_proof_for_verified_encoding.as_ref(),
             ) {
-                let statement_transcript = derive_linear_statement_transcript(
-                    parameter_set,
-                    proof_encoding,
-                    statement_matrix_coefficients,
-                    target_vector_coefficients,
-                    target_coefficient_representation,
-                    &public_randomness,
-                )?;
+                let statement_transcript =
+                    derive_linear_statement_transcript_with_matrix_coefficient_representation(
+                        parameter_set,
+                        proof_encoding,
+                        statement_matrix_coefficients,
+                        target_vector_coefficients,
+                        matrix_coefficient_representation,
+                        target_coefficient_representation,
+                        &public_randomness,
+                    )?;
                 let abdlop_commitment_hash = hash_abdlop_commitment(
                     &statement_transcript.public_parameters_and_statement_hash,
                     decoded_proof,
@@ -257,14 +284,15 @@ impl LinearProofVectorCase {
                     decoded_proof,
                     proof_encoding,
                 )?;
-                let transformed_statement_matrix = derive_transformed_statement_matrix(
-                    parameter_set,
-                    proof_encoding,
-                    statement_matrix_coefficients,
-                    target_vector_coefficients,
-                    target_coefficient_representation,
-                    &public_randomness,
-                )?;
+                let transformed_statement_matrix =
+                    derive_transformed_statement_matrix_with_coefficient_representation(
+                        parameter_set,
+                        proof_encoding,
+                        statement_matrix_coefficients,
+                        target_vector_coefficients,
+                        matrix_coefficient_representation,
+                        &public_randomness,
+                    )?;
                 let transformed_target_vector = derive_transformed_target_vector(
                     parameter_set,
                     proof_encoding,
@@ -464,6 +492,45 @@ pub(crate) fn verify_sparse_linear_proof_components(
     }
 }
 
+pub(crate) fn verify_streamed_linear_proof_components<Statement>(
+    input: StreamedLinearProofVerificationInput<'_, Statement>,
+) -> Value
+where
+    Statement: StreamedLinearProofStatement,
+{
+    match verify_streamed_linear_proof_components_inner(&input) {
+        Ok(verified_status_labels) => json!({
+            "ok": true,
+            "backendAvailable": BALLOT_PRIVACY_PROOF_BACKEND_AVAILABLE,
+            "backendStatus": describe_proof_backend(),
+            "caseName": input.case_name,
+            "vectorAvailable": true,
+            "expectedOutcome": "accept",
+            "statusLabels": verified_status_labels,
+            "acceptedDigests": [],
+            "refusedObjects": [],
+            "unresolvedReason": null
+        }),
+        Err(error) => json!({
+            "ok": false,
+            "backendAvailable": BALLOT_PRIVACY_PROOF_BACKEND_AVAILABLE,
+            "backendStatus": describe_proof_backend(),
+            "caseName": input.case_name,
+            "vectorAvailable": true,
+            "expectedOutcome": "accept",
+            "statusLabels": [],
+            "acceptedDigests": [],
+            "refusedObjects": [
+                {
+                    "code": error.code.as_str(),
+                    "message": error.message
+                }
+            ],
+            "unresolvedReason": error.code.as_str()
+        }),
+    }
+}
+
 fn verify_sparse_linear_proof_components_inner(
     input: &SparseLinearProofVerificationInput<'_>,
 ) -> CanonicalResult<Value> {
@@ -491,11 +558,13 @@ fn verify_sparse_linear_proof_components_inner(
     }
     validate_linear_proof_norms(&decoded_proof, input.proof_encoding)?;
 
-    let statement_transcript = derive_dense_compatible_sparse_linear_statement_transcript(
+    let statement_transcript =
+        derive_dense_compatible_sparse_linear_statement_transcript_with_matrix_coefficient_representation(
         input.parameter_set,
         input.proof_encoding,
         input.source_statement_matrix,
         input.target_vector_coefficients,
+        input.matrix_coefficient_representation,
         input.target_coefficient_representation,
         &public_randomness,
     )?;
@@ -515,11 +584,13 @@ fn verify_sparse_linear_proof_components_inner(
         &decoded_proof,
         input.proof_encoding,
     )?;
-    let transformed_statement_matrix = transform_sparse_statement_matrix_to_proof_ring(
-        input.parameter_set,
-        input.proof_encoding,
-        input.source_statement_matrix,
-    )?;
+    let transformed_statement_matrix =
+        transform_sparse_statement_matrix_to_proof_ring_with_coefficient_representation(
+            input.parameter_set,
+            input.proof_encoding,
+            input.source_statement_matrix,
+            input.matrix_coefficient_representation,
+        )?;
     let transformed_target_vector = transform_sparse_target_vector_to_proof_ring(
         input.parameter_set,
         input.proof_encoding,
@@ -579,6 +650,173 @@ fn verify_sparse_linear_proof_components_inner(
         "ManyQuadraticEquationsFolded",
         "QuadraticChallengeRecomputed"
     ]))
+}
+
+fn verify_streamed_linear_proof_components_inner<Statement>(
+    input: &StreamedLinearProofVerificationInput<'_, Statement>,
+) -> CanonicalResult<Value>
+where
+    Statement: StreamedLinearProofStatement,
+{
+    input.parameter_set.validate()?;
+    input.proof_encoding.validate()?;
+    validate_streamed_statement_shape(input.parameter_set, input.proof_encoding, input.statement)?;
+    let public_randomness = decode_hex(input.public_randomness_hex)?;
+    if public_randomness.len() != 32 {
+        return Err(invalid_vector(
+            "publicRandomnessHex must encode exactly 32 bytes",
+        ));
+    }
+    let public_randomness_array: [u8; 32] = public_randomness
+        .as_slice()
+        .try_into()
+        .map_err(|_| invalid_vector("publicRandomnessHex must encode exactly 32 bytes"))?;
+    derive_default_abdlop_public_parameters(&public_randomness_array)?;
+
+    let proof_bytes = LinearProofBytes::from_hex(input.proof_hex, input.expected_proof_size_bytes)?;
+    let decoded_proof = decode_linear_proof(proof_bytes.bytes(), input.proof_encoding)?;
+    let reencoded_proof = encode_linear_proof(&decoded_proof, input.proof_encoding)?;
+    if reencoded_proof != proof_bytes.bytes() {
+        return Err(invalid_vector(
+            "decoded proof object does not re-encode to the original canonical bytes",
+        ));
+    }
+    validate_linear_proof_norms(&decoded_proof, input.proof_encoding)?;
+
+    let source_polynomial_split_factor =
+        super::linear_proof_statement::source_polynomial_split_factor(
+            input.parameter_set,
+            input.proof_encoding,
+        )?;
+    let transformed_statement_rows = input
+        .parameter_set
+        .statement_rows
+        .checked_mul(source_polynomial_split_factor)
+        .ok_or_else(|| invalid_vector("streamed transformed row count overflowed"))?;
+    let transformed_statement_columns = input
+        .parameter_set
+        .statement_columns
+        .checked_mul(source_polynomial_split_factor)
+        .ok_or_else(|| invalid_vector("streamed transformed column count overflowed"))?;
+    let statement_transcript = input.statement.derive_statement_transcript(
+        input.parameter_set,
+        input.proof_encoding,
+        input.matrix_coefficient_representation,
+        input.target_coefficient_representation,
+        &public_randomness,
+    )?;
+    let abdlop_commitment_hash = hash_abdlop_commitment(
+        &statement_transcript.public_parameters_and_statement_hash,
+        &decoded_proof,
+        input.proof_encoding,
+    )?;
+    validate_abdlop_linear_opening(
+        &abdlop_commitment_hash,
+        &public_randomness_array,
+        &decoded_proof,
+        input.proof_encoding,
+    )?;
+    let tbox_public_check_summary = validate_linear_proof_tbox_public_checks(
+        &abdlop_commitment_hash,
+        &decoded_proof,
+        input.proof_encoding,
+    )?;
+    let transformed_target_vector = input.statement.transformed_target_vector(
+        input.parameter_set,
+        input.proof_encoding,
+        input.target_coefficient_representation,
+    )?;
+    let z34_challenge_hash =
+        challenge_hash_from_hex(&tbox_public_check_summary.z34_challenge_hash)?;
+    let generator_challenge_hash =
+        challenge_hash_from_hex(&tbox_public_check_summary.generator_challenge_hash)?;
+    let mut tbox_accumulators =
+        build_tbox_prefix_accumulators(&generator_challenge_hash, input.proof_encoding)?;
+    apply_tbox_z4_response_relations_with_product_builder(
+        &mut tbox_accumulators,
+        TboxZ4ResponseRelationInputs {
+            transformed_statement_rows,
+            transformed_statement_columns,
+            transformed_target_vector: &transformed_target_vector,
+            infinity_response_vector: decoded_proof.infinity_response_vector(),
+            challenge_seed: &z34_challenge_hash,
+            proof_encoding: input.proof_encoding,
+        },
+        |proof_ring, shifted_rotation_polynomial_matrix| {
+            input.statement.build_z4_statement_products(
+                proof_ring,
+                input.parameter_set,
+                input.proof_encoding,
+                input.matrix_coefficient_representation,
+                shifted_rotation_polynomial_matrix,
+            )
+        },
+    )?;
+    apply_tbox_z3_response_relations_for_statement_shape(
+        &mut tbox_accumulators,
+        transformed_statement_rows,
+        transformed_statement_columns,
+        decoded_proof.euclidean_response_vector(),
+        &z34_challenge_hash,
+        input.proof_encoding,
+    )?;
+    let many_quadratic_equations =
+        build_many_quadratic_equations(&tbox_accumulators, decoded_proof.hash_mask_vector())?;
+    let folded_many_quadratic_equation = fold_many_quadratic_equations(
+        &many_quadratic_equations,
+        &generator_challenge_hash,
+        input.proof_encoding.full_size_coefficient_bit_length,
+    )?;
+    validate_quadratic_challenge(
+        &generator_challenge_hash,
+        &public_randomness_array,
+        &decoded_proof,
+        input.proof_encoding,
+        &folded_many_quadratic_equation,
+    )?;
+    validate_quadratic_helper_self_check()?;
+    validate_tbox_relation_builder_self_check()?;
+    validate_many_quadratic_self_check()?;
+
+    Ok(json!([
+        "LinearProofBytesCanonical",
+        "LinearProofNormBoundsChecked",
+        "AbdlopPublicParametersExpanded",
+        "AbdlopLinearOpeningRecovered",
+        "TboxZ34ChallengeUpdated",
+        "TboxGeneratorChallengeUpdated",
+        "StructuredLinearStatementDigestTranscript",
+        "QuadraticAccumulatorHelpersChecked",
+        "TboxRelationBuildersChecked",
+        "TboxResponseRelationBuildersChecked",
+        "ManyQuadraticEquationsFolded",
+        "QuadraticChallengeRecomputed"
+    ]))
+}
+
+fn validate_streamed_statement_shape<Statement>(
+    parameter_set: &LinearProofParameterSet,
+    proof_encoding: &LinearProofEncoding,
+    statement: &Statement,
+) -> CanonicalResult<()>
+where
+    Statement: StreamedLinearProofStatement,
+{
+    super::linear_proof_statement::source_polynomial_split_factor(parameter_set, proof_encoding)?;
+    if statement.source_statement_rows() != parameter_set.statement_rows
+        || statement.source_statement_columns() != parameter_set.statement_columns
+    {
+        return Err(invalid_vector(
+            "streamed linear statement shape does not match the parameter set",
+        ));
+    }
+    if statement.target_vector_coefficients().len() != parameter_set.statement_rows {
+        return Err(invalid_vector(
+            "streamed linear statement target length does not match the parameter set",
+        ));
+    }
+
+    Ok(())
 }
 
 pub fn verify_linear_proof_vector_case_value(vector_case: &Value) -> Value {

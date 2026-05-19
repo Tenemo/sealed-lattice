@@ -27,6 +27,8 @@ type DensePolynomialVector = readonly DensePolynomial[];
 type BallotProofTargetCoefficientRepresentation =
     | 'canonicalUnsignedSourceModulus'
     | 'centeredSignedSourceModulus';
+type BallotProofMatrixCoefficientRepresentation =
+    BallotProofTargetCoefficientRepresentation;
 
 type ConstantSparseMatrixEntry = {
     readonly rowIndex: number;
@@ -98,6 +100,22 @@ type ExplicitFieldRowBatch = {
     readonly rows: readonly ExplicitFieldRow[];
 };
 
+type StructuredShareCommitmentRowBatch = {
+    readonly batchKind: 'StructuredModuleSisShareCommitmentRows';
+    readonly batchName: 'share_commitment_equation_rows';
+    readonly matrixDigest: ProtocolDigest;
+    readonly modulus: string;
+    readonly rowCount: number;
+    readonly shareCommitmentRows: readonly {
+        readonly receiverIdentity: string;
+        readonly receiverRosterPosition: number;
+        readonly rowCount: number;
+        readonly rowOffsetWithinBatch: number;
+    }[];
+    readonly targetVectorDigest: ProtocolDigest;
+    readonly variableColumnIndices: readonly number[];
+};
+
 type BallotProofLinearProofStatement = {
     readonly backendStatementDigest: ProtocolDigest;
     readonly ballotProofStatementDigest?: ProtocolDigest;
@@ -120,6 +138,7 @@ type BallotProofLinearProofStatement = {
     readonly statementMatrixCoefficients: DensePolynomialMatrix;
     readonly statementMatrixDigest: ProtocolDigest;
     readonly statementRows: number;
+    readonly matrixCoefficientRepresentation: BallotProofMatrixCoefficientRepresentation;
     readonly targetCoefficientRepresentation: BallotProofTargetCoefficientRepresentation;
     readonly targetVectorCoefficients: DensePolynomialVector;
     readonly targetVectorDigest: ProtocolDigest;
@@ -134,7 +153,7 @@ type BallotProofFullRelationLinearProofStatement =
         readonly projectionCoverage: 'full-encoded-score-ballot-relation';
     };
 
-export type BallotProofSparseComponentLinearProofStatement = {
+type BallotProofSparseComponentLinearProofStatement = {
     readonly backendStatementDigest: ProtocolDigest;
     readonly ballotProofStatementDigest?: ProtocolDigest;
     readonly coefficientModulus: string;
@@ -143,11 +162,13 @@ export type BallotProofSparseComponentLinearProofStatement = {
     readonly parameterProfileId: string;
     readonly proofStatementFormat: 'sparse-polynomial-matrix-linear-proof-v1';
     readonly projectionCoverage:
+        | 'encoded-score-field-rows-only'
         | 'payload-plaintext-field-rows-only'
         | 'share-commitment-rows-only';
     readonly relation: 'A*w + t = 0';
     readonly relationStatementDigest: ProtocolDigest;
     readonly sourceBackendColumnIndices: readonly number[];
+    readonly sourceColumnPackings?: readonly PackedFieldSourceColumn[];
     readonly sourceRingDegree: number;
     readonly sparseStatementMatrixDigest: ProtocolDigest;
     readonly sparseStatementMatrixEntries: readonly SparseMatrixEntry[];
@@ -155,6 +176,7 @@ export type BallotProofSparseComponentLinearProofStatement = {
     readonly statementColumns: number;
     readonly statementDigest: ProtocolDigest;
     readonly statementRows: number;
+    readonly matrixCoefficientRepresentation: BallotProofMatrixCoefficientRepresentation;
     readonly targetCoefficientRepresentation: BallotProofTargetCoefficientRepresentation;
     readonly targetVectorDigest: ProtocolDigest;
     readonly targetVectorEntries: readonly SparseTargetVectorEntry[];
@@ -162,14 +184,61 @@ export type BallotProofSparseComponentLinearProofStatement = {
     readonly witnessL2BoundSquared: string;
 };
 
+type PackedFieldSourceColumn = {
+    readonly bindings: readonly {
+        readonly backendColumnIndex: number;
+        readonly coefficientIndex: number;
+        readonly variableName: string;
+        readonly variableRole: string;
+    }[];
+    readonly columnIndex: number;
+    readonly packingKind: string;
+};
+
+type StructuredShareCommitmentReceiverStatement = {
+    readonly commitmentPolynomialVector: readonly (readonly string[])[];
+    readonly receiverIdentity: string;
+    readonly receiverRosterPosition: number;
+    readonly rowCount: number;
+    readonly rowOffsetWithinStatement: number;
+};
+
+type BallotProofStructuredShareCommitmentProofStatement = {
+    readonly backendStatementDigest: ProtocolDigest;
+    readonly ballotProofStatementDigest?: ProtocolDigest;
+    readonly coefficientModulus: string;
+    readonly componentId: 'share-commitment-component';
+    readonly matrixDigest: ProtocolDigest;
+    readonly objectType: 'BallotProofStructuredShareCommitmentProofStatement';
+    readonly objectVersion: 1;
+    readonly parameterProfileId: string;
+    readonly proofStatementFormat: 'structured-module-sis-share-commitment-v1';
+    readonly proofSystemRingDegree: 64;
+    readonly projectionCoverage: 'share-commitment-rows-only';
+    readonly receiverRows: readonly StructuredShareCommitmentReceiverStatement[];
+    readonly relation: 'A*w + t = 0';
+    readonly relationStatementDigest: ProtocolDigest;
+    readonly shareCommitmentProfileDigest: ProtocolDigest;
+    readonly shareVectorWidth: number;
+    readonly sourceBackendColumnIndices: readonly number[];
+    readonly sourceRingDegree: 64 | 256;
+    readonly statementColumns: number;
+    readonly statementDigest: ProtocolDigest;
+    readonly statementRows: number;
+    readonly matrixCoefficientRepresentation: BallotProofMatrixCoefficientRepresentation;
+    readonly targetCoefficientRepresentation: BallotProofTargetCoefficientRepresentation;
+    readonly targetVectorDigest: ProtocolDigest;
+    readonly witnessL2BoundSquared: string;
+};
+
 type StructuredReceiverEncryptionCiphertextChunkStatement = {
     readonly chunkIndex: number;
     readonly firstCiphertextVector: readonly (readonly number[])[];
-    readonly firstNoiseColumnIndices: readonly (readonly number[])[];
-    readonly plaintextBitColumnIndices: readonly number[];
-    readonly randomnessColumnIndices: readonly (readonly number[])[];
+    readonly firstNoisePolynomialColumnIndices: readonly number[];
+    readonly plaintextPolynomialColumnIndex: number;
+    readonly randomnessPolynomialColumnIndices: readonly number[];
     readonly secondCiphertextPolynomial: readonly number[];
-    readonly secondNoiseColumnIndices: readonly number[];
+    readonly secondNoiseColumnIndex: number;
 };
 
 type StructuredReceiverEncryptionReceiverStatement = {
@@ -207,6 +276,7 @@ type BallotProofStructuredReceiverEncryptionProofStatement = {
     readonly statementColumns: number;
     readonly statementDigest: ProtocolDigest;
     readonly statementRows: number;
+    readonly matrixCoefficientRepresentation: BallotProofMatrixCoefficientRepresentation;
     readonly targetCoefficientRepresentation: BallotProofTargetCoefficientRepresentation;
     readonly targetVectorDigest: ProtocolDigest;
     readonly witnessL2BoundSquared: string;
@@ -324,6 +394,7 @@ export type BallotProofComponentBundleStatement = {
 export type BallotProofComponentProofStatementFormat =
     | 'dense-polynomial-matrix-linear-proof-v1'
     | 'sparse-polynomial-matrix-linear-proof-v1'
+    | 'structured-module-sis-share-commitment-v1'
     | 'structured-module-lwe-linear-proof-v1'
     | 'public-zero-witness-binding-check-v1';
 
@@ -428,6 +499,9 @@ export type BallotProofRecordGenerationRequest = {
 };
 
 const linearProofRelation = 'A*w + t = 0' as const;
+const shareCommitmentModuleRank = 4;
+const shareCommitmentModuleDegree = 256;
+const shareCommitmentOpeningDimension = 64;
 const receiverEncryptionModulus = 12_289;
 const receiverEncryptionModuleRank = 4;
 const receiverEncryptionModuleDegree = 256;
@@ -630,6 +704,22 @@ const explicitRowBatchByName = (
     return batch as ExplicitFieldRowBatch;
 };
 
+const structuredShareCommitmentRowBatchByName = (
+    loweredStatement: BallotPrivacyLoweredLinearRelationStatement,
+    batchName: 'share_commitment_equation_rows',
+): StructuredShareCommitmentRowBatch => {
+    const batch = loweredStatement.backendStatement.rowBatches.find(
+        (candidate) => candidate.batchName === batchName,
+    );
+    if (batch?.batchKind !== 'StructuredModuleSisShareCommitmentRows') {
+        throw new Error(
+            `The structured share-commitment row batch ${batchName} is missing.`,
+        );
+    }
+
+    return batch as StructuredShareCommitmentRowBatch;
+};
+
 const componentById = (input: {
     readonly componentId: BallotPrivacyBackendProofComponentId;
     readonly loweredStatement: BallotPrivacyLoweredLinearRelationStatement;
@@ -693,88 +783,6 @@ const usedBackendColumnIndices = (
         ),
     ].sort((left, right) => left - right);
 
-const projectedColumnLookup = (
-    sourceBackendColumnIndices: readonly number[],
-): ReadonlyMap<number, number> =>
-    new Map(
-        sourceBackendColumnIndices.map((backendColumnIndex, projectedIndex) => [
-            backendColumnIndex,
-            projectedIndex,
-        ]),
-    );
-
-const requireProjectedColumn = (input: {
-    readonly description: string;
-    readonly projectedColumnByBackendColumn: ReadonlyMap<number, number>;
-    readonly variableColumns: readonly FieldVariableColumn[];
-    readonly variableMatches: (variableColumn: FieldVariableColumn) => boolean;
-}): number => {
-    const variableColumn = input.variableColumns.find(input.variableMatches);
-    if (variableColumn === undefined) {
-        throw new Error(`${input.description} variable is missing.`);
-    }
-    const projectedColumn = input.projectedColumnByBackendColumn.get(
-        variableColumn.columnIndex,
-    );
-    if (projectedColumn === undefined) {
-        throw new Error(
-            `${input.description} variable is outside the component projection.`,
-        );
-    }
-
-    return projectedColumn;
-};
-
-const receiverPayloadPlaintextBitColumnIndex = (input: {
-    readonly bitIndex: number;
-    readonly projectedColumnByBackendColumn: ReadonlyMap<number, number>;
-    readonly receiverRosterPosition: number;
-    readonly shareVectorWidth: number;
-    readonly variableColumns: readonly FieldVariableColumn[];
-}): number => {
-    const shareBitCount =
-        input.shareVectorWidth * receiverShareRepresentativeBitLength;
-    if (input.bitIndex < shareBitCount) {
-        const encodedCoordinateIndex = Math.floor(
-            input.bitIndex / receiverShareRepresentativeBitLength,
-        );
-        const localBitIndex =
-            input.bitIndex % receiverShareRepresentativeBitLength;
-
-        return requireProjectedColumn({
-            description: 'Receiver payload plaintext share bit',
-            projectedColumnByBackendColumn:
-                input.projectedColumnByBackendColumn,
-            variableColumns: input.variableColumns,
-            variableMatches: (variableColumn) =>
-                variableColumn.variableRole === 'ReceiverPayloadPlaintextBit' &&
-                variableColumn.receiverRosterPosition ===
-                    input.receiverRosterPosition &&
-                variableColumn.encodedCoordinateIndex ===
-                    encodedCoordinateIndex &&
-                variableColumn.bitIndex === localBitIndex,
-        });
-    }
-
-    const openingBitIndex = input.bitIndex - shareBitCount;
-    const openingCoordinateIndex = Math.floor(
-        openingBitIndex / receiverOpeningRandomnessBitLength,
-    );
-    const localBitIndex = openingBitIndex % receiverOpeningRandomnessBitLength;
-
-    return requireProjectedColumn({
-        description: 'Receiver payload plaintext opening bit',
-        projectedColumnByBackendColumn: input.projectedColumnByBackendColumn,
-        variableColumns: input.variableColumns,
-        variableMatches: (variableColumn) =>
-            variableColumn.variableRole === 'ReceiverPayloadPlaintextBit' &&
-            variableColumn.receiverRosterPosition ===
-                input.receiverRosterPosition &&
-            variableColumn.openingCoordinateIndex === openingCoordinateIndex &&
-            variableColumn.bitIndex === localBitIndex,
-    });
-};
-
 const receiverShareValue = (
     relationInput: BallotPrivacyRelationCompilerInput,
     receiverRosterPosition: number,
@@ -791,6 +799,22 @@ const receiverShareValue = (
     }
 
     return shareRepresentative;
+};
+
+const fieldPowerForReceiver = (
+    receiverRosterPosition: number,
+    coefficientDegree: number,
+): number => {
+    let fieldPower = 1;
+    for (
+        let multipliedDegree = 0;
+        multipliedDegree < coefficientDegree;
+        multipliedDegree += 1
+    ) {
+        fieldPower = (fieldPower * receiverRosterPosition) % fieldModulus;
+    }
+
+    return fieldPower;
 };
 
 const quotientValue = (
@@ -821,14 +845,10 @@ const quotientValue = (
         coefficientOffset += 1
     ) {
         const coefficientDegree = coefficientOffset + 1;
-        let fieldPower = 1;
-        for (
-            let multipliedDegree = 0;
-            multipliedDegree < coefficientDegree;
-            multipliedDegree += 1
-        ) {
-            fieldPower = (fieldPower * receiverRosterPosition) % fieldModulus;
-        }
+        const fieldPower = fieldPowerForReceiver(
+            receiverRosterPosition,
+            coefficientDegree,
+        );
         evaluatedInteger += coefficientRow[coefficientOffset] * fieldPower;
     }
 
@@ -1270,6 +1290,17 @@ const deriveStructuredReceiverEncryptionStatementDigest = (
             'ballot-proof-structured-receiver-encryption-proof-statement-v1',
     });
 
+const deriveStructuredShareCommitmentStatementDigest = (
+    statementPayload: Omit<
+        BallotProofStructuredShareCommitmentProofStatement,
+        'statementDigest'
+    >,
+): ProtocolDigest =>
+    deriveProtocolDigest('ChallengeDomainDigest', {
+        payload: statementPayload,
+        purpose: 'ballot-proof-structured-share-commitment-proof-statement-v1',
+    });
+
 const deriveComponentStatementDigest = (
     statementPayload: Omit<
         BallotProofComponentStatement,
@@ -1434,8 +1465,17 @@ const proofStatementFormatForComponent = (input: {
         return 'structured-module-lwe-linear-proof-v1';
     }
     if (
+        input.rowBatches.some(
+            (rowBatch) =>
+                rowBatch.batchKind === 'StructuredModuleSisShareCommitmentRows',
+        )
+    ) {
+        return 'structured-module-sis-share-commitment-v1';
+    }
+    if (
         input.component.rowBatchNames.length === 1 &&
-        input.component.rowBatchNames[0] === 'encoded_score_field_rows'
+        input.component.rowBatchNames[0] === 'encoded_score_field_rows' &&
+        input.component.rowCount <= 100
     ) {
         return 'dense-polynomial-matrix-linear-proof-v1';
     }
@@ -1450,6 +1490,7 @@ const proofBytesAvailabilityForStatementFormat = (
         case 'dense-polynomial-matrix-linear-proof-v1':
             return 'available-for-small-dense-oracle';
         case 'sparse-polynomial-matrix-linear-proof-v1':
+        case 'structured-module-sis-share-commitment-v1':
             return 'requires-sparse-proof-statement';
         case 'structured-module-lwe-linear-proof-v1':
             return 'requires-structured-proof-statement';
@@ -1521,11 +1562,44 @@ const structuredReceiverEncryptionWitnessTermCounts = (
     };
 };
 
+const structuredShareCommitmentSparseTermCount = (
+    rowBatch: StructuredShareCommitmentRowBatch,
+): bigint => {
+    if (rowBatch.shareCommitmentRows.length === 0) {
+        return 0n;
+    }
+    if (
+        rowBatch.variableColumnIndices.length %
+            rowBatch.shareCommitmentRows.length !==
+        0
+    ) {
+        throw new Error(
+            'Structured share-commitment row batch variables are not balanced by receiver.',
+        );
+    }
+    const variableCountPerReceiver =
+        rowBatch.variableColumnIndices.length /
+        rowBatch.shareCommitmentRows.length;
+
+    return rowBatch.shareCommitmentRows.reduce(
+        (termCount, shareCommitmentRow) =>
+            termCount +
+            BigInt(shareCommitmentRow.rowCount) *
+                BigInt(variableCountPerReceiver),
+        0n,
+    );
+};
+
 const rowBatchTermCount = (
     rowBatch: BackendRowBatchForComponentStatement,
 ): bigint => {
     if (rowBatch.batchKind === 'ExplicitSparseRows') {
         return explicitRowBatchTermCount(rowBatch);
+    }
+    if (rowBatch.batchKind === 'StructuredModuleSisShareCommitmentRows') {
+        return structuredShareCommitmentSparseTermCount(
+            rowBatch as StructuredShareCommitmentRowBatch,
+        );
     }
     if (rowBatch.batchKind === 'StructuredModuleLweReceiverEncryptionRows') {
         return structuredReceiverEncryptionWitnessTermCounts(rowBatch)
@@ -1718,7 +1792,8 @@ const buildBallotProofComponentProofStatementPlan = (input: {
         rowBatchTermCount(rowBatch).toString(),
     );
     const sparseTermCount =
-        proofStatementFormat === 'sparse-polynomial-matrix-linear-proof-v1'
+        proofStatementFormat === 'sparse-polynomial-matrix-linear-proof-v1' ||
+        proofStatementFormat === 'structured-module-sis-share-commitment-v1'
             ? rowBatches
                   .reduce(
                       (termCount, rowBatch) =>
@@ -2306,6 +2381,21 @@ export const buildBallotProofComponentLinearProofProjection = (input: {
         componentId: input.componentId,
         loweredStatement: input.loweredStatement,
     });
+    const componentRowBatches = rowBatchesForComponent({
+        component,
+        loweredStatement: input.loweredStatement,
+    });
+    if (
+        input.componentId === 'share-commitment-component' &&
+        componentRowBatches.some(
+            (rowBatch) =>
+                rowBatch.batchKind === 'StructuredModuleSisShareCommitmentRows',
+        )
+    ) {
+        throw new Error(
+            'Proof component share-commitment-component is not fully lowered to dense projection rows.',
+        );
+    }
     const rowBatches = explicitRowBatchesForComponent({
         component,
         loweredStatement: input.loweredStatement,
@@ -2425,6 +2515,7 @@ export const buildBallotProofComponentLinearProofProjection = (input: {
         statementMatrixCoefficients,
         statementMatrixDigest,
         statementRows: explicitRows.length,
+        matrixCoefficientRepresentation: 'centeredSignedSourceModulus',
         targetCoefficientRepresentation: 'centeredSignedSourceModulus',
         targetVectorCoefficients,
         targetVectorDigest,
@@ -2443,21 +2534,230 @@ export const buildBallotProofComponentLinearProofProjection = (input: {
     };
 };
 
+const buildStructuredShareCommitmentSparseStatement = (input: {
+    readonly ballotProofStatementDigest?: ProtocolDigest;
+    readonly component: BallotPrivacyBackendProofComponent;
+    readonly loweredStatement: BallotPrivacyLoweredLinearRelationStatement;
+    readonly parameterProfileId: string;
+    readonly sourceRingDegree: number;
+    readonly witnessL2BoundSquared: string;
+}): BallotProofStructuredShareCommitmentProofStatement => {
+    if (
+        input.sourceRingDegree !== shareCommitmentModuleDegree &&
+        input.sourceRingDegree !== 64
+    ) {
+        throw new Error(
+            'Structured share-commitment proof statements must use the share-commitment module degree or its proof-ring split degree.',
+        );
+    }
+    const structuredRowBatch = structuredShareCommitmentRowBatchByName(
+        input.loweredStatement,
+        'share_commitment_equation_rows',
+    );
+    const coefficientModulus = decimalBigInt(
+        input.component.coefficientModulus,
+        'share-commitment component coefficient modulus',
+    );
+    const sourceBackendColumnIndices = input.component.variableColumnIndices;
+    const commitmentsByReceiver = new Map(
+        input.loweredStatement.publicContext.shareCommitments.map(
+            (shareCommitment) => [
+                receiverReferenceKey(shareCommitment),
+                shareCommitment,
+            ],
+        ),
+    );
+    const receiverRows = structuredRowBatch.shareCommitmentRows.map(
+        (
+            shareCommitmentRow,
+            receiverIndex,
+        ): StructuredShareCommitmentReceiverStatement => {
+            const shareCommitment = commitmentsByReceiver.get(
+                receiverReferenceKey(shareCommitmentRow),
+            );
+            if (shareCommitment?.commitmentPolynomialVector === undefined) {
+                throw new Error(
+                    'Structured share-commitment proof statement requires explicit commitment polynomial vectors.',
+                );
+            }
+            if (
+                shareCommitment.commitmentPolynomialVector.length !==
+                shareCommitmentModuleRank
+            ) {
+                throw new Error(
+                    'Structured share-commitment proof statement received a malformed commitment polynomial vector.',
+                );
+            }
+            const rowSplitFactor =
+                shareCommitmentModuleDegree / input.sourceRingDegree;
+            const rowCount = shareCommitmentRow.rowCount * rowSplitFactor;
+
+            return {
+                commitmentPolynomialVector:
+                    shareCommitment.commitmentPolynomialVector,
+                receiverIdentity: shareCommitmentRow.receiverIdentity,
+                receiverRosterPosition:
+                    shareCommitmentRow.receiverRosterPosition,
+                rowCount,
+                rowOffsetWithinStatement: receiverIndex * rowCount,
+            };
+        },
+    );
+    if (
+        sourceBackendColumnIndices.length !==
+        receiverRows.length * (input.loweredStatement.shareVectorWidth + 64)
+    ) {
+        throw new Error(
+            'Structured share-commitment proof statement source columns do not match the encoded share and opening layout.',
+        );
+    }
+    if (coefficientModulus <= 0n) {
+        throw new Error(
+            'Structured share-commitment proof statement modulus is invalid.',
+        );
+    }
+    const statementPayload: Omit<
+        BallotProofStructuredShareCommitmentProofStatement,
+        'statementDigest'
+    > = {
+        backendStatementDigest:
+            input.loweredStatement.backendStatement.backendStatementDigest,
+        ...(input.ballotProofStatementDigest === undefined
+            ? {}
+            : {
+                  ballotProofStatementDigest: input.ballotProofStatementDigest,
+              }),
+        coefficientModulus: input.component.coefficientModulus,
+        componentId: 'share-commitment-component',
+        matrixDigest: structuredRowBatch.matrixDigest,
+        objectType: 'BallotProofStructuredShareCommitmentProofStatement',
+        objectVersion: 1,
+        parameterProfileId: input.parameterProfileId,
+        proofStatementFormat: 'structured-module-sis-share-commitment-v1',
+        proofSystemRingDegree: 64,
+        projectionCoverage: 'share-commitment-rows-only',
+        receiverRows,
+        relation: linearProofRelation,
+        relationStatementDigest: input.loweredStatement.relationStatementDigest,
+        shareCommitmentProfileDigest:
+            input.loweredStatement.publicContext.shareCommitmentProfileDigest,
+        shareVectorWidth: input.loweredStatement.shareVectorWidth,
+        sourceBackendColumnIndices,
+        sourceRingDegree: input.sourceRingDegree,
+        statementColumns: sourceBackendColumnIndices.length,
+        statementRows: receiverRows.reduce(
+            (rowCount, receiverRow) => rowCount + receiverRow.rowCount,
+            0,
+        ),
+        matrixCoefficientRepresentation: 'centeredSignedSourceModulus',
+        targetCoefficientRepresentation: 'centeredSignedSourceModulus',
+        targetVectorDigest: structuredRowBatch.targetVectorDigest,
+        witnessL2BoundSquared: input.witnessL2BoundSquared,
+    };
+
+    return {
+        ...statementPayload,
+        statementDigest:
+            deriveStructuredShareCommitmentStatementDigest(statementPayload),
+    };
+};
+
+const secretStateForStructuredShareCommitmentStatement = (input: {
+    readonly projectionWitness?: BallotProofComponentProjectionWitness;
+    readonly relationInput: BallotPrivacyRelationCompilerInput;
+    readonly structuredStatement: BallotProofStructuredShareCommitmentProofStatement;
+}): BallotProofRecordGenerationSecretState => {
+    const sourceWitnessCoefficients: DensePolynomial[] = [];
+    for (const receiverRow of input.structuredStatement.receiverRows) {
+        const receiver = input.relationInput.receivers.find(
+            (candidate) =>
+                candidate.receiverRosterPosition ===
+                receiverRow.receiverRosterPosition,
+        );
+        if (receiver === undefined) {
+            throw new Error(
+                'Structured share-commitment receiver witness is missing.',
+            );
+        }
+        for (const shareRepresentative of receiver.receiverShareVector) {
+            sourceWitnessCoefficients.push(
+                signedConstantPolynomial({
+                    coefficient: BigInt(shareRepresentative),
+                    sourceRingDegree:
+                        input.structuredStatement.sourceRingDegree,
+                }),
+            );
+        }
+        for (
+            let openingCoordinateIndex = 0;
+            openingCoordinateIndex < 64;
+            openingCoordinateIndex += 1
+        ) {
+            sourceWitnessCoefficients.push(
+                signedConstantPolynomial({
+                    coefficient: shareCommitmentOpeningValue(
+                        input.projectionWitness,
+                        receiverRow.receiverRosterPosition,
+                        openingCoordinateIndex,
+                    ),
+                    sourceRingDegree:
+                        input.structuredStatement.sourceRingDegree,
+                }),
+            );
+        }
+    }
+    if (
+        sourceWitnessCoefficients.length !==
+        input.structuredStatement.statementColumns
+    ) {
+        throw new Error(
+            'Structured share-commitment witness did not fill every statement column.',
+        );
+    }
+
+    return {
+        sourceWitnessCoefficients,
+    };
+};
+
 export const buildBallotProofSparseComponentLinearProofStatement = (input: {
     readonly ballotProofStatementDigest?: ProtocolDigest;
     readonly componentId:
+        | 'score-and-shamir-field-component'
         | 'payload-plaintext-field-component'
         | 'share-commitment-component';
     readonly loweredStatement: BallotPrivacyLoweredLinearRelationStatement;
     readonly parameterProfileId: string;
     readonly sourceRingDegree: number;
     readonly witnessL2BoundSquared: string;
-}): BallotProofSparseComponentLinearProofStatement => {
+}):
+    | BallotProofSparseComponentLinearProofStatement
+    | BallotProofStructuredShareCommitmentProofStatement => {
     validateSourceRingDegree(input.sourceRingDegree);
     const component = componentById({
         componentId: input.componentId,
         loweredStatement: input.loweredStatement,
     });
+    const componentRowBatches = rowBatchesForComponent({
+        component,
+        loweredStatement: input.loweredStatement,
+    });
+    if (
+        input.componentId === 'share-commitment-component' &&
+        componentRowBatches.some(
+            (rowBatch) =>
+                rowBatch.batchKind === 'StructuredModuleSisShareCommitmentRows',
+        )
+    ) {
+        return buildStructuredShareCommitmentSparseStatement({
+            ballotProofStatementDigest: input.ballotProofStatementDigest,
+            component,
+            loweredStatement: input.loweredStatement,
+            parameterProfileId: input.parameterProfileId,
+            sourceRingDegree: input.sourceRingDegree,
+            witnessL2BoundSquared: input.witnessL2BoundSquared,
+        });
+    }
     const rowBatches = explicitRowBatchesForComponent({
         component,
         loweredStatement: input.loweredStatement,
@@ -2569,6 +2869,7 @@ export const buildBallotProofSparseComponentLinearProofStatement = (input: {
         input.componentId,
     );
     if (
+        projectionCoverage !== 'encoded-score-field-rows-only' &&
         projectionCoverage !== 'payload-plaintext-field-rows-only' &&
         projectionCoverage !== 'share-commitment-rows-only'
     ) {
@@ -2603,6 +2904,1170 @@ export const buildBallotProofSparseComponentLinearProofStatement = (input: {
             sparseStatementMatrixEntries.length.toString(),
         statementColumns: sourceBackendColumnIndices.length,
         statementRows: explicitRows.length,
+        matrixCoefficientRepresentation: 'centeredSignedSourceModulus',
+        targetCoefficientRepresentation: 'centeredSignedSourceModulus',
+        targetVectorDigest,
+        targetVectorEntries,
+        targetVectorEntryCount: targetVectorEntries.length.toString(),
+        witnessL2BoundSquared: input.witnessL2BoundSquared,
+    };
+
+    return {
+        ...statementPayload,
+        statementDigest: deriveSparseLinearStatementDigest(statementPayload),
+    };
+};
+
+type PackedFieldStatementAccumulator = {
+    readonly addMatrixTerm: (input: {
+        readonly coefficient: bigint;
+        readonly columnIndex: number;
+        readonly monomialDegree: number;
+        readonly rowIndex: number;
+    }) => void;
+    readonly addPackedColumn: (input: {
+        readonly bindings: readonly {
+            readonly backendColumnIndex: number;
+            readonly coefficientIndex: number;
+        }[];
+        readonly packingKind: string;
+    }) => number;
+    readonly addTargetTerm: (input: {
+        readonly coefficient: bigint;
+        readonly coefficientIndex: number;
+        readonly rowIndex: number;
+    }) => void;
+    readonly matrixEntries: () => readonly SparseMatrixEntry[];
+    readonly sourceBackendColumnIndices: () => readonly number[];
+    readonly sourceColumnPackings: () => readonly PackedFieldSourceColumn[];
+    readonly statementColumns: () => number;
+    readonly targetEntries: () => readonly SparseTargetVectorEntry[];
+};
+
+const createPackedFieldStatementAccumulator = (input: {
+    readonly coefficientModulus: bigint;
+    readonly sourceRingDegree: number;
+    readonly variableColumnByBackendColumn: ReadonlyMap<
+        number,
+        FieldVariableColumn
+    >;
+}): PackedFieldStatementAccumulator => {
+    const matrixPolynomialByPosition = new Map<string, bigint[]>();
+    const targetPolynomialByRow = new Map<number, bigint[]>();
+    const sourceColumnPackings: PackedFieldSourceColumn[] = [];
+    const sourceBackendColumnIndices = new Set<number>();
+    const zeroPolynomialBigInt = (): bigint[] =>
+        Array.from({ length: input.sourceRingDegree }, () => 0n);
+    const addPolynomialTerm = (
+        polynomial: bigint[],
+        coefficientIndex: number,
+        coefficient: bigint,
+    ): void => {
+        if (
+            !Number.isSafeInteger(coefficientIndex) ||
+            coefficientIndex < 0 ||
+            coefficientIndex >= input.sourceRingDegree
+        ) {
+            throw new Error(
+                'Packed field statement coefficient index is outside the source ring.',
+            );
+        }
+        polynomial[coefficientIndex] = positiveModuloBigInt(
+            polynomial[coefficientIndex] + coefficient,
+            input.coefficientModulus,
+        );
+    };
+    const densePolynomialFromBigInt = (
+        polynomial: readonly bigint[],
+    ): DensePolynomial =>
+        polynomial.map((coefficient) =>
+            polynomialCoefficient({
+                coefficient,
+                coefficientModulus: input.coefficientModulus,
+            }),
+        );
+    const isZeroPolynomial = (polynomial: readonly bigint[]): boolean =>
+        polynomial.every((coefficient) => coefficient === 0n);
+    const sparseMatrixEntry = (
+        rowIndex: number,
+        columnIndex: number,
+        polynomial: readonly bigint[],
+    ): SparseMatrixEntry => {
+        const nonzeroIndices = polynomial.flatMap((coefficient, index) =>
+            coefficient === 0n ? [] : [index],
+        );
+        if (nonzeroIndices.length === 1 && nonzeroIndices[0] === 0) {
+            return {
+                columnIndex,
+                constantCoefficient: polynomialCoefficient({
+                    coefficient: polynomial[0] ?? 0n,
+                    coefficientModulus: input.coefficientModulus,
+                }),
+                rowIndex,
+            };
+        }
+
+        return {
+            columnIndex,
+            polynomialCoefficients: densePolynomialFromBigInt(polynomial),
+            rowIndex,
+        };
+    };
+    const sparseTargetEntry = (
+        rowIndex: number,
+        polynomial: readonly bigint[],
+    ): SparseTargetVectorEntry => {
+        const nonzeroIndices = polynomial.flatMap((coefficient, index) =>
+            coefficient === 0n ? [] : [index],
+        );
+        if (nonzeroIndices.length === 1 && nonzeroIndices[0] === 0) {
+            return {
+                constantCoefficient: polynomialCoefficient({
+                    coefficient: polynomial[0] ?? 0n,
+                    coefficientModulus: input.coefficientModulus,
+                }),
+                rowIndex,
+            };
+        }
+
+        return {
+            polynomialCoefficients: densePolynomialFromBigInt(polynomial),
+            rowIndex,
+        };
+    };
+
+    return {
+        addMatrixTerm: (termInput) => {
+            const coefficient = positiveModuloBigInt(
+                termInput.coefficient,
+                input.coefficientModulus,
+            );
+            if (coefficient === 0n) {
+                return;
+            }
+            const positionKey = `${termInput.rowIndex}:${termInput.columnIndex}`;
+            const polynomial =
+                matrixPolynomialByPosition.get(positionKey) ??
+                zeroPolynomialBigInt();
+            addPolynomialTerm(
+                polynomial,
+                termInput.monomialDegree,
+                coefficient,
+            );
+            if (isZeroPolynomial(polynomial)) {
+                matrixPolynomialByPosition.delete(positionKey);
+            } else {
+                matrixPolynomialByPosition.set(positionKey, polynomial);
+            }
+        },
+        addPackedColumn: (columnInput) => {
+            const columnIndex = sourceColumnPackings.length;
+            const seenCoefficientIndices = new Set<number>();
+            const bindings = columnInput.bindings
+                .map((binding) => {
+                    const variableColumn =
+                        input.variableColumnByBackendColumn.get(
+                            binding.backendColumnIndex,
+                        );
+                    if (variableColumn === undefined) {
+                        throw new Error(
+                            'Packed field source column references an unknown backend column.',
+                        );
+                    }
+                    if (
+                        !Number.isSafeInteger(binding.coefficientIndex) ||
+                        binding.coefficientIndex < 0 ||
+                        binding.coefficientIndex >= input.sourceRingDegree
+                    ) {
+                        throw new Error(
+                            'Packed field source column coefficient index is outside the source ring.',
+                        );
+                    }
+                    if (!seenCoefficientIndices.add(binding.coefficientIndex)) {
+                        throw new Error(
+                            'Packed field source column contains a duplicate coefficient slot.',
+                        );
+                    }
+                    sourceBackendColumnIndices.add(binding.backendColumnIndex);
+
+                    return {
+                        backendColumnIndex: binding.backendColumnIndex,
+                        coefficientIndex: binding.coefficientIndex,
+                        variableName: variableColumn.variableName,
+                        variableRole: variableColumn.variableRole,
+                    };
+                })
+                .sort(
+                    (left, right) =>
+                        left.coefficientIndex - right.coefficientIndex,
+                );
+            sourceColumnPackings.push({
+                bindings,
+                columnIndex,
+                packingKind: columnInput.packingKind,
+            });
+
+            return columnIndex;
+        },
+        addTargetTerm: (targetInput) => {
+            const coefficient = positiveModuloBigInt(
+                targetInput.coefficient,
+                input.coefficientModulus,
+            );
+            if (coefficient === 0n) {
+                return;
+            }
+            const polynomial =
+                targetPolynomialByRow.get(targetInput.rowIndex) ??
+                zeroPolynomialBigInt();
+            addPolynomialTerm(
+                polynomial,
+                targetInput.coefficientIndex,
+                coefficient,
+            );
+            if (isZeroPolynomial(polynomial)) {
+                targetPolynomialByRow.delete(targetInput.rowIndex);
+            } else {
+                targetPolynomialByRow.set(targetInput.rowIndex, polynomial);
+            }
+        },
+        matrixEntries: () =>
+            [...matrixPolynomialByPosition.entries()]
+                .map(([positionKey, polynomial]) => {
+                    const [rowIndexString, columnIndexString] =
+                        positionKey.split(':');
+                    return sparseMatrixEntry(
+                        Number(rowIndexString),
+                        Number(columnIndexString),
+                        polynomial,
+                    );
+                })
+                .sort((left, right) =>
+                    left.rowIndex === right.rowIndex
+                        ? left.columnIndex - right.columnIndex
+                        : left.rowIndex - right.rowIndex,
+                ),
+        sourceBackendColumnIndices: () =>
+            [...sourceBackendColumnIndices].sort((left, right) => left - right),
+        sourceColumnPackings: () => sourceColumnPackings,
+        statementColumns: () => sourceColumnPackings.length,
+        targetEntries: () =>
+            [...targetPolynomialByRow.entries()]
+                .map(([rowIndex, polynomial]) =>
+                    sparseTargetEntry(rowIndex, polynomial),
+                )
+                .sort((left, right) => left.rowIndex - right.rowIndex),
+    };
+};
+
+const fieldVariableKey = (variableColumn: FieldVariableColumn): string =>
+    [
+        variableColumn.variableRole,
+        variableColumn.receiverRosterPosition ?? '',
+        variableColumn.encodedCoordinateIndex ?? '',
+        variableColumn.openingCoordinateIndex ?? '',
+        variableColumn.bitIndex ?? '',
+        variableColumn.coefficientDegree ?? '',
+        variableColumn.optionIndex ?? '',
+        variableColumn.scoreBucketValue ?? '',
+    ].join('|');
+
+const requiredFieldVariableColumn = (input: {
+    readonly key: string;
+    readonly label: string;
+    readonly variableColumnByKey: ReadonlyMap<string, FieldVariableColumn>;
+}): FieldVariableColumn => {
+    const variableColumn = input.variableColumnByKey.get(input.key);
+    if (variableColumn === undefined) {
+        throw new Error(
+            `Packed field statement is missing variable column ${input.label}.`,
+        );
+    }
+
+    return variableColumn;
+};
+
+const fieldVariableLookupKey = (input: {
+    readonly bitIndex?: number;
+    readonly coefficientDegree?: number;
+    readonly encodedCoordinateIndex?: number;
+    readonly openingCoordinateIndex?: number;
+    readonly optionIndex?: number;
+    readonly receiverRosterPosition?: number;
+    readonly scoreBucketValue?: number;
+    readonly variableRole: string;
+}): string =>
+    [
+        input.variableRole,
+        input.receiverRosterPosition ?? '',
+        input.encodedCoordinateIndex ?? '',
+        input.openingCoordinateIndex ?? '',
+        input.bitIndex ?? '',
+        input.coefficientDegree ?? '',
+        input.optionIndex ?? '',
+        input.scoreBucketValue ?? '',
+    ].join('|');
+
+const encodedCoordinateCountForRelation = (
+    relationInput: BallotPrivacyRelationCompilerInput,
+): number => relationInput.optionCount * 11;
+
+const encodedCoordinateChunkCount = (input: {
+    readonly encodedCoordinateCount: number;
+    readonly sourceRingDegree: number;
+}): number => Math.ceil(input.encodedCoordinateCount / input.sourceRingDegree);
+
+const buildPackedScoreAndShamirFieldStatement = (input: {
+    readonly accumulator: PackedFieldStatementAccumulator;
+    readonly relationInput: BallotPrivacyRelationCompilerInput;
+    readonly sourceRingDegree: number;
+    readonly variableColumnByKey: ReadonlyMap<string, FieldVariableColumn>;
+}): number => {
+    const encodedCoordinateCount = encodedCoordinateCountForRelation(
+        input.relationInput,
+    );
+    const chunkCount = encodedCoordinateChunkCount({
+        encodedCoordinateCount,
+        sourceRingDegree: input.sourceRingDegree,
+    });
+    const scoreColumnByEncodedCoordinate = new Map<number, number>();
+    for (
+        let encodedCoordinateIndex = 0;
+        encodedCoordinateIndex < encodedCoordinateCount;
+        encodedCoordinateIndex += 1
+    ) {
+        const optionIndex = Math.floor(encodedCoordinateIndex / 11);
+        const coordinateOffset = encodedCoordinateIndex % 11;
+        const variableColumn =
+            coordinateOffset === 0
+                ? requiredFieldVariableColumn({
+                      key: fieldVariableLookupKey({
+                          encodedCoordinateIndex,
+                          optionIndex,
+                          variableRole: 'ScalarScoreConstant',
+                      }),
+                      label: `scalar score ${optionIndex}`,
+                      variableColumnByKey: input.variableColumnByKey,
+                  })
+                : requiredFieldVariableColumn({
+                      key: fieldVariableLookupKey({
+                          encodedCoordinateIndex,
+                          optionIndex,
+                          scoreBucketValue: coordinateOffset,
+                          variableRole: 'ScoreBucketConstant',
+                      }),
+                      label: `score bucket ${optionIndex}:${coordinateOffset}`,
+                      variableColumnByKey: input.variableColumnByKey,
+                  });
+        scoreColumnByEncodedCoordinate.set(
+            encodedCoordinateIndex,
+            input.accumulator.addPackedColumn({
+                bindings: [
+                    {
+                        backendColumnIndex: variableColumn.columnIndex,
+                        coefficientIndex: 0,
+                    },
+                ],
+                packingKind: `score-coordinate-${encodedCoordinateIndex}`,
+            }),
+        );
+    }
+    const coefficientColumnByDegreeAndChunk = new Map<string, number>();
+    for (
+        let coefficientDegree = 1;
+        coefficientDegree < input.relationInput.pvssThreshold;
+        coefficientDegree += 1
+    ) {
+        for (let chunkIndex = 0; chunkIndex < chunkCount; chunkIndex += 1) {
+            const firstCoordinateIndex = chunkIndex * input.sourceRingDegree;
+            const bindings = Array.from(
+                {
+                    length: Math.min(
+                        input.sourceRingDegree,
+                        encodedCoordinateCount - firstCoordinateIndex,
+                    ),
+                },
+                (_unusedValue, coefficientIndex) => {
+                    const encodedCoordinateIndex =
+                        firstCoordinateIndex + coefficientIndex;
+                    const variableColumn = requiredFieldVariableColumn({
+                        key: fieldVariableLookupKey({
+                            coefficientDegree,
+                            encodedCoordinateIndex,
+                            variableRole: 'ShamirCoefficient',
+                        }),
+                        label: `Shamir coefficient ${encodedCoordinateIndex}:${coefficientDegree}`,
+                        variableColumnByKey: input.variableColumnByKey,
+                    });
+
+                    return {
+                        backendColumnIndex: variableColumn.columnIndex,
+                        coefficientIndex,
+                    };
+                },
+            );
+            coefficientColumnByDegreeAndChunk.set(
+                `${coefficientDegree}:${chunkIndex}`,
+                input.accumulator.addPackedColumn({
+                    bindings,
+                    packingKind: `shamir-coefficient-degree-${coefficientDegree}-chunk-${chunkIndex}`,
+                }),
+            );
+        }
+    }
+    const receiverShareColumnByReceiverAndChunk = new Map<string, number>();
+    const quotientColumnByReceiverAndChunk = new Map<string, number>();
+    for (const receiver of input.relationInput.receivers) {
+        for (let chunkIndex = 0; chunkIndex < chunkCount; chunkIndex += 1) {
+            const firstCoordinateIndex = chunkIndex * input.sourceRingDegree;
+            const coordinateCountInChunk = Math.min(
+                input.sourceRingDegree,
+                encodedCoordinateCount - firstCoordinateIndex,
+            );
+            receiverShareColumnByReceiverAndChunk.set(
+                `${receiver.receiverRosterPosition}:${chunkIndex}`,
+                input.accumulator.addPackedColumn({
+                    bindings: Array.from(
+                        { length: coordinateCountInChunk },
+                        (_unusedValue, coefficientIndex) => {
+                            const encodedCoordinateIndex =
+                                firstCoordinateIndex + coefficientIndex;
+                            const variableColumn = requiredFieldVariableColumn({
+                                key: fieldVariableLookupKey({
+                                    encodedCoordinateIndex,
+                                    receiverRosterPosition:
+                                        receiver.receiverRosterPosition,
+                                    variableRole: 'ReceiverShare',
+                                }),
+                                label: `receiver share ${receiver.receiverRosterPosition}:${encodedCoordinateIndex}`,
+                                variableColumnByKey: input.variableColumnByKey,
+                            });
+
+                            return {
+                                backendColumnIndex: variableColumn.columnIndex,
+                                coefficientIndex,
+                            };
+                        },
+                    ),
+                    packingKind: `receiver-${receiver.receiverRosterPosition}-share-chunk-${chunkIndex}`,
+                }),
+            );
+            quotientColumnByReceiverAndChunk.set(
+                `${receiver.receiverRosterPosition}:${chunkIndex}`,
+                input.accumulator.addPackedColumn({
+                    bindings: Array.from(
+                        { length: coordinateCountInChunk },
+                        (_unusedValue, coefficientIndex) => {
+                            const encodedCoordinateIndex =
+                                firstCoordinateIndex + coefficientIndex;
+                            const variableColumn = requiredFieldVariableColumn({
+                                key: fieldVariableLookupKey({
+                                    encodedCoordinateIndex,
+                                    receiverRosterPosition:
+                                        receiver.receiverRosterPosition,
+                                    variableRole: 'ShamirQuotient',
+                                }),
+                                label: `Shamir quotient ${receiver.receiverRosterPosition}:${encodedCoordinateIndex}`,
+                                variableColumnByKey: input.variableColumnByKey,
+                            });
+
+                            return {
+                                backendColumnIndex: variableColumn.columnIndex,
+                                coefficientIndex,
+                            };
+                        },
+                    ),
+                    packingKind: `receiver-${receiver.receiverRosterPosition}-quotient-chunk-${chunkIndex}`,
+                }),
+            );
+        }
+    }
+
+    for (
+        let optionIndex = 0;
+        optionIndex < input.relationInput.optionCount;
+        optionIndex += 1
+    ) {
+        input.accumulator.addTargetTerm({
+            coefficient: -1n,
+            coefficientIndex: optionIndex,
+            rowIndex: 0,
+        });
+        for (
+            let scoreBucketValue = 1;
+            scoreBucketValue <= 10;
+            scoreBucketValue += 1
+        ) {
+            const encodedCoordinateIndex = optionIndex * 11 + scoreBucketValue;
+            input.accumulator.addMatrixTerm({
+                coefficient: 1n,
+                columnIndex:
+                    scoreColumnByEncodedCoordinate.get(
+                        encodedCoordinateIndex,
+                    ) ??
+                    (() => {
+                        throw new Error('Score coordinate column is missing.');
+                    })(),
+                monomialDegree: optionIndex,
+                rowIndex: 0,
+            });
+            input.accumulator.addMatrixTerm({
+                coefficient: -BigInt(scoreBucketValue),
+                columnIndex:
+                    scoreColumnByEncodedCoordinate.get(
+                        encodedCoordinateIndex,
+                    ) ??
+                    (() => {
+                        throw new Error('Score coordinate column is missing.');
+                    })(),
+                monomialDegree: optionIndex,
+                rowIndex: 1,
+            });
+        }
+        input.accumulator.addMatrixTerm({
+            coefficient: 1n,
+            columnIndex:
+                scoreColumnByEncodedCoordinate.get(optionIndex * 11) ??
+                (() => {
+                    throw new Error('Scalar score column is missing.');
+                })(),
+            monomialDegree: optionIndex,
+            rowIndex: 1,
+        });
+    }
+
+    const shamirRowOffset = 2;
+    for (const [
+        receiverIndex,
+        receiver,
+    ] of input.relationInput.receivers.entries()) {
+        for (let chunkIndex = 0; chunkIndex < chunkCount; chunkIndex += 1) {
+            const rowIndex =
+                shamirRowOffset + receiverIndex * chunkCount + chunkIndex;
+            const firstCoordinateIndex = chunkIndex * input.sourceRingDegree;
+            const coordinateCountInChunk = Math.min(
+                input.sourceRingDegree,
+                encodedCoordinateCount - firstCoordinateIndex,
+            );
+            for (
+                let coefficientIndex = 0;
+                coefficientIndex < coordinateCountInChunk;
+                coefficientIndex += 1
+            ) {
+                const encodedCoordinateIndex =
+                    firstCoordinateIndex + coefficientIndex;
+                input.accumulator.addMatrixTerm({
+                    coefficient: 1n,
+                    columnIndex:
+                        scoreColumnByEncodedCoordinate.get(
+                            encodedCoordinateIndex,
+                        ) ??
+                        (() => {
+                            throw new Error(
+                                'Score coordinate column is missing.',
+                            );
+                        })(),
+                    monomialDegree: coefficientIndex,
+                    rowIndex,
+                });
+            }
+            for (
+                let coefficientDegree = 1;
+                coefficientDegree < input.relationInput.pvssThreshold;
+                coefficientDegree += 1
+            ) {
+                input.accumulator.addMatrixTerm({
+                    coefficient: BigInt(
+                        fieldPowerForReceiver(
+                            receiver.receiverRosterPosition,
+                            coefficientDegree,
+                        ),
+                    ),
+                    columnIndex:
+                        coefficientColumnByDegreeAndChunk.get(
+                            `${coefficientDegree}:${chunkIndex}`,
+                        ) ??
+                        (() => {
+                            throw new Error(
+                                'Shamir coefficient packed column is missing.',
+                            );
+                        })(),
+                    monomialDegree: 0,
+                    rowIndex,
+                });
+            }
+            input.accumulator.addMatrixTerm({
+                coefficient: -1n,
+                columnIndex:
+                    receiverShareColumnByReceiverAndChunk.get(
+                        `${receiver.receiverRosterPosition}:${chunkIndex}`,
+                    ) ??
+                    (() => {
+                        throw new Error(
+                            'Receiver share packed column is missing.',
+                        );
+                    })(),
+                monomialDegree: 0,
+                rowIndex,
+            });
+            input.accumulator.addMatrixTerm({
+                coefficient: -BigInt(fieldModulus),
+                columnIndex:
+                    quotientColumnByReceiverAndChunk.get(
+                        `${receiver.receiverRosterPosition}:${chunkIndex}`,
+                    ) ??
+                    (() => {
+                        throw new Error(
+                            'Shamir quotient packed column is missing.',
+                        );
+                    })(),
+                monomialDegree: 0,
+                rowIndex,
+            });
+        }
+    }
+
+    return shamirRowOffset + input.relationInput.receivers.length * chunkCount;
+};
+
+const buildPackedPayloadPlaintextFieldStatement = (input: {
+    readonly accumulator: PackedFieldStatementAccumulator;
+    readonly relationInput: BallotPrivacyRelationCompilerInput;
+    readonly sourceRingDegree: number;
+    readonly variableColumnByKey: ReadonlyMap<string, FieldVariableColumn>;
+}): number => {
+    const encodedCoordinateCount = encodedCoordinateCountForRelation(
+        input.relationInput,
+    );
+    const encodedChunkCount = encodedCoordinateChunkCount({
+        encodedCoordinateCount,
+        sourceRingDegree: input.sourceRingDegree,
+    });
+    const openingChunkCount = Math.ceil(
+        shareCommitmentOpeningDimension / input.sourceRingDegree,
+    );
+    const columnByKindReceiverAndChunk = new Map<string, number>();
+    const addCoordinatePackedColumn = (inputColumn: {
+        readonly packingKind: string;
+        readonly receiverRosterPosition: number;
+        readonly variableRole: string;
+    }): void => {
+        for (
+            let chunkIndex = 0;
+            chunkIndex < encodedChunkCount;
+            chunkIndex += 1
+        ) {
+            const firstCoordinateIndex = chunkIndex * input.sourceRingDegree;
+            const coordinateCountInChunk = Math.min(
+                input.sourceRingDegree,
+                encodedCoordinateCount - firstCoordinateIndex,
+            );
+            const columnIndex = input.accumulator.addPackedColumn({
+                bindings: Array.from(
+                    { length: coordinateCountInChunk },
+                    (_unusedValue, coefficientIndex) => {
+                        const encodedCoordinateIndex =
+                            firstCoordinateIndex + coefficientIndex;
+                        const variableColumn = requiredFieldVariableColumn({
+                            key: fieldVariableLookupKey({
+                                encodedCoordinateIndex,
+                                receiverRosterPosition:
+                                    inputColumn.receiverRosterPosition,
+                                variableRole: inputColumn.variableRole,
+                            }),
+                            label: `${inputColumn.variableRole} ${inputColumn.receiverRosterPosition}:${encodedCoordinateIndex}`,
+                            variableColumnByKey: input.variableColumnByKey,
+                        });
+
+                        return {
+                            backendColumnIndex: variableColumn.columnIndex,
+                            coefficientIndex,
+                        };
+                    },
+                ),
+                packingKind: `${inputColumn.packingKind}-chunk-${chunkIndex}`,
+            });
+            columnByKindReceiverAndChunk.set(
+                `${inputColumn.variableRole}:${inputColumn.receiverRosterPosition}:${chunkIndex}`,
+                columnIndex,
+            );
+        }
+    };
+    const addOpeningPackedColumn = (inputColumn: {
+        readonly packingKind: string;
+        readonly receiverRosterPosition: number;
+        readonly variableRole: string;
+    }): void => {
+        for (
+            let chunkIndex = 0;
+            chunkIndex < openingChunkCount;
+            chunkIndex += 1
+        ) {
+            const firstOpeningIndex = chunkIndex * input.sourceRingDegree;
+            const openingCountInChunk = Math.min(
+                input.sourceRingDegree,
+                shareCommitmentOpeningDimension - firstOpeningIndex,
+            );
+            const columnIndex = input.accumulator.addPackedColumn({
+                bindings: Array.from(
+                    { length: openingCountInChunk },
+                    (_unusedValue, coefficientIndex) => {
+                        const openingCoordinateIndex =
+                            firstOpeningIndex + coefficientIndex;
+                        const variableColumn = requiredFieldVariableColumn({
+                            key: fieldVariableLookupKey({
+                                openingCoordinateIndex,
+                                receiverRosterPosition:
+                                    inputColumn.receiverRosterPosition,
+                                variableRole: inputColumn.variableRole,
+                            }),
+                            label: `${inputColumn.variableRole} ${inputColumn.receiverRosterPosition}:${openingCoordinateIndex}`,
+                            variableColumnByKey: input.variableColumnByKey,
+                        });
+
+                        return {
+                            backendColumnIndex: variableColumn.columnIndex,
+                            coefficientIndex,
+                        };
+                    },
+                ),
+                packingKind: `${inputColumn.packingKind}-chunk-${chunkIndex}`,
+            });
+            columnByKindReceiverAndChunk.set(
+                `${inputColumn.variableRole}:${inputColumn.receiverRosterPosition}:${chunkIndex}`,
+                columnIndex,
+            );
+        }
+    };
+    const addCoordinateBitPackedColumns = (
+        receiverRosterPosition: number,
+    ): void => {
+        for (
+            let bitIndex = 0;
+            bitIndex < receiverShareRepresentativeBitLength;
+            bitIndex += 1
+        ) {
+            for (
+                let chunkIndex = 0;
+                chunkIndex < encodedChunkCount;
+                chunkIndex += 1
+            ) {
+                const firstCoordinateIndex =
+                    chunkIndex * input.sourceRingDegree;
+                const coordinateCountInChunk = Math.min(
+                    input.sourceRingDegree,
+                    encodedCoordinateCount - firstCoordinateIndex,
+                );
+                const columnIndex = input.accumulator.addPackedColumn({
+                    bindings: Array.from(
+                        { length: coordinateCountInChunk },
+                        (_unusedValue, coefficientIndex) => {
+                            const encodedCoordinateIndex =
+                                firstCoordinateIndex + coefficientIndex;
+                            const variableColumn = requiredFieldVariableColumn({
+                                key: fieldVariableLookupKey({
+                                    bitIndex,
+                                    encodedCoordinateIndex,
+                                    receiverRosterPosition,
+                                    variableRole: 'ReceiverPayloadPlaintextBit',
+                                }),
+                                label: `payload share bit ${receiverRosterPosition}:${encodedCoordinateIndex}:${bitIndex}`,
+                                variableColumnByKey: input.variableColumnByKey,
+                            });
+
+                            return {
+                                backendColumnIndex: variableColumn.columnIndex,
+                                coefficientIndex,
+                            };
+                        },
+                    ),
+                    packingKind: `receiver-${receiverRosterPosition}-payload-share-bit-${bitIndex}-chunk-${chunkIndex}`,
+                });
+                columnByKindReceiverAndChunk.set(
+                    `ReceiverPayloadPlaintextShareBit:${receiverRosterPosition}:${bitIndex}:${chunkIndex}`,
+                    columnIndex,
+                );
+            }
+        }
+    };
+    const addOpeningBitPackedColumns = (
+        receiverRosterPosition: number,
+    ): void => {
+        for (
+            let bitIndex = 0;
+            bitIndex < receiverOpeningRandomnessBitLength;
+            bitIndex += 1
+        ) {
+            for (
+                let chunkIndex = 0;
+                chunkIndex < openingChunkCount;
+                chunkIndex += 1
+            ) {
+                const firstOpeningIndex = chunkIndex * input.sourceRingDegree;
+                const openingCountInChunk = Math.min(
+                    input.sourceRingDegree,
+                    shareCommitmentOpeningDimension - firstOpeningIndex,
+                );
+                const columnIndex = input.accumulator.addPackedColumn({
+                    bindings: Array.from(
+                        { length: openingCountInChunk },
+                        (_unusedValue, coefficientIndex) => {
+                            const openingCoordinateIndex =
+                                firstOpeningIndex + coefficientIndex;
+                            const variableColumn = requiredFieldVariableColumn({
+                                key: fieldVariableLookupKey({
+                                    bitIndex,
+                                    openingCoordinateIndex,
+                                    receiverRosterPosition,
+                                    variableRole: 'ReceiverPayloadPlaintextBit',
+                                }),
+                                label: `payload opening bit ${receiverRosterPosition}:${openingCoordinateIndex}:${bitIndex}`,
+                                variableColumnByKey: input.variableColumnByKey,
+                            });
+
+                            return {
+                                backendColumnIndex: variableColumn.columnIndex,
+                                coefficientIndex,
+                            };
+                        },
+                    ),
+                    packingKind: `receiver-${receiverRosterPosition}-payload-opening-bit-${bitIndex}-chunk-${chunkIndex}`,
+                });
+                columnByKindReceiverAndChunk.set(
+                    `ReceiverPayloadPlaintextOpeningBit:${receiverRosterPosition}:${bitIndex}:${chunkIndex}`,
+                    columnIndex,
+                );
+            }
+        }
+    };
+
+    for (const receiver of input.relationInput.receivers) {
+        addCoordinatePackedColumn({
+            packingKind: `receiver-${receiver.receiverRosterPosition}-payload-share`,
+            receiverRosterPosition: receiver.receiverRosterPosition,
+            variableRole: 'ReceiverPayloadPlaintextShare',
+        });
+        addCoordinatePackedColumn({
+            packingKind: `receiver-${receiver.receiverRosterPosition}-receiver-share`,
+            receiverRosterPosition: receiver.receiverRosterPosition,
+            variableRole: 'ReceiverShare',
+        });
+        addOpeningPackedColumn({
+            packingKind: `receiver-${receiver.receiverRosterPosition}-payload-opening`,
+            receiverRosterPosition: receiver.receiverRosterPosition,
+            variableRole: 'ReceiverPayloadPlaintextOpening',
+        });
+        addOpeningPackedColumn({
+            packingKind: `receiver-${receiver.receiverRosterPosition}-share-opening`,
+            receiverRosterPosition: receiver.receiverRosterPosition,
+            variableRole: 'ShareCommitmentOpening',
+        });
+        addCoordinateBitPackedColumns(receiver.receiverRosterPosition);
+        addOpeningBitPackedColumns(receiver.receiverRosterPosition);
+    }
+
+    const shareBindingRowOffset = 0;
+    const openingBindingRowOffset =
+        shareBindingRowOffset +
+        input.relationInput.receivers.length * encodedChunkCount;
+    const shareBitRowOffset =
+        openingBindingRowOffset +
+        input.relationInput.receivers.length * openingChunkCount;
+    const openingBitRowOffset =
+        shareBitRowOffset +
+        input.relationInput.receivers.length * encodedChunkCount;
+    for (const [
+        receiverIndex,
+        receiver,
+    ] of input.relationInput.receivers.entries()) {
+        for (
+            let chunkIndex = 0;
+            chunkIndex < encodedChunkCount;
+            chunkIndex += 1
+        ) {
+            const shareBindingRowIndex =
+                shareBindingRowOffset +
+                receiverIndex * encodedChunkCount +
+                chunkIndex;
+            input.accumulator.addMatrixTerm({
+                coefficient: 1n,
+                columnIndex:
+                    columnByKindReceiverAndChunk.get(
+                        `ReceiverPayloadPlaintextShare:${receiver.receiverRosterPosition}:${chunkIndex}`,
+                    ) ??
+                    (() => {
+                        throw new Error(
+                            'Payload share packed column is missing.',
+                        );
+                    })(),
+                monomialDegree: 0,
+                rowIndex: shareBindingRowIndex,
+            });
+            input.accumulator.addMatrixTerm({
+                coefficient: -1n,
+                columnIndex:
+                    columnByKindReceiverAndChunk.get(
+                        `ReceiverShare:${receiver.receiverRosterPosition}:${chunkIndex}`,
+                    ) ??
+                    (() => {
+                        throw new Error(
+                            'Receiver share packed column is missing.',
+                        );
+                    })(),
+                monomialDegree: 0,
+                rowIndex: shareBindingRowIndex,
+            });
+            const shareBitRowIndex =
+                shareBitRowOffset +
+                receiverIndex * encodedChunkCount +
+                chunkIndex;
+            for (
+                let bitIndex = 0;
+                bitIndex < receiverShareRepresentativeBitLength;
+                bitIndex += 1
+            ) {
+                input.accumulator.addMatrixTerm({
+                    coefficient: 1n << BigInt(bitIndex),
+                    columnIndex:
+                        columnByKindReceiverAndChunk.get(
+                            `ReceiverPayloadPlaintextShareBit:${receiver.receiverRosterPosition}:${bitIndex}:${chunkIndex}`,
+                        ) ??
+                        (() => {
+                            throw new Error(
+                                'Payload share-bit packed column is missing.',
+                            );
+                        })(),
+                    monomialDegree: 0,
+                    rowIndex: shareBitRowIndex,
+                });
+            }
+            input.accumulator.addMatrixTerm({
+                coefficient: -1n,
+                columnIndex:
+                    columnByKindReceiverAndChunk.get(
+                        `ReceiverPayloadPlaintextShare:${receiver.receiverRosterPosition}:${chunkIndex}`,
+                    ) ??
+                    (() => {
+                        throw new Error(
+                            'Payload share packed column is missing.',
+                        );
+                    })(),
+                monomialDegree: 0,
+                rowIndex: shareBitRowIndex,
+            });
+        }
+        for (
+            let chunkIndex = 0;
+            chunkIndex < openingChunkCount;
+            chunkIndex += 1
+        ) {
+            const openingBindingRowIndex =
+                openingBindingRowOffset +
+                receiverIndex * openingChunkCount +
+                chunkIndex;
+            input.accumulator.addMatrixTerm({
+                coefficient: 1n,
+                columnIndex:
+                    columnByKindReceiverAndChunk.get(
+                        `ReceiverPayloadPlaintextOpening:${receiver.receiverRosterPosition}:${chunkIndex}`,
+                    ) ??
+                    (() => {
+                        throw new Error(
+                            'Payload opening packed column is missing.',
+                        );
+                    })(),
+                monomialDegree: 0,
+                rowIndex: openingBindingRowIndex,
+            });
+            input.accumulator.addMatrixTerm({
+                coefficient: -1n,
+                columnIndex:
+                    columnByKindReceiverAndChunk.get(
+                        `ShareCommitmentOpening:${receiver.receiverRosterPosition}:${chunkIndex}`,
+                    ) ??
+                    (() => {
+                        throw new Error(
+                            'Share opening packed column is missing.',
+                        );
+                    })(),
+                monomialDegree: 0,
+                rowIndex: openingBindingRowIndex,
+            });
+            const openingBitRowIndex =
+                openingBitRowOffset +
+                receiverIndex * openingChunkCount +
+                chunkIndex;
+            const firstOpeningIndex = chunkIndex * input.sourceRingDegree;
+            const openingCountInChunk = Math.min(
+                input.sourceRingDegree,
+                shareCommitmentOpeningDimension - firstOpeningIndex,
+            );
+            for (
+                let coefficientIndex = 0;
+                coefficientIndex < openingCountInChunk;
+                coefficientIndex += 1
+            ) {
+                input.accumulator.addTargetTerm({
+                    coefficient: -BigInt(receiverPayloadOpeningEncodingOffset),
+                    coefficientIndex,
+                    rowIndex: openingBitRowIndex,
+                });
+            }
+            for (
+                let bitIndex = 0;
+                bitIndex < receiverOpeningRandomnessBitLength;
+                bitIndex += 1
+            ) {
+                input.accumulator.addMatrixTerm({
+                    coefficient: 1n << BigInt(bitIndex),
+                    columnIndex:
+                        columnByKindReceiverAndChunk.get(
+                            `ReceiverPayloadPlaintextOpeningBit:${receiver.receiverRosterPosition}:${bitIndex}:${chunkIndex}`,
+                        ) ??
+                        (() => {
+                            throw new Error(
+                                'Payload opening-bit packed column is missing.',
+                            );
+                        })(),
+                    monomialDegree: 0,
+                    rowIndex: openingBitRowIndex,
+                });
+            }
+            input.accumulator.addMatrixTerm({
+                coefficient: -1n,
+                columnIndex:
+                    columnByKindReceiverAndChunk.get(
+                        `ReceiverPayloadPlaintextOpening:${receiver.receiverRosterPosition}:${chunkIndex}`,
+                    ) ??
+                    (() => {
+                        throw new Error(
+                            'Payload opening packed column is missing.',
+                        );
+                    })(),
+                monomialDegree: 0,
+                rowIndex: openingBitRowIndex,
+            });
+        }
+    }
+
+    return (
+        openingBitRowOffset +
+        input.relationInput.receivers.length * openingChunkCount
+    );
+};
+
+const packedFieldProjectionCoverage = (
+    componentId:
+        | 'score-and-shamir-field-component'
+        | 'payload-plaintext-field-component',
+): 'encoded-score-field-rows-only' | 'payload-plaintext-field-rows-only' => {
+    switch (componentId) {
+        case 'score-and-shamir-field-component':
+            return 'encoded-score-field-rows-only';
+        case 'payload-plaintext-field-component':
+            return 'payload-plaintext-field-rows-only';
+    }
+};
+
+export const buildPackedFieldSparseComponentLinearProofStatement = (input: {
+    readonly ballotProofStatementDigest?: ProtocolDigest;
+    readonly componentId:
+        | 'score-and-shamir-field-component'
+        | 'payload-plaintext-field-component';
+    readonly loweredStatement: BallotPrivacyLoweredLinearRelationStatement;
+    readonly parameterProfileId: string;
+    readonly relationInput: BallotPrivacyRelationCompilerInput;
+    readonly sourceRingDegree: 64;
+    readonly witnessL2BoundSquared: string;
+}): BallotProofSparseComponentLinearProofStatement => {
+    const component = componentById({
+        componentId: input.componentId,
+        loweredStatement: input.loweredStatement,
+    });
+    if (component.coefficientModulus !== fieldModulus.toString()) {
+        throw new Error(
+            `Packed field statements require the GF(${fieldModulus}) modulus.`,
+        );
+    }
+    const rowBatches = explicitRowBatchesForComponent({
+        component,
+        loweredStatement: input.loweredStatement,
+    });
+    const invalidModulusBatch = rowBatches.find(
+        (rowBatch) => rowBatch.modulus !== component.coefficientModulus,
+    );
+    if (invalidModulusBatch !== undefined) {
+        throw new Error(
+            `Proof component ${input.componentId} row batch ${invalidModulusBatch.batchName} uses a mismatched modulus.`,
+        );
+    }
+    const variableColumnByBackendColumn = new Map(
+        fieldVariableColumns(input.loweredStatement).map((variableColumn) => [
+            variableColumn.columnIndex,
+            variableColumn,
+        ]),
+    );
+    const variableColumnByKey = new Map(
+        fieldVariableColumns(input.loweredStatement).map((variableColumn) => [
+            fieldVariableKey(variableColumn),
+            variableColumn,
+        ]),
+    );
+    const accumulator = createPackedFieldStatementAccumulator({
+        coefficientModulus: BigInt(fieldModulus),
+        sourceRingDegree: input.sourceRingDegree,
+        variableColumnByBackendColumn,
+    });
+    const statementRows =
+        input.componentId === 'score-and-shamir-field-component'
+            ? buildPackedScoreAndShamirFieldStatement({
+                  accumulator,
+                  relationInput: input.relationInput,
+                  sourceRingDegree: input.sourceRingDegree,
+                  variableColumnByKey,
+              })
+            : buildPackedPayloadPlaintextFieldStatement({
+                  accumulator,
+                  relationInput: input.relationInput,
+                  sourceRingDegree: input.sourceRingDegree,
+                  variableColumnByKey,
+              });
+    const sparseStatementMatrixEntries = accumulator.matrixEntries();
+    const targetVectorEntries = accumulator.targetEntries();
+    const sparseStatementMatrixDigest = deriveSparseStatementMatrixDigest(
+        sparseStatementMatrixEntries,
+    );
+    const targetVectorDigest =
+        deriveSparseTargetVectorDigest(targetVectorEntries);
+    const statementPayload: Omit<
+        BallotProofSparseComponentLinearProofStatement,
+        'statementDigest'
+    > = {
+        backendStatementDigest:
+            input.loweredStatement.backendStatement.backendStatementDigest,
+        ...(input.ballotProofStatementDigest === undefined
+            ? {}
+            : {
+                  ballotProofStatementDigest: input.ballotProofStatementDigest,
+              }),
+        coefficientModulus: component.coefficientModulus,
+        objectType: 'BallotProofSparseComponentLinearProofStatement',
+        objectVersion: 1,
+        parameterProfileId: input.parameterProfileId,
+        proofStatementFormat: 'sparse-polynomial-matrix-linear-proof-v1',
+        projectionCoverage: packedFieldProjectionCoverage(input.componentId),
+        relation: linearProofRelation,
+        relationStatementDigest: input.loweredStatement.relationStatementDigest,
+        sourceBackendColumnIndices: accumulator.sourceBackendColumnIndices(),
+        sourceColumnPackings: accumulator.sourceColumnPackings(),
+        sourceRingDegree: input.sourceRingDegree,
+        sparseStatementMatrixDigest,
+        sparseStatementMatrixEntries,
+        sparseStatementTermCount:
+            sparseStatementMatrixEntries.length.toString(),
+        statementColumns: accumulator.statementColumns(),
+        statementRows,
+        matrixCoefficientRepresentation: 'centeredSignedSourceModulus',
         targetCoefficientRepresentation: 'centeredSignedSourceModulus',
         targetVectorDigest,
         targetVectorEntries,
@@ -2668,10 +4133,6 @@ export const buildBallotProofStructuredReceiverEncryptionProofStatement =
             );
         }
         const sourceBackendColumnIndices = component.variableColumnIndices;
-        const projectedColumnByBackendColumn = projectedColumnLookup(
-            sourceBackendColumnIndices,
-        );
-        const variableColumns = fieldVariableColumns(input.loweredStatement);
         const publicKeysByReceiver = new Map(
             input.loweredStatement.publicContext.receiverPublicKeys.map(
                 (publicKey) => [receiverReferenceKey(publicKey), publicKey],
@@ -2685,16 +4146,8 @@ export const buildBallotProofStructuredReceiverEncryptionProofStatement =
                 ],
             ),
         );
-        const shareVectorWidth =
-            input.loweredStatement.backendStatement.shareVectorWidth;
-        if (
-            !Number.isSafeInteger(shareVectorWidth) ||
-            Number(shareVectorWidth) <= 0
-        ) {
-            throw new Error(
-                'Structured receiver-encryption proof statement requires a valid share vector width.',
-            );
-        }
+        let nextPolynomialColumnIndex = 0;
+        let nextPolynomialRowOffset = 0;
         const receiverRows = structuredRowBatch.receiverRows.map(
             (receiverRow): StructuredReceiverEncryptionReceiverStatement => {
                 const receiverKey = receiverReferenceKey(receiverRow);
@@ -2717,114 +4170,38 @@ export const buildBallotProofStructuredReceiverEncryptionProofStatement =
                         'Structured receiver-encryption ciphertext chunk count does not match the row descriptor.',
                     );
                 }
+                const rowOffsetWithinStatement = nextPolynomialRowOffset;
+                const rowCount =
+                    receiverRow.ciphertextChunkCount *
+                    (receiverEncryptionModuleRank + 1);
+                nextPolynomialRowOffset += rowCount;
                 const ciphertextChunks = receiverPayload.ciphertextChunks.map(
                     (
                         ciphertextChunk,
                     ): StructuredReceiverEncryptionCiphertextChunkStatement => {
-                        const plaintextBitStart =
-                            ciphertextChunk.chunkIndex *
-                            receiverEncryptionModuleDegree;
-                        const plaintextBitEnd = Math.min(
-                            receiverRow.plaintextBitLength,
-                            plaintextBitStart + receiverEncryptionModuleDegree,
-                        );
-                        const plaintextBitColumnIndices = Array.from(
-                            {
-                                length: Math.max(
-                                    plaintextBitEnd - plaintextBitStart,
-                                    0,
-                                ),
-                            },
-                            (_unusedValue, localBitIndex) =>
-                                receiverPayloadPlaintextBitColumnIndex({
-                                    bitIndex: plaintextBitStart + localBitIndex,
-                                    projectedColumnByBackendColumn,
-                                    receiverRosterPosition:
-                                        receiverRow.receiverRosterPosition,
-                                    shareVectorWidth: Number(shareVectorWidth),
-                                    variableColumns,
-                                }),
-                        );
-                        const randomnessColumnIndices = Array.from(
+                        const randomnessPolynomialColumnIndices = Array.from(
                             { length: receiverEncryptionModuleRank },
-                            (_unusedValue, ciphertextVectorIndex) =>
-                                Array.from(
-                                    { length: receiverEncryptionModuleDegree },
-                                    (_unusedCoefficient, coefficientIndex) =>
-                                        requireProjectedColumn({
-                                            description:
-                                                'Receiver encryption randomness',
-                                            projectedColumnByBackendColumn,
-                                            variableColumns,
-                                            variableMatches: (variableColumn) =>
-                                                variableColumn.variableRole ===
-                                                    'ReceiverEncryptionRandomness' &&
-                                                variableColumn.receiverRosterPosition ===
-                                                    receiverRow.receiverRosterPosition &&
-                                                variableColumn.chunkIndex ===
-                                                    ciphertextChunk.chunkIndex &&
-                                                variableColumn.ciphertextVectorIndex ===
-                                                    ciphertextVectorIndex &&
-                                                variableColumn.polynomialCoefficientIndex ===
-                                                    coefficientIndex,
-                                        }),
-                                ),
+                            () => nextPolynomialColumnIndex++,
                         );
-                        const firstNoiseColumnIndices = Array.from(
+                        const firstNoisePolynomialColumnIndices = Array.from(
                             { length: receiverEncryptionModuleRank },
-                            (_unusedValue, ciphertextVectorIndex) =>
-                                Array.from(
-                                    { length: receiverEncryptionModuleDegree },
-                                    (_unusedCoefficient, coefficientIndex) =>
-                                        requireProjectedColumn({
-                                            description:
-                                                'Receiver encryption first-noise',
-                                            projectedColumnByBackendColumn,
-                                            variableColumns,
-                                            variableMatches: (variableColumn) =>
-                                                variableColumn.variableRole ===
-                                                    'ReceiverEncryptionFirstNoise' &&
-                                                variableColumn.receiverRosterPosition ===
-                                                    receiverRow.receiverRosterPosition &&
-                                                variableColumn.chunkIndex ===
-                                                    ciphertextChunk.chunkIndex &&
-                                                variableColumn.ciphertextVectorIndex ===
-                                                    ciphertextVectorIndex &&
-                                                variableColumn.polynomialCoefficientIndex ===
-                                                    coefficientIndex,
-                                        }),
-                                ),
+                            () => nextPolynomialColumnIndex++,
                         );
-                        const secondNoiseColumnIndices = Array.from(
-                            { length: receiverEncryptionModuleDegree },
-                            (_unusedCoefficient, coefficientIndex) =>
-                                requireProjectedColumn({
-                                    description:
-                                        'Receiver encryption second-noise',
-                                    projectedColumnByBackendColumn,
-                                    variableColumns,
-                                    variableMatches: (variableColumn) =>
-                                        variableColumn.variableRole ===
-                                            'ReceiverEncryptionSecondNoise' &&
-                                        variableColumn.receiverRosterPosition ===
-                                            receiverRow.receiverRosterPosition &&
-                                        variableColumn.chunkIndex ===
-                                            ciphertextChunk.chunkIndex &&
-                                        variableColumn.polynomialCoefficientIndex ===
-                                            coefficientIndex,
-                                }),
-                        );
+                        const secondNoiseColumnIndex =
+                            nextPolynomialColumnIndex++;
+                        const plaintextPolynomialColumnIndex =
+                            nextPolynomialColumnIndex++;
 
                         return {
                             chunkIndex: ciphertextChunk.chunkIndex,
                             firstCiphertextVector:
                                 ciphertextChunk.firstCiphertextVector,
-                            firstNoiseColumnIndices,
-                            plaintextBitColumnIndices,
-                            randomnessColumnIndices,
+                            firstNoisePolynomialColumnIndices,
+                            plaintextPolynomialColumnIndex,
+                            randomnessPolynomialColumnIndices,
                             secondCiphertextPolynomial:
                                 ciphertextChunk.secondCiphertextPolynomial,
-                            secondNoiseColumnIndices,
+                            secondNoiseColumnIndex,
                         };
                     },
                 );
@@ -2840,8 +4217,8 @@ export const buildBallotProofStructuredReceiverEncryptionProofStatement =
                     receiverPublicKeyDigest:
                         receiverRow.receiverPublicKeyDigest,
                     receiverRosterPosition: receiverRow.receiverRosterPosition,
-                    rowCount: receiverRow.rowCount,
-                    rowOffsetWithinStatement: receiverRow.rowOffsetWithinBatch,
+                    rowCount,
+                    rowOffsetWithinStatement,
                 };
             },
         );
@@ -2876,8 +4253,9 @@ export const buildBallotProofStructuredReceiverEncryptionProofStatement =
                 input.loweredStatement.relationStatementDigest,
             sourceBackendColumnIndices,
             sourceRingDegree: 256,
-            statementColumns: sourceBackendColumnIndices.length,
-            statementRows: component.rowCount,
+            statementColumns: nextPolynomialColumnIndex,
+            statementRows: nextPolynomialRowOffset,
+            matrixCoefficientRepresentation: 'centeredSignedSourceModulus',
             targetCoefficientRepresentation: 'centeredSignedSourceModulus',
             targetVectorDigest: input.componentStatement.targetVectorDigest,
             witnessL2BoundSquared: input.witnessL2BoundSquared,
@@ -2941,6 +4319,10 @@ export const verifyBallotProofComponentExplicitRows = (input: {
             });
             continue;
         }
+        if (rowBatch.batchKind === 'StructuredModuleSisShareCommitmentRows') {
+            checkedRowCount += rowBatch.rowCount;
+            continue;
+        }
         if (rowBatch.modulus !== component.coefficientModulus) {
             throw new Error(
                 `Proof component ${input.componentId} row batch ${rowBatch.batchName} uses a mismatched modulus.`,
@@ -2982,6 +4364,108 @@ export const verifyBallotProofComponentExplicitRows = (input: {
         relation: linearProofRelation,
         rowCount: checkedRowCount,
         verificationStatus: 'explicitRowsSatisfied',
+    };
+};
+
+const secretStateForExplicitSparseStatement = (input: {
+    readonly componentId:
+        | 'score-and-shamir-field-component'
+        | 'payload-plaintext-field-component'
+        | 'share-commitment-component';
+    readonly loweredStatement: BallotPrivacyLoweredLinearRelationStatement;
+    readonly projectionWitness?: BallotProofComponentProjectionWitness;
+    readonly relationInput: BallotPrivacyRelationCompilerInput;
+    readonly sparseStatement: BallotProofSparseComponentLinearProofStatement;
+}): BallotProofRecordGenerationSecretState => {
+    const variableColumnByBackendColumn = new Map(
+        fieldVariableColumns(input.loweredStatement).map((variableColumn) => [
+            variableColumn.columnIndex,
+            variableColumn,
+        ]),
+    );
+    const sourceWitnessCoefficients =
+        input.sparseStatement.sourceColumnPackings === undefined
+            ? input.sparseStatement.sourceBackendColumnIndices.map(
+                  (backendColumnIndex) => {
+                      const variableColumn =
+                          variableColumnByBackendColumn.get(backendColumnIndex);
+                      if (variableColumn === undefined) {
+                          throw new Error(
+                              'Sparse projection variable lookup is incomplete.',
+                          );
+                      }
+
+                      return signedConstantPolynomial({
+                          coefficient: projectedWitnessValue({
+                              componentId: input.componentId,
+                              rawWitnessValue: witnessValueForVariable(
+                                  input.relationInput,
+                                  input.projectionWitness,
+                                  variableColumn,
+                              ),
+                          }),
+                          sourceRingDegree:
+                              input.sparseStatement.sourceRingDegree,
+                      });
+                  },
+              )
+            : input.sparseStatement.sourceColumnPackings.map((packing) => {
+                  if (
+                      packing.columnIndex < 0 ||
+                      packing.columnIndex >=
+                          input.sparseStatement.statementColumns
+                  ) {
+                      throw new Error(
+                          'Packed sparse projection column is outside the statement shape.',
+                      );
+                  }
+                  const polynomial = zeroPolynomial(
+                      input.sparseStatement.sourceRingDegree,
+                  );
+                  const seenCoefficientIndices = new Set<number>();
+                  for (const binding of packing.bindings) {
+                      if (
+                          binding.coefficientIndex < 0 ||
+                          binding.coefficientIndex >=
+                              input.sparseStatement.sourceRingDegree ||
+                          !seenCoefficientIndices.add(binding.coefficientIndex)
+                      ) {
+                          throw new Error(
+                              'Packed sparse projection binding has an invalid coefficient slot.',
+                          );
+                      }
+                      const variableColumn = variableColumnByBackendColumn.get(
+                          binding.backendColumnIndex,
+                      );
+                      if (variableColumn === undefined) {
+                          throw new Error(
+                              'Packed sparse projection variable lookup is incomplete.',
+                          );
+                      }
+                      polynomial[binding.coefficientIndex] =
+                          signedPolynomialCoefficient(
+                              projectedWitnessValue({
+                                  componentId: input.componentId,
+                                  rawWitnessValue: witnessValueForVariable(
+                                      input.relationInput,
+                                      input.projectionWitness,
+                                      variableColumn,
+                                  ),
+                              }),
+                          );
+                  }
+
+                  return polynomial;
+              });
+    verifyBallotProofComponentExplicitRows({
+        componentId: input.componentId,
+        loweredStatement: input.loweredStatement,
+        projectionWitness: input.projectionWitness,
+        relationInput: input.relationInput,
+    });
+
+    return {
+        sourceWitnessCoefficients,
     };
 };
 
@@ -3196,6 +4680,7 @@ const assertProofEncodingMatchesStatement = (input: {
     readonly encoding: unknown;
     readonly expectedProfileId: string;
     readonly label: string;
+    readonly sourceRingDegree: number;
     readonly statementColumns: number;
 }): void => {
     requireContractProfileId({
@@ -3208,9 +4693,23 @@ const assertProofEncodingMatchesStatement = (input: {
         fieldName: 'shortResponseVectorLength',
         label: input.label,
     });
-    if (shortResponseVectorLength !== input.statementColumns + 1) {
+    const proofRingDegree = requireContractIntegerField({
+        contract: input.encoding,
+        fieldName: 'ringDegree',
+        label: input.label,
+    });
+    if (input.sourceRingDegree % proofRingDegree !== 0) {
         throw new Error(
-            `${input.label}.shortResponseVectorLength must be one more than the proof statement column count.`,
+            `${input.label}.ringDegree must divide the proof statement source ring degree.`,
+        );
+    }
+    const sourcePolynomialSplitFactor =
+        input.sourceRingDegree / proofRingDegree;
+    const expectedShortResponseVectorLength =
+        input.statementColumns * sourcePolynomialSplitFactor + 1;
+    if (shortResponseVectorLength !== expectedShortResponseVectorLength) {
+        throw new Error(
+            `${input.label}.shortResponseVectorLength must match the split proof statement column count plus one.`,
         );
     }
 };
@@ -3572,6 +5071,7 @@ const buildFullRelationLinearProofStatement = (input: {
         statementMatrixCoefficients,
         statementMatrixDigest,
         statementRows: 1,
+        matrixCoefficientRepresentation: 'canonicalUnsignedSourceModulus',
         targetCoefficientRepresentation: 'centeredSignedSourceModulus',
         targetVectorCoefficients,
         targetVectorDigest,
@@ -3594,46 +5094,173 @@ const buildFullRelationLinearProofStatement = (input: {
     };
 };
 
-const secretStateForBackendColumns = (input: {
-    readonly componentId: BallotPrivacyBackendProofComponentId;
-    readonly loweredStatement: BallotPrivacyLoweredLinearRelationStatement;
+const signedNumberPolynomial = (input: {
+    readonly coefficients: readonly number[];
+    readonly sourceRingDegree: number;
+}): DensePolynomial => {
+    if (input.coefficients.length !== input.sourceRingDegree) {
+        throw new Error(
+            'Structured receiver-encryption witness polynomial has the wrong degree.',
+        );
+    }
+
+    return input.coefficients.map((coefficient) => {
+        if (!Number.isSafeInteger(coefficient)) {
+            throw new Error(
+                'Structured receiver-encryption witness coefficient must be a safe integer.',
+            );
+        }
+
+        return signedPolynomialCoefficient(BigInt(coefficient));
+    });
+};
+
+const plaintextChunkPolynomial = (input: {
+    readonly chunkIndex: number;
+    readonly plaintextBits: readonly number[];
+    readonly sourceRingDegree: number;
+}): DensePolynomial => {
+    const polynomial = zeroPolynomial(input.sourceRingDegree);
+    const chunkOffset = input.chunkIndex * input.sourceRingDegree;
+    for (
+        let coefficientIndex = 0;
+        coefficientIndex < input.sourceRingDegree;
+        coefficientIndex += 1
+    ) {
+        polynomial[coefficientIndex] =
+            input.plaintextBits[chunkOffset + coefficientIndex] ?? 0;
+    }
+
+    return polynomial;
+};
+
+const secretStateForStructuredReceiverEncryptionStatement = (input: {
     readonly projectionWitness: BallotProofComponentProjectionWitness;
     readonly relationInput: BallotPrivacyRelationCompilerInput;
-    readonly sourceBackendColumnIndices: readonly number[];
-    readonly sourceRingDegree: number;
+    readonly structuredStatement: BallotProofStructuredReceiverEncryptionProofStatement;
 }): BallotProofRecordGenerationSecretState => {
-    const variableColumnByBackendColumn = new Map(
-        fieldVariableColumns(input.loweredStatement).map((variableColumn) => [
-            variableColumn.columnIndex,
-            variableColumn,
-        ]),
-    );
+    const sourceWitnessCoefficients: (DensePolynomial | undefined)[] =
+        Array.from(
+            { length: input.structuredStatement.statementColumns },
+            () => undefined,
+        );
+    const writeWitnessPolynomial = (
+        columnIndex: number,
+        polynomial: DensePolynomial,
+    ): void => {
+        if (
+            !Number.isSafeInteger(columnIndex) ||
+            columnIndex < 0 ||
+            columnIndex >= sourceWitnessCoefficients.length
+        ) {
+            throw new Error(
+                'Structured receiver-encryption witness column is outside the statement shape.',
+            );
+        }
+        if (sourceWitnessCoefficients[columnIndex] !== undefined) {
+            throw new Error(
+                'Structured receiver-encryption witness column is duplicated.',
+            );
+        }
+        sourceWitnessCoefficients[columnIndex] = polynomial;
+    };
+
+    for (const receiverRow of input.structuredStatement.receiverRows) {
+        const plaintextBits = receiverPayloadPlaintextBits({
+            plaintextBitLength: receiverRow.plaintextBitLength,
+            projectionWitness: input.projectionWitness,
+            receiverRosterPosition: receiverRow.receiverRosterPosition,
+            relationInput: input.relationInput,
+        });
+        for (const ciphertextChunk of receiverRow.ciphertextChunks) {
+            const chunkWitness = receiverEncryptionChunkWitness(
+                input.projectionWitness,
+                receiverRow.receiverRosterPosition,
+                ciphertextChunk.chunkIndex,
+            );
+            for (
+                let vectorIndex = 0;
+                vectorIndex < receiverEncryptionModuleRank;
+                vectorIndex += 1
+            ) {
+                writeWitnessPolynomial(
+                    ciphertextChunk.randomnessPolynomialColumnIndices[
+                        vectorIndex
+                    ] ??
+                        (() => {
+                            throw new Error(
+                                'Structured receiver-encryption randomness column is missing.',
+                            );
+                        })(),
+                    signedNumberPolynomial({
+                        coefficients:
+                            chunkWitness.encryptionRandomnessVector[
+                                vectorIndex
+                            ] ??
+                            (() => {
+                                throw new Error(
+                                    'Structured receiver-encryption randomness witness is missing.',
+                                );
+                            })(),
+                        sourceRingDegree:
+                            input.structuredStatement.sourceRingDegree,
+                    }),
+                );
+                writeWitnessPolynomial(
+                    ciphertextChunk.firstNoisePolynomialColumnIndices[
+                        vectorIndex
+                    ] ??
+                        (() => {
+                            throw new Error(
+                                'Structured receiver-encryption first-noise column is missing.',
+                            );
+                        })(),
+                    signedNumberPolynomial({
+                        coefficients:
+                            chunkWitness.firstNoiseVector[vectorIndex] ??
+                            (() => {
+                                throw new Error(
+                                    'Structured receiver-encryption first-noise witness is missing.',
+                                );
+                            })(),
+                        sourceRingDegree:
+                            input.structuredStatement.sourceRingDegree,
+                    }),
+                );
+            }
+            writeWitnessPolynomial(
+                ciphertextChunk.secondNoiseColumnIndex,
+                signedNumberPolynomial({
+                    coefficients: chunkWitness.secondNoisePolynomial,
+                    sourceRingDegree:
+                        input.structuredStatement.sourceRingDegree,
+                }),
+            );
+            writeWitnessPolynomial(
+                ciphertextChunk.plaintextPolynomialColumnIndex,
+                plaintextChunkPolynomial({
+                    chunkIndex: ciphertextChunk.chunkIndex,
+                    plaintextBits,
+                    sourceRingDegree:
+                        input.structuredStatement.sourceRingDegree,
+                }),
+            );
+        }
+    }
+
+    if (
+        sourceWitnessCoefficients.some(
+            (witnessPolynomial) => witnessPolynomial === undefined,
+        )
+    ) {
+        throw new Error(
+            'Structured receiver-encryption witness did not fill every statement column.',
+        );
+    }
 
     return {
-        sourceWitnessCoefficients: input.sourceBackendColumnIndices.map(
-            (backendColumnIndex) => {
-                const variableColumn =
-                    variableColumnByBackendColumn.get(backendColumnIndex);
-                if (variableColumn === undefined) {
-                    throw new Error(
-                        `Proof component ${input.componentId} references an unknown witness column.`,
-                    );
-                }
-
-                return signedConstantPolynomial({
-                    coefficient: projectedWitnessValue({
-                        componentId:
-                            input.componentId as BallotProofExplicitComponentId,
-                        rawWitnessValue: witnessValueForVariable(
-                            input.relationInput,
-                            input.projectionWitness,
-                            variableColumn,
-                        ),
-                    }),
-                    sourceRingDegree: input.sourceRingDegree,
-                });
-            },
-        ),
+        sourceWitnessCoefficients:
+            sourceWitnessCoefficients as DensePolynomialVector,
     };
 };
 
@@ -3721,6 +5348,7 @@ const validateGeneratedProofInputContracts = (input: {
         encoding: input.proofContracts.ballotProofEncoding,
         expectedProfileId: fullBallotProofEncodingProfileId,
         label: 'ballot proof encoding',
+        sourceRingDegree: input.linearStatement.ringDegree,
         statementColumns: input.linearStatement.statementColumns,
     });
     for (const componentProofInput of input.componentProofInputs) {
@@ -3753,6 +5381,8 @@ const validateGeneratedProofInputContracts = (input: {
         const sourceRingDegree =
             componentProofInput.proofStatementFormat ===
                 'structured-module-lwe-linear-proof-v1' ||
+            componentProofInput.proofStatementFormat ===
+                'structured-module-sis-share-commitment-v1' ||
             componentProofInput.proofStatementFormat ===
                 'sparse-polynomial-matrix-linear-proof-v1'
                 ? requireContractIntegerField({
@@ -3796,6 +5426,7 @@ const validateGeneratedProofInputContracts = (input: {
                     componentProofInput.componentId
                 ],
             label: `${componentProofInput.componentId} proof encoding`,
+            sourceRingDegree,
             statementColumns: requireContractIntegerField({
                 contract: proofStatement,
                 fieldName: 'statementColumns',
@@ -3927,6 +5558,84 @@ export const buildBallotProofRecordGenerationRequest = (input: {
             );
 
             if (componentId === 'score-and-shamir-field-component') {
+                const sourceRingDegree = sourceRingDegreeFromParameterSet(
+                    proofParameterSet,
+                    `${componentId} parameter set`,
+                );
+                const witnessL2BoundSquared =
+                    witnessBoundSquaredFromParameterSet(
+                        proofParameterSet,
+                        `${componentId} parameter set`,
+                    );
+                if (
+                    componentStatementPlan.proofStatementFormat ===
+                    'sparse-polynomial-matrix-linear-proof-v1'
+                ) {
+                    const sparseStatement =
+                        input.relationInput.optionCount > 1 &&
+                        sourceRingDegree === 64
+                            ? buildPackedFieldSparseComponentLinearProofStatement(
+                                  {
+                                      ballotProofStatementDigest:
+                                          input.statement
+                                              .ballotProofStatementDigest,
+                                      componentId,
+                                      loweredStatement,
+                                      parameterProfileId:
+                                          componentProofParameterProfileIds[
+                                              componentId
+                                          ],
+                                      relationInput: input.relationInput,
+                                      sourceRingDegree,
+                                      witnessL2BoundSquared,
+                                  },
+                              )
+                            : buildBallotProofSparseComponentLinearProofStatement(
+                                  {
+                                      ballotProofStatementDigest:
+                                          input.statement
+                                              .ballotProofStatementDigest,
+                                      componentId,
+                                      loweredStatement,
+                                      parameterProfileId:
+                                          componentProofParameterProfileIds[
+                                              componentId
+                                          ],
+                                      sourceRingDegree,
+                                      witnessL2BoundSquared,
+                                  },
+                              );
+                    if (
+                        sparseStatement.proofStatementFormat !==
+                        'sparse-polynomial-matrix-linear-proof-v1'
+                    ) {
+                        throw new Error(
+                            'Encoded-score sparse proof statement used an invalid format.',
+                        );
+                    }
+                    componentSecretStates[componentId] =
+                        secretStateForExplicitSparseStatement({
+                            componentId,
+                            loweredStatement,
+                            projectionWitness: input.projectionWitness,
+                            relationInput: input.relationInput,
+                            sparseStatement,
+                        });
+
+                    return {
+                        componentId,
+                        componentProofStatementDigest:
+                            sparseStatement.statementDigest,
+                        proofEncoding,
+                        proofParameterSet,
+                        proofStatement: sparseStatement,
+                        proofStatementFormat:
+                            sparseStatement.proofStatementFormat,
+                        publicRandomnessHex,
+                        statementDigest:
+                            componentStatement.componentStatementDigest,
+                    };
+                }
                 const projection = buildEncodedScoreFieldLinearProofProjection({
                     ballotProofStatementDigest:
                         input.statement.ballotProofStatementDigest,
@@ -3934,14 +5643,8 @@ export const buildBallotProofRecordGenerationRequest = (input: {
                     parameterProfileId:
                         componentProofParameterProfileIds[componentId],
                     relationInput: input.relationInput,
-                    sourceRingDegree: sourceRingDegreeFromParameterSet(
-                        proofParameterSet,
-                        `${componentId} parameter set`,
-                    ),
-                    witnessL2BoundSquared: witnessBoundSquaredFromParameterSet(
-                        proofParameterSet,
-                        `${componentId} parameter set`,
-                    ),
+                    sourceRingDegree,
+                    witnessL2BoundSquared,
                 });
                 componentSecretStates[componentId] = {
                     sourceWitnessCoefficients:
@@ -3970,42 +5673,80 @@ export const buildBallotProofRecordGenerationRequest = (input: {
                     proofParameterSet,
                     `${componentId} parameter set`,
                 );
+                const witnessL2BoundSquared =
+                    witnessBoundSquaredFromParameterSet(
+                        proofParameterSet,
+                        `${componentId} parameter set`,
+                    );
                 const sparseStatement =
-                    buildBallotProofSparseComponentLinearProofStatement({
-                        ballotProofStatementDigest:
-                            input.statement.ballotProofStatementDigest,
+                    componentId === 'payload-plaintext-field-component' &&
+                    input.relationInput.optionCount > 1 &&
+                    sourceRingDegree === 64
+                        ? buildPackedFieldSparseComponentLinearProofStatement({
+                              ballotProofStatementDigest:
+                                  input.statement.ballotProofStatementDigest,
+                              componentId,
+                              loweredStatement,
+                              parameterProfileId:
+                                  componentProofParameterProfileIds[
+                                      componentId
+                                  ],
+                              relationInput: input.relationInput,
+                              sourceRingDegree,
+                              witnessL2BoundSquared,
+                          })
+                        : buildBallotProofSparseComponentLinearProofStatement({
+                              ballotProofStatementDigest:
+                                  input.statement.ballotProofStatementDigest,
+                              componentId,
+                              loweredStatement,
+                              parameterProfileId:
+                                  componentProofParameterProfileIds[
+                                      componentId
+                                  ],
+                              sourceRingDegree,
+                              witnessL2BoundSquared,
+                          });
+                const componentRowBatches = rowBatchesForComponent({
+                    component: componentById({
                         componentId,
                         loweredStatement,
-                        parameterProfileId:
-                            componentProofParameterProfileIds[componentId],
-                        sourceRingDegree,
-                        witnessL2BoundSquared:
-                            witnessBoundSquaredFromParameterSet(
-                                proofParameterSet,
-                                `${componentId} parameter set`,
-                            ),
-                    });
-                const projection =
-                    buildBallotProofComponentLinearProofProjection({
-                        ballotProofStatementDigest:
-                            input.statement.ballotProofStatementDigest,
-                        componentId,
-                        loweredStatement,
-                        parameterProfileId:
-                            componentProofParameterProfileIds[componentId],
-                        projectionWitness: input.projectionWitness,
-                        relationInput: input.relationInput,
-                        sourceRingDegree,
-                        witnessL2BoundSquared:
-                            witnessBoundSquaredFromParameterSet(
-                                proofParameterSet,
-                                `${componentId} parameter set`,
-                            ),
-                    });
-                componentSecretStates[componentId] = {
-                    sourceWitnessCoefficients:
-                        projection.privateWitnessVectorCoefficients,
-                };
+                    }),
+                    loweredStatement,
+                });
+                const usesStructuredShareCommitmentRows =
+                    componentId === 'share-commitment-component' &&
+                    componentRowBatches.some(
+                        (rowBatch) =>
+                            rowBatch.batchKind ===
+                            'StructuredModuleSisShareCommitmentRows',
+                    );
+                if (usesStructuredShareCommitmentRows) {
+                    componentSecretStates[componentId] =
+                        secretStateForStructuredShareCommitmentStatement({
+                            projectionWitness: input.projectionWitness,
+                            relationInput: input.relationInput,
+                            structuredStatement:
+                                sparseStatement as BallotProofStructuredShareCommitmentProofStatement,
+                        });
+                } else {
+                    if (
+                        sparseStatement.proofStatementFormat !==
+                        'sparse-polynomial-matrix-linear-proof-v1'
+                    ) {
+                        throw new Error(
+                            'Sparse proof statement used an invalid component format.',
+                        );
+                    }
+                    componentSecretStates[componentId] =
+                        secretStateForExplicitSparseStatement({
+                            componentId,
+                            loweredStatement,
+                            projectionWitness: input.projectionWitness,
+                            relationInput: input.relationInput,
+                            sparseStatement,
+                        });
+                }
 
                 return {
                     componentId,
@@ -4014,8 +5755,7 @@ export const buildBallotProofRecordGenerationRequest = (input: {
                     proofEncoding,
                     proofParameterSet,
                     proofStatement: sparseStatement,
-                    proofStatementFormat:
-                        'sparse-polynomial-matrix-linear-proof-v1',
+                    proofStatementFormat: sparseStatement.proofStatementFormat,
                     publicRandomnessHex,
                     statementDigest:
                         componentStatement.componentStatementDigest,
@@ -4037,14 +5777,10 @@ export const buildBallotProofRecordGenerationRequest = (input: {
                             ),
                     });
                 componentSecretStates[componentId] =
-                    secretStateForBackendColumns({
-                        componentId,
-                        loweredStatement,
+                    secretStateForStructuredReceiverEncryptionStatement({
                         projectionWitness: input.projectionWitness,
                         relationInput: input.relationInput,
-                        sourceBackendColumnIndices:
-                            structuredStatement.sourceBackendColumnIndices,
-                        sourceRingDegree: structuredStatement.sourceRingDegree,
+                        structuredStatement,
                     });
 
                 return {

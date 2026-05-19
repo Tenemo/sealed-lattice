@@ -23,6 +23,19 @@ pub enum LinearProofTargetCoefficientRepresentation {
     CenteredSignedSourceModulus,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum LinearProofMatrixCoefficientRepresentation {
+    CanonicalUnsignedSourceModulus,
+    CenteredSignedSourceModulus,
+}
+
+impl Default for LinearProofMatrixCoefficientRepresentation {
+    fn default() -> Self {
+        Self::CanonicalUnsignedSourceModulus
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LazerDemoLinearStatementTranscript {
@@ -36,11 +49,79 @@ pub struct LazerDemoLinearStatementTranscript {
     pub public_parameters_and_statement_hash_hex: String,
 }
 
+pub(crate) trait StreamedLinearProofStatement {
+    fn source_statement_rows(&self) -> usize;
+
+    fn source_statement_columns(&self) -> usize;
+
+    fn target_vector_coefficients(&self) -> &[Vec<u64>];
+
+    fn validate_source_relation(
+        &self,
+        parameter_set: &LinearProofParameterSet,
+        source_witness_vector: &PolynomialVector,
+    ) -> CanonicalResult<()>;
+
+    fn derive_statement_transcript(
+        &self,
+        parameter_set: &LinearProofParameterSet,
+        proof_encoding: &LinearProofEncoding,
+        matrix_coefficient_representation: LinearProofMatrixCoefficientRepresentation,
+        target_coefficient_representation: LinearProofTargetCoefficientRepresentation,
+        public_randomness: &[u8],
+    ) -> CanonicalResult<LazerDemoLinearStatementTranscript>;
+
+    fn transformed_target_vector(
+        &self,
+        parameter_set: &LinearProofParameterSet,
+        proof_encoding: &LinearProofEncoding,
+        target_coefficient_representation: LinearProofTargetCoefficientRepresentation,
+    ) -> CanonicalResult<PolynomialVector>;
+
+    fn transformed_relation_output(
+        &self,
+        parameter_set: &LinearProofParameterSet,
+        proof_encoding: &LinearProofEncoding,
+        matrix_coefficient_representation: LinearProofMatrixCoefficientRepresentation,
+        transformed_relation_witness: &PolynomialVector,
+        transformed_target_vector: &PolynomialVector,
+    ) -> CanonicalResult<PolynomialVector>;
+
+    fn build_z4_statement_products(
+        &self,
+        proof_ring: PolynomialRing,
+        parameter_set: &LinearProofParameterSet,
+        proof_encoding: &LinearProofEncoding,
+        matrix_coefficient_representation: LinearProofMatrixCoefficientRepresentation,
+        shifted_rotation_polynomial_matrix: &[Vec<Vec<u64>>],
+    ) -> CanonicalResult<Vec<Vec<Vec<u64>>>>;
+}
+
 pub fn derive_linear_statement_transcript(
     parameter_set: &LinearProofParameterSet,
     proof_encoding: &LinearProofEncoding,
     statement_matrix_coefficients: &[Vec<Vec<u64>>],
     target_vector_coefficients: &[Vec<u64>],
+    target_coefficient_representation: LinearProofTargetCoefficientRepresentation,
+    public_randomness: &[u8],
+) -> CanonicalResult<LazerDemoLinearStatementTranscript> {
+    derive_linear_statement_transcript_with_matrix_coefficient_representation(
+        parameter_set,
+        proof_encoding,
+        statement_matrix_coefficients,
+        target_vector_coefficients,
+        LinearProofMatrixCoefficientRepresentation::CanonicalUnsignedSourceModulus,
+        target_coefficient_representation,
+        public_randomness,
+    )
+}
+
+pub(crate) fn derive_linear_statement_transcript_with_matrix_coefficient_representation(
+    parameter_set: &LinearProofParameterSet,
+    proof_encoding: &LinearProofEncoding,
+    statement_matrix_coefficients: &[Vec<Vec<u64>>],
+    target_vector_coefficients: &[Vec<u64>],
+    matrix_coefficient_representation: LinearProofMatrixCoefficientRepresentation,
     target_coefficient_representation: LinearProofTargetCoefficientRepresentation,
     public_randomness: &[u8],
 ) -> CanonicalResult<LazerDemoLinearStatementTranscript> {
@@ -54,11 +135,13 @@ pub fn derive_linear_statement_transcript(
         public_randomness,
     )?;
 
-    let transformed_statement_matrix = transform_statement_matrix_to_proof_ring(
-        statement_matrix_coefficients,
-        parameter_set,
-        proof_encoding,
-    )?;
+    let transformed_statement_matrix =
+        transform_statement_matrix_to_proof_ring_with_coefficient_representation(
+            statement_matrix_coefficients,
+            parameter_set,
+            proof_encoding,
+            matrix_coefficient_representation,
+        )?;
     let transformed_target_vector = transform_target_vector_to_proof_ring(
         target_vector_coefficients,
         parameter_set,
@@ -91,12 +174,31 @@ pub fn derive_linear_statement_transcript(
     })
 }
 
+#[cfg(test)]
 pub(crate) fn derive_transformed_statement_matrix(
     parameter_set: &LinearProofParameterSet,
     proof_encoding: &LinearProofEncoding,
     statement_matrix_coefficients: &[Vec<Vec<u64>>],
     target_vector_coefficients: &[Vec<u64>],
     _target_coefficient_representation: LinearProofTargetCoefficientRepresentation,
+    public_randomness: &[u8],
+) -> CanonicalResult<PolynomialMatrix> {
+    derive_transformed_statement_matrix_with_coefficient_representation(
+        parameter_set,
+        proof_encoding,
+        statement_matrix_coefficients,
+        target_vector_coefficients,
+        LinearProofMatrixCoefficientRepresentation::CanonicalUnsignedSourceModulus,
+        public_randomness,
+    )
+}
+
+pub(crate) fn derive_transformed_statement_matrix_with_coefficient_representation(
+    parameter_set: &LinearProofParameterSet,
+    proof_encoding: &LinearProofEncoding,
+    statement_matrix_coefficients: &[Vec<Vec<u64>>],
+    target_vector_coefficients: &[Vec<u64>],
+    matrix_coefficient_representation: LinearProofMatrixCoefficientRepresentation,
     public_randomness: &[u8],
 ) -> CanonicalResult<PolynomialMatrix> {
     validate_demo_statement_inputs(
@@ -106,11 +208,13 @@ pub(crate) fn derive_transformed_statement_matrix(
         target_vector_coefficients,
         public_randomness,
     )?;
-    let transformed_statement_matrix = transform_statement_matrix_to_proof_ring(
-        statement_matrix_coefficients,
-        parameter_set,
-        proof_encoding,
-    )?;
+    let transformed_statement_matrix =
+        transform_statement_matrix_to_proof_ring_with_coefficient_representation(
+            statement_matrix_coefficients,
+            parameter_set,
+            proof_encoding,
+            matrix_coefficient_representation,
+        )?;
     let source_polynomial_split_factor =
         source_polynomial_split_factor(parameter_set, proof_encoding)?;
     PolynomialMatrix::new(
@@ -215,10 +319,11 @@ pub(crate) fn validate_source_polynomial(
     Ok(())
 }
 
-fn transform_statement_matrix_to_proof_ring(
+fn transform_statement_matrix_to_proof_ring_with_coefficient_representation(
     statement_matrix_coefficients: &[Vec<Vec<u64>>],
     parameter_set: &LinearProofParameterSet,
     proof_encoding: &LinearProofEncoding,
+    matrix_coefficient_representation: LinearProofMatrixCoefficientRepresentation,
 ) -> CanonicalResult<Vec<Vec<u64>>> {
     let source_polynomial_split_factor =
         source_polynomial_split_factor(parameter_set, proof_encoding)?;
@@ -229,10 +334,13 @@ fn transform_statement_matrix_to_proof_ring(
 
     for (source_row_index, source_row) in statement_matrix_coefficients.iter().enumerate() {
         for (selected_column_index, source_polynomial) in source_row.iter().enumerate() {
-            let split_polynomials = split_unsigned_polynomial_into_proof_ring(
-                source_polynomial,
-                source_polynomial_split_factor,
-            )?;
+            let split_polynomials =
+                split_source_polynomial_into_proof_ring_with_coefficient_representation(
+                    source_polynomial,
+                    parameter_set.coefficient_modulus,
+                    source_polynomial_split_factor,
+                    matrix_coefficient_representation,
+                )?;
             let rotated_split_polynomials = split_polynomials
                 .iter()
                 .map(|polynomial| rotate_left_negacyclic_signed_polynomial(polynomial))
@@ -310,6 +418,29 @@ pub(crate) fn transform_target_vector_to_proof_ring(
     Ok(transformed_entries)
 }
 
+pub(crate) fn split_source_polynomial_into_proof_ring_with_coefficient_representation(
+    source_polynomial: &[u64],
+    source_modulus: u64,
+    source_polynomial_split_factor: usize,
+    coefficient_representation: LinearProofMatrixCoefficientRepresentation,
+) -> CanonicalResult<Vec<Vec<i128>>> {
+    match coefficient_representation {
+        LinearProofMatrixCoefficientRepresentation::CanonicalUnsignedSourceModulus => {
+            split_unsigned_polynomial_into_proof_ring(
+                source_polynomial,
+                source_polynomial_split_factor,
+            )
+        }
+        LinearProofMatrixCoefficientRepresentation::CenteredSignedSourceModulus => {
+            split_centered_source_polynomial_into_proof_ring(
+                source_polynomial,
+                source_modulus,
+                source_polynomial_split_factor,
+            )
+        }
+    }
+}
+
 pub(crate) fn split_centered_source_polynomial_into_proof_ring(
     source_polynomial: &[u64],
     source_modulus: u64,
@@ -317,7 +448,7 @@ pub(crate) fn split_centered_source_polynomial_into_proof_ring(
 ) -> CanonicalResult<Vec<Vec<i128>>> {
     if source_modulus <= 1 || source_modulus.is_multiple_of(2) {
         return Err(invalid_statement(
-            "linear statement centered target representation requires an odd source modulus",
+            "linear statement centered source representation requires an odd source modulus",
         ));
     }
     let positive_representative_limit = source_modulus / 2;
