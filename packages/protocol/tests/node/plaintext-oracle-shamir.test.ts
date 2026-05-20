@@ -139,6 +139,17 @@ describe('plaintext oracle Shamir and interpolation', () => {
             interpolateShamirConstantTerm([{ rosterPosition: 0, value: 1 }]),
         ).toThrow('positive nonzero');
         expect(() =>
+            interpolateShamirConstantTerm([{ rosterPosition: 51, value: 1 }]),
+        ).toThrow('1..50');
+        expect(() =>
+            interpolateShamirConstantTerm(
+                Array.from({ length: 51 }, (_unused, rosterIndex) => ({
+                    rosterPosition: rosterIndex + 1,
+                    value: normalizeFieldElement(rosterIndex + 1),
+                })),
+            ),
+        ).toThrow('At most 50');
+        expect(() =>
             interpolateShamirConstantTerm([
                 { rosterPosition: 1, value: 1 },
                 { rosterPosition: 1, value: 2 },

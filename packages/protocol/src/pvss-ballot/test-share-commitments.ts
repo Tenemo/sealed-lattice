@@ -58,9 +58,9 @@ const deriveOpeningFieldElement = (
                     fieldIndex,
                     fixtureEntropy: context.fixtureEntropy,
                     pollSpecDigest: context.pollSpecDigest,
-                    receiverIdentity: receiverShareVector.trusteeIdentity,
+                    receiverIdentity: receiverShareVector.receiverIdentity,
                     receiverRosterPosition:
-                        receiverShareVector.trusteeRosterPosition,
+                        receiverShareVector.receiverRosterPosition,
                     rosterDigest: context.rosterDigest,
                     thresholdProfileDigest: context.thresholdProfileDigest,
                     voterIdentity: context.voterIdentity,
@@ -85,8 +85,8 @@ export const deriveTestShareCommitmentDigest = (input: {
         pollSpecDigest: input.context.pollSpecDigest,
         rosterDigest: input.context.rosterDigest,
         thresholdProfileDigest: input.context.thresholdProfileDigest,
-        trusteeIdentity: input.commitment.trusteeIdentity,
-        trusteeRosterPosition: input.commitment.trusteeRosterPosition,
+        receiverIdentity: input.commitment.receiverIdentity,
+        receiverRosterPosition: input.commitment.receiverRosterPosition,
         voterIdentity: input.context.voterIdentity,
         voterRosterPosition: input.context.voterRosterPosition,
     });
@@ -136,8 +136,9 @@ export const deriveTestShareCommitmentWitness = (input: {
     );
     const commitmentWithoutDigest = {
         objectType: 'TestShareCommitment' as const,
-        trusteeIdentity: input.receiverShareVector.trusteeIdentity,
-        trusteeRosterPosition: input.receiverShareVector.trusteeRosterPosition,
+        receiverIdentity: input.receiverShareVector.receiverIdentity,
+        receiverRosterPosition:
+            input.receiverShareVector.receiverRosterPosition,
         commitmentValues,
     };
     const commitment = {
@@ -150,8 +151,9 @@ export const deriveTestShareCommitmentWitness = (input: {
     };
     const payloadWithoutDigest = {
         objectType: 'TestReceiverShareOpeningPayload' as const,
-        receiverIdentity: input.receiverShareVector.trusteeIdentity,
-        receiverRosterPosition: input.receiverShareVector.trusteeRosterPosition,
+        receiverIdentity: input.receiverShareVector.receiverIdentity,
+        receiverRosterPosition:
+            input.receiverShareVector.receiverRosterPosition,
         shareVector: input.receiverShareVector.shareVector,
         openingVector,
     };

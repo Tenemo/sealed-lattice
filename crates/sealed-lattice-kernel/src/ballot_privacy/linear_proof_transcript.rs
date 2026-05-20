@@ -35,6 +35,9 @@ pub struct LinearProofPreflightTranscript {
     pub preflight_transcript_digest: String,
 }
 
+/// SHAKE128 over raw concatenated parts for the LaZer-compatible proof
+/// transcript, where all call sites have fixed boundaries or already encoded
+/// lengths. New diagnostic transcripts should use an explicit framed helper.
 pub fn shake128_32(parts: &[&[u8]]) -> [u8; 32] {
     let mut hasher = Shake128::default();
     for part in parts {
@@ -47,6 +50,8 @@ pub fn shake128_32(parts: &[&[u8]]) -> [u8; 32] {
     output
 }
 
+/// SHAKE128 over raw concatenated parts for fixed-boundary LaZer-compatible
+/// expansion. Do not use this helper for new variable-length transcripts.
 pub fn shake128_64(parts: &[&[u8]]) -> [u8; 64] {
     let mut hasher = Shake128::default();
     for part in parts {
@@ -59,6 +64,8 @@ pub fn shake128_64(parts: &[&[u8]]) -> [u8; 64] {
     output
 }
 
+/// SHAKE128 over raw concatenated parts for fixed-boundary LaZer-compatible
+/// expansion. Do not use this helper for new variable-length transcripts.
 pub fn shake128_96(parts: &[&[u8]]) -> [u8; 96] {
     let mut hasher = Shake128::default();
     for part in parts {
@@ -73,6 +80,22 @@ pub fn shake128_96(parts: &[&[u8]]) -> [u8; 96] {
 
 pub fn shake128_32_hex(parts: &[&[u8]]) -> String {
     to_hex(&shake128_32(parts))
+}
+
+fn shake128_32_framed_hex(parts: &[(&str, &[u8])]) -> String {
+    let mut hasher = Shake128::default();
+    for (label, part) in parts {
+        let label_bytes = label.as_bytes();
+        hasher.update(&(label_bytes.len() as u64).to_le_bytes());
+        hasher.update(label_bytes);
+        hasher.update(&(part.len() as u64).to_le_bytes());
+        hasher.update(part);
+    }
+    let mut reader = hasher.finalize_xof();
+    let mut output = [0_u8; 32];
+    reader.read(&mut output);
+
+    to_hex(&output)
 }
 
 pub fn canonical_json_shake128_32_hex(value: &Value) -> CanonicalResult<String> {
@@ -93,13 +116,13 @@ pub fn compute_linear_proof_preflight_transcript(
     let target_digest = shake128_32_hex(&[target_vector_canonical.as_bytes()]);
     let proof_digest = shake128_32_hex(&[input.proof_bytes]);
     let public_randomness_digest = shake128_32_hex(&[input.public_randomness]);
-    let preflight_transcript_digest = shake128_32_hex(&[
-        LINEAR_PROOF_PREFLIGHT_DOMAIN.as_bytes(),
-        parameter_set_canonical.as_bytes(),
-        statement_matrix_canonical.as_bytes(),
-        target_vector_canonical.as_bytes(),
-        input.public_randomness,
-        input.proof_bytes,
+    let preflight_transcript_digest = shake128_32_framed_hex(&[
+        ("domain", LINEAR_PROOF_PREFLIGHT_DOMAIN.as_bytes()),
+        ("parameterSet", parameter_set_canonical.as_bytes()),
+        ("statementMatrix", statement_matrix_canonical.as_bytes()),
+        ("targetVector", target_vector_canonical.as_bytes()),
+        ("publicRandomness", input.public_randomness),
+        ("proofBytes", input.proof_bytes),
     ]);
 
     Ok(LinearProofPreflightTranscript {
@@ -120,13 +143,14 @@ mod tests {
 
     use super::{
         LinearProofPreflightTranscriptInput, canonical_json_shake128_32_hex,
-        compute_linear_proof_preflight_transcript, shake128_32_hex,
+        compute_linear_proof_preflight_transcript, shake128_32_framed_hex, shake128_32_hex,
     };
 
     fn generated_vector_case(case_name: &str) -> serde_json::Value {
-        let vectors: serde_json::Value = serde_json::from_str(include_str!(
-            "../../../../test-vectors/ballot-privacy/proof-backend-linear-vectors.json"
-        ))
+        let vectors: serde_json::Value = serde_json::from_str(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../test-vectors/ballot-privacy/proof-backend-linear-vectors.json"
+        )))
         .expect("generated vector file should parse");
 
         vectors["cases"]
@@ -164,6 +188,18 @@ mod tests {
         .expect("digest should compute");
 
         assert_eq!(left, right);
+    }
+
+    #[test]
+    fn framed_preflight_digest_separates_component_boundaries() {
+        assert_ne!(
+            shake128_32_framed_hex(&[("left", b"ab"), ("right", b"c")]),
+            shake128_32_framed_hex(&[("left", b"a"), ("right", b"bc")])
+        );
+        assert_ne!(
+            shake128_32_framed_hex(&[("left", b"abc")]),
+            shake128_32_framed_hex(&[("right", b"abc")])
+        );
     }
 
     #[test]

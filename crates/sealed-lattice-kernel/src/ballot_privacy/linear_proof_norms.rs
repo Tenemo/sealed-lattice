@@ -4,12 +4,16 @@ use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
 
 use super::{
     linear_proof_parameters::{LinearProofEncoding, linear_proof_profile_for_encoding},
-    proof_coder::DecodedLazerDemoLinearProof,
+    linear_proof_profile_constants::DEMO_GENERATED_PROFILE,
+    proof_coder::DecodedLinearProof,
 };
 
-pub const LINEAR_PROOF_CHALLENGE_CENTERED_BOUND: i64 = 8;
-pub const LINEAR_PROOF_EUCLIDEAN_RESPONSE_BOUND_SQUARED: u128 = 6_938_266_263;
-pub const LINEAR_PROOF_INFINITY_RESPONSE_BOUND: u128 = 1_625_292;
+pub const LINEAR_PROOF_CHALLENGE_CENTERED_BOUND: i64 =
+    DEMO_GENERATED_PROFILE.challenge_centered_bound;
+pub const LINEAR_PROOF_EUCLIDEAN_RESPONSE_BOUND_SQUARED: u128 =
+    DEMO_GENERATED_PROFILE.euclidean_response_bound_squared;
+pub const LINEAR_PROOF_INFINITY_RESPONSE_BOUND: u128 =
+    DEMO_GENERATED_PROFILE.infinity_response_bound;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -24,7 +28,7 @@ pub struct LinearProofNormSummary {
 }
 
 pub fn validate_linear_proof_norms(
-    decoded_proof: &DecodedLazerDemoLinearProof,
+    decoded_proof: &DecodedLinearProof,
     proof_encoding: &LinearProofEncoding,
 ) -> CanonicalResult<LinearProofNormSummary> {
     let proof_profile = linear_proof_profile_for_encoding(proof_encoding)?;
@@ -146,9 +150,10 @@ mod tests {
     };
 
     fn generated_vector_case(case_name: &str) -> serde_json::Value {
-        let vectors: serde_json::Value = serde_json::from_str(include_str!(
-            "../../../../test-vectors/ballot-privacy/proof-backend-linear-vectors.json"
-        ))
+        let vectors: serde_json::Value = serde_json::from_str(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../test-vectors/ballot-privacy/proof-backend-linear-vectors.json"
+        )))
         .expect("generated vector file should parse");
 
         vectors["cases"]
@@ -161,7 +166,7 @@ mod tests {
     }
 
     fn decoded_valid_proof() -> (
-        crate::ballot_privacy::proof_coder::DecodedLazerDemoLinearProof,
+        crate::ballot_privacy::proof_coder::DecodedLinearProof,
         LinearProofEncoding,
     ) {
         let vector_case = generated_vector_case("valid-small-linear-proof");

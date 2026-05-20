@@ -17,7 +17,7 @@ concurrency:
 
 env:
     FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-    SEALED_LATTICE_TURBO_CACHE: 'local:,remote:'
+    SEALED_LATTICE_TURBO_CACHE: "local:,remote:"
 
 jobs:
     build:
@@ -33,7 +33,6 @@ jobs:
             - run: pnpm run coverage:badge
             - run: pnpm exec playwright install --with-deps chromium
             - run: pnpm run verify:docs
-            - run: pnpm run docs:build:site
             - uses: actions/upload-pages-artifact@v4.0.0
               with:
                   path: ./docs/dist

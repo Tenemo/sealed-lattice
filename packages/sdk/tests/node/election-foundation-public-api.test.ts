@@ -59,15 +59,21 @@ const requiredPublicFunctions = [
     ],
     ['isValidLifecycleTransition', isValidLifecycleTransition],
     ['validatePollSpec', validatePollSpec],
+    ['verifyBallotProof', publicApiRuntimeRecord.verifyBallotProof],
     ['verifyBoardConsistency', publicApiRuntimeRecord.verifyBoardConsistency],
     ['verifyBridgeProof', publicApiRuntimeRecord.verifyBridgeProof],
     ['verifyCastReceiptShell', publicApiRuntimeRecord.verifyCastReceiptShell],
+    [
+        'verifyClaimBearingBallotPackage',
+        publicApiRuntimeRecord.verifyClaimBearingBallotPackage,
+    ],
     ['verifyCloseRecordShell', publicApiRuntimeRecord.verifyCloseRecordShell],
     ['verifyFirstValidPolicy', publicApiRuntimeRecord.verifyFirstValidPolicy],
     [
         'verifyOneShotSharePolicy',
         publicApiRuntimeRecord.verifyOneShotSharePolicy,
     ],
+    ['verifyReceiverKeyProof', publicApiRuntimeRecord.verifyReceiverKeyProof],
     [
         'verifyRecoveryEpochUpdate',
         publicApiRuntimeRecord.verifyRecoveryEpochUpdate,

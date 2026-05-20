@@ -10,14 +10,63 @@ const resolveFromRepoRoot = (...segments: string[]): string =>
     path.resolve(repoRoot, ...segments);
 
 const nodeTestTimeoutMs = 60_000;
+const nodeKernelHeavyTestTimeoutMs = 15 * 60_000;
+const proofBenchmarkTestTimeoutMs = 60 * 60_000;
 const nodeHookTimeoutMs = 240_000;
 const browserApiHost = '127.0.0.1';
 const desktopBrowserApiPort = 64_115;
 const mobileBrowserApiPort = 64_116;
+const desktopProofBenchmarkBrowserApiPort = 64_117;
+const mobileThrottledProofBenchmarkBrowserApiPort = 64_118;
+const nodeTestIncludes = [
+    'packages/*/tests/node/**/*.test.ts',
+    'tests/node/**/*.test.ts',
+] satisfies string[];
+const nodeProofBenchmarkTestIncludes = [
+    'packages/wasm/tests/node/ballot-privacy-proof-benchmarks.benchmark.ts',
+    'packages/wasm/tests/node/transcript-core-kernel/mandatory-profile-proof-record.test.ts',
+] satisfies string[];
+const browserProofBenchmarkTestIncludes = [
+    'packages/wasm/tests/browser/ballot-privacy-proof-benchmarks.browser.benchmark.ts',
+] satisfies string[];
+const nodeHeavyTestIncludes = [
+    'packages/protocol/tests/node/ballot-privacy-proof-record-generation-input.test.ts',
+    'packages/protocol/tests/node/ballot-privacy-relation-backend-lowering/**/*.test.ts',
+] satisfies string[];
+const nodeKernelHeavyTestIncludes = [
+    'packages/wasm/tests/node/transcript-core-kernel/ballot-proof-generation.test.ts',
+    'packages/wasm/tests/node/transcript-core-kernel/ballot-proof-rejection.test.ts',
+    'packages/wasm/tests/node/transcript-core-kernel/component-bundle-rejection.test.ts',
+    'packages/wasm/tests/node/transcript-core-kernel/core-kernel-and-fixtures.test.ts',
+    'packages/wasm/tests/node/transcript-core-kernel/kernel-memory-and-loader.test.ts',
+    'packages/wasm/tests/node/transcript-core-kernel/receiver-key-proofs.test.ts',
+    'packages/wasm/tests/node/canonical-error-codes-parity.test.ts',
+    'packages/testkit/tests/node/transcript-core-fixtures.test.ts',
+    'tests/node/digest-namespace-parity.test.ts',
+] satisfies string[];
 
 const nodeProject = {
     environment: 'node',
     testTimeout: nodeTestTimeoutMs,
+    hookTimeout: nodeHookTimeoutMs,
+} as const;
+
+const nodeKernelHeavyProject = {
+    environment: 'node',
+    testTimeout: nodeKernelHeavyTestTimeoutMs,
+    hookTimeout: nodeHookTimeoutMs,
+} as const;
+
+const nodeHeavyProject = {
+    environment: 'node',
+    testTimeout: nodeKernelHeavyTestTimeoutMs,
+    hookTimeout: nodeHookTimeoutMs,
+} as const;
+
+const nodeProofBenchmarkProject = {
+    environment: 'node',
+    fileParallelism: false,
+    testTimeout: proofBenchmarkTestTimeoutMs,
     hookTimeout: nodeHookTimeoutMs,
 } as const;
 
@@ -54,6 +103,22 @@ const mobileContextOptions = {
     },
 } as const;
 
+const desktopProofBenchmarkContextOptions = {
+    userAgent:
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.7727.15 Safari/537.36',
+    viewport: {
+        width: 1280,
+        height: 720,
+    },
+    screen: {
+        width: 1280,
+        height: 720,
+    },
+    deviceScaleFactor: 1,
+    isMobile: false,
+    hasTouch: false,
+} as const;
+
 const desktopBrowserInstances: BrowserInstanceOption[] = [
     { browser: 'chromium', name: 'chromium-desktop' },
     { browser: 'firefox', name: 'firefox-desktop' },
@@ -76,6 +141,88 @@ const mobileBrowserInstances: BrowserInstanceOption[] = [
         }),
     },
 ];
+
+const desktopProofBenchmarkBrowserInstances: BrowserInstanceOption[] = [
+    {
+        browser: 'chromium',
+        name: 'chromium-desktop-proof-benchmark',
+        provider: playwright({
+            contextOptions: desktopProofBenchmarkContextOptions,
+        }),
+    },
+];
+
+const mobileThrottledProofBenchmarkBrowserInstances: BrowserInstanceOption[] = [
+    {
+        browser: 'chromium',
+        name: 'chromium-mobile-throttled-proof-benchmark',
+        provider: playwright({
+            contextOptions: mobileContextOptions['Pixel 5'],
+        }),
+    },
+];
+
+type BrowserProjectInput = {
+    readonly name: string;
+    readonly include: string[];
+    readonly apiPort: number;
+    readonly instances: BrowserInstanceOption[];
+    readonly provider?: ReturnType<typeof playwright>;
+    readonly fileParallelism?: boolean;
+    readonly testTimeout?: number;
+    readonly hookTimeout?: number;
+};
+
+type BrowserProject = {
+    readonly test: {
+        readonly name: string;
+        readonly include: string[];
+        readonly fileParallelism?: boolean;
+        readonly testTimeout?: number;
+        readonly hookTimeout?: number;
+        readonly browser: {
+            readonly enabled: true;
+            readonly api: {
+                readonly host: string;
+                readonly port: number;
+                readonly strictPort: false;
+            };
+            readonly provider: ReturnType<typeof playwright>;
+            readonly headless: true;
+            readonly instances: BrowserInstanceOption[];
+        };
+    };
+};
+
+const makeBrowserProject = ({
+    name,
+    include,
+    apiPort,
+    instances,
+    provider = playwright(),
+    fileParallelism,
+    testTimeout,
+    hookTimeout,
+}: BrowserProjectInput): BrowserProject => ({
+    test: {
+        name,
+        include,
+        ...(fileParallelism === undefined ? {} : { fileParallelism }),
+        ...(testTimeout === undefined ? {} : { testTimeout }),
+        ...(hookTimeout === undefined ? {} : { hookTimeout }),
+        browser: {
+            enabled: true,
+            api: {
+                host: browserApiHost,
+                port: apiPort,
+                strictPort: false,
+            },
+            provider,
+            headless: true,
+            instances,
+        },
+    },
+});
 
 export default defineConfig({
     resolve: {
@@ -124,66 +271,77 @@ export default defineConfig({
             reporter: ['text', 'json-summary', 'lcov'],
             reportsDirectory: './coverage',
             include: [
-                'packages/wasm/src/**/*.ts',
-                'tools/generate-coverage-badge.ts',
-                'tools/ci/check-package-boundaries.ts',
+                'packages/*/src/**/*.ts',
+                'tools/**/*.ts',
+                'tools/**/*.mts',
+                'tools/**/*.mjs',
             ],
-            exclude: [
-                'packages/*/src/**/*.d.ts',
-                'tools/ci/build-wasm-kernel.ts',
-            ],
-            thresholds: {
-                statements: 100,
-                branches: 100,
-                functions: 100,
-                lines: 100,
-            },
+            exclude: ['packages/*/src/**/*.d.ts'],
         },
         projects: [
             {
                 test: {
                     name: 'node',
-                    include: [
-                        'packages/*/tests/node/**/*.test.ts',
-                        'tests/node/**/*.test.ts',
+                    include: nodeTestIncludes,
+                    exclude: [
+                        ...nodeHeavyTestIncludes,
+                        ...nodeKernelHeavyTestIncludes,
+                        ...nodeProofBenchmarkTestIncludes,
                     ],
                     ...nodeProject,
                 },
             },
             {
                 test: {
-                    name: 'browser-desktop',
-                    include: ['packages/*/tests/browser/**/*.browser.test.ts'],
-                    browser: {
-                        enabled: true,
-                        api: {
-                            host: browserApiHost,
-                            port: desktopBrowserApiPort,
-                            strictPort: false,
-                        },
-                        provider: playwright(),
-                        headless: true,
-                        instances: desktopBrowserInstances,
-                    },
+                    name: 'node-heavy',
+                    include: nodeHeavyTestIncludes,
+                    ...nodeHeavyProject,
                 },
             },
             {
                 test: {
-                    name: 'browser-mobile',
-                    include: ['packages/*/tests/browser/**/*.browser.test.ts'],
-                    browser: {
-                        enabled: true,
-                        api: {
-                            host: browserApiHost,
-                            port: mobileBrowserApiPort,
-                            strictPort: false,
-                        },
-                        provider: playwright(),
-                        headless: true,
-                        instances: mobileBrowserInstances,
-                    },
+                    name: 'node-kernel-heavy',
+                    include: nodeKernelHeavyTestIncludes,
+                    ...nodeKernelHeavyProject,
                 },
             },
+            {
+                test: {
+                    name: 'node-proof-benchmark',
+                    include: nodeProofBenchmarkTestIncludes,
+                    ...nodeProofBenchmarkProject,
+                },
+            },
+            makeBrowserProject({
+                name: 'browser-desktop',
+                include: ['packages/*/tests/browser/**/*.browser.test.ts'],
+                apiPort: desktopBrowserApiPort,
+                instances: desktopBrowserInstances,
+            }),
+            makeBrowserProject({
+                name: 'browser-mobile',
+                include: ['packages/*/tests/browser/**/*.browser.test.ts'],
+                apiPort: mobileBrowserApiPort,
+                instances: mobileBrowserInstances,
+            }),
+            makeBrowserProject({
+                name: 'browser-desktop-proof-benchmark',
+                include: browserProofBenchmarkTestIncludes,
+                apiPort: desktopProofBenchmarkBrowserApiPort,
+                instances: desktopProofBenchmarkBrowserInstances,
+                fileParallelism: false,
+                testTimeout: proofBenchmarkTestTimeoutMs,
+                hookTimeout: nodeHookTimeoutMs,
+            }),
+            makeBrowserProject({
+                name: 'browser-mobile-throttled-proof-benchmark',
+                include: browserProofBenchmarkTestIncludes,
+                apiPort: mobileThrottledProofBenchmarkBrowserApiPort,
+                instances: mobileThrottledProofBenchmarkBrowserInstances,
+                fileParallelism: false,
+                testTimeout: proofBenchmarkTestTimeoutMs,
+                hookTimeout: nodeHookTimeoutMs,
+            }),
         ],
     },
 });

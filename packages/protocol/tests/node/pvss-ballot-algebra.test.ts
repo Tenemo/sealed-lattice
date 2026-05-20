@@ -366,8 +366,8 @@ describe('internal PVSS ballot algebra', () => {
         );
         expect(witness.receiverShareVectors).toHaveLength(20);
         expect(witness.receiverShareVectors[0]).toMatchObject({
-            trusteeIdentity: 'participant-1',
-            trusteeRosterPosition: 1,
+            receiverIdentity: 'participant-1',
+            receiverRosterPosition: 1,
             optionCount: 4,
             shareVectorWidth: 20,
         });

@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { copyFile, mkdir, readFile } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -12,17 +12,24 @@ const repoRoot = path.resolve(
     fileURLToPath(new URL('../../', import.meta.url)),
 );
 const cargoTargetDirectory = path.resolve(repoRoot, 'target');
-const bridgeSourcePath = path.resolve(
+const encodedRustflagSeparator = '\x1f';
+const sdkKernelOutputFilePath = path.resolve(
     repoRoot,
     'packages',
-    'wasm',
-    'src',
-    'transcript-core-bridge.ts',
+    'sdk',
+    'dist',
+    'sealed-lattice-kernel.wasm',
 );
-const expectedKernelDigestListPattern =
-    /const transcriptCoreKernelNormalizedSha256HexValues\s*=\s*\[([\s\S]*?)\]\s*as const/u;
-const expectedKernelDigestPattern = /['"]([a-f0-9]{64})['"]/gu;
-const encodedRustflagSeparator = '\x1f';
+const sdkKernelLoaderFilePath = path.resolve(
+    repoRoot,
+    'packages',
+    'sdk',
+    'dist',
+    'kernel.js',
+);
+const sdkKernelDigestAssignmentPattern =
+    /const packagedTranscriptCoreKernelNormalizedSha256Hex =\s*(?:undefined|'[a-f0-9]{64}');/u;
+const sha256HexPattern = /^[a-f0-9]{64}$/u;
 
 export const resolveOutputFilePath = (
     commandLineArguments: readonly string[],
@@ -130,51 +137,45 @@ const hashFileSha256Hex = async (filePath: string): Promise<string> => {
         .digest('hex');
 };
 
-const readExpectedKernelSha256HexValues = async (): Promise<
-    ReadonlySet<string>
-> => {
-    const sourceText = await readFile(bridgeSourcePath, 'utf8');
-    const listMatch = expectedKernelDigestListPattern.exec(sourceText);
-    if (listMatch?.[1] === undefined) {
+export const pinSdkKernelDigestInLoaderSource = (
+    sourceText: string,
+    sha256Hex: string,
+): string => {
+    if (!sha256HexPattern.test(sha256Hex)) {
         throw new Error(
-            'Could not find transcriptCoreKernelNormalizedSha256HexValues in the WASM bridge source.',
-        );
-    }
-    const expectedSha256HexValues = new Set<string>();
-    for (const digestMatch of listMatch[1].matchAll(
-        expectedKernelDigestPattern,
-    )) {
-        const expectedSha256Hex = digestMatch[1];
-        if (expectedSha256Hex !== undefined) {
-            expectedSha256HexValues.add(expectedSha256Hex);
-        }
-    }
-    if (expectedSha256HexValues.size === 0) {
-        throw new Error(
-            'Could not find any transcript-core kernel digest values in the WASM bridge source.',
+            `Cannot pin an invalid transcript-core kernel digest: ${sha256Hex}`,
         );
     }
 
-    return expectedSha256HexValues;
+    const replacement = `const packagedTranscriptCoreKernelNormalizedSha256Hex = '${sha256Hex}';`;
+    const pinnedSourceText = sourceText.replace(
+        sdkKernelDigestAssignmentPattern,
+        replacement,
+    );
+
+    if (pinnedSourceText === sourceText) {
+        throw new Error(
+            'Cannot pin the transcript-core kernel digest because packages/sdk/dist/kernel.js does not contain the expected digest assignment.',
+        );
+    }
+
+    return pinnedSourceText;
 };
 
-const verifyKernelDigest = async (outputFilePath: string): Promise<string> => {
-    const [actualSha256Hex, expectedSha256HexValues] = await Promise.all([
-        hashFileSha256Hex(outputFilePath),
-        readExpectedKernelSha256HexValues(),
-    ]);
-    if (!expectedSha256HexValues.has(actualSha256Hex)) {
-        throw new Error(
-            [
-                'Transcript-core WASM normalized digest mismatch.',
-                `Expected one of ${Array.from(expectedSha256HexValues).join(', ')}.`,
-                `Received ${actualSha256Hex}.`,
-                'Update transcriptCoreKernelNormalizedSha256HexValues in packages/wasm/src/transcript-core-bridge.ts after reviewing the kernel change.',
-            ].join(' '),
-        );
+const pinSdkKernelDigestIfNeeded = async (
+    outputFilePath: string,
+    sha256Hex: string,
+): Promise<void> => {
+    if (path.resolve(outputFilePath) !== sdkKernelOutputFilePath) {
+        return;
     }
 
-    return actualSha256Hex;
+    const sourceText = await readFile(sdkKernelLoaderFilePath, 'utf8');
+    await writeFile(
+        sdkKernelLoaderFilePath,
+        pinSdkKernelDigestInLoaderSource(sourceText, sha256Hex),
+        'utf8',
+    );
 };
 
 export const buildWasmKernel = async (): Promise<void> => {
@@ -184,7 +185,8 @@ export const buildWasmKernel = async (): Promise<void> => {
     runCargoBuild();
     await mkdir(outputDirectory, { recursive: true });
     await copyFile(resolveSourceFilePath(), outputFilePath);
-    const sha256Hex = await verifyKernelDigest(outputFilePath);
+    const sha256Hex = await hashFileSha256Hex(outputFilePath);
+    await pinSdkKernelDigestIfNeeded(outputFilePath, sha256Hex);
 
     console.log(
         `transcript-core kernel copied to ${path.relative(repoRoot, outputFilePath)} (${sha256Hex})`,

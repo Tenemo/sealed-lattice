@@ -104,23 +104,35 @@ impl PolynomialRing {
         rotation: usize,
     ) -> CanonicalResult<Vec<u64>> {
         self.validate_coefficients(value)?;
-        let normalized_rotation = rotation % self.degree;
-        if normalized_rotation == 0 {
-            return Ok(value.to_vec());
-        }
+        let cycle_length = self
+            .degree
+            .checked_mul(2)
+            .ok_or_else(|| invalid_ring("negacyclic rotation cycle length overflowed"))?;
+        let normalized_rotation = rotation % cycle_length;
+        let coefficient_rotation = normalized_rotation % self.degree;
+        let negate_output = normalized_rotation >= self.degree;
 
-        let mut output = vec![0_u64; self.degree];
-        for wrapped_offset in 1..=normalized_rotation {
-            let output_index = normalized_rotation - wrapped_offset;
-            let input_index = self.degree - wrapped_offset;
-            output[output_index] = if value[input_index] == 0 {
-                0
-            } else {
-                self.modulus - value[input_index]
-            };
+        let mut output = if coefficient_rotation == 0 {
+            value.to_vec()
+        } else {
+            let mut rotated = vec![0_u64; self.degree];
+            for wrapped_offset in 1..=coefficient_rotation {
+                let output_index = coefficient_rotation - wrapped_offset;
+                let input_index = self.degree - wrapped_offset;
+                rotated[output_index] = if value[input_index] == 0 {
+                    0
+                } else {
+                    self.modulus - value[input_index]
+                };
+            }
+            rotated[coefficient_rotation..self.degree]
+                .copy_from_slice(&value[..(self.degree - coefficient_rotation)]);
+            rotated
+        };
+
+        if negate_output {
+            output = self.neg(&output)?;
         }
-        output[normalized_rotation..self.degree]
-            .copy_from_slice(&value[..(self.degree - normalized_rotation)]);
 
         Ok(output)
     }
@@ -260,11 +272,36 @@ mod tests {
     #[test]
     fn normalizes_full_negacyclic_rotations() {
         let ring = PolynomialRing::new(4, 17).expect("ring should validate");
-        let rotated = ring
-            .left_rotate_negacyclic(&[1, 2, 3, 4], 8)
-            .expect("rotation should succeed");
+        let value = [1, 2, 3, 4];
+        let rotated_by_degree = ring
+            .left_rotate_negacyclic(&value, 4)
+            .expect("rotation by degree should succeed");
+        let rotated_by_two_degrees = ring
+            .left_rotate_negacyclic(&value, 8)
+            .expect("rotation by full cycle should succeed");
+        let rotated_by_three_degrees = ring
+            .left_rotate_negacyclic(&value, 12)
+            .expect("rotation by degree and full cycle should succeed");
+        let rotated_by_one = ring
+            .left_rotate_negacyclic(&value, 1)
+            .expect("rotation by one should succeed");
+        let rotated_by_degree_plus_one = ring
+            .left_rotate_negacyclic(&value, 5)
+            .expect("rotation by degree plus one should succeed");
 
-        assert_eq!(rotated, vec![1, 2, 3, 4]);
+        assert_eq!(
+            rotated_by_degree,
+            ring.neg(&value).expect("negation should succeed")
+        );
+        assert_eq!(rotated_by_two_degrees, value);
+        assert_eq!(
+            rotated_by_three_degrees,
+            ring.neg(&value).expect("negation should succeed")
+        );
+        assert_eq!(
+            rotated_by_degree_plus_one,
+            ring.neg(&rotated_by_one).expect("negation should succeed")
+        );
     }
 
     #[test]

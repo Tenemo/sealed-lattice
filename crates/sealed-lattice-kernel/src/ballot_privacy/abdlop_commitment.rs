@@ -2,13 +2,13 @@ use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
 
 use super::{
     linear_proof_parameters::LinearProofEncoding, linear_proof_transcript::shake128_32,
-    proof_coder::DecodedLazerDemoLinearProof,
+    proof_coder::DecodedLinearProof,
 };
 
 pub const LINEAR_PROOF_ABDLOP_COMMITMENT_HASH_BYTES: usize = 32;
 
 pub fn encode_abdlop_commitment(
-    decoded_proof: &DecodedLazerDemoLinearProof,
+    decoded_proof: &DecodedLinearProof,
     proof_encoding: &LinearProofEncoding,
 ) -> CanonicalResult<Vec<u8>> {
     encode_compressed_commitment_vector(
@@ -60,7 +60,7 @@ pub(crate) fn encode_compressed_commitment_vector(
 
 pub fn hash_abdlop_commitment(
     base_hash: &[u8; LINEAR_PROOF_ABDLOP_COMMITMENT_HASH_BYTES],
-    decoded_proof: &DecodedLazerDemoLinearProof,
+    decoded_proof: &DecodedLinearProof,
     proof_encoding: &LinearProofEncoding,
 ) -> CanonicalResult<[u8; LINEAR_PROOF_ABDLOP_COMMITMENT_HASH_BYTES]> {
     let encoded_commitment = encode_abdlop_commitment(decoded_proof, proof_encoding)?;
@@ -146,12 +146,13 @@ mod tests {
     };
 
     fn decoded_valid_proof() -> (
-        crate::ballot_privacy::proof_coder::DecodedLazerDemoLinearProof,
+        crate::ballot_privacy::proof_coder::DecodedLinearProof,
         LinearProofEncoding,
     ) {
-        let vectors: serde_json::Value = serde_json::from_str(include_str!(
-            "../../../../test-vectors/ballot-privacy/proof-backend-linear-vectors.json"
-        ))
+        let vectors: serde_json::Value = serde_json::from_str(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../test-vectors/ballot-privacy/proof-backend-linear-vectors.json"
+        )))
         .expect("generated vector file should parse");
         let vector_case = vectors["cases"]
             .as_array()

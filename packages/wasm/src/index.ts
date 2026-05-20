@@ -11,8 +11,11 @@ import {
     type BallotPrivacyKernelVerification,
     type BallotPrivacyLinearProofVectorVerification,
     type BallotPrivacyProofBackendStatus,
+    type BallotPrivacyProofGeneration,
+    type BallotPrivacyReceiverKeyProofGeneration,
     type BallotPrivacyReceiverKeyProofGenerationPreparation,
     type BallotPrivacyReceiverKeyVectorVerification,
+    type TranscriptCoreKernelLoaderOptions,
     type TranscriptCoreKernelSharePoint,
     type TranscriptCorePlaintextComparison,
     type TranscriptCoreKernel,
@@ -34,14 +37,19 @@ export type {
     BallotPrivacyKernelVerification,
     BallotPrivacyLinearProofVectorVerification,
     BallotPrivacyProofBackendStatus,
+    BallotPrivacyProofGeneration,
+    BallotPrivacyReceiverKeyProofGeneration,
     BallotPrivacyReceiverKeyProofGenerationPreparation,
     BallotPrivacyReceiverKeyVectorVerification,
+    TranscriptCoreKernelLoaderOptions,
     TranscriptCoreKernelSharePoint,
     TranscriptCorePlaintextComparison,
 };
 
 export const loadTranscriptCoreKernel: () => Promise<TranscriptCoreKernel> =
-    createTranscriptCoreKernelLoader(transcriptCoreKernelUrl);
+    createTranscriptCoreKernelLoader(transcriptCoreKernelUrl, {
+        allowUnpinnedKernel: true,
+    });
 
 export const verifyTranscriptCoreFixture = async (
     fixture: TranscriptCoreFixture,

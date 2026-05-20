@@ -1,9 +1,15 @@
-pub mod ballot_privacy;
-pub mod encoding;
+//! WebAssembly command surface for the sealed-lattice prototype kernel.
+//!
+//! The maintained Rust API is the byte-oriented command runner and the FFI
+//! allocation functions below. Proof internals are crate-private and should be
+//! reached through transcript-core commands so claim boundaries stay centralized.
+
+pub(crate) mod ballot_privacy;
+mod encoding;
 pub mod fixtures;
-pub mod hashing;
-pub mod ring;
-pub mod transcript_core;
+pub(crate) mod hashing;
+pub(crate) mod ring;
+pub(crate) mod transcript_core;
 
 use core::{ptr, slice};
 use std::vec::Vec;
@@ -48,6 +54,7 @@ pub unsafe extern "C" fn sealed_lattice_deallocate(pointer: *mut u8, length: usi
     }
 
     unsafe {
+        ptr::write_bytes(pointer, 0, length);
         drop(Box::from_raw(ptr::slice_from_raw_parts_mut(
             pointer, length,
         )));

@@ -64,7 +64,7 @@ const createDummySignature = (
         mode: 'PureMLDSA',
         providerName: 'browser-fixture',
         providerVersion: '1',
-        providerBuildHash: deriveProtocolDigest('ProviderBuildDigest', {
+        providerBuildDigest: deriveProtocolDigest('ProviderBuildDigest', {
             providerName: 'browser-fixture',
         }),
         fips204Version: 'FIPS 204',

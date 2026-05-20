@@ -84,8 +84,8 @@ export const deriveTestBallotPackage = (
         }),
     );
     const receiverShareCommitments = commitmentPayloads.map(({ witness }) => ({
-        trusteeIdentity: witness.commitment.trusteeIdentity,
-        trusteeRosterPosition: witness.commitment.trusteeRosterPosition,
+        receiverIdentity: witness.commitment.receiverIdentity,
+        receiverRosterPosition: witness.commitment.receiverRosterPosition,
         shareCommitmentDigest: witness.commitment.shareCommitmentDigest,
     }));
     const receiverPayloadDigests = commitmentPayloads.map(({ payload }) => ({
@@ -165,8 +165,8 @@ const collectReceiverReferenceRefusals = (input: {
         const payload = input.ballotPackage.receiverPayloadDigests[entryIndex];
 
         if (
-            commitment?.trusteeIdentity !== entry.participantIdentity ||
-            commitment.trusteeRosterPosition !== entry.rosterPosition
+            commitment?.receiverIdentity !== entry.participantIdentity ||
+            commitment.receiverRosterPosition !== entry.rosterPosition
         ) {
             refusedObjects.push(
                 createRefusal(
@@ -202,8 +202,8 @@ const collectReceiverReferenceRefusals = (input: {
                 );
             }
             const commitmentKey = [
-                commitment.trusteeIdentity,
-                commitment.trusteeRosterPosition,
+                commitment.receiverIdentity,
+                commitment.receiverRosterPosition,
             ].join('\u0000');
             if (commitmentKeys.has(commitmentKey)) {
                 refusedObjects.push(

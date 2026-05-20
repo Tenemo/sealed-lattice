@@ -57,8 +57,8 @@ export type BallotPolynomialSet = {
 
 /** One fixed-width receiver share vector for a frozen roster participant. */
 export type ReceiverShareVector = {
-    readonly trusteeIdentity: string;
-    readonly trusteeRosterPosition: number;
+    readonly receiverIdentity: string;
+    readonly receiverRosterPosition: number;
     readonly optionCount: number;
     readonly shareVectorWidth: PvssBallotShareVectorWidth;
     readonly shareVector: readonly FieldElement[];
@@ -67,8 +67,8 @@ export type ReceiverShareVector = {
 /** Deliberately weak additive commitment used only by internal tests. */
 export type TestShareCommitment = {
     readonly objectType: 'TestShareCommitment';
-    readonly trusteeIdentity: string;
-    readonly trusteeRosterPosition: number;
+    readonly receiverIdentity: string;
+    readonly receiverRosterPosition: number;
     readonly commitmentValues: readonly FieldElement[];
     readonly shareCommitmentDigest: ProtocolDigest;
 };
@@ -92,8 +92,8 @@ export type TestReceiverShareOpeningPayload = {
 
 /** Digest reference to one receiver commitment inside a ballot package shell. */
 export type ReceiverShareCommitmentReference = {
-    readonly trusteeIdentity: string;
-    readonly trusteeRosterPosition: number;
+    readonly receiverIdentity: string;
+    readonly receiverRosterPosition: number;
     readonly shareCommitmentDigest: ProtocolDigest;
 };
 

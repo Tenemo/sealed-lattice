@@ -57,9 +57,9 @@ const sameCanonicalObject = (left: unknown, right: unknown): boolean =>
     canonicalJson(left) === canonicalJson(right);
 
 const receiverKey = (
-    trusteeIdentity: string,
-    trusteeRosterPosition: number,
-): string => [trusteeIdentity, trusteeRosterPosition].join('\u0000');
+    receiverIdentity: string,
+    receiverRosterPosition: number,
+): string => [receiverIdentity, receiverRosterPosition].join('\u0000');
 
 const buildUniqueMap = <Value>(
     values: readonly Value[],
@@ -154,8 +154,8 @@ const assertReceiverWitnessesMatchPackage = (input: {
         witness.receiverShareVectors,
         (shareVector) =>
             receiverKey(
-                shareVector.trusteeIdentity,
-                shareVector.trusteeRosterPosition,
+                shareVector.receiverIdentity,
+                shareVector.receiverRosterPosition,
             ),
         'Counted ballot witness receiver shares must be unique.',
     );
@@ -164,8 +164,8 @@ const assertReceiverWitnessesMatchPackage = (input: {
             witness.shareCommitmentWitnesses,
             (commitmentWitness) =>
                 receiverKey(
-                    commitmentWitness.commitment.trusteeIdentity,
-                    commitmentWitness.commitment.trusteeRosterPosition,
+                    commitmentWitness.commitment.receiverIdentity,
+                    commitmentWitness.commitment.receiverRosterPosition,
                 ),
             'Counted ballot witness commitment openings must be unique.',
         );
@@ -205,8 +205,8 @@ const assertReceiverWitnessesMatchPackage = (input: {
     expectedReceiverShareVectors.forEach(
         (expectedShareVector, receiverIndex) => {
             const key = receiverKey(
-                expectedShareVector.trusteeIdentity,
-                expectedShareVector.trusteeRosterPosition,
+                expectedShareVector.receiverIdentity,
+                expectedShareVector.receiverRosterPosition,
             );
             const shareVector = shareVectorsByReceiver.get(key);
             const commitmentWitness = commitmentWitnessesByReceiver.get(key);
@@ -241,14 +241,14 @@ const assertReceiverWitnessesMatchPackage = (input: {
                 );
             }
             if (
-                commitmentReference.trusteeIdentity !==
-                    expectedShareVector.trusteeIdentity ||
-                commitmentReference.trusteeRosterPosition !==
-                    expectedShareVector.trusteeRosterPosition ||
+                commitmentReference.receiverIdentity !==
+                    expectedShareVector.receiverIdentity ||
+                commitmentReference.receiverRosterPosition !==
+                    expectedShareVector.receiverRosterPosition ||
                 payloadReference.receiverIdentity !==
-                    expectedShareVector.trusteeIdentity ||
+                    expectedShareVector.receiverIdentity ||
                 payloadReference.receiverRosterPosition !==
-                    expectedShareVector.trusteeRosterPosition
+                    expectedShareVector.receiverRosterPosition
             ) {
                 throw new RangeError(
                     'Counted ballot package receiver references do not match the frozen roster order.',
@@ -257,9 +257,9 @@ const assertReceiverWitnessesMatchPackage = (input: {
 
             const commitmentWithoutDigest = {
                 objectType: commitmentWitness.commitment.objectType,
-                trusteeIdentity: commitmentWitness.commitment.trusteeIdentity,
-                trusteeRosterPosition:
-                    commitmentWitness.commitment.trusteeRosterPosition,
+                receiverIdentity: commitmentWitness.commitment.receiverIdentity,
+                receiverRosterPosition:
+                    commitmentWitness.commitment.receiverRosterPosition,
                 commitmentValues: commitmentWitness.commitment.commitmentValues,
             };
             const payloadWithoutDigest = {
@@ -447,16 +447,16 @@ export const deriveTestAggregateShares = (input: {
             for (const witness of countedWitnesses) {
                 const share = witness.receiverShareVectors.find(
                     (candidate) =>
-                        candidate.trusteeIdentity ===
+                        candidate.receiverIdentity ===
                             entry.participantIdentity &&
-                        candidate.trusteeRosterPosition ===
+                        candidate.receiverRosterPosition ===
                             entry.rosterPosition,
                 );
                 const commitmentWitness = witness.shareCommitmentWitnesses.find(
                     (candidate) =>
-                        candidate.commitment.trusteeIdentity ===
+                        candidate.commitment.receiverIdentity ===
                             entry.participantIdentity &&
-                        candidate.commitment.trusteeRosterPosition ===
+                        candidate.commitment.receiverRosterPosition ===
                             entry.rosterPosition,
                 );
 

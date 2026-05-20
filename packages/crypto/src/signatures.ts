@@ -82,6 +82,12 @@ const isLowercaseHex = (value: string): boolean =>
 const isProtocolDigestString = (value: string): boolean =>
     /^[0-9a-f]{128}$/u.test(value);
 
+const isProtocolDigestOrNull = (
+    value: unknown,
+): value is ProtocolDigest | null =>
+    value === null ||
+    (typeof value === 'string' && isProtocolDigestString(value));
+
 const canonicalProtocolSignatureMessage = (
     signature: Pick<
         ProtocolSignatureEnvelope,
@@ -131,8 +137,8 @@ export const createMlDsaSignatureProfileFixture = (
         mode: overrides.mode ?? 'PureMLDSA',
         providerName: overrides.providerName ?? 'deterministic-fixture',
         providerVersion: overrides.providerVersion ?? '1',
-        providerBuildHash:
-            overrides.providerBuildHash ??
+        providerBuildDigest:
+            overrides.providerBuildDigest ??
             deriveProtocolDigest('ProviderBuildDigest', {
                 providerName: 'deterministic-fixture',
                 providerVersion: '1',
@@ -251,7 +257,7 @@ const validateProfile = (
     if (
         signature.profile.providerName.length === 0 ||
         signature.profile.providerVersion.length === 0 ||
-        !isProtocolDigestString(signature.profile.providerBuildHash) ||
+        !isProtocolDigestString(signature.profile.providerBuildDigest) ||
         signature.profile.fips204Version.length === 0 ||
         signature.profile.errataStatus.length === 0
     ) {
@@ -369,12 +375,11 @@ const validateSignedRootShape = (
         );
     }
     if (
-        (signedRoot.objectRoot !== null && !objectRootPresent) ||
-        (signedRoot.chunkMerkleRoot !== null && !chunkMerkleRootPresent) ||
-        (signedRoot.manifestDigest !== null &&
-            typeof signedRoot.manifestDigest !== 'string') ||
-        (signedRoot.boardHeadDigest !== null &&
-            typeof signedRoot.boardHeadDigest !== 'string')
+        !isProtocolDigestOrNull(signedRoot.objectRoot) ||
+        !isProtocolDigestOrNull(signedRoot.chunkMerkleRoot) ||
+        !isProtocolDigestOrNull(signedRoot.manifestDigest) ||
+        !isProtocolDigestOrNull(signedRoot.boardHeadDigest) ||
+        !isProtocolDigestString(signedRoot.contextDigest)
     ) {
         return emptySignatureVerificationResult(
             'InvalidSignedRoot',

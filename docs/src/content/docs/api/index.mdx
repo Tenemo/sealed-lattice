@@ -6,15 +6,16 @@ editUrl: false
 
 import { CardGrid, LinkCard } from "@astrojs/starlight/components";
 
-Use the root package name for the full supported public surface. The package currently exposes the safe transcript core fixture verifier and deterministic election foundation helpers.
+Use the root package name for the full supported public surface. The package currently exposes safe-by-default helpers for transcript-core fixture verification, election foundation checks, and verification-oriented ballot privacy APIs.
 
 ## What lives here
 
 - `sealed-lattice` as the only public package name
-- transcript core fixture verification
+- transcript-core fixture verification
 - threshold, lifecycle, poll specification, and capability helpers
 - board consistency, target finality, roster-manifest, cast receipt, close record, first-valid ordering, and recovery-epoch helpers
 - ML-DSA-65 signed-root verification inside those election foundation helpers, including runtime envelope-field checks
+- receiver-key proof, ballot proof record, and claim-bearing encoded-score ballot package verification through the packaged Rust/WASM backend
 - fail-closed target-bound decryption gates that require a target-bound share-selection profile and explicit proof certificates before decryption-share or recombination capabilities are allowed
 - generated reference pages that confirm the current public surface stays narrow
 
@@ -24,6 +25,7 @@ Use the root package name for the full supported public surface. The package cur
 import {
     deriveThresholdProfile,
     validatePollSpec,
+    verifyClaimBearingBallotPackage,
     verifyBoardConsistency,
     verifyTranscriptCoreFixture,
 } from "sealed-lattice";
@@ -32,13 +34,15 @@ import {
 ## Use the root package when
 
 - you need the stable published package identity
-- you want to verify transcript core fixtures and run the safe election foundation
+- you want to verify transcript-core fixtures and run the safe election foundation
+- you need to verify supported receiver-key proofs, ballot proof records, or claim-bearing encoded-score ballot packages
 - you want structured board, finality, manifest, first-valid, or recovery refusals
 - you want to follow the documented path without depending on private workspace packages
 
 ## What stays intentionally internal
 
 - crypto provider wrappers
+- ballot generation, proof construction, and fixture-only proof helpers
 - local replay record, target-accepted-record, and decryption-share shell helpers
 - the Rust/WASM loader internals
 - testkit utilities
@@ -50,7 +54,7 @@ import {
     <LinkCard
         title="Generated reference"
         href="./reference/"
-        description="Browse the generated page for the current transcript core and election foundation surface."
+        description="Browse the generated page for the current transcript-core, election foundation, and ballot privacy verification surface."
     />
     <LinkCard
         title="Workspace layout"

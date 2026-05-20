@@ -4,9 +4,11 @@ import {
     buildCoverageBadge,
     colorForCoverage,
     createCoverageArtifacts,
+    defaultRequiredCoverageEntryPaths,
     getTotalLinesMetric,
     normalizeCoverageKey,
     normalizeCoverageSummary,
+    validateCoverageScope,
     type CoverageEntry,
     type CoverageMetric,
     type CoverageSummary,
@@ -112,7 +114,7 @@ describe('coverage badge generator', () => {
             }),
         ).toEqual({
             color: 'green',
-            label: 'coverage',
+            label: 'node source coverage',
             message: '90%',
             schemaVersion: 1,
         });
@@ -125,15 +127,39 @@ describe('coverage badge generator', () => {
                 total: createEntry(96.4),
             },
             'C:\\Repo\\sealed-lattice',
+            { requiredEntryPaths: [] },
         );
 
         expect(Object.keys(summary)).toEqual(['total', 'src/index.ts']);
         expect(summary['src/index.ts']).toEqual(createEntry(50));
         expect(badge).toEqual({
             color: 'brightgreen',
-            label: 'coverage',
+            label: 'node source coverage',
             message: '96.4%',
             schemaVersion: 1,
         });
+    });
+
+    it('rejects summaries that do not cover the expected source scope', () => {
+        expect(() =>
+            validateCoverageScope({
+                total: createEntry(100),
+                'packages/sdk/src/index.ts': createEntry(100),
+            }),
+        ).toThrow(
+            'Coverage summary is missing required source entries: packages/crypto/src/canonical-json.ts',
+        );
+    });
+
+    it('accepts summaries that include every required source entry', () => {
+        const summary: CoverageSummary = {
+            total: createEntry(100),
+        };
+
+        for (const requiredEntryPath of defaultRequiredCoverageEntryPaths) {
+            summary[requiredEntryPath] = createEntry(100);
+        }
+
+        expect(() => validateCoverageScope(summary)).not.toThrow();
     });
 });

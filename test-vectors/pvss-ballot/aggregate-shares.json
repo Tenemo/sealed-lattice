@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "ballotSetDigest": "5cd9ee7855b30007cd121bf750eaabbe0b0b4dc384d8d4d1192a1a1f25793b5e11198c2d8b5890c3c4ec14fa631aa673ff28ec87acbbe664af0452fe9f9ad549",
-  "firstAggregateShareCommitmentDigest": "5eed7e94b3f2f9ac70c063d4574fa4f53e4b18f7c50e57356ec2cfee9346b2365793ccc76c8710d5608a6d8c9903ab598b2c53d90e4364e946796e9a93861484",
+  "ballotSetDigest": "9b19c44d7d087c1e4cec9f6cfed681013d7225ea35fb14f05c628e302e7dc2410575ddfe6fab5f29da56a33c38b689d7753f8b36e15f193af97160b01bc379b2",
+  "firstAggregateShareCommitmentDigest": "18232d042f0ce2ea6a1b4988e9a2b9c7c829e6bbee373ecf70f1b3c214719eb256ebfd36fe703bcd1abbf46dd9f5995c1782d604a9d339c8089b9e530bfaae7c",
   "firstAggregateShareVector": [
     20504,
     51694,

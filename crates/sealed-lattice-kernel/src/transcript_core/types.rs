@@ -206,10 +206,3 @@ impl TranscriptCoreAnalysis {
         })
     }
 }
-
-pub fn invalid_response(
-    error_code: CanonicalErrorCode,
-    message: impl Into<String>,
-) -> CanonicalResult<Value> {
-    Err(CanonicalError::new(error_code, message))
-}

@@ -1,8 +1,11 @@
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import {
     copyFile,
     mkdtemp,
     mkdir,
+    readFile,
     readdir,
     rm,
     writeFile,
@@ -10,6 +13,13 @@ import {
 import { tmpdir } from 'node:os';
 import path, { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+import { normalizeTranscriptCoreKernelBytesForDigest } from '../../packages/wasm/src/transcript-core-bridge.js';
+
+import {
+    getRootReadmePath,
+    stagePublicPackage,
+} from './stage-public-package.mjs';
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 
@@ -51,6 +61,8 @@ const forbiddenPublishedTestVectorPathFragments = [
 ] as const;
 const requiredPublishedPackageFilePaths = [
     'LICENSE',
+    'README.md',
+    'dist/kernel.js',
     'dist/sealed-lattice-kernel.wasm',
     'dist/internal/board-target.d.ts',
     'dist/internal/lifecycle.d.ts',
@@ -61,6 +73,8 @@ const requiredPublishedPackageFilePaths = [
     'dist/internal/transcript-core.d.ts',
     'public-surface.json',
 ] as const;
+const publishedKernelDigestPattern =
+    /const packagedTranscriptCoreKernelNormalizedSha256Hex\s*=\s*(?<digest>undefined|'[a-f0-9]{64}');/u;
 
 export const getPublicPackageDirectory = (
     projectRoot: string = repoRoot,
@@ -104,23 +118,105 @@ export const detectPackageManager = (
     );
 };
 
-export const getPackageManagerExecutableName = (
+export const buildPackageManagerEntryPointCandidates = (
     packageManager: PackageManager,
-    platform: NodeJS.Platform = process.platform,
+    pathEnvironment: string = process.env.PATH ?? '',
+    nodeExecutablePath: string = process.execPath,
+): readonly string[] => {
+    const nodeDirectoryPath = path.dirname(nodeExecutablePath);
+    const pathDirectoryPaths = pathEnvironment
+        .split(path.delimiter)
+        .filter((directoryPath) => directoryPath.length > 0);
+    const baseDirectoryPaths = [nodeDirectoryPath, ...pathDirectoryPaths];
+    const relativeEntryPointPaths =
+        packageManager === 'npm'
+            ? [
+                  path.join('node_modules', 'npm', 'bin', 'npm-cli.js'),
+                  path.join(
+                      '..',
+                      'lib',
+                      'node_modules',
+                      'npm',
+                      'bin',
+                      'npm-cli.js',
+                  ),
+              ]
+            : [
+                  path.join('node_modules', 'corepack', 'dist', 'pnpm.js'),
+                  path.join('node_modules', 'pnpm', 'bin', 'pnpm.cjs'),
+                  path.join(
+                      '..',
+                      'lib',
+                      'node_modules',
+                      'pnpm',
+                      'bin',
+                      'pnpm.cjs',
+                  ),
+              ];
+
+    return baseDirectoryPaths.flatMap((baseDirectoryPath) =>
+        relativeEntryPointPaths.map((relativeEntryPointPath) =>
+            path.resolve(baseDirectoryPath, relativeEntryPointPath),
+        ),
+    );
+};
+
+export const resolvePackageManagerEntryPoint = (
+    packageManager: PackageManager,
+    packageManagerEntryPointPath = process.env.npm_execpath,
+    pathEnvironment: string = process.env.PATH ?? '',
+    nodeExecutablePath: string = process.execPath,
+    pathExists: (candidatePath: string) => boolean = existsSync,
 ): string => {
-    return platform === 'win32' ? `${packageManager}.cmd` : packageManager;
+    if (packageManagerEntryPointPath !== undefined) {
+        try {
+            if (
+                detectPackageManager(packageManagerEntryPointPath) ===
+                packageManager
+            ) {
+                return packageManagerEntryPointPath;
+            }
+        } catch {
+            // Keep searching for a real Node entry point below.
+        }
+    }
+
+    const entryPointPath = buildPackageManagerEntryPointCandidates(
+        packageManager,
+        pathEnvironment,
+        nodeExecutablePath,
+    ).find(pathExists);
+
+    if (entryPointPath === undefined) {
+        throw new Error(
+            `Cannot find a Node entry point for ${packageManager}. Avoid shell shims and run through npm_execpath or a Node-installed package-manager CLI.`,
+        );
+    }
+
+    return entryPointPath;
 };
 
 export const resolvePackageManagerRunner = (
     commandLineArguments: readonly string[],
     packageManagerEntryPointPath = process.env.npm_execpath,
+    pathEnvironment: string = process.env.PATH ?? '',
+    nodeExecutablePath: string = process.execPath,
+    pathExists: (candidatePath: string) => boolean = existsSync,
 ): PackageManagerRunner => {
     const packageManagerOverride =
         parsePackageManagerOverride(commandLineArguments);
     if (packageManagerOverride !== undefined) {
         return {
-            command: getPackageManagerExecutableName(packageManagerOverride),
-            commandArgsPrefix: [],
+            command: nodeExecutablePath,
+            commandArgsPrefix: [
+                resolvePackageManagerEntryPoint(
+                    packageManagerOverride,
+                    packageManagerEntryPointPath,
+                    pathEnvironment,
+                    nodeExecutablePath,
+                    pathExists,
+                ),
+            ],
             kind: packageManagerOverride,
         };
     }
@@ -132,7 +228,7 @@ export const resolvePackageManagerRunner = (
     }
 
     return {
-        command: process.execPath,
+        command: nodeExecutablePath,
         commandArgsPrefix: [packageManagerEntryPointPath],
         kind: detectPackageManager(packageManagerEntryPointPath),
     };
@@ -161,18 +257,9 @@ export const createInstallArguments = (
 export const createPackageManagerSpawnCommand = (
     runner: PackageManagerRunner,
     commandArguments: readonly string[],
-    commandShell: string = process.env.ComSpec ?? 'cmd.exe',
 ): SpawnCommand => {
     const commandArgs = [...runner.commandArgsPrefix, ...commandArguments];
     const description = [runner.command, ...commandArgs].join(' ');
-
-    if (runner.command.endsWith('.cmd')) {
-        return {
-            command: commandShell,
-            args: ['/d', '/s', '/c', runner.command, ...commandArgs],
-            description,
-        };
-    }
 
     return {
         command: runner.command,
@@ -327,24 +414,105 @@ export const validatePublishedPackageFilePaths = (
     return failures;
 };
 
+export const validatePublishedPackageMetadata = (
+    publishedPackageJson: Record<string, unknown>,
+): string[] => {
+    const failures: string[] = [];
+
+    if ('description' in publishedPackageJson) {
+        failures.push(
+            'Published package metadata must not include a description field',
+        );
+    }
+    if ('devDependencies' in publishedPackageJson) {
+        failures.push(
+            'Published package metadata must not include devDependencies',
+        );
+    }
+    if ('scripts' in publishedPackageJson) {
+        failures.push('Published package metadata must not include scripts');
+    }
+
+    return failures;
+};
+
+export const hashPublishedKernelBytesSha256Hex = (bytes: Uint8Array): string =>
+    createHash('sha256')
+        .update(normalizeTranscriptCoreKernelBytesForDigest(bytes))
+        .digest('hex');
+
+export const extractPublishedKernelDigest = (
+    kernelRuntimeText: string,
+): string | undefined => {
+    const match = publishedKernelDigestPattern.exec(kernelRuntimeText);
+    const digest = match?.groups?.digest;
+    if (digest === undefined || digest === 'undefined') {
+        return undefined;
+    }
+
+    return digest.slice(1, -1);
+};
+
+export const validatePublishedKernelIntegrity = (
+    kernelRuntimeText: string,
+    kernelBytes: Uint8Array,
+): string[] => {
+    const expectedDigest = extractPublishedKernelDigest(kernelRuntimeText);
+    if (expectedDigest === undefined) {
+        return [
+            'Published package kernel loader must pin the packaged transcript-core WASM digest',
+        ];
+    }
+
+    const actualDigest = hashPublishedKernelBytesSha256Hex(kernelBytes);
+    if (actualDigest !== expectedDigest) {
+        return [
+            `Published package kernel digest mismatch: expected ${expectedDigest}, received ${actualDigest}`,
+        ];
+    }
+
+    return [];
+};
+
 const main = async (): Promise<void> => {
     const packageManagerRunner = resolvePackageManagerRunner(
         process.argv.slice(2),
     );
-    const packageDirectory = getPublicPackageDirectory();
     const npmPackRunner: PackageManagerRunner = {
-        command: getPackageManagerExecutableName('npm'),
-        commandArgsPrefix: [],
+        command: process.execPath,
+        commandArgsPrefix: [resolvePackageManagerEntryPoint('npm')],
         kind: 'npm',
     };
     const tempRoot = await mkdtemp(join(tmpdir(), 'sealed-lattice-packed-'));
     const packDirectory = join(tempRoot, 'pack');
     const consumerDirectory = join(tempRoot, 'consumer');
+    const packageDirectory = join(tempRoot, 'package');
 
     try {
         await mkdir(packDirectory, { recursive: true });
         await mkdir(consumerDirectory, { recursive: true });
+        const stagedPackage = await stagePublicPackage({
+            destinationPath: packageDirectory,
+        });
 
+        const [rootReadmeText, stagedReadmeText] = await Promise.all([
+            readFile(getRootReadmePath(repoRoot), 'utf8'),
+            readFile(stagedPackage.readmePath, 'utf8'),
+        ]);
+        if (stagedReadmeText !== rootReadmeText) {
+            throw new Error(
+                'Staged public package README must be copied from the repository root README',
+            );
+        }
+
+        const publishedPackageJson = JSON.parse(
+            await readFile(join(packageDirectory, 'package.json'), 'utf8'),
+        ) as Record<string, unknown>;
+        const packageMetadataValidationFailures =
+            validatePublishedPackageMetadata(publishedPackageJson);
+        if (packageMetadataValidationFailures.length > 0) {
+            throw new Error(packageMetadataValidationFailures.join('\n'));
+        }
         const publishedPackageFilePaths = parsePackDryRunFilePaths(
             runPackageManagerAndCaptureOutput(
                 npmPackRunner,
@@ -356,6 +524,15 @@ const main = async (): Promise<void> => {
             validatePublishedPackageFilePaths(publishedPackageFilePaths);
         if (publishedPackageValidationFailures.length > 0) {
             throw new Error(publishedPackageValidationFailures.join('\n'));
+        }
+        const packageKernelIntegrityFailures = validatePublishedKernelIntegrity(
+            await readFile(join(packageDirectory, 'dist', 'kernel.js'), 'utf8'),
+            await readFile(
+                join(packageDirectory, 'dist', 'sealed-lattice-kernel.wasm'),
+            ),
+        );
+        if (packageKernelIntegrityFailures.length > 0) {
+            throw new Error(packageKernelIntegrityFailures.join('\n'));
         }
 
         runPackageManager(

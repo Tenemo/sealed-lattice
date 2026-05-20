@@ -35,23 +35,24 @@ import {
 import { fieldModulus } from '../plaintext-oracle/field.js';
 
 import {
+    ballotPrivacyMaximumCertificateGatedTurnout as maximumCertificateGatedTurnout,
+    ballotPrivacyMaximumCanonicalFieldElement as maximumCanonicalFieldElement,
+    ballotPrivacyMaximumFieldElementBitLength as maximumFieldElementBitLength,
     ballotPrivacyEncodedCoordinatesPerOption,
     ballotPrivacyMandatoryOptionCount,
     ballotPrivacyMandatoryShareVectorWidth,
     ballotPrivacyMaximumOptionCount,
+    ballotPrivacyMinimumSupportedTurnout as minimumSupportedTurnout,
     ballotPrivacyScoreBucketCount,
-} from './encoded-share-layout.js';
-
-const receiverEncryptionCiphertextModulus = '12289';
-const shareCommitmentModulus = '18446744069414584321';
-const commitmentMessageBound = '4611686017353646080';
-const mandatoryProfileProofSizeTargetBytes = 4_194_304;
-const certificateGatedProfileProofSizeTargetBytes = 10_485_760;
-const openingRandomnessInfinityNormBound = 1_024;
-const maximumCertificateGatedTurnout = 50;
-const minimumSupportedTurnout = 3;
-const maximumFieldElementBitLength = 17;
-const maximumCanonicalFieldElement = 65_536 as const;
+    certificateGatedProfileProofSizeTargetBytes,
+    mandatoryProfileProofSizeTargetBytes,
+    receiverEncryptionCiphertextModulus,
+    shareCommitmentMessageBound as commitmentMessageBound,
+    shareCommitmentModulusDecimal as shareCommitmentModulus,
+    shareCommitmentOpeningInfinityNormBound as openingRandomnessInfinityNormBound,
+    shareCommitmentOpeningRandomnessRangeWidth as openingRandomnessRangeWidth,
+    shareCommitmentOpeningRandomnessSamplerDomain as openingRandomnessSamplerDomain,
+} from './protocol-parameters.js';
 
 const decimalIntegerPattern = /^(0|[1-9][0-9]*)$/u;
 
@@ -228,7 +229,12 @@ const createShareCommitmentProfile = (): ShareCommitmentProfile => {
         matrixDerivationDomain:
             'sealed.vote/v1/share-commitment/public-matrices',
         openingRandomnessDimension: 64,
+        openingRandomnessDistribution: 'UniformCenteredInteger',
         openingRandomnessInfinityNormBound,
+        openingRandomnessRangeWidth,
+        openingRandomnessSampler: 'RejectionSampledLittleEndianUint16',
+        openingRandomnessSamplerDomain,
+        openingRandomnessSamplerWordBits: 16,
         aggregateOpeningRandomnessMaximumTurnout:
             maximumCertificateGatedTurnout,
     };
@@ -372,6 +378,9 @@ const createEncodedAggregateLayoutProfile =
     };
 
 const createBallotProofProfile = (): BallotProofProfile => {
+    // This profile records the selected proof target. Current implementation
+    // evidence and claim limits are tracked in CURRENT_STATUS.md; do not treat
+    // these fields as final theorem eligibility by themselves.
     const profilePayload: BallotProofProfilePayload = {
         objectType: 'BallotProofProfile',
         objectVersion: 1,
@@ -380,7 +389,7 @@ const createBallotProofProfile = (): BallotProofProfile => {
         backendConstruction: 'LyubashevskyNguyenPlancon2022LinearProofs',
         relationShape:
             'LinearLatticeRelationsWithShortVectorAndOneHotMembership',
-        fiatShamirHash: 'Hash512-SHAKE256',
+        fiatShamirHash: 'SHAKE128-256',
         fiatShamirModel: 'QROMAccountedRequired',
         challengeBits: 256,
         soundnessBits: 128,

@@ -53,7 +53,12 @@ export type ShareCommitmentProfile = {
     readonly commitmentFormula: 'A_message * EncodeShareVector(S) + A_randomness * rho mod q_commit';
     readonly matrixDerivationDomain: string;
     readonly openingRandomnessDimension: 64;
+    readonly openingRandomnessDistribution: 'UniformCenteredInteger';
     readonly openingRandomnessInfinityNormBound: number;
+    readonly openingRandomnessRangeWidth: number;
+    readonly openingRandomnessSampler: 'RejectionSampledLittleEndianUint16';
+    readonly openingRandomnessSamplerDomain: string;
+    readonly openingRandomnessSamplerWordBits: 16;
     readonly aggregateOpeningRandomnessMaximumTurnout: 50;
 };
 
@@ -158,7 +163,7 @@ export type BallotProofProfile = {
     readonly proofSystem: 'LocalLinearLatticeRelation';
     readonly backendConstruction: 'LyubashevskyNguyenPlancon2022LinearProofs';
     readonly relationShape: 'LinearLatticeRelationsWithShortVectorAndOneHotMembership';
-    readonly fiatShamirHash: 'Hash512-SHAKE256';
+    readonly fiatShamirHash: 'SHAKE128-256';
     readonly fiatShamirModel: 'QROMAccountedRequired';
     readonly challengeBits: 256;
     readonly soundnessBits: 128;
@@ -220,12 +225,14 @@ export type ShareCommitmentMessageBoundCertVerification =
         readonly shareCommitmentMessageBoundCertDigest?: ProtocolDigest;
     };
 
+/** Public receiver-key reference bound into a ballot proof statement. */
 export type BallotProofReceiverPublicKeyReference = {
     readonly receiverIdentity: string;
     readonly receiverRosterPosition: number;
     readonly receiverPublicKeyDigest: ProtocolDigest;
 };
 
+/** Public receiver-payload reference bound into a ballot proof statement. */
 export type BallotProofReceiverPayloadReference = {
     readonly receiverIdentity: string;
     readonly receiverRosterPosition: number;
@@ -233,12 +240,14 @@ export type BallotProofReceiverPayloadReference = {
     readonly receiverPayloadCiphertextRoot: ProtocolDigest;
 };
 
+/** Public share-commitment reference bound into a ballot proof statement. */
 export type BallotProofShareCommitmentReference = {
     readonly receiverIdentity: string;
     readonly receiverRosterPosition: number;
     readonly shareCommitmentDigest: ProtocolDigest;
 };
 
+/** Stable identifier for one component of the ballot privacy proof relation. */
 export type BallotProofComponentId =
     | 'score-and-shamir-field-component'
     | 'payload-plaintext-field-component'
@@ -246,15 +255,16 @@ export type BallotProofComponentId =
     | 'receiver-encryption-component'
     | 'receiver-key-binding-component';
 
+/** Digest-bearing proof record for one ballot privacy proof component. */
 export type BallotProofComponentProofRecord = {
     readonly objectType: 'BallotProofComponentProofRecord';
     readonly objectVersion: 1;
     readonly componentProofRecordDigest: ProtocolDigest;
     readonly componentId: BallotProofComponentId;
     readonly componentStatementDigest: ProtocolDigest;
-    readonly componentProofStatementDigest?: ProtocolDigest;
+    readonly componentProofStatementDigest: ProtocolDigest;
     readonly backendStatementDigest: ProtocolDigest;
-    readonly ballotProofStatementDigest?: ProtocolDigest;
+    readonly ballotProofStatementDigest: ProtocolDigest;
     readonly relationStatementDigest: ProtocolDigest;
     readonly proofBackend: 'LocalLinearLatticeRelation';
     readonly proofRoot: ProtocolDigest;
@@ -265,28 +275,32 @@ export type BallotProofComponentProofRecord = {
     readonly publicRandomnessDigest: ProtocolDigest;
 };
 
+/** Ordered proof bundle covering every required ballot proof component. */
 export type BallotProofComponentProofBundle = {
     readonly objectType: 'BallotProofComponentProofBundle';
     readonly objectVersion: 1;
     readonly componentProofBundleDigest: ProtocolDigest;
     readonly componentBundleStatementDigest: ProtocolDigest;
     readonly backendStatementDigest: ProtocolDigest;
-    readonly ballotProofStatementDigest?: ProtocolDigest;
+    readonly ballotProofStatementDigest: ProtocolDigest;
     readonly relationStatementDigest: ProtocolDigest;
     readonly bundleCoverage: 'full-encoded-score-ballot-relation';
     readonly requiredComponentIds: readonly BallotProofComponentId[];
     readonly componentProofs: readonly BallotProofComponentProofRecord[];
 };
 
+/** Supported public statement format for a component proof input. */
 export type BallotProofComponentProofStatementFormat =
     | 'dense-polynomial-matrix-linear-proof-v1'
     | 'sparse-polynomial-matrix-linear-proof-v1'
+    | 'structured-module-sis-share-commitment-v1'
     | 'structured-module-lwe-linear-proof-v1'
     | 'public-zero-witness-binding-check-v1';
 
+/** Public proof bytes and verifier input for one ballot proof component. */
 export type BallotProofComponentProofVerificationInput = {
     readonly componentId: BallotProofComponentId;
-    readonly componentProofStatementDigest?: ProtocolDigest;
+    readonly componentProofStatementDigest: ProtocolDigest;
     readonly proofBytesHex: string;
     readonly proofEncoding: unknown;
     readonly proofParameterSet: unknown;
@@ -296,6 +310,7 @@ export type BallotProofComponentProofVerificationInput = {
     readonly statementDigest: ProtocolDigest;
 };
 
+/** Public receiver encryption key shell registered for ballot encryption. */
 export type ReceiverEncryptionPublicKey = {
     readonly objectType: 'ReceiverEncryptionPublicKey';
     readonly objectVersion: 1;
@@ -310,6 +325,7 @@ export type ReceiverEncryptionPublicKey = {
     readonly receiverPublicKeyDigest: ProtocolDigest;
 };
 
+/** Proof shell binding a receiver encryption key to its registered public material. */
 export type ReceiverKeyProof = {
     readonly objectType: 'ReceiverKeyProof';
     readonly objectVersion: 1;
@@ -333,6 +349,22 @@ export type ReceiverKeyProof = {
     readonly receiverKeyProofRoot: ProtocolDigest;
 };
 
+/** Accepted setup evidence for the receiver-key proof root bound into ballot packages. */
+export type ReceiverKeyProofRootEvidence = {
+    readonly objectType: 'ReceiverKeyProofRootEvidence';
+    readonly objectVersion: 1;
+    readonly receiverKeyProofRootEvidenceDigest: ProtocolDigest;
+    readonly ceremonyId: string;
+    readonly manifestDigest: ProtocolDigest;
+    readonly rosterDigest: ProtocolDigest;
+    readonly receiverKeyRoot: ProtocolDigest;
+    readonly receiverKeyProofRoot: ProtocolDigest;
+    readonly receiverPublicKeys: readonly BallotProofReceiverPublicKeyReference[];
+    readonly acceptedReceiverKeyProofCount: number;
+    readonly evidenceStatus: 'ReceiverKeyProofRootAccepted';
+};
+
+/** Encrypted receiver payload shell referenced by a scoped relation-bearing ballot package. */
 export type ReceiverPayload = {
     readonly objectType: 'ReceiverPayload';
     readonly objectVersion: 1;
@@ -351,6 +383,7 @@ export type ReceiverPayload = {
     readonly receiverPayloadDigest: ProtocolDigest;
 };
 
+/** Public share commitment shell referenced by a scoped relation-bearing ballot package. */
 export type ShareCommitment = {
     readonly objectType: 'ShareCommitment';
     readonly objectVersion: 1;
@@ -366,6 +399,7 @@ export type ShareCommitment = {
     readonly shareCommitmentDigest: ProtocolDigest;
 };
 
+/** Canonical statement for a scoped relation-bearing encoded-score ballot proof. */
 export type BallotProofStatement = {
     readonly objectType: 'BallotProofStatement';
     readonly objectVersion: 1;
@@ -405,6 +439,7 @@ export type BallotProofStatement = {
     readonly challengeDomainDigest: ProtocolDigest;
 };
 
+/** Proof record binding ballot proof bytes, challenge material, and component coverage. */
 export type BallotProofRecord = {
     readonly objectType: 'BallotProofRecord';
     readonly objectVersion: 1;
@@ -428,27 +463,36 @@ export type BallotProofRecord = {
     readonly publicRandomnessDigest?: ProtocolDigest;
 };
 
+/** Public ballot package containing the proof statement, proof record, and verifier inputs. */
 export type ClaimBearingBallotPackage = {
     readonly objectType: 'ClaimBearingBallotPackage';
     readonly objectVersion: 1;
     readonly ballotPackageDigest: ProtocolDigest;
     readonly ballotProofStatement: BallotProofStatement;
     readonly ballotProof: BallotProofRecord;
+    readonly receiverKeyProofRootEvidence: ReceiverKeyProofRootEvidence;
     readonly proofBytesHex?: string;
+    readonly linearStatement?: unknown;
+    readonly parameterSet?: unknown;
+    readonly proofEncoding?: unknown;
+    readonly publicRandomnessHex?: string;
+    readonly componentBundleStatement?: unknown;
     readonly componentProofBundle?: BallotProofComponentProofBundle;
     readonly componentProofInputs?: readonly BallotProofComponentProofVerificationInput[];
     readonly receiverPayloads: readonly ReceiverPayload[];
     readonly shareCommitments: readonly ShareCommitment[];
 };
 
+/** Runtime status reported by the ballot privacy proof backend. */
 export type BallotPrivacyProofBackendStatus = {
     readonly backendName: 'linear lattice proof backend';
-    readonly backendAvailable: false;
-    readonly portableRustWasmPortRequired: true;
+    readonly backendAvailable: boolean;
+    readonly portableRustWasmPortRequired: boolean;
     readonly requiredComponents: readonly string[];
-    readonly blockedReason: string;
+    readonly blockedReason: string | null;
 };
 
+/** Structured verification result for ballot privacy shell and proof checks. */
 export type BallotPrivacyVerification = StructuredProtocolVerificationResult & {
     readonly backendAvailable: boolean;
     readonly backendStatus?: BallotPrivacyProofBackendStatus;

@@ -1,7 +1,7 @@
 use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
 
 use super::{
-    linear_proof_public_parameters::LINEAR_PROOF_PROOF_COEFFICIENT_BIT_LENGTH,
+    linear_proof_public_parameters::DEFAULT_LINEAR_PROOF_COEFFICIENT_BIT_LENGTH,
     linear_proof_rng::sample_linear_proof_uniform_u64_values,
     polynomial_ring::PolynomialRing,
     quadratic_equation::LinearProofQuadraticEquation,
@@ -74,7 +74,7 @@ pub(crate) fn fold_default_many_quadratic_equations(
     fold_many_quadratic_equations(
         equations,
         challenge_seed,
-        LINEAR_PROOF_PROOF_COEFFICIENT_BIT_LENGTH,
+        DEFAULT_LINEAR_PROOF_COEFFICIENT_BIT_LENGTH,
     )
 }
 
@@ -166,6 +166,9 @@ fn validate_linear_proof_hash_mask_vector(
     }
     for hash_mask_polynomial in hash_mask_vector {
         proof_ring.validate_coefficients(hash_mask_polynomial)?;
+        // The fixed LaZer-style TBOX profile requires zero at the two
+        // automorphism fixed positions used by the current degree-64 proof
+        // ring. Generalizing the proof ring shape must revisit this invariant.
         if hash_mask_polynomial[0] != 0 || hash_mask_polynomial[proof_ring.degree() / 2] != 0 {
             return Err(invalid_many_quadratic(
                 "hash-mask polynomial constant and half-degree coefficients must be zero",

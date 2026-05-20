@@ -118,8 +118,8 @@ export const deriveReceiverShareVectors = (input: {
         ];
 
         return {
-            trusteeIdentity: entry.participantIdentity,
-            trusteeRosterPosition: entry.rosterPosition,
+            receiverIdentity: entry.participantIdentity,
+            receiverRosterPosition: entry.rosterPosition,
             optionCount: optionShares.length,
             shareVectorWidth: pvssBallotShareVectorWidth,
             shareVector,

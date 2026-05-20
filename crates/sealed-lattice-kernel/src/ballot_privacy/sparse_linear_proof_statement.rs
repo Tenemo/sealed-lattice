@@ -12,11 +12,11 @@ use crate::{
 use super::{
     linear_proof_parameters::{LinearProofEncoding, LinearProofParameterSet},
     linear_proof_statement::{
-        LazerDemoLinearStatementTranscript, LinearProofTargetCoefficientRepresentation,
-        rotate_left_negacyclic_signed_polynomial,
+        LinearProofMatrixCoefficientRepresentation, LinearProofTargetCoefficientRepresentation,
+        LinearStatementTranscript, rotate_left_negacyclic_signed_polynomial,
         scale_signed_polynomial_by_source_modulus_inverse, source_polynomial_split_factor,
-        split_unsigned_polynomial_into_proof_ring, transform_target_vector_to_proof_ring,
-        validate_source_polynomial,
+        split_source_polynomial_into_proof_ring_with_coefficient_representation,
+        transform_target_vector_to_proof_ring, validate_source_polynomial,
     },
     polynomial_ring::PolynomialRing,
     polynomial_vector::PolynomialVector,
@@ -85,6 +85,20 @@ pub fn transform_sparse_statement_matrix_to_proof_ring(
     proof_encoding: &LinearProofEncoding,
     source_statement_matrix: &SparsePolynomialMatrix,
 ) -> CanonicalResult<SparsePolynomialMatrix> {
+    transform_sparse_statement_matrix_to_proof_ring_with_coefficient_representation(
+        parameter_set,
+        proof_encoding,
+        source_statement_matrix,
+        LinearProofMatrixCoefficientRepresentation::CanonicalUnsignedSourceModulus,
+    )
+}
+
+pub fn transform_sparse_statement_matrix_to_proof_ring_with_coefficient_representation(
+    parameter_set: &LinearProofParameterSet,
+    proof_encoding: &LinearProofEncoding,
+    source_statement_matrix: &SparsePolynomialMatrix,
+    matrix_coefficient_representation: LinearProofMatrixCoefficientRepresentation,
+) -> CanonicalResult<SparsePolynomialMatrix> {
     validate_sparse_statement_matrix_inputs(
         parameter_set,
         proof_encoding,
@@ -99,10 +113,13 @@ pub fn transform_sparse_statement_matrix_to_proof_ring(
     let mut transformed_entries = Vec::new();
 
     for source_entry in source_statement_matrix.entries() {
-        let split_polynomials = split_unsigned_polynomial_into_proof_ring(
-            source_entry.coefficients(),
-            source_polynomial_split_factor,
-        )?;
+        let split_polynomials =
+            split_source_polynomial_into_proof_ring_with_coefficient_representation(
+                source_entry.coefficients(),
+                parameter_set.coefficient_modulus,
+                source_polynomial_split_factor,
+                matrix_coefficient_representation,
+            )?;
         let rotated_split_polynomials = split_polynomials
             .iter()
             .map(|polynomial| rotate_left_negacyclic_signed_polynomial(polynomial))
@@ -186,16 +203,38 @@ pub fn derive_sparse_linear_statement_transcript(
     target_coefficient_representation: LinearProofTargetCoefficientRepresentation,
     public_randomness: &[u8],
 ) -> CanonicalResult<SparseLinearStatementTranscript> {
+    derive_sparse_linear_statement_transcript_with_matrix_coefficient_representation(
+        parameter_set,
+        proof_encoding,
+        source_statement_matrix,
+        target_vector_coefficients,
+        LinearProofMatrixCoefficientRepresentation::CanonicalUnsignedSourceModulus,
+        target_coefficient_representation,
+        public_randomness,
+    )
+}
+
+pub fn derive_sparse_linear_statement_transcript_with_matrix_coefficient_representation(
+    parameter_set: &LinearProofParameterSet,
+    proof_encoding: &LinearProofEncoding,
+    source_statement_matrix: &SparsePolynomialMatrix,
+    target_vector_coefficients: &[Vec<u64>],
+    matrix_coefficient_representation: LinearProofMatrixCoefficientRepresentation,
+    target_coefficient_representation: LinearProofTargetCoefficientRepresentation,
+    public_randomness: &[u8],
+) -> CanonicalResult<SparseLinearStatementTranscript> {
     if public_randomness.len() != 32 {
         return Err(invalid_sparse_statement(
             "sparse statement public randomness must be exactly 32 bytes",
         ));
     }
-    let transformed_statement_matrix = transform_sparse_statement_matrix_to_proof_ring(
-        parameter_set,
-        proof_encoding,
-        source_statement_matrix,
-    )?;
+    let transformed_statement_matrix =
+        transform_sparse_statement_matrix_to_proof_ring_with_coefficient_representation(
+            parameter_set,
+            proof_encoding,
+            source_statement_matrix,
+            matrix_coefficient_representation,
+        )?;
     let transformed_target_vector = transform_sparse_target_vector_to_proof_ring(
         parameter_set,
         proof_encoding,
@@ -235,17 +274,39 @@ pub fn derive_dense_compatible_sparse_linear_statement_transcript(
     target_vector_coefficients: &[Vec<u64>],
     target_coefficient_representation: LinearProofTargetCoefficientRepresentation,
     public_randomness: &[u8],
-) -> CanonicalResult<LazerDemoLinearStatementTranscript> {
+) -> CanonicalResult<LinearStatementTranscript> {
+    derive_dense_compatible_sparse_linear_statement_transcript_with_matrix_coefficient_representation(
+        parameter_set,
+        proof_encoding,
+        source_statement_matrix,
+        target_vector_coefficients,
+        LinearProofMatrixCoefficientRepresentation::CanonicalUnsignedSourceModulus,
+        target_coefficient_representation,
+        public_randomness,
+    )
+}
+
+pub fn derive_dense_compatible_sparse_linear_statement_transcript_with_matrix_coefficient_representation(
+    parameter_set: &LinearProofParameterSet,
+    proof_encoding: &LinearProofEncoding,
+    source_statement_matrix: &SparsePolynomialMatrix,
+    target_vector_coefficients: &[Vec<u64>],
+    matrix_coefficient_representation: LinearProofMatrixCoefficientRepresentation,
+    target_coefficient_representation: LinearProofTargetCoefficientRepresentation,
+    public_randomness: &[u8],
+) -> CanonicalResult<LinearStatementTranscript> {
     if public_randomness.len() != 32 {
         return Err(invalid_sparse_statement(
             "sparse statement public randomness must be exactly 32 bytes",
         ));
     }
-    let transformed_statement_matrix = transform_sparse_statement_matrix_to_proof_ring(
-        parameter_set,
-        proof_encoding,
-        source_statement_matrix,
-    )?;
+    let transformed_statement_matrix =
+        transform_sparse_statement_matrix_to_proof_ring_with_coefficient_representation(
+            parameter_set,
+            proof_encoding,
+            source_statement_matrix,
+            matrix_coefficient_representation,
+        )?;
     let transformed_target_vector = transform_sparse_target_vector_to_proof_ring(
         parameter_set,
         proof_encoding,
@@ -261,7 +322,7 @@ pub fn derive_dense_compatible_sparse_linear_statement_transcript(
     let public_parameters_and_statement_hash =
         shake128_32_from_parts(public_randomness, &arithmetic_statement_hash);
 
-    Ok(LazerDemoLinearStatementTranscript {
+    Ok(LinearStatementTranscript {
         transformed_statement_matrix_rows: transformed_statement_matrix.rows(),
         transformed_statement_matrix_columns: transformed_statement_matrix.columns(),
         transformed_target_vector_length: transformed_target_vector.len(),
@@ -400,6 +461,8 @@ fn hash_sparse_transformed_statement_as_dense(
 }
 
 fn shake128_32_from_parts(first_part: &[u8], second_part: &[u8]) -> [u8; 32] {
+    // LaZer-compatible fixed-width composition: current callers pass two
+    // 32-byte values. Do not reuse this helper for variable-length transcripts.
     let mut hasher = Shake128::default();
     hasher.update(first_part);
     hasher.update(second_part);

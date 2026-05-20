@@ -31,6 +31,9 @@ const assertPositiveRosterPosition = (rosterPosition: number): number => {
             'Roster interpolation points must be positive nonzero integers.',
         );
     }
+    if (rosterPosition > maximumSupportedRosterSize) {
+        throw new RangeError('Roster interpolation points must be in 1..50.');
+    }
 
     return rosterPosition;
 };
@@ -223,6 +226,9 @@ export const interpolateShamirConstantTerm = (
 ): FieldElement => {
     if (sharePoints.length === 0) {
         throw new RangeError('At least one Shamir share is required.');
+    }
+    if (sharePoints.length > maximumSupportedRosterSize) {
+        throw new RangeError('At most 50 Shamir shares are supported.');
     }
 
     validateDistinctSharePoints(sharePoints);

@@ -152,7 +152,6 @@ jobs:
                   targets: wasm32-unknown-unknown
             - run: pnpm exec playwright install --with-deps chromium
             - run: pnpm run verify:docs
-            - run: pnpm run docs:build:site
 
     release-smoke:
         name: release smoke
@@ -172,10 +171,13 @@ jobs:
             - run: pnpm run build
             - run: pnpm exec playwright install --with-deps chromium
             - run: pnpm run verify:docs
-            - run: pnpm run docs:build:site
             - run: pnpm run smoke:pack
             - run: pnpm run smoke:pack:npm
-            - run: cd packages/sdk && npm pack --dry-run --ignore-scripts
+            - run: |
+                  PUBLIC_PACKAGE_DIR="$(mktemp -d)"
+                  node ./tools/ci/stage-public-package.mjs --out "${PUBLIC_PACKAGE_DIR}"
+                  cd "${PUBLIC_PACKAGE_DIR}"
+                  npm pack --dry-run --ignore-scripts
 
     prepare-release:
         needs:
@@ -307,10 +309,13 @@ jobs:
             - run: pnpm run build
             - run: pnpm exec playwright install --with-deps chromium
             - run: pnpm run verify:docs
-            - run: pnpm run docs:build:site
             - run: pnpm run smoke:pack
             - run: pnpm run smoke:pack:npm
-            - run: cd packages/sdk && npm publish --dry-run --ignore-scripts
+            - run: |
+                  PUBLIC_PACKAGE_DIR="$(mktemp -d)"
+                  node ./tools/ci/stage-public-package.mjs --out "${PUBLIC_PACKAGE_DIR}"
+                  cd "${PUBLIC_PACKAGE_DIR}"
+                  npm publish --dry-run --ignore-scripts
 
             - uses: actions/upload-artifact@v7.0.1
               with:
@@ -467,7 +472,9 @@ jobs:
 
             - name: publish to npm
               run: |
-                  cd packages/sdk
+                  PUBLIC_PACKAGE_DIR="$(mktemp -d)"
+                  node ./tools/ci/stage-public-package.mjs --out "${PUBLIC_PACKAGE_DIR}"
+                  cd "${PUBLIC_PACKAGE_DIR}"
 
                   if [[ "${{ needs.prepare-release.outputs.dist_tag }}" == "latest" ]]; then
                     npm publish --ignore-scripts

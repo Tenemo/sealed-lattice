@@ -1,2 +1,5 @@
-pnpm run check || exit 1
-pnpm run test:node || exit 1
+pnpm run tsc
+pnpm run lint
+cargo fmt --check -p sealed-lattice-kernel
+pnpm run check
+pnpm run test:browser

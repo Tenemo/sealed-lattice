@@ -11,12 +11,12 @@ use super::{
     linear_proof_transcript::shake128_32,
     polynomial_ring::PolynomialRing,
     polynomial_vector::PolynomialVector,
-    proof_coder::DecodedLazerDemoLinearProof,
+    proof_coder::DecodedLinearProof,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct LazerDemoAbdlopLinearOpeningSummary {
+pub struct AbdlopLinearOpeningSummary {
     pub recovered_high_bits_vector_length: usize,
     pub recovered_high_bits_encoding_bytes: usize,
     pub recovered_high_bits_hash: String,
@@ -27,9 +27,9 @@ pub struct LazerDemoAbdlopLinearOpeningSummary {
 pub fn validate_abdlop_linear_opening(
     base_transcript_hash: &[u8; 32],
     public_randomness: &[u8; 32],
-    decoded_proof: &DecodedLazerDemoLinearProof,
+    decoded_proof: &DecodedLinearProof,
     proof_encoding: &LinearProofEncoding,
-) -> CanonicalResult<LazerDemoAbdlopLinearOpeningSummary> {
+) -> CanonicalResult<AbdlopLinearOpeningSummary> {
     proof_encoding.validate()?;
     let proof_profile = linear_proof_profile_for_encoding(proof_encoding)?;
 
@@ -89,7 +89,7 @@ pub fn validate_abdlop_linear_opening(
     let recovered_high_bits_hash =
         shake128_32(&[base_transcript_hash, &recovered_high_bits_encoding]);
 
-    Ok(LazerDemoAbdlopLinearOpeningSummary {
+    Ok(AbdlopLinearOpeningSummary {
         recovered_high_bits_vector_length: recovered_high_bits.len(),
         recovered_high_bits_encoding_bytes: recovered_high_bits_encoding.len(),
         recovered_high_bits_hash: to_hex(&recovered_high_bits_hash),
@@ -121,7 +121,7 @@ fn signed_polynomial_vector_to_canonical(
 }
 
 fn shifted_challenge_polynomial(
-    decoded_proof: &DecodedLazerDemoLinearProof,
+    decoded_proof: &DecodedLinearProof,
     ring: PolynomialRing,
     proof_profile: super::linear_proof_parameters::LinearProofProfile,
 ) -> CanonicalResult<Vec<u64>> {
@@ -417,9 +417,10 @@ mod tests {
     };
 
     fn generated_vector_case(case_name: &str) -> serde_json::Value {
-        let vectors: serde_json::Value = serde_json::from_str(include_str!(
-            "../../../../test-vectors/ballot-privacy/proof-backend-linear-vectors.json"
-        ))
+        let vectors: serde_json::Value = serde_json::from_str(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../test-vectors/ballot-privacy/proof-backend-linear-vectors.json"
+        )))
         .expect("generated vector file should parse");
 
         vectors["cases"]

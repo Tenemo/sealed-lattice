@@ -31,6 +31,7 @@ temp-preview-*.txt
 temp/
 temp.*
 temp-*
+temp_*
 tmp/
 tmp.*
 tmp-*
