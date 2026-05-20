@@ -46,6 +46,18 @@ const bridgeOutputPath = path.resolve(
     'internal',
     'transcript-core-bridge.js',
 );
+const bridgePartsSourceDirectoryPath = path.resolve(
+    repoRoot,
+    'packages',
+    'wasm',
+    'src',
+    'transcript-core-bridge',
+);
+const bridgePartsOutputDirectoryPath = path.resolve(
+    sdkDistDirectoryPath,
+    'internal',
+    'transcript-core-bridge',
+);
 const protocolSourceDirectoryPath = path.resolve(
     repoRoot,
     'packages',
@@ -153,6 +165,39 @@ export const buildSdkBridge = async (): Promise<void> => {
 
     await mkdir(path.dirname(bridgeOutputPath), { recursive: true });
     await writeFile(bridgeOutputPath, outputText, 'utf8');
+
+    const bridgePartSourcePaths = await collectFiles(
+        bridgePartsSourceDirectoryPath,
+        {
+            extensions: ['.ts'],
+        },
+    );
+
+    await rm(bridgePartsOutputDirectoryPath, {
+        recursive: true,
+        force: true,
+    });
+    await mkdir(bridgePartsOutputDirectoryPath, { recursive: true });
+    await Promise.all(
+        bridgePartSourcePaths.map(async (sourcePath) => {
+            const relativeSourcePath = path.relative(
+                bridgePartsSourceDirectoryPath,
+                sourcePath,
+            );
+            const outputPath = path.join(
+                bridgePartsOutputDirectoryPath,
+                relativeSourcePath.replace(/\.ts$/u, '.js'),
+            );
+            const bridgePartSourceText = await readFile(sourcePath, 'utf8');
+            const bridgePartOutputText = transpileSdkInternalSource(
+                bridgePartSourceText,
+                sourcePath,
+            );
+
+            await mkdir(path.dirname(outputPath), { recursive: true });
+            await writeFile(outputPath, bridgePartOutputText, 'utf8');
+        }),
+    );
 };
 
 export const buildSdkProtocolRuntime = async (): Promise<void> => {

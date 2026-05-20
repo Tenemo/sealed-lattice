@@ -48,6 +48,7 @@ pub unsafe extern "C" fn sealed_lattice_deallocate(pointer: *mut u8, length: usi
     }
 
     unsafe {
+        ptr::write_bytes(pointer, 0, length);
         drop(Box::from_raw(ptr::slice_from_raw_parts_mut(
             pointer, length,
         )));

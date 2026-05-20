@@ -5,6 +5,13 @@ import type {
     ReceiverEncryptionPublicKey,
 } from '@sealed-lattice/types';
 
+import {
+    receiverEncryptionModuleDegree,
+    receiverEncryptionModuleRank,
+    receiverEncryptionModulus,
+    receiverEncryptionShortVectorInfinityNormBound,
+} from './protocol-parameters.js';
+
 const backendStatementFormat = 'SparseSignedIntegerBackendStatement-v1';
 const receiverKeyStatementDigestPurpose = 'receiver-key-backend-statement-v1';
 const receiverKeyMatrixDigestPurpose = 'receiver-key-backend-matrix-v1';
@@ -21,10 +28,6 @@ const receiverKeyEquationCoefficientExpansionDomain =
     'sealed.vote/internal/receiver-key-proof/receiver-key-equation/coefficient-expansion-v1';
 const receiverKeyEquationTargetExpansionDomain =
     'sealed.vote/internal/receiver-key-proof/receiver-key-equation/target-expansion-v1';
-const receiverEncryptionModulus = 12_289;
-const receiverEncryptionModuleRank = 4;
-const receiverEncryptionModuleDegree = 256;
-const receiverEncryptionShortVectorInfinityNormBound = 2;
 const receiverKeyEquationRowCount =
     receiverEncryptionModuleRank * receiverEncryptionModuleDegree;
 const receiverKeyWitnessColumnCount = receiverKeyEquationRowCount * 2;

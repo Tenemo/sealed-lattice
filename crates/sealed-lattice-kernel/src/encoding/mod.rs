@@ -4,8 +4,11 @@ use serde_json::{Value, json};
 use crate::{
     fixtures::{TranscriptCoreFixture, verify_fixture},
     hashing::{RESERVED_ROOT_NAMESPACES, chunk_root, derive_protocol_digest, hash512_hex},
-    ring::{ShamirSharePoint, evaluate_plaintext_comparison, interpolate_shamir_constant_term},
-    transcript_core::{analyze_canonical_object_hex, invalid_response},
+    ring::{
+        MAXIMUM_SHAMIR_INTERPOLATION_POINTS, ShamirSharePoint, evaluate_plaintext_comparison,
+        interpolate_shamir_constant_term,
+    },
+    transcript_core::analyze_canonical_object_hex,
 };
 
 pub const MODULE_MARKER: &str = "encoding";
@@ -285,6 +288,41 @@ pub fn run_transcript_core_command(input: &[u8]) -> Vec<u8> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(tag = "command")]
+enum TranscriptCoreCommand {
+    ListCanonicalErrorCodes,
+    ListReservedRootNamespaces,
+    AnalyzeCanonicalObject,
+    ComputeChunkRoot,
+    HashRaw,
+    DeriveProtocolDigest,
+    InterpolateShamirConstantTerm,
+    EvaluatePlaintextComparison,
+    VerifyFixture,
+    DescribeBallotPrivacyProofBackend,
+    VerifyBallotPrivacyLinearProofVector,
+    VerifyBallotPrivacyEncodedRelationVector,
+    VerifyBallotPrivacyReceiverKeyVector,
+    VerifyReceiverKeyProof,
+    PrepareReceiverKeyProofGeneration,
+    GenerateReceiverKeyProof,
+    GenerateBallotProof,
+    GenerateBallotComponentProof,
+    GenerateBallotProofRecord,
+    VerifyBallotProof,
+    VerifyClaimBearingBallotPackage,
+}
+
+fn parse_transcript_core_command(command_name: &str) -> CanonicalResult<TranscriptCoreCommand> {
+    serde_json::from_value(json!({ "command": command_name })).map_err(|_| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            format!("unsupported command: {command_name}"),
+        )
+    })
+}
+
 fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult<Value> {
     let request: Value = serde_json::from_slice(input).map_err(|error| {
         CanonicalError::new(
@@ -301,21 +339,22 @@ fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult<Value> {
                 "command must be a string",
             )
         })?;
+    let command = parse_transcript_core_command(command)?;
 
     match command {
-        "ListCanonicalErrorCodes" => Ok(Value::Array(
+        TranscriptCoreCommand::ListCanonicalErrorCodes => Ok(Value::Array(
             ALL_CANONICAL_ERROR_CODES
                 .iter()
                 .map(|code| Value::String(code.as_str().to_string()))
                 .collect(),
         )),
-        "ListReservedRootNamespaces" => Ok(Value::Array(
+        TranscriptCoreCommand::ListReservedRootNamespaces => Ok(Value::Array(
             RESERVED_ROOT_NAMESPACES
                 .iter()
                 .map(|namespace| Value::String((*namespace).to_string()))
                 .collect(),
         )),
-        "AnalyzeCanonicalObject" => {
+        TranscriptCoreCommand::AnalyzeCanonicalObject => {
             let canonical_bytes_hex = request
                 .get("canonicalBytesHex")
                 .and_then(Value::as_str)
@@ -332,7 +371,7 @@ fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult<Value> {
 
             analyze_canonical_object_hex(canonical_bytes_hex, chunk_size)
         }
-        "ComputeChunkRoot" => {
+        TranscriptCoreCommand::ComputeChunkRoot => {
             let input_hex = request
                 .get("inputHex")
                 .and_then(Value::as_str)
@@ -366,7 +405,7 @@ fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult<Value> {
                 "chunkRoot": root,
             }))
         }
-        "HashRaw" => {
+        TranscriptCoreCommand::HashRaw => {
             let input_hex = request
                 .get("inputHex")
                 .and_then(Value::as_str)
@@ -382,7 +421,7 @@ fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult<Value> {
                 "hash512": hash512_hex("transcript-core/raw", &[&bytes]),
             }))
         }
-        "DeriveProtocolDigest" => {
+        TranscriptCoreCommand::DeriveProtocolDigest => {
             let namespace = read_string_field(&request, "namespace")?;
             let value = request.get("value").ok_or_else(|| {
                 CanonicalError::new(
@@ -395,14 +434,14 @@ fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult<Value> {
                 "protocolDigest": derive_protocol_digest(namespace, value)?,
             }))
         }
-        "InterpolateShamirConstantTerm" => {
+        TranscriptCoreCommand::InterpolateShamirConstantTerm => {
             let share_points = read_share_points(&request)?;
 
             Ok(json!({
                 "fieldElement": interpolate_shamir_constant_term(&share_points)?,
             }))
         }
-        "EvaluatePlaintextComparison" => {
+        TranscriptCoreCommand::EvaluatePlaintextComparison => {
             let left_total_score = read_u64_field(&request, "leftTotalScore")?;
             let right_total_score = read_u64_field(&request, "rightTotalScore")?;
             let roster_size = read_u64_field(&request, "rosterSize")?;
@@ -415,7 +454,7 @@ fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult<Value> {
                 "scoreDifference": comparison.score_difference,
             }))
         }
-        "VerifyFixture" => {
+        TranscriptCoreCommand::VerifyFixture => {
             let fixture_value = request.get("fixture").ok_or_else(|| {
                 CanonicalError::new(CanonicalErrorCode::InvalidFixture, "fixture is required")
             })?;
@@ -429,8 +468,10 @@ fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult<Value> {
 
             verify_fixture(&fixture)
         }
-        "DescribeBallotPrivacyProofBackend" => Ok(crate::ballot_privacy::describe_proof_backend()),
-        "VerifyBallotPrivacyLinearProofVector" => {
+        TranscriptCoreCommand::DescribeBallotPrivacyProofBackend => {
+            Ok(crate::ballot_privacy::describe_proof_backend())
+        }
+        TranscriptCoreCommand::VerifyBallotPrivacyLinearProofVector => {
             let vector_case = request.get("vectorCase").ok_or_else(|| {
                 CanonicalError::new(CanonicalErrorCode::InvalidFixture, "vectorCase is required")
             })?;
@@ -439,7 +480,7 @@ fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult<Value> {
                 vector_case,
             ))
         }
-        "VerifyBallotPrivacyEncodedRelationVector" => {
+        TranscriptCoreCommand::VerifyBallotPrivacyEncodedRelationVector => {
             let vector_case = request.get("vectorCase").ok_or_else(|| {
                 CanonicalError::new(CanonicalErrorCode::InvalidFixture, "vectorCase is required")
             })?;
@@ -448,7 +489,7 @@ fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult<Value> {
                 vector_case,
             ))
         }
-        "VerifyBallotPrivacyReceiverKeyVector" => {
+        TranscriptCoreCommand::VerifyBallotPrivacyReceiverKeyVector => {
             let vector_case = request.get("vectorCase").ok_or_else(|| {
                 CanonicalError::new(CanonicalErrorCode::InvalidFixture, "vectorCase is required")
             })?;
@@ -457,7 +498,7 @@ fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult<Value> {
                 vector_case,
             ))
         }
-        "VerifyReceiverKeyProof" => {
+        TranscriptCoreCommand::VerifyReceiverKeyProof => {
             let receiver_key_proof = request.get("receiverKeyProof").ok_or_else(|| {
                 CanonicalError::new(
                     CanonicalErrorCode::InvalidFixture,
@@ -479,7 +520,7 @@ fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult<Value> {
                 proof_encoding,
             ))
         }
-        "PrepareReceiverKeyProofGeneration" => {
+        TranscriptCoreCommand::PrepareReceiverKeyProofGeneration => {
             let linear_statement = request.get("linearStatement");
             let parameter_set = request.get("parameterSet");
             let proof_encoding = request.get("proofEncoding");
@@ -498,7 +539,7 @@ fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult<Value> {
                 ),
             )
         }
-        "GenerateReceiverKeyProof" => {
+        TranscriptCoreCommand::GenerateReceiverKeyProof => {
             let linear_statement = request.get("linearStatement");
             let parameter_set = request.get("parameterSet");
             let proof_encoding = request.get("proofEncoding");
@@ -515,7 +556,7 @@ fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult<Value> {
                 prover_randomness_hex,
             ))
         }
-        "GenerateBallotProof" => {
+        TranscriptCoreCommand::GenerateBallotProof => {
             let linear_statement = request.get("linearStatement");
             let parameter_set = request.get("parameterSet");
             let proof_encoding = request.get("proofEncoding");
@@ -532,7 +573,7 @@ fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult<Value> {
                 prover_randomness_hex,
             ))
         }
-        "GenerateBallotComponentProof" => {
+        TranscriptCoreCommand::GenerateBallotComponentProof => {
             let component_id = request.get("componentId").and_then(Value::as_str);
             let proof_input = request.get("proofInput");
             let secret_state = request.get("secretState");
@@ -545,7 +586,7 @@ fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult<Value> {
                 prover_randomness_hex,
             ))
         }
-        "GenerateBallotProofRecord" => {
+        TranscriptCoreCommand::GenerateBallotProofRecord => {
             let statement = request.get("statement");
             let linear_statement = request.get("linearStatement");
             let parameter_set = request.get("parameterSet");
@@ -574,7 +615,7 @@ fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult<Value> {
                 },
             ))
         }
-        "VerifyBallotProof" => {
+        TranscriptCoreCommand::VerifyBallotProof => {
             let statement = request.get("statement").ok_or_else(|| {
                 CanonicalError::new(CanonicalErrorCode::InvalidFixture, "statement is required")
             })?;
@@ -609,7 +650,7 @@ fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult<Value> {
                 },
             ))
         }
-        "VerifyClaimBearingBallotPackage" => {
+        TranscriptCoreCommand::VerifyClaimBearingBallotPackage => {
             let ballot_package = request.get("ballotPackage").ok_or_else(|| {
                 CanonicalError::new(
                     CanonicalErrorCode::InvalidFixture,
@@ -621,10 +662,6 @@ fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult<Value> {
                 ballot_package,
             ))
         }
-        _ => invalid_response(
-            CanonicalErrorCode::InvalidFixture,
-            format!("unsupported command: {command}"),
-        ),
     }
 }
 
@@ -662,6 +699,12 @@ fn read_share_points(request: &Value) -> CanonicalResult<Vec<ShamirSharePoint>> 
                 "sharePoints must be an array",
             )
         })?;
+    if share_points.len() > MAXIMUM_SHAMIR_INTERPOLATION_POINTS {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "at most 50 Shamir shares are supported",
+        ));
+    }
 
     share_points
         .iter()
@@ -738,6 +781,30 @@ mod tests {
 
         assert!(response.contains("\"success\":false"));
         assert!(response.contains("\"InvalidFixture\""));
+    }
+
+    #[test]
+    fn command_rejects_missing_command_with_stable_message() {
+        let error = super::run_transcript_core_command_inner(br#"{}"#)
+            .expect_err("missing command should fail");
+
+        assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
+        assert_eq!(error.message, "command must be a string");
+    }
+
+    #[test]
+    fn command_rejects_unknown_command_with_stable_message() {
+        let error = super::run_transcript_core_command_inner(
+            serde_json::json!({
+                "command": "NotACommand"
+            })
+            .to_string()
+            .as_bytes(),
+        )
+        .expect_err("unknown command should fail");
+
+        assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
+        assert_eq!(error.message, "unsupported command: NotACommand");
     }
 
     #[test]

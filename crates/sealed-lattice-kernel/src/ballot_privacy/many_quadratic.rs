@@ -166,6 +166,9 @@ fn validate_linear_proof_hash_mask_vector(
     }
     for hash_mask_polynomial in hash_mask_vector {
         proof_ring.validate_coefficients(hash_mask_polynomial)?;
+        // The fixed LaZer-style TBOX profile requires zero at the two
+        // automorphism fixed positions used by the current degree-64 proof
+        // ring. Generalizing the proof ring shape must revisit this invariant.
         if hash_mask_polynomial[0] != 0 || hash_mask_polynomial[proof_ring.degree() / 2] != 0 {
             return Err(invalid_many_quadratic(
                 "hash-mask polynomial constant and half-degree coefficients must be zero",

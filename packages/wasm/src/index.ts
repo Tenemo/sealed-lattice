@@ -15,6 +15,7 @@ import {
     type BallotPrivacyReceiverKeyProofGeneration,
     type BallotPrivacyReceiverKeyProofGenerationPreparation,
     type BallotPrivacyReceiverKeyVectorVerification,
+    type TranscriptCoreKernelLoaderOptions,
     type TranscriptCoreKernelSharePoint,
     type TranscriptCorePlaintextComparison,
     type TranscriptCoreKernel,
@@ -40,6 +41,7 @@ export type {
     BallotPrivacyReceiverKeyProofGeneration,
     BallotPrivacyReceiverKeyProofGenerationPreparation,
     BallotPrivacyReceiverKeyVectorVerification,
+    TranscriptCoreKernelLoaderOptions,
     TranscriptCoreKernelSharePoint,
     TranscriptCorePlaintextComparison,
 };

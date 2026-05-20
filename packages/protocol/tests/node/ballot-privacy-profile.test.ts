@@ -138,6 +138,18 @@ describe('ballot privacy profile freeze', () => {
         );
         expect(profileSet.shareCommitmentProfile.shareVectorWidth).toBe(220);
         expect(
+            profileSet.shareCommitmentProfile.openingRandomnessDistribution,
+        ).toBe('UniformCenteredInteger');
+        expect(profileSet.shareCommitmentProfile.openingRandomnessSampler).toBe(
+            'RejectionSampledLittleEndianUint16',
+        );
+        expect(
+            profileSet.shareCommitmentProfile.openingRandomnessRangeWidth,
+        ).toBe(2049);
+        expect(
+            profileSet.shareCommitmentProfile.openingRandomnessSamplerDomain,
+        ).toBe('sealed.vote/internal/share-commitment/opening-randomness-v1');
+        expect(
             profileSet.ballotShareLayoutProfile.mandatoryShareVectorWidth,
         ).toBe(220);
         expect(profileSet.ballotProofProfile.profileId).toBe(

@@ -9,11 +9,14 @@ import type {
     ReceiverEncryptionPublicKey,
 } from '@sealed-lattice/types';
 
+import {
+    receiverEncryptionModuleDegree,
+    receiverEncryptionModuleRank,
+    receiverEncryptionModulus,
+    receiverEncryptionShortVectorInfinityNormBound,
+} from './protocol-parameters.js';
+
 const textEncoder = new TextEncoder();
-const receiverEncryptionModulus = 12_289;
-const receiverEncryptionModuleRank = 4;
-const receiverEncryptionModuleDegree = 256;
-const receiverEncryptionShortVectorInfinityNormBound = 2;
 const receiverKeyStatementRows = receiverEncryptionModuleRank;
 const receiverKeyStatementColumns = 8;
 const receiverKeyWitnessL2BoundSquared =

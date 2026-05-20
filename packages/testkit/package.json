@@ -12,14 +12,14 @@
             "import": "./dist/index.js"
         }
     },
-  "dependencies": {
-    "@sealed-lattice/types": "workspace:*",
-    "sealed-lattice": "workspace:*"
-  },
-  "devDependencies": {
-    "vitest": "^4.1.4"
-  },
-  "scripts": {
+    "dependencies": {
+        "@sealed-lattice/types": "workspace:*"
+    },
+    "devDependencies": {
+        "sealed-lattice": "workspace:*",
+        "vitest": "^4.1.4"
+    },
+    "scripts": {
         "check": "tsc --project tsconfig.json --pretty false --noEmit",
         "build": "pnpm exec del-cli dist && tsc --project tsconfig.json"
     }

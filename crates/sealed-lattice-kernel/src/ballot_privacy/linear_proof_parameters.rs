@@ -2,6 +2,17 @@ use serde::{Deserialize, Deserializer, Serialize, de};
 
 use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
 
+use super::linear_proof_profile_constants::{
+    DEMO_GENERATED_PARAMETER_CONTRACT, DEMO_GENERATED_PROFILE,
+    ENCODED_SCORE_FIELD_GENERATED_PARAMETER_CONTRACT, ENCODED_SCORE_FIELD_GENERATED_PROFILE,
+    GENERATED_COMPONENT_EUCLIDEAN_RESPONSE_BOUND_SQUARED,
+    GENERATED_COMPONENT_INFINITY_RESPONSE_BOUND,
+    GENERATED_FIELD_COMPONENT_EXACT_NORM_BOUND_SQUARED,
+    GENERATED_SHARE_COMMITMENT_COMPONENT_EXACT_NORM_BOUND_SQUARED,
+    GeneratedLinearProofProfileConstants, RECEIVER_KEY_GENERATED_PARAMETER_CONTRACT,
+    RECEIVER_KEY_GENERATED_PROFILE,
+};
+
 const UPSTREAM_COMPATIBILITY_DEMO_LINEAR_PROOF_ENCODING_PROFILE_ID: &str =
     concat!("la", "zer-demo-linear-proof-encoding-v1");
 
@@ -172,6 +183,14 @@ impl LinearProofEncoding {
                 "proofEncoding.randomnessResponseVectorLength",
                 self.randomness_response_vector_length,
             ),
+            (
+                "proofEncoding.euclideanResponseVectorLength",
+                self.euclidean_response_vector_length,
+            ),
+            (
+                "proofEncoding.infinityResponseVectorLength",
+                self.infinity_response_vector_length,
+            ),
         ] {
             if value == 0 {
                 return Err(invalid_parameter(format!("{field_name} must be non-zero")));
@@ -203,84 +222,144 @@ pub(crate) fn linear_proof_profile_for_encoding(
     proof_encoding: &LinearProofEncoding,
 ) -> CanonicalResult<LinearProofProfile> {
     proof_encoding.validate()?;
-    match proof_encoding.profile_id.as_str() {
+    let proof_profile = match proof_encoding.profile_id.as_str() {
         "demo-linear-proof-encoding-v1"
-        | UPSTREAM_COMPATIBILITY_DEMO_LINEAR_PROOF_ENCODING_PROFILE_ID => Ok(LinearProofProfile {
-            decompression_shift: 10,
-            decompression_gamma: 514_206,
-            decompression_modulus: 70_066_854_566,
-            decompression_log2_modulus: 37,
-            decompression_low_part_bound_squared: 100_800_248_132_613,
-            challenge_centered_bound: 8,
-            challenge_coefficient_bit_length: 5,
-            euclidean_response_bound_squared: 6_938_266_263,
-            infinity_response_bound: 1_625_292,
-            short_response_message_length: 33,
-            short_response_bound_scale_numerator: 962,
-            short_response_bound_scale_denominator: 400,
-            exact_norm_bound_squared: 2_048,
-        }),
-        "receiver-key-linear-proof-encoding-v1" => Ok(LinearProofProfile {
-            decompression_shift: 10,
-            decompression_gamma: 441_444,
-            decompression_modulus: 622_679,
-            decompression_log2_modulus: 20,
-            decompression_low_part_bound_squared: 115_113_594_542_128,
-            challenge_centered_bound: 8,
-            challenge_coefficient_bit_length: 5,
-            euclidean_response_bound_squared: 27_753_065_054,
-            infinity_response_bound: 3_250_585,
-            short_response_message_length: 33,
-            short_response_bound_scale_numerator: 962,
-            short_response_bound_scale_denominator: 400,
-            exact_norm_bound_squared: 8_192,
-        }),
-        "encoded-score-field-linear-proof-encoding-v1" => Ok(LinearProofProfile {
-            decompression_shift: 12,
-            decompression_gamma: 3_712_122,
-            decompression_modulus: 18_956_474,
-            decompression_log2_modulus: 25,
-            decompression_low_part_bound_squared: 5_369_976_544_106_605,
-            challenge_centered_bound: 8,
-            challenge_coefficient_bit_length: 5,
-            euclidean_response_bound_squared: 444_049_040_871,
-            infinity_response_bound: 104_018_739,
-            short_response_message_length: 177,
-            short_response_bound_scale_numerator: 962,
-            short_response_bound_scale_denominator: 400,
-            exact_norm_bound_squared: 65_536,
-        }),
+        | UPSTREAM_COMPATIBILITY_DEMO_LINEAR_PROOF_ENCODING_PROFILE_ID => {
+            profile_from_generated_constants(DEMO_GENERATED_PROFILE)
+        }
+        "receiver-key-linear-proof-encoding-v1" => {
+            profile_from_generated_constants(RECEIVER_KEY_GENERATED_PROFILE)
+        }
+        "encoded-score-field-linear-proof-encoding-v1" => {
+            profile_from_generated_constants(ENCODED_SCORE_FIELD_GENERATED_PROFILE)
+        }
         "full-encoded-score-ballot-linear-proof-encoding-v1"
         | "payload-plaintext-field-linear-proof-encoding-v1"
-        | "receiver-encryption-linear-proof-encoding-v1" => {
-            encoded_score_compatible_profile(proof_encoding, 65_536)
+        | "receiver-encryption-linear-proof-encoding-v1" => encoded_score_compatible_profile(
+            proof_encoding,
+            GENERATED_FIELD_COMPONENT_EXACT_NORM_BOUND_SQUARED,
+        )?,
+        "share-commitment-linear-proof-encoding-v1" => encoded_score_compatible_profile(
+            proof_encoding,
+            GENERATED_SHARE_COMMITMENT_COMPONENT_EXACT_NORM_BOUND_SQUARED,
+        )?,
+        _ => {
+            return Err(invalid_parameter(
+                "proofEncoding.profileId is not a supported linear proof profile",
+            ));
         }
-        "share-commitment-linear-proof-encoding-v1" => {
-            encoded_score_compatible_profile(proof_encoding, 1_048_576)
-        }
-        _ => Err(invalid_parameter(
-            "proofEncoding.profileId is not a supported linear proof profile",
-        )),
+    };
+
+    validate_linear_proof_profile_invariants(proof_profile)
+}
+
+fn profile_from_generated_constants(
+    constants: GeneratedLinearProofProfileConstants,
+) -> LinearProofProfile {
+    LinearProofProfile {
+        decompression_shift: constants.decompression_shift,
+        decompression_gamma: constants.decompression_gamma,
+        decompression_modulus: constants.decompression_modulus,
+        decompression_log2_modulus: constants.decompression_log2_modulus,
+        decompression_low_part_bound_squared: constants.decompression_low_part_bound_squared,
+        challenge_centered_bound: constants.challenge_centered_bound,
+        challenge_coefficient_bit_length: constants.challenge_coefficient_bit_length,
+        euclidean_response_bound_squared: constants.euclidean_response_bound_squared,
+        infinity_response_bound: constants.infinity_response_bound,
+        short_response_message_length: constants.short_response_message_length,
+        short_response_bound_scale_numerator: constants.short_response_bound_scale_numerator,
+        short_response_bound_scale_denominator: constants.short_response_bound_scale_denominator,
+        exact_norm_bound_squared: constants.exact_norm_bound_squared,
     }
+}
+
+fn validate_linear_proof_profile_invariants(
+    proof_profile: LinearProofProfile,
+) -> CanonicalResult<LinearProofProfile> {
+    if proof_profile.decompression_gamma <= 0 {
+        return Err(invalid_parameter(
+            "linear proof decompression gamma must be positive",
+        ));
+    }
+    if proof_profile.decompression_modulus <= proof_profile.decompression_gamma {
+        return Err(invalid_parameter(
+            "linear proof decompression modulus must be larger than gamma",
+        ));
+    }
+    if proof_profile.decompression_log2_modulus == 0 {
+        return Err(invalid_parameter(
+            "linear proof decompression modulus bit length must be non-zero",
+        ));
+    }
+    let decompression_log2_modulus = u32::try_from(proof_profile.decompression_log2_modulus)
+        .map_err(|_| {
+            invalid_parameter("linear proof decompression modulus bit length is too large")
+        })?;
+    let decompression_modulus_capacity = 1_i128
+        .checked_shl(decompression_log2_modulus)
+        .ok_or_else(|| {
+            invalid_parameter("linear proof decompression modulus bit length overflowed")
+        })?;
+    let previous_decompression_modulus_capacity = 1_i128
+        .checked_shl(decompression_log2_modulus - 1)
+        .ok_or_else(|| {
+            invalid_parameter("linear proof decompression modulus bit length overflowed")
+        })?;
+    if proof_profile.decompression_modulus > decompression_modulus_capacity
+        || proof_profile.decompression_modulus <= previous_decompression_modulus_capacity
+    {
+        return Err(invalid_parameter(
+            "linear proof decompression modulus must match the rounded-up bit length",
+        ));
+    }
+    if proof_profile.decompression_low_part_bound_squared == 0 {
+        return Err(invalid_parameter(
+            "linear proof decompression low-part bound must be non-zero",
+        ));
+    }
+    if proof_profile.challenge_centered_bound <= 0
+        || proof_profile.challenge_coefficient_bit_length == 0
+    {
+        return Err(invalid_parameter(
+            "linear proof challenge profile bounds must be non-zero",
+        ));
+    }
+    if proof_profile.euclidean_response_bound_squared == 0
+        || proof_profile.infinity_response_bound == 0
+        || proof_profile.short_response_message_length == 0
+        || proof_profile.short_response_bound_scale_numerator == 0
+        || proof_profile.short_response_bound_scale_denominator == 0
+        || proof_profile.exact_norm_bound_squared == 0
+    {
+        return Err(invalid_parameter(
+            "linear proof response and norm profile bounds must be non-zero",
+        ));
+    }
+
+    Ok(proof_profile)
 }
 
 fn encoded_score_compatible_profile(
     proof_encoding: &LinearProofEncoding,
     exact_norm_bound_squared: u64,
 ) -> CanonicalResult<LinearProofProfile> {
+    let generated_profile = ENCODED_SCORE_FIELD_GENERATED_PROFILE;
     Ok(LinearProofProfile {
-        decompression_shift: 12,
-        decompression_gamma: 3_712_122,
-        decompression_modulus: 18_956_474,
-        decompression_log2_modulus: 25,
-        decompression_low_part_bound_squared: 5_369_976_544_106_605,
-        challenge_centered_bound: 8,
-        challenge_coefficient_bit_length: 5,
-        euclidean_response_bound_squared: 1_u128 << 96,
-        infinity_response_bound: 1_u128 << 48,
+        decompression_shift: generated_profile.decompression_shift,
+        decompression_gamma: generated_profile.decompression_gamma,
+        decompression_modulus: generated_profile.decompression_modulus,
+        decompression_log2_modulus: generated_profile.decompression_log2_modulus,
+        decompression_low_part_bound_squared: generated_profile
+            .decompression_low_part_bound_squared,
+        challenge_centered_bound: generated_profile.challenge_centered_bound,
+        challenge_coefficient_bit_length: generated_profile.challenge_coefficient_bit_length,
+        euclidean_response_bound_squared: GENERATED_COMPONENT_EUCLIDEAN_RESPONSE_BOUND_SQUARED,
+        infinity_response_bound: GENERATED_COMPONENT_INFINITY_RESPONSE_BOUND,
         short_response_message_length: proof_encoding.short_response_vector_length as u128,
-        short_response_bound_scale_numerator: 962,
-        short_response_bound_scale_denominator: 400,
+        short_response_bound_scale_numerator: generated_profile
+            .short_response_bound_scale_numerator,
+        short_response_bound_scale_denominator: generated_profile
+            .short_response_bound_scale_denominator,
         exact_norm_bound_squared,
     })
 }
@@ -290,12 +369,12 @@ pub fn demo_linear_parameter_contract() -> LinearProofParameterSet {
         profile_id: "demo-linear-proof-compatibility-v1".to_string(),
         source: "sealed-lattice/linear-proof/demo-parameters-v1".to_string(),
         relation: "A*w + t = 0".to_string(),
-        ring_degree: 256,
-        proof_system_ring_degree: 64,
-        coefficient_modulus: 4_294_962_689,
-        statement_rows: 4,
-        statement_columns: 8,
-        witness_l2_bound_squared: 2_048,
+        ring_degree: DEMO_GENERATED_PARAMETER_CONTRACT.source_ring_degree,
+        proof_system_ring_degree: DEMO_GENERATED_PARAMETER_CONTRACT.proof_system_ring_degree,
+        coefficient_modulus: DEMO_GENERATED_PARAMETER_CONTRACT.source_coefficient_modulus,
+        statement_rows: DEMO_GENERATED_PARAMETER_CONTRACT.statement_rows,
+        statement_columns: DEMO_GENERATED_PARAMETER_CONTRACT.statement_columns,
+        witness_l2_bound_squared: DEMO_GENERATED_PROFILE.exact_norm_bound_squared as u128,
         expected_proof_size_bytes: None,
     }
 }
@@ -305,12 +384,13 @@ pub fn receiver_key_linear_parameter_contract() -> LinearProofParameterSet {
         profile_id: "receiver-key-linear-module-lwe-v1".to_string(),
         source: "sealed-lattice/linear-proof/receiver-key-parameters-v1".to_string(),
         relation: "A*w + t = 0".to_string(),
-        ring_degree: 256,
-        proof_system_ring_degree: 64,
-        coefficient_modulus: 12_289,
-        statement_rows: 4,
-        statement_columns: 8,
-        witness_l2_bound_squared: 8_192,
+        ring_degree: RECEIVER_KEY_GENERATED_PARAMETER_CONTRACT.source_ring_degree,
+        proof_system_ring_degree: RECEIVER_KEY_GENERATED_PARAMETER_CONTRACT
+            .proof_system_ring_degree,
+        coefficient_modulus: RECEIVER_KEY_GENERATED_PARAMETER_CONTRACT.source_coefficient_modulus,
+        statement_rows: RECEIVER_KEY_GENERATED_PARAMETER_CONTRACT.statement_rows,
+        statement_columns: RECEIVER_KEY_GENERATED_PARAMETER_CONTRACT.statement_columns,
+        witness_l2_bound_squared: RECEIVER_KEY_GENERATED_PROFILE.exact_norm_bound_squared as u128,
         expected_proof_size_bytes: None,
     }
 }
@@ -320,12 +400,15 @@ pub fn encoded_score_field_linear_parameter_contract() -> LinearProofParameterSe
         profile_id: "encoded-score-field-linear-compatibility-v1".to_string(),
         source: "sealed-lattice/linear-proof/encoded-score-field-parameters-v1".to_string(),
         relation: "A*w + t = 0".to_string(),
-        ring_degree: 64,
-        proof_system_ring_degree: 64,
-        coefficient_modulus: 65_537,
-        statement_rows: 70,
-        statement_columns: 176,
-        witness_l2_bound_squared: 65_536,
+        ring_degree: ENCODED_SCORE_FIELD_GENERATED_PARAMETER_CONTRACT.source_ring_degree,
+        proof_system_ring_degree: ENCODED_SCORE_FIELD_GENERATED_PARAMETER_CONTRACT
+            .proof_system_ring_degree,
+        coefficient_modulus: ENCODED_SCORE_FIELD_GENERATED_PARAMETER_CONTRACT
+            .source_coefficient_modulus,
+        statement_rows: ENCODED_SCORE_FIELD_GENERATED_PARAMETER_CONTRACT.statement_rows,
+        statement_columns: ENCODED_SCORE_FIELD_GENERATED_PARAMETER_CONTRACT.statement_columns,
+        witness_l2_bound_squared: ENCODED_SCORE_FIELD_GENERATED_PROFILE.exact_norm_bound_squared
+            as u128,
         expected_proof_size_bytes: None,
     }
 }
@@ -495,8 +578,14 @@ mod tests {
     use super::{
         demo_linear_parameter_contract, demo_linear_proof_encoding_contract,
         encoded_score_field_linear_parameter_contract,
-        encoded_score_field_linear_proof_encoding_contract, receiver_key_linear_parameter_contract,
-        receiver_key_linear_proof_encoding_contract,
+        encoded_score_field_linear_proof_encoding_contract, profile_from_generated_constants,
+        receiver_key_linear_parameter_contract, receiver_key_linear_proof_encoding_contract,
+        validate_linear_proof_profile_invariants,
+    };
+    use crate::ballot_privacy::linear_proof_profile_constants::{
+        DEMO_GENERATED_PROFILE, ENCODED_SCORE_FIELD_GENERATED_PARAMETER_CONTRACT,
+        ENCODED_SCORE_FIELD_GENERATED_PROFILE, RECEIVER_KEY_GENERATED_PARAMETER_CONTRACT,
+        RECEIVER_KEY_GENERATED_PROFILE,
     };
     use serde_json::json;
 
@@ -518,10 +607,22 @@ mod tests {
             parameter_contract.profile_id,
             "receiver-key-linear-module-lwe-v1"
         );
-        assert_eq!(parameter_contract.coefficient_modulus, 12_289);
-        assert_eq!(parameter_contract.witness_l2_bound_squared, 8_192);
-        assert_eq!(parameter_contract.statement_rows, 4);
-        assert_eq!(parameter_contract.statement_columns, 8);
+        assert_eq!(
+            parameter_contract.coefficient_modulus,
+            RECEIVER_KEY_GENERATED_PARAMETER_CONTRACT.source_coefficient_modulus
+        );
+        assert_eq!(
+            parameter_contract.witness_l2_bound_squared,
+            RECEIVER_KEY_GENERATED_PROFILE.exact_norm_bound_squared as u128
+        );
+        assert_eq!(
+            parameter_contract.statement_rows,
+            RECEIVER_KEY_GENERATED_PARAMETER_CONTRACT.statement_rows
+        );
+        assert_eq!(
+            parameter_contract.statement_columns,
+            RECEIVER_KEY_GENERATED_PARAMETER_CONTRACT.statement_columns
+        );
     }
 
     #[test]
@@ -535,10 +636,22 @@ mod tests {
             parameter_contract.profile_id,
             "encoded-score-field-linear-compatibility-v1"
         );
-        assert_eq!(parameter_contract.coefficient_modulus, 65_537);
-        assert_eq!(parameter_contract.witness_l2_bound_squared, 65_536);
-        assert_eq!(parameter_contract.statement_rows, 70);
-        assert_eq!(parameter_contract.statement_columns, 176);
+        assert_eq!(
+            parameter_contract.coefficient_modulus,
+            ENCODED_SCORE_FIELD_GENERATED_PARAMETER_CONTRACT.source_coefficient_modulus
+        );
+        assert_eq!(
+            parameter_contract.witness_l2_bound_squared,
+            ENCODED_SCORE_FIELD_GENERATED_PROFILE.exact_norm_bound_squared as u128
+        );
+        assert_eq!(
+            parameter_contract.statement_rows,
+            ENCODED_SCORE_FIELD_GENERATED_PARAMETER_CONTRACT.statement_rows
+        );
+        assert_eq!(
+            parameter_contract.statement_columns,
+            ENCODED_SCORE_FIELD_GENERATED_PARAMETER_CONTRACT.statement_columns
+        );
     }
 
     #[test]
@@ -594,6 +707,56 @@ mod tests {
         assert_eq!(proof_encoding.compressed_coefficient_bit_length, 35);
         assert_eq!(proof_encoding.short_response_vector_length, 177);
         assert_eq!(proof_encoding.randomness_response_vector_length, 41);
+    }
+
+    #[test]
+    fn rejects_zero_response_vector_lengths() {
+        let mut proof_encoding = demo_linear_proof_encoding_contract();
+        proof_encoding.euclidean_response_vector_length = 0;
+
+        let error = proof_encoding
+            .validate()
+            .expect_err("zero euclidean response vector length should fail");
+
+        assert!(
+            error
+                .message
+                .contains("proofEncoding.euclideanResponseVectorLength")
+        );
+
+        let mut proof_encoding = demo_linear_proof_encoding_contract();
+        proof_encoding.infinity_response_vector_length = 0;
+
+        let error = proof_encoding
+            .validate()
+            .expect_err("zero infinity response vector length should fail");
+
+        assert!(
+            error
+                .message
+                .contains("proofEncoding.infinityResponseVectorLength")
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_decompression_profile_invariants() {
+        let mut proof_profile = profile_from_generated_constants(DEMO_GENERATED_PROFILE);
+        proof_profile.decompression_gamma = 0;
+        let error = validate_linear_proof_profile_invariants(proof_profile)
+            .expect_err("zero decompression gamma should fail");
+        assert!(error.message.contains("gamma"));
+
+        let mut proof_profile = profile_from_generated_constants(DEMO_GENERATED_PROFILE);
+        proof_profile.decompression_log2_modulus = 10;
+        let error = validate_linear_proof_profile_invariants(proof_profile)
+            .expect_err("understated decompression modulus bit length should fail");
+        assert!(error.message.contains("rounded-up bit length"));
+
+        let mut proof_profile = profile_from_generated_constants(DEMO_GENERATED_PROFILE);
+        proof_profile.decompression_low_part_bound_squared = 0;
+        let error = validate_linear_proof_profile_invariants(proof_profile)
+            .expect_err("zero decompression low-part bound should fail");
+        assert!(error.message.contains("low-part bound"));
     }
 
     #[test]

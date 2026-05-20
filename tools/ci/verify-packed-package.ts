@@ -1,5 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import {
     copyFile,
     mkdtemp,
@@ -117,23 +118,105 @@ export const detectPackageManager = (
     );
 };
 
-export const getPackageManagerExecutableName = (
+export const buildPackageManagerEntryPointCandidates = (
     packageManager: PackageManager,
-    platform: NodeJS.Platform = process.platform,
+    pathEnvironment: string = process.env.PATH ?? '',
+    nodeExecutablePath: string = process.execPath,
+): readonly string[] => {
+    const nodeDirectoryPath = path.dirname(nodeExecutablePath);
+    const pathDirectoryPaths = pathEnvironment
+        .split(path.delimiter)
+        .filter((directoryPath) => directoryPath.length > 0);
+    const baseDirectoryPaths = [nodeDirectoryPath, ...pathDirectoryPaths];
+    const relativeEntryPointPaths =
+        packageManager === 'npm'
+            ? [
+                  path.join('node_modules', 'npm', 'bin', 'npm-cli.js'),
+                  path.join(
+                      '..',
+                      'lib',
+                      'node_modules',
+                      'npm',
+                      'bin',
+                      'npm-cli.js',
+                  ),
+              ]
+            : [
+                  path.join('node_modules', 'corepack', 'dist', 'pnpm.js'),
+                  path.join('node_modules', 'pnpm', 'bin', 'pnpm.cjs'),
+                  path.join(
+                      '..',
+                      'lib',
+                      'node_modules',
+                      'pnpm',
+                      'bin',
+                      'pnpm.cjs',
+                  ),
+              ];
+
+    return baseDirectoryPaths.flatMap((baseDirectoryPath) =>
+        relativeEntryPointPaths.map((relativeEntryPointPath) =>
+            path.resolve(baseDirectoryPath, relativeEntryPointPath),
+        ),
+    );
+};
+
+export const resolvePackageManagerEntryPoint = (
+    packageManager: PackageManager,
+    packageManagerEntryPointPath = process.env.npm_execpath,
+    pathEnvironment: string = process.env.PATH ?? '',
+    nodeExecutablePath: string = process.execPath,
+    pathExists: (candidatePath: string) => boolean = existsSync,
 ): string => {
-    return platform === 'win32' ? `${packageManager}.cmd` : packageManager;
+    if (packageManagerEntryPointPath !== undefined) {
+        try {
+            if (
+                detectPackageManager(packageManagerEntryPointPath) ===
+                packageManager
+            ) {
+                return packageManagerEntryPointPath;
+            }
+        } catch {
+            // Keep searching for a real Node entry point below.
+        }
+    }
+
+    const entryPointPath = buildPackageManagerEntryPointCandidates(
+        packageManager,
+        pathEnvironment,
+        nodeExecutablePath,
+    ).find(pathExists);
+
+    if (entryPointPath === undefined) {
+        throw new Error(
+            `Cannot find a Node entry point for ${packageManager}. Avoid shell shims and run through npm_execpath or a Node-installed package-manager CLI.`,
+        );
+    }
+
+    return entryPointPath;
 };
 
 export const resolvePackageManagerRunner = (
     commandLineArguments: readonly string[],
     packageManagerEntryPointPath = process.env.npm_execpath,
+    pathEnvironment: string = process.env.PATH ?? '',
+    nodeExecutablePath: string = process.execPath,
+    pathExists: (candidatePath: string) => boolean = existsSync,
 ): PackageManagerRunner => {
     const packageManagerOverride =
         parsePackageManagerOverride(commandLineArguments);
     if (packageManagerOverride !== undefined) {
         return {
-            command: getPackageManagerExecutableName(packageManagerOverride),
-            commandArgsPrefix: [],
+            command: nodeExecutablePath,
+            commandArgsPrefix: [
+                resolvePackageManagerEntryPoint(
+                    packageManagerOverride,
+                    packageManagerEntryPointPath,
+                    pathEnvironment,
+                    nodeExecutablePath,
+                    pathExists,
+                ),
+            ],
             kind: packageManagerOverride,
         };
     }
@@ -145,7 +228,7 @@ export const resolvePackageManagerRunner = (
     }
 
     return {
-        command: process.execPath,
+        command: nodeExecutablePath,
         commandArgsPrefix: [packageManagerEntryPointPath],
         kind: detectPackageManager(packageManagerEntryPointPath),
     };
@@ -174,18 +257,9 @@ export const createInstallArguments = (
 export const createPackageManagerSpawnCommand = (
     runner: PackageManagerRunner,
     commandArguments: readonly string[],
-    commandShell: string = process.env.ComSpec ?? 'cmd.exe',
 ): SpawnCommand => {
     const commandArgs = [...runner.commandArgsPrefix, ...commandArguments];
     const description = [runner.command, ...commandArgs].join(' ');
-
-    if (runner.command.endsWith('.cmd')) {
-        return {
-            command: commandShell,
-            args: ['/d', '/s', '/c', runner.command, ...commandArgs],
-            description,
-        };
-    }
 
     return {
         command: runner.command,
@@ -405,8 +479,8 @@ const main = async (): Promise<void> => {
         process.argv.slice(2),
     );
     const npmPackRunner: PackageManagerRunner = {
-        command: getPackageManagerExecutableName('npm'),
-        commandArgsPrefix: [],
+        command: process.execPath,
+        commandArgsPrefix: [resolvePackageManagerEntryPoint('npm')],
         kind: 'npm',
     };
     const tempRoot = await mkdtemp(join(tmpdir(), 'sealed-lattice-packed-'));

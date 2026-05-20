@@ -475,6 +475,42 @@ describe('ballot privacy lattice primitives', () => {
         ).toContain('BallotPackageInvalid');
     });
 
+    it('samples fixture share-commitment openings with the frozen unbiased profile', () => {
+        const profileSet = createBallotPrivacyProfileSet();
+        const firstCommitment = createShareCommitment({
+            ceremonyId: 'ceremony-1',
+            manifestDigest: digest('manifest'),
+            randomnessSource: fixtureRandomness,
+            receiverIdentity: 'receiver-1',
+            receiverRosterPosition: 1,
+            receiverShareVector: shareVector(5, 7),
+            rosterDigest: digest('roster'),
+            shareCommitmentProfile: profileSet.shareCommitmentProfile,
+        });
+        const secondCommitment = createShareCommitment({
+            ceremonyId: 'ceremony-1',
+            manifestDigest: digest('manifest'),
+            randomnessSource: fixtureRandomness,
+            receiverIdentity: 'receiver-1',
+            receiverRosterPosition: 1,
+            receiverShareVector: shareVector(5, 7),
+            rosterDigest: digest('roster'),
+            shareCommitmentProfile: profileSet.shareCommitmentProfile,
+        });
+
+        expect(firstCommitment.opening).toEqual(secondCommitment.opening);
+        expect(firstCommitment.opening.openingRandomness).toHaveLength(64);
+        expect(
+            firstCommitment.opening.openingRandomness.every(
+                (coordinate) =>
+                    Number.isInteger(coordinate) &&
+                    Math.abs(coordinate) <=
+                        profileSet.shareCommitmentProfile
+                            .openingRandomnessInfinityNormBound,
+            ),
+        ).toBe(true);
+    });
+
     it('encrypts receiver payload plaintext with per-chunk randomness and context binding', () => {
         const profileSet = createBallotPrivacyProfileSet();
         const receiverState = generateReceiverState({

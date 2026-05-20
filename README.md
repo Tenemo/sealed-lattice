@@ -14,12 +14,17 @@ The published `sealed-lattice` package currently exposes safe-by-default helpers
 - threshold profile derivation and poll-spec validation;
 - lifecycle labels, lifecycle transitions, and action capability checks;
 - signed board consistency, cast receipt shells, close record shells, and target finality checks;
-- roster manifest verification, participant roster acceptance, deterministic first-valid ordering, and recovery-epoch checks.
+- roster manifest verification, participant roster acceptance, deterministic first-valid ordering, and recovery-epoch checks;
+- verification-oriented ballot privacy APIs for receiver-key proofs, ballot proof records, and scoped relation-bearing encoded-score ballot packages.
 
 Reserved complete-protocol entry points such as transcript verification, bridge-proof creation, bridge-proof verification, and one-shot share-policy verification currently fail closed with `OperationUnavailable`.
 
 ```ts
-import { validatePollSpec, verifyTranscriptCoreFixture } from "sealed-lattice";
+import {
+    validatePollSpec,
+    verifyClaimBearingBallotPackage,
+    verifyTranscriptCoreFixture,
+} from "sealed-lattice";
 ```
 
 ## What is internal
@@ -28,7 +33,7 @@ Several protocol components exist only as workspace-internal implementation, tes
 
 - plaintext `GF(65537)` arithmetic, Shamir interpolation, top-k tallying, and sparse target fixtures;
 - deterministic PVSS ballot-algebra helpers used for regression tests;
-- ballot privacy profile, relation, proof-record, and receiver-key scaffolding;
+- ballot privacy profile, relation, proof-record, receiver-key proof, and scoped relation package verification infrastructure;
 - Rust/WASM transcript-core commands used to keep TypeScript and native canonicalization behavior aligned;
 - offline proof-oracle comparison tooling and generated public test vectors.
 
@@ -36,7 +41,7 @@ These pieces are not exported as a public voting API and must not be used for re
 
 ## Ballot privacy status
 
-The ballot privacy implementation is currently a fail-closed compatibility and verification scaffold.
+The ballot privacy implementation currently exposes verification-oriented APIs only. It can verify the supported scoped relation-bearing encoded-score ballot package shape through the packaged Rust/WASM proof backend, but it is not a complete voting API and is not supported-phone-certified.
 
 Implemented internally:
 
@@ -45,17 +50,16 @@ Implemented internally:
 - relation lowering for score/Shamir rows, receiver-payload plaintext binding, share-commitment rows, receiver-encryption structure, and receiver-key binding;
 - receiver-key proof records with proof-byte metadata and Rust/WASM verification for supported linear proof vectors;
 - ballot proof records that bind backend statements, component proof bundles, proof bytes, proof encodings, proof parameter sets, and public randomness;
-- native and WASM verification of public vectors for the supported internal linear proof slices.
+- scoped relation-bearing ballot package verification that recomputes the package digest, requires accepted receiver-key proof root evidence, checks receiver coverage, rejects witness leakage, and verifies the bound ballot proof record;
+- native and WASM verification of public vectors for the supported internal linear proof slices and full encoded-score package path.
 
 Still unavailable:
 
-- claim-bearing ballot proof generation for the full encoded-score relation;
-- portable proof bytes for every required component format;
-- the encoded aggregate bridge into the encrypted tally target;
+- public ballot generation or casting APIs;
+- aggregate derivation proofs;
+- the encoded aggregate bridge and `ScoreBitAggregationRelation-v1` encrypted score-bit input path;
 - the packed bit-sliced BGV evaluator and mandatory evaluation proof;
 - production target-bound decryption and result release.
-
-Until those are integrated, claim-bearing ballot verification remains intentionally fail-closed.
 
 ## Repository layout
 
@@ -90,7 +94,7 @@ sealed-lattice/
 pnpm add sealed-lattice
 ```
 
-The package is not a complete voting library yet. Treat it as a safe public foundation surface for the implemented transcript and election-foundation checks.
+The package is not a complete voting library yet. Treat it as a safe public verification surface for the implemented transcript-core fixture checks, election-foundation checks, and scoped ballot privacy verification APIs.
 
 ## Development
 
@@ -114,9 +118,16 @@ pnpm run test:node:fast
 pnpm run test:node:heavy:kernel
 pnpm run test:node
 pnpm run test:browser
-pnpm run test:proof-benchmarks
+pnpm run test:proof-benchmark
+pnpm run test:proof-benchmark:node
+pnpm run test:proof-benchmark:browser:desktop
+pnpm run test:proof-benchmark:browser:mobile:throttled
 pnpm run verify:docs
 ```
+
+The proof benchmark command builds once, then runs the Node and desktop Chromium benchmark projects sequentially to avoid benchmark worker memory contention on one machine. Use the individual proof-benchmark commands on separate CI workers when parallel resources are available. The mobile proof benchmark is throttled-only and manual-only through `pnpm run test:proof-benchmark:browser:mobile:throttled`.
+
+Heavy ballot privacy proof flows write resumable development checkpoints to `temp/test-checkpoints/`. Checkpoint filenames are named after their test suite and step. Set `SEALED_LATTICE_RESUME_TEST_CHECKPOINTS=1` only when intentionally debugging from the latest local checkpoint.
 
 Build and package-smoke the published SDK:
 

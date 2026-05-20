@@ -8,7 +8,7 @@ on:
 
 env:
     FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-    SEALED_LATTICE_TURBO_CACHE: 'local:,remote:'
+    SEALED_LATTICE_TURBO_CACHE: "local:,remote:"
 
 jobs:
     rust:
@@ -98,7 +98,6 @@ jobs:
             - uses: Swatinem/rust-cache@aa7c1c80a07a27a84c0aa76d0cef0aad3830e330
             - run: pnpm exec playwright install --with-deps chromium
             - run: pnpm run verify:docs
-            - run: pnpm run docs:build:site
 
     release-smoke:
         name: release smoke
@@ -116,7 +115,6 @@ jobs:
             - run: pnpm run build
             - run: pnpm exec playwright install --with-deps chromium
             - run: pnpm run verify:docs
-            - run: pnpm run docs:build:site
             - run: pnpm run smoke:pack
             - run: pnpm run smoke:pack:npm
             - run: |

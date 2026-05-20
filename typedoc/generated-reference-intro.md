@@ -4,7 +4,7 @@ This section lists the exported symbols on the current public API surface.
 
 ## Public module map
 
-- `sealed-lattice`: published package facade with the transcript core fixture verifier and deterministic election foundation helpers
+- `sealed-lattice`: published package facade with the transcript-core fixture verifier, deterministic election foundation helpers, and verification-oriented ballot privacy APIs
 
 ## What this section contains
 

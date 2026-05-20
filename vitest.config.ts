@@ -17,7 +17,7 @@ const browserApiHost = '127.0.0.1';
 const desktopBrowserApiPort = 64_115;
 const mobileBrowserApiPort = 64_116;
 const desktopProofBenchmarkBrowserApiPort = 64_117;
-const mobileProofBenchmarkBrowserApiPort = 64_118;
+const mobileThrottledProofBenchmarkBrowserApiPort = 64_118;
 const nodeTestIncludes = [
     'packages/*/tests/node/**/*.test.ts',
     'tests/node/**/*.test.ts',
@@ -136,15 +136,77 @@ const desktopProofBenchmarkBrowserInstances: BrowserInstanceOption[] = [
     },
 ];
 
-const mobileProofBenchmarkBrowserInstances: BrowserInstanceOption[] = [
+const mobileThrottledProofBenchmarkBrowserInstances: BrowserInstanceOption[] = [
     {
         browser: 'chromium',
-        name: 'chromium-mobile-proof-benchmark',
+        name: 'chromium-mobile-throttled-proof-benchmark',
         provider: playwright({
             contextOptions: mobileContextOptions['Pixel 5'],
         }),
     },
 ];
+
+type BrowserProjectInput = {
+    readonly name: string;
+    readonly include: string[];
+    readonly apiPort: number;
+    readonly instances: BrowserInstanceOption[];
+    readonly provider?: ReturnType<typeof playwright>;
+    readonly fileParallelism?: boolean;
+    readonly testTimeout?: number;
+    readonly hookTimeout?: number;
+};
+
+type BrowserProject = {
+    readonly test: {
+        readonly name: string;
+        readonly include: string[];
+        readonly fileParallelism?: boolean;
+        readonly testTimeout?: number;
+        readonly hookTimeout?: number;
+        readonly browser: {
+            readonly enabled: true;
+            readonly api: {
+                readonly host: string;
+                readonly port: number;
+                readonly strictPort: false;
+            };
+            readonly provider: ReturnType<typeof playwright>;
+            readonly headless: true;
+            readonly instances: BrowserInstanceOption[];
+        };
+    };
+};
+
+const makeBrowserProject = ({
+    name,
+    include,
+    apiPort,
+    instances,
+    provider = playwright(),
+    fileParallelism,
+    testTimeout,
+    hookTimeout,
+}: BrowserProjectInput): BrowserProject => ({
+    test: {
+        name,
+        include,
+        ...(fileParallelism === undefined ? {} : { fileParallelism }),
+        ...(testTimeout === undefined ? {} : { testTimeout }),
+        ...(hookTimeout === undefined ? {} : { hookTimeout }),
+        browser: {
+            enabled: true,
+            api: {
+                host: browserApiHost,
+                port: apiPort,
+                strictPort: false,
+            },
+            provider,
+            headless: true,
+            instances,
+        },
+    },
+});
 
 export default defineConfig({
     resolve: {
@@ -223,80 +285,36 @@ export default defineConfig({
                     ...nodeProofBenchmarkProject,
                 },
             },
-            {
-                test: {
-                    name: 'browser-desktop',
-                    include: ['packages/*/tests/browser/**/*.browser.test.ts'],
-                    browser: {
-                        enabled: true,
-                        api: {
-                            host: browserApiHost,
-                            port: desktopBrowserApiPort,
-                            strictPort: false,
-                        },
-                        provider: playwright(),
-                        headless: true,
-                        instances: desktopBrowserInstances,
-                    },
-                },
-            },
-            {
-                test: {
-                    name: 'browser-mobile',
-                    include: ['packages/*/tests/browser/**/*.browser.test.ts'],
-                    browser: {
-                        enabled: true,
-                        api: {
-                            host: browserApiHost,
-                            port: mobileBrowserApiPort,
-                            strictPort: false,
-                        },
-                        provider: playwright(),
-                        headless: true,
-                        instances: mobileBrowserInstances,
-                    },
-                },
-            },
-            {
-                test: {
-                    name: 'browser-desktop-proof-benchmark',
-                    include: browserProofBenchmarkTestIncludes,
-                    fileParallelism: false,
-                    testTimeout: proofBenchmarkTestTimeoutMs,
-                    hookTimeout: nodeHookTimeoutMs,
-                    browser: {
-                        enabled: true,
-                        api: {
-                            host: browserApiHost,
-                            port: desktopProofBenchmarkBrowserApiPort,
-                            strictPort: false,
-                        },
-                        provider: playwright(),
-                        headless: true,
-                        instances: desktopProofBenchmarkBrowserInstances,
-                    },
-                },
-            },
-            {
-                test: {
-                    name: 'browser-mobile-proof-benchmark',
-                    include: browserProofBenchmarkTestIncludes,
-                    fileParallelism: false,
-                    testTimeout: proofBenchmarkTestTimeoutMs,
-                    hookTimeout: nodeHookTimeoutMs,
-                    browser: {
-                        enabled: true,
-                        api: {
-                            host: browserApiHost,
-                            port: mobileProofBenchmarkBrowserApiPort,
-                            strictPort: false,
-                        },
-                        provider: playwright(),
-                        headless: true,
-                        instances: mobileProofBenchmarkBrowserInstances,
-                    },
-                },
-            },
+            makeBrowserProject({
+                name: 'browser-desktop',
+                include: ['packages/*/tests/browser/**/*.browser.test.ts'],
+                apiPort: desktopBrowserApiPort,
+                instances: desktopBrowserInstances,
+            }),
+            makeBrowserProject({
+                name: 'browser-mobile',
+                include: ['packages/*/tests/browser/**/*.browser.test.ts'],
+                apiPort: mobileBrowserApiPort,
+                instances: mobileBrowserInstances,
+            }),
+            makeBrowserProject({
+                name: 'browser-desktop-proof-benchmark',
+                include: browserProofBenchmarkTestIncludes,
+                apiPort: desktopProofBenchmarkBrowserApiPort,
+                instances: desktopProofBenchmarkBrowserInstances,
+                fileParallelism: false,
+                testTimeout: proofBenchmarkTestTimeoutMs,
+                hookTimeout: nodeHookTimeoutMs,
+            }),
+            makeBrowserProject({
+                name: 'browser-mobile-throttled-proof-benchmark',
+                include: browserProofBenchmarkTestIncludes,
+                apiPort: mobileThrottledProofBenchmarkBrowserApiPort,
+                instances: mobileThrottledProofBenchmarkBrowserInstances,
+                fileParallelism: false,
+                testTimeout: proofBenchmarkTestTimeoutMs,
+                hookTimeout: nodeHookTimeoutMs,
+            }),
         ],
     },
 });

@@ -152,7 +152,6 @@ jobs:
                   targets: wasm32-unknown-unknown
             - run: pnpm exec playwright install --with-deps chromium
             - run: pnpm run verify:docs
-            - run: pnpm run docs:build:site
 
     release-smoke:
         name: release smoke
@@ -172,7 +171,6 @@ jobs:
             - run: pnpm run build
             - run: pnpm exec playwright install --with-deps chromium
             - run: pnpm run verify:docs
-            - run: pnpm run docs:build:site
             - run: pnpm run smoke:pack
             - run: pnpm run smoke:pack:npm
             - run: |
@@ -311,7 +309,6 @@ jobs:
             - run: pnpm run build
             - run: pnpm exec playwright install --with-deps chromium
             - run: pnpm run verify:docs
-            - run: pnpm run docs:build:site
             - run: pnpm run smoke:pack
             - run: pnpm run smoke:pack:npm
             - run: |

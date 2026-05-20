@@ -18,6 +18,15 @@ import { loadTranscriptCoreKernel } from '../../src/index';
 const proofBenchmarkTimeoutMs = 60 * 60_000;
 let mobileCpuThrottleCalibration: CpuThrottleCalibrationSuccess | undefined;
 
+const mobileCpuThrottleEnabled = (): boolean =>
+    Boolean(
+        (
+            import.meta as {
+                readonly env?: Record<string, string | undefined>;
+            }
+        ).env?.VITE_SEALED_LATTICE_ENABLE_THROTTLED_MOBILE_BENCHMARK === '1',
+    );
+
 const setCpuThrottleRate: BrowserCpuThrottleRateSetter = async (
     throttleRate,
 ) => {
@@ -79,6 +88,11 @@ describe('ballot privacy proof benchmarks in browsers', () => {
         if (!hasMobileBrowserUserAgent()) {
             return;
         }
+        if (!mobileCpuThrottleEnabled()) {
+            throw new Error(
+                'Mobile proof benchmarks must run through the throttled mobile benchmark lane.',
+            );
+        }
         if (server.provider !== 'playwright' || server.browser !== 'chromium') {
             throw new Error(
                 'Mobile proof benchmark CPU calibration requires Playwright Chromium.',
@@ -109,7 +123,7 @@ describe('ballot privacy proof benchmarks in browsers', () => {
         'records mandatory ballot proof generation and verification metrics',
         async () => {
             const kernel = await loadTranscriptCoreKernel();
-            const { generation, report, verification } =
+            const { claimVerification, generation, report, verification } =
                 runMandatoryBallotProofRecordBenchmark({
                     kernel,
                     runtime: browserRuntimeContext(),
@@ -126,11 +140,17 @@ describe('ballot privacy proof benchmarks in browsers', () => {
                 operation: 'verifyBallotProof',
                 unresolvedReason: null,
             });
+            expect(claimVerification).toMatchObject({
+                ok: true,
+                operation: 'verifyClaimBearingBallotPackage',
+                unresolvedReason: null,
+            });
             expect(report.proofSizeBytes).toBeGreaterThan(0);
             expect(report.totalComponentProofSizeBytes).toBeGreaterThan(0);
             expect(report.componentProofs).toHaveLength(5);
             expectPositiveFiniteDuration(report.generationMs);
             expectPositiveFiniteDuration(report.verificationMs);
+            expectPositiveFiniteDuration(report.packageVerificationMs);
             for (const componentProof of report.componentProofs) {
                 if (
                     componentProof.componentId !==

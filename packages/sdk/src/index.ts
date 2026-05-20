@@ -48,6 +48,11 @@ import type {
     TargetFinalityVerification,
     TargetFinalityVerificationInput,
 } from '@sealed-lattice/types';
+import type {
+    BallotPrivacyKernelVerification,
+    BallotPrivacyProofBackendStatus,
+    TranscriptCoreKernel,
+} from '@sealed-lattice/wasm';
 
 import { loadTranscriptCoreKernel } from './kernel.js';
 
@@ -62,9 +67,21 @@ export type {
     BoardConsistencyInput,
     BoardConsistencyVerification,
     BoardEntryMerklePathStep,
+    BallotPrivacyVerification,
+    BallotProofComponentId,
+    BallotProofComponentProofBundle,
+    BallotProofComponentProofRecord,
+    BallotProofComponentProofStatementFormat,
+    BallotProofComponentProofVerificationInput,
+    BallotProofRecord,
+    BallotProofReceiverPayloadReference,
+    BallotProofReceiverPublicKeyReference,
+    BallotProofShareCommitmentReference,
+    BallotProofStatement,
     CanonicalError,
     CanonicalErrorCode,
     CanonicalSignedRootObject,
+    ClaimBearingBallotPackage,
     CapabilityContext,
     CapabilityDecision,
     CastReceipt,
@@ -114,6 +131,10 @@ export type {
     ProtocolSignatureEnvelope,
     ProtocolVerificationStatusLabel,
     ReceiverKeyRegistration,
+    ReceiverKeyProof,
+    ReceiverKeyProofRootEvidence,
+    ReceiverEncryptionPublicKey,
+    ReceiverPayload,
     RecoveryEpochMapEntry,
     RecoveryEpochUpdate,
     RecoveryEpochVerification,
@@ -134,6 +155,7 @@ export type {
     SignedBoardHead,
     SignedObjectType,
     SignerRole,
+    ShareCommitment,
     StructuredProtocolVerificationResult,
     TargetFinalityPolicy,
     TargetFinalityCheckpoint,
@@ -158,6 +180,10 @@ export type {
     WitnessCheckpoint,
     WitnessPolicy,
 } from '@sealed-lattice/types';
+export type {
+    BallotPrivacyKernelVerification,
+    BallotPrivacyProofBackendStatus,
+};
 
 /** Derives threshold, quorum, and warning parameters for a roster profile. */
 export const deriveThresholdProfile = (
@@ -298,4 +324,46 @@ export const verifyTranscriptCoreFixture = async (
         chunkRoot: verification.chunkRoot,
         statusLabels: verification.statusLabels,
     };
+};
+
+/** Input accepted by the packaged WASM receiver-key proof verifier. */
+export type ReceiverKeyProofVerificationInput = Parameters<
+    TranscriptCoreKernel['verifyReceiverKeyProof']
+>[0];
+
+/** Input accepted by the packaged WASM ballot proof verifier. */
+export type BallotProofVerificationInput = Parameters<
+    TranscriptCoreKernel['verifyBallotProof']
+>[0];
+
+/** Input accepted by the packaged WASM scoped relation-bearing ballot package verifier. */
+export type ClaimBearingBallotPackageVerificationInput = Parameters<
+    TranscriptCoreKernel['verifyClaimBearingBallotPackage']
+>[0];
+
+/** Verifies a receiver-key proof with the packaged WASM proof backend. */
+export const verifyReceiverKeyProof = async (
+    input: ReceiverKeyProofVerificationInput,
+): Promise<BallotPrivacyKernelVerification> => {
+    const kernel = await loadTranscriptCoreKernel();
+
+    return kernel.verifyReceiverKeyProof(input);
+};
+
+/** Verifies a ballot proof record with the packaged WASM proof backend. */
+export const verifyBallotProof = async (
+    input: BallotProofVerificationInput,
+): Promise<BallotPrivacyKernelVerification> => {
+    const kernel = await loadTranscriptCoreKernel();
+
+    return kernel.verifyBallotProof(input);
+};
+
+/** Verifies a scoped relation-bearing ballot package with the packaged WASM proof backend. */
+export const verifyClaimBearingBallotPackage = async (
+    input: ClaimBearingBallotPackageVerificationInput,
+): Promise<BallotPrivacyKernelVerification> => {
+    const kernel = await loadTranscriptCoreKernel();
+
+    return kernel.verifyClaimBearingBallotPackage(input);
 };

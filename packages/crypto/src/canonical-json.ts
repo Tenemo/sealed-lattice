@@ -49,15 +49,15 @@ const normalizeCanonicalString = (value: string): string => {
     return value.normalize('NFC');
 };
 
-const normalizeCanonicalValue = (value: unknown): unknown => {
+const serializeCanonicalValue = (value: unknown): string => {
     if (value === null) {
-        return null;
+        return 'null';
     }
     if (typeof value === 'string') {
-        return normalizeCanonicalString(value);
+        return JSON.stringify(normalizeCanonicalString(value));
     }
     if (typeof value === 'boolean') {
-        return value;
+        return value ? 'true' : 'false';
     }
     if (typeof value === 'number') {
         if (!isCanonicalInteger(value)) {
@@ -66,24 +66,29 @@ const normalizeCanonicalValue = (value: unknown): unknown => {
             );
         }
 
-        return value;
+        return JSON.stringify(value);
     }
     if (Array.isArray(value)) {
-        const normalized: unknown[] = [];
+        const serializedItems: string[] = [];
         for (let index = 0; index < value.length; index += 1) {
             if (!hasOwnProperty(value, index)) {
                 throw new TypeError('Canonical arrays cannot be sparse.');
             }
-            normalized.push(normalizeCanonicalValue(value[index]));
+            serializedItems.push(serializeCanonicalValue(value[index]));
         }
 
-        return normalized;
+        return `[${serializedItems.join(',')}]`;
     }
     if (isPlainObject(value)) {
-        const normalized = Object.create(null) as Record<string, unknown>;
-        for (const key of Object.keys(value).sort()) {
+        const serializedEntries: {
+            readonly key: string;
+            readonly value: string;
+        }[] = [];
+        for (const key of Object.keys(value)) {
             const normalizedKey = normalizeCanonicalString(key);
-            if (hasOwnProperty(normalized, normalizedKey)) {
+            if (
+                serializedEntries.some((entry) => entry.key === normalizedKey)
+            ) {
                 throw new TypeError(
                     'Canonical object keys must be unique after NFC normalization.',
                 );
@@ -94,17 +99,25 @@ const normalizeCanonicalValue = (value: unknown): unknown => {
                     'Canonical objects cannot contain undefined.',
                 );
             }
-            normalized[normalizedKey] = normalizeCanonicalValue(entry);
+            serializedEntries.push({
+                key: normalizedKey,
+                value: serializeCanonicalValue(entry),
+            });
         }
+        serializedEntries.sort((left, right) =>
+            left.key < right.key ? -1 : left.key > right.key ? 1 : 0,
+        );
 
-        return normalized;
+        return `{${serializedEntries
+            .map((entry) => `${JSON.stringify(entry.key)}:${entry.value}`)
+            .join(',')}}`;
     }
 
     throw new TypeError('Unsupported canonical value.');
 };
 
 export const canonicalJson = (value: unknown): string =>
-    JSON.stringify(normalizeCanonicalValue(value));
+    serializeCanonicalValue(value);
 
 const appendVarUint = (output: number[], value: number): void => {
     if (!Number.isSafeInteger(value) || value < 0) {

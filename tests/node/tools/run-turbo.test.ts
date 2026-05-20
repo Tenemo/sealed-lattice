@@ -3,9 +3,13 @@ import { describe, expect, it } from 'vitest';
 import {
     buildTurboInvocation,
     cacheOverrideEnvironmentVariableName,
-    getPnpmExecutableName,
     splitTurboArguments,
 } from '../../../tools/run-turbo';
+
+const nodePackageManagerRunner = {
+    command: process.execPath,
+    commandArgumentsPrefix: ['/tools/pnpm.cjs'],
+} as const;
 
 describe('Turbo runner helper', () => {
     it('splits task names from Turbo arguments', () => {
@@ -27,11 +31,6 @@ describe('Turbo runner helper', () => {
         );
     });
 
-    it('selects the correct pnpm executable for each platform', () => {
-        expect(getPnpmExecutableName('win32')).toBe('pnpm.cmd');
-        expect(getPnpmExecutableName('linux')).toBe('pnpm');
-    });
-
     it('builds a Turbo invocation without a cache override', () => {
         const originalCacheOverride =
             process.env[cacheOverrideEnvironmentVariableName];
@@ -39,12 +38,16 @@ describe('Turbo runner helper', () => {
         delete process.env[cacheOverrideEnvironmentVariableName];
 
         try {
-            expect(buildTurboInvocation(['build'], undefined, 'linux')).toEqual(
-                {
-                    command: 'pnpm',
-                    args: ['exec', 'turbo', 'run', 'build'],
-                },
-            );
+            expect(
+                buildTurboInvocation(
+                    ['build'],
+                    undefined,
+                    nodePackageManagerRunner,
+                ),
+            ).toEqual({
+                command: process.execPath,
+                args: ['/tools/pnpm.cjs', 'exec', 'turbo', 'run', 'build'],
+            });
         } finally {
             if (originalCacheOverride === undefined) {
                 delete process.env[cacheOverrideEnvironmentVariableName];
@@ -60,16 +63,12 @@ describe('Turbo runner helper', () => {
             buildTurboInvocation(
                 ['build', 'check'],
                 'local:,remote:',
-                'win32',
-                'C:\\Windows\\System32\\cmd.exe',
+                nodePackageManagerRunner,
             ),
         ).toEqual({
-            command: 'C:\\Windows\\System32\\cmd.exe',
+            command: process.execPath,
             args: [
-                '/d',
-                '/s',
-                '/c',
-                'pnpm.cmd',
+                '/tools/pnpm.cjs',
                 'exec',
                 'turbo',
                 'run',
@@ -87,18 +86,23 @@ describe('Turbo runner helper', () => {
         process.env[cacheOverrideEnvironmentVariableName] = 'local:,remote:';
 
         try {
-            expect(buildTurboInvocation(['build'], undefined, 'linux')).toEqual(
-                {
-                    command: 'pnpm',
-                    args: [
-                        'exec',
-                        'turbo',
-                        'run',
-                        'build',
-                        '--cache=local:,remote:',
-                    ],
-                },
-            );
+            expect(
+                buildTurboInvocation(
+                    ['build'],
+                    undefined,
+                    nodePackageManagerRunner,
+                ),
+            ).toEqual({
+                command: process.execPath,
+                args: [
+                    '/tools/pnpm.cjs',
+                    'exec',
+                    'turbo',
+                    'run',
+                    'build',
+                    '--cache=local:,remote:',
+                ],
+            });
         } finally {
             if (originalCacheOverride === undefined) {
                 delete process.env[cacheOverrideEnvironmentVariableName];

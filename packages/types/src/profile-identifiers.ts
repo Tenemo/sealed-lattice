@@ -45,7 +45,7 @@ export const evaluationNoiseProfileId = 'he-evaluation-noise-profile-v1';
 /** Mobile profile required by accepted manifests. */
 export const mobileProfileId = 'mobile-flagship-profile-v1';
 
-/** Receiver encryption profile used by claim-bearing ballot privacy proofs. */
+/** Receiver encryption profile used by scoped relation-bearing ballot privacy proofs. */
 export const receiverEncryptionProfileId =
     'linear-module-lwe-receiver-encryption-v1';
 

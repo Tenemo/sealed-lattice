@@ -3,6 +3,8 @@ use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
 pub const MODULE_MARKER: &str = "ring";
 pub const FIELD_MODULUS: u64 = 65_537;
 pub const MAXIMUM_TOTAL_SCORE_FACTOR: u64 = 10;
+pub const MAXIMUM_SUPPORTED_ROSTER_SIZE: u64 = 50;
+pub const MAXIMUM_SHAMIR_INTERPOLATION_POINTS: usize = MAXIMUM_SUPPORTED_ROSTER_SIZE as usize;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ShamirSharePoint {
@@ -35,6 +37,11 @@ fn assert_roster_position(value: u64) -> CanonicalResult<u64> {
     if value == 0 || value >= FIELD_MODULUS {
         return Err(invalid_ring_input(
             "roster interpolation points must be positive GF(65537) elements",
+        ));
+    }
+    if value > MAXIMUM_SUPPORTED_ROSTER_SIZE {
+        return Err(invalid_ring_input(
+            "roster interpolation points must be in 1..50",
         ));
     }
 
@@ -123,6 +130,9 @@ pub fn interpolate_shamir_constant_term(share_points: &[ShamirSharePoint]) -> Ca
     if share_points.is_empty() {
         return Err(invalid_ring_input("at least one Shamir share is required"));
     }
+    if share_points.len() > MAXIMUM_SHAMIR_INTERPOLATION_POINTS {
+        return Err(invalid_ring_input("at most 50 Shamir shares are supported"));
+    }
 
     let mut seen_roster_positions = Vec::with_capacity(share_points.len());
     for share_point in share_points {
@@ -158,7 +168,7 @@ pub fn evaluate_plaintext_comparison(
     right_total_score: u64,
     roster_size: u64,
 ) -> CanonicalResult<PlaintextComparison> {
-    if roster_size == 0 || roster_size > 50 {
+    if roster_size == 0 || roster_size > MAXIMUM_SUPPORTED_ROSTER_SIZE {
         return Err(invalid_ring_input("roster size must be in 1..50"));
     }
     let maximum_total_score = roster_size * MAXIMUM_TOTAL_SCORE_FACTOR;
@@ -212,6 +222,25 @@ mod tests {
         ]);
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn rejects_out_of_domain_interpolation_inputs() {
+        let too_many_shares: Vec<ShamirSharePoint> = (1..=51)
+            .map(|roster_position| ShamirSharePoint {
+                roster_position,
+                value: roster_position,
+            })
+            .collect();
+
+        assert!(interpolate_shamir_constant_term(&too_many_shares).is_err());
+        assert!(
+            interpolate_shamir_constant_term(&[ShamirSharePoint {
+                roster_position: 51,
+                value: 1,
+            }])
+            .is_err()
+        );
     }
 
     #[test]

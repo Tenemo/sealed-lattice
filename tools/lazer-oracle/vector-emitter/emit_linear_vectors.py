@@ -62,6 +62,18 @@ def shake128_bytes_hex(*parts: bytes) -> str:
     return digest.hexdigest(32)
 
 
+def shake128_framed_bytes_hex(*parts: tuple[str, bytes]) -> str:
+    digest = hashlib.shake_128()
+    for label, part in parts:
+        label_bytes = label.encode("utf-8")
+        digest.update(len(label_bytes).to_bytes(8, "little"))
+        digest.update(label_bytes)
+        digest.update(len(part).to_bytes(8, "little"))
+        digest.update(part)
+
+    return digest.hexdigest(32)
+
+
 def bytes_hex(value: bytes) -> str:
     return value.hex()
 
@@ -102,13 +114,13 @@ def build_sealed_lattice_preflight_transcript(
         "targetDigest": canonical_json_shake128_digest(target_vector_coefficients),
         "proofDigest": shake128_bytes_hex(proof),
         "publicRandomnessDigest": shake128_bytes_hex(public_randomness),
-        "preflightTranscriptDigest": shake128_bytes_hex(
-            LINEAR_PROOF_PREFLIGHT_DOMAIN.encode("utf-8"),
-            parameter_set_canonical,
-            statement_matrix_canonical,
-            target_vector_canonical,
-            public_randomness,
-            proof,
+        "preflightTranscriptDigest": shake128_framed_bytes_hex(
+            ("domain", LINEAR_PROOF_PREFLIGHT_DOMAIN.encode("utf-8")),
+            ("parameterSet", parameter_set_canonical),
+            ("statementMatrix", statement_matrix_canonical),
+            ("targetVector", target_vector_canonical),
+            ("publicRandomness", public_randomness),
+            ("proofBytes", proof),
         ),
     }
 

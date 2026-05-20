@@ -1,2 +1,3 @@
-pnpm run check || exit 1
-pnpm run test:node:fast || exit 1
+pnpm run tsc || exit 1
+pnpm run lint || exit 1
+cargo fmt --check -p sealed-lattice-kernel || exit 1

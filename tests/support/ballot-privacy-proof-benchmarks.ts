@@ -25,6 +25,7 @@ import type {
 } from '../../packages/wasm/src/transcript-core-bridge';
 
 import { createMandatoryProfileBallotProofRecordBenchmarkFixture } from './ballot-privacy-proof-record-generation-fixtures';
+import { runTimedTestStep, type TimedTestStepMetric } from './timed-test-steps';
 
 type ProcessMemoryUsage = {
     readonly arrayBuffers?: number;
@@ -108,11 +109,14 @@ export type MandatoryBallotProofRecordBenchmarkReport = {
     readonly componentProofs: readonly ComponentProofBenchmarkMetric[];
     readonly generationMs: number;
     readonly memoryAfterGeneration: RuntimeMemorySnapshot;
+    readonly memoryAfterPackageVerification: RuntimeMemorySnapshot;
     readonly memoryAfterVerification: RuntimeMemorySnapshot;
     readonly memoryBeforeGeneration: RuntimeMemorySnapshot;
     readonly operation: 'mandatory-ballot-proof-record';
+    readonly packageVerificationMs: number;
     readonly proofSizeBytes: number;
     readonly runtime: RuntimeBenchmarkContext;
+    readonly steps: readonly TimedTestStepMetric[];
     readonly totalComponentProofSizeBytes: number;
     readonly verificationMs: number;
 };
@@ -125,6 +129,7 @@ export type ReceiverKeyProofBenchmarkReport = {
     readonly operation: 'receiver-key-proof';
     readonly proofSizeBytes: number;
     readonly runtime: RuntimeBenchmarkContext;
+    readonly steps: readonly TimedTestStepMetric[];
     readonly verificationMs: number;
 };
 
@@ -143,7 +148,25 @@ export type ReceiverKeyProofBenchmarkInput = {
     readonly secretState: ReceiverEncryptionSecretState;
 };
 
-const runtimeNowMs = (): number => globalThis.performance?.now() ?? Date.now();
+const mandatoryProofBenchmarkCheckpointNames = {
+    claimBearingPackage: 'ballot-privacy-proof-benchmark-claim-bearing-package',
+    generatedProofRecord:
+        'ballot-privacy-proof-benchmark-generated-proof-record',
+    loweredStatements: 'ballot-privacy-proof-benchmark-lowered-statements',
+    relationRequest: 'ballot-privacy-proof-benchmark-relation-request',
+    verificationReport: 'ballot-privacy-proof-benchmark-verification-report',
+} as const;
+
+export type ProofBenchmarkCheckpointName =
+    (typeof mandatoryProofBenchmarkCheckpointNames)[keyof typeof mandatoryProofBenchmarkCheckpointNames];
+
+export type ProofBenchmarkCheckpointStore = {
+    readonly read?: (checkpointName: ProofBenchmarkCheckpointName) => unknown;
+    readonly write?: (
+        checkpointName: ProofBenchmarkCheckpointName,
+        value: unknown,
+    ) => void;
+};
 
 const safeMemoryInteger = (value: number | undefined): number | undefined =>
     value === undefined || !Number.isSafeInteger(value) || value < 0
@@ -502,32 +525,185 @@ const buildBallotProofVerificationInput = (input: {
     statement: input.request.statement,
 });
 
+export const buildClaimBearingBallotPackageForBenchmark = (input: {
+    readonly fixture: ReturnType<
+        typeof createMandatoryProfileBallotProofRecordBenchmarkFixture
+    >;
+    readonly generation: BallotPrivacyProofGeneration;
+}): Record<string, unknown> => ({
+    ballotPackageDigest: input.fixture.request.statement.ballotPackageDigest,
+    ballotProof: input.generation.ballotProof,
+    ballotProofStatement: input.fixture.request.statement,
+    componentBundleStatement: input.fixture.request.componentBundleStatement,
+    componentProofBundle: input.generation.componentProofBundle,
+    componentProofInputs: input.generation.componentProofInputs,
+    linearStatement: input.fixture.request.linearStatement,
+    objectType: 'ClaimBearingBallotPackage',
+    objectVersion: 1,
+    parameterSet: input.generation.parameterSet,
+    proofBytesHex: input.generation.proofBytesHex,
+    proofEncoding: input.generation.proofEncoding,
+    publicRandomnessHex: input.fixture.request.publicRandomnessHex,
+    receiverKeyProofRootEvidence: input.fixture.receiverKeyProofRootEvidence,
+    receiverPayloads: input.fixture.claimBearingReceiverPayloads,
+    shareCommitments: input.fixture.claimBearingShareCommitments,
+});
+
+const checkpointRecord = (
+    checkpointName: ProofBenchmarkCheckpointName,
+    payload: unknown,
+): Record<string, unknown> => ({
+    checkpointName,
+    payload,
+    schemaVersion: 1,
+});
+
+const checkpointPayload = (
+    value: unknown,
+    checkpointName: ProofBenchmarkCheckpointName,
+): unknown => {
+    const record = recordValue(value);
+    if (
+        record?.schemaVersion !== 1 ||
+        record.checkpointName !== checkpointName
+    ) {
+        return undefined;
+    }
+
+    return record.payload;
+};
+
 export const runMandatoryBallotProofRecordBenchmark = (input: {
+    readonly checkpoints?: ProofBenchmarkCheckpointStore;
     readonly kernel: TranscriptCoreKernel;
+    readonly resumeFromCheckpoints?: boolean;
     readonly runtime: RuntimeBenchmarkContext;
 }): {
+    readonly claimVerification: BallotPrivacyKernelVerification;
     readonly generation: BallotPrivacyProofGeneration;
     readonly report: MandatoryBallotProofRecordBenchmarkReport;
     readonly verification: BallotPrivacyKernelVerification;
 } => {
-    const { request } =
-        createMandatoryProfileBallotProofRecordBenchmarkFixture();
+    const steps: TimedTestStepMetric[] = [];
+    const fixture = runTimedTestStep(
+        steps,
+        'build mandatory proof relation request',
+        () => createMandatoryProfileBallotProofRecordBenchmarkFixture(),
+    );
+    const { request } = fixture;
+    input.checkpoints?.write?.(
+        mandatoryProofBenchmarkCheckpointNames.relationRequest,
+        checkpointRecord(
+            mandatoryProofBenchmarkCheckpointNames.relationRequest,
+            {
+                publicContext: fixture.publicContext,
+                request,
+            },
+        ),
+    );
+    input.checkpoints?.write?.(
+        mandatoryProofBenchmarkCheckpointNames.loweredStatements,
+        checkpointRecord(
+            mandatoryProofBenchmarkCheckpointNames.loweredStatements,
+            {
+                componentBundleStatement: request.componentBundleStatement,
+                componentProofInputs: request.componentProofInputs,
+                linearStatement: request.linearStatement,
+                statement: request.statement,
+            },
+        ),
+    );
     const memoryBeforeGeneration = captureRuntimeMemorySnapshot();
-    const generationStartMs = runtimeNowMs();
-    const generation = input.kernel.generateBallotProofRecord(request);
-    const generationMs = runtimeNowMs() - generationStartMs;
+    const generationCheckpoint = checkpointPayload(
+        input.checkpoints?.read?.(
+            mandatoryProofBenchmarkCheckpointNames.generatedProofRecord,
+        ),
+        mandatoryProofBenchmarkCheckpointNames.generatedProofRecord,
+    );
+    const checkpointGeneration = recordValue(generationCheckpoint)?.generation;
+    const shouldUseGenerationCheckpoint =
+        input.resumeFromCheckpoints === true &&
+        recordValue(checkpointGeneration) !== undefined;
+    const generation = runTimedTestStep(
+        steps,
+        shouldUseGenerationCheckpoint
+            ? 'load mandatory proof record checkpoint'
+            : 'generate mandatory proof record',
+        () =>
+            shouldUseGenerationCheckpoint
+                ? (checkpointGeneration as BallotPrivacyProofGeneration)
+                : input.kernel.generateBallotProofRecord(request),
+        { reusedCheckpoint: shouldUseGenerationCheckpoint },
+    );
+    const generationMs =
+        steps.find(
+            (step) =>
+                step.name === 'generate mandatory proof record' ||
+                step.name === 'load mandatory proof record checkpoint',
+        )?.durationMs ?? 0;
+    input.checkpoints?.write?.(
+        mandatoryProofBenchmarkCheckpointNames.generatedProofRecord,
+        checkpointRecord(
+            mandatoryProofBenchmarkCheckpointNames.generatedProofRecord,
+            {
+                generation,
+            },
+        ),
+    );
     const memoryAfterGeneration = captureRuntimeMemorySnapshot();
     const proofSizeBytes = requireGenerationProofSize(
         generation,
         'Mandatory ballot proof record generation',
     );
-    const verificationStartMs = runtimeNowMs();
-    const verification = input.kernel.verifyBallotProof(
-        buildBallotProofVerificationInput({ generation, request }),
+    const proofVerificationInput = runTimedTestStep(
+        steps,
+        'build mandatory proof verification input',
+        () => buildBallotProofVerificationInput({ generation, request }),
     );
-    const verificationMs = runtimeNowMs() - verificationStartMs;
+    const verification = runTimedTestStep(
+        steps,
+        'verify mandatory ballot proof record',
+        () => input.kernel.verifyBallotProof(proofVerificationInput),
+    );
+    const verificationMs =
+        steps.find(
+            (step) => step.name === 'verify mandatory ballot proof record',
+        )?.durationMs ?? 0;
     const memoryAfterVerification = captureRuntimeMemorySnapshot();
-    const componentProofs = componentProofMetrics(generation);
+    const ballotPackage = runTimedTestStep(
+        steps,
+        'build claim-bearing ballot package',
+        () =>
+            buildClaimBearingBallotPackageForBenchmark({
+                fixture,
+                generation,
+            }),
+    );
+    input.checkpoints?.write?.(
+        mandatoryProofBenchmarkCheckpointNames.claimBearingPackage,
+        checkpointRecord(
+            mandatoryProofBenchmarkCheckpointNames.claimBearingPackage,
+            ballotPackage,
+        ),
+    );
+    const claimVerification = runTimedTestStep(
+        steps,
+        'verify claim-bearing ballot package',
+        () =>
+            input.kernel.verifyClaimBearingBallotPackage({
+                ballotPackage,
+            }),
+    );
+    const packageVerificationMs =
+        steps.find(
+            (step) => step.name === 'verify claim-bearing ballot package',
+        )?.durationMs ?? 0;
+    const memoryAfterPackageVerification = captureRuntimeMemorySnapshot();
+    const componentProofs = runTimedTestStep(
+        steps,
+        'summarize mandatory component proof metrics',
+        () => componentProofMetrics(generation),
+    );
     const totalComponentProofSizeBytes = componentProofs.reduce(
         (sum, componentProof) => sum + componentProof.proofSizeBytes,
         0,
@@ -536,18 +712,33 @@ export const runMandatoryBallotProofRecordBenchmark = (input: {
         componentProofs,
         generationMs,
         memoryAfterGeneration,
+        memoryAfterPackageVerification,
         memoryAfterVerification,
         memoryBeforeGeneration,
         operation: 'mandatory-ballot-proof-record',
+        packageVerificationMs,
         proofSizeBytes,
         runtime: input.runtime,
+        steps,
         totalComponentProofSizeBytes,
         verificationMs,
     };
 
     verifyMandatoryBallotProofBenchmarkShape(report);
+    input.checkpoints?.write?.(
+        mandatoryProofBenchmarkCheckpointNames.verificationReport,
+        checkpointRecord(
+            mandatoryProofBenchmarkCheckpointNames.verificationReport,
+            {
+                claimVerification,
+                report,
+                verification,
+            },
+        ),
+    );
 
     return {
+        claimVerification,
         generation,
         report,
         verification,
@@ -562,18 +753,25 @@ export const runReceiverKeyProofBenchmark = (input: {
     readonly report: ReceiverKeyProofBenchmarkReport;
     readonly verification: BallotPrivacyKernelVerification;
 } => {
+    const steps: TimedTestStepMetric[] = [];
     const request = createReceiverKeyProofBenchmarkInput();
     const memoryBeforeGeneration = captureRuntimeMemorySnapshot();
-    const generationStartMs = runtimeNowMs();
-    const generation = input.kernel.generateReceiverKeyProof({
-        linearStatement: request.linearStatement,
-        parameterSet: request.parameterSet,
-        proofEncoding: request.proofEncoding,
-        proverRandomnessHex: request.proverRandomnessHex,
-        publicRandomnessHex: request.publicRandomnessHex,
-        secretState: request.secretState,
-    });
-    const generationMs = runtimeNowMs() - generationStartMs;
+    const generation = runTimedTestStep(
+        steps,
+        'generate receiver-key proof',
+        () =>
+            input.kernel.generateReceiverKeyProof({
+                linearStatement: request.linearStatement,
+                parameterSet: request.parameterSet,
+                proofEncoding: request.proofEncoding,
+                proverRandomnessHex: request.proverRandomnessHex,
+                publicRandomnessHex: request.publicRandomnessHex,
+                secretState: request.secretState,
+            }),
+    );
+    const generationMs =
+        steps.find((step) => step.name === 'generate receiver-key proof')
+            ?.durationMs ?? 0;
     const memoryAfterGeneration = captureRuntimeMemorySnapshot();
     const proofSizeBytes = requireGenerationProofSize(
         generation,
@@ -593,16 +791,22 @@ export const runReceiverKeyProofBenchmark = (input: {
     const proofEncoding = createReceiverKeyLinearProofEncoding({
         expectedProofSizeBytes: proofSizeBytes,
     });
-    const verificationStartMs = runtimeNowMs();
-    const verification = input.kernel.verifyReceiverKeyProof({
-        linearStatement: request.linearStatement,
-        parameterSet,
-        proofBytesHex,
-        proofEncoding,
-        publicRandomnessHex: request.publicRandomnessHex,
-        receiverKeyProof,
-    });
-    const verificationMs = runtimeNowMs() - verificationStartMs;
+    const verification = runTimedTestStep(
+        steps,
+        'verify receiver-key proof',
+        () =>
+            input.kernel.verifyReceiverKeyProof({
+                linearStatement: request.linearStatement,
+                parameterSet,
+                proofBytesHex,
+                proofEncoding,
+                publicRandomnessHex: request.publicRandomnessHex,
+                receiverKeyProof,
+            }),
+    );
+    const verificationMs =
+        steps.find((step) => step.name === 'verify receiver-key proof')
+            ?.durationMs ?? 0;
     const memoryAfterVerification = captureRuntimeMemorySnapshot();
 
     return {
@@ -615,6 +819,7 @@ export const runReceiverKeyProofBenchmark = (input: {
             operation: 'receiver-key-proof',
             proofSizeBytes,
             runtime: input.runtime,
+            steps,
             verificationMs,
         },
         verification,

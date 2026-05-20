@@ -132,14 +132,19 @@ mod tests {
         derive_default_abdlop_public_parameters, expand_linear_proof_uniform_polynomial_matrix,
     };
     use crate::{
-        ballot_privacy::polynomial_ring::PolynomialRing, hashing::to_hex,
+        ballot_privacy::{
+            linear_proof_profile_constants::DEMO_GENERATED_PARAMETER_CONTRACT,
+            polynomial_ring::PolynomialRing,
+        },
+        hashing::to_hex,
         transcript_core::decode_hex,
     };
 
     fn generated_vector_case(case_name: &str) -> serde_json::Value {
-        let vectors: serde_json::Value = serde_json::from_str(include_str!(
-            "../../../../test-vectors/ballot-privacy/proof-backend-linear-vectors.json"
-        ))
+        let vectors: serde_json::Value = serde_json::from_str(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../test-vectors/ballot-privacy/proof-backend-linear-vectors.json"
+        )))
         .expect("generated vector file should parse");
 
         vectors["cases"]
@@ -165,12 +170,16 @@ mod tests {
         let statement_matrix_coefficients: Vec<Vec<Vec<u64>>> =
             serde_json::from_value(vector_case["statementMatrixCoefficients"].clone())
                 .expect("statement matrix should deserialize");
-        let source_ring = PolynomialRing::new(256, 4_294_962_689).expect("ring should validate");
+        let source_ring = PolynomialRing::new(
+            DEMO_GENERATED_PARAMETER_CONTRACT.source_ring_degree,
+            DEMO_GENERATED_PARAMETER_CONTRACT.source_coefficient_modulus,
+        )
+        .expect("ring should validate");
 
         let expanded_statement_matrix = expand_linear_proof_uniform_polynomial_matrix(
             source_ring,
-            4,
-            8,
+            DEMO_GENERATED_PARAMETER_CONTRACT.statement_rows,
+            DEMO_GENERATED_PARAMETER_CONTRACT.statement_columns,
             &public_randomness,
             0,
             32,

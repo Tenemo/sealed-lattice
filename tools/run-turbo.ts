@@ -1,18 +1,17 @@
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 
+import {
+    resolvePackageManagerRunner,
+    type PackageManagerRunner,
+} from './ci/run-command.js';
+
 export const cacheOverrideEnvironmentVariableName =
     'SEALED_LATTICE_TURBO_CACHE';
 
 export type TurboInvocation = {
     readonly command: string;
     readonly args: readonly string[];
-};
-
-export const getPnpmExecutableName = (
-    platform: NodeJS.Platform = process.platform,
-): string => {
-    return platform === 'win32' ? 'pnpm.cmd' : 'pnpm';
 };
 
 export const splitTurboArguments = (
@@ -53,12 +52,11 @@ export const buildTurboInvocation = (
     cacheOverride: string | undefined = process.env[
         cacheOverrideEnvironmentVariableName
     ],
-    platform: NodeJS.Platform = process.platform,
-    commandShell: string = process.env.ComSpec ?? 'cmd.exe',
+    packageManagerRunner: PackageManagerRunner = resolvePackageManagerRunner(),
 ): TurboInvocation => {
     const { tasks, turboArguments } = splitTurboArguments(commandLineArguments);
-    const packageManagerCommand = getPnpmExecutableName(platform);
     const packageManagerArguments = [
+        ...packageManagerRunner.commandArgumentsPrefix,
         'exec',
         'turbo',
         'run',
@@ -70,38 +68,29 @@ export const buildTurboInvocation = (
         packageManagerArguments.push(`--cache=${cacheOverride.trim()}`);
     }
 
-    if (platform === 'win32') {
-        return {
-            command: commandShell,
-            args: [
-                '/d',
-                '/s',
-                '/c',
-                packageManagerCommand,
-                ...packageManagerArguments,
-            ],
-        };
-    }
-
     return {
-        command: packageManagerCommand,
+        command: packageManagerRunner.command,
         args: packageManagerArguments,
     };
 };
 
-/* v8 ignore start */
-const main = (): void => {
-    const invocation = buildTurboInvocation(process.argv.slice(2));
+export const runTurboInvocation = (invocation: TurboInvocation): number => {
     const result = spawnSync(invocation.command, invocation.args, {
-        stdio: 'inherit',
         env: process.env,
+        stdio: 'inherit',
     });
 
     if (result.error !== undefined) {
         throw result.error;
     }
 
-    process.exitCode = result.status ?? 1;
+    return result.status ?? 1;
+};
+
+/* v8 ignore start */
+const main = (): void => {
+    const invocation = buildTurboInvocation(process.argv.slice(2));
+    process.exitCode = runTurboInvocation(invocation);
 };
 
 const scriptEntryPoint = process.argv[1];

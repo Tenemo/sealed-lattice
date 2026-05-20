@@ -1,13 +1,16 @@
+import path from 'node:path';
+
 import { describe, expect, it } from 'vitest';
 
 import {
+    buildPackageManagerEntryPointCandidates,
     createPackageManagerSpawnCommand,
     detectPackageManager,
     extractPublishedKernelDigest,
-    getPackageManagerExecutableName,
     hashPublishedKernelBytesSha256Hex,
     parsePackDryRunFilePaths,
     parsePackageManagerOverride,
+    resolvePackageManagerEntryPoint,
     resolvePackageManagerRunner,
     validatePublishedKernelIntegrity,
     validatePublishedPackageMetadata,
@@ -43,39 +46,86 @@ describe('packed package smoke helpers', () => {
         ).toBe('npm');
     });
 
-    it('derives package manager executables for each platform', () => {
-        expect(getPackageManagerExecutableName('npm', 'win32')).toBe('npm.cmd');
-        expect(getPackageManagerExecutableName('pnpm', 'win32')).toBe(
-            'pnpm.cmd',
+    it('derives package manager JavaScript entry point candidates', () => {
+        expect(
+            buildPackageManagerEntryPointCandidates(
+                'npm',
+                ['/opt/node/bin', '/workspace/bin'].join(path.delimiter),
+                '/opt/node/bin/node',
+            ),
+        ).toContain(
+            path.resolve(
+                '/opt/node/bin',
+                'node_modules',
+                'npm',
+                'bin',
+                'npm-cli.js',
+            ),
         );
-        expect(getPackageManagerExecutableName('npm', 'linux')).toBe('npm');
-        expect(getPackageManagerExecutableName('pnpm', 'darwin')).toBe('pnpm');
+        expect(
+            buildPackageManagerEntryPointCandidates(
+                'pnpm',
+                ['/opt/node/bin', '/workspace/bin'].join(path.delimiter),
+                '/opt/node/bin/node',
+            ),
+        ).toContain(
+            path.resolve(
+                '/opt/node/bin',
+                'node_modules',
+                'corepack',
+                'dist',
+                'pnpm.js',
+            ),
+        );
     });
 
-    it('builds a Windows-safe spawn command for package manager shims', () => {
+    it('resolves explicit package manager overrides to Node entry points', () => {
+        expect(
+            resolvePackageManagerEntryPoint(
+                'npm',
+                '/tools/pnpm.cjs',
+                ['/opt/node/bin'].join(path.delimiter),
+                '/opt/node/bin/node',
+                (candidatePath) =>
+                    candidatePath ===
+                    path.resolve(
+                        '/opt/node/bin',
+                        'node_modules',
+                        'npm',
+                        'bin',
+                        'npm-cli.js',
+                    ),
+            ),
+        ).toBe(
+            path.resolve(
+                '/opt/node/bin',
+                'node_modules',
+                'npm',
+                'bin',
+                'npm-cli.js',
+            ),
+        );
+    });
+
+    it('builds a shell-free spawn command for package manager entry points', () => {
         expect(
             createPackageManagerSpawnCommand(
                 {
-                    command: 'npm.cmd',
-                    commandArgsPrefix: [],
+                    command: process.execPath,
+                    commandArgsPrefix: ['/tools/npm-cli.js'],
                     kind: 'npm',
                 },
                 ['install', '--silent', 'C:\\Temp\\with space\\pkg.tgz'],
-                'C:\\Windows\\System32\\cmd.exe',
             ),
         ).toEqual({
-            command: 'C:\\Windows\\System32\\cmd.exe',
+            command: process.execPath,
             args: [
-                '/d',
-                '/s',
-                '/c',
-                'npm.cmd',
+                '/tools/npm-cli.js',
                 'install',
                 '--silent',
                 'C:\\Temp\\with space\\pkg.tgz',
             ],
-            description:
-                'npm.cmd install --silent C:\\Temp\\with space\\pkg.tgz',
+            description: `${process.execPath} /tools/npm-cli.js install --silent C:\\Temp\\with space\\pkg.tgz`,
         });
     });
 
@@ -92,10 +142,29 @@ describe('packed package smoke helpers', () => {
             resolvePackageManagerRunner(
                 ['--package-manager', 'npm'],
                 '/tools/pnpm.cjs',
+                ['/opt/node/bin'].join(path.delimiter),
+                '/opt/node/bin/node',
+                (candidatePath) =>
+                    candidatePath ===
+                    path.resolve(
+                        '/opt/node/bin',
+                        'node_modules',
+                        'npm',
+                        'bin',
+                        'npm-cli.js',
+                    ),
             ),
         ).toEqual({
-            command: getPackageManagerExecutableName('npm'),
-            commandArgsPrefix: [],
+            command: '/opt/node/bin/node',
+            commandArgsPrefix: [
+                path.resolve(
+                    '/opt/node/bin',
+                    'node_modules',
+                    'npm',
+                    'bin',
+                    'npm-cli.js',
+                ),
+            ],
             kind: 'npm',
         });
     });

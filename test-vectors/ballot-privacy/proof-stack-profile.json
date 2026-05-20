@@ -13,24 +13,24 @@
   },
   "profileDigests": {
     "receiverEncryptionProfileDigest": "5de80d6b0eaf3d6e32c95a65985651732176fcf390195595dd76d64615ca03034b71d9757e5d70dc370cdeafeaa341cadeafa2ebe8c19d7fd2a74c5b163650b9",
-    "shareCommitmentProfileDigest": "220791dd96061d68bb9a3c2740c17e25205fa55e31dfeed489e1bbc51415630711a12eaeef227fef6b2765636c1447fbb9ca35493908177812935943d94f3f6f",
+    "shareCommitmentProfileDigest": "b9d5a90cc57d3f4716dc547f458279a63341b47e1ac8a5badd3a0db5a764d1a3e83297bd1253c1b9593f9a5f07e4e273dd3c668232c66e0fceefe30b0570948a",
     "scoreMembershipProfileDigest": "d2c6448460e46c81b849d8a2a7391830d0ffbe908fb0916a5a687a9f1bc9400c6d9af6bc668dcc98d081953a50059c00a3ed41c528fe0311cafac8ef1608b548",
     "ballotScoreEncodingProfileDigest": "d7d68c4149c276c1b3515c3299c2fb68b73ac8633e7cec36820523aa2dc4697e5f29e72f8065c784c68476ff0d9b153834d5981d64ae9e95ed37c399a4dd68d7",
     "ballotShareLayoutProfileDigest": "0561e327c52fb00ee1df7de1f0a93d5b919df9ff7b8faf39fdcae25f9b7fe6295600c5999f391750dceedd012319c30b449adf55781b0a4d2423e98d00caa73b",
     "aggregateInputEncodingProfileDigest": "8423aa20ac82748accbf934e3de76133e1fdce7f051325f6df8517d7ab3903f2eda9506c7ff428e70e960af283bd9280541f7252a78f3fa402733c668f377abe",
     "encodedShareVectorLayoutDigest": "384cfeafbae0ab84370f768eebea5896c74637f54d3045dc9b8e3ea08317b7a83dfddffe162840a0b34c72583eb4d78f722df228fde2cfaab983bb490c88c742",
     "encodedAggregateLayoutDigest": "5d97928d6662de259e96d04288772fc0054d865bdec8f4c57b0407f85081e71ca626612429ca55915ffbe0b8aa40962d9cc1736b0651ef80d8806ed86868b7f8",
-    "ballotProofProfileDigest": "f962306f32e2ed04b352e7f40440054d0c804c0d665b034c313376a3daa20072826768c67d1ac494acf496df0726506f2d3556a1e6e6922c4211d1a87e6d44ad"
+    "ballotProofProfileDigest": "a690b5dbb09037f365ca7fba55b77acddcc12f3793ab83d410e02543d8fb616e4b6fcf9ee7a4f5de26c4b413e27ad964a7189e3b835987686bafb2b59cdfdbe4"
   },
   "mandatoryBoundCert": {
-    "shareCommitmentMessageBoundCertDigest": "09762e51e94fd0a3ca27dbce2282cd47f3fee269acad1d3b3e606eae23e186c978642b1c693321d12e6cd8792ebec7eb91001d0d4b37339e2f8806c74cbe7d72",
+    "shareCommitmentMessageBoundCertDigest": "4173571100c99c306b57116f8e706799194f32531e44ab0dd265ce7cd7696d53be10b424a19c062abf17f923a6a9f55c549dba85ce408ed9d830499fad4c4b6d",
     "maximumCanonicalTurnout": 20,
     "maximumAggregateInteger": 1310720,
     "openingRandomnessAggregateBound": 20480,
     "shareVectorWidth": 220
   },
   "certificateGatedBoundCert": {
-    "shareCommitmentMessageBoundCertDigest": "e9aad277a88d10a3471524d5c0e26fdaafd9c9b46fa2f8f909ef9c54068e164e189fa09728cd7708d427639a7e40599ef721e8fd1acb5124d3b22a42ae5b70d5",
+    "shareCommitmentMessageBoundCertDigest": "50fe187a86a99ca94e2e8cfb39a5b2aac446252de687dde7b53207a67d29286868468dd074fa6926d4a6de06472039dae8e28f409bc0ffaa9cdc82b5725c2c10",
     "maximumCanonicalTurnout": 50,
     "maximumAggregateInteger": 3276800,
     "openingRandomnessAggregateBound": 51200,

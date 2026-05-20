@@ -67,7 +67,7 @@ export type MlDsaSignatureProfile = {
     readonly mode: MlDsaSignatureMode;
     readonly providerName: string;
     readonly providerVersion: string;
-    readonly providerBuildHash: ProtocolDigest;
+    readonly providerBuildDigest: ProtocolDigest;
     readonly fips204Version: string;
     readonly errataStatus: string;
     readonly contextString: string;

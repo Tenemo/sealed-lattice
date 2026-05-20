@@ -932,4 +932,16 @@ mod tests {
             chunk_root(input, 8).expect("chunk root should compute"),
         );
     }
+
+    #[test]
+    fn chunk_root_separates_empty_input_from_zero_leaf_input() {
+        assert_ne!(
+            chunk_root(&[], 1).expect("empty chunk root should compute"),
+            chunk_root(&[0], 1).expect("single zero chunk root should compute"),
+        );
+        assert_ne!(
+            chunk_root(&[], 64).expect("empty chunk root should compute"),
+            chunk_root(&[0; 64], 64).expect("full zero chunk root should compute"),
+        );
+    }
 }

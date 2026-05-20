@@ -461,6 +461,8 @@ fn hash_sparse_transformed_statement_as_dense(
 }
 
 fn shake128_32_from_parts(first_part: &[u8], second_part: &[u8]) -> [u8; 32] {
+    // LaZer-compatible fixed-width composition: current callers pass two
+    // 32-byte values. Do not reuse this helper for variable-length transcripts.
     let mut hasher = Shake128::default();
     hasher.update(first_part);
     hasher.update(second_part);

@@ -114,6 +114,18 @@ describe('crypto primitive boundary', () => {
         expect(canonicalJson({ b: [2, 1], a: { z: true } })).toBe(
             '{"a":{"z":true},"b":[2,1]}',
         );
+        expect(canonicalJson({ '10': 'a', '2': 'b' })).toBe(
+            '{"10":"a","2":"b"}',
+        );
+        expect(canonicalJson({ '\u0065\u0301': 1, z: 2 })).toBe(
+            '{"z":2,"é":1}',
+        );
+        expect(canonicalJson({ '\u0061\u0303': 1, z: 2 })).toBe(
+            `{"z":2,"${'\u00e3'}":1}`,
+        );
+        expect(canonicalJson({ '\u00e4': 1, '\u00e3': 2 })).toBe(
+            `{"${'\u00e3'}":2,"${'\u00e4'}":1}`,
+        );
         expect(canonicalJson({ value: '\u0065\u0301' })).toBe(
             '{"value":"\u00e9"}',
         );
@@ -214,9 +226,12 @@ describe('crypto primitive boundary', () => {
                 ...signature.profile,
                 providerName: 'forged-provider',
                 providerVersion: '999',
-                providerBuildHash: deriveProtocolDigest('ProviderBuildDigest', {
-                    forged: true,
-                }),
+                providerBuildDigest: deriveProtocolDigest(
+                    'ProviderBuildDigest',
+                    {
+                        forged: true,
+                    },
+                ),
             },
             publicKeyBytesHex: signature.publicKeyBytesHex,
             publicKeyDigest: signature.publicKeyDigest,
@@ -257,6 +272,43 @@ describe('crypto primitive boundary', () => {
                     expect.objectContaining({ code: 'InvalidSignature' }),
                 ]),
             );
+        }
+    });
+
+    it('rejects signatures over malformed signed-root digest bindings', () => {
+        const profile = createMlDsaSignatureProfileFixture();
+        const keyPair = createMlDsaKeyPairFixture('crypto-test-bad-root');
+        const malformedRoots: CanonicalSignedRootObject[] = [
+            {
+                ...createSignedRoot(),
+                objectRoot: 'not-a-digest',
+            } as CanonicalSignedRootObject,
+            {
+                ...createSignedRoot(),
+                objectRoot: null,
+                chunkMerkleRoot: 'A'.repeat(128),
+            } as CanonicalSignedRootObject,
+            {
+                ...createSignedRoot(),
+                contextDigest: 'not-a-digest',
+            } as CanonicalSignedRootObject,
+        ];
+
+        for (const signedRoot of malformedRoots) {
+            const signature = createProtocolSignatureFixture({
+                profile,
+                publicKeyBytesHex: keyPair.publicKeyBytesHex,
+                publicKeyDigest: keyPair.publicKeyDigest,
+                secretKeyBytesHex: keyPair.secretKeyBytesHex,
+                signedRoot,
+            });
+
+            expect(verifySignedObjectSignature(signature)).toMatchObject({
+                ok: false,
+                refusedObjects: [
+                    expect.objectContaining({ code: 'InvalidSignedRoot' }),
+                ],
+            });
         }
     });
 });

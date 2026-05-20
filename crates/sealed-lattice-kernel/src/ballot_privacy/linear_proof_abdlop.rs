@@ -417,9 +417,10 @@ mod tests {
     };
 
     fn generated_vector_case(case_name: &str) -> serde_json::Value {
-        let vectors: serde_json::Value = serde_json::from_str(include_str!(
-            "../../../../test-vectors/ballot-privacy/proof-backend-linear-vectors.json"
-        ))
+        let vectors: serde_json::Value = serde_json::from_str(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../test-vectors/ballot-privacy/proof-backend-linear-vectors.json"
+        )))
         .expect("generated vector file should parse");
 
         vectors["cases"]
