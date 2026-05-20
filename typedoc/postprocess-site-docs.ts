@@ -1,13 +1,13 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
-import { collectFiles } from '../tools/internal/files.js';
-
 import {
     apiNavigationPath,
     apiReferenceRoot,
     publicApiReferenceEntries,
 } from './public-api-reference';
+
+import { collectFiles } from '#tools/internal/files.js';
 
 const repoRoot = process.cwd();
 const referenceRoot = path.resolve(repoRoot, apiReferenceRoot);

@@ -4,7 +4,7 @@ import {
     buildTurboInvocation,
     cacheOverrideEnvironmentVariableName,
     splitTurboArguments,
-} from '../../../tools/run-turbo';
+} from '#tools/run-turbo';
 
 const nodePackageManagerRunner = {
     command: process.execPath,

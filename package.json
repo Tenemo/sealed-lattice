@@ -1,11 +1,17 @@
 {
     "name": "sealed-lattice-workspace",
-    "version": "0.0.12",
+    "version": "0.0.13",
     "private": true,
     "description": "Post-quantum threshold homomorphic voting library.",
     "author": "Piotr Piech <piotr@piech.dev>",
     "license": "MPL-2.0",
     "packageManager": "pnpm@10.33.0",
+    "imports": {
+        "#packages/*": "./packages/*",
+        "#test-vectors/*": "./test-vectors/*",
+        "#tests/*": "./tests/*",
+        "#tools/*": "./tools/*"
+    },
     "scripts": {
         "lint": "eslint . -c eslint.config.js",
         "eslint:fix": "eslint . --fix -c eslint.config.js",

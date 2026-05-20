@@ -8,7 +8,7 @@ import {
     parseStagePublicPackageArguments,
     sanitizePublicPackageJson,
     stagePublicPackage,
-} from '../../../tools/ci/stage-public-package.mjs';
+} from '#tools/ci/stage-public-package.mjs';
 
 const temporaryRoots: string[] = [];
 
@@ -29,6 +29,17 @@ const writeFixtureProject = async (projectRoot: string): Promise<void> => {
     await writeFile(
         path.join(projectRoot, 'README.md'),
         '# Root readme\n\nThis is the public package readme.\n',
+        'utf8',
+    );
+    await writeFile(
+        path.join(projectRoot, 'package.json'),
+        `${JSON.stringify(
+            {
+                description: 'Root public package description.',
+            },
+            null,
+            4,
+        )}\n`,
         'utf8',
     );
     await writeFile(
@@ -110,6 +121,13 @@ describe('public package staging', () => {
                 (contents) => JSON.parse(contents) as Record<string, unknown>,
             ),
         ).resolves.not.toHaveProperty('scripts');
+        await expect(
+            readFile(path.join(destinationPath, 'package.json'), 'utf8').then(
+                (contents) => JSON.parse(contents) as Record<string, unknown>,
+            ),
+        ).resolves.toMatchObject({
+            description: 'Root public package description.',
+        });
     });
 
     it('sanitizes package metadata that only belongs to the workspace build', () => {
@@ -129,15 +147,34 @@ describe('public package staging', () => {
                             '@noble/hashes': '^2.2.0',
                         },
                     }),
+                    {
+                        description: 'Root public package description.',
+                    },
                 ),
             ),
         ).toEqual({
             name: 'sealed-lattice',
             version: '0.0.0',
+            description: 'Root public package description.',
             dependencies: {
                 '@noble/hashes': '^2.2.0',
             },
         });
+    });
+
+    it('rejects missing root description metadata', async () => {
+        const projectRoot = await createTemporaryRoot();
+        await writeFixtureProject(projectRoot);
+        const destinationPath = path.join(projectRoot, 'staged-package');
+        await writeFile(
+            path.join(projectRoot, 'package.json'),
+            '{"name":"sealed-lattice-workspace"}\n',
+            'utf8',
+        );
+
+        await expect(
+            stagePublicPackage({ destinationPath, projectRoot }),
+        ).rejects.toThrow('Root package.json must define package description.');
     });
 
     it('rejects missing and empty staging destinations', () => {

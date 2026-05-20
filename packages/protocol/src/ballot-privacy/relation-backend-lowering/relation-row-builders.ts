@@ -5,7 +5,7 @@ import {
     getBallotPrivacyEncodedShareVectorWidth,
     getBallotPrivacyScalarCoordinateIndex,
     getBallotPrivacyScoreBucketCoordinateIndex,
-} from '../encoded-share-layout.js';
+} from '../protocol-parameters.js';
 import { type BallotPrivacyRelationCompilerInput } from '../relation-compiler.js';
 
 import type {

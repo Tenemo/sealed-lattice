@@ -137,7 +137,7 @@ type ScopedRelationBearingBallotPackageVerificationShell =
     };
 
 const unavailableProofBackendMessage =
-    'The pure TypeScript protocol shell does not verify ballot privacy proof bytes. Use the packaged Rust/WASM verifier for claim-bearing ballot proof and package verification.';
+    'The pure TypeScript protocol shell does not verify ballot privacy proof bytes. Use the packaged Rust/WASM verifier for ballot proof and package verification.';
 
 const protocolDigestPattern = /^[a-f0-9]{128}$/u;
 
@@ -165,48 +165,95 @@ const allowedBallotProofComponentStatementFormats = new Set<
     'public-zero-witness-binding-check-v1',
 ]);
 
-type BallotProofComponentProofBytesAvailability =
+export type BallotProofComponentProofBytesAvailability =
     | 'available-for-small-dense-oracle'
     | 'requires-sparse-proof-statement'
     | 'requires-structured-proof-statement'
     | 'public-zero-witness-binding-check';
 
-type BallotProofComponentProofPolicy = {
-    readonly proofBytesAvailability: BallotProofComponentProofBytesAvailability;
-    readonly proofBytesMustBeEmpty: boolean;
-    readonly proofStatementFormat: BallotProofComponentProofVerificationInput['proofStatementFormat'];
+const componentProofBytesMustBeEmpty = (
+    componentId: BallotProofComponentId,
+): boolean => componentId === 'receiver-key-binding-component';
+
+const componentProofStatementFormatIsExpected = (
+    componentId: BallotProofComponentId,
+    proofStatementFormat: BallotProofComponentProofVerificationInput['proofStatementFormat'],
+): boolean => {
+    switch (componentId) {
+        case 'score-and-shamir-field-component':
+            return (
+                proofStatementFormat ===
+                    'dense-polynomial-matrix-linear-proof-v1' ||
+                proofStatementFormat ===
+                    'sparse-polynomial-matrix-linear-proof-v1'
+            );
+        case 'payload-plaintext-field-component':
+            return (
+                proofStatementFormat ===
+                'sparse-polynomial-matrix-linear-proof-v1'
+            );
+        case 'share-commitment-component':
+            return (
+                proofStatementFormat ===
+                    'sparse-polynomial-matrix-linear-proof-v1' ||
+                proofStatementFormat ===
+                    'structured-module-sis-share-commitment-v1'
+            );
+        case 'receiver-encryption-component':
+            return (
+                proofStatementFormat === 'structured-module-lwe-linear-proof-v1'
+            );
+        case 'receiver-key-binding-component':
+            return (
+                proofStatementFormat === 'public-zero-witness-binding-check-v1'
+            );
+    }
 };
 
-const ballotProofComponentProofPolicyById = {
-    'score-and-shamir-field-component': {
-        proofBytesAvailability: 'available-for-small-dense-oracle',
-        proofBytesMustBeEmpty: false,
-        proofStatementFormat: 'dense-polynomial-matrix-linear-proof-v1',
-    },
-    'payload-plaintext-field-component': {
-        proofBytesAvailability: 'requires-sparse-proof-statement',
-        proofBytesMustBeEmpty: false,
-        proofStatementFormat: 'sparse-polynomial-matrix-linear-proof-v1',
-    },
-    'share-commitment-component': {
-        proofBytesAvailability: 'requires-structured-proof-statement',
-        proofBytesMustBeEmpty: false,
-        proofStatementFormat: 'structured-module-sis-share-commitment-v1',
-    },
-    'receiver-encryption-component': {
-        proofBytesAvailability: 'requires-structured-proof-statement',
-        proofBytesMustBeEmpty: false,
-        proofStatementFormat: 'structured-module-lwe-linear-proof-v1',
-    },
-    'receiver-key-binding-component': {
-        proofBytesAvailability: 'public-zero-witness-binding-check',
-        proofBytesMustBeEmpty: true,
-        proofStatementFormat: 'public-zero-witness-binding-check-v1',
-    },
-} as const satisfies Record<
-    BallotProofComponentId,
-    BallotProofComponentProofPolicy
->;
+const expectedComponentProofStatementFormatLabel = (
+    componentId: BallotProofComponentId,
+): string => {
+    switch (componentId) {
+        case 'score-and-shamir-field-component':
+            return 'dense-polynomial-matrix-linear-proof-v1 or sparse-polynomial-matrix-linear-proof-v1';
+        case 'share-commitment-component':
+            return 'sparse-polynomial-matrix-linear-proof-v1 or structured-module-sis-share-commitment-v1';
+        case 'payload-plaintext-field-component':
+            return 'sparse-polynomial-matrix-linear-proof-v1';
+        case 'receiver-encryption-component':
+            return 'structured-module-lwe-linear-proof-v1';
+        case 'receiver-key-binding-component':
+            return 'public-zero-witness-binding-check-v1';
+    }
+};
+
+const componentProofBytesAvailabilityForStatementFormat = (
+    proofStatementFormat: BallotProofComponentProofVerificationInput['proofStatementFormat'],
+): BallotProofComponentProofBytesAvailability => {
+    switch (proofStatementFormat) {
+        case 'dense-polynomial-matrix-linear-proof-v1':
+            return 'available-for-small-dense-oracle';
+        case 'sparse-polynomial-matrix-linear-proof-v1':
+        case 'structured-module-sis-share-commitment-v1':
+            return 'requires-sparse-proof-statement';
+        case 'structured-module-lwe-linear-proof-v1':
+            return 'requires-structured-proof-statement';
+        case 'public-zero-witness-binding-check-v1':
+            return 'public-zero-witness-binding-check';
+    }
+};
+
+const componentProofBytesAvailabilityIsExpected = (
+    componentId: BallotProofComponentId,
+    proofStatementFormat: BallotProofComponentProofVerificationInput['proofStatementFormat'],
+    proofBytesAvailability: string,
+): boolean =>
+    componentProofStatementFormatIsExpected(
+        componentId,
+        proofStatementFormat,
+    ) &&
+    componentProofBytesAvailabilityForStatementFormat(proofStatementFormat) ===
+        proofBytesAvailability;
 
 export const describeBallotPrivacyProofBackend =
     (): BallotPrivacyProofBackendStatus => ({
@@ -605,7 +652,10 @@ export {
     shareCommitmentModulus,
     requiredBallotProofComponentIds,
     allowedBallotProofComponentStatementFormats,
-    ballotProofComponentProofPolicyById,
+    componentProofBytesMustBeEmpty,
+    componentProofStatementFormatIsExpected,
+    expectedComponentProofStatementFormatLabel,
+    componentProofBytesAvailabilityIsExpected,
     deriveReceiverKeyProofRoot,
     deriveReceiverKeyProofRootEvidenceDigest,
     deriveReceiverPayloadCiphertextRoot,

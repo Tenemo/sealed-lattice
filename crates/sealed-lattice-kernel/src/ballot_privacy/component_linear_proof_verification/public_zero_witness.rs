@@ -7,12 +7,14 @@ pub(super) fn verify_public_zero_witness_component_proof(
     proof_input: &Value,
 ) -> Value {
     let mut refused_objects = Vec::new();
+    let component_proof_record_digest = string_field(component_proof, "componentProofRecordDigest");
     if component_id != "receiver-key-binding-component" {
-        refused_objects.push(json!({
-            "code": "BallotPackageInvalid",
-            "message": format!("Public-zero witness binding checks are only valid for receiver-key-binding-component, not {component_id}."),
-            "objectDigest": string_field(component_proof, "componentProofRecordDigest")
-        }));
+        refused_objects.push(structural_refusal(
+            format!(
+                "Public-zero witness binding checks are only valid for receiver-key-binding-component, not {component_id}."
+            ),
+            component_proof_record_digest,
+        ));
     }
     if string_field(proof_input, "proofBytesHex") != Some("")
         || object_map(component_proof)
@@ -20,11 +22,12 @@ pub(super) fn verify_public_zero_witness_component_proof(
             .and_then(Value::as_u64)
             != Some(0)
     {
-        refused_objects.push(json!({
-            "code": "BallotPackageInvalid",
-            "message": format!("Ballot proof component proof bytes for {component_id} must be empty for the public-zero witness binding check."),
-            "objectDigest": string_field(component_proof, "componentProofRecordDigest")
-        }));
+        refused_objects.push(structural_refusal(
+            format!(
+                "Ballot proof component proof bytes for {component_id} must be empty for the public-zero witness binding check."
+            ),
+            component_proof_record_digest,
+        ));
     }
     if let Some(proof_statement) =
         object_map(proof_input).and_then(|object| object.get("proofStatement"))
@@ -32,23 +35,25 @@ pub(super) fn verify_public_zero_witness_component_proof(
         refused_objects.extend(collect_component_proof_statement_plan_shape_refusals(
             proof_statement,
             component_id,
-            string_field(component_proof, "componentProofRecordDigest"),
+            component_proof_record_digest,
         ));
         if derive_ballot_component_proof_statement_plan_digest(proof_statement).as_deref()
             != string_field(proof_statement, "componentProofStatementDigest")
         {
-            refused_objects.push(json!({
-                "code": "BallotPackageInvalid",
-                "message": format!("Ballot proof component proof statement digest for {component_id} does not match its canonical payload."),
-                "objectDigest": string_field(component_proof, "componentProofRecordDigest")
-            }));
+            refused_objects.push(structural_refusal(
+                format!(
+                    "Ballot proof component proof statement digest for {component_id} does not match its canonical payload."
+                ),
+                component_proof_record_digest,
+            ));
         }
     } else {
-        refused_objects.push(json!({
-            "code": "BallotPackageInvalid",
-            "message": format!("Ballot proof component proof input for {component_id} must supply its public proof statement object."),
-            "objectDigest": string_field(component_proof, "componentProofRecordDigest")
-        }));
+        refused_objects.push(structural_refusal(
+            format!(
+                "Ballot proof component proof input for {component_id} must supply its public proof statement object."
+            ),
+            component_proof_record_digest,
+        ));
     }
     if !refused_objects.is_empty() {
         return component_proof_backend_rejection(

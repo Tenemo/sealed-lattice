@@ -14,6 +14,28 @@ pub struct BallotProofRecordGenerationInput<'a> {
     pub component_secret_states: Option<&'a Value>,
 }
 
+impl<'a> BallotProofRecordGenerationInput<'a> {
+    pub(crate) fn from_command_request(request: &'a Value) -> Self {
+        Self {
+            statement: object_map(request).and_then(|object| object.get("statement")),
+            linear_statement: object_map(request).and_then(|object| object.get("linearStatement")),
+            parameter_set: object_map(request).and_then(|object| object.get("parameterSet")),
+            proof_encoding: object_map(request).and_then(|object| object.get("proofEncoding")),
+            public_randomness_hex: string_field(request, "publicRandomnessHex"),
+            component_bundle_statement: object_map(request)
+                .and_then(|object| object.get("componentBundleStatement")),
+            component_proof_inputs: object_map(request)
+                .and_then(|object| object.get("componentProofInputs")),
+            secret_state: object_map(request).and_then(|object| object.get("secretState")),
+            prover_randomness_hex: string_field(request, "proverRandomnessHex"),
+            component_prover_randomness_hexes: object_map(request)
+                .and_then(|object| object.get("componentProverRandomnessHexes")),
+            component_secret_states: object_map(request)
+                .and_then(|object| object.get("componentSecretStates")),
+        }
+    }
+}
+
 pub(crate) struct RequiredBallotProofRecordGenerationInput<'a> {
     pub(crate) statement: &'a Value,
     pub(crate) linear_statement: &'a Value,

@@ -19,92 +19,47 @@ pub(crate) fn verify_receiver_key_linear_proof_bytes(
         derive_receiver_key_public_randomness_digest(public_randomness_hex);
     let expected_linear_statement_digest =
         derive_receiver_key_linear_statement_digest(linear_statement);
-    let proof_size_bytes = object_map(receiver_key_proof)
-        .and_then(|object| object.get("proofSizeBytes"))
-        .and_then(Value::as_u64)
-        .and_then(|proof_size_bytes| usize::try_from(proof_size_bytes).ok());
-    let supplied_parameter_profile_id = string_field(parameter_set, "profileId");
-    let supplied_proof_encoding_profile_id = string_field(proof_encoding, "profileId");
-
-    if linear_statement_digest != expected_linear_statement_digest.as_deref() {
-        refused_objects.push(structural_refusal(
-            "Receiver key linear statement digest does not match its canonical payload.",
-            receiver_key_proof_root,
-        ));
-    }
-    if supplied_parameter_profile_id != Some(RECEIVER_KEY_PROOF_PARAMETER_PROFILE_ID) {
-        refused_objects.push(structural_refusal(
-            "Receiver key proof records require the production receiver-key parameter profile.",
-            receiver_key_proof_root,
-        ));
-    }
-    if supplied_proof_encoding_profile_id != Some(RECEIVER_KEY_PROOF_ENCODING_PROFILE_ID) {
-        refused_objects.push(structural_refusal(
-            "Receiver key proof records require the production receiver-key proof encoding profile.",
-            receiver_key_proof_root,
-        ));
-    }
-
-    if string_field(receiver_key_proof, "linearStatementDigest") != linear_statement_digest {
-        refused_objects.push(structural_refusal(
-            "Receiver key proof record is not bound to the supplied linear statement.",
-            receiver_key_proof_root,
-        ));
-    }
-    if string_field(receiver_key_proof, "proofEncodingProfileDigest")
-        != expected_proof_encoding_digest.as_deref()
-    {
-        refused_objects.push(structural_refusal(
-            "Receiver key proof record is not bound to the supplied proof encoding profile.",
-            receiver_key_proof_root,
-        ));
-    }
-    if string_field(receiver_key_proof, "proofParameterSetDigest")
-        != expected_parameter_set_digest.as_deref()
-    {
-        refused_objects.push(structural_refusal(
-            "Receiver key proof record is not bound to the supplied proof parameter set.",
-            receiver_key_proof_root,
-        ));
-    }
-    if string_field(receiver_key_proof, "publicRandomnessDigest")
-        != expected_public_randomness_digest.as_deref()
-    {
-        refused_objects.push(structural_refusal(
-            "Receiver key proof record is not bound to the supplied public randomness.",
-            receiver_key_proof_root,
-        ));
-    }
-    match serde_json::from_value::<LinearProofParameterSet>(parameter_set.clone()) {
-        Ok(parameter_contract)
-            if parameter_contract.expected_proof_size_bytes != proof_size_bytes =>
-        {
-            refused_objects.push(structural_refusal(
-                "Receiver key proof parameter set is not bound to the proof record byte length.",
-                receiver_key_proof_root,
-            ));
+    refused_objects.extend(collect_linear_proof_binding_refusals(
+        LinearProofBindingValidationInput {
+            proof_record: receiver_key_proof,
+            linear_statement,
+            parameter_set,
+            proof_encoding,
+            expected_linear_statement_digest,
+            expected_parameter_set_digest,
+            expected_proof_encoding_digest,
+            expected_public_randomness_digest,
+            object_digest: receiver_key_proof_root,
+            parameter_profile_requirement: Some(LinearProofProfileRequirement {
+                profile_id: RECEIVER_KEY_PROOF_PARAMETER_PROFILE_ID,
+                refusal_message:
+                    "Receiver key proof records require the production receiver-key parameter profile.",
+            }),
+            proof_encoding_profile_requirement: Some(LinearProofProfileRequirement {
+                profile_id: RECEIVER_KEY_PROOF_ENCODING_PROFILE_ID,
+                refusal_message:
+                    "Receiver key proof records require the production receiver-key proof encoding profile.",
+            }),
+            messages: LinearProofBindingValidationMessages {
+                canonical_statement_digest_mismatch:
+                    "Receiver key linear statement digest does not match its canonical payload.",
+                proof_record_statement_mismatch:
+                    "Receiver key proof record is not bound to the supplied linear statement.",
+                proof_encoding_digest_mismatch:
+                    "Receiver key proof record is not bound to the supplied proof encoding profile.",
+                parameter_set_digest_mismatch:
+                    "Receiver key proof record is not bound to the supplied proof parameter set.",
+                public_randomness_digest_mismatch:
+                    "Receiver key proof record is not bound to the supplied public randomness.",
+                parameter_set_size_mismatch:
+                    "Receiver key proof parameter set is not bound to the proof record byte length.",
+                parameter_set_malformed_prefix: "Receiver key proof parameter set is malformed",
+                proof_encoding_size_mismatch:
+                    "Receiver key proof encoding is not bound to the proof record byte length.",
+                proof_encoding_malformed_prefix: "Receiver key proof encoding is malformed",
+            },
         }
-        Ok(_) => {}
-        Err(error) => refused_objects.push(structural_refusal(
-            format!("Receiver key proof parameter set is malformed: {error}"),
-            receiver_key_proof_root,
-        )),
-    }
-    match serde_json::from_value::<LinearProofEncoding>(proof_encoding.clone()) {
-        Ok(proof_encoding_contract)
-            if proof_encoding_contract.expected_proof_size_bytes != proof_size_bytes =>
-        {
-            refused_objects.push(structural_refusal(
-                "Receiver key proof encoding is not bound to the proof record byte length.",
-                receiver_key_proof_root,
-            ));
-        }
-        Ok(_) => {}
-        Err(error) => refused_objects.push(structural_refusal(
-            format!("Receiver key proof encoding is malformed: {error}"),
-            receiver_key_proof_root,
-        )),
-    }
+    ));
     if !refused_objects.is_empty() {
         return structural_rejection("verifyReceiverKeyProof", refused_objects);
     }
@@ -219,14 +174,12 @@ struct ReceiverKeyLinearProofVerificationInput<'a> {
 }
 
 impl<'a> ReceiverKeyProofVerificationInput<'a> {
-    fn from_command_fields(
-        receiver_key_proof: &'a Value,
-        linear_statement: Option<&'a Value>,
-        proof_bytes_hex: Option<&'a str>,
-        public_randomness_hex: Option<&'a str>,
-        parameter_set: Option<&'a Value>,
-        proof_encoding: Option<&'a Value>,
-    ) -> Result<Self, Value> {
+    fn from_command_request(request: &'a Value) -> Result<Self, Value> {
+        let receiver_key_proof =
+            required_json_field(request, "receiverKeyProof", "verifyReceiverKeyProof").map_err(
+                |error| structural_rejection("verifyReceiverKeyProof", vec![error.to_json_value()]),
+            )?;
+        let proof_bytes_hex = string_field(request, "proofBytesHex");
         let refused_objects =
             collect_receiver_key_proof_refusals(receiver_key_proof, proof_bytes_hex);
         if !refused_objects.is_empty() {
@@ -237,11 +190,11 @@ impl<'a> ReceiverKeyProofVerificationInput<'a> {
         }
 
         let linear_proof_context = match (
-            linear_statement,
+            object_map(request).and_then(|object| object.get("linearStatement")),
             proof_bytes_hex,
-            public_randomness_hex,
-            parameter_set,
-            proof_encoding,
+            string_field(request, "publicRandomnessHex"),
+            object_map(request).and_then(|object| object.get("parameterSet")),
+            object_map(request).and_then(|object| object.get("proofEncoding")),
         ) {
             (None, None, None, None, None) => None,
             (
@@ -275,22 +228,8 @@ impl<'a> ReceiverKeyProofVerificationInput<'a> {
     }
 }
 
-pub(crate) fn verify_receiver_key_proof_from_command_fields(
-    receiver_key_proof: &Value,
-    linear_statement: Option<&Value>,
-    proof_bytes_hex: Option<&str>,
-    public_randomness_hex: Option<&str>,
-    parameter_set: Option<&Value>,
-    proof_encoding: Option<&Value>,
-) -> Value {
-    match ReceiverKeyProofVerificationInput::from_command_fields(
-        receiver_key_proof,
-        linear_statement,
-        proof_bytes_hex,
-        public_randomness_hex,
-        parameter_set,
-        proof_encoding,
-    ) {
+pub(crate) fn verify_receiver_key_proof_from_command_request(request: &Value) -> Value {
+    match ReceiverKeyProofVerificationInput::from_command_request(request) {
         Ok(input) => verify_receiver_key_proof(input),
         Err(rejection) => rejection,
     }
@@ -317,22 +256,54 @@ pub(crate) fn verify_receiver_key_proof(input: ReceiverKeyProofVerificationInput
     )
 }
 
-pub fn prepare_receiver_key_proof_generation(
-    linear_statement: Option<&Value>,
-    parameter_set: Option<&Value>,
-    proof_encoding: Option<&Value>,
-    public_randomness_hex: Option<&str>,
-    secret_state: Option<&Value>,
-    prover_randomness_hex: Option<&str>,
+pub(crate) struct ReceiverKeyProofPreparationInput<'a> {
+    linear_statement: &'a Value,
+    parameter_set_value: &'a Value,
+    proof_encoding_value: &'a Value,
+    public_randomness_hex: &'a str,
+    secret_state: &'a Value,
+    prover_randomness_hex: Option<&'a str>,
+}
+
+impl<'a> ReceiverKeyProofPreparationInput<'a> {
+    pub(crate) fn from_command_request(
+        request: &'a Value,
+    ) -> crate::encoding::CanonicalResult<Self> {
+        Ok(Self {
+            linear_statement: required_json_field(
+                request,
+                "linearStatement",
+                "prepareReceiverKeyProofGeneration",
+            )?,
+            parameter_set_value: required_json_field(
+                request,
+                "parameterSet",
+                "prepareReceiverKeyProofGeneration",
+            )?,
+            proof_encoding_value: required_json_field(
+                request,
+                "proofEncoding",
+                "prepareReceiverKeyProofGeneration",
+            )?,
+            public_randomness_hex: required_string_field(
+                request,
+                "publicRandomnessHex",
+                "prepareReceiverKeyProofGeneration",
+            )?,
+            secret_state: required_json_field(
+                request,
+                "secretState",
+                "prepareReceiverKeyProofGeneration",
+            )?,
+            prover_randomness_hex: string_field(request, "proverRandomnessHex"),
+        })
+    }
+}
+
+pub(crate) fn prepare_receiver_key_proof_generation(
+    input: ReceiverKeyProofPreparationInput<'_>,
 ) -> Value {
-    match prepare_receiver_key_proof_generation_inner(
-        linear_statement,
-        parameter_set,
-        proof_encoding,
-        public_randomness_hex,
-        secret_state,
-        prover_randomness_hex,
-    ) {
+    match prepare_receiver_key_proof_generation_inner(input) {
         Ok(value) => value,
         Err(error) => structural_rejection(
             "prepareReceiverKeyProofGeneration",
@@ -341,32 +312,25 @@ pub fn prepare_receiver_key_proof_generation(
     }
 }
 
-pub(crate) fn prepare_receiver_key_proof_generation_inner(
-    linear_statement: Option<&Value>,
-    parameter_set: Option<&Value>,
-    proof_encoding: Option<&Value>,
-    public_randomness_hex: Option<&str>,
-    secret_state: Option<&Value>,
-    prover_randomness_hex: Option<&str>,
-) -> crate::encoding::CanonicalResult<Value> {
-    let linear_statement = linear_statement.ok_or_else(|| {
-        invalid_preflight("linearStatement is required for receiver-key proof preparation")
-    })?;
-    let parameter_set = parameter_set.ok_or_else(|| {
-        invalid_preflight("parameterSet is required for receiver-key proof preparation")
-    })?;
-    let proof_encoding = proof_encoding.ok_or_else(|| {
-        invalid_preflight("proofEncoding is required for receiver-key proof preparation")
-    })?;
-    let public_randomness_hex = public_randomness_hex.ok_or_else(|| {
-        invalid_preflight("publicRandomnessHex is required for receiver-key proof preparation")
-    })?;
-    let secret_state = secret_state.ok_or_else(|| {
-        invalid_preflight("secretState is required for receiver-key proof preparation")
-    })?;
+pub(crate) fn prepare_receiver_key_proof_generation_from_command_request(request: &Value) -> Value {
+    match ReceiverKeyProofPreparationInput::from_command_request(request) {
+        Ok(input) => prepare_receiver_key_proof_generation(input),
+        Err(error) => structural_rejection(
+            "prepareReceiverKeyProofGeneration",
+            vec![error.to_json_value()],
+        ),
+    }
+}
 
-    let parameter_set_value = parameter_set;
-    let proof_encoding_value = proof_encoding;
+pub(crate) fn prepare_receiver_key_proof_generation_inner(
+    input: ReceiverKeyProofPreparationInput<'_>,
+) -> crate::encoding::CanonicalResult<Value> {
+    let linear_statement = input.linear_statement;
+    let parameter_set_value = input.parameter_set_value;
+    let proof_encoding_value = input.proof_encoding_value;
+    let public_randomness_hex = input.public_randomness_hex;
+    let secret_state = input.secret_state;
+    let prover_randomness_hex = input.prover_randomness_hex;
     let parameter_set: LinearProofParameterSet =
         serde_json::from_value(parameter_set_value.clone()).map_err(|error| {
             invalid_preflight(format!(
@@ -545,53 +509,73 @@ pub(crate) fn prepare_receiver_key_proof_generation_inner(
     }))
 }
 
-pub fn generate_receiver_key_proof(
-    linear_statement: Option<&Value>,
-    parameter_set: Option<&Value>,
-    proof_encoding: Option<&Value>,
-    public_randomness_hex: Option<&str>,
-    secret_state: Option<&Value>,
-    prover_randomness_hex: Option<&str>,
-) -> Value {
-    match generate_receiver_key_proof_inner(
-        linear_statement,
-        parameter_set,
-        proof_encoding,
-        public_randomness_hex,
-        secret_state,
-        prover_randomness_hex,
-    ) {
+pub(crate) struct ReceiverKeyProofGenerationInput<'a> {
+    linear_statement: &'a Value,
+    parameter_set_value: &'a Value,
+    proof_encoding_value: &'a Value,
+    public_randomness_hex: &'a str,
+    secret_state: &'a Value,
+    prover_randomness_hex: &'a str,
+}
+
+impl<'a> ReceiverKeyProofGenerationInput<'a> {
+    pub(crate) fn from_command_request(
+        request: &'a Value,
+    ) -> crate::encoding::CanonicalResult<Self> {
+        Ok(Self {
+            linear_statement: required_json_field(
+                request,
+                "linearStatement",
+                "generateReceiverKeyProof",
+            )?,
+            parameter_set_value: required_json_field(
+                request,
+                "parameterSet",
+                "generateReceiverKeyProof",
+            )?,
+            proof_encoding_value: required_json_field(
+                request,
+                "proofEncoding",
+                "generateReceiverKeyProof",
+            )?,
+            public_randomness_hex: required_string_field(
+                request,
+                "publicRandomnessHex",
+                "generateReceiverKeyProof",
+            )?,
+            secret_state: required_json_field(request, "secretState", "generateReceiverKeyProof")?,
+            prover_randomness_hex: required_string_field(
+                request,
+                "proverRandomnessHex",
+                "generateReceiverKeyProof",
+            )?,
+        })
+    }
+}
+
+pub(crate) fn generate_receiver_key_proof(input: ReceiverKeyProofGenerationInput<'_>) -> Value {
+    match generate_receiver_key_proof_inner(input) {
         Ok(value) => value,
         Err(error) => structural_rejection("generateReceiverKeyProof", vec![error.to_json_value()]),
     }
 }
 
+pub(crate) fn generate_receiver_key_proof_from_command_request(request: &Value) -> Value {
+    match ReceiverKeyProofGenerationInput::from_command_request(request) {
+        Ok(input) => generate_receiver_key_proof(input),
+        Err(error) => structural_rejection("generateReceiverKeyProof", vec![error.to_json_value()]),
+    }
+}
+
 pub(crate) fn generate_receiver_key_proof_inner(
-    linear_statement: Option<&Value>,
-    parameter_set: Option<&Value>,
-    proof_encoding: Option<&Value>,
-    public_randomness_hex: Option<&str>,
-    secret_state: Option<&Value>,
-    prover_randomness_hex: Option<&str>,
+    input: ReceiverKeyProofGenerationInput<'_>,
 ) -> crate::encoding::CanonicalResult<Value> {
-    let linear_statement = linear_statement.ok_or_else(|| {
-        invalid_preflight("linearStatement is required for receiver-key proof generation")
-    })?;
-    let parameter_set_value = parameter_set.ok_or_else(|| {
-        invalid_preflight("parameterSet is required for receiver-key proof generation")
-    })?;
-    let proof_encoding_value = proof_encoding.ok_or_else(|| {
-        invalid_preflight("proofEncoding is required for receiver-key proof generation")
-    })?;
-    let public_randomness_hex = public_randomness_hex.ok_or_else(|| {
-        invalid_preflight("publicRandomnessHex is required for receiver-key proof generation")
-    })?;
-    let secret_state = secret_state.ok_or_else(|| {
-        invalid_preflight("secretState is required for receiver-key proof generation")
-    })?;
-    let prover_randomness_hex = prover_randomness_hex.ok_or_else(|| {
-        invalid_preflight("proverRandomnessHex is required for receiver-key proof generation")
-    })?;
+    let linear_statement = input.linear_statement;
+    let parameter_set_value = input.parameter_set_value;
+    let proof_encoding_value = input.proof_encoding_value;
+    let public_randomness_hex = input.public_randomness_hex;
+    let secret_state = input.secret_state;
+    let prover_randomness_hex = input.prover_randomness_hex;
 
     let parameter_set: LinearProofParameterSet =
         serde_json::from_value(parameter_set_value.clone()).map_err(|error| {

@@ -10,7 +10,7 @@ import {
     validateImportBoundaries,
     type ImportObservation,
     type WorkspacePackage,
-} from '../../../tools/ci/check-package-boundaries';
+} from '#tools/ci/check-package-boundaries';
 
 const createWorkspacePackage = (
     name: WorkspacePackage['name'],

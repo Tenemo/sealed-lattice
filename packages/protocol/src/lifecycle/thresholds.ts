@@ -14,8 +14,8 @@ import { isNonNegativeInteger } from '../common/verification-helpers.js';
 import {
     targetBoundShareSelectionProfileId,
     cpadProfileId,
-    mandatoryClaimRosterSize,
-    maximumCertificateGatedRosterSize,
+    maximumSafeRosterSize,
+    minimumSafeRosterSize,
     minimumUnsafeRosterSize,
     strictLessThanOneThirdModel,
 } from './profiles.js';
@@ -172,7 +172,7 @@ const normalizeTargetBoundShareSelectionProfile = (
 
 const deriveRosterProfile = (
     rosterSize: number,
-    unsafeMicroRosterAcknowledged: boolean | undefined,
+    unsafeSmallRosterAcknowledged: boolean | undefined,
 ): {
     readonly claimBearing: boolean;
     readonly rosterProfileKind: RosterProfileKind;
@@ -184,34 +184,27 @@ const deriveRosterProfile = (
     if (rosterSize < minimumUnsafeRosterSize) {
         throw new RangeError('Roster size must be at least 3.');
     }
-    if (rosterSize > maximumCertificateGatedRosterSize) {
+    if (rosterSize > maximumSafeRosterSize) {
         throw new RangeError('Roster size must be at most 50.');
     }
-    if (rosterSize < mandatoryClaimRosterSize) {
-        if (unsafeMicroRosterAcknowledged !== true) {
+    if (rosterSize < minimumSafeRosterSize) {
+        if (unsafeSmallRosterAcknowledged !== true) {
             throw new Error(
-                'Unsafe micro-roster profiles require explicit acknowledgement.',
+                'Unsafe small-roster profiles require explicit acknowledgement.',
             );
         }
 
         return {
-            claimBearing: false,
-            rosterProfileKind: 'UnsafeMicroRoster',
-            warnings: ['UnsafeMicroRoster'],
-        };
-    }
-    if (rosterSize === mandatoryClaimRosterSize) {
-        return {
             claimBearing: true,
-            rosterProfileKind: 'MandatoryN20',
-            warnings: [],
+            rosterProfileKind: 'UnsafeSmallRoster',
+            warnings: ['UnsafeSmallRoster'],
         };
     }
 
     return {
-        claimBearing: false,
-        rosterProfileKind: 'CertificateGatedRange',
-        warnings: ['CertificateGatedProfile', 'BackendCertificateRequired'],
+        claimBearing: true,
+        rosterProfileKind: 'SupportedRosterRange',
+        warnings: [],
     };
 };
 
@@ -221,7 +214,8 @@ export const deriveThresholdProfile = (
     const { rosterSize } = input;
     const rosterProfile = deriveRosterProfile(
         rosterSize,
-        input.unsafeMicroRosterAcknowledged,
+        input.unsafeSmallRosterAcknowledged ??
+            input.unsafeMicroRosterAcknowledged,
     );
     const backendCorruptionModel = normalizeBackendCorruptionModel(
         rosterSize,

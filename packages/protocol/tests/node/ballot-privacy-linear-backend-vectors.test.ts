@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
-import ballotFieldLinearProofBackendVectorsJson from '../../../../test-vectors/ballot-privacy/ballot-field-linear-proof-vectors.json';
-import linearProofBackendVectorsJson from '../../../../test-vectors/ballot-privacy/proof-backend-linear-vectors.json';
-import receiverKeyLinearProofBackendVectorsJson from '../../../../test-vectors/ballot-privacy/receiver-key-linear-proof-vectors.json';
+import ballotFieldLinearProofBackendVectorsJson from '#test-vectors/ballot-privacy/ballot-field-linear-proof-vectors.json';
+import linearProofBackendVectorsJson from '#test-vectors/ballot-privacy/proof-backend-linear-vectors.json';
+import receiverKeyLinearProofBackendVectorsJson from '#test-vectors/ballot-privacy/receiver-key-linear-proof-vectors.json';
 
 type LinearProofBackendVectorCase = {
     readonly caseName: string;

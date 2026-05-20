@@ -2,8 +2,8 @@ import type {
     BallotProofComponentBundleStatement,
     BallotProofComponentProofStatementPlan,
     BallotProofComponentStatement,
-} from "../../../packages/protocol/src/ballot-privacy/ballot-proof-linear-statement.js";
-import type { BallotPrivacyLoweredLinearRelationStatement } from "../../../packages/protocol/src/ballot-privacy/relation-backend-lowering.js";
+} from "#packages/protocol/src/ballot-privacy/ballot-proof-linear-statement.js";
+import type { BallotPrivacyLoweredLinearRelationStatement } from "#packages/protocol/src/ballot-privacy/relation-backend-lowering.js";
 
 export interface EncodedBallotRelationVectorCase {
     readonly caseName: string;

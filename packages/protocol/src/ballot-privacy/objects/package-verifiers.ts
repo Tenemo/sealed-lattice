@@ -123,12 +123,14 @@ const collectShareCommitmentStructuralRefusals = (
 
 const collectScopedRelationBearingPackageStructuralRefusals = (
     ballotPackage: ScopedRelationBearingBallotPackageVerificationShell,
+    unsafeSmallRosterAcknowledged?: boolean,
 ): readonly RefusalRecord[] => {
     const refusedObjects: RefusalRecord[] = [
         ...collectBallotProofStructuralRefusals(
             ballotPackage.ballotProofStatement,
             ballotPackage.ballotProof,
             ballotPackage.proofBytesHex,
+            unsafeSmallRosterAcknowledged,
         ),
         ...collectReceiverKeyProofRootEvidenceStructuralRefusals(
             ballotPackage.receiverKeyProofRootEvidence,
@@ -339,12 +341,14 @@ export const verifyBallotProof = (input: {
     readonly componentProofBundle?: BallotProofComponentProofBundle;
     readonly componentProofInputs?: readonly BallotProofComponentProofVerificationInput[];
     readonly proofBytesHex?: string;
+    readonly unsafeSmallRosterAcknowledged?: boolean;
 }): BallotPrivacyVerification => {
     const structuralRefusals = [
         ...collectBallotProofStructuralRefusals(
             input.statement,
             input.ballotProof,
             input.proofBytesHex,
+            input.unsafeSmallRosterAcknowledged,
         ),
         ...collectBallotProofComponentProofBundleRefusals({
             ballotProof: input.ballotProof,
@@ -371,10 +375,12 @@ export const verifyBallotProof = (input: {
 
 export const verifyClaimBearingBallotPackage = (input: {
     readonly ballotPackage: ScopedRelationBearingBallotPackageVerificationShell;
+    readonly unsafeSmallRosterAcknowledged?: boolean;
 }): BallotPrivacyVerification => {
     const structuralRefusals =
         collectScopedRelationBearingPackageStructuralRefusals(
             input.ballotPackage,
+            input.unsafeSmallRosterAcknowledged,
         );
     if (structuralRefusals.length > 0) {
         return createBallotPrivacyStructuralRejection(structuralRefusals);

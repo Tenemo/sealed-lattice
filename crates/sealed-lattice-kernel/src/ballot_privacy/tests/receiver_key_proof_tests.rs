@@ -121,14 +121,14 @@ fn receiver_key_prover_preflight_fixture() -> (Value, Value, Value, Value) {
 fn receiver_key_proof_generation_preflight_checks_source_and_proof_ring_witness() {
     let (linear_statement, parameter_set, proof_encoding, secret_state) =
         receiver_key_prover_preflight_fixture();
-    let preparation = super::prepare_receiver_key_proof_generation(
-        Some(&linear_statement),
-        Some(&parameter_set),
-        Some(&proof_encoding),
-        Some(&"00".repeat(32)),
-        Some(&secret_state),
-        Some(&"09".repeat(32)),
-    );
+    let preparation = super::prepare_receiver_key_proof_generation_from_command_request(&json!({
+        "linearStatement": linear_statement.clone(),
+        "parameterSet": parameter_set.clone(),
+        "proofEncoding": proof_encoding.clone(),
+        "publicRandomnessHex": "00".repeat(32),
+        "secretState": secret_state.clone(),
+        "proverRandomnessHex": "09".repeat(32)
+    }));
 
     assert_eq!(preparation["ok"], true);
     assert_eq!(
@@ -174,14 +174,14 @@ fn receiver_key_proof_generation_preflight_checks_source_and_proof_ring_witness(
 
     let mut wrong_secret_state = secret_state;
     wrong_secret_state["secretVector"][0][0] = json!(3);
-    let rejection = super::prepare_receiver_key_proof_generation(
-        Some(&linear_statement),
-        Some(&parameter_set),
-        Some(&proof_encoding),
-        Some(&"00".repeat(32)),
-        Some(&wrong_secret_state),
-        Some(&"09".repeat(32)),
-    );
+    let rejection = super::prepare_receiver_key_proof_generation_from_command_request(&json!({
+        "linearStatement": linear_statement.clone(),
+        "parameterSet": parameter_set.clone(),
+        "proofEncoding": proof_encoding.clone(),
+        "publicRandomnessHex": "00".repeat(32),
+        "secretState": wrong_secret_state.clone(),
+        "proverRandomnessHex": "09".repeat(32)
+    }));
 
     assert_eq!(rejection["ok"], false);
     assert_eq!(rejection["unresolvedReason"], json!("BallotPackageInvalid"));
@@ -200,14 +200,15 @@ fn receiver_key_proof_generation_preflight_checks_source_and_proof_ring_witness(
             "profileId".to_string(),
             json!("receiver-key-linear-module-lwe-compatibility-v1"),
         );
-    let compatibility_rejection = super::prepare_receiver_key_proof_generation(
-        Some(&linear_statement),
-        Some(&compatibility_parameter_set),
-        Some(&proof_encoding),
-        Some(&"00".repeat(32)),
-        Some(&wrong_secret_state),
-        Some(&"09".repeat(32)),
-    );
+    let compatibility_rejection =
+        super::prepare_receiver_key_proof_generation_from_command_request(&json!({
+            "linearStatement": linear_statement,
+            "parameterSet": compatibility_parameter_set,
+            "proofEncoding": proof_encoding,
+            "publicRandomnessHex": "00".repeat(32),
+            "secretState": wrong_secret_state,
+            "proverRandomnessHex": "09".repeat(32)
+        }));
 
     assert_eq!(compatibility_rejection["ok"], false);
     assert_eq!(
@@ -407,14 +408,14 @@ fn proof_byte_bearing_receiver_key_record_verifies_against_linear_backend() {
         &production_parameter_set,
         &production_proof_encoding,
     );
-    let valid_verification = super::verify_receiver_key_proof_from_command_fields(
-        &valid_receiver_key_proof,
-        Some(&valid_linear_statement),
-        Some(proof_bytes_hex),
-        Some(public_randomness_hex),
-        Some(&production_parameter_set),
-        Some(&production_proof_encoding),
-    );
+    let valid_verification = super::verify_receiver_key_proof_from_command_request(&json!({
+        "receiverKeyProof": valid_receiver_key_proof.clone(),
+        "linearStatement": valid_linear_statement.clone(),
+        "proofBytesHex": proof_bytes_hex,
+        "publicRandomnessHex": public_randomness_hex,
+        "parameterSet": production_parameter_set.clone(),
+        "proofEncoding": production_proof_encoding.clone()
+    }));
 
     assert_eq!(valid_verification["ok"], true);
     assert_eq!(valid_verification["unresolvedReason"], Value::Null);
@@ -432,14 +433,14 @@ fn proof_byte_bearing_receiver_key_record_verifies_against_linear_backend() {
         &production_parameter_set,
         &production_proof_encoding,
     );
-    let mutated_verification = super::verify_receiver_key_proof_from_command_fields(
-        &mutated_receiver_key_proof,
-        Some(&mutated_linear_statement),
-        Some(proof_bytes_hex),
-        Some(public_randomness_hex),
-        Some(&production_parameter_set),
-        Some(&production_proof_encoding),
-    );
+    let mutated_verification = super::verify_receiver_key_proof_from_command_request(&json!({
+        "receiverKeyProof": mutated_receiver_key_proof,
+        "linearStatement": mutated_linear_statement,
+        "proofBytesHex": proof_bytes_hex,
+        "publicRandomnessHex": public_randomness_hex,
+        "parameterSet": production_parameter_set.clone(),
+        "proofEncoding": production_proof_encoding.clone()
+    }));
 
     assert_eq!(mutated_verification["ok"], false);
     assert_eq!(mutated_verification["unresolvedReason"], "InvalidFixture");
@@ -452,14 +453,15 @@ fn proof_byte_bearing_receiver_key_record_verifies_against_linear_backend() {
             "profileId".to_string(),
             json!("receiver-key-linear-module-lwe-compatibility-v1"),
         );
-    let wrong_parameter_verification = super::verify_receiver_key_proof_from_command_fields(
-        &valid_receiver_key_proof,
-        Some(&valid_linear_statement),
-        Some(proof_bytes_hex),
-        Some(public_randomness_hex),
-        Some(&wrong_parameter_set),
-        Some(&production_proof_encoding),
-    );
+    let wrong_parameter_verification =
+        super::verify_receiver_key_proof_from_command_request(&json!({
+            "receiverKeyProof": valid_receiver_key_proof.clone(),
+            "linearStatement": valid_linear_statement.clone(),
+            "proofBytesHex": proof_bytes_hex,
+            "publicRandomnessHex": public_randomness_hex,
+            "parameterSet": wrong_parameter_set,
+            "proofEncoding": production_proof_encoding.clone()
+        }));
 
     assert_eq!(wrong_parameter_verification["ok"], false);
     assert_eq!(
@@ -480,14 +482,15 @@ fn proof_byte_bearing_receiver_key_record_verifies_against_linear_backend() {
         &size_unbound_parameter_set,
         &production_proof_encoding,
     );
-    let size_unbound_parameter_verification = super::verify_receiver_key_proof_from_command_fields(
-        &size_unbound_receiver_key_proof,
-        Some(&valid_linear_statement),
-        Some(proof_bytes_hex),
-        Some(public_randomness_hex),
-        Some(&size_unbound_parameter_set),
-        Some(&production_proof_encoding),
-    );
+    let size_unbound_parameter_verification =
+        super::verify_receiver_key_proof_from_command_request(&json!({
+            "receiverKeyProof": size_unbound_receiver_key_proof,
+            "linearStatement": valid_linear_statement.clone(),
+            "proofBytesHex": proof_bytes_hex,
+            "publicRandomnessHex": public_randomness_hex,
+            "parameterSet": size_unbound_parameter_set,
+            "proofEncoding": production_proof_encoding.clone()
+        }));
 
     assert_eq!(size_unbound_parameter_verification["ok"], false);
     assert_eq!(
@@ -514,14 +517,15 @@ fn proof_byte_bearing_receiver_key_record_verifies_against_linear_backend() {
         &production_parameter_set,
         &size_unbound_proof_encoding,
     );
-    let size_unbound_encoding_verification = super::verify_receiver_key_proof_from_command_fields(
-        &size_unbound_encoding_receiver_key_proof,
-        Some(&valid_linear_statement),
-        Some(proof_bytes_hex),
-        Some(public_randomness_hex),
-        Some(&production_parameter_set),
-        Some(&size_unbound_proof_encoding),
-    );
+    let size_unbound_encoding_verification =
+        super::verify_receiver_key_proof_from_command_request(&json!({
+            "receiverKeyProof": size_unbound_encoding_receiver_key_proof,
+            "linearStatement": valid_linear_statement,
+            "proofBytesHex": proof_bytes_hex,
+            "publicRandomnessHex": public_randomness_hex,
+            "parameterSet": production_parameter_set,
+            "proofEncoding": size_unbound_proof_encoding
+        }));
 
     assert_eq!(size_unbound_encoding_verification["ok"], false);
     assert_eq!(

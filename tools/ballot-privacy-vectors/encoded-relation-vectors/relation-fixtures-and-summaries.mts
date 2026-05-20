@@ -3,24 +3,24 @@ import {
     verifyBallotProofComponentExplicitRows,
     type BallotProofComponentBundleStatement,
     type BallotProofComponentProjectionWitness,
-} from "../../../packages/protocol/src/ballot-privacy/ballot-proof-linear-statement.js";
+} from "#packages/protocol/src/ballot-privacy/ballot-proof-linear-statement.js";
 import {
     denseCoefficientCountForComponentProofStatement,
     proofStatementFormatForComponent,
     sourceRingDegreeForComponentProofStatement,
-} from "../../../packages/protocol/src/ballot-privacy/ballot-proof-linear-statement/component-proof-plan-policy.js";
-import { rowBatchesForComponent } from "../../../packages/protocol/src/ballot-privacy/ballot-proof-linear-statement/component-statement-builder.js";
-import { deriveProtocolDigest } from "../../../packages/crypto/src/digests.js";
+} from "#packages/protocol/src/ballot-privacy/ballot-proof-linear-statement/component-proof-plan-policy.js";
+import { rowBatchesForComponent } from "#packages/protocol/src/ballot-privacy/ballot-proof-linear-statement/component-statement-builder.js";
+import { deriveProtocolDigest } from "#packages/crypto/src/digests.js";
 import {
     createBallotPrivacyProfileSet,
     createShareCommitmentMessageBoundCert,
-} from "../../../packages/protocol/src/ballot-privacy/profiles.js";
+} from "#packages/protocol/src/ballot-privacy/profiles.js";
 import {
     createFixtureRandomnessSource,
     createShareCommitmentPolynomialVector,
     deriveShareCommitmentBodyDigest,
     generateReceiverState,
-} from "../../../packages/protocol/src/ballot-privacy/lattice-primitives.js";
+} from "#packages/protocol/src/ballot-privacy/lattice-primitives.js";
 import {
     ballotPrivacyMandatoryOptionCount,
     ballotPrivacyMandatoryReceiverCount,
@@ -32,12 +32,12 @@ import {
     receiverOpeningRandomnessBitLength,
     receiverShareRepresentativeBitLength,
     shareCommitmentOpeningDimension,
-} from "../../../packages/protocol/src/ballot-privacy/protocol-parameters.js";
+} from "#packages/protocol/src/ballot-privacy/protocol-parameters.js";
 import type {
     BallotPrivacyLoweredLinearRelationStatement,
     BallotPrivacyRelationBackendPublicContext,
-} from "../../../packages/protocol/src/ballot-privacy/relation-backend-lowering.js";
-import type { BallotPrivacyRelationCompilerInput } from "../../../packages/protocol/src/ballot-privacy/relation-compiler.js";
+} from "#packages/protocol/src/ballot-privacy/relation-backend-lowering.js";
+import type { BallotPrivacyRelationCompilerInput } from "#packages/protocol/src/ballot-privacy/relation-compiler.js";
 
 import type { EncodedBallotRelationVectorCase } from "./vector-case-types.mjs";
 

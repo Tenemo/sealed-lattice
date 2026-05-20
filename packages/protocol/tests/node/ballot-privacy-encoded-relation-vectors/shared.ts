@@ -1,5 +1,5 @@
 // Shared ballot privacy encoded relation vector fixtures.
-import encodedRelationVectorsJson from '../../../../../test-vectors/ballot-privacy/encoded-ballot-linear-relation-vectors.json';
+import encodedRelationVectorsJson from '#test-vectors/ballot-privacy/encoded-ballot-linear-relation-vectors.json';
 
 type EncodedRelationVectorCase = {
     readonly caseName: string;

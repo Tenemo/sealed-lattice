@@ -1,7 +1,6 @@
 // This file is one focused part of the split test suite.
 import { describe, expect, it } from 'vitest';
 
-import { createWasmBallotProofRecordGenerationFixture } from '../../../../../tests/support/ballot-privacy-proof-record-generation-fixtures';
 import { loadTranscriptCoreKernel } from '../../../src/index';
 
 import {
@@ -9,6 +8,8 @@ import {
     cloneJsonValue,
     expectRefusalMessage,
 } from './shared.js';
+
+import { createWasmBallotProofRecordGenerationFixture } from '#tests/support/ballot-privacy-proof-record-generation-fixtures';
 
 describe('transcript-core kernel in Node', () => {
     it('generates ballot and dense component proof bytes through WASM', async () => {

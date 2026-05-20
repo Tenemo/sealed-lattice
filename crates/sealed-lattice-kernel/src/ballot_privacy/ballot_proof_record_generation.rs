@@ -17,6 +17,12 @@ pub fn generate_ballot_proof_record(input: BallotProofRecordGenerationInput<'_>)
     }
 }
 
+pub(crate) fn generate_ballot_proof_record_from_command_request(request: &Value) -> Value {
+    generate_ballot_proof_record(BallotProofRecordGenerationInput::from_command_request(
+        request,
+    ))
+}
+
 pub(crate) fn generate_ballot_proof_record_inner(
     input: BallotProofRecordGenerationInput<'_>,
 ) -> crate::encoding::CanonicalResult<Value> {
@@ -46,12 +52,12 @@ pub(crate) fn generate_ballot_proof_record_inner(
             component_generation_randomness_hex(component_id, component_prover_randomness_hexes)?;
         let component_secret_state =
             component_generation_secret_state(component_id, secret_state, component_secret_states)?;
-        let component_generation_input = BallotComponentProofGenerationInput::from_command_fields(
-            Some(component_id),
-            Some(proof_input),
-            Some(component_secret_state),
-            Some(&component_prover_randomness_hex),
-        )?;
+        let component_generation_input = BallotComponentProofGenerationInput::from_required_fields(
+            component_id,
+            proof_input,
+            component_secret_state,
+            &component_prover_randomness_hex,
+        );
         let component_generation =
             generate_ballot_component_proof_inner(component_generation_input).map_err(|error| {
                 invalid_preflight(format!(
@@ -81,14 +87,14 @@ pub(crate) fn generate_ballot_proof_record_inner(
     let component_proof_bundle =
         generated_component_proof_bundle(component_bundle_statement, generated_component_proofs)?;
 
-    let ballot_generation_input = BallotProofGenerationInput::from_command_fields(
-        Some(linear_statement),
-        Some(parameter_set),
-        Some(proof_encoding),
-        Some(public_randomness_hex),
-        Some(secret_state),
-        Some(prover_randomness_hex),
-    )?;
+    let ballot_generation_input = BallotProofGenerationInput::from_required_fields(
+        linear_statement,
+        parameter_set,
+        proof_encoding,
+        public_randomness_hex,
+        secret_state,
+        prover_randomness_hex,
+    );
     let ballot_generation =
         generate_ballot_proof_inner(ballot_generation_input).map_err(|error| {
             invalid_preflight(format!(
@@ -132,7 +138,9 @@ pub(crate) fn generate_ballot_proof_record_inner(
             proof_bytes_hex: Some(&generated_ballot_proof.proof_bytes_hex),
             proof_encoding: Some(&bound_proof_encoding),
             public_randomness_hex: Some(public_randomness_hex),
-            skip_component_backend_verification: true,
+            component_proof_verification_mode:
+                ComponentProofVerificationMode::AlreadyVerifiedDuringGeneration,
+            unsafe_small_roster_acknowledged: false,
         },
     );
     if verification

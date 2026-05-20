@@ -45,7 +45,7 @@ export type ShareCommitmentProfile = {
     readonly commitmentModulus: DecimalIntegerString;
     readonly moduleRank: 4;
     readonly moduleDegree: 256;
-    readonly shareVectorWidth: 220;
+    readonly shareVectorWidth: number;
     readonly messageFieldModulus: 65537;
     readonly messageRepresentativeMinimum: 0;
     readonly messageRepresentativeMaximum: 65536;
@@ -111,10 +111,10 @@ export type BallotShareLayoutProfile = {
     readonly profileId: string;
     readonly ballotShareLayoutProfileDigest: ProtocolDigest;
     readonly layout: 'ScalarThenOneHotBucketsPerOption';
-    readonly maximumOptionCount: 20;
     readonly coordinatesPerOption: 11;
-    readonly mandatoryOptionCount: 20;
-    readonly mandatoryShareVectorWidth: 220;
+    readonly minimumOptionCount: 2;
+    readonly maximumOptionCount: 20;
+    readonly shareVectorWidth: number;
     readonly widthFormula: 'shareVectorWidth = 11 * optionCount';
     readonly paddingRule: 'unused coordinates must be zero';
 };
@@ -139,7 +139,7 @@ export type EncodedShareVectorLayoutProfile = {
     readonly layout: 'ScalarThenOneHotBucketsPerOption';
     readonly coordinatesPerOption: 11;
     readonly maximumOptionCount: 20;
-    readonly mandatoryShareVectorWidth: 220;
+    readonly shareVectorWidth: number;
     readonly coordinateOrder: 'score, score_bucket_1, ..., score_bucket_10 for each option';
 };
 
@@ -151,7 +151,7 @@ export type EncodedAggregateLayoutProfile = {
     readonly layout: 'AggregatedScalarAndScoreBucketCoordinates';
     readonly coordinatesPerOption: 11;
     readonly maximumOptionCount: 20;
-    readonly mandatoryAggregateWidth: 220;
+    readonly aggregateWidth: number;
     readonly aggregateCoordinateMeaning: 'sum of accepted receiver-share coordinates before bridge reduction';
 };
 
@@ -182,7 +182,7 @@ export type ShareCommitmentMessageBoundCert = {
     readonly profileDigest: ProtocolDigest;
     readonly shareCommitmentProfileDigest: ProtocolDigest;
     readonly fieldModulus: 65537;
-    readonly shareVectorWidth: 220;
+    readonly shareVectorWidth: number;
     readonly perBallotShareRepresentativeRange: readonly [0, 65536];
     readonly maximumCanonicalTurnout: number;
     readonly maximumAggregateInteger: number;

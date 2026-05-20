@@ -2,15 +2,15 @@ import path from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import sdkPackageJson from '../../../packages/sdk/package.json' with { type: 'json' };
-import publicSurface from '../../../packages/sdk/public-surface.json' with { type: 'json' };
+import sdkPackageJson from '#packages/sdk/package.json' with { type: 'json' };
+import publicSurface from '#packages/sdk/public-surface.json' with { type: 'json' };
 import {
     computeRelativeTypesSpecifier,
     rewriteTypesImports,
     sdkProtocolRuntimeSourceRelativePaths,
     transpileBridgeSource,
     transpileSdkInternalSource,
-} from '../../../tools/ci/build-sdk-bridge';
+} from '#tools/ci/build-sdk-bridge';
 
 const distRoot = path.resolve('/fake-repo/packages/sdk/dist');
 const typesRuntime = path.resolve(distRoot, 'internal/types.js');
@@ -37,13 +37,13 @@ describe('SDK bridge build helpers', () => {
             `
                 import type { ThresholdProfile } from '@sealed-lattice/types';
 
-                export const isMandatory = (profile: ThresholdProfile): boolean =>
-                    profile.rosterProfileKind === 'MandatoryN20';
+                export const isSupportedSafeRange = (profile: ThresholdProfile): boolean =>
+                    profile.rosterProfileKind === 'SupportedRosterRange';
             `,
             'packages/protocol/src/lifecycle/thresholds.ts',
         );
 
-        expect(outputText).toContain('export const isMandatory');
+        expect(outputText).toContain('export const isSupportedSafeRange');
         expect(outputText).not.toContain('ThresholdProfile');
     });
 

@@ -122,42 +122,38 @@ describe('election foundation threshold profiles', () => {
         'requires explicit unsafe acknowledgement for roster size %d',
         (rosterSize) => {
             expect(() => deriveThresholdProfile({ rosterSize })).toThrow(
-                'Unsafe micro-roster profiles require explicit acknowledgement.',
+                'Unsafe small-roster profiles require explicit acknowledgement.',
             );
         },
     );
 
-    it('marks acknowledged micro-rosters as non-claim-bearing', () => {
+    it('marks acknowledged small rosters as unsafe supported profiles', () => {
         const profile = deriveThresholdProfile({
             rosterSize: 19,
-            unsafeMicroRosterAcknowledged: true,
+            unsafeSmallRosterAcknowledged: true,
         });
 
-        expect(profile.rosterProfileKind).toBe('UnsafeMicroRoster');
-        expect(profile.claimBearing).toBe(false);
-        expect(profile.warnings).toContain('UnsafeMicroRoster');
+        expect(profile.rosterProfileKind).toBe('UnsafeSmallRoster');
+        expect(profile.claimBearing).toBe(true);
+        expect(profile.warnings).toContain('UnsafeSmallRoster');
     });
 
-    it('marks roster size 20 as the mandatory claim-bearing profile', () => {
+    it('marks roster size 20 as a supported safe profile', () => {
         const profile = deriveThresholdProfile({ rosterSize: 20 });
 
-        expect(profile.rosterProfileKind).toBe('MandatoryN20');
+        expect(profile.rosterProfileKind).toBe('SupportedRosterRange');
         expect(profile.claimBearing).toBe(true);
         expect(profile.warnings).toEqual(['ShareSelectionProfileRequired']);
     });
 
     it.each([21, 50])(
-        'marks roster size %d as certificate-gated in election foundation',
+        'marks roster size %d as a supported safe profile',
         (rosterSize) => {
             const profile = deriveThresholdProfile({ rosterSize });
 
-            expect(profile.rosterProfileKind).toBe('CertificateGatedRange');
-            expect(profile.claimBearing).toBe(false);
-            expect(profile.warnings).toEqual([
-                'CertificateGatedProfile',
-                'BackendCertificateRequired',
-                'ShareSelectionProfileRequired',
-            ]);
+            expect(profile.rosterProfileKind).toBe('SupportedRosterRange');
+            expect(profile.claimBearing).toBe(true);
+            expect(profile.warnings).toEqual(['ShareSelectionProfileRequired']);
         },
     );
 

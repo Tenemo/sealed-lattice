@@ -45,6 +45,8 @@ const config = [
             react: {
                 version: 'detect',
             },
+            'import-x/internal-regex':
+                '^#(?:packages|test-vectors|tests|tools)(?:/|$)',
             'import-x/resolver-next': [
                 createTypeScriptImportResolver({
                     alwaysTryTypes: true,

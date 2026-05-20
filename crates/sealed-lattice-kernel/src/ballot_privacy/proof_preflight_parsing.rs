@@ -1,15 +1,5 @@
 use super::*;
 
-pub(crate) fn required_json_field<'value>(
-    value: &'value Value,
-    field_name: &str,
-    object_name: &str,
-) -> crate::encoding::CanonicalResult<&'value Value> {
-    object_map(value)
-        .and_then(|object| object.get(field_name))
-        .ok_or_else(|| invalid_preflight(format!("{object_name}.{field_name} is required")))
-}
-
 pub(crate) fn matrix_coefficient_representation_from_statement(
     statement: &Value,
     object_name: &str,

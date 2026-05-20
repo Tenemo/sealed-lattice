@@ -1,16 +1,17 @@
 import { describe, expect, it } from 'vitest';
 
+import { loadTranscriptCoreKernel } from '../../src/index';
+
 import {
     formatProofBenchmarkReport,
     runMandatoryBallotProofRecordBenchmark,
     runReceiverKeyProofBenchmark,
     type RuntimeBenchmarkContext,
-} from '../../../../tests/support/ballot-privacy-proof-benchmarks';
+} from '#tests/support/ballot-privacy-proof-benchmarks';
 import {
     createJsonCheckpointStore,
     shouldResumeFromTestCheckpoints,
-} from '../../../../tests/support/node-test-checkpoints';
-import { loadTranscriptCoreKernel } from '../../src/index';
+} from '#tests/support/node-test-checkpoints';
 
 const proofBenchmarkTimeoutMs = 60 * 60_000;
 

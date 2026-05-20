@@ -191,10 +191,10 @@ describe('election foundation lifecycle', () => {
         ]);
     });
 
-    it('keeps unsafe profiles and passive prototype out of claim-bearing results', () => {
+    it('marks unsafe small rosters while preserving result claim gates', () => {
         const unsafeProfile = deriveThresholdProfile({
             rosterSize: 19,
-            unsafeMicroRosterAcknowledged: true,
+            unsafeSmallRosterAcknowledged: true,
         });
         const unsafeLabels = deriveLifecycleLabels(
             fullyVerifiedLabelInput({
@@ -208,9 +208,11 @@ describe('election foundation lifecycle', () => {
             }),
         );
 
-        expect(unsafeLabels.primary).toEqual(['Unresolved']);
-        expect(unsafeLabels.modes).toContain('UnsafeMicroRoster');
-        expect(unsafeLabels.resultClaimLabels).toEqual([]);
+        expect(unsafeLabels.modes).toContain('UnsafeSmallRoster');
+        expect(unsafeLabels.resultClaimLabels).toEqual([
+            'FullyVerifiedResult',
+            'ResultLocallyReplayedAuditable',
+        ]);
         expect(passiveLabels.primary).toEqual(['Unresolved']);
         expect(passiveLabels.modes).toContain('PassiveMHEPrototype');
     });

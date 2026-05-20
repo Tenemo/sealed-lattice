@@ -6,6 +6,7 @@ pub(super) fn verify_sparse_compatible_component_proof(
     component_proof: &Value,
     proof_input: &Value,
 ) -> Value {
+    let component_proof_record_digest = string_field(component_proof, "componentProofRecordDigest");
     let proof_statement_format =
         string_field(proof_input, "proofStatementFormat").expect("statement format checked");
     let proof_statement = match object_map(proof_input)
@@ -13,15 +14,13 @@ pub(super) fn verify_sparse_compatible_component_proof(
     {
         Some(proof_statement) => proof_statement,
         None => {
-            return component_proof_backend_rejection(
+            return component_backend_invalid_rejection(
                 operation,
                 component_id,
-                vec![json!({
-                    "code": "BallotPackageInvalid",
-                    "message": format!("Ballot proof component proof input for {component_id} must supply its sparse-compatible public proof statement object."),
-                    "objectDigest": string_field(component_proof, "componentProofRecordDigest")
-                })],
-                json!("BallotPackageInvalid"),
+                format!(
+                    "Ballot proof component proof input for {component_id} must supply its sparse-compatible public proof statement object."
+                ),
+                component_proof_record_digest,
             );
         }
     };
@@ -48,101 +47,77 @@ pub(super) fn verify_sparse_compatible_component_proof(
     let proof_bytes_hex = match string_field(proof_input, "proofBytesHex") {
         Some(proof_bytes_hex) => proof_bytes_hex,
         None => {
-            return component_proof_backend_rejection(
+            return component_backend_invalid_rejection(
                 operation,
                 component_id,
-                vec![json!({
-                    "code": "BallotPackageInvalid",
-                    "message": format!("Ballot proof component {component_id} has no proof bytes."),
-                    "objectDigest": string_field(component_proof, "componentProofRecordDigest")
-                })],
-                json!("BallotPackageInvalid"),
+                format!("Ballot proof component {component_id} has no proof bytes."),
+                component_proof_record_digest,
             );
         }
     };
     let public_randomness_hex = match string_field(proof_input, "publicRandomnessHex") {
         Some(public_randomness_hex) => public_randomness_hex,
         None => {
-            return component_proof_backend_rejection(
+            return component_backend_invalid_rejection(
                 operation,
                 component_id,
-                vec![json!({
-                    "code": "BallotPackageInvalid",
-                    "message": format!("Ballot proof component {component_id} has no public randomness."),
-                    "objectDigest": string_field(component_proof, "componentProofRecordDigest")
-                })],
-                json!("BallotPackageInvalid"),
+                format!("Ballot proof component {component_id} has no public randomness."),
+                component_proof_record_digest,
             );
         }
     };
-    let parameter_set_value = match object_map(proof_input)
-        .and_then(|object| object.get("proofParameterSet"))
-    {
-        Some(parameter_set_value) => parameter_set_value,
-        None => {
-            return component_proof_backend_rejection(
-                operation,
-                component_id,
-                vec![json!({
-                    "code": "BallotPackageInvalid",
-                    "message": format!("Ballot proof component {component_id} has no parameter set."),
-                    "objectDigest": string_field(component_proof, "componentProofRecordDigest")
-                })],
-                json!("BallotPackageInvalid"),
-            );
-        }
-    };
-    let proof_encoding_value = match object_map(proof_input)
-        .and_then(|object| object.get("proofEncoding"))
-    {
-        Some(proof_encoding_value) => proof_encoding_value,
-        None => {
-            return component_proof_backend_rejection(
-                operation,
-                component_id,
-                vec![json!({
-                    "code": "BallotPackageInvalid",
-                    "message": format!("Ballot proof component {component_id} has no proof encoding."),
-                    "objectDigest": string_field(component_proof, "componentProofRecordDigest")
-                })],
-                json!("BallotPackageInvalid"),
-            );
-        }
-    };
-    let parameter_set: LinearProofParameterSet = match serde_json::from_value(
-        parameter_set_value.clone(),
-    ) {
-        Ok(parameter_set) => parameter_set,
-        Err(error) => {
-            return component_proof_backend_rejection(
-                operation,
-                component_id,
-                vec![json!({
-                    "code": "BallotPackageInvalid",
-                    "message": format!("Ballot proof component {component_id} parameter set is invalid: {error}."),
-                    "objectDigest": string_field(component_proof, "componentProofRecordDigest")
-                })],
-                json!("BallotPackageInvalid"),
-            );
-        }
-    };
-    let proof_encoding: LinearProofEncoding = match serde_json::from_value(
-        proof_encoding_value.clone(),
-    ) {
-        Ok(proof_encoding) => proof_encoding,
-        Err(error) => {
-            return component_proof_backend_rejection(
-                operation,
-                component_id,
-                vec![json!({
-                    "code": "BallotPackageInvalid",
-                    "message": format!("Ballot proof component {component_id} proof encoding is invalid: {error}."),
-                    "objectDigest": string_field(component_proof, "componentProofRecordDigest")
-                })],
-                json!("BallotPackageInvalid"),
-            );
-        }
-    };
+    let parameter_set_value =
+        match object_map(proof_input).and_then(|object| object.get("proofParameterSet")) {
+            Some(parameter_set_value) => parameter_set_value,
+            None => {
+                return component_backend_invalid_rejection(
+                    operation,
+                    component_id,
+                    format!("Ballot proof component {component_id} has no parameter set."),
+                    component_proof_record_digest,
+                );
+            }
+        };
+    let proof_encoding_value =
+        match object_map(proof_input).and_then(|object| object.get("proofEncoding")) {
+            Some(proof_encoding_value) => proof_encoding_value,
+            None => {
+                return component_backend_invalid_rejection(
+                    operation,
+                    component_id,
+                    format!("Ballot proof component {component_id} has no proof encoding."),
+                    component_proof_record_digest,
+                );
+            }
+        };
+    let parameter_set: LinearProofParameterSet =
+        match serde_json::from_value(parameter_set_value.clone()) {
+            Ok(parameter_set) => parameter_set,
+            Err(error) => {
+                return component_backend_invalid_rejection(
+                    operation,
+                    component_id,
+                    format!(
+                        "Ballot proof component {component_id} parameter set is invalid: {error}."
+                    ),
+                    component_proof_record_digest,
+                );
+            }
+        };
+    let proof_encoding: LinearProofEncoding =
+        match serde_json::from_value(proof_encoding_value.clone()) {
+            Ok(proof_encoding) => proof_encoding,
+            Err(error) => {
+                return component_backend_invalid_rejection(
+                    operation,
+                    component_id,
+                    format!(
+                        "Ballot proof component {component_id} proof encoding is invalid: {error}."
+                    ),
+                    component_proof_record_digest,
+                );
+            }
+        };
     let target_coefficient_representation_value = match object_map(proof_statement)
         .and_then(|object| object.get("targetCoefficientRepresentation"))
     {
@@ -150,15 +125,13 @@ pub(super) fn verify_sparse_compatible_component_proof(
             target_coefficient_representation_value.clone()
         }
         None => {
-            return component_proof_backend_rejection(
+            return component_backend_invalid_rejection(
                 operation,
                 component_id,
-                vec![json!({
-                    "code": "BallotPackageInvalid",
-                    "message": format!("Sparse-compatible component proof statement for {component_id} is missing targetCoefficientRepresentation."),
-                    "objectDigest": string_field(component_proof, "componentProofRecordDigest")
-                })],
-                json!("BallotPackageInvalid"),
+                format!(
+                    "Sparse-compatible component proof statement for {component_id} is missing targetCoefficientRepresentation."
+                ),
+                component_proof_record_digest,
             );
         }
     };
@@ -166,15 +139,13 @@ pub(super) fn verify_sparse_compatible_component_proof(
         match serde_json::from_value(target_coefficient_representation_value) {
             Ok(target_coefficient_representation) => target_coefficient_representation,
             Err(error) => {
-                return component_proof_backend_rejection(
+                return component_backend_invalid_rejection(
                     operation,
                     component_id,
-                    vec![json!({
-                        "code": "BallotPackageInvalid",
-                        "message": format!("Sparse-compatible component proof statement for {component_id} has invalid targetCoefficientRepresentation: {error}."),
-                        "objectDigest": string_field(component_proof, "componentProofRecordDigest")
-                    })],
-                    json!("BallotPackageInvalid"),
+                    format!(
+                        "Sparse-compatible component proof statement for {component_id} has invalid targetCoefficientRepresentation: {error}."
+                    ),
+                    component_proof_record_digest,
                 );
             }
         };
@@ -184,15 +155,14 @@ pub(super) fn verify_sparse_compatible_component_proof(
     ) {
         Ok(matrix_coefficient_representation) => matrix_coefficient_representation,
         Err(error) => {
-            return component_proof_backend_rejection(
+            return component_backend_invalid_rejection(
                 operation,
                 component_id,
-                vec![json!({
-                    "code": "BallotPackageInvalid",
-                    "message": format!("Sparse-compatible component proof statement for {component_id} has invalid matrixCoefficientRepresentation: {}.", error.message),
-                    "objectDigest": string_field(component_proof, "componentProofRecordDigest")
-                })],
-                json!("BallotPackageInvalid"),
+                format!(
+                    "Sparse-compatible component proof statement for {component_id} has invalid matrixCoefficientRepresentation: {}.",
+                    error.message
+                ),
+                component_proof_record_digest,
             );
         }
     };

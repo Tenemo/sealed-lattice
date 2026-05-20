@@ -9,7 +9,7 @@ pub(crate) struct BallotLinearProofVerificationInputs<'a> {
     parameter_set: &'a Value,
     proof_encoding: &'a Value,
     component_bundle_statement: Option<&'a Value>,
-    skip_component_backend_verification: bool,
+    component_proof_verification_mode: ComponentProofVerificationMode,
 }
 
 pub(crate) struct BallotProofVerificationInputs<'a> {
@@ -21,7 +21,56 @@ pub(crate) struct BallotProofVerificationInputs<'a> {
     pub(crate) component_bundle_statement: Option<&'a Value>,
     pub(crate) component_proof_inputs: Option<&'a Value>,
     pub(crate) component_proof_bundle: Option<&'a Value>,
-    pub(crate) skip_component_backend_verification: bool,
+    pub(crate) component_proof_verification_mode: ComponentProofVerificationMode,
+    pub(crate) unsafe_small_roster_acknowledged: bool,
+}
+
+pub(crate) struct BallotProofVerificationRequest<'a> {
+    statement: &'a Value,
+    ballot_proof: &'a Value,
+    backend_inputs: BallotProofVerificationInputs<'a>,
+}
+
+impl<'a> BallotProofVerificationRequest<'a> {
+    pub(crate) fn from_command_request(
+        request: &'a Value,
+    ) -> crate::encoding::CanonicalResult<Self> {
+        Ok(Self {
+            statement: required_json_field(request, "statement", "verifyBallotProof")?,
+            ballot_proof: required_json_field(request, "ballotProof", "verifyBallotProof")?,
+            backend_inputs: BallotProofVerificationInputs {
+                component_bundle_statement: object_map(request)
+                    .and_then(|object| object.get("componentBundleStatement")),
+                component_proof_bundle: object_map(request)
+                    .and_then(|object| object.get("componentProofBundle")),
+                component_proof_inputs: object_map(request)
+                    .and_then(|object| object.get("componentProofInputs")),
+                linear_statement: object_map(request)
+                    .and_then(|object| object.get("linearStatement")),
+                parameter_set: object_map(request).and_then(|object| object.get("parameterSet")),
+                proof_bytes_hex: string_field(request, "proofBytesHex"),
+                proof_encoding: object_map(request).and_then(|object| object.get("proofEncoding")),
+                public_randomness_hex: string_field(request, "publicRandomnessHex"),
+                component_proof_verification_mode: ComponentProofVerificationMode::VerifyBackend,
+                unsafe_small_roster_acknowledged: object_map(request)
+                    .and_then(|object| object.get("unsafeSmallRosterAcknowledged"))
+                    .and_then(Value::as_bool)
+                    == Some(true),
+            },
+        })
+    }
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub(crate) enum ComponentProofVerificationMode {
+    VerifyBackend,
+    AlreadyVerifiedDuringGeneration,
+}
+
+impl ComponentProofVerificationMode {
+    fn verifies_component_backend(self) -> bool {
+        self == Self::VerifyBackend
+    }
 }
 
 pub(crate) fn verify_ballot_linear_proof_bytes(
@@ -48,7 +97,6 @@ pub(crate) fn verify_ballot_linear_proof_bytes(
     let expected_linear_statement_digest =
         derive_ballot_proof_linear_statement_digest(linear_statement);
     let supplied_parameter_profile_id = string_field(parameter_set, "profileId");
-    let supplied_proof_encoding_profile_id = string_field(proof_encoding, "profileId");
     let linear_statement_parameter_profile_id =
         string_field(linear_statement, "parameterProfileId");
     let linear_statement_projection_coverage = string_field(linear_statement, "projectionCoverage");
@@ -57,46 +105,65 @@ pub(crate) fn verify_ballot_linear_proof_bytes(
         .and_then(Value::as_u64)
         .and_then(|proof_size_bytes| usize::try_from(proof_size_bytes).ok());
 
-    if linear_statement_digest != expected_linear_statement_digest.as_deref() {
-        refused_objects.push(structural_refusal(
-            "Ballot proof linear statement digest does not match its canonical payload.",
-            ballot_proof_record_digest,
-        ));
-    }
     if linear_statement_parameter_profile_id != supplied_parameter_profile_id {
         refused_objects.push(structural_refusal(
             "Ballot proof linear statement parameter profile does not match the supplied proof parameter set.",
             ballot_proof_record_digest,
         ));
     }
-    if linear_statement_projection_coverage == Some(FULL_BALLOT_PROOF_PROJECTION_COVERAGE)
-        && supplied_parameter_profile_id != Some(FULL_BALLOT_PROOF_PARAMETER_PROFILE_ID)
-    {
-        refused_objects.push(structural_refusal(
-            "Full encoded-score ballot relation proofs require the dedicated full-relation parameter profile.",
-            ballot_proof_record_digest,
-        ));
-    }
-    if linear_statement_projection_coverage == Some(FULL_BALLOT_PROOF_PROJECTION_COVERAGE)
-        && supplied_proof_encoding_profile_id != Some(FULL_BALLOT_PROOF_ENCODING_PROFILE_ID)
-    {
-        refused_objects.push(structural_refusal(
-            "Full encoded-score ballot relation proofs require the dedicated full-relation proof encoding profile.",
-            ballot_proof_record_digest,
-        ));
-    }
+    let requires_full_profile =
+        linear_statement_projection_coverage == Some(FULL_BALLOT_PROOF_PROJECTION_COVERAGE);
+    refused_objects.extend(collect_linear_proof_binding_refusals(
+        LinearProofBindingValidationInput {
+            proof_record: ballot_proof,
+            linear_statement,
+            parameter_set,
+            proof_encoding,
+            expected_linear_statement_digest,
+            expected_parameter_set_digest,
+            expected_proof_encoding_digest,
+            expected_public_randomness_digest,
+            object_digest: ballot_proof_record_digest,
+            parameter_profile_requirement: requires_full_profile.then_some(
+                LinearProofProfileRequirement {
+                    profile_id: FULL_BALLOT_PROOF_PARAMETER_PROFILE_ID,
+                    refusal_message:
+                        "Full encoded-score ballot relation proofs require the dedicated full-relation parameter profile.",
+                },
+            ),
+            proof_encoding_profile_requirement: requires_full_profile.then_some(
+                LinearProofProfileRequirement {
+                    profile_id: FULL_BALLOT_PROOF_ENCODING_PROFILE_ID,
+                    refusal_message:
+                        "Full encoded-score ballot relation proofs require the dedicated full-relation proof encoding profile.",
+                },
+            ),
+            messages: LinearProofBindingValidationMessages {
+                canonical_statement_digest_mismatch:
+                    "Ballot proof linear statement digest does not match its canonical payload.",
+                proof_record_statement_mismatch:
+                    "Ballot proof record is not bound to the supplied linear statement.",
+                proof_encoding_digest_mismatch:
+                    "Ballot proof record is not bound to the supplied proof encoding profile.",
+                parameter_set_digest_mismatch:
+                    "Ballot proof record is not bound to the supplied proof parameter set.",
+                public_randomness_digest_mismatch:
+                    "Ballot proof record is not bound to the supplied public randomness.",
+                parameter_set_size_mismatch:
+                    "Ballot proof parameter set is not bound to the proof record byte length.",
+                parameter_set_malformed_prefix: "Ballot proof parameter set is malformed",
+                proof_encoding_size_mismatch:
+                    "Ballot proof encoding is not bound to the proof record byte length.",
+                proof_encoding_malformed_prefix: "Ballot proof encoding is malformed",
+            },
+        },
+    ));
     if linear_statement_projection_coverage == Some(FULL_BALLOT_PROOF_PROJECTION_COVERAGE) {
         refused_objects.extend(collect_full_ballot_binding_contract_refusals(
             linear_statement,
             parameter_set,
             proof_encoding,
             proof_size_bytes,
-            ballot_proof_record_digest,
-        ));
-    }
-    if string_field(ballot_proof, "linearStatementDigest") != linear_statement_digest {
-        refused_objects.push(structural_refusal(
-            "Ballot proof record is not bound to the supplied linear statement.",
             ballot_proof_record_digest,
         ));
     }
@@ -143,60 +210,6 @@ pub(crate) fn verify_ballot_linear_proof_bytes(
             "Ballot proof linear statement is not bound to the supplied ballot proof statement.",
             ballot_proof_record_digest,
         ));
-    }
-    if string_field(ballot_proof, "proofEncodingProfileDigest")
-        != expected_proof_encoding_digest.as_deref()
-    {
-        refused_objects.push(structural_refusal(
-            "Ballot proof record is not bound to the supplied proof encoding profile.",
-            ballot_proof_record_digest,
-        ));
-    }
-    if string_field(ballot_proof, "proofParameterSetDigest")
-        != expected_parameter_set_digest.as_deref()
-    {
-        refused_objects.push(structural_refusal(
-            "Ballot proof record is not bound to the supplied proof parameter set.",
-            ballot_proof_record_digest,
-        ));
-    }
-    if string_field(ballot_proof, "publicRandomnessDigest")
-        != expected_public_randomness_digest.as_deref()
-    {
-        refused_objects.push(structural_refusal(
-            "Ballot proof record is not bound to the supplied public randomness.",
-            ballot_proof_record_digest,
-        ));
-    }
-    match serde_json::from_value::<LinearProofParameterSet>(parameter_set.clone()) {
-        Ok(parameter_contract)
-            if parameter_contract.expected_proof_size_bytes != proof_size_bytes =>
-        {
-            refused_objects.push(structural_refusal(
-                "Ballot proof parameter set is not bound to the proof record byte length.",
-                ballot_proof_record_digest,
-            ));
-        }
-        Ok(_) => {}
-        Err(error) => refused_objects.push(structural_refusal(
-            format!("Ballot proof parameter set is malformed: {error}"),
-            ballot_proof_record_digest,
-        )),
-    }
-    match serde_json::from_value::<LinearProofEncoding>(proof_encoding.clone()) {
-        Ok(proof_encoding_contract)
-            if proof_encoding_contract.expected_proof_size_bytes != proof_size_bytes =>
-        {
-            refused_objects.push(structural_refusal(
-                "Ballot proof encoding is not bound to the proof record byte length.",
-                ballot_proof_record_digest,
-            ));
-        }
-        Ok(_) => {}
-        Err(error) => refused_objects.push(structural_refusal(
-            format!("Ballot proof encoding is malformed: {error}"),
-            ballot_proof_record_digest,
-        )),
     }
     refused_objects.extend(collect_ballot_component_bundle_refusals(
         statement,
@@ -278,7 +291,9 @@ pub(crate) fn verify_ballot_linear_proof_bytes(
         );
     }
     let mut component_backend_verified = false;
-    if !backend_inputs.skip_component_backend_verification
+    if backend_inputs
+        .component_proof_verification_mode
+        .verifies_component_backend()
         && let Some(component_proof_bundle) = component_proof_bundle
         && let Some(component_backend_result) = verify_component_proof_bundle_backend(
             "verifyBallotProof",
@@ -288,7 +303,9 @@ pub(crate) fn verify_ballot_linear_proof_bytes(
         )
     {
         return component_backend_result;
-    } else if !backend_inputs.skip_component_backend_verification
+    } else if backend_inputs
+        .component_proof_verification_mode
+        .verifies_component_backend()
         && component_proof_bundle.is_some()
     {
         component_backend_verified = true;
@@ -304,7 +321,9 @@ pub(crate) fn verify_ballot_linear_proof_bytes(
         status_labels.push(json!("BallotProofComponentProofBundleVerified"));
         status_labels.push(json!("BallotProofComponentLinearProofVerified"));
     }
-    if backend_inputs.skip_component_backend_verification {
+    if backend_inputs.component_proof_verification_mode
+        == ComponentProofVerificationMode::AlreadyVerifiedDuringGeneration
+    {
         status_labels.push(json!("BallotProofComponentGeneratedProofsAlreadyVerified"));
     }
     if let Some(proof_status_labels) = proof_verification
@@ -342,7 +361,11 @@ pub(crate) fn verify_ballot_proof(
     ballot_proof: &Value,
     backend_inputs: BallotProofVerificationInputs<'_>,
 ) -> Value {
-    let mut refused_objects = collect_ballot_proof_refusals(statement, ballot_proof);
+    let mut refused_objects = collect_ballot_proof_refusals(
+        statement,
+        ballot_proof,
+        backend_inputs.unsafe_small_roster_acknowledged,
+    );
     refused_objects.extend(collect_proof_bytes_refusals(
         backend_inputs.proof_bytes_hex,
         string_field(ballot_proof, "proofBytesDigest"),
@@ -395,8 +418,8 @@ pub(crate) fn verify_ballot_proof(
                     proof_bytes_hex,
                     proof_encoding,
                     public_randomness_hex,
-                    skip_component_backend_verification: backend_inputs
-                        .skip_component_backend_verification,
+                    component_proof_verification_mode: backend_inputs
+                        .component_proof_verification_mode,
                 },
             );
         }
@@ -418,4 +441,15 @@ pub(crate) fn verify_ballot_proof(
             string_field(ballot_proof, "ballotProofRecordDigest"),
         )],
     )
+}
+
+pub(crate) fn verify_ballot_proof_from_command_request(request: &Value) -> Value {
+    match BallotProofVerificationRequest::from_command_request(request) {
+        Ok(request) => verify_ballot_proof(
+            request.statement,
+            request.ballot_proof,
+            request.backend_inputs,
+        ),
+        Err(error) => structural_rejection("verifyBallotProof", vec![error.to_json_value()]),
+    }
 }

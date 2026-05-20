@@ -1,6 +1,5 @@
 import type { BallotProofStatement } from '@sealed-lattice/types';
 
-import ballotFieldLinearProofBackendVectorsJson from '../../../../../test-vectors/ballot-privacy/ballot-field-linear-proof-vectors.json';
 import {
     buildBallotProofComponentBundleStatement,
     buildBallotProofComponentLinearProofProjection,
@@ -38,6 +37,8 @@ import {
     receiverKeyProofRootEvidence,
     singleReceiverRelationInput,
 } from './fixture-inputs.js';
+
+import ballotFieldLinearProofBackendVectorsJson from '#test-vectors/ballot-privacy/ballot-field-linear-proof-vectors.json';
 
 const createProofEncoding = (input: {
     readonly profileId: string;

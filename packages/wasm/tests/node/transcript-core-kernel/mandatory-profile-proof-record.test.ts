@@ -1,12 +1,6 @@
 // This file is one focused part of the split test suite.
 import { describe, expect, it } from 'vitest';
 
-import { createMandatoryProfileBallotProofRecordBenchmarkFixture } from '../../../../../tests/support/ballot-privacy-proof-record-generation-fixtures';
-import {
-    createJsonCheckpointStore,
-    shouldResumeFromTestCheckpoints,
-} from '../../../../../tests/support/node-test-checkpoints';
-import { runTimedTestStep } from '../../../../../tests/support/timed-test-steps';
 import { loadTranscriptCoreKernel } from '../../../src/index';
 import {
     type BallotPrivacyKernelVerification,
@@ -14,6 +8,13 @@ import {
 } from '../../../src/transcript-core-bridge';
 
 import { cloneJsonValue, expectRefusalMessage } from './shared.js';
+
+import { createMandatoryProfileBallotProofRecordBenchmarkFixture } from '#tests/support/ballot-privacy-proof-record-generation-fixtures';
+import {
+    createJsonCheckpointStore,
+    shouldResumeFromTestCheckpoints,
+} from '#tests/support/node-test-checkpoints';
+import { runTimedTestStep } from '#tests/support/timed-test-steps';
 
 const mandatoryProfileProofRecordCheckpointNames = {
     generatedProofRecord:

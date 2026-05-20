@@ -2,7 +2,6 @@ import { protocolDigestNamespaceValues } from '@sealed-lattice/types';
 import type { ShareCommitmentMessageBoundCert } from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
-import ballotPrivacyProfileVectorJson from '../../../../test-vectors/ballot-privacy/proof-stack-profile.json' with { type: 'json' };
 import {
     createBallotPrivacyProfileSet,
     createShareCommitmentMessageBoundCert,
@@ -10,6 +9,8 @@ import {
     deriveShareCommitmentMessageBoundCertDigest,
     verifyShareCommitmentMessageBoundCert,
 } from '../../src/ballot-privacy/index';
+
+import ballotPrivacyProfileVectorJson from '#test-vectors/ballot-privacy/proof-stack-profile.json' with { type: 'json' };
 
 const ballotPrivacyProfileVector = ballotPrivacyProfileVectorJson as {
     readonly schemaVersion: 1;
@@ -149,9 +150,11 @@ describe('ballot privacy profile freeze', () => {
         expect(
             profileSet.shareCommitmentProfile.openingRandomnessSamplerDomain,
         ).toBe('sealed.vote/internal/share-commitment/opening-randomness-v1');
+        expect(profileSet.ballotShareLayoutProfile.shareVectorWidth).toBe(220);
         expect(
-            profileSet.ballotShareLayoutProfile.mandatoryShareVectorWidth,
-        ).toBe(220);
+            createBallotPrivacyProfileSet({ optionCount: 2 })
+                .ballotShareLayoutProfile.shareVectorWidth,
+        ).toBe(22);
         expect(profileSet.ballotProofProfile.profileId).toBe(
             ballotPrivacyProfileVector.profileIds.ballotProofProfileId,
         );

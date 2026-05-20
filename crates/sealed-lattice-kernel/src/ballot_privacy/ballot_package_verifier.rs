@@ -1,7 +1,11 @@
 use super::*;
 
-pub fn verify_claim_bearing_ballot_package(ballot_package: &Value) -> Value {
-    let refused_objects = collect_claim_bearing_package_refusals(ballot_package);
+pub fn verify_claim_bearing_ballot_package(
+    ballot_package: &Value,
+    unsafe_small_roster_acknowledged: bool,
+) -> Value {
+    let refused_objects =
+        collect_claim_bearing_package_refusals(ballot_package, unsafe_small_roster_acknowledged);
     if !refused_objects.is_empty() {
         return structural_rejection("verifyClaimBearingBallotPackage", refused_objects);
     }
@@ -33,7 +37,8 @@ pub fn verify_claim_bearing_ballot_package(ballot_package: &Value) -> Value {
             public_randomness_hex: package_object
                 .get("publicRandomnessHex")
                 .and_then(Value::as_str),
-            skip_component_backend_verification: false,
+            component_proof_verification_mode: ComponentProofVerificationMode::VerifyBackend,
+            unsafe_small_roster_acknowledged,
         },
     );
     if verification
@@ -77,7 +82,7 @@ pub fn verify_claim_bearing_ballot_package(ballot_package: &Value) -> Value {
     }
 
     let mut status_labels = vec![
-        json!("ClaimBearingBallotPackageDigestRecomputed"),
+        json!("BallotPrivacyPackageDigestRecomputed"),
         json!("ReceiverKeyProofRootEvidenceChecked"),
     ];
     if let Some(verification_labels) = verification

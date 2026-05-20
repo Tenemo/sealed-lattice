@@ -1,7 +1,3 @@
-use super::protocol_constants::{
-    MANDATORY_CLAIM_OPTION_COUNT, MANDATORY_CLAIM_RECEIVER_COUNT,
-    MANDATORY_CLAIM_SHARE_VECTOR_WIDTH,
-};
 use super::*;
 
 const FULL_BALLOT_BINDING_PARAMETER_SOURCE: &str =
@@ -24,29 +20,57 @@ struct LinearContractExpectation {
     witness_l2_bound_squared: u128,
 }
 
-pub(crate) fn collect_mandatory_claim_profile_refusals(
+pub(crate) fn collect_supported_ballot_privacy_dimension_refusals(
     statement: &Value,
     object_digest: Option<&str>,
+    unsafe_small_roster_acknowledged: bool,
 ) -> Vec<Value> {
-    let mandatory_shape_is_present = unsigned_integer_field(statement, "optionCount")
-        == Some(MANDATORY_CLAIM_OPTION_COUNT)
-        && unsigned_integer_field(statement, "shareVectorWidth")
-            == Some(MANDATORY_CLAIM_SHARE_VECTOR_WIDTH)
-        && array_field(statement, "receiverPublicKeys").map(Vec::len)
-            == Some(MANDATORY_CLAIM_RECEIVER_COUNT)
-        && array_field(statement, "receiverPayloads").map(Vec::len)
-            == Some(MANDATORY_CLAIM_RECEIVER_COUNT)
-        && array_field(statement, "shareCommitments").map(Vec::len)
-            == Some(MANDATORY_CLAIM_RECEIVER_COUNT);
+    let mut refused_objects = Vec::new();
+    let option_count = unsigned_integer_field(statement, "optionCount");
+    let share_vector_width = unsigned_integer_field(statement, "shareVectorWidth");
+    let expected_share_vector_width = option_count.and_then(|value| {
+        value.checked_mul(u128::from(
+            BALLOT_PRIVACY_ENCODED_COORDINATES_PER_OPTION,
+        ))
+    });
+    let participant_count = array_field(statement, "receiverPublicKeys").map(Vec::len);
 
-    if mandatory_shape_is_present {
-        Vec::new()
-    } else {
-        vec![structural_refusal(
-            "Claim-bearing ballot package must use the mandatory 20-option, 20-receiver, width-220 ballot privacy profile.",
+    if !option_count.is_some_and(|value| {
+        (BALLOT_PRIVACY_MINIMUM_OPTION_COUNT..=BALLOT_PRIVACY_MAXIMUM_OPTION_COUNT)
+            .contains(&value)
+    }) {
+        refused_objects.push(structural_refusal(
+            "Ballot privacy proof statements must use two to twenty options.",
             object_digest,
-        )]
+        ));
     }
+    if share_vector_width != expected_share_vector_width {
+        refused_objects.push(structural_refusal(
+            "Ballot privacy proof statement shareVectorWidth must equal optionCount times eleven encoded coordinates.",
+            object_digest,
+        ));
+    }
+    if !participant_count.is_some_and(|value| {
+        (BALLOT_PRIVACY_MINIMUM_UNSAFE_PARTICIPANT_COUNT
+            ..=BALLOT_PRIVACY_MAXIMUM_PARTICIPANT_COUNT)
+            .contains(&value)
+    }) {
+        refused_objects.push(structural_refusal(
+            "Ballot privacy proof statements must use three to fifty participants.",
+            object_digest,
+        ));
+    }
+    if participant_count.is_some_and(|value| {
+        value < BALLOT_PRIVACY_MINIMUM_SAFE_PARTICIPANT_COUNT
+            && !unsafe_small_roster_acknowledged
+    }) {
+        refused_objects.push(structural_refusal(
+            "Ballot privacy proof statements with three to nineteen participants require explicit unsafe small-roster acknowledgement.",
+            object_digest,
+        ));
+    }
+
+    refused_objects
 }
 
 pub(crate) fn collect_full_ballot_binding_contract_refusals(
@@ -107,221 +131,6 @@ pub(crate) fn collect_full_ballot_binding_contract_refusals(
     refused_objects
 }
 
-pub(crate) fn collect_mandatory_component_contract_refusals(
-    component_proof_bundle: Option<&Value>,
-    component_proof_inputs: Option<&Value>,
-    object_digest: Option<&str>,
-) -> Vec<Value> {
-    let Some(component_proof_bundle) = component_proof_bundle else {
-        return Vec::new();
-    };
-    let Some(component_proof_inputs) = component_proof_inputs.and_then(Value::as_array) else {
-        return Vec::new();
-    };
-    let component_proofs = array_field(component_proof_bundle, "componentProofs")
-        .map(Vec::as_slice)
-        .unwrap_or(&[]);
-    let mut refused_objects = Vec::new();
-
-    for (component_index, component_id) in REQUIRED_BALLOT_PROOF_COMPONENT_IDS.iter().enumerate() {
-        let Some(component_proof) = component_proofs.get(component_index) else {
-            continue;
-        };
-        let Some(proof_input) = component_proof_inputs
-            .iter()
-            .find(|input| string_field(input, "componentId") == Some(component_id))
-        else {
-            continue;
-        };
-        refused_objects.extend(collect_component_contract_refusals(
-            component_id,
-            component_proof,
-            proof_input,
-            object_digest,
-        ));
-    }
-
-    refused_objects
-}
-
-fn collect_component_contract_refusals(
-    component_id: &str,
-    component_proof: &Value,
-    proof_input: &Value,
-    object_digest: Option<&str>,
-) -> Vec<Value> {
-    let Some(expectation) = mandatory_component_contract_expectation(component_id) else {
-        return vec![structural_refusal(
-            format!("Claim-bearing ballot package includes unsupported component {component_id}."),
-            object_digest,
-        )];
-    };
-    let mut refused_objects = Vec::new();
-    let proof_statement = object_map(proof_input)
-        .and_then(|object| object.get("proofStatement"))
-        .unwrap_or(&Value::Null);
-
-    if component_id == "receiver-key-binding-component" {
-        refused_objects.extend(collect_public_zero_statement_contract_refusals(
-            proof_statement,
-            object_digest,
-        ));
-    } else {
-        refused_objects.extend(collect_linear_statement_contract_refusals(
-            proof_statement,
-            &expectation,
-            object_digest,
-            &format!("Claim-bearing {component_id} proof statement"),
-        ));
-    }
-    if string_field(proof_input, "proofStatementFormat")
-        != mandatory_component_statement_format(component_id)
-    {
-        refused_objects.push(structural_refusal(
-            format!("Claim-bearing {component_id} proof statement format is not the frozen mandatory format."),
-            object_digest,
-        ));
-    }
-    if string_field(proof_statement, "parameterProfileId") != Some(expectation.parameter_profile_id)
-    {
-        refused_objects.push(structural_refusal(
-            format!("Claim-bearing {component_id} proof statement is not bound to the frozen parameter profile."),
-            object_digest,
-        ));
-    }
-
-    let proof_size_bytes = unsigned_integer_field(component_proof, "proofSizeBytes")
-        .and_then(|value| usize::try_from(value).ok());
-    let parameter_set = object_map(proof_input)
-        .and_then(|object| object.get("proofParameterSet"))
-        .unwrap_or(&Value::Null);
-    let proof_encoding = object_map(proof_input)
-        .and_then(|object| object.get("proofEncoding"))
-        .unwrap_or(&Value::Null);
-
-    refused_objects.extend(collect_parameter_contract_refusals(
-        parameter_set,
-        &expectation,
-        proof_size_bytes,
-        object_digest,
-        &format!("Claim-bearing {component_id} parameter set"),
-        component_id != "receiver-key-binding-component",
-    ));
-    refused_objects.extend(collect_encoding_contract_refusals(
-        proof_encoding,
-        &expectation,
-        proof_size_bytes,
-        object_digest,
-        &format!("Claim-bearing {component_id} proof encoding"),
-        component_id != "receiver-key-binding-component",
-    ));
-
-    refused_objects
-}
-
-fn mandatory_component_contract_expectation(
-    component_id: &str,
-) -> Option<LinearContractExpectation> {
-    let common_field_encoding = |parameter_profile_id,
-                                 parameter_source,
-                                 encoding_profile_id,
-                                 encoding_source,
-                                 coefficient_modulus,
-                                 ring_degree,
-                                 statement_rows,
-                                 statement_columns,
-                                 witness_l2_bound_squared| {
-        LinearContractExpectation {
-            coefficient_modulus,
-            encoding_profile_id,
-            encoding_source,
-            parameter_profile_id,
-            parameter_source,
-            proof_system_ring_degree: 64,
-            ring_degree,
-            short_response_vector_length: statement_columns * (ring_degree / 64) + 1,
-            statement_columns,
-            statement_rows,
-            witness_l2_bound_squared,
-        }
-    };
-
-    match component_id {
-        "score-and-shamir-field-component" => Some(common_field_encoding(
-            "encoded-score-field-linear-compatibility-v1",
-            "sealed-lattice/linear-proof/score-and-shamir-field-component-parameters-v1",
-            "encoded-score-field-linear-proof-encoding-v1",
-            "sealed-lattice/linear-proof/score-and-shamir-field-component-encoding-v1",
-            65_537,
-            64,
-            82,
-            404,
-            65_536,
-        )),
-        "payload-plaintext-field-component" => Some(common_field_encoding(
-            "payload-plaintext-field-linear-compatibility-v1",
-            "sealed-lattice/linear-proof/payload-plaintext-field-component-parameters-v1",
-            "payload-plaintext-field-linear-proof-encoding-v1",
-            "sealed-lattice/linear-proof/payload-plaintext-field-component-encoding-v1",
-            65_537,
-            64,
-            200,
-            1_800,
-            65_536,
-        )),
-        "share-commitment-component" => Some(common_field_encoding(
-            "share-commitment-linear-compatibility-v1",
-            "sealed-lattice/linear-proof/share-commitment-component-parameters-v1",
-            "share-commitment-linear-proof-encoding-v1",
-            "sealed-lattice/linear-proof/share-commitment-component-encoding-v1",
-            18_446_744_069_414_584_321,
-            64,
-            320,
-            5_680,
-            1_048_576,
-        )),
-        "receiver-encryption-component" => Some(common_field_encoding(
-            "receiver-encryption-linear-compatibility-v1",
-            "sealed-lattice/linear-proof/receiver-encryption-component-parameters-v1",
-            "receiver-encryption-linear-proof-encoding-v1",
-            "sealed-lattice/linear-proof/receiver-encryption-component-encoding-v1",
-            12_289,
-            256,
-            1_800,
-            3_600,
-            65_536,
-        )),
-        "receiver-key-binding-component" => Some(LinearContractExpectation {
-            coefficient_modulus: 12_289,
-            encoding_profile_id: "receiver-encryption-linear-proof-encoding-v1",
-            encoding_source: "sealed-lattice/linear-proof/receiver-key-binding-component-encoding-v1",
-            parameter_profile_id: "receiver-key-binding-linear-compatibility-v1",
-            parameter_source: "sealed-lattice/linear-proof/receiver-key-binding-component-parameters-v1",
-            proof_system_ring_degree: 64,
-            ring_degree: 64,
-            short_response_vector_length: 2,
-            statement_columns: 1,
-            statement_rows: 1,
-            witness_l2_bound_squared: 65_536,
-        }),
-        _ => None,
-    }
-}
-
-fn mandatory_component_statement_format(component_id: &str) -> Option<&'static str> {
-    match component_id {
-        "score-and-shamir-field-component" | "payload-plaintext-field-component" => {
-            Some(SPARSE_COMPONENT_PROOF_STATEMENT_FORMAT)
-        }
-        "share-commitment-component" => Some(STRUCTURED_SHARE_COMMITMENT_PROOF_STATEMENT_FORMAT),
-        "receiver-encryption-component" => {
-            Some(STRUCTURED_RECEIVER_ENCRYPTION_PROOF_STATEMENT_FORMAT)
-        }
-        "receiver-key-binding-component" => Some(PUBLIC_ZERO_PROOF_STATEMENT_FORMAT),
-        _ => None,
-    }
-}
-
 fn collect_linear_statement_contract_refusals(
     proof_statement: &Value,
     expectation: &LinearContractExpectation,
@@ -349,36 +158,6 @@ fn collect_linear_statement_contract_refusals(
     if string_field(proof_statement, "relation") != Some("A*w + t = 0") {
         refused_objects.push(structural_refusal(
             format!("{label} does not use the frozen linear relation."),
-            object_digest,
-        ));
-    }
-
-    refused_objects
-}
-
-fn collect_public_zero_statement_contract_refusals(
-    proof_statement: &Value,
-    object_digest: Option<&str>,
-) -> Vec<Value> {
-    let mut refused_objects = Vec::new();
-    if string_field(proof_statement, "objectType") != Some("BallotProofComponentProofStatementPlan")
-        || object_map(proof_statement)
-            .and_then(|object| object.get("objectVersion"))
-            .and_then(Value::as_u64)
-            != Some(1)
-        || string_field(proof_statement, "componentId") != Some("receiver-key-binding-component")
-        || string_field(proof_statement, "proofStatementFormat")
-            != Some(PUBLIC_ZERO_PROOF_STATEMENT_FORMAT)
-        || string_field(proof_statement, "proofBytesAvailability")
-            != Some("public-zero-witness-binding-check")
-        || string_field(proof_statement, "proofLoweringStatus") != Some("explicitRowsAvailable")
-        || string_field(proof_statement, "relation") != Some("A*w + t = 0")
-        || unsigned_integer_field(proof_statement, "coefficientModulus") != Some(12_289)
-        || unsigned_integer_field(proof_statement, "rowCount") != Some(20_480)
-        || unsigned_integer_field(proof_statement, "variableColumnCount") != Some(0)
-    {
-        refused_objects.push(structural_refusal(
-            "Claim-bearing receiver-key-binding-component proof statement does not match the frozen public-zero witness binding contract.",
             object_digest,
         ));
     }
@@ -565,25 +344,98 @@ mod tests {
         })
     }
 
-    #[test]
-    fn mandatory_claim_profile_requires_twenty_receivers() {
+    fn statement_with_dimensions(option_count: u128, participant_count: usize) -> Value {
         let statement = json!({
-            "optionCount": 20,
-            "receiverPayloads": [{}],
-            "receiverPublicKeys": [{}],
-            "shareCommitments": [{}],
-            "shareVectorWidth": 220,
+            "optionCount": option_count,
+            "receiverPayloads": vec![json!({}); participant_count],
+            "receiverPublicKeys": vec![json!({}); participant_count],
+            "shareCommitments": vec![json!({}); participant_count],
+            "shareVectorWidth": option_count * u128::from(BALLOT_PRIVACY_ENCODED_COORDINATES_PER_OPTION),
         });
 
-        let refused_objects =
-            collect_mandatory_claim_profile_refusals(&statement, Some(&digest("package")));
+        statement
+    }
+
+    #[test]
+    fn supported_ballot_privacy_dimensions_accept_safe_range() {
+        let statement = statement_with_dimensions(2, 20);
+        assert!(collect_supported_ballot_privacy_dimension_refusals(
+            &statement,
+            Some(&digest("package")),
+            false,
+        )
+        .is_empty());
+
+        let statement = statement_with_dimensions(20, 50);
+        assert!(
+            collect_supported_ballot_privacy_dimension_refusals(
+                &statement,
+                Some(&digest("package")),
+                false,
+            )
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn supported_ballot_privacy_dimensions_require_unsafe_acknowledgement() {
+        let statement = statement_with_dimensions(20, 3);
+        let refused_objects = collect_supported_ballot_privacy_dimension_refusals(
+            &statement,
+            Some(&digest("package")),
+            false,
+        );
 
         assert!(
-            refused_objects
-                .iter()
-                .any(|refusal| string_field(refusal, "message")
-                    .is_some_and(|message| message.contains("mandatory 20-option"))),
-            "single-receiver statement must not pass claim-bearing profile checks: {refused_objects:?}"
+            refused_objects.iter().any(|refusal| string_field(refusal, "message")
+                .is_some_and(|message| message.contains("unsafe small-roster"))),
+            "unacknowledged unsafe small roster must be rejected: {refused_objects:?}"
+        );
+        assert!(
+            collect_supported_ballot_privacy_dimension_refusals(
+                &statement,
+                Some(&digest("package")),
+                true,
+            )
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn supported_ballot_privacy_dimensions_reject_out_of_range_values() {
+        for (mut statement, expected_message) in [
+            (statement_with_dimensions(1, 20), "two to twenty options"),
+            (statement_with_dimensions(21, 20), "two to twenty options"),
+            (statement_with_dimensions(20, 2), "three to fifty participants"),
+            (statement_with_dimensions(20, 51), "three to fifty participants"),
+        ] {
+            if expected_message == "two to twenty options" {
+                statement["shareVectorWidth"] = json!(220);
+            }
+            let refused_objects = collect_supported_ballot_privacy_dimension_refusals(
+                &statement,
+                Some(&digest("package")),
+                true,
+            );
+
+            assert!(
+                refused_objects.iter().any(|refusal| string_field(refusal, "message")
+                    .is_some_and(|message| message.contains(expected_message))),
+                "invalid dimensions must be rejected: {refused_objects:?}"
+            );
+        }
+
+        let mut statement = statement_with_dimensions(20, 20);
+        statement["shareVectorWidth"] = json!(219);
+        let refused_objects = collect_supported_ballot_privacy_dimension_refusals(
+            &statement,
+            Some(&digest("package")),
+            false,
+        );
+        assert!(
+            refused_objects.iter().any(|refusal| string_field(refusal, "message")
+                .is_some_and(|message| message.contains("shareVectorWidth"))),
+            "wrong share vector width must be rejected: {refused_objects:?}"
         );
     }
 
@@ -638,34 +490,4 @@ mod tests {
         );
     }
 
-    #[test]
-    fn public_zero_statement_contract_is_frozen() {
-        let statement = json!({
-            "coefficientModulus": "12289",
-            "componentId": "receiver-key-binding-component",
-            "objectType": "BallotProofComponentProofStatementPlan",
-            "objectVersion": 1,
-            "proofBytesAvailability": "public-zero-witness-binding-check",
-            "proofLoweringStatus": "explicitRowsAvailable",
-            "proofStatementFormat": PUBLIC_ZERO_PROOF_STATEMENT_FORMAT,
-            "relation": "A*w + t = 0",
-            "rowCount": 20_480,
-            "variableColumnCount": 0,
-        });
-
-        assert!(collect_public_zero_statement_contract_refusals(&statement, None).is_empty());
-
-        let mut mutated_statement = statement;
-        mutated_statement["rowCount"] = json!(1);
-        let refused_objects =
-            collect_public_zero_statement_contract_refusals(&mutated_statement, None);
-
-        assert!(
-            refused_objects
-                .iter()
-                .any(|refusal| string_field(refusal, "message")
-                    .is_some_and(|message| message.contains("public-zero"))),
-            "mutated public-zero statement must be rejected: {refused_objects:?}"
-        );
-    }
 }

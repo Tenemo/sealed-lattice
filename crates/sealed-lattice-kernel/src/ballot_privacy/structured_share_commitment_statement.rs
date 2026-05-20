@@ -1,4 +1,8 @@
 use super::*;
+#[cfg(test)]
+use crate::ballot_privacy::receiver_polynomial_helpers::{
+    negate_receiver_coefficient, parse_receiver_column_vector_with_max_len,
+};
 
 pub(crate) fn parse_structured_share_commitment_statement(
     structured_statement: &Value,

@@ -2,28 +2,28 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { deriveProtocolDigest } from "../../packages/crypto/src/digests.js";
-import { createReceiverEncryptionPublicKeyShell } from "../../packages/protocol/src/ballot-privacy/objects.js";
-import { createBallotPrivacyProfileSet } from "../../packages/protocol/src/ballot-privacy/profiles.js";
+import { deriveProtocolDigest } from "#packages/crypto/src/digests.js";
+import { createReceiverEncryptionPublicKeyShell } from "#packages/protocol/src/ballot-privacy/objects.js";
+import { createBallotPrivacyProfileSet } from "#packages/protocol/src/ballot-privacy/profiles.js";
 import {
     createFixtureRandomnessSource,
     createReceiverKeyProof,
     generateReceiverState,
     type ReceiverEncryptionSecretState,
-} from "../../packages/protocol/src/ballot-privacy/lattice-primitives.js";
+} from "#packages/protocol/src/ballot-privacy/lattice-primitives.js";
 import {
     createReceiverKeyProofBackendStatement,
     type ReceiverKeyProofBackendStatement,
-} from "../../packages/protocol/src/ballot-privacy/receiver-key-backend-statement.js";
+} from "#packages/protocol/src/ballot-privacy/receiver-key-backend-statement.js";
 import {
     createReceiverKeyLinearProofStatement,
     type ReceiverKeyLinearProofStatement,
-} from "../../packages/protocol/src/ballot-privacy/receiver-key-linear-statement.js";
+} from "#packages/protocol/src/ballot-privacy/receiver-key-linear-statement.js";
 import type {
     ProtocolDigest,
     ReceiverEncryptionPublicKey,
     ReceiverKeyProof,
-} from "../../packages/types/src/index.js";
+} from "#packages/types/src/index.js";
 
 const repoRoot = fileURLToPath(new URL("../../", import.meta.url));
 const outputPath = path.resolve(

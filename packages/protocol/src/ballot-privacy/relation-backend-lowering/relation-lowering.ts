@@ -2,7 +2,7 @@ import { deriveProtocolDigest } from '@sealed-lattice/crypto';
 import type { ProtocolDigest } from '@sealed-lattice/types';
 
 import { fieldModulus } from '../../plaintext-oracle/field.js';
-import { getBallotPrivacyEncodedShareVectorWidth } from '../encoded-share-layout.js';
+import { getBallotPrivacyEncodedShareVectorWidth } from '../protocol-parameters.js';
 import {
     compileBallotPrivacyRelation,
     type BallotPrivacyRelationCompilerInput,

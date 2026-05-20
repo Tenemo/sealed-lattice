@@ -14,12 +14,13 @@ import { tmpdir } from 'node:os';
 import path, { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { normalizeTranscriptCoreKernelBytesForDigest } from '../../packages/wasm/src/transcript-core-bridge.js';
-
 import {
+    getRootPackageJsonPath,
     getRootReadmePath,
     stagePublicPackage,
 } from './stage-public-package.mjs';
+
+import { normalizeTranscriptCoreKernelBytesForDigest } from '#packages/wasm/src/transcript-core-bridge.js';
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 
@@ -416,12 +417,13 @@ export const validatePublishedPackageFilePaths = (
 
 export const validatePublishedPackageMetadata = (
     publishedPackageJson: Record<string, unknown>,
+    expectedDescription: string,
 ): string[] => {
     const failures: string[] = [];
 
-    if ('description' in publishedPackageJson) {
+    if (publishedPackageJson.description !== expectedDescription) {
         failures.push(
-            'Published package metadata must not include a description field',
+            'Published package metadata description must match the root package description',
         );
     }
     if ('devDependencies' in publishedPackageJson) {
@@ -508,8 +510,22 @@ const main = async (): Promise<void> => {
         const publishedPackageJson = JSON.parse(
             await readFile(join(packageDirectory, 'package.json'), 'utf8'),
         ) as Record<string, unknown>;
+        const rootPackageJson = JSON.parse(
+            await readFile(getRootPackageJsonPath(repoRoot), 'utf8'),
+        ) as Record<string, unknown>;
+        if (
+            typeof rootPackageJson.description !== 'string' ||
+            rootPackageJson.description.length === 0
+        ) {
+            throw new Error(
+                'Root package.json must define package description.',
+            );
+        }
         const packageMetadataValidationFailures =
-            validatePublishedPackageMetadata(publishedPackageJson);
+            validatePublishedPackageMetadata(
+                publishedPackageJson,
+                rootPackageJson.description,
+            );
         if (packageMetadataValidationFailures.length > 0) {
             throw new Error(packageMetadataValidationFailures.join('\n'));
         }

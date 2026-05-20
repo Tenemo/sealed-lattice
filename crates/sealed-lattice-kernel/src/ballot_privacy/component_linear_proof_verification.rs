@@ -15,6 +15,27 @@ use structured_receiver_encryption::verify_structured_receiver_encryption_compon
 pub(crate) use bundle_backend::verify_component_proof_bundle_backend;
 pub(crate) use dense_vector_case::component_linear_proof_vector_case;
 
+pub(super) fn component_backend_refusal(
+    message: impl Into<String>,
+    object_digest: Option<&str>,
+) -> Value {
+    structural_refusal(message, object_digest)
+}
+
+pub(super) fn component_backend_invalid_rejection(
+    operation: &str,
+    component_id: &str,
+    message: impl Into<String>,
+    object_digest: Option<&str>,
+) -> Value {
+    component_proof_backend_rejection(
+        operation,
+        component_id,
+        vec![component_backend_refusal(message, object_digest)],
+        json!("BallotPackageInvalid"),
+    )
+}
+
 pub(crate) fn verify_component_linear_proof_bytes(
     operation: &str,
     component_id: &str,

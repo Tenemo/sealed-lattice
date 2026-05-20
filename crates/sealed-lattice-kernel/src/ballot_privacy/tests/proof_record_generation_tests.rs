@@ -761,19 +761,14 @@ fn ballot_proof_record_generation_emits_bound_component_bundle() {
 
 #[test]
 fn malformed_receiver_key_proof_rejects_before_backend_gate() {
-    let verification = super::verify_receiver_key_proof_from_command_fields(
-        &json!({
+    let verification = super::verify_receiver_key_proof_from_command_request(&json!({
+        "receiverKeyProof": {
             "objectType": "ReceiverKeyProof",
             "objectVersion": 1,
             "proofBackend": "LocalLinearLatticeRelation",
             "receiverKeyProofRoot": "00"
-        }),
-        None,
-        None,
-        None,
-        None,
-        None,
-    );
+        }
+    }));
 
     assert_eq!(verification["ok"], false);
     assert_eq!(verification["backendAvailable"], true);

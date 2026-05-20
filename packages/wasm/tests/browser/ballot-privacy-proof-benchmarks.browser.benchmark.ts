@@ -1,19 +1,20 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { cdp, server } from 'vitest/browser';
 
+import { loadTranscriptCoreKernel } from '../../src/index';
+
 import {
     formatProofBenchmarkReport,
     runMandatoryBallotProofRecordBenchmark,
     runReceiverKeyProofBenchmark,
     type RuntimeBenchmarkContext,
-} from '../../../../tests/support/ballot-privacy-proof-benchmarks';
+} from '#tests/support/ballot-privacy-proof-benchmarks';
 import {
     applyCalibratedMidTierMobileCpuThrottle,
     setBrowserCpuThrottleRate,
     type BrowserCpuThrottleRateSetter,
     type CpuThrottleCalibrationSuccess,
-} from '../../../../tests/support/browser-cpu-throttle-calibration';
-import { loadTranscriptCoreKernel } from '../../src/index';
+} from '#tests/support/browser-cpu-throttle-calibration';
 
 const proofBenchmarkTimeoutMs = 60 * 60_000;
 let mobileCpuThrottleCalibration: CpuThrottleCalibrationSuccess | undefined;

@@ -9,9 +9,6 @@ import type {
 } from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
-import aggregateSharesVectorJson from '../../../../test-vectors/pvss-ballot/aggregate-shares.json' with { type: 'json' };
-import ballotAlgebraVectorJson from '../../../../test-vectors/pvss-ballot/ballot-algebra.json' with { type: 'json' };
-import canonicalBallotSetVectorJson from '../../../../test-vectors/pvss-ballot/canonical-ballot-set.json' with { type: 'json' };
 import { deriveThresholdProfile } from '../../src/lifecycle/thresholds';
 import { derivePlaintextTopKOracle } from '../../src/plaintext-oracle/index';
 import { deriveBallotPolynomialSetDigest } from '../../src/pvss-ballot/ballot-polynomials';
@@ -37,6 +34,10 @@ import {
     manifestPolicyDigests,
     createSignature,
 } from './election-foundation-fixture-constants';
+
+import aggregateSharesVectorJson from '#test-vectors/pvss-ballot/aggregate-shares.json' with { type: 'json' };
+import ballotAlgebraVectorJson from '#test-vectors/pvss-ballot/ballot-algebra.json' with { type: 'json' };
+import canonicalBallotSetVectorJson from '#test-vectors/pvss-ballot/canonical-ballot-set.json' with { type: 'json' };
 
 const pollSpec = {
     pollId: 'pvss-ballot-poll',

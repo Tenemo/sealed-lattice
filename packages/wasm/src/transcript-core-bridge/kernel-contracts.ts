@@ -286,9 +286,11 @@ export type TranscriptCoreKernel = {
         readonly proofEncoding?: unknown;
         readonly publicRandomnessHex?: string;
         readonly statement: unknown;
+        readonly unsafeSmallRosterAcknowledged?: boolean;
     }): BallotPrivacyKernelVerification;
     verifyClaimBearingBallotPackage(input: {
         readonly ballotPackage: unknown;
+        readonly unsafeSmallRosterAcknowledged?: boolean;
     }): BallotPrivacyKernelVerification;
 };
 
@@ -418,10 +420,12 @@ type TranscriptCoreKernelCommand =
           readonly proofEncoding?: unknown;
           readonly publicRandomnessHex?: string;
           readonly statement: unknown;
+          readonly unsafeSmallRosterAcknowledged?: boolean;
       }
     | {
           readonly command: 'VerifyClaimBearingBallotPackage';
           readonly ballotPackage: unknown;
+          readonly unsafeSmallRosterAcknowledged?: boolean;
       };
 
 type TranscriptCoreKernelExports = WebAssembly.Exports & {

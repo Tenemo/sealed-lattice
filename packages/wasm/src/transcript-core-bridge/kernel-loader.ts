@@ -339,6 +339,8 @@ export const createTranscriptCoreKernelLoader = (
                         proofEncoding: input.proofEncoding,
                         publicRandomnessHex: input.publicRandomnessHex,
                         statement: input.statement,
+                        unsafeSmallRosterAcknowledged:
+                            input.unsafeSmallRosterAcknowledged,
                     }),
                 verifyClaimBearingBallotPackage: (
                     input,
@@ -346,6 +348,8 @@ export const createTranscriptCoreKernelLoader = (
                     executeCommand<BallotPrivacyKernelVerification>({
                         command: 'VerifyClaimBearingBallotPackage',
                         ballotPackage: input.ballotPackage,
+                        unsafeSmallRosterAcknowledged:
+                            input.unsafeSmallRosterAcknowledged,
                     }),
             };
         })().catch((error: unknown) => {

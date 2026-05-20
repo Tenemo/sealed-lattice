@@ -11,7 +11,7 @@ import {
     isVectorRelativePathInsideRoot,
     normalizeVectorRelativePath,
     validateVectorManifest,
-} from '../../../tools/ci/verify-test-vectors';
+} from '#tools/ci/verify-test-vectors';
 
 const tempDirectoryPaths: string[] = [];
 

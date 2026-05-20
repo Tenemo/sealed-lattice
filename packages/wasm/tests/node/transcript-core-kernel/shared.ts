@@ -9,18 +9,19 @@ import {
 } from '@sealed-lattice/types';
 import { afterEach, expect, vi } from 'vitest';
 
-import ballotFieldLinearProofBackendVectorsJson from '../../../../../test-vectors/ballot-privacy/ballot-field-linear-proof-vectors.json';
-import encodedRelationVectorsJson from '../../../../../test-vectors/ballot-privacy/encoded-ballot-linear-relation-vectors.json';
-import linearProofBackendVectorsJson from '../../../../../test-vectors/ballot-privacy/proof-backend-linear-vectors.json';
-import receiverKeyLinearProofBackendVectorsJson from '../../../../../test-vectors/ballot-privacy/receiver-key-linear-proof-vectors.json';
-import receiverKeyVectorsJson from '../../../../../test-vectors/ballot-privacy/receiver-key-proof-vectors.json';
-import goldenTranscriptCoreFixturesJson from '../../../../../test-vectors/transcript-core/golden-transcript-core.json';
-import malformedObjectFixturesJson from '../../../../../test-vectors/transcript-core/malformed-objects.json';
 import {
     createTranscriptCoreKernelLoader,
     type BallotPrivacyKernelVerification,
     type TranscriptCoreKernel,
 } from '../../../src/transcript-core-bridge';
+
+import ballotFieldLinearProofBackendVectorsJson from '#test-vectors/ballot-privacy/ballot-field-linear-proof-vectors.json';
+import encodedRelationVectorsJson from '#test-vectors/ballot-privacy/encoded-ballot-linear-relation-vectors.json';
+import linearProofBackendVectorsJson from '#test-vectors/ballot-privacy/proof-backend-linear-vectors.json';
+import receiverKeyLinearProofBackendVectorsJson from '#test-vectors/ballot-privacy/receiver-key-linear-proof-vectors.json';
+import receiverKeyVectorsJson from '#test-vectors/ballot-privacy/receiver-key-proof-vectors.json';
+import goldenTranscriptCoreFixturesJson from '#test-vectors/transcript-core/golden-transcript-core.json';
+import malformedObjectFixturesJson from '#test-vectors/transcript-core/malformed-objects.json';
 
 type NamedFixture = {
     readonly caseName: string;

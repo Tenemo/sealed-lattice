@@ -1,29 +1,3 @@
-import { deriveProtocolDigest } from '../../packages/crypto/src/index';
-import {
-    createFixtureRandomnessSource,
-    createReceiverKeyProof,
-    generateReceiverState,
-    type ReceiverEncryptionSecretState,
-} from '../../packages/protocol/src/ballot-privacy/lattice-primitives';
-import { createBallotPrivacyProfileSet } from '../../packages/protocol/src/ballot-privacy/profiles';
-import { createReceiverKeyLinearProofStatement } from '../../packages/protocol/src/ballot-privacy/receiver-key-linear-statement';
-import {
-    createReceiverKeyLinearProofEncoding,
-    createReceiverKeyLinearProofParameterSet,
-    createReceiverKeyProofMaterial,
-} from '../../packages/protocol/src/ballot-privacy/receiver-key-proof-parameters';
-import type {
-    ProtocolDigest,
-    ReceiverEncryptionProfile,
-    ReceiverEncryptionPublicKey,
-} from '../../packages/types/src/index';
-import type {
-    BallotPrivacyKernelVerification,
-    BallotPrivacyProofGeneration,
-    BallotPrivacyReceiverKeyProofGeneration,
-    TranscriptCoreKernel,
-} from '../../packages/wasm/src/transcript-core-bridge';
-
 import {
     checkpointPayload,
     checkpointRecord,
@@ -36,6 +10,32 @@ import {
 } from './ballot-privacy-proof-benchmark-memory';
 import { createMandatoryProfileBallotProofRecordBenchmarkFixture } from './ballot-privacy-proof-record-generation-fixtures';
 import { runTimedTestStep, type TimedTestStepMetric } from './timed-test-steps';
+
+import { deriveProtocolDigest } from '#packages/crypto/src/index';
+import {
+    createFixtureRandomnessSource,
+    createReceiverKeyProof,
+    generateReceiverState,
+    type ReceiverEncryptionSecretState,
+} from '#packages/protocol/src/ballot-privacy/lattice-primitives';
+import { createBallotPrivacyProfileSet } from '#packages/protocol/src/ballot-privacy/profiles';
+import { createReceiverKeyLinearProofStatement } from '#packages/protocol/src/ballot-privacy/receiver-key-linear-statement';
+import {
+    createReceiverKeyLinearProofEncoding,
+    createReceiverKeyLinearProofParameterSet,
+    createReceiverKeyProofMaterial,
+} from '#packages/protocol/src/ballot-privacy/receiver-key-proof-parameters';
+import type {
+    ProtocolDigest,
+    ReceiverEncryptionProfile,
+    ReceiverEncryptionPublicKey,
+} from '#packages/types/src/index';
+import type {
+    BallotPrivacyKernelVerification,
+    BallotPrivacyProofGeneration,
+    BallotPrivacyReceiverKeyProofGeneration,
+    TranscriptCoreKernel,
+} from '#packages/wasm/src/transcript-core-bridge';
 
 type ComponentProofRecord = {
     readonly componentId: string;
