@@ -239,7 +239,7 @@ pub(crate) fn generate_sparse_linear_proof(
     validate_zero_high_bits_low_part(proof_ring, recovery_input.entries(), input.proof_encoding)?;
 
     let proof_bytes = encode_linear_proof_components(
-        LazerDemoLinearProofComponents {
+        LinearProofComponents {
             commitment_target_vector: target_commitment_vector,
             hash_mask_vector,
             compressed_commitment_vector: commitment_preparation
@@ -534,7 +534,7 @@ where
     validate_zero_high_bits_low_part(proof_ring, recovery_input.entries(), input.proof_encoding)?;
 
     let proof_bytes = encode_linear_proof_components(
-        LazerDemoLinearProofComponents {
+        LinearProofComponents {
             commitment_target_vector: target_commitment_vector,
             hash_mask_vector,
             compressed_commitment_vector: commitment_preparation

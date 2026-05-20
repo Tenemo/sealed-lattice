@@ -761,7 +761,7 @@ fn ballot_proof_record_generation_emits_bound_component_bundle() {
 
 #[test]
 fn malformed_receiver_key_proof_rejects_before_backend_gate() {
-    let verification = super::verify_receiver_key_proof(
+    let verification = super::verify_receiver_key_proof_from_command_fields(
         &json!({
             "objectType": "ReceiverKeyProof",
             "objectVersion": 1,

@@ -1,5 +1,6 @@
 use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
 
+#[cfg(test)]
 pub const MODULE_MARKER: &str = "ring";
 pub const FIELD_MODULUS: u64 = 65_537;
 pub const MAXIMUM_TOTAL_SCORE_FACTOR: u64 = 10;

@@ -12,8 +12,8 @@ use crate::{
 use super::{
     linear_proof_parameters::{LinearProofEncoding, LinearProofParameterSet},
     linear_proof_statement::{
-        LazerDemoLinearStatementTranscript, LinearProofMatrixCoefficientRepresentation,
-        LinearProofTargetCoefficientRepresentation, rotate_left_negacyclic_signed_polynomial,
+        LinearProofMatrixCoefficientRepresentation, LinearProofTargetCoefficientRepresentation,
+        LinearStatementTranscript, rotate_left_negacyclic_signed_polynomial,
         scale_signed_polynomial_by_source_modulus_inverse, source_polynomial_split_factor,
         split_source_polynomial_into_proof_ring_with_coefficient_representation,
         transform_target_vector_to_proof_ring, validate_source_polynomial,
@@ -274,7 +274,7 @@ pub fn derive_dense_compatible_sparse_linear_statement_transcript(
     target_vector_coefficients: &[Vec<u64>],
     target_coefficient_representation: LinearProofTargetCoefficientRepresentation,
     public_randomness: &[u8],
-) -> CanonicalResult<LazerDemoLinearStatementTranscript> {
+) -> CanonicalResult<LinearStatementTranscript> {
     derive_dense_compatible_sparse_linear_statement_transcript_with_matrix_coefficient_representation(
         parameter_set,
         proof_encoding,
@@ -294,7 +294,7 @@ pub fn derive_dense_compatible_sparse_linear_statement_transcript_with_matrix_co
     matrix_coefficient_representation: LinearProofMatrixCoefficientRepresentation,
     target_coefficient_representation: LinearProofTargetCoefficientRepresentation,
     public_randomness: &[u8],
-) -> CanonicalResult<LazerDemoLinearStatementTranscript> {
+) -> CanonicalResult<LinearStatementTranscript> {
     if public_randomness.len() != 32 {
         return Err(invalid_sparse_statement(
             "sparse statement public randomness must be exactly 32 bytes",
@@ -322,7 +322,7 @@ pub fn derive_dense_compatible_sparse_linear_statement_transcript_with_matrix_co
     let public_parameters_and_statement_hash =
         shake128_32_from_parts(public_randomness, &arithmetic_statement_hash);
 
-    Ok(LazerDemoLinearStatementTranscript {
+    Ok(LinearStatementTranscript {
         transformed_statement_matrix_rows: transformed_statement_matrix.rows(),
         transformed_statement_matrix_columns: transformed_statement_matrix.columns(),
         transformed_target_vector_length: transformed_target_vector.len(),

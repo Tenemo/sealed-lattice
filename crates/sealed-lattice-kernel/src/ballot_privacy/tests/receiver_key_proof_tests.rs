@@ -407,7 +407,7 @@ fn proof_byte_bearing_receiver_key_record_verifies_against_linear_backend() {
         &production_parameter_set,
         &production_proof_encoding,
     );
-    let valid_verification = super::verify_receiver_key_proof(
+    let valid_verification = super::verify_receiver_key_proof_from_command_fields(
         &valid_receiver_key_proof,
         Some(&valid_linear_statement),
         Some(proof_bytes_hex),
@@ -432,7 +432,7 @@ fn proof_byte_bearing_receiver_key_record_verifies_against_linear_backend() {
         &production_parameter_set,
         &production_proof_encoding,
     );
-    let mutated_verification = super::verify_receiver_key_proof(
+    let mutated_verification = super::verify_receiver_key_proof_from_command_fields(
         &mutated_receiver_key_proof,
         Some(&mutated_linear_statement),
         Some(proof_bytes_hex),
@@ -452,7 +452,7 @@ fn proof_byte_bearing_receiver_key_record_verifies_against_linear_backend() {
             "profileId".to_string(),
             json!("receiver-key-linear-module-lwe-compatibility-v1"),
         );
-    let wrong_parameter_verification = super::verify_receiver_key_proof(
+    let wrong_parameter_verification = super::verify_receiver_key_proof_from_command_fields(
         &valid_receiver_key_proof,
         Some(&valid_linear_statement),
         Some(proof_bytes_hex),
@@ -480,7 +480,7 @@ fn proof_byte_bearing_receiver_key_record_verifies_against_linear_backend() {
         &size_unbound_parameter_set,
         &production_proof_encoding,
     );
-    let size_unbound_parameter_verification = super::verify_receiver_key_proof(
+    let size_unbound_parameter_verification = super::verify_receiver_key_proof_from_command_fields(
         &size_unbound_receiver_key_proof,
         Some(&valid_linear_statement),
         Some(proof_bytes_hex),
@@ -514,7 +514,7 @@ fn proof_byte_bearing_receiver_key_record_verifies_against_linear_backend() {
         &production_parameter_set,
         &size_unbound_proof_encoding,
     );
-    let size_unbound_encoding_verification = super::verify_receiver_key_proof(
+    let size_unbound_encoding_verification = super::verify_receiver_key_proof_from_command_fields(
         &size_unbound_encoding_receiver_key_proof,
         Some(&valid_linear_statement),
         Some(proof_bytes_hex),

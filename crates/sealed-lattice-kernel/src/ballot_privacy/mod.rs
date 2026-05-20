@@ -1,28 +1,30 @@
-pub mod abdlop_commitment;
-pub mod encoded_relation_vectors;
-pub mod linear_proof_abdlop;
-pub mod linear_proof_norms;
-pub mod linear_proof_parameters;
+#![allow(dead_code, unused_imports)]
+
+pub(crate) mod abdlop_commitment;
+pub(crate) mod encoded_relation_vectors;
+pub(crate) mod linear_proof_abdlop;
+pub(crate) mod linear_proof_norms;
+pub(crate) mod linear_proof_parameters;
 pub(crate) mod linear_proof_profile_constants;
 pub(crate) mod linear_proof_prover;
-pub mod linear_proof_public_parameters;
-pub mod linear_proof_rng;
-pub mod linear_proof_statement;
-pub mod linear_proof_tbox;
-pub mod linear_proof_transcript;
-pub mod linear_proof_verifier;
+pub(crate) mod linear_proof_public_parameters;
+pub(crate) mod linear_proof_rng;
+pub(crate) mod linear_proof_statement;
+pub(crate) mod linear_proof_tbox;
+pub(crate) mod linear_proof_transcript;
+pub(crate) mod linear_proof_verifier;
 pub(crate) mod many_quadratic;
-pub mod polynomial_matrix;
-pub mod polynomial_ring;
-pub mod polynomial_vector;
-pub mod proof_coder;
+pub(crate) mod polynomial_matrix;
+pub(crate) mod polynomial_ring;
+pub(crate) mod polynomial_vector;
+pub(crate) mod proof_coder;
 pub(crate) mod protocol_constants;
 pub(crate) mod quadratic_challenge;
 pub(crate) mod quadratic_equation;
-pub mod receiver_key_vectors;
-pub mod sparse_linear_proof_statement;
-pub mod sparse_polynomial_matrix;
-pub mod sparse_polynomial_vector;
+pub(crate) mod receiver_key_vectors;
+pub(crate) mod sparse_linear_proof_statement;
+pub(crate) mod sparse_polynomial_matrix;
+pub(crate) mod sparse_polynomial_vector;
 pub(crate) mod tbox_relations;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -52,7 +54,7 @@ use self::{
     linear_proof_transcript::shake128_32,
     polynomial_ring::PolynomialRing,
     polynomial_vector::PolynomialVector,
-    protocol_constants::{BALLOT_PRIVACY_ENCODED_COORDINATES_PER_OPTION, SHARE_COMMITMENT_MODULUS},
+    protocol_constants::SHARE_COMMITMENT_MODULUS,
     receiver_key_vectors::{
         RECEIVER_ENCRYPTION_MODULE_DEGREE, RECEIVER_ENCRYPTION_MODULE_RANK,
         RECEIVER_ENCRYPTION_MODULUS, derive_receiver_encryption_public_matrix,
@@ -61,283 +63,24 @@ use self::{
     sparse_polynomial_matrix::{SparsePolynomialMatrix, SparsePolynomialMatrixEntry},
 };
 
+#[cfg(test)]
 pub const MODULE_MARKER: &str = "ballot-privacy";
 pub const BALLOT_PRIVACY_PROOF_BACKEND_AVAILABLE: bool = true;
 
-const BACKEND_NAME: &str = "linear lattice proof backend";
-const FULL_BALLOT_PROOF_PROJECTION_COVERAGE: &str = "full-encoded-score-ballot-relation";
-const FULL_BALLOT_PROOF_PARAMETER_PROFILE_ID: &str =
-    "full-encoded-score-ballot-linear-compatibility-v1";
-const FULL_BALLOT_PROOF_ENCODING_PROFILE_ID: &str =
-    "full-encoded-score-ballot-linear-proof-encoding-v1";
-const RECEIVER_KEY_PROOF_PARAMETER_PROFILE_ID: &str = "receiver-key-linear-module-lwe-v1";
-const RECEIVER_KEY_PROOF_ENCODING_PROFILE_ID: &str = "receiver-key-linear-proof-encoding-v1";
-const COMPONENT_BUNDLE_INCOMPLETE_COVERAGE: &str = "component-bundle-incomplete";
-const REQUIRED_BALLOT_PROOF_COMPONENT_IDS: &[&str] = &[
-    "score-and-shamir-field-component",
-    "payload-plaintext-field-component",
-    "share-commitment-component",
-    "receiver-encryption-component",
-    "receiver-key-binding-component",
-];
-const ALLOWED_BALLOT_PROOF_COMPONENT_STATEMENT_FORMATS: &[&str] = &[
-    "dense-polynomial-matrix-linear-proof-v1",
-    "sparse-polynomial-matrix-linear-proof-v1",
-    "structured-module-sis-share-commitment-v1",
-    "structured-module-lwe-linear-proof-v1",
-    "public-zero-witness-binding-check-v1",
-];
-const DENSE_COMPONENT_PROOF_STATEMENT_FORMAT: &str = "dense-polynomial-matrix-linear-proof-v1";
-const SPARSE_COMPONENT_PROOF_STATEMENT_FORMAT: &str = "sparse-polynomial-matrix-linear-proof-v1";
-const STRUCTURED_SHARE_COMMITMENT_PROOF_STATEMENT_FORMAT: &str =
-    "structured-module-sis-share-commitment-v1";
-const STRUCTURED_RECEIVER_ENCRYPTION_PROOF_STATEMENT_FORMAT: &str =
-    "structured-module-lwe-linear-proof-v1";
-const PUBLIC_ZERO_PROOF_STATEMENT_FORMAT: &str = "public-zero-witness-binding-check-v1";
-const MAX_GENERIC_SPARSE_COMPONENT_SHORT_RESPONSE_VECTOR_LENGTH: usize = 4_096;
-const AVAILABLE_DENSE_PROOF_BYTES: &str = "available-for-small-dense-oracle";
-const REQUIRES_SPARSE_PROOF_STATEMENT: &str = "requires-sparse-proof-statement";
-const REQUIRES_STRUCTURED_PROOF_STATEMENT: &str = "requires-structured-proof-statement";
-const PUBLIC_ZERO_WITNESS_BINDING_CHECK: &str = "public-zero-witness-binding-check";
-const SHARE_COMMITMENT_MODULE_RANK: usize = 4;
-const SHARE_COMMITMENT_MODULE_DEGREE: usize = 256;
-const SHARE_COMMITMENT_OPENING_DIMENSION: usize = 64;
-
-fn encoded_share_vector_width(statement: &Value) -> Option<u64> {
-    object_map(statement)
-        .and_then(|object| object.get("optionCount"))
-        .and_then(Value::as_u64)
-        .map(|option_count| {
-            option_count.saturating_mul(BALLOT_PRIVACY_ENCODED_COORDINATES_PER_OPTION)
-        })
-}
-
-pub fn describe_proof_backend() -> Value {
-    json!({
-        "backendName": BACKEND_NAME,
-        "backendAvailable": BALLOT_PRIVACY_PROOF_BACKEND_AVAILABLE,
-        "portableRustWasmPortRequired": false,
-        "requiredComponents": [],
-        "blockedReason": Value::Null
-    })
-}
-
-fn structural_rejection(operation: &str, refused_objects: Vec<Value>) -> Value {
-    json!({
-        "ok": false,
-        "backendAvailable": BALLOT_PRIVACY_PROOF_BACKEND_AVAILABLE,
-        "backendStatus": describe_proof_backend(),
-        "operation": operation,
-        "statusLabels": [],
-        "acceptedDigests": [],
-        "refusedObjects": refused_objects,
-        "unresolvedReason": "BallotPackageInvalid"
-    })
-}
-
-fn structural_refusal(message: impl Into<String>, object_digest: Option<&str>) -> Value {
-    let message = message.into();
-    match object_digest {
-        Some(object_digest) => json!({
-            "code": "BallotPackageInvalid",
-            "message": message,
-            "objectDigest": object_digest
-        }),
-        None => json!({
-            "code": "BallotPackageInvalid",
-            "message": message
-        }),
-    }
-}
-
-fn object_map(value: &Value) -> Option<&Map<String, Value>> {
-    value.as_object()
-}
-
-fn string_field<'value>(value: &'value Value, field_name: &str) -> Option<&'value str> {
-    object_map(value)?.get(field_name)?.as_str()
-}
-
-fn array_field<'value>(value: &'value Value, field_name: &str) -> Option<&'value Vec<Value>> {
-    object_map(value)?.get(field_name)?.as_array()
-}
-
-fn is_protocol_digest(value: &str) -> bool {
-    value.len() == 128
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-}
-
-fn unsigned_decimal_string(value: &str) -> bool {
-    value == "0" || (!value.starts_with('0') && value.bytes().all(|byte| byte.is_ascii_digit()))
-}
-
-fn expected_component_proof_statement_format(component_id: &str) -> Option<&'static str> {
-    match component_id {
-        "score-and-shamir-field-component" => Some(DENSE_COMPONENT_PROOF_STATEMENT_FORMAT),
-        "payload-plaintext-field-component" | "share-commitment-component" => {
-            Some(SPARSE_COMPONENT_PROOF_STATEMENT_FORMAT)
-        }
-        "receiver-encryption-component" => {
-            Some(STRUCTURED_RECEIVER_ENCRYPTION_PROOF_STATEMENT_FORMAT)
-        }
-        "receiver-key-binding-component" => Some(PUBLIC_ZERO_PROOF_STATEMENT_FORMAT),
-        _ => None,
-    }
-}
-
-fn component_proof_statement_format_is_expected(
-    component_id: &str,
-    proof_statement_format: &str,
-) -> bool {
-    match component_id {
-        "score-and-shamir-field-component" => matches!(
-            proof_statement_format,
-            DENSE_COMPONENT_PROOF_STATEMENT_FORMAT | SPARSE_COMPONENT_PROOF_STATEMENT_FORMAT
-        ),
-        "payload-plaintext-field-component" => {
-            proof_statement_format == SPARSE_COMPONENT_PROOF_STATEMENT_FORMAT
-        }
-        "share-commitment-component" => matches!(
-            proof_statement_format,
-            SPARSE_COMPONENT_PROOF_STATEMENT_FORMAT
-                | STRUCTURED_SHARE_COMMITMENT_PROOF_STATEMENT_FORMAT
-        ),
-        "receiver-encryption-component" => {
-            proof_statement_format == STRUCTURED_RECEIVER_ENCRYPTION_PROOF_STATEMENT_FORMAT
-        }
-        "receiver-key-binding-component" => {
-            proof_statement_format == PUBLIC_ZERO_PROOF_STATEMENT_FORMAT
-        }
-        _ => false,
-    }
-}
-
-fn expected_component_proof_statement_format_label(component_id: &str) -> &'static str {
-    match component_id {
-        "score-and-shamir-field-component" => {
-            "dense-polynomial-matrix-linear-proof-v1 or sparse-polynomial-matrix-linear-proof-v1"
-        }
-        "share-commitment-component" => {
-            "sparse-polynomial-matrix-linear-proof-v1 or structured-module-sis-share-commitment-v1"
-        }
-        _ => expected_component_proof_statement_format(component_id).unwrap_or("unknown"),
-    }
-}
-
-fn component_proof_bytes_availability_is_expected(
-    component_id: &str,
-    proof_statement_format: &str,
-    proof_bytes_availability: &str,
-) -> bool {
-    let expected_availability = match proof_statement_format {
-        DENSE_COMPONENT_PROOF_STATEMENT_FORMAT => AVAILABLE_DENSE_PROOF_BYTES,
-        SPARSE_COMPONENT_PROOF_STATEMENT_FORMAT
-        | STRUCTURED_SHARE_COMMITMENT_PROOF_STATEMENT_FORMAT => REQUIRES_SPARSE_PROOF_STATEMENT,
-        STRUCTURED_RECEIVER_ENCRYPTION_PROOF_STATEMENT_FORMAT => {
-            REQUIRES_STRUCTURED_PROOF_STATEMENT
-        }
-        PUBLIC_ZERO_PROOF_STATEMENT_FORMAT => PUBLIC_ZERO_WITNESS_BINDING_CHECK,
-        _ => return false,
-    };
-
-    component_proof_statement_format_is_expected(component_id, proof_statement_format)
-        && proof_bytes_availability == expected_availability
-}
-
-fn component_proof_bytes_must_be_empty(component_id: &str) -> bool {
-    component_id == "receiver-key-binding-component"
-}
-
-fn positive_roster_position(value: &Value, field_name: &str) -> Option<u64> {
-    let roster_position = object_map(value)?.get(field_name)?.as_u64()?;
-    if roster_position == 0 {
-        None
-    } else {
-        Some(roster_position)
-    }
-}
-
-fn value_without_field(value: &Value, field_name: &str) -> Option<Value> {
-    let object = object_map(value)?;
-    let mut copied_object = object.clone();
-    copied_object.remove(field_name);
-
-    Some(Value::Object(copied_object))
-}
-
-fn value_without_fields(value: &Value, field_names: &[&str]) -> Option<Value> {
-    let object = object_map(value)?;
-    let mut copied_object = object.clone();
-    for field_name in field_names {
-        copied_object.remove(*field_name);
-    }
-
-    Some(Value::Object(copied_object))
-}
-
-fn derive_digest(namespace: &str, value: &Value) -> Option<String> {
-    derive_protocol_digest(namespace, value).ok()
-}
-
-fn receiver_reference_key(value: &Value) -> Option<String> {
-    let receiver_identity = string_field(value, "receiverIdentity")?;
-    if receiver_identity.is_empty() {
-        return None;
-    }
-
-    Some(format!(
-        "{}:{}",
-        positive_roster_position(value, "receiverRosterPosition")?,
-        receiver_identity,
-    ))
-}
-
-fn collect_receiver_reference_refusals(
-    references: Option<&Vec<Value>>,
-    object_digest: Option<&str>,
-    label: &str,
-) -> Vec<Value> {
-    let mut refused_objects = Vec::new();
-    let mut seen_receiver_references = BTreeSet::new();
-    let Some(references) = references else {
-        refused_objects.push(structural_refusal(
-            format!("{label} must be an array."),
-            object_digest,
-        ));
-
-        return refused_objects;
-    };
-
-    for receiver_reference in references {
-        let Some(receiver_reference_key) = receiver_reference_key(receiver_reference) else {
-            refused_objects.push(structural_refusal(
-                format!("{label} contains an invalid receiver identity or roster position."),
-                object_digest,
-            ));
-            continue;
-        };
-        if !seen_receiver_references.insert(receiver_reference_key) {
-            refused_objects.push(structural_refusal(
-                format!("{label} contains a duplicate receiver reference."),
-                object_digest,
-            ));
-        }
-    }
-
-    refused_objects
-}
-
+mod backend_status;
 mod ballot_linear_verifier;
 mod ballot_package_verifier;
 mod ballot_proof_digest_helpers;
 mod ballot_proof_generation_core;
+mod ballot_proof_record_builders;
 mod ballot_proof_record_generation;
+mod ballot_proof_record_inputs;
 mod ballot_proof_refusals;
 mod component_backend_sparse;
 mod component_bundle_validation;
+mod component_contracts;
 mod component_linear_proof_verification;
+mod json_helpers;
 mod linear_proof_contract_validation;
 mod proof_binding_digests;
 mod proof_preflight_parsing;
@@ -348,34 +91,125 @@ mod share_commitment_backend_helpers;
 mod structured_receiver_encryption_statement;
 mod structured_share_commitment_statement;
 
-pub(crate) use ballot_linear_verifier::*;
-pub(crate) use ballot_proof_digest_helpers::*;
+pub(crate) use backend_status::{describe_proof_backend, structural_refusal, structural_rejection};
+pub(crate) use ballot_linear_verifier::{
+    BallotLinearProofVerificationInputs, BallotProofVerificationInputs,
+    verify_ballot_linear_proof_bytes, verify_ballot_proof,
+};
+pub(crate) use ballot_proof_digest_helpers::{
+    derive_ballot_component_bundle_statement_digest, derive_ballot_component_proof_bundle_digest,
+    derive_ballot_component_proof_record_digest, derive_ballot_component_proof_root,
+    derive_ballot_component_statement_digest, derive_ballot_proof_challenge_digest,
+    insert_optional_digest_field,
+};
 pub(crate) use ballot_proof_generation_core::{
+    BallotComponentProofGenerationInput, BallotProofGenerationInput,
     generate_ballot_component_proof_inner, generate_ballot_proof_inner,
 };
-pub(crate) use ballot_proof_refusals::*;
-pub(crate) use component_backend_sparse::*;
-pub(crate) use component_bundle_validation::*;
-pub(crate) use component_linear_proof_verification::*;
-pub(crate) use linear_proof_contract_validation::*;
-pub(crate) use proof_binding_digests::*;
-pub(crate) use proof_preflight_parsing::*;
-pub(crate) use receiver_key_package_refusals::*;
-pub(crate) use receiver_polynomial_helpers::*;
-pub(crate) use share_commitment_backend_helpers::*;
-pub(crate) use structured_receiver_encryption_statement::*;
-pub(crate) use structured_share_commitment_statement::*;
+pub(crate) use ballot_proof_refusals::{
+    collect_ballot_proof_refusals, collect_claim_bearing_package_refusals,
+    collect_proof_bytes_refusals, collect_receiver_payload_refusals,
+    collect_share_commitment_refusals, reference_map,
+};
+pub(crate) use component_backend_sparse::{
+    ComponentProofBackendError, ParsedSparseComponentProofStatement,
+    ParsedStructuredReceiverEncryptionStatement, component_proof_backend_rejection,
+    derive_sparse_statement_matrix_digest, derive_sparse_target_vector_digest, integer_value,
+    parse_sparse_polynomial_entry, polynomial_is_zero,
+    sparse_matrix_from_sparse_component_statement, u64_object_field, usize_object_field,
+};
+pub(crate) use component_bundle_validation::{
+    collect_ballot_component_bundle_refusals, collect_ballot_component_proof_bundle_refusals,
+    collect_ballot_component_proof_input_refusals,
+    collect_component_proof_statement_plan_shape_refusals,
+    supplied_component_proof_statement_digest,
+};
+pub(crate) use component_contracts::{
+    ALLOWED_BALLOT_PROOF_COMPONENT_STATEMENT_FORMATS, COMPONENT_BUNDLE_INCOMPLETE_COVERAGE,
+    DENSE_COMPONENT_PROOF_STATEMENT_FORMAT, FULL_BALLOT_PROOF_ENCODING_PROFILE_ID,
+    FULL_BALLOT_PROOF_PARAMETER_PROFILE_ID, FULL_BALLOT_PROOF_PROJECTION_COVERAGE,
+    MAX_GENERIC_SPARSE_COMPONENT_SHORT_RESPONSE_VECTOR_LENGTH, PUBLIC_ZERO_PROOF_STATEMENT_FORMAT,
+    RECEIVER_KEY_PROOF_ENCODING_PROFILE_ID, RECEIVER_KEY_PROOF_PARAMETER_PROFILE_ID,
+    REQUIRED_BALLOT_PROOF_COMPONENT_IDS, SHARE_COMMITMENT_MODULE_DEGREE,
+    SHARE_COMMITMENT_MODULE_RANK, SHARE_COMMITMENT_OPENING_DIMENSION,
+    SPARSE_COMPONENT_PROOF_STATEMENT_FORMAT, STRUCTURED_RECEIVER_ENCRYPTION_PROOF_STATEMENT_FORMAT,
+    STRUCTURED_SHARE_COMMITMENT_PROOF_STATEMENT_FORMAT,
+    component_proof_bytes_availability_is_expected, component_proof_bytes_must_be_empty,
+    component_proof_statement_format_is_expected, encoded_share_vector_width,
+    expected_component_proof_statement_format_label,
+};
+pub(crate) use component_linear_proof_verification::{
+    component_linear_proof_vector_case, verify_component_linear_proof_bytes,
+    verify_component_proof_bundle_backend,
+};
+pub(crate) use json_helpers::{
+    array_field, collect_receiver_reference_refusals, derive_digest, is_protocol_digest,
+    object_map, positive_roster_position, receiver_reference_key, string_field,
+    unsigned_decimal_string, value_without_field, value_without_fields,
+};
+pub(crate) use linear_proof_contract_validation::{
+    collect_full_ballot_binding_contract_refusals, collect_mandatory_claim_profile_refusals,
+    collect_mandatory_component_contract_refusals,
+};
+pub(crate) use proof_binding_digests::{
+    derive_ballot_component_proof_statement_plan_digest,
+    derive_ballot_proof_encoding_profile_digest, derive_ballot_proof_linear_statement_digest,
+    derive_ballot_proof_parameter_set_digest, derive_ballot_proof_public_randomness_digest,
+    derive_ballot_sparse_linear_statement_digest,
+    derive_ballot_structured_receiver_encryption_statement_digest,
+    derive_ballot_structured_share_commitment_statement_digest,
+    derive_receiver_key_linear_statement_digest, derive_receiver_key_proof_encoding_profile_digest,
+    derive_receiver_key_proof_parameter_set_digest, derive_receiver_key_public_randomness_digest,
+};
+pub(crate) use proof_preflight_parsing::{
+    decode_32_byte_hex, invalid_preflight, matrix_coefficient_representation_from_statement,
+    receiver_key_source_witness_coefficients, required_json_field, signed_polynomial_vector_field,
+    source_witness_coefficients, string_array_length, string_array_matches_expected,
+};
+pub(crate) use receiver_key_package_refusals::{
+    collect_receiver_key_proof_refusals, collect_receiver_key_proof_root_evidence_refusals,
+    derive_claim_bearing_ballot_package_digest, derive_receiver_key_proof_root_evidence_digest,
+};
+pub(crate) use receiver_polynomial_helpers::{
+    negate_receiver_coefficient, negate_receiver_polynomial, parse_receiver_column_index,
+    parse_receiver_column_vector, parse_receiver_column_vector_with_max_len,
+    parse_receiver_polynomial, parse_receiver_polynomial_vector, parse_share_commitment_polynomial,
+    parse_share_commitment_polynomial_vector, push_receiver_sparse_entry,
+    receiver_constant_polynomial,
+};
+pub(crate) use share_commitment_backend_helpers::{
+    derive_share_commitment_bytes, derive_share_commitment_message_matrix,
+    derive_share_commitment_polynomial, derive_share_commitment_randomness_matrix,
+    derive_share_commitment_uniform_number, negate_share_commitment_coefficient,
+    negate_share_commitment_polynomial, push_share_commitment_sparse_entry,
+    share_commitment_message_entry_polynomial, split_share_commitment_polynomial,
+};
+pub(crate) use structured_receiver_encryption_statement::parse_structured_receiver_encryption_statement;
+pub(crate) use structured_share_commitment_statement::parse_structured_share_commitment_statement;
 
-pub use ballot_package_verifier::{
+#[cfg(test)]
+pub(crate) use component_backend_sparse::dense_matrix_from_sparse_component_statement;
+#[cfg(test)]
+pub(crate) use receiver_polynomial_helpers::{
+    negacyclic_receiver_coefficient, parse_receiver_column_matrix,
+};
+#[cfg(test)]
+pub(crate) use share_commitment_backend_helpers::add_structured_constant_entry;
+#[cfg(test)]
+pub(crate) use structured_share_commitment_statement::structured_receiver_encryption_statement_as_sparse;
+
+pub(crate) use ballot_package_verifier::{
     verify_claim_bearing_ballot_package, verify_encoded_relation_vector_case,
     verify_linear_proof_vector_case, verify_receiver_key_vector_case,
 };
-pub use ballot_proof_generation_core::{generate_ballot_component_proof, generate_ballot_proof};
-pub use ballot_proof_record_generation::{
-    BallotProofRecordGenerationInput, generate_ballot_proof_record,
+pub(crate) use ballot_proof_generation_core::{
+    generate_ballot_component_proof_from_command_fields, generate_ballot_proof_from_command_fields,
 };
-pub use receiver_key_proof::{
-    generate_receiver_key_proof, prepare_receiver_key_proof_generation, verify_receiver_key_proof,
+pub(crate) use ballot_proof_record_generation::generate_ballot_proof_record;
+pub(crate) use ballot_proof_record_inputs::BallotProofRecordGenerationInput;
+pub(crate) use receiver_key_proof::{
+    generate_receiver_key_proof, prepare_receiver_key_proof_generation,
+    verify_receiver_key_proof_from_command_fields,
 };
 
 #[cfg(test)]

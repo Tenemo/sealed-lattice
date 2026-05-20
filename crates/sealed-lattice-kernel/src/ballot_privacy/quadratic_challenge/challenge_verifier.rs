@@ -6,7 +6,7 @@ use crate::{
 use super::{
     linear_proof_parameters::{LinearProofEncoding, linear_proof_profile_for_encoding},
     linear_proof_public_parameters::{
-        LINEAR_PROOF_PROOF_RING_DEGREE, derive_abdlop_public_parameters,
+        DEFAULT_LINEAR_PROOF_RING_DEGREE, derive_abdlop_public_parameters,
     },
     linear_proof_rng::sample_linear_proof_autostable_challenge_coefficients,
     linear_proof_transcript::shake128_32,
@@ -14,7 +14,7 @@ use super::{
     polynomial_matrix::PolynomialMatrix,
     polynomial_ring::PolynomialRing,
     polynomial_vector::PolynomialVector,
-    proof_coder::DecodedLazerDemoLinearProof,
+    proof_coder::DecodedLinearProof,
     sparse_polynomial_vector::SparsePolynomialVector,
 };
 
@@ -22,7 +22,7 @@ pub(super) const QUADRATIC_TARGET_VECTOR_LENGTH: usize = 12;
 pub(super) const QUADRATIC_MESSAGE_LENGTH: usize = 11;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct LazerDemoQuadraticChallengeSummary {
+pub(crate) struct QuadraticChallengeSummary {
     pub(crate) recomputed_challenge_hash: String,
     pub(crate) short_response_l2_squared: u128,
     pub(crate) short_response_l2_bound_squared: u128,
@@ -34,10 +34,10 @@ pub(crate) struct LazerDemoQuadraticChallengeSummary {
 pub(crate) fn validate_quadratic_challenge(
     challenge_seed: &[u8; 32],
     public_randomness: &[u8; 32],
-    decoded_proof: &DecodedLazerDemoLinearProof,
+    decoded_proof: &DecodedLinearProof,
     proof_encoding: &LinearProofEncoding,
     many_quadratic_fold: &ManyQuadraticFold,
-) -> CanonicalResult<LazerDemoQuadraticChallengeSummary> {
+) -> CanonicalResult<QuadraticChallengeSummary> {
     proof_encoding.validate()?;
     let proof_profile = linear_proof_profile_for_encoding(proof_encoding)?;
     validate_quadratic_equation_shapes(decoded_proof, proof_encoding, many_quadratic_fold)?;
@@ -105,8 +105,8 @@ pub(crate) fn validate_quadratic_challenge(
         &randomness_response_vector,
         &target_commitment_vector,
     )?;
-    let verifier_polynomial = recover_quadratic_equation_verifier_polynomial(
-        LazerDemoQuadraticVerifierPolynomialInput {
+    let verifier_polynomial =
+        recover_quadratic_equation_verifier_polynomial(QuadraticVerifierPolynomialInput {
             proof_ring,
             challenge_polynomial: &challenge_polynomial,
             folded_equation: &many_quadratic_fold.folded_equation,
@@ -115,8 +115,7 @@ pub(crate) fn validate_quadratic_challenge(
             message_key_matrix: &public_parameters.message_key_matrix,
             randomness_response_vector: &randomness_response_vector,
             target_commitment_vector: &target_commitment_vector,
-        },
-    )?;
+        })?;
     let challenge_encoding = encode_quadratic_challenge_input(
         proof_ring,
         &target_commitment_vector.entries()[QUADRATIC_MESSAGE_LENGTH..],
@@ -164,7 +163,7 @@ pub(crate) fn validate_quadratic_challenge(
         ));
     }
 
-    Ok(LazerDemoQuadraticChallengeSummary {
+    Ok(QuadraticChallengeSummary {
         recomputed_challenge_hash: to_hex(&recomputed_challenge_seed),
         short_response_l2_squared,
         short_response_l2_bound_squared,
@@ -175,7 +174,7 @@ pub(crate) fn validate_quadratic_challenge(
 }
 
 pub(super) fn validate_quadratic_equation_shapes(
-    decoded_proof: &DecodedLazerDemoLinearProof,
+    decoded_proof: &DecodedLinearProof,
     proof_encoding: &LinearProofEncoding,
     many_quadratic_fold: &ManyQuadraticFold,
 ) -> CanonicalResult<()> {
@@ -264,7 +263,7 @@ pub(super) fn recover_quadratic_equation_message_vector(
     message_target_vector.sub(&message_binding_product)
 }
 
-pub(super) struct LazerDemoQuadraticVerifierPolynomialInput<'input> {
+pub(super) struct QuadraticVerifierPolynomialInput<'input> {
     proof_ring: PolynomialRing,
     challenge_polynomial: &'input [u64],
     folded_equation: &'input super::quadratic_equation::LinearProofQuadraticEquation,
@@ -276,7 +275,7 @@ pub(super) struct LazerDemoQuadraticVerifierPolynomialInput<'input> {
 }
 
 pub(super) fn recover_quadratic_equation_verifier_polynomial(
-    input: LazerDemoQuadraticVerifierPolynomialInput<'_>,
+    input: QuadraticVerifierPolynomialInput<'_>,
 ) -> CanonicalResult<Vec<u64>> {
     let proof_ring = input.proof_ring;
     let mut verifier_polynomial = input
@@ -539,7 +538,7 @@ pub(super) fn encode_uniform_polynomial(
     modulus: u64,
     bit_length: usize,
 ) -> CanonicalResult<()> {
-    if polynomial.len() != LINEAR_PROOF_PROOF_RING_DEGREE {
+    if polynomial.len() != DEFAULT_LINEAR_PROOF_RING_DEGREE {
         return Err(invalid_quadratic_challenge(
             "quadratic challenge polynomial degree does not match the proof ring",
         ));

@@ -22,6 +22,7 @@ pnpm run check
 pnpm run vectors
 pnpm exec playwright install chromium firefox webkit
 pnpm run test:node:fast
+pnpm run test:node:heavy
 pnpm run test:node:heavy:kernel
 pnpm run test
 pnpm run test:proof-benchmark
@@ -38,9 +39,10 @@ pnpm run build
 
 - `pnpm run check`: package typechecks, repo lint, Rust checks, package-boundary checks, vector manifest verification, and dead-code analysis
 - `pnpm run vectors`: committed test vector files match `test-vectors/manifest.json`
-- `pnpm run test:node:fast`: pre-commit-friendly Node tests, excluding the slow kernel-heavy WASM integration suite
+- `pnpm run test:node:fast`: pre-commit-friendly Node tests, excluding slow protocol, kernel-heavy WASM, and proof-benchmark suites
+- `pnpm run test:node:heavy`: slow protocol relation and proof-record input tests that remain part of the default Node gate without running under coverage instrumentation
 - `pnpm run test:node:heavy:kernel`: transcript-core WASM loader, parity, fixture, proof-generation, and proof-record integration tests
-- `pnpm run test`: fast Node tests, kernel-heavy Node tests, and browser tests
+- `pnpm run test`: fast Node tests, heavy protocol Node tests, kernel-heavy Node tests, and browser tests
 - `pnpm run test:proof-benchmark`: Node and desktop Chromium proof benchmark lanes, run sequentially on one machine
 - `pnpm run test:proof-benchmark:node`: Node proof benchmark lane, suitable for a separate CI worker
 - `pnpm run test:proof-benchmark:browser:desktop`: desktop Chromium proof benchmark lane, suitable for a separate CI worker
@@ -54,7 +56,7 @@ pnpm run build
 
 The pre-commit hook runs only the fast local gate: `pnpm run tsc`, `pnpm run lint`, and `cargo fmt --check -p sealed-lattice-kernel`.
 The pre-push hook runs the heavier repository gate: `pnpm run check` and `pnpm run test:browser`.
-Node-heavy and proof benchmark lanes remain explicit commands so they can use checkpoints and focused reruns instead of slowing every local commit.
+Node-heavy and proof benchmark lanes remain explicit commands so they can use checkpoints and focused reruns instead of slowing every local commit. The coverage lane covers the fast Node project only; heavy protocol, kernel, and proof-benchmark coverage comes from their explicit test lanes rather than V8 coverage instrumentation.
 
 ## Heavy proof checkpoints
 

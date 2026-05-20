@@ -1,2 +1,0 @@
-pnpm run check || exit 1
-pnpm run test:browser || exit 1

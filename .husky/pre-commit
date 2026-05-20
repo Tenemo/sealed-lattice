@@ -1,3 +1,5 @@
-pnpm run tsc || exit 1
-pnpm run lint || exit 1
-cargo fmt --check -p sealed-lattice-kernel || exit 1
+pnpm run tsc
+pnpm run lint
+cargo fmt --check -p sealed-lattice-kernel
+pnpm run check
+pnpm run test:browser

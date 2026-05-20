@@ -19,7 +19,7 @@ export { buildBallotProofSparseComponentLinearProofStatement } from './ballot-pr
 export { buildPackedFieldSparseComponentLinearProofStatement } from './ballot-proof-linear-statement/packed-payload-plaintext-statement.js';
 export {
     buildBallotProofStructuredReceiverEncryptionProofStatement,
-    verifyBallotProofComponentExplicitRows,
     buildEncodedScoreFieldLinearProofProjection,
 } from './ballot-proof-linear-statement/receiver-encryption-proof-statement.js';
+export { verifyBallotProofComponentExplicitRows } from './ballot-proof-linear-statement/explicit-row-verification.js';
 export { buildBallotProofRecordGenerationRequest } from './ballot-proof-linear-statement/proof-record-generation-request.js';

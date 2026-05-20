@@ -3,7 +3,6 @@ import type { ProtocolDigest } from '@sealed-lattice/types';
 import { fieldModulus } from '../../plaintext-oracle/field.js';
 
 import {
-    ballotPrivacyBackendProofComponentOrder,
     buildBackendBounds,
     buildDigestExpandedRowBatch,
     buildExplicitBackendRowBatch,
@@ -12,7 +11,6 @@ import {
     buildReceiverPayloadEncryptionRowBatch,
     buildReceiverPayloadPlaintextBitDecompositionRowBatch,
     buildStructuredShareCommitmentRowBatch,
-    componentIdForBatch,
     shouldUseStructuredShareCommitmentRows,
 } from './backend-batches-and-bounds.js';
 import type {
@@ -38,6 +36,10 @@ import {
     receiverEncryptionModulus,
     relationStatementFormat,
 } from './backend-contracts.js';
+import {
+    ballotPrivacyBackendProofComponentOrder,
+    componentIdForBatch,
+} from './backend-proof-components.js';
 import {
     backendVariableColumns,
     buildExplicitSparseRowBatch,

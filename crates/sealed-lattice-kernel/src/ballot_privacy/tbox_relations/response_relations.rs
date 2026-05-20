@@ -71,7 +71,7 @@ pub(crate) fn validate_tbox_relation_builder_self_check() -> CanonicalResult<()>
         || folded_equations[0].linear_terms().entries().is_empty()
         || folded_equations[0]
             .constant_term()
-            .is_none_or(|constant_term| constant_term.len() != LINEAR_PROOF_PROOF_RING_DEGREE)
+            .is_none_or(|constant_term| constant_term.len() != DEFAULT_LINEAR_PROOF_RING_DEGREE)
     {
         return Err(invalid_tbox_relation(
             "prefixed tbox accumulator self-check did not produce folded equations",
@@ -83,14 +83,14 @@ pub(crate) fn validate_tbox_relation_builder_self_check() -> CanonicalResult<()>
         TBOX_APPROXIMATE_NORM_COORDINATES,
         TBOX_EXACT_NORM_DIMENSION,
         vec![
-            vec![0_u64; LINEAR_PROOF_PROOF_RING_DEGREE];
+            vec![0_u64; DEFAULT_LINEAR_PROOF_RING_DEGREE];
             TBOX_APPROXIMATE_NORM_COORDINATES * TBOX_EXACT_NORM_DIMENSION
         ],
     )?;
     let zero_target_vector = PolynomialVector::zero(proof_ring, TBOX_APPROXIMATE_NORM_COORDINATES)?;
     let zero_response = vec![
-        vec![0_i64; LINEAR_PROOF_PROOF_RING_DEGREE];
-        LINEAR_PROOF_PROOF_RING_DEGREE / TBOX_APPROXIMATE_NORM_COORDINATES
+        vec![0_i64; DEFAULT_LINEAR_PROOF_RING_DEGREE];
+        DEFAULT_LINEAR_PROOF_RING_DEGREE / TBOX_APPROXIMATE_NORM_COORDINATES
     ];
     let mut response_accumulators = prefixed_accumulators.clone();
     apply_default_tbox_z4_response_relations(
@@ -286,7 +286,7 @@ pub(super) fn compute_linear_proof_response_rotation_products(
     modulus: u64,
 ) -> CanonicalResult<Vec<Vec<u64>>> {
     let rotation_column_count = column_group_count
-        .checked_mul(LINEAR_PROOF_PROOF_RING_DEGREE)
+        .checked_mul(DEFAULT_LINEAR_PROOF_RING_DEGREE)
         .ok_or_else(|| invalid_tbox_relation("rotation product column count overflowed"))?;
     let mut signed_products =
         vec![vec![0_i128; rotation_column_count]; TBOX_QUADRATIC_EVALUATION_REPETITIONS];

@@ -19,15 +19,16 @@ pub use mutations::{
     mutate_unsupported_envelope_version_fixture, mutate_unsupported_object_type_fixture,
     mutate_unsupported_object_version_fixture, mutate_wrong_evaluation_profile_fixture,
 };
+#[cfg(test)]
 pub use rng::DeterministicFixtureRng;
+#[cfg(test)]
+pub use types::MANDATORY_EVALUATION_PROOF_PROFILE_ID;
 pub use types::{
-    ACTIVE_MALICIOUS_MHE_PROFILE_ID, BaseClaimProfile, FULLY_VERIFIED_ACTIVE_MALICIOUS_PROFILE,
-    FULLY_VERIFIED_PASSIVE_MHE_PROFILE, FULLY_VERIFIED_RESULT_PROFILE_ID,
-    MANDATORY_EVALUATION_PROOF_PROFILE_ID, MheSecurityClosure, NO_DECRYPTION_PROOF_PROFILE_ID,
-    NO_HE_SETUP_PROOF_PROFILE_ID, PASSIVE_MHE_PROTOTYPE_PROFILE_ID, TranscriptCoreAnalysis,
-    TranscriptCoreObject, TranscriptCoreProfile, TranscriptCoreStatus, invalid_response,
+    FULLY_VERIFIED_ACTIVE_MALICIOUS_PROFILE, FULLY_VERIFIED_PASSIVE_MHE_PROFILE,
+    TranscriptCoreProfile,
 };
 
+#[cfg(test)]
 pub const MODULE_MARKER: &str = "transcript-core";
 
 #[cfg(test)]

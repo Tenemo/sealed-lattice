@@ -13,6 +13,8 @@ import {
     buildBallotProofComponentProofStatementPlans,
 } from './component-bundle.js';
 import { secretStateForStructuredShareCommitmentStatement } from './component-projections.js';
+import { rowBatchesForComponent } from './component-statement-builder.js';
+import { verifyBallotProofComponentExplicitRows } from './explicit-row-verification.js';
 import {
     assertBallotStatementMatchesPublicContext,
     assertFullReceiverPayloadsAreExplicit,
@@ -29,8 +31,6 @@ import { buildPackedFieldSparseComponentLinearProofStatement } from './packed-pa
 import {
     assertProofEncodingMatchesStatement,
     assertProofParameterSetMatchesStatement,
-    buildBallotProofStructuredReceiverEncryptionProofStatement,
-    buildEncodedScoreFieldLinearProofProjection,
     requireComponentContract,
     requireContractDecimalStringField,
     requireContractIntegerField,
@@ -38,8 +38,11 @@ import {
     requireObjectContract,
     requirePartialComponentContract,
     requireRandomnessHex,
+} from './proof-contract-validation.js';
+import {
+    buildBallotProofStructuredReceiverEncryptionProofStatement,
+    buildEncodedScoreFieldLinearProofProjection,
     secretStateForExplicitSparseStatement,
-    verifyBallotProofComponentExplicitRows,
 } from './receiver-encryption-proof-statement.js';
 import { buildBallotProofSparseComponentLinearProofStatement } from './sparse-component-statement.js';
 import type {
@@ -58,7 +61,6 @@ import {
     fullBallotProofEncodingProfileId,
     fullBallotProofParameterProfileId,
 } from './statement-contracts.js';
-import { rowBatchesForComponent } from './statement-digests.js';
 import { componentById } from './witness-accessors.js';
 
 const validateGeneratedProofInputContracts = (input: {

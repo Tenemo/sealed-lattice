@@ -291,8 +291,8 @@ pub(super) fn validate_linear_proof_tbox_shape() -> CanonicalResult<()> {
 
 pub(crate) fn linear_proof_tbox_proof_ring() -> CanonicalResult<PolynomialRing> {
     PolynomialRing::new(
-        LINEAR_PROOF_PROOF_RING_DEGREE,
-        LINEAR_PROOF_PROOF_COEFFICIENT_MODULUS,
+        DEFAULT_LINEAR_PROOF_RING_DEGREE,
+        DEFAULT_LINEAR_PROOF_COEFFICIENT_MODULUS,
     )
 }
 
@@ -302,9 +302,9 @@ pub(super) fn linear_proof_tbox_short_message_without_upsilon() -> usize {
 
 pub(super) fn linear_proof_tbox_beta_offset() -> usize {
     let proof_ring_offset_for_approximate_relation =
-        LINEAR_PROOF_PROOF_RING_DEGREE / TBOX_APPROXIMATE_NORM_COORDINATES;
+        DEFAULT_LINEAR_PROOF_RING_DEGREE / TBOX_APPROXIMATE_NORM_COORDINATES;
     let proof_ring_offset_for_extended_relation =
-        LINEAR_PROOF_PROOF_RING_DEGREE / TBOX_APPROXIMATE_NORM_COORDINATES;
+        DEFAULT_LINEAR_PROOF_RING_DEGREE / TBOX_APPROXIMATE_NORM_COORDINATES;
 
     (linear_proof_tbox_short_message_without_upsilon()
         + TBOX_UPSILON_COORDINATES
@@ -405,7 +405,7 @@ pub(super) fn invalid_tbox_relation(message: impl Into<String>) -> CanonicalErro
 #[cfg(test)]
 mod tests {
     use super::{
-        LINEAR_PROOF_PROOF_COEFFICIENT_MODULUS, LINEAR_PROOF_PROOF_RING_DEGREE,
+        DEFAULT_LINEAR_PROOF_COEFFICIENT_MODULUS, DEFAULT_LINEAR_PROOF_RING_DEGREE,
         TBOX_BETA3_DOMAIN_OFFSET, TBOX_BETA4_DOMAIN_OFFSET, TBOX_EUCLIDEAN_DOMAIN_OFFSET,
         TBOX_EXACT_NORM_BOUND_SQUARED, TBOX_EXACT_NORM_DIMENSION,
         TBOX_QUADRATIC_EVALUATION_REPETITIONS, TBOX_UPSILON_DOMAIN_OFFSET,
@@ -418,7 +418,7 @@ mod tests {
         inverse_four_modulus, linear_proof_tbox_beta_offset, linear_proof_tbox_upsilon_offset,
         multiply_mod, validate_tbox_relation_builder_self_check,
     };
-    use crate::ballot_privacy::linear_proof_public_parameters::LINEAR_PROOF_PROOF_COEFFICIENT_BIT_LENGTH;
+    use crate::ballot_privacy::linear_proof_public_parameters::DEFAULT_LINEAR_PROOF_COEFFICIENT_BIT_LENGTH;
     use crate::ballot_privacy::linear_proof_rng::sample_linear_proof_uniform_u64_values;
 
     #[test]
@@ -440,7 +440,7 @@ mod tests {
             accumulators.extra_beta_norm_equations[0]
                 .constant_term()
                 .expect("constant should exist")[0],
-            LINEAR_PROOF_PROOF_COEFFICIENT_MODULUS - 1
+            DEFAULT_LINEAR_PROOF_COEFFICIENT_MODULUS - 1
         );
     }
 
@@ -473,7 +473,7 @@ mod tests {
 
         assert_eq!(
             lower_half_relation.linear_terms().entries()[0].coefficients()[33],
-            LINEAR_PROOF_PROOF_COEFFICIENT_MODULUS - 9
+            DEFAULT_LINEAR_PROOF_COEFFICIENT_MODULUS - 9
         );
         assert_eq!(
             lower_half_relation.linear_terms().entries()[1].coefficients()[33],
@@ -485,7 +485,7 @@ mod tests {
         );
         assert_eq!(
             upper_half_relation.linear_terms().entries()[1].coefficients()[0],
-            LINEAR_PROOF_PROOF_COEFFICIENT_MODULUS - 9
+            DEFAULT_LINEAR_PROOF_COEFFICIENT_MODULUS - 9
         );
     }
 
@@ -525,23 +525,23 @@ mod tests {
             .expect("beta3 accumulation should succeed");
 
         let beta3_challenges = sample_linear_proof_uniform_u64_values(
-            (LINEAR_PROOF_PROOF_RING_DEGREE - 1) * TBOX_QUADRATIC_EVALUATION_REPETITIONS,
-            LINEAR_PROOF_PROOF_COEFFICIENT_MODULUS,
-            LINEAR_PROOF_PROOF_COEFFICIENT_BIT_LENGTH,
+            (DEFAULT_LINEAR_PROOF_RING_DEGREE - 1) * TBOX_QUADRATIC_EVALUATION_REPETITIONS,
+            DEFAULT_LINEAR_PROOF_COEFFICIENT_MODULUS,
+            DEFAULT_LINEAR_PROOF_COEFFICIENT_BIT_LENGTH,
             &challenge_seed,
             u64::from(TBOX_BETA3_DOMAIN_OFFSET),
         )
         .expect("challenge sampling should succeed");
-        let inverse_two = LINEAR_PROOF_PROOF_COEFFICIENT_MODULUS.div_ceil(2);
+        let inverse_two = DEFAULT_LINEAR_PROOF_COEFFICIENT_MODULUS.div_ceil(2);
         let expected_first_primary = multiply_mod(
             inverse_two,
             beta3_challenges[0],
-            LINEAR_PROOF_PROOF_COEFFICIENT_MODULUS,
+            DEFAULT_LINEAR_PROOF_COEFFICIENT_MODULUS,
         );
         let expected_second_primary = multiply_mod(
             inverse_two,
             beta3_challenges[4],
-            LINEAR_PROOF_PROOF_COEFFICIENT_MODULUS,
+            DEFAULT_LINEAR_PROOF_COEFFICIENT_MODULUS,
         );
 
         assert_eq!(
@@ -562,9 +562,9 @@ mod tests {
         apply_default_tbox_beta4_relations(&mut accumulators, &challenge_seed)
             .expect("beta4 accumulation should succeed");
         let beta4_challenges = sample_linear_proof_uniform_u64_values(
-            (LINEAR_PROOF_PROOF_RING_DEGREE - 1) * TBOX_QUADRATIC_EVALUATION_REPETITIONS,
-            LINEAR_PROOF_PROOF_COEFFICIENT_MODULUS,
-            LINEAR_PROOF_PROOF_COEFFICIENT_BIT_LENGTH,
+            (DEFAULT_LINEAR_PROOF_RING_DEGREE - 1) * TBOX_QUADRATIC_EVALUATION_REPETITIONS,
+            DEFAULT_LINEAR_PROOF_COEFFICIENT_MODULUS,
+            DEFAULT_LINEAR_PROOF_COEFFICIENT_BIT_LENGTH,
             &challenge_seed,
             u64::from(TBOX_BETA4_DOMAIN_OFFSET),
         )
@@ -572,18 +572,18 @@ mod tests {
         let expected_beta4_shifted = multiply_mod(
             inverse_two,
             beta4_challenges[0],
-            LINEAR_PROOF_PROOF_COEFFICIENT_MODULUS,
+            DEFAULT_LINEAR_PROOF_COEFFICIENT_MODULUS,
         );
         let expected_beta3_at_shifted_index = multiply_mod(
             inverse_two,
             beta3_challenges[32 * TBOX_QUADRATIC_EVALUATION_REPETITIONS],
-            LINEAR_PROOF_PROOF_COEFFICIENT_MODULUS,
+            DEFAULT_LINEAR_PROOF_COEFFICIENT_MODULUS,
         );
         let expected_accumulated_shifted_coefficient =
             if expected_beta3_at_shifted_index >= expected_beta4_shifted {
                 expected_beta3_at_shifted_index - expected_beta4_shifted
             } else {
-                LINEAR_PROOF_PROOF_COEFFICIENT_MODULUS + expected_beta3_at_shifted_index
+                DEFAULT_LINEAR_PROOF_COEFFICIENT_MODULUS + expected_beta3_at_shifted_index
                     - expected_beta4_shifted
             };
         assert_eq!(
@@ -620,11 +620,11 @@ mod tests {
         assert_eq!(l2_relation.linear_terms().entries()[0].coefficients()[0], 1);
         assert_eq!(
             l2_relation.linear_terms().entries()[0].coefficients()[53],
-            LINEAR_PROOF_PROOF_COEFFICIENT_MODULUS - TBOX_EXACT_NORM_BOUND_SQUARED
+            DEFAULT_LINEAR_PROOF_COEFFICIENT_MODULUS - TBOX_EXACT_NORM_BOUND_SQUARED
         );
         assert_eq!(
             l2_relation.constant_term().expect("constant should exist")[0],
-            LINEAR_PROOF_PROOF_COEFFICIENT_MODULUS - TBOX_EXACT_NORM_BOUND_SQUARED
+            DEFAULT_LINEAR_PROOF_COEFFICIENT_MODULUS - TBOX_EXACT_NORM_BOUND_SQUARED
         );
     }
 
@@ -638,8 +638,8 @@ mod tests {
             .expect("upsilon accumulation should succeed");
         let upsilon_challenges = sample_linear_proof_uniform_u64_values(
             2,
-            LINEAR_PROOF_PROOF_COEFFICIENT_MODULUS,
-            LINEAR_PROOF_PROOF_COEFFICIENT_BIT_LENGTH,
+            DEFAULT_LINEAR_PROOF_COEFFICIENT_MODULUS,
+            DEFAULT_LINEAR_PROOF_COEFFICIENT_BIT_LENGTH,
             &challenge_seed,
             u64::from(TBOX_UPSILON_DOMAIN_OFFSET),
         )
@@ -663,8 +663,8 @@ mod tests {
             .expect("l2 accumulation should succeed");
         let l2_challenges = sample_linear_proof_uniform_u64_values(
             2,
-            LINEAR_PROOF_PROOF_COEFFICIENT_MODULUS,
-            LINEAR_PROOF_PROOF_COEFFICIENT_BIT_LENGTH,
+            DEFAULT_LINEAR_PROOF_COEFFICIENT_MODULUS,
+            DEFAULT_LINEAR_PROOF_COEFFICIENT_BIT_LENGTH,
             &challenge_seed,
             u64::from(TBOX_EUCLIDEAN_DOMAIN_OFFSET),
         )
@@ -674,9 +674,9 @@ mod tests {
                 .constant_term()
                 .expect("constant should exist")[0],
             multiply_mod(
-                LINEAR_PROOF_PROOF_COEFFICIENT_MODULUS - TBOX_EXACT_NORM_BOUND_SQUARED,
+                DEFAULT_LINEAR_PROOF_COEFFICIENT_MODULUS - TBOX_EXACT_NORM_BOUND_SQUARED,
                 l2_challenges[0],
-                LINEAR_PROOF_PROOF_COEFFICIENT_MODULUS
+                DEFAULT_LINEAR_PROOF_COEFFICIENT_MODULUS
             )
         );
     }

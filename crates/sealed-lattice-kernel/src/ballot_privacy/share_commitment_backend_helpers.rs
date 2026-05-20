@@ -284,9 +284,8 @@ impl StreamedLinearProofStatement for ParsedStructuredReceiverEncryptionStatemen
         matrix_coefficient_representation: LinearProofMatrixCoefficientRepresentation,
         target_coefficient_representation: LinearProofTargetCoefficientRepresentation,
         public_randomness: &[u8],
-    ) -> crate::encoding::CanonicalResult<
-        self::linear_proof_statement::LazerDemoLinearStatementTranscript,
-    > {
+    ) -> crate::encoding::CanonicalResult<self::linear_proof_statement::LinearStatementTranscript>
+    {
         if public_randomness.len() != 32 {
             return Err(invalid_preflight(
                 "structured linear statement public randomness must be exactly 32 bytes",
@@ -349,20 +348,16 @@ impl StreamedLinearProofStatement for ParsedStructuredReceiverEncryptionStatemen
         let public_parameters_and_statement_hash =
             shake128_32(&[public_randomness, &arithmetic_statement_hash]);
 
-        Ok(
-            self::linear_proof_statement::LazerDemoLinearStatementTranscript {
-                transformed_statement_matrix_rows: transformed_statement_rows,
-                transformed_statement_matrix_columns: transformed_statement_columns,
-                transformed_target_vector_length: transformed_statement_rows,
-                encoded_statement_bytes: encoded_statement.len(),
-                arithmetic_statement_hash,
-                arithmetic_statement_hash_hex: to_hex(&arithmetic_statement_hash),
-                public_parameters_and_statement_hash,
-                public_parameters_and_statement_hash_hex: to_hex(
-                    &public_parameters_and_statement_hash,
-                ),
-            },
-        )
+        Ok(self::linear_proof_statement::LinearStatementTranscript {
+            transformed_statement_matrix_rows: transformed_statement_rows,
+            transformed_statement_matrix_columns: transformed_statement_columns,
+            transformed_target_vector_length: transformed_statement_rows,
+            encoded_statement_bytes: encoded_statement.len(),
+            arithmetic_statement_hash,
+            arithmetic_statement_hash_hex: to_hex(&arithmetic_statement_hash),
+            public_parameters_and_statement_hash,
+            public_parameters_and_statement_hash_hex: to_hex(&public_parameters_and_statement_hash),
+        })
     }
 
     fn transformed_target_vector(

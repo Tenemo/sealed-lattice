@@ -35,12 +35,6 @@ import {
 } from './backend-contracts.js';
 import {
     deriveAlgebraicTargetDigest,
-    receiverEncryptionVariableNames,
-    receiverOpeningVariableNames,
-    receiverPayloadPlaintextBitVariableNames,
-    receiverPayloadPlaintextOpeningVariableNames,
-    receiverPayloadPlaintextShareVariableNames,
-    receiverShareVariableNames,
     referencesByReceiver,
 } from './backend-row-helpers.js';
 import {
@@ -48,6 +42,14 @@ import {
     explicitReceiverEncryptionRelationKeys,
     resolveCiphertextChunkCount,
 } from './backend-statement-builder.js';
+import {
+    receiverEncryptionVariableNames,
+    receiverOpeningVariableNames,
+    receiverPayloadPlaintextBitVariableNames,
+    receiverPayloadPlaintextOpeningVariableNames,
+    receiverPayloadPlaintextShareVariableNames,
+    receiverShareVariableNames,
+} from './backend-variable-names.js';
 import {
     addDigestExpandedReceiverEncryptionNoiseVariable,
     addDigestExpandedReceiverEncryptionRandomnessVariable,

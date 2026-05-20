@@ -61,7 +61,7 @@ type BallotProofRecordPayload = Omit<
     'ballotProofRecordDigest'
 >;
 
-type ClaimBearingBallotPackageDigestPayload = {
+type ScopedRelationBearingBallotPackageDigestPayload = {
     readonly objectType: 'ClaimBearingBallotPackage';
     readonly objectVersion: 1;
     readonly ballotProofStatement: Omit<
@@ -130,10 +130,11 @@ export type BallotProofComponentProofVerificationInput = {
 
 type UnknownObject = Readonly<Record<string, unknown>>;
 
-type ClaimBearingBallotPackageVerificationShell = ClaimBearingBallotPackage & {
-    readonly componentProofInputs?: readonly BallotProofComponentProofVerificationInput[];
-    readonly proofBytesHex?: string;
-};
+type ScopedRelationBearingBallotPackageVerificationShell =
+    ClaimBearingBallotPackage & {
+        readonly componentProofInputs?: readonly BallotProofComponentProofVerificationInput[];
+        readonly proofBytesHex?: string;
+    };
 
 const unavailableProofBackendMessage =
     'The pure TypeScript protocol shell does not verify ballot privacy proof bytes. Use the packaged Rust/WASM verifier for claim-bearing ballot proof and package verification.';
@@ -453,12 +454,12 @@ const omitProperty = <InputValue extends object, Key extends keyof InputValue>(
     return remainingProperties;
 };
 
-const claimBearingBallotPackageDigestPayload = (input: {
+const scopedRelationBearingBallotPackageDigestPayload = (input: {
     readonly ballotProofStatement: BallotProofStatement;
     readonly receiverKeyProofRootEvidence: ReceiverKeyProofRootEvidence;
     readonly receiverPayloads: readonly ReceiverPayload[];
     readonly shareCommitments: readonly ShareCommitment[];
-}): ClaimBearingBallotPackageDigestPayload => ({
+}): ScopedRelationBearingBallotPackageDigestPayload => ({
     objectType: 'ClaimBearingBallotPackage',
     objectVersion: 1,
     ballotProofStatement: omitProperty(
@@ -478,7 +479,7 @@ export const deriveClaimBearingBallotPackageDigest = (input: {
 }): ProtocolDigest =>
     deriveProtocolDigest(
         'BallotPackageDigest',
-        claimBearingBallotPackageDigestPayload(input),
+        scopedRelationBearingBallotPackageDigestPayload(input),
     );
 
 const isUnknownObject = (value: unknown): value is UnknownObject =>
@@ -630,6 +631,6 @@ export type {
     ReceiverPayloadInput,
     ShareCommitmentInput,
     UnknownObject,
-    ClaimBearingBallotPackageVerificationShell,
+    ScopedRelationBearingBallotPackageVerificationShell,
     BallotProofStatementInput,
 };

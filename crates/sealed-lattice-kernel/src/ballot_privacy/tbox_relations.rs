@@ -3,7 +3,7 @@ use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
 
 use super::{
     linear_proof_public_parameters::{
-        LINEAR_PROOF_PROOF_COEFFICIENT_MODULUS, LINEAR_PROOF_PROOF_RING_DEGREE,
+        DEFAULT_LINEAR_PROOF_COEFFICIENT_MODULUS, DEFAULT_LINEAR_PROOF_RING_DEGREE,
         TBOX_SHORT_MESSAGE_LENGTH,
     },
     linear_proof_rng::sample_linear_proof_uniform_u64_values,

@@ -5,6 +5,7 @@ import type { BallotPrivacyRelationCompilerInput } from '../relation-compiler.js
 
 import { validateSourceRingDegree } from './component-bundle.js';
 import { buildStructuredShareCommitmentSparseStatement } from './component-projections.js';
+import { rowBatchesForComponent } from './component-statement-builder.js';
 import type {
     BallotProofSparseComponentLinearProofStatement,
     BallotProofStructuredShareCommitmentProofStatement,
@@ -25,7 +26,6 @@ import {
     deriveSparseLinearStatementDigest,
     deriveSparseStatementMatrixDigest,
     deriveSparseTargetVectorDigest,
-    rowBatchesForComponent,
 } from './statement-digests.js';
 import {
     componentById,

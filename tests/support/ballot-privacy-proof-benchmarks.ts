@@ -24,30 +24,18 @@ import type {
     TranscriptCoreKernel,
 } from '../../packages/wasm/src/transcript-core-bridge';
 
+import {
+    checkpointPayload,
+    checkpointRecord,
+    mandatoryProofBenchmarkCheckpointNames,
+    type ProofBenchmarkCheckpointStore,
+} from './ballot-privacy-proof-benchmark-checkpoints';
+import {
+    captureRuntimeMemorySnapshot,
+    type RuntimeMemorySnapshot,
+} from './ballot-privacy-proof-benchmark-memory';
 import { createMandatoryProfileBallotProofRecordBenchmarkFixture } from './ballot-privacy-proof-record-generation-fixtures';
 import { runTimedTestStep, type TimedTestStepMetric } from './timed-test-steps';
-
-type ProcessMemoryUsage = {
-    readonly arrayBuffers?: number;
-    readonly external?: number;
-    readonly heapTotal?: number;
-    readonly heapUsed?: number;
-    readonly rss?: number;
-};
-
-type ProcessLike = {
-    readonly memoryUsage?: () => ProcessMemoryUsage;
-};
-
-type PerformanceMemory = {
-    readonly jsHeapSizeLimit?: number;
-    readonly totalJSHeapSize?: number;
-    readonly usedJSHeapSize?: number;
-};
-
-type PerformanceWithMemory = Performance & {
-    readonly memory?: PerformanceMemory;
-};
 
 type ComponentProofRecord = {
     readonly componentId: string;
@@ -81,15 +69,6 @@ export type RuntimeBenchmarkContext = {
     readonly userAgent?: string;
     readonly viewportHeight?: number;
     readonly viewportWidth?: number;
-};
-
-export type RuntimeMemorySnapshot = {
-    readonly arrayBufferBytes?: number;
-    readonly externalBytes?: number;
-    readonly heapLimitBytes?: number;
-    readonly residentSetBytes?: number;
-    readonly totalHeapBytes?: number;
-    readonly usedHeapBytes?: number;
 };
 
 export type ComponentProofBenchmarkMetric = {
@@ -146,62 +125,6 @@ export type ReceiverKeyProofBenchmarkInput = {
         readonly secretState: ReceiverEncryptionSecretState;
     };
     readonly secretState: ReceiverEncryptionSecretState;
-};
-
-const mandatoryProofBenchmarkCheckpointNames = {
-    claimBearingPackage: 'ballot-privacy-proof-benchmark-claim-bearing-package',
-    generatedProofRecord:
-        'ballot-privacy-proof-benchmark-generated-proof-record',
-    loweredStatements: 'ballot-privacy-proof-benchmark-lowered-statements',
-    relationRequest: 'ballot-privacy-proof-benchmark-relation-request',
-    verificationReport: 'ballot-privacy-proof-benchmark-verification-report',
-} as const;
-
-export type ProofBenchmarkCheckpointName =
-    (typeof mandatoryProofBenchmarkCheckpointNames)[keyof typeof mandatoryProofBenchmarkCheckpointNames];
-
-export type ProofBenchmarkCheckpointStore = {
-    readonly read?: (checkpointName: ProofBenchmarkCheckpointName) => unknown;
-    readonly write?: (
-        checkpointName: ProofBenchmarkCheckpointName,
-        value: unknown,
-    ) => void;
-};
-
-const safeMemoryInteger = (value: number | undefined): number | undefined =>
-    value === undefined || !Number.isSafeInteger(value) || value < 0
-        ? undefined
-        : value;
-
-export const captureRuntimeMemorySnapshot = (): RuntimeMemorySnapshot => {
-    const performanceMemory = (
-        globalThis.performance as PerformanceWithMemory | undefined
-    )?.memory;
-    if (performanceMemory !== undefined) {
-        return {
-            heapLimitBytes: safeMemoryInteger(
-                performanceMemory.jsHeapSizeLimit,
-            ),
-            totalHeapBytes: safeMemoryInteger(
-                performanceMemory.totalJSHeapSize,
-            ),
-            usedHeapBytes: safeMemoryInteger(performanceMemory.usedJSHeapSize),
-        };
-    }
-
-    const processLike = (globalThis as { readonly process?: ProcessLike })
-        .process;
-    const memoryUsage = processLike?.memoryUsage?.();
-
-    return memoryUsage === undefined
-        ? {}
-        : {
-              arrayBufferBytes: safeMemoryInteger(memoryUsage.arrayBuffers),
-              externalBytes: safeMemoryInteger(memoryUsage.external),
-              residentSetBytes: safeMemoryInteger(memoryUsage.rss),
-              totalHeapBytes: safeMemoryInteger(memoryUsage.heapTotal),
-              usedHeapBytes: safeMemoryInteger(memoryUsage.heapUsed),
-          };
 };
 
 const digest = (label: string): ProtocolDigest =>
@@ -548,30 +471,6 @@ export const buildClaimBearingBallotPackageForBenchmark = (input: {
     receiverPayloads: input.fixture.claimBearingReceiverPayloads,
     shareCommitments: input.fixture.claimBearingShareCommitments,
 });
-
-const checkpointRecord = (
-    checkpointName: ProofBenchmarkCheckpointName,
-    payload: unknown,
-): Record<string, unknown> => ({
-    checkpointName,
-    payload,
-    schemaVersion: 1,
-});
-
-const checkpointPayload = (
-    value: unknown,
-    checkpointName: ProofBenchmarkCheckpointName,
-): unknown => {
-    const record = recordValue(value);
-    if (
-        record?.schemaVersion !== 1 ||
-        record.checkpointName !== checkpointName
-    ) {
-        return undefined;
-    }
-
-    return record.payload;
-};
 
 export const runMandatoryBallotProofRecordBenchmark = (input: {
     readonly checkpoints?: ProofBenchmarkCheckpointStore;

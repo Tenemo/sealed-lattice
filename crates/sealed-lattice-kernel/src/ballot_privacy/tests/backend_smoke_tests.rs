@@ -191,7 +191,7 @@ fn ballot_proof_generation_command_emits_verifying_dense_proof_bytes() {
         "sourceWitnessCoefficients": [witness_polynomial]
     });
 
-    let generation = super::generate_ballot_proof(
+    let generation = super::generate_ballot_proof_from_command_fields(
         Some(&linear_statement),
         Some(&parameter_set_value),
         Some(&proof_encoding_value),
@@ -227,7 +227,7 @@ fn ballot_proof_generation_command_emits_verifying_dense_proof_bytes() {
         "proofEncoding": proof_encoding_value,
         "publicRandomnessHex": public_randomness_hex
     });
-    let component_generation = super::generate_ballot_component_proof(
+    let component_generation = super::generate_ballot_component_proof_from_command_fields(
         Some("score-and-shamir-field-component"),
         Some(&proof_input),
         Some(&secret_state),
@@ -331,7 +331,7 @@ fn structured_share_commitment_component_generation_uses_compact_statement() {
         ]
     });
 
-    let component_generation = super::generate_ballot_component_proof(
+    let component_generation = super::generate_ballot_component_proof_from_command_fields(
         Some("share-commitment-component"),
         Some(&proof_input),
         Some(&secret_state),
@@ -352,7 +352,7 @@ fn structured_share_commitment_component_generation_uses_compact_statement() {
     let mut mutated_proof_input = proof_input;
     mutated_proof_input["proofStatement"]["receiverRows"][0]["commitmentPolynomialVector"][0][0] =
         json!(1);
-    let mutated_generation = super::generate_ballot_component_proof(
+    let mutated_generation = super::generate_ballot_component_proof_from_command_fields(
         Some("share-commitment-component"),
         Some(&mutated_proof_input),
         Some(&secret_state),

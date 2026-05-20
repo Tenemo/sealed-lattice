@@ -18,7 +18,7 @@ import {
 } from './component-and-payload-checks.js';
 import type {
     BallotProofComponentProofVerificationInput,
-    ClaimBearingBallotPackageVerificationShell,
+    ScopedRelationBearingBallotPackageVerificationShell,
 } from './object-contracts.js';
 import {
     createReceiverReferenceKey,
@@ -121,8 +121,8 @@ const collectShareCommitmentStructuralRefusals = (
     return refusedObjects;
 };
 
-const collectClaimBearingPackageStructuralRefusals = (
-    ballotPackage: ClaimBearingBallotPackageVerificationShell,
+const collectScopedRelationBearingPackageStructuralRefusals = (
+    ballotPackage: ScopedRelationBearingBallotPackageVerificationShell,
 ): readonly RefusalRecord[] => {
     const refusedObjects: RefusalRecord[] = [
         ...collectBallotProofStructuralRefusals(
@@ -370,11 +370,12 @@ export const verifyBallotProof = (input: {
 };
 
 export const verifyClaimBearingBallotPackage = (input: {
-    readonly ballotPackage: ClaimBearingBallotPackageVerificationShell;
+    readonly ballotPackage: ScopedRelationBearingBallotPackageVerificationShell;
 }): BallotPrivacyVerification => {
-    const structuralRefusals = collectClaimBearingPackageStructuralRefusals(
-        input.ballotPackage,
-    );
+    const structuralRefusals =
+        collectScopedRelationBearingPackageStructuralRefusals(
+            input.ballotPackage,
+        );
     if (structuralRefusals.length > 0) {
         return createBallotPrivacyStructuralRejection(structuralRefusals);
     }

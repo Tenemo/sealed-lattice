@@ -1,4 +1,4 @@
-use super::component_verifier::LinearProofVectorCase;
+use super::vector_case::LinearProofVectorCase;
 use crate::ballot_privacy::{BALLOT_PRIVACY_PROOF_BACKEND_AVAILABLE, describe_proof_backend};
 use crate::encoding::{CanonicalError, CanonicalErrorCode};
 use serde_json::{Value, json};

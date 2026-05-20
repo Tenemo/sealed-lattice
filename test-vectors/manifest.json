@@ -75,15 +75,15 @@
     },
     {
       "path": "pvss-ballot/aggregate-shares.json",
-      "sha256": "9eb82fd11d3e09555cd31841e52924642a751c4588e1658a13950e9e8b590e93"
+      "sha256": "80fb6a5d35ed2f194c3bdb7607ffbc94f976e170b7b25937d93e2aaaf590a039"
     },
     {
       "path": "pvss-ballot/ballot-algebra.json",
-      "sha256": "08e87f10546041e1de67d6f181cc05ee8c180a7825071633c086dff6ffec0c6f"
+      "sha256": "bc0a6cbe8f0eda798b5d0f8191d079bec5e1b62746626bc55888d3b0151d430e"
     },
     {
       "path": "pvss-ballot/canonical-ballot-set.json",
-      "sha256": "703ab4e93aa47b44c352b31756309372cb3fdbf4035e77bb3d8cdc20facb2ec0"
+      "sha256": "c82b8e0323af5f0df94e0aff30e59bc2da4f7cb95c8bf3036e996f1c674ddac0"
     },
     {
       "path": "transcript-core/golden-transcript-core.json",

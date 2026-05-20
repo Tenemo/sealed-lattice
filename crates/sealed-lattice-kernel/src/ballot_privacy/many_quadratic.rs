@@ -1,7 +1,7 @@
 use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
 
 use super::{
-    linear_proof_public_parameters::LINEAR_PROOF_PROOF_COEFFICIENT_BIT_LENGTH,
+    linear_proof_public_parameters::DEFAULT_LINEAR_PROOF_COEFFICIENT_BIT_LENGTH,
     linear_proof_rng::sample_linear_proof_uniform_u64_values,
     polynomial_ring::PolynomialRing,
     quadratic_equation::LinearProofQuadraticEquation,
@@ -74,7 +74,7 @@ pub(crate) fn fold_default_many_quadratic_equations(
     fold_many_quadratic_equations(
         equations,
         challenge_seed,
-        LINEAR_PROOF_PROOF_COEFFICIENT_BIT_LENGTH,
+        DEFAULT_LINEAR_PROOF_COEFFICIENT_BIT_LENGTH,
     )
 }
 

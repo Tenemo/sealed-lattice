@@ -205,7 +205,77 @@ pub(crate) fn verify_receiver_key_linear_proof_bytes(
     })
 }
 
-pub fn verify_receiver_key_proof(
+pub(crate) struct ReceiverKeyProofVerificationInput<'a> {
+    receiver_key_proof: &'a Value,
+    linear_proof_context: Option<ReceiverKeyLinearProofVerificationInput<'a>>,
+}
+
+struct ReceiverKeyLinearProofVerificationInput<'a> {
+    linear_statement: &'a Value,
+    proof_bytes_hex: &'a str,
+    public_randomness_hex: &'a str,
+    parameter_set: &'a Value,
+    proof_encoding: &'a Value,
+}
+
+impl<'a> ReceiverKeyProofVerificationInput<'a> {
+    fn from_command_fields(
+        receiver_key_proof: &'a Value,
+        linear_statement: Option<&'a Value>,
+        proof_bytes_hex: Option<&'a str>,
+        public_randomness_hex: Option<&'a str>,
+        parameter_set: Option<&'a Value>,
+        proof_encoding: Option<&'a Value>,
+    ) -> Result<Self, Value> {
+        let refused_objects =
+            collect_receiver_key_proof_refusals(receiver_key_proof, proof_bytes_hex);
+        if !refused_objects.is_empty() {
+            return Err(structural_rejection(
+                "verifyReceiverKeyProof",
+                refused_objects,
+            ));
+        }
+
+        let linear_proof_context = match (
+            linear_statement,
+            proof_bytes_hex,
+            public_randomness_hex,
+            parameter_set,
+            proof_encoding,
+        ) {
+            (None, None, None, None, None) => None,
+            (
+                Some(linear_statement),
+                Some(proof_bytes_hex),
+                Some(public_randomness_hex),
+                Some(parameter_set),
+                Some(proof_encoding),
+            ) => Some(ReceiverKeyLinearProofVerificationInput {
+                linear_statement,
+                proof_bytes_hex,
+                public_randomness_hex,
+                parameter_set,
+                proof_encoding,
+            }),
+            _ => {
+                return Err(structural_rejection(
+                    "verifyReceiverKeyProof",
+                    vec![structural_refusal(
+                        "Receiver key proof verification requires proof bytes, public randomness, proof parameters, proof encoding, and the public linear statement together.",
+                        string_field(receiver_key_proof, "receiverKeyProofRoot"),
+                    )],
+                ));
+            }
+        };
+
+        Ok(Self {
+            receiver_key_proof,
+            linear_proof_context,
+        })
+    }
+}
+
+pub(crate) fn verify_receiver_key_proof_from_command_fields(
     receiver_key_proof: &Value,
     linear_statement: Option<&Value>,
     proof_bytes_hex: Option<&str>,
@@ -213,51 +283,36 @@ pub fn verify_receiver_key_proof(
     parameter_set: Option<&Value>,
     proof_encoding: Option<&Value>,
 ) -> Value {
-    let refused_objects = collect_receiver_key_proof_refusals(receiver_key_proof, proof_bytes_hex);
-    if !refused_objects.is_empty() {
-        return structural_rejection("verifyReceiverKeyProof", refused_objects);
-    }
-
-    match (
+    match ReceiverKeyProofVerificationInput::from_command_fields(
+        receiver_key_proof,
         linear_statement,
         proof_bytes_hex,
         public_randomness_hex,
         parameter_set,
         proof_encoding,
     ) {
-        (None, None, None, None, None) => {}
-        (
-            Some(linear_statement),
-            Some(proof_bytes_hex),
-            Some(public_randomness_hex),
-            Some(parameter_set),
-            Some(proof_encoding),
-        ) => {
-            return verify_receiver_key_linear_proof_bytes(
-                receiver_key_proof,
-                linear_statement,
-                proof_bytes_hex,
-                public_randomness_hex,
-                parameter_set,
-                proof_encoding,
-            );
-        }
-        _ => {
-            return structural_rejection(
-                "verifyReceiverKeyProof",
-                vec![structural_refusal(
-                    "Receiver key proof verification requires proof bytes, public randomness, proof parameters, proof encoding, and the public linear statement together.",
-                    string_field(receiver_key_proof, "receiverKeyProofRoot"),
-                )],
-            );
-        }
+        Ok(input) => verify_receiver_key_proof(input),
+        Err(rejection) => rejection,
+    }
+}
+
+pub(crate) fn verify_receiver_key_proof(input: ReceiverKeyProofVerificationInput<'_>) -> Value {
+    if let Some(linear_proof_context) = input.linear_proof_context {
+        return verify_receiver_key_linear_proof_bytes(
+            input.receiver_key_proof,
+            linear_proof_context.linear_statement,
+            linear_proof_context.proof_bytes_hex,
+            linear_proof_context.public_randomness_hex,
+            linear_proof_context.parameter_set,
+            linear_proof_context.proof_encoding,
+        );
     }
 
     structural_rejection(
         "verifyReceiverKeyProof",
         vec![structural_refusal(
             "Receiver key proof verification requires proof bytes, public randomness, proof parameters, proof encoding, and the public linear statement.",
-            string_field(receiver_key_proof, "receiverKeyProofRoot"),
+            string_field(input.receiver_key_proof, "receiverKeyProofRoot"),
         )],
     )
 }

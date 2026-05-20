@@ -5,7 +5,7 @@ use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
 use super::{
     linear_proof_parameters::{LinearProofEncoding, linear_proof_profile_for_encoding},
     linear_proof_profile_constants::DEMO_GENERATED_PROFILE,
-    proof_coder::DecodedLazerDemoLinearProof,
+    proof_coder::DecodedLinearProof,
 };
 
 pub const LINEAR_PROOF_CHALLENGE_CENTERED_BOUND: i64 =
@@ -28,7 +28,7 @@ pub struct LinearProofNormSummary {
 }
 
 pub fn validate_linear_proof_norms(
-    decoded_proof: &DecodedLazerDemoLinearProof,
+    decoded_proof: &DecodedLinearProof,
     proof_encoding: &LinearProofEncoding,
 ) -> CanonicalResult<LinearProofNormSummary> {
     let proof_profile = linear_proof_profile_for_encoding(proof_encoding)?;
@@ -166,7 +166,7 @@ mod tests {
     }
 
     fn decoded_valid_proof() -> (
-        crate::ballot_privacy::proof_coder::DecodedLazerDemoLinearProof,
+        crate::ballot_privacy::proof_coder::DecodedLinearProof,
         LinearProofEncoding,
     ) {
         let vector_case = generated_vector_case("valid-small-linear-proof");

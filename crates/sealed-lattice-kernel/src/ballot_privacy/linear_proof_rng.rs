@@ -51,7 +51,7 @@ pub fn sample_linear_proof_uniform_u64_values(
     }
 
     let mut accepted_values = Vec::with_capacity(value_count);
-    let mut rng_cursor = LazerDemoAes256CtrCursor::new(seed, domain_separator);
+    let mut rng_cursor = LinearProofAes256CtrCursor::new(seed, domain_separator);
     while accepted_values.len() < value_count {
         let remaining_values = value_count - accepted_values.len();
         let byte_count = (modulus_bit_length * remaining_values).div_ceil(8);
@@ -121,14 +121,14 @@ pub fn sample_linear_proof_autostable_challenge_coefficients(
     Ok(coefficients)
 }
 
-struct LazerDemoAes256CtrCursor {
+struct LinearProofAes256CtrCursor {
     seed: [u8; 32],
     domain_separator: u64,
     buffered_bytes: Vec<u8>,
     consumed_bytes: usize,
 }
 
-impl LazerDemoAes256CtrCursor {
+impl LinearProofAes256CtrCursor {
     fn new(seed: &[u8; 32], domain_separator: u64) -> Self {
         Self {
             seed: *seed,

@@ -7,9 +7,9 @@ use super::{
     polynomial_ring::PolynomialRing,
 };
 
-pub const LINEAR_PROOF_PROOF_RING_DEGREE: usize = 64;
-pub const LINEAR_PROOF_PROOF_COEFFICIENT_MODULUS: u64 = 36_028_797_018_964_597;
-pub const LINEAR_PROOF_PROOF_COEFFICIENT_BIT_LENGTH: usize = 56;
+pub const DEFAULT_LINEAR_PROOF_RING_DEGREE: usize = 64;
+pub const DEFAULT_LINEAR_PROOF_COEFFICIENT_MODULUS: u64 = 36_028_797_018_964_597;
+pub const DEFAULT_LINEAR_PROOF_COEFFICIENT_BIT_LENGTH: usize = 56;
 pub const TBOX_SHORT_MESSAGE_LENGTH: usize = 33;
 pub const TBOX_RANDOMNESS_LENGTH: usize = 60;
 pub const TBOX_COMPRESSED_OPENING_LENGTH: usize = 13;
@@ -20,7 +20,7 @@ const LINEAR_PROOF_ABDLOP_OPENING_KEY_DOMAIN: u32 = 1;
 const LINEAR_PROOF_ABDLOP_MESSAGE_KEY_DOMAIN: u32 = 2;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LazerDemoAbdlopPublicParameters {
+pub struct AbdlopPublicParameters {
     pub commitment_key_matrix: PolynomialMatrix,
     pub opening_key_matrix: PolynomialMatrix,
     pub message_key_matrix: PolynomialMatrix,
@@ -28,7 +28,7 @@ pub struct LazerDemoAbdlopPublicParameters {
 
 pub fn derive_default_abdlop_public_parameters(
     public_randomness: &[u8; 32],
-) -> CanonicalResult<LazerDemoAbdlopPublicParameters> {
+) -> CanonicalResult<AbdlopPublicParameters> {
     let proof_encoding = demo_linear_proof_encoding_contract();
     derive_abdlop_public_parameters(public_randomness, &proof_encoding)
 }
@@ -36,7 +36,7 @@ pub fn derive_default_abdlop_public_parameters(
 pub fn derive_abdlop_public_parameters(
     public_randomness: &[u8; 32],
     proof_encoding: &LinearProofEncoding,
-) -> CanonicalResult<LazerDemoAbdlopPublicParameters> {
+) -> CanonicalResult<AbdlopPublicParameters> {
     proof_encoding.validate()?;
     let proof_ring = PolynomialRing::new(
         proof_encoding.ring_degree,
@@ -68,7 +68,7 @@ pub fn derive_abdlop_public_parameters(
         proof_encoding.full_size_coefficient_bit_length,
     )?;
 
-    Ok(LazerDemoAbdlopPublicParameters {
+    Ok(AbdlopPublicParameters {
         commitment_key_matrix,
         opening_key_matrix,
         message_key_matrix,
@@ -128,7 +128,7 @@ fn invalid_public_parameters(message: impl Into<String>) -> CanonicalError {
 #[cfg(test)]
 mod tests {
     use super::{
-        LINEAR_PROOF_PROOF_COEFFICIENT_MODULUS, LINEAR_PROOF_PROOF_RING_DEGREE,
+        DEFAULT_LINEAR_PROOF_COEFFICIENT_MODULUS, DEFAULT_LINEAR_PROOF_RING_DEGREE,
         derive_default_abdlop_public_parameters, expand_linear_proof_uniform_polynomial_matrix,
     };
     use crate::{
@@ -207,11 +207,11 @@ mod tests {
         assert_eq!(public_parameters.message_key_matrix.columns(), 47);
         assert_eq!(
             public_parameters.commitment_key_matrix.ring().degree(),
-            LINEAR_PROOF_PROOF_RING_DEGREE
+            DEFAULT_LINEAR_PROOF_RING_DEGREE
         );
         assert_eq!(
             public_parameters.commitment_key_matrix.ring().modulus(),
-            LINEAR_PROOF_PROOF_COEFFICIENT_MODULUS
+            DEFAULT_LINEAR_PROOF_COEFFICIENT_MODULUS
         );
     }
 

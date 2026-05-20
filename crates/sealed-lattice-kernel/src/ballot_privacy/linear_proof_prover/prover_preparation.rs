@@ -22,7 +22,7 @@ use super::{
     many_quadratic::{build_many_quadratic_equations, fold_many_quadratic_equations},
     polynomial_ring::PolynomialRing,
     polynomial_vector::PolynomialVector,
-    proof_coder::{LazerDemoLinearProofComponents, encode_linear_proof_components},
+    proof_coder::{LinearProofComponents, encode_linear_proof_components},
     sparse_linear_proof_statement::{
         transform_sparse_statement_matrix_to_proof_ring_with_coefficient_representation,
         transform_sparse_target_vector_to_proof_ring,
@@ -821,7 +821,7 @@ pub(crate) fn generate_linear_proof(
     validate_zero_high_bits_low_part(proof_ring, recovery_input.entries(), input.proof_encoding)?;
 
     let proof_bytes = encode_linear_proof_components(
-        LazerDemoLinearProofComponents {
+        LinearProofComponents {
             commitment_target_vector: target_commitment_vector,
             hash_mask_vector,
             compressed_commitment_vector: commitment_preparation

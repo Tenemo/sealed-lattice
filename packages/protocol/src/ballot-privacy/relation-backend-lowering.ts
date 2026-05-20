@@ -6,5 +6,5 @@ export type {
     BallotPrivacyLoweredLinearRelationStatement,
     BallotPrivacyRelationBackendLoweringResult,
 } from './relation-backend-lowering/backend-contracts.js';
-export { ballotPrivacyBackendProofComponentOrder } from './relation-backend-lowering/backend-batches-and-bounds.js';
+export { ballotPrivacyBackendProofComponentOrder } from './relation-backend-lowering/backend-proof-components.js';
 export { lowerBallotPrivacyRelationToBackendStatement } from './relation-backend-lowering/relation-lowering.js';

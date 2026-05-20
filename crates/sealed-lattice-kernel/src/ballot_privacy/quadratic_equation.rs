@@ -252,7 +252,7 @@ impl LinearProofQuadraticEquation {
         challenge_seed: &[u8; 32],
         challenge_domain: u32,
         modulus_bit_length: usize,
-    ) -> CanonicalResult<LazerDemoQuadraticAccumulatorPairs> {
+    ) -> CanonicalResult<QuadraticAccumulatorPairs> {
         if primary_accumulators.len() != secondary_accumulators.len() {
             return Err(invalid_quadratic(
                 "primary and secondary accumulator counts must match",
@@ -314,7 +314,7 @@ impl LinearProofQuadraticEquation {
             challenge_scalars_by_pair.push(challenge_scalars);
         }
 
-        Ok(LazerDemoQuadraticAccumulatorPairs {
+        Ok(QuadraticAccumulatorPairs {
             primary_accumulators: primary_outputs,
             secondary_accumulators: secondary_outputs,
             challenge_scalars_by_pair,
@@ -427,7 +427,7 @@ pub(crate) struct WeightedLinearProofQuadraticEquation<'equation> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct LazerDemoQuadraticAccumulatorPairs {
+pub(crate) struct QuadraticAccumulatorPairs {
     pub(crate) primary_accumulators: Vec<LinearProofQuadraticEquation>,
     pub(crate) secondary_accumulators: Vec<LinearProofQuadraticEquation>,
     pub(crate) challenge_scalars_by_pair: Vec<Vec<u64>>,

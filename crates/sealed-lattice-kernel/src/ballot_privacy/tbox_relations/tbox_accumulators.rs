@@ -7,7 +7,7 @@ use super::{
         LinearProofEncoding, LinearProofProfile, demo_linear_proof_encoding_contract,
         linear_proof_profile_for_encoding,
     },
-    linear_proof_public_parameters::LINEAR_PROOF_PROOF_RING_DEGREE,
+    linear_proof_public_parameters::DEFAULT_LINEAR_PROOF_RING_DEGREE,
     linear_proof_rng::sample_linear_proof_uniform_u64_values,
     polynomial_matrix::PolynomialMatrix,
     polynomial_ring::PolynomialRing,
@@ -29,18 +29,20 @@ pub(super) const TBOX_QUADRATIC_EVALUATION_REPETITIONS: usize = 4;
 
 pub(super) const TBOX_BETA3_DOMAIN_OFFSET: u32 = 0;
 pub(super) const TBOX_BETA4_DOMAIN_OFFSET: u32 =
-    (TBOX_QUADRATIC_EVALUATION_REPETITIONS * (LINEAR_PROOF_PROOF_RING_DEGREE - 1)) as u32;
+    (TBOX_QUADRATIC_EVALUATION_REPETITIONS * (DEFAULT_LINEAR_PROOF_RING_DEGREE - 1)) as u32;
 pub(super) const TBOX_UPSILON_DOMAIN_OFFSET: u32 =
-    (TBOX_QUADRATIC_EVALUATION_REPETITIONS * 2 * (LINEAR_PROOF_PROOF_RING_DEGREE - 1)) as u32;
-pub(super) const TBOX_BINARY_DOMAIN_OFFSET: u32 =
-    (TBOX_QUADRATIC_EVALUATION_REPETITIONS * (2 * (LINEAR_PROOF_PROOF_RING_DEGREE - 1) + 1)) as u32;
-pub(super) const TBOX_EUCLIDEAN_DOMAIN_OFFSET: u32 =
-    (TBOX_QUADRATIC_EVALUATION_REPETITIONS * (2 * (LINEAR_PROOF_PROOF_RING_DEGREE - 1) + 2)) as u32;
+    (TBOX_QUADRATIC_EVALUATION_REPETITIONS * 2 * (DEFAULT_LINEAR_PROOF_RING_DEGREE - 1)) as u32;
+pub(super) const TBOX_BINARY_DOMAIN_OFFSET: u32 = (TBOX_QUADRATIC_EVALUATION_REPETITIONS
+    * (2 * (DEFAULT_LINEAR_PROOF_RING_DEGREE - 1) + 1))
+    as u32;
+pub(super) const TBOX_EUCLIDEAN_DOMAIN_OFFSET: u32 = (TBOX_QUADRATIC_EVALUATION_REPETITIONS
+    * (2 * (DEFAULT_LINEAR_PROOF_RING_DEGREE - 1) + 2))
+    as u32;
 pub(super) const TBOX_Z4_RESPONSE_DOMAIN_OFFSET: u32 = (TBOX_QUADRATIC_EVALUATION_REPETITIONS
-    * (2 * (LINEAR_PROOF_PROOF_RING_DEGREE - 1) + 2 + TBOX_UPSILON_COORDINATES))
+    * (2 * (DEFAULT_LINEAR_PROOF_RING_DEGREE - 1) + 2 + TBOX_UPSILON_COORDINATES))
     as u32;
 pub(super) const TBOX_Z3_RESPONSE_DOMAIN_OFFSET: u32 = (TBOX_QUADRATIC_EVALUATION_REPETITIONS
-    * (2 * (LINEAR_PROOF_PROOF_RING_DEGREE - 1) + 2 + TBOX_UPSILON_COORDINATES + 256))
+    * (2 * (DEFAULT_LINEAR_PROOF_RING_DEGREE - 1) + 2 + TBOX_UPSILON_COORDINATES + 256))
     as u32;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -237,14 +239,14 @@ pub(super) fn apply_tbox_beta3_relations(
     let proof_ring = tbox_profile.proof_ring;
     let inverse_two = proof_ring.modulus().div_ceil(2);
     let challenge_values = sample_linear_proof_uniform_u64_values(
-        (LINEAR_PROOF_PROOF_RING_DEGREE - 1) * TBOX_QUADRATIC_EVALUATION_REPETITIONS,
+        (DEFAULT_LINEAR_PROOF_RING_DEGREE - 1) * TBOX_QUADRATIC_EVALUATION_REPETITIONS,
         proof_ring.modulus(),
         tbox_profile.coefficient_bit_length,
         challenge_seed,
         u64::from(TBOX_BETA3_DOMAIN_OFFSET),
     )?;
 
-    for coefficient_index in 1..LINEAR_PROOF_PROOF_RING_DEGREE {
+    for coefficient_index in 1..DEFAULT_LINEAR_PROOF_RING_DEGREE {
         for accumulator_pair_index in 0..accumulator_set.primary_schwartz_zippel_accumulators.len()
         {
             let primary_challenge_index = (coefficient_index - 1)
@@ -307,14 +309,14 @@ pub(super) fn apply_tbox_beta4_relations(
     let proof_ring = tbox_profile.proof_ring;
     let inverse_two = proof_ring.modulus().div_ceil(2);
     let challenge_values = sample_linear_proof_uniform_u64_values(
-        (LINEAR_PROOF_PROOF_RING_DEGREE - 1) * TBOX_QUADRATIC_EVALUATION_REPETITIONS,
+        (DEFAULT_LINEAR_PROOF_RING_DEGREE - 1) * TBOX_QUADRATIC_EVALUATION_REPETITIONS,
         proof_ring.modulus(),
         tbox_profile.coefficient_bit_length,
         challenge_seed,
         u64::from(TBOX_BETA4_DOMAIN_OFFSET),
     )?;
 
-    for coefficient_index in 1..LINEAR_PROOF_PROOF_RING_DEGREE {
+    for coefficient_index in 1..DEFAULT_LINEAR_PROOF_RING_DEGREE {
         for accumulator_pair_index in 0..accumulator_set.primary_schwartz_zippel_accumulators.len()
         {
             let primary_challenge_index = (coefficient_index - 1)

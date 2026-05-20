@@ -11,6 +11,7 @@ use crate::{
     transcript_core::analyze_canonical_object_hex,
 };
 
+#[cfg(test)]
 pub const MODULE_MARKER: &str = "encoding";
 pub const TRANSCRIPT_CORE_COMMAND_CONTRACT_VERSION: &str =
     "sealed-lattice-transcript-core-command-v1";
@@ -468,6 +469,28 @@ fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult<Value> {
 
             verify_fixture(&fixture)
         }
+        TranscriptCoreCommand::DescribeBallotPrivacyProofBackend
+        | TranscriptCoreCommand::VerifyBallotPrivacyLinearProofVector
+        | TranscriptCoreCommand::VerifyBallotPrivacyEncodedRelationVector
+        | TranscriptCoreCommand::VerifyBallotPrivacyReceiverKeyVector
+        | TranscriptCoreCommand::VerifyReceiverKeyProof
+        | TranscriptCoreCommand::PrepareReceiverKeyProofGeneration
+        | TranscriptCoreCommand::GenerateReceiverKeyProof
+        | TranscriptCoreCommand::GenerateBallotProof
+        | TranscriptCoreCommand::GenerateBallotComponentProof
+        | TranscriptCoreCommand::GenerateBallotProofRecord
+        | TranscriptCoreCommand::VerifyBallotProof
+        | TranscriptCoreCommand::VerifyClaimBearingBallotPackage => {
+            run_ballot_privacy_command(command, &request)
+        }
+    }
+}
+
+fn run_ballot_privacy_command(
+    command: TranscriptCoreCommand,
+    request: &Value,
+) -> CanonicalResult<Value> {
+    match command {
         TranscriptCoreCommand::DescribeBallotPrivacyProofBackend => {
             Ok(crate::ballot_privacy::describe_proof_backend())
         }
@@ -511,14 +534,16 @@ fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult<Value> {
             let parameter_set = request.get("parameterSet");
             let proof_encoding = request.get("proofEncoding");
 
-            Ok(crate::ballot_privacy::verify_receiver_key_proof(
-                receiver_key_proof,
-                linear_statement,
-                proof_bytes_hex,
-                public_randomness_hex,
-                parameter_set,
-                proof_encoding,
-            ))
+            Ok(
+                crate::ballot_privacy::verify_receiver_key_proof_from_command_fields(
+                    receiver_key_proof,
+                    linear_statement,
+                    proof_bytes_hex,
+                    public_randomness_hex,
+                    parameter_set,
+                    proof_encoding,
+                ),
+            )
         }
         TranscriptCoreCommand::PrepareReceiverKeyProofGeneration => {
             let linear_statement = request.get("linearStatement");
@@ -564,14 +589,16 @@ fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult<Value> {
             let secret_state = request.get("secretState");
             let prover_randomness_hex = request.get("proverRandomnessHex").and_then(Value::as_str);
 
-            Ok(crate::ballot_privacy::generate_ballot_proof(
-                linear_statement,
-                parameter_set,
-                proof_encoding,
-                public_randomness_hex,
-                secret_state,
-                prover_randomness_hex,
-            ))
+            Ok(
+                crate::ballot_privacy::generate_ballot_proof_from_command_fields(
+                    linear_statement,
+                    parameter_set,
+                    proof_encoding,
+                    public_randomness_hex,
+                    secret_state,
+                    prover_randomness_hex,
+                ),
+            )
         }
         TranscriptCoreCommand::GenerateBallotComponentProof => {
             let component_id = request.get("componentId").and_then(Value::as_str);
@@ -579,12 +606,14 @@ fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult<Value> {
             let secret_state = request.get("secretState");
             let prover_randomness_hex = request.get("proverRandomnessHex").and_then(Value::as_str);
 
-            Ok(crate::ballot_privacy::generate_ballot_component_proof(
-                component_id,
-                proof_input,
-                secret_state,
-                prover_randomness_hex,
-            ))
+            Ok(
+                crate::ballot_privacy::generate_ballot_component_proof_from_command_fields(
+                    component_id,
+                    proof_input,
+                    secret_state,
+                    prover_randomness_hex,
+                ),
+            )
         }
         TranscriptCoreCommand::GenerateBallotProofRecord => {
             let statement = request.get("statement");
@@ -662,6 +691,7 @@ fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult<Value> {
                 ballot_package,
             ))
         }
+        _ => unreachable!("non-ballot command dispatched to ballot privacy handler"),
     }
 }
 

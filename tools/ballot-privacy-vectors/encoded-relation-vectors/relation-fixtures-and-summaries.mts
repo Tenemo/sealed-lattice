@@ -4,6 +4,12 @@ import {
     type BallotProofComponentBundleStatement,
     type BallotProofComponentProjectionWitness,
 } from "../../../packages/protocol/src/ballot-privacy/ballot-proof-linear-statement.js";
+import {
+    denseCoefficientCountForComponentProofStatement,
+    proofStatementFormatForComponent,
+    sourceRingDegreeForComponentProofStatement,
+} from "../../../packages/protocol/src/ballot-privacy/ballot-proof-linear-statement/component-proof-plan-policy.js";
+import { rowBatchesForComponent } from "../../../packages/protocol/src/ballot-privacy/ballot-proof-linear-statement/component-statement-builder.js";
 import { deriveProtocolDigest } from "../../../packages/crypto/src/digests.js";
 import {
     createBallotPrivacyProfileSet,
@@ -705,73 +711,6 @@ export const componentProjectionSummaries = (input: {
     });
 };
 
-const sourceRingDegreeForComponent = (input: {
-    readonly coefficientModulus: string;
-    readonly componentId: string;
-}): number | null => {
-    if (input.componentId === "share-commitment-component") {
-        return 256;
-    }
-    if (
-        input.componentId === "score-and-shamir-field-component" ||
-        input.componentId === "payload-plaintext-field-component"
-    ) {
-        return 64;
-    }
-    if (input.componentId === "receiver-encryption-component") {
-        return 256;
-    }
-    if (input.componentId === "receiver-key-binding-component") {
-        return null;
-    }
-
-    throw new Error(`Unknown proof component ${input.componentId}.`);
-};
-
-const denseCoefficientCountForComponent = (input: {
-    readonly componentId: string;
-    readonly coefficientModulus: string;
-    readonly rowCount: number;
-    readonly variableColumnCount: number;
-}): string | null => {
-    const sourceRingDegree = sourceRingDegreeForComponent(input);
-    if (sourceRingDegree === null || input.variableColumnCount === 0) {
-        return null;
-    }
-
-    return (
-        BigInt(input.rowCount) *
-        BigInt(input.variableColumnCount) *
-        BigInt(sourceRingDegree)
-    ).toString();
-};
-
-const proofStatementFormatForComponent = (input: {
-    readonly componentId: string;
-    readonly rowBatchNames: readonly string[];
-    readonly variableColumnCount: number;
-}): NonNullable<
-    EncodedBallotRelationVectorCase["componentProofReadinessManifests"]
->[number]["proofStatementFormat"] => {
-    if (input.componentId === "receiver-encryption-component") {
-        return "structured-module-lwe-linear-proof-v1";
-    }
-    if (
-        input.componentId === "receiver-key-binding-component" &&
-        input.variableColumnCount === 0
-    ) {
-        return "public-zero-witness-binding-check-v1";
-    }
-    if (
-        input.rowBatchNames.length === 1 &&
-        input.rowBatchNames[0] === "encoded_score_field_rows"
-    ) {
-        return "dense-polynomial-matrix-linear-proof-v1";
-    }
-
-    return "sparse-polynomial-matrix-linear-proof-v1";
-};
-
 const denseMatrixOracleStatusForComponent = (input: {
     readonly componentId: string;
     readonly proofStatementFormat: string;
@@ -803,25 +742,26 @@ export const componentProofReadinessManifests = (input: {
     EncodedBallotRelationVectorCase["componentProofReadinessManifests"]
 > =>
     input.loweredStatement.backendStatement.proofComponents.map((component) => {
-        const recommendedSourceRingDegree = sourceRingDegreeForComponent({
-            coefficientModulus: component.coefficientModulus,
-            componentId: component.componentId,
+        const componentRowBatches = rowBatchesForComponent({
+            component,
+            loweredStatement: input.loweredStatement,
         });
+        const recommendedSourceRingDegree =
+            sourceRingDegreeForComponentProofStatement(component.componentId);
         const proofStatementFormat = proofStatementFormatForComponent({
-            componentId: component.componentId,
-            rowBatchNames: component.rowBatchNames,
-            variableColumnCount: component.variableColumnCount,
+            component,
+            rowBatches: componentRowBatches,
         });
 
         return {
             coefficientModulus: component.coefficientModulus,
             componentId: component.componentId,
-            denseCoefficientCount: denseCoefficientCountForComponent({
-                coefficientModulus: component.coefficientModulus,
-                componentId: component.componentId,
-                rowCount: component.rowCount,
-                variableColumnCount: component.variableColumnCount,
-            }),
+            denseCoefficientCount:
+                denseCoefficientCountForComponentProofStatement({
+                    rowCount: component.rowCount,
+                    sourceRingDegree: recommendedSourceRingDegree,
+                    variableColumnCount: component.variableColumnCount,
+                }),
             denseMatrixOracleStatus: denseMatrixOracleStatusForComponent({
                 componentId: component.componentId,
                 proofStatementFormat,

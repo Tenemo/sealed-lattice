@@ -1,4 +1,4 @@
-use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult, append_varuint};
+use crate::encoding::append_varuint;
 
 pub struct DeterministicFixtureRng {
     seed: Vec<u8>,
@@ -33,10 +33,14 @@ impl DeterministicFixtureRng {
         output
     }
 
-    pub fn next_u64_below(&mut self, exclusive_upper_bound: u64) -> CanonicalResult<u64> {
+    #[cfg(test)]
+    pub fn next_u64_below(
+        &mut self,
+        exclusive_upper_bound: u64,
+    ) -> crate::encoding::CanonicalResult<u64> {
         if exclusive_upper_bound == 0 {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+            return Err(crate::encoding::CanonicalError::new(
+                crate::encoding::CanonicalErrorCode::InvalidFixture,
                 "deterministic fixture RNG bound must be greater than zero",
             ));
         }
@@ -63,6 +67,7 @@ impl DeterministicFixtureRng {
     }
 }
 
+#[cfg(test)]
 fn decode_u64_be(bytes: &[u8]) -> u64 {
     let mut value = 0_u64;
     for byte in bytes {
@@ -72,6 +77,7 @@ fn decode_u64_be(bytes: &[u8]) -> u64 {
     value
 }
 
+#[cfg(test)]
 fn reduce_u64_below_without_modulo_bias(value: u64, exclusive_upper_bound: u64) -> Option<u64> {
     let bound = u128::from(exclusive_upper_bound);
     let sample_space_size = u128::from(u64::MAX) + 1;

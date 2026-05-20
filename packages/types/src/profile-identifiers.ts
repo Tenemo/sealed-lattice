@@ -9,7 +9,7 @@ export const cpadProfileId = 'CPAD-BGV-AsyncThreshold-v1';
 export const bridgeProofProfileId =
     'CommittedAggregateShare-TargetBasisData-HwangPiEnc-BGV-v1';
 
-/** TargetBasisData bridge profile required by accepted manifests. */
+/** Direct TargetBasisData BGV binding profile required inside accepted manifests. */
 export const directTargetBasisDataBridgeProfileId =
     'CommittedAggregateShare-TargetBasisData-BGV-v1';
 

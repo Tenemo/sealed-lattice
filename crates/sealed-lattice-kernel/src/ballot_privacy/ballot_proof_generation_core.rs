@@ -1,6 +1,196 @@
 use super::*;
 
-pub fn generate_ballot_proof(
+pub(crate) struct BallotProofGenerationInput<'a> {
+    linear_statement: &'a Value,
+    parameter_set_value: &'a Value,
+    proof_encoding_value: &'a Value,
+    public_randomness_hex: &'a str,
+    secret_state: &'a Value,
+    prover_randomness_hex: &'a str,
+}
+
+impl<'a> BallotProofGenerationInput<'a> {
+    pub(crate) fn from_command_fields(
+        linear_statement: Option<&'a Value>,
+        parameter_set: Option<&'a Value>,
+        proof_encoding: Option<&'a Value>,
+        public_randomness_hex: Option<&'a str>,
+        secret_state: Option<&'a Value>,
+        prover_randomness_hex: Option<&'a str>,
+    ) -> crate::encoding::CanonicalResult<Self> {
+        Ok(Self {
+            linear_statement: linear_statement.ok_or_else(|| {
+                invalid_preflight("linearStatement is required for ballot proof generation")
+            })?,
+            parameter_set_value: parameter_set.ok_or_else(|| {
+                invalid_preflight("parameterSet is required for ballot proof generation")
+            })?,
+            proof_encoding_value: proof_encoding.ok_or_else(|| {
+                invalid_preflight("proofEncoding is required for ballot proof generation")
+            })?,
+            public_randomness_hex: public_randomness_hex.ok_or_else(|| {
+                invalid_preflight("publicRandomnessHex is required for ballot proof generation")
+            })?,
+            secret_state: secret_state.ok_or_else(|| {
+                invalid_preflight("secretState is required for ballot proof generation")
+            })?,
+            prover_randomness_hex: prover_randomness_hex.ok_or_else(|| {
+                invalid_preflight("proverRandomnessHex is required for ballot proof generation")
+            })?,
+        })
+    }
+}
+
+struct ParsedBallotProofGenerationInput<'a> {
+    raw: BallotProofGenerationInput<'a>,
+    parameter_set: LinearProofParameterSet,
+    proof_encoding: LinearProofEncoding,
+    statement_matrix_coefficients: Vec<Vec<Vec<u64>>>,
+    target_vector_coefficients: Vec<Vec<u64>>,
+    matrix_coefficient_representation: LinearProofMatrixCoefficientRepresentation,
+    target_coefficient_representation: LinearProofTargetCoefficientRepresentation,
+    source_witness_coefficients: Vec<Vec<i64>>,
+    public_randomness_array: [u8; 32],
+    prover_randomness_array: [u8; 32],
+}
+
+impl<'a> ParsedBallotProofGenerationInput<'a> {
+    fn parse(raw: BallotProofGenerationInput<'a>) -> crate::encoding::CanonicalResult<Self> {
+        if string_field(raw.linear_statement, "projectionCoverage")
+            != Some(FULL_BALLOT_PROOF_PROJECTION_COVERAGE)
+        {
+            return Err(invalid_preflight(
+                "ballot proof generation requires a full encoded-score relation statement",
+            ));
+        }
+        if string_field(raw.parameter_set_value, "profileId")
+            != Some(FULL_BALLOT_PROOF_PARAMETER_PROFILE_ID)
+        {
+            return Err(invalid_preflight(
+                "ballot proof generation requires the full-relation parameter profile",
+            ));
+        }
+        if string_field(raw.proof_encoding_value, "profileId")
+            != Some(FULL_BALLOT_PROOF_ENCODING_PROFILE_ID)
+        {
+            return Err(invalid_preflight(
+                "ballot proof generation requires the full-relation proof encoding profile",
+            ));
+        }
+
+        let parameter_set: LinearProofParameterSet =
+            serde_json::from_value(raw.parameter_set_value.clone()).map_err(|error| {
+                invalid_preflight(format!(
+                    "parameterSet is malformed for ballot proof generation: {error}"
+                ))
+            })?;
+        let proof_encoding: LinearProofEncoding =
+            serde_json::from_value(raw.proof_encoding_value.clone()).map_err(|error| {
+                invalid_preflight(format!(
+                    "proofEncoding is malformed for ballot proof generation: {error}"
+                ))
+            })?;
+        let statement_matrix_coefficients: Vec<Vec<Vec<u64>>> = required_json_field(
+            raw.linear_statement,
+            "statementMatrixCoefficients",
+            "linearStatement",
+        )
+        .and_then(|value| {
+            serde_json::from_value(value.clone()).map_err(|error| {
+                invalid_preflight(format!(
+                    "linearStatement.statementMatrixCoefficients is malformed: {error}"
+                ))
+            })
+        })?;
+        let target_vector_coefficients: Vec<Vec<u64>> = required_json_field(
+            raw.linear_statement,
+            "targetVectorCoefficients",
+            "linearStatement",
+        )
+        .and_then(|value| {
+            serde_json::from_value(value.clone()).map_err(|error| {
+                invalid_preflight(format!(
+                    "linearStatement.targetVectorCoefficients is malformed: {error}"
+                ))
+            })
+        })?;
+        let target_coefficient_representation: LinearProofTargetCoefficientRepresentation =
+            required_json_field(
+                raw.linear_statement,
+                "targetCoefficientRepresentation",
+                "linearStatement",
+            )
+            .and_then(|value| {
+                serde_json::from_value(value.clone()).map_err(|error| {
+                    invalid_preflight(format!(
+                        "linearStatement.targetCoefficientRepresentation is malformed: {error}"
+                    ))
+                })
+            })?;
+        let matrix_coefficient_representation = matrix_coefficient_representation_from_statement(
+            raw.linear_statement,
+            "linearStatement",
+        )?;
+        let source_witness_coefficients = source_witness_coefficients(raw.secret_state)?;
+        let public_randomness_array =
+            decode_32_byte_hex(raw.public_randomness_hex, "publicRandomnessHex")?;
+        let prover_randomness_array =
+            decode_32_byte_hex(raw.prover_randomness_hex, "proverRandomnessHex")?;
+
+        Ok(Self {
+            raw,
+            parameter_set,
+            proof_encoding,
+            statement_matrix_coefficients,
+            target_vector_coefficients,
+            matrix_coefficient_representation,
+            target_coefficient_representation,
+            source_witness_coefficients,
+            public_randomness_array,
+            prover_randomness_array,
+        })
+    }
+}
+
+pub(crate) struct BallotComponentProofGenerationInput<'a> {
+    component_id: &'a str,
+    proof_input: &'a Value,
+    secret_state: &'a Value,
+    prover_randomness_hex: &'a str,
+}
+
+impl<'a> BallotComponentProofGenerationInput<'a> {
+    pub(crate) fn from_command_fields(
+        component_id: Option<&'a str>,
+        proof_input: Option<&'a Value>,
+        secret_state: Option<&'a Value>,
+        prover_randomness_hex: Option<&'a str>,
+    ) -> crate::encoding::CanonicalResult<Self> {
+        Ok(Self {
+            component_id: component_id.ok_or_else(|| {
+                invalid_preflight("componentId is required for component proof generation")
+            })?,
+            proof_input: proof_input.ok_or_else(|| {
+                invalid_preflight("proofInput is required for component proof generation")
+            })?,
+            secret_state: secret_state.ok_or_else(|| {
+                invalid_preflight("secretState is required for component proof generation")
+            })?,
+            prover_randomness_hex: prover_randomness_hex.ok_or_else(|| {
+                invalid_preflight("proverRandomnessHex is required for component proof generation")
+            })?,
+        })
+    }
+}
+
+pub(crate) fn generate_ballot_proof(input: BallotProofGenerationInput<'_>) -> Value {
+    match generate_ballot_proof_inner(input) {
+        Ok(value) => value,
+        Err(error) => structural_rejection("generateBallotProof", vec![error.to_json_value()]),
+    }
+}
+
+pub(crate) fn generate_ballot_proof_from_command_fields(
     linear_statement: Option<&Value>,
     parameter_set: Option<&Value>,
     proof_encoding: Option<&Value>,
@@ -8,7 +198,7 @@ pub fn generate_ballot_proof(
     secret_state: Option<&Value>,
     prover_randomness_hex: Option<&str>,
 ) -> Value {
-    match generate_ballot_proof_inner(
+    match BallotProofGenerationInput::from_command_fields(
         linear_statement,
         parameter_set,
         proof_encoding,
@@ -16,122 +206,26 @@ pub fn generate_ballot_proof(
         secret_state,
         prover_randomness_hex,
     ) {
-        Ok(value) => value,
+        Ok(input) => generate_ballot_proof(input),
         Err(error) => structural_rejection("generateBallotProof", vec![error.to_json_value()]),
     }
 }
 
 pub(crate) fn generate_ballot_proof_inner(
-    linear_statement: Option<&Value>,
-    parameter_set: Option<&Value>,
-    proof_encoding: Option<&Value>,
-    public_randomness_hex: Option<&str>,
-    secret_state: Option<&Value>,
-    prover_randomness_hex: Option<&str>,
+    input: BallotProofGenerationInput<'_>,
 ) -> crate::encoding::CanonicalResult<Value> {
-    let linear_statement = linear_statement.ok_or_else(|| {
-        invalid_preflight("linearStatement is required for ballot proof generation")
-    })?;
-    if string_field(linear_statement, "projectionCoverage")
-        != Some(FULL_BALLOT_PROOF_PROJECTION_COVERAGE)
-    {
-        return Err(invalid_preflight(
-            "ballot proof generation requires a full encoded-score relation statement",
-        ));
-    }
-    let parameter_set_value = parameter_set
-        .ok_or_else(|| invalid_preflight("parameterSet is required for ballot proof generation"))?;
-    let proof_encoding_value = proof_encoding.ok_or_else(|| {
-        invalid_preflight("proofEncoding is required for ballot proof generation")
-    })?;
-    if string_field(parameter_set_value, "profileId")
-        != Some(FULL_BALLOT_PROOF_PARAMETER_PROFILE_ID)
-    {
-        return Err(invalid_preflight(
-            "ballot proof generation requires the full-relation parameter profile",
-        ));
-    }
-    if string_field(proof_encoding_value, "profileId")
-        != Some(FULL_BALLOT_PROOF_ENCODING_PROFILE_ID)
-    {
-        return Err(invalid_preflight(
-            "ballot proof generation requires the full-relation proof encoding profile",
-        ));
-    }
-    let public_randomness_hex = public_randomness_hex.ok_or_else(|| {
-        invalid_preflight("publicRandomnessHex is required for ballot proof generation")
-    })?;
-    let secret_state = secret_state
-        .ok_or_else(|| invalid_preflight("secretState is required for ballot proof generation"))?;
-    let prover_randomness_hex = prover_randomness_hex.ok_or_else(|| {
-        invalid_preflight("proverRandomnessHex is required for ballot proof generation")
-    })?;
-
-    let parameter_set: LinearProofParameterSet =
-        serde_json::from_value(parameter_set_value.clone()).map_err(|error| {
-            invalid_preflight(format!(
-                "parameterSet is malformed for ballot proof generation: {error}"
-            ))
-        })?;
-    let proof_encoding: LinearProofEncoding = serde_json::from_value(proof_encoding_value.clone())
-        .map_err(|error| {
-            invalid_preflight(format!(
-                "proofEncoding is malformed for ballot proof generation: {error}"
-            ))
-        })?;
-    let statement_matrix_coefficients: Vec<Vec<Vec<u64>>> = required_json_field(
-        linear_statement,
-        "statementMatrixCoefficients",
-        "linearStatement",
-    )
-    .and_then(|value| {
-        serde_json::from_value(value.clone()).map_err(|error| {
-            invalid_preflight(format!(
-                "linearStatement.statementMatrixCoefficients is malformed: {error}"
-            ))
-        })
-    })?;
-    let target_vector_coefficients: Vec<Vec<u64>> = required_json_field(
-        linear_statement,
-        "targetVectorCoefficients",
-        "linearStatement",
-    )
-    .and_then(|value| {
-        serde_json::from_value(value.clone()).map_err(|error| {
-            invalid_preflight(format!(
-                "linearStatement.targetVectorCoefficients is malformed: {error}"
-            ))
-        })
-    })?;
-    let target_coefficient_representation: LinearProofTargetCoefficientRepresentation =
-        required_json_field(
-            linear_statement,
-            "targetCoefficientRepresentation",
-            "linearStatement",
-        )
-        .and_then(|value| {
-            serde_json::from_value(value.clone()).map_err(|error| {
-                invalid_preflight(format!(
-                    "linearStatement.targetCoefficientRepresentation is malformed: {error}"
-                ))
-            })
-        })?;
-    let matrix_coefficient_representation =
-        matrix_coefficient_representation_from_statement(linear_statement, "linearStatement")?;
-    let source_witness_coefficients = source_witness_coefficients(secret_state)?;
-    let public_randomness_array = decode_32_byte_hex(public_randomness_hex, "publicRandomnessHex")?;
-    let prover_randomness_array = decode_32_byte_hex(prover_randomness_hex, "proverRandomnessHex")?;
+    let input = ParsedBallotProofGenerationInput::parse(input)?;
 
     let generation = generate_linear_proof(LinearProverProofInput {
-        parameter_set: &parameter_set,
-        proof_encoding: &proof_encoding,
-        statement_matrix_coefficients: &statement_matrix_coefficients,
-        target_vector_coefficients: &target_vector_coefficients,
-        matrix_coefficient_representation,
-        target_coefficient_representation,
-        source_witness_coefficients: &source_witness_coefficients,
-        public_randomness: &public_randomness_array,
-        prover_randomness: &prover_randomness_array,
+        parameter_set: &input.parameter_set,
+        proof_encoding: &input.proof_encoding,
+        statement_matrix_coefficients: &input.statement_matrix_coefficients,
+        target_vector_coefficients: &input.target_vector_coefficients,
+        matrix_coefficient_representation: input.matrix_coefficient_representation,
+        target_coefficient_representation: input.target_coefficient_representation,
+        source_witness_coefficients: &input.source_witness_coefficients,
+        public_randomness: &input.public_randomness_array,
+        prover_randomness: &input.prover_randomness_array,
     })?;
     let proof_hex = crate::hashing::to_hex(&generation.proof_bytes);
     let vector_case = json!({
@@ -140,13 +234,13 @@ pub(crate) fn generate_ballot_proof_inner(
         "mutation": "none",
         "expectedOutcome": "accept",
         "upstreamVectorAvailable": true,
-        "parameterSet": parameter_set_value,
-        "proofEncoding": proof_encoding_value,
-        "publicRandomnessHex": public_randomness_hex,
-        "statementMatrixCoefficients": statement_matrix_coefficients,
-        "targetVectorCoefficients": target_vector_coefficients,
-        "matrixCoefficientRepresentation": matrix_coefficient_representation,
-        "targetCoefficientRepresentation": target_coefficient_representation,
+        "parameterSet": input.raw.parameter_set_value,
+        "proofEncoding": input.raw.proof_encoding_value,
+        "publicRandomnessHex": input.raw.public_randomness_hex,
+        "statementMatrixCoefficients": input.statement_matrix_coefficients,
+        "targetVectorCoefficients": input.target_vector_coefficients,
+        "matrixCoefficientRepresentation": input.matrix_coefficient_representation,
+        "targetCoefficientRepresentation": input.target_coefficient_representation,
         "proofHex": proof_hex,
         "expectedProofSizeBytes": generation.summary.proof_size_bytes
     });
@@ -170,18 +264,10 @@ pub(crate) fn generate_ballot_proof_inner(
     ))
 }
 
-pub fn generate_ballot_component_proof(
-    component_id: Option<&str>,
-    proof_input: Option<&Value>,
-    secret_state: Option<&Value>,
-    prover_randomness_hex: Option<&str>,
+pub(crate) fn generate_ballot_component_proof(
+    input: BallotComponentProofGenerationInput<'_>,
 ) -> Value {
-    match generate_ballot_component_proof_inner(
-        component_id,
-        proof_input,
-        secret_state,
-        prover_randomness_hex,
-    ) {
+    match generate_ballot_component_proof_inner(input) {
         Ok(value) => value,
         Err(error) => {
             structural_rejection("generateBallotComponentProof", vec![error.to_json_value()])
@@ -189,24 +275,32 @@ pub fn generate_ballot_component_proof(
     }
 }
 
-pub(crate) fn generate_ballot_component_proof_inner(
+pub(crate) fn generate_ballot_component_proof_from_command_fields(
     component_id: Option<&str>,
     proof_input: Option<&Value>,
     secret_state: Option<&Value>,
     prover_randomness_hex: Option<&str>,
+) -> Value {
+    match BallotComponentProofGenerationInput::from_command_fields(
+        component_id,
+        proof_input,
+        secret_state,
+        prover_randomness_hex,
+    ) {
+        Ok(input) => generate_ballot_component_proof(input),
+        Err(error) => {
+            structural_rejection("generateBallotComponentProof", vec![error.to_json_value()])
+        }
+    }
+}
+
+pub(crate) fn generate_ballot_component_proof_inner(
+    input: BallotComponentProofGenerationInput<'_>,
 ) -> crate::encoding::CanonicalResult<Value> {
-    let component_id = component_id.ok_or_else(|| {
-        invalid_preflight("componentId is required for component proof generation")
-    })?;
-    let proof_input = proof_input.ok_or_else(|| {
-        invalid_preflight("proofInput is required for component proof generation")
-    })?;
-    let secret_state = secret_state.ok_or_else(|| {
-        invalid_preflight("secretState is required for component proof generation")
-    })?;
-    let prover_randomness_hex = prover_randomness_hex.ok_or_else(|| {
-        invalid_preflight("proverRandomnessHex is required for component proof generation")
-    })?;
+    let component_id = input.component_id;
+    let proof_input = input.proof_input;
+    let secret_state = input.secret_state;
+    let prover_randomness_hex = input.prover_randomness_hex;
     if string_field(proof_input, "componentId") != Some(component_id) {
         return Err(invalid_preflight(
             "component proof input is not bound to the requested component",

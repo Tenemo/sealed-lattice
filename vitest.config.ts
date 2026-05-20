@@ -24,12 +24,22 @@ const nodeTestIncludes = [
 ] satisfies string[];
 const nodeProofBenchmarkTestIncludes = [
     'packages/wasm/tests/node/ballot-privacy-proof-benchmarks.benchmark.ts',
+    'packages/wasm/tests/node/transcript-core-kernel/mandatory-profile-proof-record.test.ts',
 ] satisfies string[];
 const browserProofBenchmarkTestIncludes = [
     'packages/wasm/tests/browser/ballot-privacy-proof-benchmarks.browser.benchmark.ts',
 ] satisfies string[];
+const nodeHeavyTestIncludes = [
+    'packages/protocol/tests/node/ballot-privacy-proof-record-generation-input.test.ts',
+    'packages/protocol/tests/node/ballot-privacy-relation-backend-lowering/**/*.test.ts',
+] satisfies string[];
 const nodeKernelHeavyTestIncludes = [
-    'packages/wasm/tests/node/transcript-core-kernel.test.ts',
+    'packages/wasm/tests/node/transcript-core-kernel/ballot-proof-generation.test.ts',
+    'packages/wasm/tests/node/transcript-core-kernel/ballot-proof-rejection.test.ts',
+    'packages/wasm/tests/node/transcript-core-kernel/component-bundle-rejection.test.ts',
+    'packages/wasm/tests/node/transcript-core-kernel/core-kernel-and-fixtures.test.ts',
+    'packages/wasm/tests/node/transcript-core-kernel/kernel-memory-and-loader.test.ts',
+    'packages/wasm/tests/node/transcript-core-kernel/receiver-key-proofs.test.ts',
     'packages/wasm/tests/node/canonical-error-codes-parity.test.ts',
     'packages/testkit/tests/node/transcript-core-fixtures.test.ts',
     'tests/node/digest-namespace-parity.test.ts',
@@ -42,6 +52,12 @@ const nodeProject = {
 } as const;
 
 const nodeKernelHeavyProject = {
+    environment: 'node',
+    testTimeout: nodeKernelHeavyTestTimeoutMs,
+    hookTimeout: nodeHookTimeoutMs,
+} as const;
+
+const nodeHeavyProject = {
     environment: 'node',
     testTimeout: nodeKernelHeavyTestTimeoutMs,
     hookTimeout: nodeHookTimeoutMs,
@@ -267,8 +283,19 @@ export default defineConfig({
                 test: {
                     name: 'node',
                     include: nodeTestIncludes,
-                    exclude: nodeKernelHeavyTestIncludes,
+                    exclude: [
+                        ...nodeHeavyTestIncludes,
+                        ...nodeKernelHeavyTestIncludes,
+                        ...nodeProofBenchmarkTestIncludes,
+                    ],
                     ...nodeProject,
+                },
+            },
+            {
+                test: {
+                    name: 'node-heavy',
+                    include: nodeHeavyTestIncludes,
+                    ...nodeHeavyProject,
                 },
             },
             {

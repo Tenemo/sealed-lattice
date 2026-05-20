@@ -39,7 +39,7 @@ impl Default for LinearProofMatrixCoefficientRepresentation {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct LazerDemoLinearStatementTranscript {
+pub struct LinearStatementTranscript {
     pub transformed_statement_matrix_rows: usize,
     pub transformed_statement_matrix_columns: usize,
     pub transformed_target_vector_length: usize,
@@ -70,7 +70,7 @@ pub(crate) trait StreamedLinearProofStatement {
         matrix_coefficient_representation: LinearProofMatrixCoefficientRepresentation,
         target_coefficient_representation: LinearProofTargetCoefficientRepresentation,
         public_randomness: &[u8],
-    ) -> CanonicalResult<LazerDemoLinearStatementTranscript>;
+    ) -> CanonicalResult<LinearStatementTranscript>;
 
     fn transformed_target_vector(
         &self,
@@ -105,7 +105,7 @@ pub fn derive_linear_statement_transcript(
     target_vector_coefficients: &[Vec<u64>],
     target_coefficient_representation: LinearProofTargetCoefficientRepresentation,
     public_randomness: &[u8],
-) -> CanonicalResult<LazerDemoLinearStatementTranscript> {
+) -> CanonicalResult<LinearStatementTranscript> {
     derive_linear_statement_transcript_with_matrix_coefficient_representation(
         parameter_set,
         proof_encoding,
@@ -125,10 +125,10 @@ pub(crate) fn derive_linear_statement_transcript_with_matrix_coefficient_represe
     matrix_coefficient_representation: LinearProofMatrixCoefficientRepresentation,
     target_coefficient_representation: LinearProofTargetCoefficientRepresentation,
     public_randomness: &[u8],
-) -> CanonicalResult<LazerDemoLinearStatementTranscript> {
+) -> CanonicalResult<LinearStatementTranscript> {
     parameter_set.validate()?;
     proof_encoding.validate()?;
-    validate_demo_statement_inputs(
+    validate_linear_statement_inputs(
         parameter_set,
         proof_encoding,
         statement_matrix_coefficients,
@@ -160,7 +160,7 @@ pub(crate) fn derive_linear_statement_transcript_with_matrix_coefficient_represe
     let source_polynomial_split_factor =
         source_polynomial_split_factor(parameter_set, proof_encoding)?;
 
-    Ok(LazerDemoLinearStatementTranscript {
+    Ok(LinearStatementTranscript {
         transformed_statement_matrix_rows: parameter_set.statement_rows
             * source_polynomial_split_factor,
         transformed_statement_matrix_columns: parameter_set.statement_columns
@@ -202,7 +202,7 @@ pub(crate) fn derive_transformed_statement_matrix_with_coefficient_representatio
     matrix_coefficient_representation: LinearProofMatrixCoefficientRepresentation,
     public_randomness: &[u8],
 ) -> CanonicalResult<PolynomialMatrix> {
-    validate_demo_statement_inputs(
+    validate_linear_statement_inputs(
         parameter_set,
         proof_encoding,
         statement_matrix_coefficients,
@@ -237,7 +237,7 @@ pub(crate) fn derive_transformed_target_vector(
     target_coefficient_representation: LinearProofTargetCoefficientRepresentation,
     public_randomness: &[u8],
 ) -> CanonicalResult<PolynomialVector> {
-    validate_demo_statement_inputs(
+    validate_linear_statement_inputs(
         parameter_set,
         proof_encoding,
         statement_matrix_coefficients,
@@ -259,7 +259,7 @@ pub(crate) fn derive_transformed_target_vector(
     )
 }
 
-pub(super) fn validate_demo_statement_inputs(
+pub(super) fn validate_linear_statement_inputs(
     parameter_set: &LinearProofParameterSet,
     proof_encoding: &LinearProofEncoding,
     statement_matrix_coefficients: &[Vec<Vec<u64>>],

@@ -77,7 +77,7 @@ impl DecodedChallengePolynomial {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DecodedLazerDemoLinearProof {
+pub struct DecodedLinearProof {
     field_lengths: DecodedProofFieldLengths,
     pub(super) commitment_target_vector: Vec<Vec<u64>>,
     hash_mask_vector: Vec<Vec<u64>>,
@@ -90,7 +90,7 @@ pub struct DecodedLazerDemoLinearProof {
     infinity_response_vector: Vec<Vec<i64>>,
 }
 
-impl DecodedLazerDemoLinearProof {
+impl DecodedLinearProof {
     pub fn field_lengths(&self) -> &DecodedProofFieldLengths {
         &self.field_lengths
     }
@@ -194,7 +194,7 @@ pub fn decode_linear_proof_fields(
 pub fn decode_linear_proof(
     proof_bytes: &[u8],
     proof_encoding: &LinearProofEncoding,
-) -> CanonicalResult<DecodedLazerDemoLinearProof> {
+) -> CanonicalResult<DecodedLinearProof> {
     proof_encoding.validate()?;
     if proof_bytes.is_empty() {
         return Err(invalid_proof("proof bytes must not be empty"));
@@ -310,7 +310,7 @@ pub fn decode_linear_proof(
         },
     };
 
-    Ok(DecodedLazerDemoLinearProof {
+    Ok(DecodedLinearProof {
         field_lengths,
         commitment_target_vector,
         hash_mask_vector,
@@ -325,7 +325,7 @@ pub fn decode_linear_proof(
 }
 
 pub fn encode_linear_proof(
-    decoded_proof: &DecodedLazerDemoLinearProof,
+    decoded_proof: &DecodedLinearProof,
     proof_encoding: &LinearProofEncoding,
 ) -> CanonicalResult<Vec<u8>> {
     proof_encoding.validate()?;
@@ -404,7 +404,7 @@ pub fn encode_linear_proof(
     writer.finish()
 }
 
-pub(crate) struct LazerDemoLinearProofComponents {
+pub(crate) struct LinearProofComponents {
     pub(crate) commitment_target_vector: Vec<Vec<u64>>,
     pub(crate) hash_mask_vector: Vec<Vec<u64>>,
     pub(crate) compressed_commitment_vector: Vec<Vec<u64>>,
@@ -417,7 +417,7 @@ pub(crate) struct LazerDemoLinearProofComponents {
 }
 
 pub(crate) fn encode_linear_proof_components(
-    components: LazerDemoLinearProofComponents,
+    components: LinearProofComponents,
     proof_encoding: &LinearProofEncoding,
 ) -> CanonicalResult<Vec<u8>> {
     proof_encoding.validate()?;
@@ -452,7 +452,7 @@ pub(crate) fn encode_linear_proof_components(
         })
         .collect::<CanonicalResult<Vec<_>>>()?;
 
-    let decoded_proof = DecodedLazerDemoLinearProof {
+    let decoded_proof = DecodedLinearProof {
         field_lengths: DecodedProofFieldLengths {
             full_proof_bytes: 0,
             fields: Vec::new(),

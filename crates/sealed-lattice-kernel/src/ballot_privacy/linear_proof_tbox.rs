@@ -7,7 +7,7 @@ use crate::{
 
 use super::{
     linear_proof_norms::validate_linear_proof_norms, linear_proof_parameters::LinearProofEncoding,
-    linear_proof_transcript::shake128_32, proof_coder::DecodedLazerDemoLinearProof,
+    linear_proof_transcript::shake128_32, proof_coder::DecodedLinearProof,
 };
 
 pub const TBOX_Z34_TARGET_VECTOR_LENGTH: usize = 9;
@@ -17,7 +17,7 @@ pub const TBOX_HASH_MASK_ZERO_COEFFICIENTS: &[usize] = &[0, 32];
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct LazerDemoTboxPublicCheckSummary {
+pub struct TboxPublicCheckSummary {
     pub z34_challenge_encoding_bytes: usize,
     pub z34_challenge_hash: String,
     pub generator_challenge_encoding_bytes: usize,
@@ -26,9 +26,9 @@ pub struct LazerDemoTboxPublicCheckSummary {
 
 pub fn validate_linear_proof_tbox_public_checks(
     base_transcript_hash: &[u8; 32],
-    decoded_proof: &DecodedLazerDemoLinearProof,
+    decoded_proof: &DecodedLinearProof,
     proof_encoding: &LinearProofEncoding,
-) -> CanonicalResult<LazerDemoTboxPublicCheckSummary> {
+) -> CanonicalResult<TboxPublicCheckSummary> {
     proof_encoding.validate()?;
     validate_linear_proof_norms(decoded_proof, proof_encoding)?;
     validate_hash_mask_zero_positions(decoded_proof, proof_encoding)?;
@@ -58,7 +58,7 @@ pub fn validate_linear_proof_tbox_public_checks(
     let generator_challenge_hash =
         shake128_32(&[&z34_challenge_hash, &generator_challenge_encoding]);
 
-    Ok(LazerDemoTboxPublicCheckSummary {
+    Ok(TboxPublicCheckSummary {
         z34_challenge_encoding_bytes: z34_challenge_encoding.len(),
         z34_challenge_hash: to_hex(&z34_challenge_hash),
         generator_challenge_encoding_bytes: generator_challenge_encoding.len(),
@@ -67,7 +67,7 @@ pub fn validate_linear_proof_tbox_public_checks(
 }
 
 fn validate_hash_mask_zero_positions(
-    decoded_proof: &DecodedLazerDemoLinearProof,
+    decoded_proof: &DecodedLinearProof,
     proof_encoding: &LinearProofEncoding,
 ) -> CanonicalResult<()> {
     let hash_mask_vector = decoded_proof.hash_mask_vector();
@@ -202,7 +202,7 @@ mod tests {
     };
 
     fn decoded_valid_proof() -> (
-        crate::ballot_privacy::proof_coder::DecodedLazerDemoLinearProof,
+        crate::ballot_privacy::proof_coder::DecodedLinearProof,
         LinearProofEncoding,
     ) {
         let vectors: serde_json::Value = serde_json::from_str(include_str!(concat!(

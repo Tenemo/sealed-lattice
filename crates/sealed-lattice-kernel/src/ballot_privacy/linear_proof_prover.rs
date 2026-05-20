@@ -18,7 +18,7 @@ use super::{
     polynomial_matrix::PolynomialMatrix,
     polynomial_ring::PolynomialRing,
     polynomial_vector::PolynomialVector,
-    proof_coder::{LazerDemoLinearProofComponents, encode_linear_proof_components},
+    proof_coder::{LinearProofComponents, encode_linear_proof_components},
     quadratic_equation::LinearProofQuadraticEquation,
     sparse_linear_proof_statement::{
         derive_dense_compatible_sparse_linear_statement_transcript_with_matrix_coefficient_representation,

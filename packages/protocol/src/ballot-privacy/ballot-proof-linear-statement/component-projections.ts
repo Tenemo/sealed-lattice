@@ -17,6 +17,7 @@ import {
     receiverReferenceKey,
     validateSourceRingDegree,
 } from './component-bundle.js';
+import { rowBatchesForComponent } from './component-statement-builder.js';
 import type {
     BackendRowBatchForComponentStatement,
     BallotProofComponentLinearProofProjection,
@@ -45,9 +46,8 @@ import {
     deriveStatementMatrixDigest,
     deriveStructuredShareCommitmentStatementDigest,
     deriveTargetVectorDigest,
-    rowBatchesForComponent,
-    witnessValueForVariable,
 } from './statement-digests.js';
+import { witnessValueForVariable } from './statement-witness-values.js';
 import {
     componentById,
     constantPolynomial,

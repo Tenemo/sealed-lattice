@@ -12,6 +12,19 @@ import {
 } from '../relation-backend-lowering.js';
 import type { BallotPrivacyRelationCompilerInput } from '../relation-compiler.js';
 
+import {
+    denseCoefficientCountForComponentProofStatement,
+    proofBytesAvailabilityForStatementFormat,
+    proofStatementFormatForComponent,
+    proofSystemRingDegreeForComponentProofStatement,
+    rowBatchTermCount,
+    sourceRingDegreeForComponentProofStatement,
+    structuredReceiverEncryptionWitnessTermCounts,
+} from './component-proof-plan-policy.js';
+import {
+    buildComponentStatement,
+    rowBatchesForComponent,
+} from './component-statement-builder.js';
 import type {
     BackendRowBatchForComponentStatement,
     BallotProofComponentBundleCoverage,
@@ -35,19 +48,10 @@ import {
     receiverShareRepresentativeBitLength,
 } from './statement-contracts.js';
 import {
-    buildComponentStatement,
-    denseCoefficientCountForComponentProofStatement,
     deriveComponentBundleStatementDigest,
     deriveComponentProofBundleDigest,
     deriveComponentProofRecordDigest,
     deriveComponentProofStatementDigest,
-    proofBytesAvailabilityForStatementFormat,
-    proofStatementFormatForComponent,
-    proofSystemRingDegreeForComponentProofStatement,
-    rowBatchesForComponent,
-    rowBatchTermCount,
-    sourceRingDegreeForComponentProofStatement,
-    structuredReceiverEncryptionWitnessTermCounts,
 } from './statement-digests.js';
 import {
     centeredFieldRepresentative,
