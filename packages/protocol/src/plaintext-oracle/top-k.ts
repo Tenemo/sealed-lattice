@@ -11,7 +11,10 @@ import type {
     PollSpec,
 } from '@sealed-lattice/types';
 
-import { validatePollSpec } from '../lifecycle/poll-spec.js';
+import {
+    derivePollSpecDigest,
+    validatePollSpec,
+} from '../lifecycle/poll-spec.js';
 
 import {
     addFieldElements,
@@ -128,15 +131,7 @@ const derivePlaintextTally = (input: {
     const tallyFieldElements = optionTallies.map((tally) =>
         normalizeFieldElement(tally),
     );
-    const pollSpecDigest = deriveProtocolDigest('PollSpecDigest', {
-        duplicateBallotPolicy: input.pollSpec.duplicateBallotPolicy,
-        options: input.pollSpec.options,
-        pollId: input.pollSpec.pollId,
-        question: input.pollSpec.question,
-        scoreDomain: input.pollSpec.scoreDomain,
-        tiePolicy: input.pollSpec.tiePolicy,
-        topOptionCount: input.pollSpec.topOptionCount,
-    });
+    const pollSpecDigest = derivePollSpecDigest(input.pollSpec);
     const tallyPayload = {
         maximumRosterSize,
         normalizedBallots,

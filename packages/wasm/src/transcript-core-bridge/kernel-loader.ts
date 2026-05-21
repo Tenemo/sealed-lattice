@@ -335,6 +335,8 @@ export const createTranscriptCoreKernelLoader = (
                             input.componentBundleStatement,
                         componentProofBundle: input.componentProofBundle,
                         componentProofInputs: input.componentProofInputs,
+                        dynamicRosterProfileEvidence:
+                            input.dynamicRosterProfileEvidence,
                         linearStatement: input.linearStatement,
                         parameterSet: input.parameterSet,
                         proofBytesHex: input.proofBytesHex,
@@ -350,6 +352,8 @@ export const createTranscriptCoreKernelLoader = (
                     executeCommand<BallotPrivacyKernelVerification>({
                         command: 'VerifyClaimBearingBallotPackage',
                         ballotPackage: input.ballotPackage,
+                        dynamicRosterProfileEvidence:
+                            input.dynamicRosterProfileEvidence,
                         unsafeSmallRosterAcknowledged:
                             input.unsafeSmallRosterAcknowledged,
                     }),

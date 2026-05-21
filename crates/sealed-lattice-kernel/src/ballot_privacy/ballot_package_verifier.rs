@@ -63,10 +63,14 @@ fn relabel_package_verification(
 
 pub fn verify_claim_bearing_ballot_package(
     ballot_package: &Value,
+    dynamic_roster_profile_evidence: Option<&Value>,
     unsafe_small_roster_acknowledged: bool,
 ) -> Value {
-    let refused_objects =
-        collect_claim_bearing_package_refusals(ballot_package, unsafe_small_roster_acknowledged);
+    let refused_objects = collect_claim_bearing_package_refusals(
+        ballot_package,
+        dynamic_roster_profile_evidence,
+        unsafe_small_roster_acknowledged,
+    );
     if !refused_objects.is_empty() {
         return structural_rejection("verifyClaimBearingBallotPackage", refused_objects);
     }
@@ -100,6 +104,8 @@ pub fn verify_claim_bearing_ballot_package(
     let component_bundle_statement = package_object.get("componentBundleStatement");
     let component_proof_bundle = package_object.get("componentProofBundle");
     let component_proof_inputs = package_object.get("componentProofInputs");
+    let package_dynamic_roster_profile_evidence = dynamic_roster_profile_evidence
+        .or_else(|| package_object.get("dynamicRosterProfileEvidence"));
 
     if proof_bytes_hex.is_none() {
         missing_inputs.push(required_package_field_refusal(
@@ -168,6 +174,7 @@ pub fn verify_claim_bearing_ballot_package(
             component_bundle_statement,
             component_proof_bundle,
             component_proof_inputs,
+            dynamic_roster_profile_evidence: package_dynamic_roster_profile_evidence,
             linear_statement,
             parameter_set,
             proof_bytes_hex,

@@ -1,4 +1,5 @@
 // This file is one focused part of the split test suite.
+import type { BallotPrivacyRosterProfileEvidence } from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -8,6 +9,7 @@ import {
     createReceiverKeyProofShell,
     createReceiverPayloadShell,
     createShareCommitmentShell,
+    deriveBallotPrivacyRosterProfileEvidenceDigest,
     deriveBallotProofEncodingProfileDigest,
     deriveBallotProofParameterSetDigest,
     deriveBallotProofPublicRandomnessDigest,
@@ -20,9 +22,37 @@ import {
     createComponentProofStatementFixture,
     createComponentProofVerificationInputsFixture,
     createStatement,
+    createStructurallyBoundObjects,
     digest,
     requiredComponentIds,
 } from './shared.js';
+
+const createDynamicRosterProfileEvidence = (
+    input: Pick<
+        BallotPrivacyRosterProfileEvidence,
+        'frozenRosterSize' | 'optionCount' | 'thresholdProfileDigest'
+    >,
+): BallotPrivacyRosterProfileEvidence => {
+    const payload = {
+        dynamicRosterProfileCertificateDigest: digest(
+            'dynamic-roster-profile-certificate',
+        ),
+        frozenRosterSize: input.frozenRosterSize,
+        objectType: 'BallotPrivacyRosterProfileEvidence' as const,
+        objectVersion: 1 as const,
+        optionCount: input.optionCount,
+        profileFamily: 'BalancedDefault' as const,
+        proofStatementShape: 'M5EncodedScoreBallotProof-v1' as const,
+        receiverCoverageProfile: 'AllFrozenRosterReceivers' as const,
+        thresholdProfileDigest: input.thresholdProfileDigest,
+    };
+
+    return {
+        ...payload,
+        rosterProfileEvidenceDigest:
+            deriveBallotPrivacyRosterProfileEvidenceDigest(payload),
+    };
+};
 
 describe('ballot privacy proof object boundary', () => {
     it('derives production-shaped receiver key, payload, and commitment shells without witness material', () => {
@@ -685,6 +715,54 @@ describe('ballot privacy proof object boundary', () => {
         ).toMatchObject({
             ok: false,
             unresolvedReason: 'BallotPackageInvalid',
+        });
+    });
+
+    it('requires dynamic roster profile evidence for non-benchmark receiver counts', () => {
+        const { statement } = createStructurallyBoundObjects({
+            participantCount: 16,
+        });
+        const proofBytesHex = '001122aabbcc';
+        const proofRecord = createBallotProofRecordShell({
+            statement,
+            relationStatementDigest: digest('relation-statement'),
+            proofRoot: digest('proof-root'),
+            proofBytesDigest: deriveProofBytesDigest({ proofBytesHex }),
+            proofSizeBytes: proofBytesHex.length / 2,
+        });
+        const dynamicRosterProfileEvidence = createDynamicRosterProfileEvidence(
+            {
+                frozenRosterSize: statement.receiverPublicKeys.length,
+                optionCount: statement.optionCount,
+                thresholdProfileDigest: statement.thresholdProfileDigest,
+            },
+        );
+
+        const missingEvidenceResult = verifyBallotProof({
+            ballotProof: proofRecord,
+            proofBytesHex,
+            statement,
+        });
+        expect(missingEvidenceResult).toMatchObject({
+            ok: false,
+            unresolvedReason: 'BallotPackageInvalid',
+        });
+        expect(
+            missingEvidenceResult.refusedObjects.some((refusal) =>
+                refusal.message.includes('roster profile certificate'),
+            ),
+        ).toBe(true);
+
+        expect(
+            verifyBallotProof({
+                ballotProof: proofRecord,
+                dynamicRosterProfileEvidence,
+                proofBytesHex,
+                statement,
+            }),
+        ).toMatchObject({
+            ok: false,
+            unresolvedReason: 'OperationUnavailable',
         });
     });
 });

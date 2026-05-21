@@ -642,7 +642,7 @@ export const buildAggregateDerivationStatement = (input: {
         input.unsafeSmallRosterAcknowledged !== true
     ) {
         throw new RangeError(
-            'Aggregate derivation small-roster participants require explicit unsafe acknowledgement.',
+            'Aggregate derivation micro-roster participants require explicit casual acknowledgement.',
         );
     }
     if (
@@ -650,7 +650,7 @@ export const buildAggregateDerivationStatement = (input: {
         input.unsafeSmallRosterAcknowledged === true
     ) {
         throw new RangeError(
-            'Aggregate derivation unsafe small-roster acknowledgement is only valid for participants below the safe range.',
+            'Aggregate derivation casual micro-roster acknowledgement is only valid for participants below the dynamic roster range.',
         );
     }
     const statementPayload: Omit<
@@ -1506,7 +1506,7 @@ export const verifyAggregateDerivationComponentStructure = (
             ballotPrivacyMinimumUnsafeParticipantCount &&
         component.statement.participantCount <
             ballotPrivacyMinimumSafeParticipantCount
-            ? (['UnsafeSmallRoster'] as const)
+            ? (['CasualMicroRoster'] as const)
             : [];
     if (refusedObjects.length > 0) {
         return {

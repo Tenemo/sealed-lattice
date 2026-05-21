@@ -26,6 +26,8 @@ struct LinearContractExpectation {
 pub(crate) fn collect_supported_ballot_privacy_dimension_refusals(
     statement: &Value,
     object_digest: Option<&str>,
+    dynamic_roster_profile_evidence: Option<&Value>,
+    claim_bearing_package: bool,
     unsafe_small_roster_acknowledged: bool,
 ) -> Vec<Value> {
     let mut refused_objects = Vec::new();
@@ -59,13 +61,54 @@ pub(crate) fn collect_supported_ballot_privacy_dimension_refusals(
             object_digest,
         ));
     }
+    if participant_count.is_some_and(|value| value < BALLOT_PRIVACY_MINIMUM_SAFE_PARTICIPANT_COUNT)
+    {
+        if claim_bearing_package {
+            refused_objects.push(structural_refusal(
+                "Claim-bearing ballot privacy proof statements must use at least ten frozen participants.",
+                object_digest,
+            ));
+        } else if !unsafe_small_roster_acknowledged {
+            refused_objects.push(structural_refusal(
+                "Ballot privacy proof statements with three to nine participants require explicit casual micro-roster acknowledgement.",
+                object_digest,
+            ));
+        }
+    }
     if participant_count.is_some_and(|value| {
-        value < BALLOT_PRIVACY_MINIMUM_SAFE_PARTICIPANT_COUNT && !unsafe_small_roster_acknowledged
+        value >= BALLOT_PRIVACY_MINIMUM_SAFE_PARTICIPANT_COUNT
+            && value != BALLOT_PRIVACY_MANDATORY_RECEIVER_COUNT
+            && dynamic_roster_profile_evidence.is_none()
     }) {
         refused_objects.push(structural_refusal(
-            "Ballot privacy proof statements with three to nineteen participants require explicit unsafe small-roster acknowledgement.",
+            "Dynamic claim-bearing ballot privacy proof statements require roster profile certificate or workbook evidence for the frozen receiver count.",
             object_digest,
         ));
+    }
+    if let Some(evidence) = dynamic_roster_profile_evidence {
+        let evidence_digest = string_field(evidence, "rosterProfileEvidenceDigest");
+        let expected_evidence_digest = value_without_field(evidence, "rosterProfileEvidenceDigest")
+            .and_then(|payload| {
+                derive_digest("BallotPrivacyRosterProfileEvidenceDigest", &payload)
+            });
+        let evidence_frozen_roster_size = usize_object_field(evidence, "frozenRosterSize");
+        let evidence_option_count = u64_object_field(evidence, "optionCount");
+        if string_field(evidence, "objectType") != Some("BallotPrivacyRosterProfileEvidence")
+            || u64_object_field(evidence, "objectVersion") != Some(1)
+            || string_field(evidence, "profileFamily") != Some("BalancedDefault")
+            || string_field(evidence, "receiverCoverageProfile") != Some("AllFrozenRosterReceivers")
+            || string_field(evidence, "proofStatementShape") != Some("M5EncodedScoreBallotProof-v1")
+            || evidence_frozen_roster_size != participant_count
+            || evidence_option_count.map(u128::from) != option_count
+            || string_field(evidence, "thresholdProfileDigest")
+                != string_field(statement, "thresholdProfileDigest")
+            || expected_evidence_digest.as_deref() != evidence_digest
+        {
+            refused_objects.push(structural_refusal(
+                "Dynamic roster profile evidence is not bound to the ballot proof statement dimensions and threshold profile.",
+                object_digest,
+            ));
+        }
     }
 
     refused_objects
@@ -602,28 +645,63 @@ mod tests {
             "receiverPublicKeys": vec![json!({}); participant_count],
             "shareCommitments": vec![json!({}); participant_count],
             "shareVectorWidth": option_count * u128::from(BALLOT_PRIVACY_ENCODED_COORDINATES_PER_OPTION),
+            "thresholdProfileDigest": digest("threshold-profile"),
         });
 
         statement
     }
 
+    fn dynamic_roster_profile_evidence(statement: &Value) -> Value {
+        let mut evidence = json!({
+            "dynamicRosterProfileCertificateDigest": digest("dynamic-roster-certificate"),
+            "frozenRosterSize": array_field(statement, "receiverPublicKeys")
+                .expect("receiver keys should exist")
+                .len(),
+            "objectType": "BallotPrivacyRosterProfileEvidence",
+            "objectVersion": 1,
+            "optionCount": unsigned_integer_field(statement, "optionCount")
+                .expect("option count should exist"),
+            "profileFamily": "BalancedDefault",
+            "proofStatementShape": "M5EncodedScoreBallotProof-v1",
+            "receiverCoverageProfile": "AllFrozenRosterReceivers",
+            "thresholdProfileDigest": string_field(statement, "thresholdProfileDigest")
+                .expect("threshold profile digest should exist"),
+        });
+        let evidence_digest = derive_digest("BallotPrivacyRosterProfileEvidenceDigest", &evidence)
+            .expect("dynamic roster evidence digest should derive");
+        evidence
+            .as_object_mut()
+            .expect("dynamic roster evidence should be an object")
+            .insert(
+                "rosterProfileEvidenceDigest".to_string(),
+                json!(evidence_digest),
+            );
+
+        evidence
+    }
+
     #[test]
-    fn supported_ballot_privacy_dimensions_accept_safe_range() {
+    fn supported_ballot_privacy_dimensions_accept_mandatory_and_evidenced_dynamic_ranges() {
         let statement = statement_with_dimensions(2, 20);
         assert!(
             collect_supported_ballot_privacy_dimension_refusals(
                 &statement,
                 Some(&digest("package")),
+                None,
+                false,
                 false,
             )
             .is_empty()
         );
 
         let statement = statement_with_dimensions(20, 50);
+        let dynamic_roster_evidence = dynamic_roster_profile_evidence(&statement);
         assert!(
             collect_supported_ballot_privacy_dimension_refusals(
                 &statement,
                 Some(&digest("package")),
+                Some(&dynamic_roster_evidence),
+                false,
                 false,
             )
             .is_empty()
@@ -631,11 +709,13 @@ mod tests {
     }
 
     #[test]
-    fn supported_ballot_privacy_dimensions_require_unsafe_acknowledgement() {
+    fn supported_ballot_privacy_dimensions_require_casual_micro_roster_acknowledgement() {
         let statement = statement_with_dimensions(20, 3);
         let refused_objects = collect_supported_ballot_privacy_dimension_refusals(
             &statement,
             Some(&digest("package")),
+            None,
+            false,
             false,
         );
 
@@ -643,14 +723,62 @@ mod tests {
             refused_objects
                 .iter()
                 .any(|refusal| string_field(refusal, "message")
-                    .is_some_and(|message| message.contains("unsafe small-roster"))),
-            "unacknowledged unsafe small roster must be rejected: {refused_objects:?}"
+                    .is_some_and(|message| message.contains("casual micro-roster"))),
+            "unacknowledged casual micro roster must be rejected: {refused_objects:?}"
         );
         assert!(
             collect_supported_ballot_privacy_dimension_refusals(
                 &statement,
                 Some(&digest("package")),
+                None,
+                false,
                 true,
+            )
+            .is_empty()
+        );
+
+        let refused_objects = collect_supported_ballot_privacy_dimension_refusals(
+            &statement,
+            Some(&digest("package")),
+            None,
+            true,
+            true,
+        );
+        assert!(
+            refused_objects
+                .iter()
+                .any(|refusal| string_field(refusal, "message")
+                    .is_some_and(|message| message.contains("at least ten frozen participants"))),
+            "claim-bearing micro roster must be rejected: {refused_objects:?}"
+        );
+    }
+
+    #[test]
+    fn supported_ballot_privacy_dimensions_require_dynamic_roster_evidence() {
+        let statement = statement_with_dimensions(20, 16);
+        let refused_objects = collect_supported_ballot_privacy_dimension_refusals(
+            &statement,
+            Some(&digest("package")),
+            None,
+            false,
+            false,
+        );
+        assert!(
+            refused_objects
+                .iter()
+                .any(|refusal| string_field(refusal, "message")
+                    .is_some_and(|message| message.contains("roster profile certificate"))),
+            "dynamic receiver count without evidence must be rejected: {refused_objects:?}"
+        );
+
+        let dynamic_roster_evidence = dynamic_roster_profile_evidence(&statement);
+        assert!(
+            collect_supported_ballot_privacy_dimension_refusals(
+                &statement,
+                Some(&digest("package")),
+                Some(&dynamic_roster_evidence),
+                true,
+                false,
             )
             .is_empty()
         );
@@ -676,6 +804,8 @@ mod tests {
             let refused_objects = collect_supported_ballot_privacy_dimension_refusals(
                 &statement,
                 Some(&digest("package")),
+                None,
+                false,
                 true,
             );
 
@@ -693,6 +823,8 @@ mod tests {
         let refused_objects = collect_supported_ballot_privacy_dimension_refusals(
             &statement,
             Some(&digest("package")),
+            None,
+            false,
             false,
         );
         assert!(

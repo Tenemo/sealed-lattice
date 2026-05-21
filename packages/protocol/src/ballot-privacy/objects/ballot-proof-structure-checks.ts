@@ -1,5 +1,6 @@
 import { deriveProtocolDigest } from '@sealed-lattice/crypto';
 import type {
+    BallotPrivacyRosterProfileEvidence,
     BallotProofComponentId,
     BallotProofComponentProofRecord,
     BallotProofRecord,
@@ -37,7 +38,12 @@ const collectBallotProofStructuralRefusals = (
     statement: BallotProofStatement,
     ballotProof: BallotProofRecord,
     proofBytesHex?: string,
-    unsafeSmallRosterAcknowledged?: boolean,
+    options: {
+        readonly casualMicroRosterAcknowledged?: boolean;
+        readonly claimBearingPackage?: boolean;
+        readonly dynamicRosterProfileEvidence?: BallotPrivacyRosterProfileEvidence;
+        readonly unsafeSmallRosterAcknowledged?: boolean;
+    } = {},
 ): readonly RefusalRecord[] => {
     const refusedObjects: RefusalRecord[] = [];
     const statementPayload = omitProperty(
@@ -95,7 +101,13 @@ const collectBallotProofStructuralRefusals = (
             optionCount: statement.optionCount,
             participantCount: statement.receiverPublicKeys.length,
             shareVectorWidth: statement.shareVectorWidth,
-            unsafeSmallRosterAcknowledged,
+            casualMicroRosterAcknowledged:
+                options.casualMicroRosterAcknowledged,
+            claimBearingPackage: options.claimBearingPackage,
+            dynamicRosterProfileEvidence: options.dynamicRosterProfileEvidence,
+            thresholdProfileDigest: statement.thresholdProfileDigest,
+            unsafeSmallRosterAcknowledged:
+                options.unsafeSmallRosterAcknowledged,
         }),
     );
     refusedObjects.push(

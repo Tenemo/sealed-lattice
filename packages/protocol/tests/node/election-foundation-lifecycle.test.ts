@@ -38,6 +38,7 @@ const targetBoundShareSelectionProfile = {
     selectedShareRule: 'FirstValidSharesInCanonicalBoardOrder',
 } as const;
 
+const dynamicRosterProfileCertificateDigest = 'a'.repeat(128);
 const uncertifiedThresholdProfile = deriveThresholdProfile({ rosterSize: 20 });
 const thresholdProfile = deriveThresholdProfile({
     rosterSize: 20,
@@ -191,15 +192,25 @@ describe('election foundation lifecycle', () => {
         ]);
     });
 
-    it('marks unsafe small rosters while preserving result claim gates', () => {
-        const unsafeProfile = deriveThresholdProfile({
-            rosterSize: 19,
-            unsafeSmallRosterAcknowledged: true,
+    it('marks casual micro rosters while preserving dynamic result claim gates', () => {
+        const casualProfile = deriveThresholdProfile({
+            casualMicroRosterAcknowledged: true,
+            rosterSize: 9,
             targetBoundShareSelectionProfile,
         });
-        const unsafeLabels = deriveLifecycleLabels(
+        const dynamicProfile = deriveThresholdProfile({
+            dynamicRosterProfileCertificateDigest,
+            rosterSize: 16,
+            targetBoundShareSelectionProfile,
+        });
+        const casualLabels = deriveLifecycleLabels(
             fullyVerifiedLabelInput({
-                thresholdProfile: unsafeProfile,
+                thresholdProfile: casualProfile,
+            }),
+        );
+        const dynamicLabels = deriveLifecycleLabels(
+            fullyVerifiedLabelInput({
+                thresholdProfile: dynamicProfile,
             }),
         );
         const passiveLabels = deriveLifecycleLabels(
@@ -209,8 +220,11 @@ describe('election foundation lifecycle', () => {
             }),
         );
 
-        expect(unsafeLabels.modes).toContain('UnsafeSmallRoster');
-        expect(unsafeLabels.resultClaimLabels).toEqual(['FullyVerifiedResult']);
+        expect(casualLabels.modes).toContain('CasualMicroRoster');
+        expect(casualLabels.resultClaimLabels).toEqual([]);
+        expect(dynamicLabels.resultClaimLabels).toEqual([
+            'FullyVerifiedResult',
+        ]);
         expect(passiveLabels.primary).toEqual(['Unresolved']);
         expect(passiveLabels.modes).toContain('PassiveMHEPrototype');
     });

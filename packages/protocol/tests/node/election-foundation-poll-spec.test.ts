@@ -50,6 +50,11 @@ describe('election foundation poll-spec validation', () => {
                     skippedOptionScore: 1,
                 },
                 duplicateBallotPolicy: 'LastValidBeforeVotingClosedCounts',
+                maxRosterSize: 50,
+                minRosterSize: 10,
+                rosterPolicy: 'OpenLinkPublicRoster',
+                smallRosterPolicy: 'ForbidMicroRoster',
+                thresholdProfileFamily: 'BalancedDefault',
                 tiePolicy: 'HigherScoreThenLowerOptionIndex',
             }),
         });
@@ -72,7 +77,35 @@ describe('election foundation poll-spec validation', () => {
                     skippedOptionScore: 1,
                 },
                 duplicateBallotPolicy: 'LastValidBeforeVotingClosedCounts',
+                maxRosterSize: 50,
+                minRosterSize: 10,
+                rosterPolicy: 'OpenLinkPublicRoster',
+                smallRosterPolicy: 'ForbidMicroRoster',
+                thresholdProfileFamily: 'BalancedDefault',
                 tiePolicy: 'HigherScoreThenLowerOptionIndex',
+            },
+        });
+    });
+
+    it('accepts explicit roster bounds and profile family policy', () => {
+        const validation = validatePollSpec(
+            createValidPollSpecInput({
+                maxRosterSize: 21,
+                minRosterSize: 11,
+                rosterPolicy: 'OpenLinkPublicRoster',
+                smallRosterPolicy: 'WarnMicroRoster',
+                thresholdProfileFamily: 'BalancedDefault',
+            }),
+        );
+
+        expect(validation).toMatchObject({
+            ok: true,
+            normalized: {
+                maxRosterSize: 21,
+                minRosterSize: 11,
+                rosterPolicy: 'OpenLinkPublicRoster',
+                smallRosterPolicy: 'WarnMicroRoster',
+                thresholdProfileFamily: 'BalancedDefault',
             },
         });
     });
@@ -132,6 +165,27 @@ describe('election foundation poll-spec validation', () => {
                 topOptionCount: 1n,
             },
             ['InvalidTopOptionCount'],
+        );
+    });
+
+    it('rejects unsupported roster policy and invalid roster bounds', () => {
+        expectErrorCodes(
+            createValidPollSpecInput({
+                maxRosterSize: 2,
+                minRosterSize: 51,
+                rosterPolicy:
+                    'InviteOnlyRoster' as PollSpecInput['rosterPolicy'],
+                smallRosterPolicy:
+                    'SilentMicroRoster' as PollSpecInput['smallRosterPolicy'],
+                thresholdProfileFamily:
+                    'ExperimentalProfile' as PollSpecInput['thresholdProfileFamily'],
+            }),
+            [
+                'UnsupportedRosterPolicy',
+                'UnsupportedThresholdProfileFamily',
+                'UnsupportedSmallRosterPolicy',
+                'InvalidRosterBounds',
+            ],
         );
     });
 

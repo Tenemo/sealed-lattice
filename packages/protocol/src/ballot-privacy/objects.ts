@@ -9,6 +9,7 @@ export {
     deriveBallotProofEncodingProfileDigest,
     deriveBallotProofParameterSetDigest,
     deriveBallotProofPublicRandomnessDigest,
+    deriveBallotPrivacyRosterProfileEvidenceDigest,
     deriveClaimBearingBallotPackageDigest,
     createReceiverEncryptionPublicKeyShell,
     createReceiverKeyProofShell,

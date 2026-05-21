@@ -281,6 +281,7 @@ export type TranscriptCoreKernel = {
         readonly componentBundleStatement?: unknown;
         readonly componentProofBundle?: unknown;
         readonly componentProofInputs?: readonly unknown[];
+        readonly dynamicRosterProfileEvidence?: unknown;
         readonly linearStatement?: unknown;
         readonly parameterSet?: unknown;
         readonly proofBytesHex?: string;
@@ -291,6 +292,7 @@ export type TranscriptCoreKernel = {
     }): BallotPrivacyKernelVerification;
     verifyClaimBearingBallotPackage(input: {
         readonly ballotPackage: unknown;
+        readonly dynamicRosterProfileEvidence?: unknown;
         readonly unsafeSmallRosterAcknowledged?: boolean;
     }): BallotPrivacyKernelVerification;
     generateAggregateDerivationProof(input: {
@@ -425,6 +427,7 @@ type TranscriptCoreKernelCommand =
           readonly componentBundleStatement?: unknown;
           readonly componentProofBundle?: unknown;
           readonly componentProofInputs?: readonly unknown[];
+          readonly dynamicRosterProfileEvidence?: unknown;
           readonly linearStatement?: unknown;
           readonly parameterSet?: unknown;
           readonly proofBytesHex?: string;
@@ -436,6 +439,7 @@ type TranscriptCoreKernelCommand =
     | {
           readonly command: 'VerifyClaimBearingBallotPackage';
           readonly ballotPackage: unknown;
+          readonly dynamicRosterProfileEvidence?: unknown;
           readonly unsafeSmallRosterAcknowledged?: boolean;
       }
     | {

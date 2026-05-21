@@ -463,6 +463,20 @@ export type BallotProofRecord = {
     readonly publicRandomnessDigest?: ProtocolDigest;
 };
 
+/** Certificate/workbook row evidence for one frozen dynamic M5 roster size. */
+export type BallotPrivacyRosterProfileEvidence = {
+    readonly objectType: 'BallotPrivacyRosterProfileEvidence';
+    readonly objectVersion: 1;
+    readonly rosterProfileEvidenceDigest: ProtocolDigest;
+    readonly profileFamily: 'BalancedDefault';
+    readonly frozenRosterSize: number;
+    readonly optionCount: number;
+    readonly thresholdProfileDigest: ProtocolDigest;
+    readonly dynamicRosterProfileCertificateDigest: ProtocolDigest;
+    readonly receiverCoverageProfile: 'AllFrozenRosterReceivers';
+    readonly proofStatementShape: 'M5EncodedScoreBallotProof-v1';
+};
+
 /** Public ballot package shell containing the proof statement, proof record, and supplied verifier inputs. */
 export type ClaimBearingBallotPackage = {
     readonly objectType: 'ClaimBearingBallotPackage';
@@ -476,6 +490,7 @@ export type ClaimBearingBallotPackage = {
     readonly parameterSet?: unknown;
     readonly proofEncoding?: unknown;
     readonly publicRandomnessHex?: string;
+    readonly dynamicRosterProfileEvidence?: BallotPrivacyRosterProfileEvidence;
     readonly componentBundleStatement?: unknown;
     readonly componentProofBundle?: BallotProofComponentProofBundle;
     readonly componentProofInputs?: readonly BallotProofComponentProofVerificationInput[];

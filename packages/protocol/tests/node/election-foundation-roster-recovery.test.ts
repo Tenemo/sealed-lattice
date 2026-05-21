@@ -54,7 +54,11 @@ describe('roster, manifest, first-valid, and recovery shells', () => {
 
     it('rejects a manifest organizer that is not part of the all-trustee roster', () => {
         const input = createRosterManifestTranscriptInput(
-            [createRegistrationEntry('participant-1', 1, 0)],
+            [
+                createRegistrationEntry('participant-1', 1, 0),
+                createRegistrationEntry('participant-2', 1, 1),
+                createRegistrationEntry('participant-3', 1, 2),
+            ],
             {},
             { includeOrganizer: false },
         );
@@ -206,7 +210,10 @@ describe('roster, manifest, first-valid, and recovery shells', () => {
 
     it('rejects roster objects included after freeze even if their signed payload claims an earlier position', () => {
         const registration = createRegistrationEntry('participant-1', 1, 0);
-        const input = createRosterManifestTranscriptInput([registration]);
+        const input = createRosterManifestTranscriptInput([
+            registration,
+            createRegistrationEntry('participant-2', 1, 1),
+        ]);
         const lastHead =
             input.boardEvidence.signedBoardHeads[
                 input.boardEvidence.signedBoardHeads.length - 1
@@ -245,7 +252,10 @@ describe('roster, manifest, first-valid, and recovery shells', () => {
 
     it('rejects signed registration reuse as trustee setup evidence', () => {
         const registration = createRegistrationEntry('participant-1', 1, 0);
-        const input = createRosterManifestTranscriptInput([registration]);
+        const input = createRosterManifestTranscriptInput([
+            registration,
+            createRegistrationEntry('participant-2', 1, 1),
+        ]);
 
         expect(
             verifyRosterManifestTranscript({

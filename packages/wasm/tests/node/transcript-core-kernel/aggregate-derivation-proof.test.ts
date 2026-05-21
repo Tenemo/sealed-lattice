@@ -18,7 +18,10 @@ import {
     verifyAggregateDerivationComponentStructure,
     type AggregateDerivationWitnessInput,
 } from '#packages/protocol/src/ballot-privacy/index';
-import { createWasmBallotProofRecordGenerationFixture } from '#tests/support/ballot-privacy-proof-record-generation-fixtures';
+import {
+    createMandatoryProfileBallotProofRecordBenchmarkFixture,
+    createWasmBallotProofRecordGenerationFixture,
+} from '#tests/support/ballot-privacy-proof-record-generation-fixtures';
 
 const digest = (label: string): string =>
     `${label.padEnd(64, '0').slice(0, 64)}${label.padEnd(64, '1').slice(0, 64)}`.replace(
@@ -121,7 +124,8 @@ const certificateThatPermitsWraparound = (
 describe('aggregate derivation proof through the transcript-core kernel', () => {
     it('generates and verifies a witness-clean aggregate derivation component', async () => {
         const kernel = await loadTranscriptCoreKernel();
-        const fixture = createWasmBallotProofRecordGenerationFixture();
+        const fixture =
+            createMandatoryProfileBallotProofRecordBenchmarkFixture();
         const ballotProofGeneration = kernel.generateBallotProofRecord(
             fixture.request,
         );
@@ -149,15 +153,15 @@ describe('aggregate derivation proof through the transcript-core kernel', () => 
                 fixture.statement.rosterExternalAcceptanceDigest,
             contributorRosterPosition: 1,
             postVotingClosedContextDigest: digest('post-close-context'),
-            unsafeSmallRosterAcknowledged: true,
+            unsafeSmallRosterAcknowledged: false,
             votingClosedBoardHeadDigest: digest('closed-board-head'),
         };
         expect(() =>
             buildAggregateDerivationStatement({
                 ...statementInput,
-                unsafeSmallRosterAcknowledged: false,
+                unsafeSmallRosterAcknowledged: true,
             }),
-        ).toThrow(/unsafe small-roster acknowledgement/u);
+        ).toThrow(/casual micro-roster acknowledgement is only valid/u);
         expect(() =>
             buildAggregateDerivationStatement({
                 ...statementInput,

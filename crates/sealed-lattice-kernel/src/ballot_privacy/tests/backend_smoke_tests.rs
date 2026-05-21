@@ -30,6 +30,7 @@ pub(super) fn ballot_proof_backend_inputs<'a>(
         component_bundle_statement: parts.component_bundle_statement,
         component_proof_bundle: parts.component_proof_bundle,
         component_proof_inputs: parts.component_proof_inputs,
+        dynamic_roster_profile_evidence: None,
         linear_statement: parts.linear_statement,
         parameter_set: parts.parameter_set,
         proof_bytes_hex: parts.proof_bytes_hex,

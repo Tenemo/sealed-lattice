@@ -130,7 +130,12 @@ const collectScopedRelationBearingPackageStructuralRefusals = (
             ballotPackage.ballotProofStatement,
             ballotPackage.ballotProof,
             ballotPackage.proofBytesHex,
-            unsafeSmallRosterAcknowledged,
+            {
+                claimBearingPackage: true,
+                dynamicRosterProfileEvidence:
+                    ballotPackage.dynamicRosterProfileEvidence,
+                unsafeSmallRosterAcknowledged,
+            },
         ),
         ...collectReceiverKeyProofRootEvidenceStructuralRefusals(
             ballotPackage.receiverKeyProofRootEvidence,
@@ -340,6 +345,7 @@ export const verifyBallotProof = (input: {
     readonly ballotProof: BallotProofRecord;
     readonly componentProofBundle?: BallotProofComponentProofBundle;
     readonly componentProofInputs?: readonly BallotProofComponentProofVerificationInput[];
+    readonly dynamicRosterProfileEvidence?: ScopedRelationBearingBallotPackageVerificationShell['dynamicRosterProfileEvidence'];
     readonly proofBytesHex?: string;
     readonly unsafeSmallRosterAcknowledged?: boolean;
 }): BallotPrivacyVerification => {
@@ -348,7 +354,12 @@ export const verifyBallotProof = (input: {
             input.statement,
             input.ballotProof,
             input.proofBytesHex,
-            input.unsafeSmallRosterAcknowledged,
+            {
+                dynamicRosterProfileEvidence:
+                    input.dynamicRosterProfileEvidence,
+                unsafeSmallRosterAcknowledged:
+                    input.unsafeSmallRosterAcknowledged,
+            },
         ),
         ...collectBallotProofComponentProofBundleRefusals({
             ballotProof: input.ballotProof,

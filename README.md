@@ -11,7 +11,7 @@
 The published `sealed-lattice` package currently exposes safe-by-default helpers for:
 
 - transcript-core fixture verification through the packaged Rust/WASM kernel;
-- threshold profile derivation and poll-spec validation;
+- poll-spec validation, canonical poll/profile digest derivation, threshold profile derivation, and frozen roster-profile derivation;
 - lifecycle labels, lifecycle transitions, and action capability checks;
 - signed board consistency, cast receipt shells, close record shells, and target finality checks;
 - roster manifest verification, participant roster acceptance, deterministic first-valid ordering, and recovery-epoch checks;
@@ -45,6 +45,8 @@ These pieces are not exported as a public voting API and must not be used for re
 
 The ballot privacy implementation currently exposes verification-oriented APIs only. It can verify receiver-key proof records, ballot proof records, and proof-byte-bearing scoped relation packages through the packaged Rust/WASM proof backend. Package verification requires the public verifier inputs carried with the package shell and is not a complete voting API or supported-phone-certified result.
 
+Current M5 dimensions are: 2 to 20 options; `shareVectorWidth = 11 * optionCount`; `n = 20` as the mandatory benchmark receiver count; dynamic frozen receiver counts from 10 to 50 only when the ballot proof statement carries bound roster-profile evidence; and 3 to 9 receiver casual micro-roster verification only outside claim-bearing package acceptance.
+
 Implemented internally:
 
 - frozen ballot privacy profile objects and digest namespaces;
@@ -59,6 +61,7 @@ Implemented internally:
 Still unavailable:
 
 - public ballot generation or casting APIs;
+- generated certificate/workbook rows and benchmark evidence for every dynamic frozen roster size;
 - the encoded aggregate bridge and `ScoreBitAggregationRelation-v1` encrypted score-bit input path;
 - the packed bit-sliced BGV evaluator and mandatory evaluation proof;
 - production target-bound decryption and result release.

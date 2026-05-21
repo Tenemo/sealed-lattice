@@ -1,7 +1,10 @@
 import type {
     DuplicateBallotPolicy,
     HeBackendCorruptionModel,
+    RosterPolicy,
     ScoreDomain,
+    SmallRosterPolicy,
+    ThresholdProfileFamily,
     TiePolicy,
 } from '@sealed-lattice/types';
 export {
@@ -25,6 +28,16 @@ export const defaultDuplicateBallotPolicy =
 export const defaultTiePolicy =
     'HigherScoreThenLowerOptionIndex' as const satisfies TiePolicy;
 
-export const minimumUnsafeRosterSize = 3;
-export const minimumSafeRosterSize = 20;
-export const maximumSafeRosterSize = 50;
+export const defaultRosterPolicy =
+    'OpenLinkPublicRoster' as const satisfies RosterPolicy;
+
+export const defaultThresholdProfileFamily =
+    'BalancedDefault' as const satisfies ThresholdProfileFamily;
+
+export const defaultSmallRosterPolicy =
+    'ForbidMicroRoster' as const satisfies SmallRosterPolicy;
+
+export const minimumSupportedRosterSize = 3;
+export const minimumDynamicRosterSize = 10;
+export const mandatoryBenchmarkRosterSize = 20;
+export const maximumSupportedRosterSize = 50;

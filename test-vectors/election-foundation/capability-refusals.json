@@ -192,7 +192,8 @@
       "caseName": "accept-target-supported-safe-profile",
       "action": "AcceptTarget",
       "thresholdProfileInput": {
-        "rosterSize": 21
+        "rosterSize": 21,
+        "dynamicRosterProfileCertificateDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
       },
       "context": {
         "pollSpecValid": true,

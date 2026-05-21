@@ -3,6 +3,8 @@ use super::*;
 pub(crate) fn collect_ballot_proof_refusals(
     statement: &Value,
     ballot_proof: &Value,
+    dynamic_roster_profile_evidence: Option<&Value>,
+    claim_bearing_package: bool,
     unsafe_small_roster_acknowledged: bool,
 ) -> Vec<Value> {
     let mut refused_objects = Vec::new();
@@ -41,6 +43,8 @@ pub(crate) fn collect_ballot_proof_refusals(
     refused_objects.extend(collect_supported_ballot_privacy_dimension_refusals(
         statement,
         statement_digest,
+        dynamic_roster_profile_evidence,
+        claim_bearing_package,
         unsafe_small_roster_acknowledged,
     ));
 
@@ -340,6 +344,7 @@ pub(crate) fn reference_map(references: Option<&Vec<Value>>) -> BTreeMap<String,
 
 pub(crate) fn collect_claim_bearing_package_refusals(
     ballot_package: &Value,
+    dynamic_roster_profile_evidence: Option<&Value>,
     unsafe_small_roster_acknowledged: bool,
 ) -> Vec<Value> {
     let Some(package_object) = object_map(ballot_package) else {
@@ -352,8 +357,15 @@ pub(crate) fn collect_claim_bearing_package_refusals(
         .get("ballotProofStatement")
         .unwrap_or(&Value::Null);
     let ballot_proof = package_object.get("ballotProof").unwrap_or(&Value::Null);
-    let mut refused_objects =
-        collect_ballot_proof_refusals(statement, ballot_proof, unsafe_small_roster_acknowledged);
+    let package_dynamic_roster_profile_evidence = dynamic_roster_profile_evidence
+        .or_else(|| package_object.get("dynamicRosterProfileEvidence"));
+    let mut refused_objects = collect_ballot_proof_refusals(
+        statement,
+        ballot_proof,
+        package_dynamic_roster_profile_evidence,
+        true,
+        unsafe_small_roster_acknowledged,
+    );
     refused_objects.extend(collect_proof_bytes_refusals(
         package_object.get("proofBytesHex").and_then(Value::as_str),
         string_field(ballot_proof, "proofBytesDigest"),

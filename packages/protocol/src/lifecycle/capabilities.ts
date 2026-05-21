@@ -342,6 +342,46 @@ const evaluateClaimBearingEnvironment = (
     return undefined;
 };
 
+const nonEmptyDigest = (digest: string | undefined): boolean =>
+    digest !== undefined && digest.length > 0;
+
+const evaluateOpenVoting = (
+    action: ProtocolAction,
+    context: CapabilityContext,
+): CapabilityDecision => {
+    if (!lifecycleAllows(context, 'VotingOpen')) {
+        return refuseAction(action, 'InvalidLifecycleState');
+    }
+    if (!context.thresholdProfile.claimBearing) {
+        return refuseAction(action, 'ProfileNotClaimBearing');
+    }
+    if (
+        !nonEmptyDigest(context.finalRosterDigest) ||
+        !nonEmptyDigest(context.frozenRosterProfileDigest) ||
+        context.ballotProofProfileFrozen !== true ||
+        context.shareLayoutFrozen !== true ||
+        context.targetOutputLayoutFrozen !== true ||
+        context.cpadProfileReferencePresent !== true
+    ) {
+        return refuseAction(action, 'ClaimClosureMissing');
+    }
+    if (
+        context.receiverKeyCoverageComplete !== true ||
+        context.trusteeSetupComplete !== true ||
+        !countAtLeast(
+            context.setupCompleteCount,
+            context.thresholdProfile.setupCompletionQuorum,
+        )
+    ) {
+        return refuseAction(action, 'SetupIncomplete');
+    }
+    if (context.localRosterExternallyAccepted !== true) {
+        return refuseAction(action, 'LocalRosterNotAccepted');
+    }
+
+    return allowAction(action);
+};
+
 const evaluateUnavailableFutureAction = (
     action: ProtocolAction,
     context: CapabilityContext,
@@ -402,7 +442,7 @@ export const evaluateActionCapability = (
         case 'FreezeRoster':
             return evaluateLifecycleAction(action, context, 'RosterFrozen');
         case 'OpenVoting':
-            return evaluateLifecycleAction(action, context, 'VotingOpen');
+            return evaluateOpenVoting(action, context);
         case 'SubmitVote':
             return context.lifecycleState === 'VotingOpen'
                 ? allowAction(action)

@@ -140,6 +140,12 @@ export const manifestOpaqueBindings: ManifestOpaqueBindings = {
     bgvProfileDigest: deriveProtocolDigest('BGVProfileDigest', {
         profile: 'BGV-RNS-v1',
     }),
+    rustBgvBackendProfileDigest: deriveProtocolDigest(
+        'RustBgvBackendProfileDigest',
+        {
+            backend: 'sealed-lattice-rust-wasm-bgv-rns-v1',
+        },
+    ),
     bgvPublicKeyRoot: deriveProtocolDigest('BGVPublicKeyRoot', {
         key: 'bgv-collective',
     }),
@@ -159,6 +165,18 @@ export const manifestOpaqueBindings: ManifestOpaqueBindings = {
     bridgeLayoutDigest: deriveProtocolDigest('BridgeLayoutDigest', {
         layout: 'target-basis-data-encoded-aggregate-layout-v1',
     }),
+    scoreBitAggregationRelationDigest: deriveProtocolDigest(
+        'ScoreBitAggregationRelationDigest',
+        {
+            relation: 'ScoreBitAggregationRelation-v1',
+        },
+    ),
+    encryptedScoreBitInputLayoutDigest: deriveProtocolDigest(
+        'EncryptedScoreBitInputLayoutDigest',
+        {
+            layout: 'encrypted-score-bit-target-basis-data-v1',
+        },
+    ),
     evaluationNoiseProfileDigest: deriveProtocolDigest(
         'EvaluationNoiseProfileDigest',
         {

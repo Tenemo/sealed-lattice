@@ -558,6 +558,7 @@ describe('board consistency', () => {
         } as unknown as CastReceipt;
         const malformedRosterInput = createRosterManifestTranscriptInput([
             createRegistrationEntry('participant-1', 1, 0),
+            createRegistrationEntry('participant-2', 1, 1),
         ]);
         const malformedRegistration = {
             ...malformedRosterInput.registrationEntries[0],

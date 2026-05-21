@@ -1,4 +1,5 @@
 import type { BoardConsistencyInput, InclusionProof } from './board-target.js';
+import type { FrozenRosterProfile, PollSpec } from './lifecycle.js';
 import type { ProtocolDigest } from './protocol-digest.js';
 import type {
     ProtocolObjectType,
@@ -67,12 +68,15 @@ export type ManifestOpaqueBindings = {
     readonly directTargetBasisDataBridgeProfileId: string;
     readonly heParamDigest: ProtocolDigest;
     readonly bgvProfileDigest: ProtocolDigest;
+    readonly rustBgvBackendProfileDigest: ProtocolDigest;
     readonly bgvPublicKeyRoot: ProtocolDigest;
     readonly collectivePublicKeyRoot: ProtocolDigest;
     readonly canonicalCiphertextConventionDigest: ProtocolDigest;
     readonly bridgeProofProfileDigest: ProtocolDigest;
     readonly bgvBatchEncoderDigest: ProtocolDigest;
     readonly bridgeLayoutDigest: ProtocolDigest;
+    readonly scoreBitAggregationRelationDigest: ProtocolDigest;
+    readonly encryptedScoreBitInputLayoutDigest: ProtocolDigest;
     readonly evaluationNoiseProfileDigest: ProtocolDigest;
     readonly heEvaluationNoiseCertDigest: ProtocolDigest;
     readonly allowedEvaluatorOpsDigest: ProtocolDigest;
@@ -134,6 +138,8 @@ export type RosterManifestTranscriptInput = {
     readonly receiverKeyRegistrationInclusionProofs: readonly InclusionProof[];
     readonly trusteeSetupEntries: readonly TrusteeSetupEntry[];
     readonly trusteeSetupInclusionProofs: readonly InclusionProof[];
+    readonly pollSpec: PollSpec;
+    readonly frozenRosterProfile: FrozenRosterProfile;
     readonly electionManifest: ElectionManifest;
     readonly organizerPublicKeyDigest: ProtocolDigest;
     readonly organizerIdentity: string;

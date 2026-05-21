@@ -244,21 +244,19 @@ describe('transcript-core kernel in Node', () => {
         });
 
         expect(claimVerification).toMatchObject({
-            ok: true,
+            ok: false,
             backendAvailable: true,
             operation: 'verifyClaimBearingBallotPackage',
-            unresolvedReason: null,
+            unresolvedReason: 'BallotPackageInvalid',
         });
-        expect(claimVerification.statusLabels).toEqual(
-            expect.arrayContaining([
-                'ClaimBearingBallotPackageDigestRecomputed',
-                'ClaimBearingBallotPackageVerified',
-                'BallotProofLinearProofVerified',
-                'BallotProofComponentProofBundleVerified',
-                'BallotProofComponentLinearProofVerified',
-            ]),
-        );
-        expect(claimVerification.acceptedDigests).toContain(
+        expect(
+            claimVerification.refusedObjects.some((refusal) =>
+                /at least (?:10|ten) frozen participants/u.test(
+                    refusal.message,
+                ),
+            ),
+        ).toBe(true);
+        expect(claimVerification.acceptedDigests).not.toContain(
             ballotPackage.ballotPackageDigest,
         );
         expect(

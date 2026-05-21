@@ -11,7 +11,10 @@ export {
 export { verifyTargetFinality } from './finality/index.js';
 export { deriveLifecycleLabels } from './lifecycle/labels.js';
 export { isValidLifecycleTransition } from './lifecycle/lifecycle.js';
-export { validatePollSpec } from './lifecycle/poll-spec.js';
+export {
+    derivePollSpecDigest,
+    validatePollSpec,
+} from './lifecycle/poll-spec.js';
 export {
     isActionCurrentForRecoveryEpoch,
     verifyRecoveryEpochUpdate,
@@ -20,4 +23,8 @@ export {
     verifyRosterExternalAcceptance,
     verifyRosterManifestTranscript,
 } from './roster/index.js';
-export { deriveThresholdProfile } from './lifecycle/thresholds.js';
+export {
+    deriveFrozenRosterProfile,
+    deriveThresholdProfile,
+    deriveThresholdProfileDigest,
+} from './lifecycle/thresholds.js';

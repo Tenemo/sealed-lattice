@@ -559,9 +559,11 @@ fn run_ballot_privacy_command(
                 .get("unsafeSmallRosterAcknowledged")
                 .and_then(Value::as_bool)
                 == Some(true);
+            let dynamic_roster_profile_evidence = request.get("dynamicRosterProfileEvidence");
 
             Ok(crate::ballot_privacy::verify_claim_bearing_ballot_package(
                 ballot_package,
+                dynamic_roster_profile_evidence,
                 unsafe_small_roster_acknowledged,
             ))
         }
