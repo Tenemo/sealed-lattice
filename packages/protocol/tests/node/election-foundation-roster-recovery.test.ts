@@ -52,6 +52,36 @@ describe('roster, manifest, first-valid, and recovery shells', () => {
         );
     });
 
+    it('attributes frozen roster profile mismatches to the frozen profile', () => {
+        const input = createRosterManifestTranscriptInput([
+            createRegistrationEntry('participant-1', 1, 0),
+            createRegistrationEntry('participant-2', 1, 1),
+            createRegistrationEntry('participant-3', 1, 2),
+        ]);
+        const changedFrozenRosterProfile = {
+            ...input.frozenRosterProfile,
+            pollSpecDigest: deriveProtocolDigest('PollSpecDigest', {
+                poll: 'changed',
+            }),
+        };
+
+        const result = verifyRosterManifestTranscript({
+            ...input,
+            frozenRosterProfile: changedFrozenRosterProfile,
+        });
+
+        expect(result.refusedObjects).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    code: 'ManifestDigestMismatch',
+                    objectDigest:
+                        changedFrozenRosterProfile.thresholdProfileDigest,
+                    objectType: 'FrozenRosterProfile',
+                }),
+            ]),
+        );
+    });
+
     it('rejects a manifest organizer that is not part of the all-trustee roster', () => {
         const input = createRosterManifestTranscriptInput(
             [

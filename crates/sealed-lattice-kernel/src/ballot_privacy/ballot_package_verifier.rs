@@ -13,6 +13,15 @@ fn required_package_field_refusal(
     )
 }
 
+fn package_field<'a>(
+    package_object: &'a serde_json::Map<String, Value>,
+    field_name: &str,
+) -> Option<&'a Value> {
+    package_object
+        .get(field_name)
+        .filter(|value| !value.is_null())
+}
+
 fn relabel_package_verification(
     mut verification: Value,
     package_digest: Option<&str>,
@@ -98,12 +107,12 @@ pub fn verify_claim_bearing_ballot_package(
     let mut missing_inputs = Vec::new();
     let proof_bytes_hex = string_field(ballot_package, "proofBytesHex");
     let public_randomness_hex = string_field(ballot_package, "publicRandomnessHex");
-    let linear_statement = package_object.get("linearStatement");
-    let parameter_set = package_object.get("parameterSet");
-    let proof_encoding = package_object.get("proofEncoding");
-    let component_bundle_statement = package_object.get("componentBundleStatement");
-    let component_proof_bundle = package_object.get("componentProofBundle");
-    let component_proof_inputs = package_object.get("componentProofInputs");
+    let linear_statement = package_field(package_object, "linearStatement");
+    let parameter_set = package_field(package_object, "parameterSet");
+    let proof_encoding = package_field(package_object, "proofEncoding");
+    let component_bundle_statement = package_field(package_object, "componentBundleStatement");
+    let component_proof_bundle = package_field(package_object, "componentProofBundle");
+    let component_proof_inputs = package_field(package_object, "componentProofInputs");
     let package_dynamic_roster_profile_evidence = dynamic_roster_profile_evidence
         .or_else(|| package_object.get("dynamicRosterProfileEvidence"));
 

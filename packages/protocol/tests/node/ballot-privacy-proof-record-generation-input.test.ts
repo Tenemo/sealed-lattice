@@ -72,7 +72,7 @@ const shareCommitmentProofStatement = (
     fixture: BallotProofRecordGenerationFixture,
 ): {
     readonly proofStatementFormat: string;
-    readonly receiverRows: readonly {
+    readonly receiverRows?: readonly {
         readonly commitmentPolynomialVector: readonly (readonly string[])[];
         readonly rowCount: number;
         readonly rowOffsetWithinStatement: number;
@@ -91,7 +91,7 @@ const shareCommitmentProofStatement = (
 
     return shareCommitmentInput.proofStatement as {
         readonly proofStatementFormat: string;
-        readonly receiverRows: readonly {
+        readonly receiverRows?: readonly {
             readonly commitmentPolynomialVector: readonly (readonly string[])[];
             readonly rowCount: number;
             readonly rowOffsetWithinStatement: number;
@@ -251,9 +251,31 @@ describe('ballot proof record generation input', () => {
             expect(
                 receiverEncryptionStatementForRoster.receiverRows,
             ).toHaveLength(rosterSize);
-            expect(shareCommitmentStatementForRoster.receiverRows).toHaveLength(
-                rosterSize,
+            expect(shareCommitmentStatementForRoster.statementColumns).toBe(
+                rosterSize * (22 + 64),
             );
+            expect(
+                shareCommitmentStatementForRoster.sourceBackendColumnIndices,
+            ).toHaveLength(shareCommitmentStatementForRoster.statementColumns);
+            if (rosterSize <= 6) {
+                expect(shareCommitmentStatementForRoster).toMatchObject({
+                    proofStatementFormat:
+                        'sparse-polynomial-matrix-linear-proof-v1',
+                    statementRows: rosterSize * 1_024,
+                });
+                expect(
+                    shareCommitmentStatementForRoster.receiverRows,
+                ).toBeUndefined();
+            } else {
+                expect(shareCommitmentStatementForRoster).toMatchObject({
+                    proofStatementFormat:
+                        'structured-module-sis-share-commitment-v1',
+                    statementRows: rosterSize * 16,
+                });
+                expect(
+                    shareCommitmentStatementForRoster.receiverRows,
+                ).toHaveLength(rosterSize);
+            }
             expect(
                 microRosterFixture.request.componentProofInputs.map(
                     (proofInput) => proofInput.componentId,
@@ -551,14 +573,21 @@ describe('mandatory-profile ballot proof record generation input', () => {
             statementColumns: 5680,
             statementRows: 320,
         });
-        expect(shareCommitmentStatement.receiverRows).toHaveLength(20);
+        const shareCommitmentReceiverRows =
+            shareCommitmentStatement.receiverRows ??
+            (() => {
+                throw new Error(
+                    'Structured share-commitment statement should expose receiver rows.',
+                );
+            })();
+        expect(shareCommitmentReceiverRows).toHaveLength(20);
         expect(
             shareCommitmentStatement.sourceBackendColumnIndices,
         ).toHaveLength(shareCommitmentStatement.statementColumns);
         for (const [
             receiverIndex,
             receiverRow,
-        ] of shareCommitmentStatement.receiverRows.entries()) {
+        ] of shareCommitmentReceiverRows.entries()) {
             expect(receiverRow.rowCount).toBe(16);
             expect(receiverRow.rowOffsetWithinStatement).toBe(
                 receiverIndex * 16,

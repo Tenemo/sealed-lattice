@@ -175,6 +175,7 @@ const buildAlgebraicRows = (
                 : [];
         const encryptionVariableNames = hasExplicitReceiverEncryptionRows
             ? shouldUseCompactReceiverEncryptionWitnessColumns({
+                  receiverCount: input.relationInput.receivers.length,
                   shareVectorWidth: encodedCoordinateCount,
               })
                 ? []

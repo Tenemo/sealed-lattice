@@ -342,6 +342,15 @@ pub(crate) fn reference_map(references: Option<&Vec<Value>>) -> BTreeMap<String,
     mapped_references
 }
 
+fn non_null_package_field<'a>(
+    package_object: &'a serde_json::Map<String, Value>,
+    field_name: &str,
+) -> Option<&'a Value> {
+    package_object
+        .get(field_name)
+        .filter(|value| !value.is_null())
+}
+
 pub(crate) fn collect_claim_bearing_package_refusals(
     ballot_package: &Value,
     dynamic_roster_profile_evidence: Option<&Value>,
@@ -357,6 +366,10 @@ pub(crate) fn collect_claim_bearing_package_refusals(
         .get("ballotProofStatement")
         .unwrap_or(&Value::Null);
     let ballot_proof = package_object.get("ballotProof").unwrap_or(&Value::Null);
+    let component_bundle_statement =
+        non_null_package_field(package_object, "componentBundleStatement");
+    let component_proof_bundle = non_null_package_field(package_object, "componentProofBundle");
+    let component_proof_inputs = non_null_package_field(package_object, "componentProofInputs");
     let package_dynamic_roster_profile_evidence = dynamic_roster_profile_evidence
         .or_else(|| package_object.get("dynamicRosterProfileEvidence"));
     let mut refused_objects = collect_ballot_proof_refusals(
@@ -379,9 +392,9 @@ pub(crate) fn collect_claim_bearing_package_refusals(
     refused_objects.extend(collect_ballot_component_proof_bundle_refusals(
         statement,
         ballot_proof,
-        package_object.get("componentBundleStatement"),
-        package_object.get("componentProofBundle"),
-        package_object.get("componentProofInputs"),
+        component_bundle_statement,
+        component_proof_bundle,
+        component_proof_inputs,
     ));
     refused_objects.extend(collect_receiver_key_proof_root_evidence_refusals(
         package_object
@@ -402,17 +415,13 @@ pub(crate) fn collect_claim_bearing_package_refusals(
             package_digest,
         ));
     }
-    if package_object.contains_key("componentProofBundle")
-        && !package_object.contains_key("proofBytesHex")
-    {
+    if component_proof_bundle.is_some() && !package_object.contains_key("proofBytesHex") {
         refused_objects.push(structural_refusal(
             "Claim-bearing ballot package verification requires the public ballot proof bytes when a component proof bundle is supplied.",
             package_digest,
         ));
     }
-    if package_object.contains_key("componentProofBundle")
-        && !package_object.contains_key("componentBundleStatement")
-    {
+    if component_proof_bundle.is_some() && component_bundle_statement.is_none() {
         refused_objects.push(structural_refusal(
             "Claim-bearing ballot package verification requires the public component bundle statement when a component proof bundle is supplied.",
             package_digest,

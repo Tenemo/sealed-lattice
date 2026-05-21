@@ -23,7 +23,7 @@
         "build": "tsx ./tools/run-turbo.ts build",
         "test:node:fast:built": "vitest --project node --run",
         "test:node:fast": "pnpm run build && pnpm run test:node:fast:built",
-        "test:node:built": "vitest --project node --project node-heavy --project node-kernel-heavy --run",
+        "test:node:built": "tsx ./tools/ci/run-node-tests.ts",
         "test:node:heavy": "pnpm run build && vitest --project node-heavy --run",
         "test:node:heavy:kernel": "pnpm run build && vitest --project node-kernel-heavy --run",
         "test:node": "pnpm run build && pnpm run test:node:built",

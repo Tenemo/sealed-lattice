@@ -232,7 +232,7 @@ const verifyRosterManifestTranscriptUnchecked = (
                 'ManifestDigestMismatch',
                 'Frozen roster profile poll spec digest must match the transcript poll specification.',
                 input.frozenRosterProfile.thresholdProfileDigest,
-                'ElectionManifest',
+                'FrozenRosterProfile',
             ),
         );
     }
@@ -245,7 +245,7 @@ const verifyRosterManifestTranscriptUnchecked = (
                 'RosterDigestMismatch',
                 'Frozen roster profile must be derived from the accepted frozen roster.',
                 input.frozenRosterProfile.thresholdProfileDigest,
-                'Roster',
+                'FrozenRosterProfile',
             ),
         );
     }
@@ -260,9 +260,20 @@ const verifyRosterManifestTranscriptUnchecked = (
         });
         if (
             expectedFrozenRosterProfile.thresholdProfileDigest !==
-                input.frozenRosterProfile.thresholdProfileDigest ||
+            input.frozenRosterProfile.thresholdProfileDigest
+        ) {
+            refusedObjects.push(
+                createRefusal(
+                    'ManifestDigestMismatch',
+                    'Frozen roster profile threshold profile digest must match the roster-freeze derived profile.',
+                    input.frozenRosterProfile.thresholdProfileDigest,
+                    'FrozenRosterProfile',
+                ),
+            );
+        }
+        if (
             expectedFrozenRosterProfile.thresholdProfileDigest !==
-                input.electionManifest.thresholdProfileDigest
+            input.electionManifest.thresholdProfileDigest
         ) {
             refusedObjects.push(
                 createRefusal(
@@ -278,8 +289,8 @@ const verifyRosterManifestTranscriptUnchecked = (
             createRefusal(
                 'ManifestDigestMismatch',
                 'Frozen roster profile could not be derived from the poll policy and accepted roster.',
-                input.electionManifest.electionManifestDigest,
-                'ElectionManifest',
+                input.frozenRosterProfile.thresholdProfileDigest,
+                'FrozenRosterProfile',
             ),
         );
     }

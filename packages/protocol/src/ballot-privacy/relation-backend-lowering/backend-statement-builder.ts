@@ -246,6 +246,7 @@ const buildBackendStatement = (input: {
     if (shareCommitmentRowsWithPublicVectors.length > 0) {
         if (
             shouldUseStructuredShareCommitmentRows({
+                receiverCount: input.receivers.length,
                 shareVectorWidth: input.shareVectorWidth,
             })
         ) {

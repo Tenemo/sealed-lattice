@@ -108,7 +108,7 @@ export const collectBallotPrivacyDimensionRefusals = (input: {
         refusedObjects.push(
             createRefusal(
                 'BallotPackageInvalid',
-                'Dynamic claim-bearing ballot privacy verification requires roster profile certificate or workbook evidence for the frozen receiver count.',
+                'Dynamic ballot privacy verification requires roster profile certificate or workbook evidence for the frozen receiver count.',
                 input.objectDigest,
             ),
         );

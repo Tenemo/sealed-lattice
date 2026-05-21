@@ -299,6 +299,36 @@ describe('ballot privacy proof object boundary', () => {
         },
     );
 
+    it('uses package-neutral dynamic roster evidence wording for standalone ballot proofs', () => {
+        const structurallyBoundObjects = createStructurallyBoundObjects({
+            participantCount: 11,
+        });
+        const proofRecord = createBallotProofRecordShell({
+            proofBytesDigest: digest('dynamic-proof-bytes'),
+            relationStatementDigest: digest('dynamic-relation-statement'),
+            proofRoot: digest('dynamic-proof-root'),
+            proofSizeBytes: 1_024,
+            statement: structurallyBoundObjects.statement,
+        });
+
+        const result = verifyBallotProof({
+            ballotProof: proofRecord,
+            statement: structurallyBoundObjects.statement,
+        });
+
+        expect(result).toMatchObject({
+            ok: false,
+            unresolvedReason: 'BallotPackageInvalid',
+        });
+        expect(
+            result.refusedObjects.some(
+                (refusal) =>
+                    refusal.message ===
+                    'Dynamic ballot privacy verification requires roster profile certificate or workbook evidence for the frozen receiver count.',
+            ),
+        ).toBe(true);
+    });
+
     it('rejects malformed claim-bearing package shells before the backend gate', () => {
         const structurallyBoundObjects = createStructurallyBoundObjects();
         const firstReceiverPayload =

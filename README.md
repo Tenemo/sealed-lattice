@@ -62,8 +62,8 @@ Still unavailable:
 
 - public ballot generation or casting APIs;
 - generated certificate/workbook rows and benchmark evidence for every dynamic frozen roster size and every casual micro-roster benchmark profile that later evaluation chooses to measure;
-- the encoded aggregate bridge and `ScoreBitAggregationRelation-v1` encrypted score-bit input path;
-- the packed bit-sliced BGV evaluator and mandatory evaluation proof;
+- the M9 encrypted aggregate bridge from committed aggregate shares to encrypted aggregate TargetBasisData, preserving bridge witness privacy;
+- the M10 encrypted aggregate reconstruction, evaluator-side score-bit/comparison derivation, packed bit-sliced BGV evaluator, and mandatory evaluation proof;
 - production target-bound decryption and result release.
 
 ## Repository layout

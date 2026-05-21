@@ -16,6 +16,7 @@ export type ProtocolObjectType =
     | 'ElectionManifest'
     | 'EvaluationProofRecord'
     | 'FirstValidOrder'
+    | 'FrozenRosterProfile'
     | 'LocalReplayRecord'
     | 'RecoveryEpochUpdate'
     | 'ReceiverKeyRegistration'

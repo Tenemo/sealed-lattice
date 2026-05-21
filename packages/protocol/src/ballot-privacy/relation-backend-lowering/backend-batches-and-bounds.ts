@@ -46,6 +46,16 @@ import {
 } from './backend-row-helpers.js';
 import { receiverReferenceKey } from './relation-row-builders.js';
 
+const maximumExplicitSmallReceiverSourceColumnCount =
+    6 * (22 + shareCommitmentOpeningDimension);
+
+const estimatedReceiverSourceColumnCount = (input: {
+    readonly receiverCount: number;
+    readonly shareVectorWidth: number;
+}): number =>
+    input.receiverCount *
+    (input.shareVectorWidth + shareCommitmentOpeningDimension);
+
 const buildExplicitShareCommitmentRowBatch = (input: {
     readonly rowOffset: number;
     readonly rows: readonly BallotPrivacyBackendStatementExplicitRow[];
@@ -92,12 +102,20 @@ const buildExplicitShareCommitmentRowBatch = (input: {
 };
 
 const shouldUseStructuredShareCommitmentRows = (input: {
+    readonly receiverCount: number;
     readonly shareVectorWidth: number;
-}): boolean => input.shareVectorWidth > 64;
+}): boolean =>
+    input.shareVectorWidth > 64 ||
+    estimatedReceiverSourceColumnCount(input) >
+        maximumExplicitSmallReceiverSourceColumnCount;
 
 const shouldUseCompactReceiverEncryptionWitnessColumns = (input: {
+    readonly receiverCount: number;
     readonly shareVectorWidth: number;
-}): boolean => input.shareVectorWidth > 64;
+}): boolean =>
+    input.shareVectorWidth > 64 ||
+    estimatedReceiverSourceColumnCount(input) >
+        maximumExplicitSmallReceiverSourceColumnCount;
 
 const buildStructuredShareCommitmentRowBatch = (input: {
     readonly columnLookup: ReadonlyMap<string, number>;
@@ -409,6 +427,7 @@ const buildReceiverPayloadEncryptionRowBatch = (input: {
             receiverEncryptionModuleDegree;
         if (
             shouldUseCompactReceiverEncryptionWitnessColumns({
+                receiverCount: input.receivers.length,
                 shareVectorWidth: input.shareVectorWidth,
             })
         ) {
