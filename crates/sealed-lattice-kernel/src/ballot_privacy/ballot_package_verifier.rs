@@ -4,8 +4,7 @@ pub fn verify_claim_bearing_ballot_package(
     ballot_package: &Value,
     unsafe_small_roster_acknowledged: bool,
 ) -> Value {
-    let refused_objects =
-        collect_claim_bearing_package_refusals(ballot_package, unsafe_small_roster_acknowledged);
+    let refused_objects = collect_claim_bearing_package_shell_refusals(ballot_package);
     if !refused_objects.is_empty() {
         return structural_rejection("verifyClaimBearingBallotPackage", refused_objects);
     }

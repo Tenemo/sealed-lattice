@@ -115,7 +115,7 @@ pub(crate) use ballot_proof_generation_core::{
     generate_ballot_component_proof_inner, generate_ballot_proof_inner,
 };
 pub(crate) use ballot_proof_refusals::{
-    collect_ballot_proof_refusals, collect_claim_bearing_package_refusals,
+    collect_ballot_proof_refusals, collect_claim_bearing_package_shell_refusals,
     collect_proof_bytes_refusals, reference_map,
 };
 pub(crate) use component_backend_sparse::{

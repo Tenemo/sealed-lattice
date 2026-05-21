@@ -338,10 +338,7 @@ pub(crate) fn reference_map(references: Option<&Vec<Value>>) -> BTreeMap<String,
     mapped_references
 }
 
-pub(crate) fn collect_claim_bearing_package_refusals(
-    ballot_package: &Value,
-    unsafe_small_roster_acknowledged: bool,
-) -> Vec<Value> {
+pub(crate) fn collect_claim_bearing_package_shell_refusals(ballot_package: &Value) -> Vec<Value> {
     let Some(package_object) = object_map(ballot_package) else {
         return vec![structural_refusal(
             "Claim-bearing ballot package shell digest or shape is invalid.",
@@ -351,32 +348,12 @@ pub(crate) fn collect_claim_bearing_package_refusals(
     let statement = package_object
         .get("ballotProofStatement")
         .unwrap_or(&Value::Null);
-    let ballot_proof = package_object.get("ballotProof").unwrap_or(&Value::Null);
-    let mut refused_objects =
-        collect_ballot_proof_refusals(statement, ballot_proof, unsafe_small_roster_acknowledged);
-    refused_objects.extend(collect_proof_bytes_refusals(
-        package_object.get("proofBytesHex").and_then(Value::as_str),
-        string_field(ballot_proof, "proofBytesDigest"),
-        object_map(ballot_proof)
-            .and_then(|object| object.get("proofSizeBytes"))
-            .and_then(Value::as_u64),
-        string_field(ballot_proof, "ballotProofRecordDigest"),
-        "Ballot",
-        false,
-    ));
-    refused_objects.extend(collect_ballot_component_proof_bundle_refusals(
-        statement,
-        ballot_proof,
-        package_object.get("componentBundleStatement"),
-        package_object.get("componentProofBundle"),
-        package_object.get("componentProofInputs"),
-    ));
-    refused_objects.extend(collect_receiver_key_proof_root_evidence_refusals(
+    let mut refused_objects = collect_receiver_key_proof_root_evidence_refusals(
         package_object
             .get("receiverKeyProofRootEvidence")
             .unwrap_or(&Value::Null),
         statement,
-    ));
+    );
     let package_digest = string_field(ballot_package, "ballotPackageDigest");
     let expected_package_digest = derive_claim_bearing_ballot_package_digest(ballot_package);
 
