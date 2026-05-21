@@ -166,6 +166,11 @@ pub(crate) fn verify_ballot_linear_proof_bytes(
             proof_size_bytes,
             ballot_proof_record_digest,
         ));
+        refused_objects.extend(collect_full_ballot_relation_binding_refusals(
+            linear_statement,
+            component_bundle_statement,
+            ballot_proof_record_digest,
+        ));
     }
     if string_field(ballot_proof, "backendStatementDigest")
         != string_field(linear_statement, "backendStatementDigest")

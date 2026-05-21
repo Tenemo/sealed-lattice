@@ -6,7 +6,6 @@ import { loadTranscriptCoreKernel } from '../../../src/index';
 import {
     ballotFieldLinearProofBackendVectors,
     cloneJsonValue,
-    expectRefusalMessage,
 } from './shared.js';
 
 import { createWasmBallotProofRecordGenerationFixture } from '#tests/support/ballot-privacy-proof-record-generation-fixtures';
@@ -245,14 +244,22 @@ describe('transcript-core kernel in Node', () => {
         });
 
         expect(claimVerification).toMatchObject({
-            ok: false,
+            ok: true,
             backendAvailable: true,
             operation: 'verifyClaimBearingBallotPackage',
-            unresolvedReason: 'BallotPackageInvalid',
+            unresolvedReason: null,
         });
-        expectRefusalMessage(
-            claimVerification,
-            'Claim-bearing ballot package verification requires verifier-derived lowered relation statements and trusted public randomness',
+        expect(claimVerification.statusLabels).toEqual(
+            expect.arrayContaining([
+                'ClaimBearingBallotPackageDigestRecomputed',
+                'ClaimBearingBallotPackageVerified',
+                'BallotProofLinearProofVerified',
+                'BallotProofComponentProofBundleVerified',
+                'BallotProofComponentLinearProofVerified',
+            ]),
+        );
+        expect(claimVerification.acceptedDigests).toContain(
+            ballotPackage.ballotPackageDigest,
         );
         expect(
             kernel.verifyClaimBearingBallotPackage({

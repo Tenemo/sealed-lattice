@@ -343,7 +343,7 @@ export type BallotProofVerificationInput = Parameters<
     TranscriptCoreKernel['verifyBallotProof']
 >[0];
 
-/** Input accepted by the packaged WASM scoped relation-bearing ballot package shell validator. */
+/** Input accepted by the packaged WASM scoped relation-bearing ballot package verifier. */
 export type ClaimBearingBallotPackageVerificationInput = Parameters<
     TranscriptCoreKernel['verifyClaimBearingBallotPackage']
 >[0];
@@ -371,7 +371,7 @@ export const verifyBallotProof = async (
     return kernel.verifyBallotProof(input);
 };
 
-/** Validates a scoped relation-bearing ballot package shell, then fails closed before package-level claim acceptance. */
+/** Verifies a proof-byte-bearing scoped relation-bearing ballot package with the packaged WASM proof backend. */
 export const verifyClaimBearingBallotPackage = async (
     input: ClaimBearingBallotPackageVerificationInput,
 ): Promise<BallotPrivacyKernelVerification> => {

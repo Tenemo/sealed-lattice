@@ -4,6 +4,9 @@ const FULL_BALLOT_BINDING_PARAMETER_SOURCE: &str =
     "sealed-lattice/linear-proof/full-ballot-binding-parameters-v1";
 const FULL_BALLOT_BINDING_ENCODING_SOURCE: &str =
     "sealed-lattice/linear-proof/full-ballot-binding-encoding-v1";
+const FULL_BALLOT_BINDING_DIGEST_PURPOSE: &str = "ballot-proof-full-relation-binding-v1";
+const BACKEND_PROOF_COMPONENTS_DIGEST_PURPOSE: &str = "ballot-privacy-backend-proof-components-v1";
+const FULL_BALLOT_BINDING_COEFFICIENT_MODULUS: u64 = 65_537;
 
 #[derive(Clone, Copy)]
 struct LinearContractExpectation {
@@ -126,6 +129,39 @@ pub(crate) fn collect_full_ballot_binding_contract_refusals(
     refused_objects
 }
 
+pub(crate) fn collect_full_ballot_relation_binding_refusals(
+    linear_statement: &Value,
+    component_bundle_statement: Option<&Value>,
+    object_digest: Option<&str>,
+) -> Vec<Value> {
+    let Some(component_bundle_statement) = component_bundle_statement else {
+        return Vec::new();
+    };
+    let mut refused_objects = Vec::new();
+    let expected_relation_binding_digest =
+        derive_full_relation_binding_digest(component_bundle_statement);
+
+    if string_field(linear_statement, "relationBindingDigest")
+        != expected_relation_binding_digest.as_deref()
+    {
+        refused_objects.push(structural_refusal(
+            "Full ballot binding linear statement relation binding digest does not match the supplied component bundle.",
+            object_digest,
+        ));
+    }
+    if !full_ballot_binding_matrix_and_target_are_derived(
+        linear_statement,
+        expected_relation_binding_digest.as_deref(),
+    ) {
+        refused_objects.push(structural_refusal(
+            "Full ballot binding linear statement matrix and target are not derived from the component bundle relation binding.",
+            object_digest,
+        ));
+    }
+
+    refused_objects
+}
+
 fn collect_linear_statement_contract_refusals(
     proof_statement: &Value,
     expectation: &LinearContractExpectation,
@@ -158,6 +194,131 @@ fn collect_linear_statement_contract_refusals(
     }
 
     refused_objects
+}
+
+fn derive_backend_digest(purpose: &str, payload: Value) -> Option<String> {
+    derive_digest(
+        "ChallengeDomainDigest",
+        &json!({
+            "payload": payload,
+            "purpose": purpose,
+        }),
+    )
+}
+
+fn component_statement_as_proof_component(component_statement: &Value) -> Option<Value> {
+    let component_object = object_map(component_statement)?;
+
+    Some(json!({
+        "coefficientModulus": component_object.get("coefficientModulus")?.clone(),
+        "componentId": component_object.get("componentId")?.clone(),
+        "proofLoweringStatus": component_object.get("proofLoweringStatus")?.clone(),
+        "rowBatchNames": component_object.get("rowBatchNames")?.clone(),
+        "rowCount": component_object.get("rowCount")?.clone(),
+        "rowKinds": component_object.get("rowKinds")?.clone(),
+        "variableColumnCount": component_object.get("variableColumnCount")?.clone(),
+        "variableColumnIndices": component_object.get("variableColumnIndices")?.clone(),
+        "componentDigest": component_object.get("componentDigest")?.clone()
+    }))
+}
+
+pub(crate) fn derive_full_relation_binding_digest(
+    component_bundle_statement: &Value,
+) -> Option<String> {
+    let component_bundle_object = object_map(component_bundle_statement)?;
+    let component_statements = component_bundle_object
+        .get("componentStatements")
+        .and_then(Value::as_array)?;
+    let proof_components = component_statements
+        .iter()
+        .map(component_statement_as_proof_component)
+        .collect::<Option<Vec<_>>>()?;
+    let proof_components_digest = derive_backend_digest(
+        BACKEND_PROOF_COMPONENTS_DIGEST_PURPOSE,
+        json!({
+            "proofComponents": proof_components
+        }),
+    )?;
+
+    derive_digest(
+        "ChallengeDomainDigest",
+        &json!({
+            "backendStatementDigest": component_bundle_object.get("backendStatementDigest")?,
+            "componentBundleStatementDigest": component_bundle_object.get("componentBundleStatementDigest")?,
+            "proofComponentsDigest": proof_components_digest,
+            "purpose": FULL_BALLOT_BINDING_DIGEST_PURPOSE,
+            "relationStatementDigest": component_bundle_object.get("relationStatementDigest")?
+        }),
+    )
+}
+
+pub(crate) fn binding_scalar_from_digest(relation_binding_digest: &str) -> Option<u64> {
+    let prefix = relation_binding_digest.get(..16)?;
+    u64::from_str_radix(prefix, 16)
+        .ok()
+        .map(|value| 1 + (value % 127))
+}
+
+fn dense_polynomial_is_constant(
+    polynomial: &Value,
+    expected_constant: u64,
+    expected_length: usize,
+) -> bool {
+    let Some(coefficients) = polynomial.as_array() else {
+        return false;
+    };
+    coefficients.len() == expected_length
+        && coefficients
+            .iter()
+            .enumerate()
+            .all(|(coefficient_index, coefficient)| {
+                let expected_coefficient = if coefficient_index == 0 {
+                    expected_constant
+                } else {
+                    0
+                };
+
+                integer_value(coefficient) == Some(expected_coefficient)
+            })
+}
+
+fn full_ballot_binding_matrix_and_target_are_derived(
+    linear_statement: &Value,
+    relation_binding_digest: Option<&str>,
+) -> bool {
+    let Some(relation_binding_digest) = relation_binding_digest else {
+        return false;
+    };
+    let Some(binding_scalar) = binding_scalar_from_digest(relation_binding_digest) else {
+        return false;
+    };
+    let Some(source_ring_degree) = unsigned_integer_field(linear_statement, "ringDegree")
+        .and_then(|value| usize::try_from(value).ok())
+    else {
+        return false;
+    };
+    let Some(statement_matrix) = object_map(linear_statement)
+        .and_then(|object| object.get("statementMatrixCoefficients"))
+        .and_then(Value::as_array)
+    else {
+        return false;
+    };
+    let Some(target_vector) = object_map(linear_statement)
+        .and_then(|object| object.get("targetVectorCoefficients"))
+        .and_then(Value::as_array)
+    else {
+        return false;
+    };
+    let Some(first_matrix_row) = statement_matrix.first().and_then(Value::as_array) else {
+        return false;
+    };
+    let target_constant = FULL_BALLOT_BINDING_COEFFICIENT_MODULUS - binding_scalar;
+
+    statement_matrix.len() == 1
+        && first_matrix_row.len() == 1
+        && target_vector.len() == 1
+        && dense_polynomial_is_constant(&first_matrix_row[0], 1, source_ring_degree)
+        && dense_polynomial_is_constant(&target_vector[0], target_constant, source_ring_degree)
 }
 
 fn collect_parameter_contract_refusals(
@@ -296,6 +457,101 @@ mod tests {
             "statementRows": 1,
             "witnessL2BoundSquared": "65536",
         })
+    }
+
+    fn constant_polynomial(constant: u64) -> Value {
+        Value::Array(
+            (0..64)
+                .map(|coefficient_index| {
+                    if coefficient_index == 0 {
+                        json!(constant)
+                    } else {
+                        json!(0)
+                    }
+                })
+                .collect(),
+        )
+    }
+
+    fn test_component_statement(component_id: &str, component_digest_label: &str) -> Value {
+        json!({
+            "coefficientModulus": "65537",
+            "componentDigest": digest(component_digest_label),
+            "componentId": component_id,
+            "proofLoweringStatus": "Lowered",
+            "rowBatchNames": ["test rows"],
+            "rowCount": 1,
+            "rowKinds": ["test-row-kind"],
+            "variableColumnCount": 2,
+            "variableColumnIndices": [0, 1],
+        })
+    }
+
+    fn full_relation_component_bundle_statement() -> Value {
+        let mut component_bundle_statement = json!({
+            "backendStatementDigest": digest("backend-statement"),
+            "ballotProofStatementDigest": digest("ballot-proof-statement"),
+            "bundleCoverage": FULL_BALLOT_PROOF_PROJECTION_COVERAGE,
+            "componentStatements": [
+                test_component_statement("score-and-shamir-field-component", "score-component"),
+                test_component_statement("payload-plaintext-field-component", "payload-component"),
+                test_component_statement("share-commitment-component", "share-component"),
+                test_component_statement("receiver-encryption-component", "receiver-encryption-component"),
+                test_component_statement("receiver-key-binding-component", "receiver-key-binding-component"),
+            ],
+            "objectType": "BallotProofComponentBundleStatement",
+            "objectVersion": 1,
+            "relationLabel": "BallotPrivacyPvssRelation",
+            "relationStatementDigest": digest("relation-statement"),
+            "requiredComponentIds": REQUIRED_BALLOT_PROOF_COMPONENT_IDS,
+        });
+        let component_bundle_statement_digest =
+            derive_ballot_component_bundle_statement_digest(&component_bundle_statement)
+                .expect("component bundle statement digest should derive");
+        component_bundle_statement
+            .as_object_mut()
+            .expect("component bundle statement should be an object")
+            .insert(
+                "componentBundleStatementDigest".to_string(),
+                json!(component_bundle_statement_digest),
+            );
+
+        component_bundle_statement
+    }
+
+    fn full_relation_bound_linear_statement(component_bundle_statement: &Value) -> Value {
+        let mut linear_statement = full_binding_linear_statement();
+        let relation_binding_digest =
+            derive_full_relation_binding_digest(component_bundle_statement)
+                .expect("full relation binding digest should derive");
+        let binding_scalar = binding_scalar_from_digest(&relation_binding_digest)
+            .expect("binding scalar should derive from digest");
+        let target_constant = FULL_BALLOT_BINDING_COEFFICIENT_MODULUS - binding_scalar;
+
+        let linear_statement_object = linear_statement
+            .as_object_mut()
+            .expect("linear statement should be an object");
+        linear_statement_object.insert(
+            "componentBundleStatementDigest".to_string(),
+            json!(
+                string_field(component_bundle_statement, "componentBundleStatementDigest")
+                    .expect("component bundle statement should have a digest")
+            ),
+        );
+        linear_statement_object.insert(
+            "relationBindingDigest".to_string(),
+            json!(relation_binding_digest),
+        );
+        linear_statement_object.insert(
+            "statementMatrixCoefficients".to_string(),
+            json!([[constant_polynomial(1)]]),
+        );
+        linear_statement_object.insert(
+            "targetVectorCoefficients".to_string(),
+            json!([constant_polynomial(target_constant)]),
+        );
+
+        linear_statement
     }
 
     fn full_binding_parameter_set(source: &str) -> Value {
@@ -496,6 +752,71 @@ mod tests {
                 .any(|refusal| string_field(refusal, "message")
                     .is_some_and(|message| message.contains("component bundle"))),
             "missing relation binding metadata must be rejected: {refused_objects:?}"
+        );
+    }
+
+    #[test]
+    fn full_relation_binding_accepts_derived_component_bundle_binding() {
+        let component_bundle_statement = full_relation_component_bundle_statement();
+        let linear_statement = full_relation_bound_linear_statement(&component_bundle_statement);
+
+        assert!(
+            collect_full_ballot_relation_binding_refusals(
+                &linear_statement,
+                Some(&component_bundle_statement),
+                Some(&digest("proof-record")),
+            )
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn full_relation_binding_rejects_mutated_relation_binding_digest() {
+        let component_bundle_statement = full_relation_component_bundle_statement();
+        let mut linear_statement =
+            full_relation_bound_linear_statement(&component_bundle_statement);
+        linear_statement
+            .as_object_mut()
+            .expect("linear statement should be an object")
+            .insert(
+                "relationBindingDigest".to_string(),
+                json!(digest("wrong-relation-binding")),
+            );
+
+        let refused_objects = collect_full_ballot_relation_binding_refusals(
+            &linear_statement,
+            Some(&component_bundle_statement),
+            Some(&digest("proof-record")),
+        );
+
+        assert!(
+            refused_objects
+                .iter()
+                .any(|refusal| string_field(refusal, "message")
+                    .is_some_and(|message| message.contains("relation binding digest"))),
+            "mutated relation binding digest must be rejected: {refused_objects:?}"
+        );
+    }
+
+    #[test]
+    fn full_relation_binding_rejects_mutated_derived_target() {
+        let component_bundle_statement = full_relation_component_bundle_statement();
+        let mut linear_statement =
+            full_relation_bound_linear_statement(&component_bundle_statement);
+        linear_statement["targetVectorCoefficients"][0][0] = json!(0);
+
+        let refused_objects = collect_full_ballot_relation_binding_refusals(
+            &linear_statement,
+            Some(&component_bundle_statement),
+            Some(&digest("proof-record")),
+        );
+
+        assert!(
+            refused_objects
+                .iter()
+                .any(|refusal| string_field(refusal, "message")
+                    .is_some_and(|message| message.contains("matrix and target"))),
+            "mutated derived target must be rejected: {refused_objects:?}"
         );
     }
 }

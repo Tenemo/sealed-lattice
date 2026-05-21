@@ -50,9 +50,9 @@ describe('ballot privacy proof benchmarks', () => {
                 unresolvedReason: null,
             });
             expect(claimVerification).toMatchObject({
-                ok: false,
+                ok: true,
                 operation: 'verifyClaimBearingBallotPackage',
-                unresolvedReason: 'BallotPackageInvalid',
+                unresolvedReason: null,
             });
             expect(report.proofSizeBytes).toBeGreaterThan(0);
             expect(report.totalComponentProofSizeBytes).toBeGreaterThan(0);

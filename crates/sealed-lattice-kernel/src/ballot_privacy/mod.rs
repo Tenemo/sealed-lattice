@@ -154,7 +154,7 @@ pub(crate) use linear_proof_binding_validation::{
     LinearProofProfileRequirement, collect_linear_proof_binding_refusals,
 };
 pub(crate) use linear_proof_contract_validation::{
-    collect_full_ballot_binding_contract_refusals,
+    collect_full_ballot_binding_contract_refusals, collect_full_ballot_relation_binding_refusals,
     collect_supported_ballot_privacy_dimension_refusals,
 };
 pub(crate) use proof_binding_digests::{
