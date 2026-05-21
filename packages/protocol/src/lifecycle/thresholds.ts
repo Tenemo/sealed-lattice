@@ -28,6 +28,11 @@ import {
 
 const protocolDigestPattern = /^[0-9a-f]{128}$/u;
 
+const normalizeDynamicRosterProfileCertificateDigest = (
+    digest: ProtocolDigest | undefined,
+): ProtocolDigest | null =>
+    digest !== undefined && protocolDigestPattern.test(digest) ? digest : null;
+
 const normalizeBackendCorruptionModel = (
     rosterSize: number,
     model: HeBackendCorruptionModel | undefined,
@@ -197,6 +202,11 @@ const deriveRosterProfile = (
     if (rosterSize > maximumSupportedRosterSize) {
         throw new RangeError('Roster size must be at most 50.');
     }
+    const dynamicRosterProfileCertificateDigest =
+        normalizeDynamicRosterProfileCertificateDigest(
+            input.dynamicRosterProfileCertificateDigest,
+        );
+
     if (rosterSize < minimumDynamicRosterSize) {
         if (
             input.casualMicroRosterAcknowledged !== true &&
@@ -221,20 +231,16 @@ const deriveRosterProfile = (
             claimBoundary: 'MandatoryBenchmark',
             claimBearing: true,
             dynamicRosterProfileCertificateDigest:
-                input.dynamicRosterProfileCertificateDigest ?? null,
+                dynamicRosterProfileCertificateDigest,
             rosterProfileKind: 'MandatoryBenchmarkRoster',
             warnings: [],
         };
     }
-    if (
-        input.dynamicRosterProfileCertificateDigest !== undefined &&
-        protocolDigestPattern.test(input.dynamicRosterProfileCertificateDigest)
-    ) {
+    if (dynamicRosterProfileCertificateDigest !== null) {
         return {
             claimBoundary: 'DynamicRosterCertificate',
             claimBearing: true,
-            dynamicRosterProfileCertificateDigest:
-                input.dynamicRosterProfileCertificateDigest,
+            dynamicRosterProfileCertificateDigest,
             rosterProfileKind: 'SupportedDynamicRosterRange',
             warnings: [],
         };
@@ -378,6 +384,11 @@ export const deriveFrozenRosterProfile = (input: {
     readonly dynamicRosterProfileCertificateDigest?: ProtocolDigest;
 }): FrozenRosterProfile => {
     const { pollSpec, rosterSize } = input;
+    const dynamicRosterProfileCertificateDigest =
+        normalizeDynamicRosterProfileCertificateDigest(
+            input.dynamicRosterProfileCertificateDigest,
+        );
+
     if (
         rosterSize < pollSpec.minRosterSize ||
         rosterSize > pollSpec.maxRosterSize
@@ -397,7 +408,7 @@ export const deriveFrozenRosterProfile = (input: {
     if (
         rosterSize >= minimumDynamicRosterSize &&
         rosterSize !== mandatoryBenchmarkRosterSize &&
-        input.dynamicRosterProfileCertificateDigest === undefined
+        dynamicRosterProfileCertificateDigest === null
     ) {
         throw new Error(
             'Dynamic claim-bearing roster profiles require certificate or workbook coverage for the frozen roster size.',
@@ -408,7 +419,7 @@ export const deriveFrozenRosterProfile = (input: {
         rosterSize,
         casualMicroRosterAcknowledged: rosterSize < minimumDynamicRosterSize,
         dynamicRosterProfileCertificateDigest:
-            input.dynamicRosterProfileCertificateDigest,
+            dynamicRosterProfileCertificateDigest ?? undefined,
         heBackendCorruptionModel: input.heBackendCorruptionModel,
         targetBoundShareSelectionProfile:
             input.targetBoundShareSelectionProfile,
@@ -438,7 +449,7 @@ export const deriveFrozenRosterProfile = (input: {
         minRosterSize: pollSpec.minRosterSize,
         maxRosterSize: pollSpec.maxRosterSize,
         dynamicRosterProfileCertificateDigest:
-            input.dynamicRosterProfileCertificateDigest ?? null,
+            thresholdProfile.dynamicRosterProfileCertificateDigest,
         thresholdProfile,
     };
 };

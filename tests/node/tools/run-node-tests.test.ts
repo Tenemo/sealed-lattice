@@ -2,7 +2,10 @@ import { readFile } from 'node:fs/promises';
 
 import { describe, expect, it } from 'vitest';
 
-import { buildNodeTestCommands } from '#tools/ci/run-node-tests';
+import {
+    buildNodeTestCommands,
+    parseRequestedNodeTestLanes,
+} from '#tools/ci/run-node-tests';
 
 const packageManagerRunner = {
     command: 'node',
@@ -30,14 +33,20 @@ describe('node test runner', () => {
         expect(scripts['test:node:built']).toBe(
             'tsx ./tools/ci/run-node-tests.ts',
         );
+        expect(scripts['test:node:fast:built']).toBe(
+            'tsx ./tools/ci/run-node-tests.ts --only fast',
+        );
     });
 
-    it('keeps kernel-heavy proof tests out of the fast and heavy node phase', () => {
+    it('keeps heavy Node lanes independently runnable', () => {
         const commands = buildNodeTestCommands({ packageManagerRunner });
 
         expect(commands.map((command) => command.description)).toEqual([
-            'Run fast and heavy Node tests',
-            'Run heavy Node kernel tests',
+            'Run fast Node tests',
+            'Run relation-heavy Node tests',
+            'Run proof-input-heavy Node tests',
+            'Run remaining heavy Node kernel tests',
+            'Run aggregate heavy Node kernel tests',
         ]);
         expect(commands.map((command) => command.args)).toEqual([
             [
@@ -46,8 +55,6 @@ describe('node test runner', () => {
                 'vitest',
                 '--project',
                 'node',
-                '--project',
-                'node-heavy',
                 '--run',
             ],
             [
@@ -55,9 +62,54 @@ describe('node test runner', () => {
                 'exec',
                 'vitest',
                 '--project',
-                'node-kernel-heavy',
+                'node-relation-heavy',
+                '--run',
+            ],
+            [
+                'pnpm-entrypoint.js',
+                'exec',
+                'vitest',
+                '--project',
+                'node-proof-input-heavy',
+                '--run',
+            ],
+            [
+                'pnpm-entrypoint.js',
+                'exec',
+                'vitest',
+                '--project',
+                'node-kernel-remaining',
+                '--run',
+            ],
+            [
+                'pnpm-entrypoint.js',
+                'exec',
+                'vitest',
+                '--project',
+                'node-kernel-aggregate',
                 '--run',
             ],
         ]);
+    });
+
+    it('can select one or more lanes for parallel CI jobs', () => {
+        expect(parseRequestedNodeTestLanes(['--only', 'fast'])).toEqual([
+            'fast',
+        ]);
+        expect(
+            parseRequestedNodeTestLanes([
+                '--only',
+                'kernel-remaining,kernel-aggregate,kernel-remaining',
+            ]),
+        ).toEqual(['kernel-remaining', 'kernel-aggregate']);
+    });
+
+    it('rejects unsupported lane selectors', () => {
+        expect(() => parseRequestedNodeTestLanes(['--only', 'kernel'])).toThrow(
+            'Unsupported Node test lane: kernel',
+        );
+        expect(() => parseRequestedNodeTestLanes(['--lane', 'fast'])).toThrow(
+            'Usage: run-node-tests.ts [--only lane[,lane...]].',
+        );
     });
 });

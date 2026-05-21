@@ -39,10 +39,10 @@ jobs:
             - uses: Swatinem/rust-cache@aa7c1c80a07a27a84c0aa76d0cef0aad3830e330
             - run: cargo build --workspace --lib --target wasm32-unknown-unknown --release
 
-    verify:
-        name: verify
+    verify-static:
+        name: verify static
         runs-on: ubuntu-latest
-        timeout-minutes: 35
+        timeout-minutes: 25
         steps:
             - uses: actions/checkout@v6.0.2
             - uses: ./.github/actions/bootstrap-pnpm
@@ -52,7 +52,105 @@ jobs:
                   targets: wasm32-unknown-unknown
             - uses: Swatinem/rust-cache@aa7c1c80a07a27a84c0aa76d0cef0aad3830e330
             - run: pnpm run check
-            - run: pnpm run test:node:built
+
+    node-fast:
+        name: node fast
+        runs-on: ubuntu-latest
+        timeout-minutes: 15
+        steps:
+            - uses: actions/checkout@v6.0.2
+            - uses: ./.github/actions/bootstrap-pnpm
+            - uses: dtolnay/rust-toolchain@1.90.0
+              with:
+                  components: clippy, rustfmt
+                  targets: wasm32-unknown-unknown
+            - uses: Swatinem/rust-cache@aa7c1c80a07a27a84c0aa76d0cef0aad3830e330
+            - run: pnpm run build
+            - run: pnpm run test:node:fast:built
+
+    node-relation-heavy:
+        name: node relation heavy
+        runs-on: ubuntu-latest
+        timeout-minutes: 20
+        steps:
+            - uses: actions/checkout@v6.0.2
+            - uses: ./.github/actions/bootstrap-pnpm
+            - uses: dtolnay/rust-toolchain@1.90.0
+              with:
+                  components: clippy, rustfmt
+                  targets: wasm32-unknown-unknown
+            - uses: Swatinem/rust-cache@aa7c1c80a07a27a84c0aa76d0cef0aad3830e330
+            - run: pnpm run build
+            - run: pnpm run test:node:relation-heavy:built
+
+    node-proof-input-heavy:
+        name: node proof input heavy
+        runs-on: ubuntu-latest
+        timeout-minutes: 30
+        steps:
+            - uses: actions/checkout@v6.0.2
+            - uses: ./.github/actions/bootstrap-pnpm
+            - uses: dtolnay/rust-toolchain@1.90.0
+              with:
+                  components: clippy, rustfmt
+                  targets: wasm32-unknown-unknown
+            - uses: Swatinem/rust-cache@aa7c1c80a07a27a84c0aa76d0cef0aad3830e330
+            - run: pnpm run build
+            - run: pnpm run test:node:proof-input-heavy:built
+
+    node-kernel-remaining:
+        name: node kernel remaining
+        runs-on: ubuntu-latest
+        timeout-minutes: 25
+        steps:
+            - uses: actions/checkout@v6.0.2
+            - uses: ./.github/actions/bootstrap-pnpm
+            - uses: dtolnay/rust-toolchain@1.90.0
+              with:
+                  components: clippy, rustfmt
+                  targets: wasm32-unknown-unknown
+            - uses: Swatinem/rust-cache@aa7c1c80a07a27a84c0aa76d0cef0aad3830e330
+            - run: pnpm run build
+            - run: pnpm run test:node:kernel-remaining:built
+
+    node-kernel-aggregate:
+        name: node kernel aggregate
+        runs-on: ubuntu-latest
+        timeout-minutes: 40
+        steps:
+            - uses: actions/checkout@v6.0.2
+            - uses: ./.github/actions/bootstrap-pnpm
+            - uses: dtolnay/rust-toolchain@1.90.0
+              with:
+                  components: clippy, rustfmt
+                  targets: wasm32-unknown-unknown
+            - uses: Swatinem/rust-cache@aa7c1c80a07a27a84c0aa76d0cef0aad3830e330
+            - run: pnpm run build
+            - run: pnpm run test:node:kernel-aggregate:built
+
+    verify:
+        name: verify
+        runs-on: ubuntu-latest
+        timeout-minutes: 5
+        needs:
+            - verify-static
+            - node-fast
+            - node-relation-heavy
+            - node-proof-input-heavy
+            - node-kernel-remaining
+            - node-kernel-aggregate
+        if: ${{ always() }}
+        steps:
+            - name: Check split verify jobs
+              env:
+                  NEEDS_JSON: ${{ toJSON(needs) }}
+              run: >-
+                  node -e "const needs = JSON.parse(process.env.NEEDS_JSON);
+                  const failed = Object.entries(needs).filter(([, job]) =>
+                  job.result !== 'success'); if (failed.length > 0) {
+                  console.error(failed.map(([name, job]) => name + ': ' +
+                  job.result).join('\n')); process.exit(1); }
+                  console.log('Split verify jobs passed.');"
 
     coverage:
         name: coverage

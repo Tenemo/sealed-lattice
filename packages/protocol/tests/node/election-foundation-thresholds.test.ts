@@ -1,13 +1,37 @@
 import {
     cpadProfileId,
+    type PollSpec,
     targetBoundShareSelectionProfileId,
 } from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
-import { deriveThresholdProfile } from '../../src/index';
+import {
+    deriveFrozenRosterProfile,
+    deriveThresholdProfile,
+} from '../../src/index';
 
 const dynamicRosterProfileCertificateDigest = 'a'.repeat(128);
+const invalidDynamicRosterProfileCertificateDigest = 'not-a-protocol-digest';
+const rosterDigest = 'b'.repeat(128);
 const casualMicroRosterSizes = [3, 4, 5, 6, 7, 8, 9] as const;
+const pollSpec = {
+    duplicateBallotPolicy: 'LastValidBeforeVotingClosedCounts',
+    maxRosterSize: 50,
+    minRosterSize: 10,
+    options: ['Alpha', 'Beta'],
+    pollId: 'threshold-profile-test',
+    question: 'Choose one',
+    rosterPolicy: 'OpenLinkPublicRoster',
+    scoreDomain: {
+        max: 10,
+        min: 1,
+        skippedOptionScore: 1,
+    },
+    smallRosterPolicy: 'ForbidMicroRoster',
+    thresholdProfileFamily: 'BalancedDefault',
+    tiePolicy: 'HigherScoreThenLowerOptionIndex',
+    topOptionCount: 1,
+} as const satisfies PollSpec;
 
 const targetBoundShareSelectionProfile = {
     profileId: targetBoundShareSelectionProfileId,
@@ -194,7 +218,48 @@ describe('election foundation threshold profiles', () => {
         expect(profile.rosterProfileKind).toBe('MandatoryBenchmarkRoster');
         expect(profile.claimBoundary).toBe('MandatoryBenchmark');
         expect(profile.claimBearing).toBe(true);
+        expect(profile.dynamicRosterProfileCertificateDigest).toBeNull();
         expect(profile.warnings).toEqual(['ShareSelectionProfileRequired']);
+    });
+
+    it('does not carry invalid dynamic roster certificate digests into mandatory benchmark profiles', () => {
+        const profile = deriveThresholdProfile({
+            dynamicRosterProfileCertificateDigest:
+                invalidDynamicRosterProfileCertificateDigest,
+            rosterSize: 20,
+        });
+
+        expect(profile.rosterProfileKind).toBe('MandatoryBenchmarkRoster');
+        expect(profile.claimBoundary).toBe('MandatoryBenchmark');
+        expect(profile.claimBearing).toBe(true);
+        expect(profile.dynamicRosterProfileCertificateDigest).toBeNull();
+
+        const frozenRosterProfile = deriveFrozenRosterProfile({
+            dynamicRosterProfileCertificateDigest:
+                invalidDynamicRosterProfileCertificateDigest,
+            pollSpec,
+            rosterDigest,
+            rosterSize: 20,
+        });
+
+        expect(
+            frozenRosterProfile.dynamicRosterProfileCertificateDigest,
+        ).toBeNull();
+        expect(
+            frozenRosterProfile.thresholdProfile
+                .dynamicRosterProfileCertificateDigest,
+        ).toBeNull();
+        expect(() =>
+            deriveFrozenRosterProfile({
+                dynamicRosterProfileCertificateDigest:
+                    invalidDynamicRosterProfileCertificateDigest,
+                pollSpec,
+                rosterDigest,
+                rosterSize: 21,
+            }),
+        ).toThrow(
+            'Dynamic claim-bearing roster profiles require certificate or workbook coverage for the frozen roster size.',
+        );
     });
 
     it.each([10, 11, 16, 21, 50])(
