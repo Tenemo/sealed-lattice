@@ -710,47 +710,51 @@ mod tests {
 
     #[test]
     fn supported_ballot_privacy_dimensions_require_casual_micro_roster_acknowledgement() {
-        let statement = statement_with_dimensions(20, 3);
-        let refused_objects = collect_supported_ballot_privacy_dimension_refusals(
-            &statement,
-            Some(&digest("package")),
-            None,
-            false,
-            false,
-        );
-
-        assert!(
-            refused_objects
-                .iter()
-                .any(|refusal| string_field(refusal, "message")
-                    .is_some_and(|message| message.contains("casual micro-roster"))),
-            "unacknowledged casual micro roster must be rejected: {refused_objects:?}"
-        );
-        assert!(
-            collect_supported_ballot_privacy_dimension_refusals(
+        for participant_count in 3..10 {
+            let statement = statement_with_dimensions(20, participant_count);
+            let refused_objects = collect_supported_ballot_privacy_dimension_refusals(
                 &statement,
                 Some(&digest("package")),
                 None,
                 false,
-                true,
-            )
-            .is_empty()
-        );
+                false,
+            );
 
-        let refused_objects = collect_supported_ballot_privacy_dimension_refusals(
-            &statement,
-            Some(&digest("package")),
-            None,
-            true,
-            true,
-        );
-        assert!(
-            refused_objects
-                .iter()
-                .any(|refusal| string_field(refusal, "message")
-                    .is_some_and(|message| message.contains("at least ten frozen participants"))),
-            "claim-bearing micro roster must be rejected: {refused_objects:?}"
-        );
+            assert!(
+                refused_objects
+                    .iter()
+                    .any(|refusal| string_field(refusal, "message")
+                        .is_some_and(|message| message.contains("casual micro-roster"))),
+                "unacknowledged casual micro roster must be rejected for participant count {participant_count}: {refused_objects:?}"
+            );
+            assert!(
+                collect_supported_ballot_privacy_dimension_refusals(
+                    &statement,
+                    Some(&digest("package")),
+                    None,
+                    false,
+                    true,
+                )
+                .is_empty(),
+                "acknowledged non-claim micro roster must be accepted for participant count {participant_count}"
+            );
+
+            let refused_objects = collect_supported_ballot_privacy_dimension_refusals(
+                &statement,
+                Some(&digest("package")),
+                None,
+                true,
+                true,
+            );
+            assert!(
+                refused_objects
+                    .iter()
+                    .any(|refusal| string_field(refusal, "message").is_some_and(
+                        |message| message.contains("at least ten frozen participants")
+                    )),
+                "claim-bearing micro roster must be rejected for participant count {participant_count}: {refused_objects:?}"
+            );
+        }
     }
 
     #[test]

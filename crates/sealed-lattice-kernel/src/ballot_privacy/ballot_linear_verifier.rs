@@ -58,7 +58,11 @@ impl<'a> BallotProofVerificationRequest<'a> {
                 unsafe_small_roster_acknowledged: object_map(request)
                     .and_then(|object| object.get("unsafeSmallRosterAcknowledged"))
                     .and_then(Value::as_bool)
-                    == Some(true),
+                    == Some(true)
+                    || object_map(request)
+                        .and_then(|object| object.get("casualMicroRosterAcknowledged"))
+                        .and_then(Value::as_bool)
+                        == Some(true),
             },
         })
     }

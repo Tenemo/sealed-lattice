@@ -324,6 +324,8 @@ export const createTranscriptCoreKernelLoader = (
                                 input.componentProverRandomnessHexes,
                             ),
                         componentSecretStates: input.componentSecretStates,
+                        casualMicroRosterAcknowledged:
+                            input.casualMicroRosterAcknowledged,
                         unsafeSmallRosterAcknowledged:
                             input.unsafeSmallRosterAcknowledged,
                     }),
@@ -343,6 +345,8 @@ export const createTranscriptCoreKernelLoader = (
                         proofEncoding: input.proofEncoding,
                         publicRandomnessHex: input.publicRandomnessHex,
                         statement: input.statement,
+                        casualMicroRosterAcknowledged:
+                            input.casualMicroRosterAcknowledged,
                         unsafeSmallRosterAcknowledged:
                             input.unsafeSmallRosterAcknowledged,
                     }),
@@ -354,6 +358,8 @@ export const createTranscriptCoreKernelLoader = (
                         ballotPackage: input.ballotPackage,
                         dynamicRosterProfileEvidence:
                             input.dynamicRosterProfileEvidence,
+                        casualMicroRosterAcknowledged:
+                            input.casualMicroRosterAcknowledged,
                         unsafeSmallRosterAcknowledged:
                             input.unsafeSmallRosterAcknowledged,
                     }),

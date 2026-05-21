@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { deriveThresholdProfile } from '../../src/index';
 
 const dynamicRosterProfileCertificateDigest = 'a'.repeat(128);
+const casualMicroRosterSizes = [3, 4, 5, 6, 7, 8, 9] as const;
 
 const targetBoundShareSelectionProfile = {
     profileId: targetBoundShareSelectionProfileId,
@@ -140,7 +141,7 @@ describe('election foundation threshold profiles', () => {
         ).toBe(9);
     });
 
-    it.each([10, 11, 16, 20, 21, 30, 40, 50])(
+    it.each([...casualMicroRosterSizes, 10, 11, 16, 20, 21, 30, 40, 50])(
         'keeps threshold feasibility invariants for roster size %d',
         expectFeasibleThresholds,
     );
@@ -151,7 +152,7 @@ describe('election foundation threshold profiles', () => {
         );
     });
 
-    it.each([3, 9])(
+    it.each(casualMicroRosterSizes)(
         'requires explicit casual micro-roster acknowledgement for roster size %d',
         (rosterSize) => {
             expect(() => deriveThresholdProfile({ rosterSize })).toThrow(
@@ -160,17 +161,32 @@ describe('election foundation threshold profiles', () => {
         },
     );
 
-    it('marks acknowledged micro rosters as casual and not claim-bearing', () => {
-        const profile = deriveThresholdProfile({
-            casualMicroRosterAcknowledged: true,
-            rosterSize: 9,
-        });
+    it.each([
+        { rosterSize: 3, threshold: 1 },
+        { rosterSize: 4, threshold: 2 },
+        { rosterSize: 5, threshold: 2 },
+        { rosterSize: 6, threshold: 2 },
+        { rosterSize: 7, threshold: 3 },
+        { rosterSize: 8, threshold: 3 },
+        { rosterSize: 9, threshold: 3 },
+    ])(
+        'marks acknowledged roster size $rosterSize as a non-claim casual micro-roster',
+        ({ rosterSize, threshold }) => {
+            const profile = deriveThresholdProfile({
+                casualMicroRosterAcknowledged: true,
+                rosterSize,
+            });
 
-        expect(profile.rosterProfileKind).toBe('CasualMicroRoster');
-        expect(profile.claimBoundary).toBe('CasualMicroRoster');
-        expect(profile.claimBearing).toBe(false);
-        expect(profile.warnings).toContain('CasualMicroRoster');
-    });
+            expect(profile.rosterProfileKind).toBe('CasualMicroRoster');
+            expect(profile.claimBoundary).toBe('CasualMicroRoster');
+            expect(profile.claimBearing).toBe(false);
+            expect(profile.releaseQuorum).toBe(rosterSize);
+            expect(profile.setupCompletionQuorum).toBe(rosterSize);
+            expect(profile.pvssThreshold).toBe(threshold);
+            expect(profile.decryptionThreshold).toBe(threshold);
+            expect(profile.warnings).toContain('CasualMicroRoster');
+        },
+    );
 
     it('marks roster size 20 as the mandatory benchmark profile', () => {
         const profile = deriveThresholdProfile({ rosterSize: 20 });

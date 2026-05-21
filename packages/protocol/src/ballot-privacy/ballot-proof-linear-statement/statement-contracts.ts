@@ -505,6 +505,7 @@ export type BallotProofRecordGenerationRequest = {
     readonly publicRandomnessHex: string;
     readonly secretState: BallotProofRecordGenerationSecretState;
     readonly statement: BallotProofStatement;
+    readonly casualMicroRosterAcknowledged?: boolean;
     readonly unsafeSmallRosterAcknowledged?: boolean;
 };
 

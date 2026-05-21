@@ -29,13 +29,13 @@ import type {
 } from './fixture-inputs.js';
 import {
     ballotProofStatement,
+    casualMicroRosterRelationInput,
     claimBearingReceiverPayloadShells,
     claimBearingShareCommitmentShells,
     cloneJsonValue,
     mandatoryProfileRelationInput,
     publicContextAndProjectionWitness,
     receiverKeyProofRootEvidence,
-    smallUnsafeRelationInput,
 } from './fixture-inputs.js';
 
 import ballotFieldLinearProofBackendVectorsJson from '#test-vectors/ballot-privacy/ballot-field-linear-proof-vectors.json';
@@ -415,6 +415,12 @@ const createBallotProofRecordGenerationFixtureWithOptions = (
             relationInput,
             statement,
         }),
+        ...(options.casualMicroRosterAcknowledged === undefined
+            ? {}
+            : {
+                  casualMicroRosterAcknowledged:
+                      options.casualMicroRosterAcknowledged,
+              }),
         ...(options.unsafeSmallRosterAcknowledged === undefined
             ? {}
             : {
@@ -444,13 +450,19 @@ const createBallotProofRecordGenerationFixtureWithOptions = (
     };
 };
 
+export const createMicroRosterBallotProofRecordGenerationFixture = (
+    rosterSize: number,
+): BallotProofRecordGenerationFixture =>
+    createBallotProofRecordGenerationFixtureWithOptions({
+        casualMicroRosterAcknowledged: true,
+        relationInput: casualMicroRosterRelationInput(rosterSize),
+        topOptionCount: 2,
+        unsafeSmallRosterAcknowledged: true,
+    });
+
 export const createBallotProofRecordGenerationFixture =
     (): BallotProofRecordGenerationFixture =>
-        createBallotProofRecordGenerationFixtureWithOptions({
-            relationInput: smallUnsafeRelationInput(),
-            topOptionCount: 2,
-            unsafeSmallRosterAcknowledged: true,
-        });
+        createMicroRosterBallotProofRecordGenerationFixture(3);
 
 export const createMandatoryProfileBallotProofRecordGenerationFixture =
     (): BallotProofRecordGenerationFixture =>

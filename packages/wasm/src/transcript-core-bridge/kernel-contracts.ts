@@ -274,6 +274,7 @@ export type TranscriptCoreKernel = {
             Record<string, string>
         >;
         readonly componentSecretStates?: Readonly<Record<string, unknown>>;
+        readonly casualMicroRosterAcknowledged?: boolean;
         readonly unsafeSmallRosterAcknowledged?: boolean;
     }): BallotPrivacyProofGeneration;
     verifyBallotProof(input: {
@@ -288,11 +289,13 @@ export type TranscriptCoreKernel = {
         readonly proofEncoding?: unknown;
         readonly publicRandomnessHex?: string;
         readonly statement: unknown;
+        readonly casualMicroRosterAcknowledged?: boolean;
         readonly unsafeSmallRosterAcknowledged?: boolean;
     }): BallotPrivacyKernelVerification;
     verifyClaimBearingBallotPackage(input: {
         readonly ballotPackage: unknown;
         readonly dynamicRosterProfileEvidence?: unknown;
+        readonly casualMicroRosterAcknowledged?: boolean;
         readonly unsafeSmallRosterAcknowledged?: boolean;
     }): BallotPrivacyKernelVerification;
     generateAggregateDerivationProof(input: {
@@ -419,6 +422,7 @@ type TranscriptCoreKernelCommand =
               Record<string, string>
           >;
           readonly componentSecretStates?: Readonly<Record<string, unknown>>;
+          readonly casualMicroRosterAcknowledged?: boolean;
           readonly unsafeSmallRosterAcknowledged?: boolean;
       }
     | {
@@ -434,12 +438,14 @@ type TranscriptCoreKernelCommand =
           readonly proofEncoding?: unknown;
           readonly publicRandomnessHex?: string;
           readonly statement: unknown;
+          readonly casualMicroRosterAcknowledged?: boolean;
           readonly unsafeSmallRosterAcknowledged?: boolean;
       }
     | {
           readonly command: 'VerifyClaimBearingBallotPackage';
           readonly ballotPackage: unknown;
           readonly dynamicRosterProfileEvidence?: unknown;
+          readonly casualMicroRosterAcknowledged?: boolean;
           readonly unsafeSmallRosterAcknowledged?: boolean;
       }
     | {

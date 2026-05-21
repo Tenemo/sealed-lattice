@@ -25,6 +25,8 @@ import {
     digest,
 } from './shared.js';
 
+const casualMicroRosterSizes = [3, 4, 5, 6, 7, 8, 9] as const;
+
 describe('ballot privacy proof object boundary', () => {
     it('checks supplied receiver-key proof bytes against proof-byte metadata before the backend gate', () => {
         const proofBytesHex = '001122aabbcc';
@@ -248,6 +250,54 @@ describe('ballot privacy proof object boundary', () => {
             ],
         });
     });
+
+    it.each(casualMicroRosterSizes)(
+        'rejects roster size %d casual micro-rosters for claim-bearing ballot package acceptance',
+        (rosterSize) => {
+            const structurallyBoundObjects = createStructurallyBoundObjects({
+                participantCount: rosterSize,
+            });
+            const proofRecord = createBallotProofRecordShell({
+                proofBytesDigest: digest(
+                    `micro-roster-bound-proof-bytes-${rosterSize}`,
+                ),
+                relationStatementDigest: digest(
+                    `micro-roster-bound-relation-statement-${rosterSize}`,
+                ),
+                proofRoot: digest(
+                    `micro-roster-bound-proof-root-${rosterSize}`,
+                ),
+                proofSizeBytes: 1_024,
+                statement: structurallyBoundObjects.statement,
+            });
+
+            const result = verifyClaimBearingBallotPackage({
+                ballotPackage: {
+                    objectType: 'ClaimBearingBallotPackage',
+                    objectVersion: 1,
+                    ballotPackageDigest:
+                        structurallyBoundObjects.statement.ballotPackageDigest,
+                    ballotProofStatement: structurallyBoundObjects.statement,
+                    receiverKeyProofRootEvidence:
+                        structurallyBoundObjects.receiverKeyProofRootEvidence,
+                    ballotProof: proofRecord,
+                    receiverPayloads: structurallyBoundObjects.receiverPayloads,
+                    shareCommitments: structurallyBoundObjects.shareCommitments,
+                },
+                casualMicroRosterAcknowledged: true,
+            });
+
+            expect(result).toMatchObject({
+                ok: false,
+                unresolvedReason: 'BallotPackageInvalid',
+            });
+            expect(
+                result.refusedObjects.some((refusal) =>
+                    refusal.message.includes('at least 10 frozen participants'),
+                ),
+            ).toBe(true);
+        },
+    );
 
     it('rejects malformed claim-bearing package shells before the backend gate', () => {
         const structurallyBoundObjects = createStructurallyBoundObjects();

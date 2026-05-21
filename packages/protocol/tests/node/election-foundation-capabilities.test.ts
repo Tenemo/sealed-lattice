@@ -552,42 +552,45 @@ describe('election foundation capability evaluator', () => {
         ).toEqual({ allowed: true, action: 'RecombineAcceptedTarget' });
     });
 
-    it('refuses casual micro rosters but allows certified dynamic rosters through claim-bearing gates', () => {
-        const casualThresholdProfile = deriveThresholdProfile({
-            casualMicroRosterAcknowledged: true,
-            rosterSize: 9,
-        });
-        const dynamicThresholdProfile = deriveThresholdProfile({
-            dynamicRosterProfileCertificateDigest,
-            rosterSize: 16,
-        });
+    it.each([3, 4, 5, 6, 7, 8, 9])(
+        'refuses roster size %d casual micro-rosters but allows certified dynamic rosters through claim-bearing gates',
+        (rosterSize) => {
+            const casualThresholdProfile = deriveThresholdProfile({
+                casualMicroRosterAcknowledged: true,
+                rosterSize,
+            });
+            const dynamicThresholdProfile = deriveThresholdProfile({
+                dynamicRosterProfileCertificateDigest,
+                rosterSize: 16,
+            });
 
-        expect(
-            evaluateActionCapability(
-                'AcceptTarget',
-                createContext({
-                    lifecycleState: 'EvaluationProofVerified',
-                    thresholdProfile: casualThresholdProfile,
-                    targetFinalityAccepted: true,
-                    evaluationProofVerified: true,
-                    bridgeMobileCertificatePresent: true,
-                }),
-            ),
-        ).toMatchObject({ reason: 'ProfileNotClaimBearing' });
+            expect(
+                evaluateActionCapability(
+                    'AcceptTarget',
+                    createContext({
+                        lifecycleState: 'EvaluationProofVerified',
+                        thresholdProfile: casualThresholdProfile,
+                        targetFinalityAccepted: true,
+                        evaluationProofVerified: true,
+                        bridgeMobileCertificatePresent: true,
+                    }),
+                ),
+            ).toMatchObject({ reason: 'ProfileNotClaimBearing' });
 
-        expect(
-            evaluateActionCapability(
-                'AcceptTarget',
-                createContext({
-                    lifecycleState: 'EvaluationProofVerified',
-                    thresholdProfile: dynamicThresholdProfile,
-                    targetFinalityAccepted: true,
-                    evaluationProofVerified: true,
-                    bridgeMobileCertificatePresent: true,
-                }),
-            ),
-        ).toEqual({ allowed: true, action: 'AcceptTarget' });
-    });
+            expect(
+                evaluateActionCapability(
+                    'AcceptTarget',
+                    createContext({
+                        lifecycleState: 'EvaluationProofVerified',
+                        thresholdProfile: dynamicThresholdProfile,
+                        targetFinalityAccepted: true,
+                        evaluationProofVerified: true,
+                        bridgeMobileCertificatePresent: true,
+                    }),
+                ),
+            ).toEqual({ allowed: true, action: 'AcceptTarget' });
+        },
+    );
 
     it('refuses claim-bearing capabilities when mobile environment gates fail', () => {
         expect(

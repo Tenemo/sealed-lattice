@@ -37,6 +37,7 @@ import {
     shareCommitmentOpeningDimension,
 } from '../../../src/ballot-privacy/protocol-parameters';
 import { type BallotPrivacyRelationBackendPublicContext } from '../../../src/ballot-privacy/relation-backend-lowering';
+import { deriveThresholdProfile } from '../../../src/lifecycle/thresholds';
 
 const digest = (label: string): string =>
     deriveProtocolDigest('ChallengeDomainDigest', {
@@ -90,6 +91,7 @@ export type BallotProofRecordGenerationFixture = {
 type BallotProofRecordGenerationFixtureOptions = {
     readonly relationInput: BallotPrivacyRelationCompilerInput;
     readonly topOptionCount: number;
+    readonly casualMicroRosterAcknowledged?: boolean;
     readonly unsafeSmallRosterAcknowledged?: boolean;
 };
 
@@ -224,23 +226,50 @@ const deterministicReceiverPayloadCiphertextForTest = (input: {
     };
 };
 
-const smallUnsafeRelationInput = (): BallotPrivacyRelationCompilerInput => {
+const minimumCasualMicroRosterSize = 3;
+const maximumCasualMicroRosterSize = 9;
+
+const casualMicroRosterRelationInput = (
+    rosterSize = minimumCasualMicroRosterSize,
+): BallotPrivacyRelationCompilerInput => {
+    if (
+        !Number.isSafeInteger(rosterSize) ||
+        rosterSize < minimumCasualMicroRosterSize ||
+        rosterSize > maximumCasualMicroRosterSize
+    ) {
+        throw new RangeError(
+            'Casual micro-roster fixtures require roster size 3 to 9.',
+        );
+    }
+
+    const thresholdProfile = deriveThresholdProfile({
+        casualMicroRosterAcknowledged: true,
+        rosterSize,
+    });
     const normalizedScores = [5, 7];
     const encodedShareVector = encodedShareVectorForScores(normalizedScores);
+    const shamirCoefficientWidth = thresholdProfile.pvssThreshold - 1;
 
     return {
         encodedCoordinateShamirCoefficients: encodedShareVector.map(
-            () => [0] as readonly number[],
+            () =>
+                Array.from(
+                    { length: shamirCoefficientWidth },
+                    () => 0,
+                ) as readonly number[],
         ),
         normalizedScores,
         optionCount: normalizedScores.length,
-        pvssThreshold: 2,
-        receivers: Array.from({ length: 3 }, (_unusedValue, receiverIndex) => ({
-            receiverIdentity: `receiver-${receiverIndex + 1}`,
-            receiverRosterPosition: receiverIndex + 1,
-            receiverShareVector: encodedShareVector,
-        })),
-        rosterSize: 3,
+        pvssThreshold: thresholdProfile.pvssThreshold,
+        receivers: Array.from(
+            { length: rosterSize },
+            (_unusedValue, receiverIndex) => ({
+                receiverIdentity: `receiver-${receiverIndex + 1}`,
+                receiverRosterPosition: receiverIndex + 1,
+                receiverShareVector: encodedShareVector,
+            }),
+        ),
+        rosterSize,
         scoreOneHotWitnesses: normalizedScores.map((score) =>
             oneHotScore(score),
         ),
@@ -650,7 +679,7 @@ const ballotProofStatement = (input: {
 };
 
 export {
-    smallUnsafeRelationInput,
+    casualMicroRosterRelationInput,
     publicContextAndProjectionWitness,
     claimBearingReceiverPayloadShells,
     claimBearingShareCommitmentShells,

@@ -54,6 +54,8 @@ const createDynamicRosterProfileEvidence = (
     };
 };
 
+const casualMicroRosterSizes = [3, 4, 5, 6, 7, 8, 9] as const;
+
 describe('ballot privacy proof object boundary', () => {
     it('derives production-shaped receiver key, payload, and commitment shells without witness material', () => {
         const profileSet = createBallotPrivacyProfileSet();
@@ -765,4 +767,50 @@ describe('ballot privacy proof object boundary', () => {
             unresolvedReason: 'OperationUnavailable',
         });
     });
+
+    it.each(casualMicroRosterSizes)(
+        'supports acknowledged non-claim casual micro-roster ballot proof shells for roster size %d',
+        (rosterSize) => {
+            const { statement } = createStructurallyBoundObjects({
+                participantCount: rosterSize,
+            });
+            const proofBytesHex = '001122aabbcc';
+            const proofRecord = createBallotProofRecordShell({
+                statement,
+                relationStatementDigest: digest(
+                    `micro-roster-relation-${rosterSize}`,
+                ),
+                proofRoot: digest(`micro-roster-proof-root-${rosterSize}`),
+                proofBytesDigest: deriveProofBytesDigest({ proofBytesHex }),
+                proofSizeBytes: proofBytesHex.length / 2,
+            });
+
+            const unacknowledgedResult = verifyBallotProof({
+                ballotProof: proofRecord,
+                proofBytesHex,
+                statement,
+            });
+            expect(unacknowledgedResult).toMatchObject({
+                ok: false,
+                unresolvedReason: 'BallotPackageInvalid',
+            });
+            expect(
+                unacknowledgedResult.refusedObjects.some((refusal) =>
+                    refusal.message.includes('casual micro-roster'),
+                ),
+            ).toBe(true);
+
+            expect(
+                verifyBallotProof({
+                    ballotProof: proofRecord,
+                    casualMicroRosterAcknowledged: true,
+                    proofBytesHex,
+                    statement,
+                }),
+            ).toMatchObject({
+                ok: false,
+                unresolvedReason: 'OperationUnavailable',
+            });
+        },
+    );
 });

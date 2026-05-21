@@ -45,7 +45,7 @@ These pieces are not exported as a public voting API and must not be used for re
 
 The ballot privacy implementation currently exposes verification-oriented APIs only. It can verify receiver-key proof records, ballot proof records, and proof-byte-bearing scoped relation packages through the packaged Rust/WASM proof backend. Package verification requires the public verifier inputs carried with the package shell and is not a complete voting API or supported-phone-certified result.
 
-Current M5 dimensions are: 2 to 20 options; `shareVectorWidth = 11 * optionCount`; `n = 20` as the mandatory benchmark receiver count; dynamic frozen receiver counts from 10 to 50 only when the ballot proof statement carries bound roster-profile evidence; and 3 to 9 receiver casual micro-roster verification only outside claim-bearing package acceptance.
+Current M5 dimensions are: 2 to 20 options; `shareVectorWidth = 11 * optionCount`; `n = 20` as the mandatory benchmark receiver count; dynamic frozen receiver counts from 10 to 50 only when the ballot proof statement carries bound roster-profile evidence; and explicitly acknowledged 3 to 9 receiver casual micro-roster verification only outside claim-bearing package acceptance. The casual micro-roster path has verifier and proof-record generation harness coverage for every receiver count from 3 through 9, but claim-bearing package acceptance still rejects those rosters. Current proof-size and runtime benchmark evidence has only been run for the mandatory `n = 20`, `m = 20`, threshold-7 profile; micro-roster and dynamic-roster benchmark evidence remains future full-suite work.
 
 Implemented internally:
 
@@ -61,7 +61,7 @@ Implemented internally:
 Still unavailable:
 
 - public ballot generation or casting APIs;
-- generated certificate/workbook rows and benchmark evidence for every dynamic frozen roster size;
+- generated certificate/workbook rows and benchmark evidence for every dynamic frozen roster size and every casual micro-roster benchmark profile that later evaluation chooses to measure;
 - the encoded aggregate bridge and `ScoreBitAggregationRelation-v1` encrypted score-bit input path;
 - the packed bit-sliced BGV evaluator and mandatory evaluation proof;
 - production target-bound decryption and result release.
