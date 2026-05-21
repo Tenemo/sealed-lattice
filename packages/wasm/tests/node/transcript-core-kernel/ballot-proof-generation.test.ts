@@ -245,16 +245,24 @@ describe('transcript-core kernel in Node', () => {
         });
 
         expect(claimVerification).toMatchObject({
-            ok: false,
+            ok: true,
             backendAvailable: true,
             operation: 'verifyClaimBearingBallotPackage',
-            unresolvedReason: 'BallotPackageInvalid',
+            unresolvedReason: null,
         });
-        expectRefusalMessage(
-            claimVerification,
-            'Claim-bearing ballot package verification requires verifier-derived lowered relation statements and trusted public randomness',
+        expect(claimVerification.statusLabels).toEqual(
+            expect.arrayContaining([
+                'ClaimBearingBallotPackageDigestRecomputed',
+                'ClaimBearingBallotPackageShellBound',
+                'ClaimBearingBallotPackageProofVerified',
+                'BallotProofComponentProofBundleVerified',
+                'BallotProofComponentLinearProofVerified',
+            ]),
         );
-        expect(
+        expect(claimVerification.acceptedDigests).toContain(
+            request.statement.ballotPackageDigest,
+        );
+        const mutatedProofBytesVerification =
             kernel.verifyClaimBearingBallotPackage({
                 ballotPackage: {
                     ...ballotPackage,
@@ -263,12 +271,16 @@ describe('transcript-core kernel in Node', () => {
                 unsafeSmallRosterAcknowledged:
                     proofRecordGenerationFixture.request
                         .unsafeSmallRosterAcknowledged,
-            }),
-        ).toMatchObject({
+            });
+        expect(mutatedProofBytesVerification).toMatchObject({
             ok: false,
             backendAvailable: true,
             operation: 'verifyClaimBearingBallotPackage',
             unresolvedReason: 'BallotPackageInvalid',
         });
+        expectRefusalMessage(
+            mutatedProofBytesVerification,
+            'Ballot proof bytes do not match the proof record digest.',
+        );
     }, 900_000);
 });

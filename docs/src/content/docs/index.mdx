@@ -161,7 +161,7 @@ import { Card, CardGrid, LinkCard, Steps } from "@astrojs/starlight/components";
       1. **Install the public package name.**
          Use `sealed-lattice` as the only supported public import path.
       2. **Use the safe public helpers.**
-         The package exposes safe fixture verification, election foundation helpers, receiver-key proof verification, and ballot proof-record verification. Scoped relation package acceptance stays fail-closed until verifier-derived lowering and trusted public randomness checks exist.
+         The package exposes safe fixture verification, election foundation helpers, receiver-key proof verification, ballot proof-record verification, and proof-byte-bearing scoped relation package verification.
       3. **Develop inside the workspace packages.**
          Use the private packages for shared types, protocol, crypto, wasm, and testkit work.
       4. **Keep the Rust/WASM path verified.**
@@ -187,7 +187,7 @@ import { Card, CardGrid, LinkCard, Steps } from "@astrojs/starlight/components";
         <li>Node, browser, docs, vector, pack smoke, and release verification.</li>
         <li>Rust transcript-core build plus pinned SDK WASM loading path.</li>
         <li>Election foundation threshold, lifecycle, poll specification, capability, board/finality, signed fixture, first-valid, and recovery vectors.</li>
-        <li>Verification-oriented receiver-key proof and ballot proof-record APIs, plus fail-closed scoped relation package shell validation.</li>
+        <li>Verification-oriented receiver-key proof, ballot proof-record, and proof-byte-bearing scoped relation package APIs.</li>
       </ul>
     </Card>
 
