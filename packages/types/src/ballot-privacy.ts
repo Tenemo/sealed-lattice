@@ -45,7 +45,7 @@ export type ShareCommitmentProfile = {
     readonly commitmentModulus: DecimalIntegerString;
     readonly moduleRank: 4;
     readonly moduleDegree: 256;
-    readonly shareVectorWidth: 220;
+    readonly shareVectorWidth: number;
     readonly messageFieldModulus: 65537;
     readonly messageRepresentativeMinimum: 0;
     readonly messageRepresentativeMaximum: 65536;
@@ -111,10 +111,10 @@ export type BallotShareLayoutProfile = {
     readonly profileId: string;
     readonly ballotShareLayoutProfileDigest: ProtocolDigest;
     readonly layout: 'ScalarThenOneHotBucketsPerOption';
-    readonly maximumOptionCount: 20;
     readonly coordinatesPerOption: 11;
-    readonly mandatoryOptionCount: 20;
-    readonly mandatoryShareVectorWidth: 220;
+    readonly minimumOptionCount: 2;
+    readonly maximumOptionCount: 20;
+    readonly shareVectorWidth: number;
     readonly widthFormula: 'shareVectorWidth = 11 * optionCount';
     readonly paddingRule: 'unused coordinates must be zero';
 };
@@ -139,7 +139,7 @@ export type EncodedShareVectorLayoutProfile = {
     readonly layout: 'ScalarThenOneHotBucketsPerOption';
     readonly coordinatesPerOption: 11;
     readonly maximumOptionCount: 20;
-    readonly mandatoryShareVectorWidth: 220;
+    readonly shareVectorWidth: number;
     readonly coordinateOrder: 'score, score_bucket_1, ..., score_bucket_10 for each option';
 };
 
@@ -151,7 +151,7 @@ export type EncodedAggregateLayoutProfile = {
     readonly layout: 'AggregatedScalarAndScoreBucketCoordinates';
     readonly coordinatesPerOption: 11;
     readonly maximumOptionCount: 20;
-    readonly mandatoryAggregateWidth: 220;
+    readonly aggregateWidth: number;
     readonly aggregateCoordinateMeaning: 'sum of accepted receiver-share coordinates before bridge reduction';
 };
 
@@ -182,7 +182,7 @@ export type ShareCommitmentMessageBoundCert = {
     readonly profileDigest: ProtocolDigest;
     readonly shareCommitmentProfileDigest: ProtocolDigest;
     readonly fieldModulus: 65537;
-    readonly shareVectorWidth: 220;
+    readonly shareVectorWidth: number;
     readonly perBallotShareRepresentativeRange: readonly [0, 65536];
     readonly maximumCanonicalTurnout: number;
     readonly maximumAggregateInteger: number;
@@ -463,7 +463,7 @@ export type BallotProofRecord = {
     readonly publicRandomnessDigest?: ProtocolDigest;
 };
 
-/** Public ballot package containing the proof statement, proof record, and verifier inputs. */
+/** Public ballot package shell containing the proof statement, proof record, and supplied verifier inputs. */
 export type ClaimBearingBallotPackage = {
     readonly objectType: 'ClaimBearingBallotPackage';
     readonly objectVersion: 1;
@@ -482,6 +482,123 @@ export type ClaimBearingBallotPackage = {
     readonly receiverPayloads: readonly ReceiverPayload[];
     readonly shareCommitments: readonly ShareCommitment[];
 };
+
+/** Canonical public commitment to one contributor's post-close aggregate share opening. */
+export type AggregateShareCommitment = {
+    readonly objectType: 'AggregateShareCommitment';
+    readonly objectVersion: 1;
+    readonly aggregateShareCommitmentDigest: ProtocolDigest;
+    readonly ceremonyId: string;
+    readonly manifestDigest: ProtocolDigest;
+    readonly rosterDigest: ProtocolDigest;
+    readonly pollSpecDigest: ProtocolDigest;
+    readonly ballotSetDigest: ProtocolDigest;
+    readonly contributorIdentity: string;
+    readonly contributorRosterPosition: number;
+    readonly shareCommitmentProfileDigest: ProtocolDigest;
+    readonly shareVectorWidth: number;
+    readonly commitmentPolynomialVector: readonly (readonly DecimalIntegerString[])[];
+    readonly commitmentBodyDigest: ProtocolDigest;
+};
+
+/** Public counted-ballot reference bound into an M6 aggregate derivation statement. */
+export type AggregateDerivationPackageReference = {
+    readonly ballotPackageDigest: ProtocolDigest;
+    readonly ballotProofStatementDigest: ProtocolDigest;
+    readonly receiverPayloadDigest: ProtocolDigest;
+    readonly receiverPayloadCiphertextRoot: ProtocolDigest;
+    readonly shareCommitmentDigest: ProtocolDigest;
+};
+
+/** Public statement for the M6 aggregate derivation proof. */
+export type AggregateDerivationStatement = {
+    readonly objectType: 'AggregateDerivationStatement';
+    readonly objectVersion: 1;
+    readonly aggregateDerivationStatementDigest: ProtocolDigest;
+    readonly ceremonyId: string;
+    readonly manifestDigest: ProtocolDigest;
+    readonly rosterDigest: ProtocolDigest;
+    readonly pollSpecDigest: ProtocolDigest;
+    readonly thresholdProfileDigest: ProtocolDigest;
+    readonly ballotSetDigest: ProtocolDigest;
+    readonly votingClosedBoardHeadDigest: ProtocolDigest;
+    readonly closeRecordDigest: ProtocolDigest;
+    readonly postVotingClosedContextDigest: ProtocolDigest;
+    readonly contributorIdentity: string;
+    readonly contributorRosterPosition: number;
+    readonly contributorRosterExternalAcceptanceDigest: ProtocolDigest;
+    readonly contributorActionContextDigest: ProtocolDigest;
+    readonly packageReferences: readonly AggregateDerivationPackageReference[];
+    readonly aggregateShareCommitmentDigest: ProtocolDigest;
+    readonly aggregateCommitmentDigest: ProtocolDigest;
+    readonly receiverEncryptionProfileDigest: ProtocolDigest;
+    readonly shareCommitmentProfileDigest: ProtocolDigest;
+    readonly shareCommitmentMessageBoundCertDigest: ProtocolDigest;
+    readonly ballotScoreEncodingProfileDigest: ProtocolDigest;
+    readonly ballotShareLayoutProfileDigest: ProtocolDigest;
+    readonly aggregateInputEncodingProfileDigest: ProtocolDigest;
+    readonly encodedShareVectorLayoutDigest: ProtocolDigest;
+    readonly encodedAggregateLayoutDigest: ProtocolDigest;
+    readonly optionCount: number;
+    readonly participantCount: number;
+    readonly unsafeSmallRosterAcknowledged?: true;
+    readonly shareVectorWidth: number;
+    readonly canonicalTurnout: number;
+    readonly proofProfileId: string;
+    readonly proofParameterProfileId: string;
+    readonly proofEncodingProfileId: string;
+    readonly challengeDomainDigest: ProtocolDigest;
+};
+
+/** Public proof verifier input for the M6 aggregate derivation relation. */
+export type AggregateDerivationProofVerificationInput = {
+    readonly componentId: 'aggregate-derivation-component';
+    readonly componentProofStatementDigest: ProtocolDigest;
+    readonly proofBytesHex: string;
+    readonly proofEncoding: unknown;
+    readonly proofParameterSet: unknown;
+    readonly proofStatement: unknown;
+    readonly proofStatementFormat: 'sparse-polynomial-matrix-linear-proof-v1';
+    readonly publicRandomnessHex: string;
+    readonly statementDigest: ProtocolDigest;
+};
+
+/** Proof-byte-bearing public record for the M6 aggregate derivation component. */
+export type AggregateDerivationProofRecord = {
+    readonly objectType: 'AggregateDerivationProofRecord';
+    readonly objectVersion: 1;
+    readonly aggregateDerivationProofRecordDigest: ProtocolDigest;
+    readonly aggregateDerivationStatementDigest: ProtocolDigest;
+    readonly aggregateShareCommitmentDigest: ProtocolDigest;
+    readonly componentId: 'aggregate-derivation-component';
+    readonly componentProofStatementDigest: ProtocolDigest;
+    readonly proofBackend: 'LocalLinearLatticeRelation';
+    readonly proofRoot: ProtocolDigest;
+    readonly proofBytesDigest: ProtocolDigest;
+    readonly proofEncodingProfileDigest: ProtocolDigest;
+    readonly proofParameterSetDigest: ProtocolDigest;
+    readonly proofSizeBytes: number;
+    readonly publicRandomnessDigest: ProtocolDigest;
+};
+
+/** Public M6 aggregate derivation component. */
+export type AggregateDerivationComponent = {
+    readonly objectType: 'AggregateDerivationComponent';
+    readonly objectVersion: 1;
+    readonly aggregateDerivationComponentDigest: ProtocolDigest;
+    readonly statement: AggregateDerivationStatement;
+    readonly aggregateCommitment: AggregateShareCommitment;
+    readonly proofRecord: AggregateDerivationProofRecord;
+    readonly proofInput: AggregateDerivationProofVerificationInput;
+    readonly shareCommitmentMessageBoundCert: ShareCommitmentMessageBoundCert;
+};
+
+/** Structured result returned by M6 aggregate derivation component verification. */
+export type AggregateDerivationVerification =
+    StructuredProtocolVerificationResult & {
+        readonly backendAvailable: boolean;
+        readonly aggregateDerivationComponentDigest?: ProtocolDigest;
+    };
 
 /** Runtime status reported by the ballot privacy proof backend. */
 export type BallotPrivacyProofBackendStatus = {

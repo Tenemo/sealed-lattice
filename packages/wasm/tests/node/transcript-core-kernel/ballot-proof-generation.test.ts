@@ -1,7 +1,6 @@
 // This file is one focused part of the split test suite.
 import { describe, expect, it } from 'vitest';
 
-import { createWasmBallotProofRecordGenerationFixture } from '../../../../../tests/support/ballot-privacy-proof-record-generation-fixtures';
 import { loadTranscriptCoreKernel } from '../../../src/index';
 
 import {
@@ -9,6 +8,8 @@ import {
     cloneJsonValue,
     expectRefusalMessage,
 } from './shared.js';
+
+import { createWasmBallotProofRecordGenerationFixture } from '#tests/support/ballot-privacy-proof-record-generation-fixtures';
 
 describe('transcript-core kernel in Node', () => {
     it('generates ballot and dense component proof bytes through WASM', async () => {
@@ -238,6 +239,9 @@ describe('transcript-core kernel in Node', () => {
         };
         const claimVerification = kernel.verifyClaimBearingBallotPackage({
             ballotPackage,
+            unsafeSmallRosterAcknowledged:
+                proofRecordGenerationFixture.request
+                    .unsafeSmallRosterAcknowledged,
         });
 
         expect(claimVerification).toMatchObject({
@@ -248,7 +252,7 @@ describe('transcript-core kernel in Node', () => {
         });
         expectRefusalMessage(
             claimVerification,
-            'Claim-bearing ballot package must use the mandatory 20-option, 20-receiver, width-220 ballot privacy profile.',
+            'Claim-bearing ballot package verification requires verifier-derived lowered relation statements and trusted public randomness',
         );
         expect(
             kernel.verifyClaimBearingBallotPackage({
@@ -256,6 +260,9 @@ describe('transcript-core kernel in Node', () => {
                     ...ballotPackage,
                     proofBytesHex: `00${String(generation.proofBytesHex).slice(2)}`,
                 },
+                unsafeSmallRosterAcknowledged:
+                    proofRecordGenerationFixture.request
+                        .unsafeSmallRosterAcknowledged,
             }),
         ).toMatchObject({
             ok: false,

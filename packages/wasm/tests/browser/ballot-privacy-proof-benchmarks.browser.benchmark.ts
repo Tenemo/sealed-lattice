@@ -1,19 +1,20 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { cdp, server } from 'vitest/browser';
 
+import { loadTranscriptCoreKernel } from '../../src/index';
+
 import {
     formatProofBenchmarkReport,
     runMandatoryBallotProofRecordBenchmark,
     runReceiverKeyProofBenchmark,
     type RuntimeBenchmarkContext,
-} from '../../../../tests/support/ballot-privacy-proof-benchmarks';
+} from '#tests/support/ballot-privacy-proof-benchmarks';
 import {
     applyCalibratedMidTierMobileCpuThrottle,
     setBrowserCpuThrottleRate,
     type BrowserCpuThrottleRateSetter,
     type CpuThrottleCalibrationSuccess,
-} from '../../../../tests/support/browser-cpu-throttle-calibration';
-import { loadTranscriptCoreKernel } from '../../src/index';
+} from '#tests/support/browser-cpu-throttle-calibration';
 
 const proofBenchmarkTimeoutMs = 60 * 60_000;
 let mobileCpuThrottleCalibration: CpuThrottleCalibrationSuccess | undefined;
@@ -120,7 +121,7 @@ describe('ballot privacy proof benchmarks in browsers', () => {
     });
 
     it(
-        'records mandatory ballot proof generation and verification metrics',
+        'records mandatory ballot proof generation, proof verification, and package boundary metrics',
         async () => {
             const kernel = await loadTranscriptCoreKernel();
             const { claimVerification, generation, report, verification } =
@@ -141,9 +142,9 @@ describe('ballot privacy proof benchmarks in browsers', () => {
                 unresolvedReason: null,
             });
             expect(claimVerification).toMatchObject({
-                ok: true,
+                ok: false,
                 operation: 'verifyClaimBearingBallotPackage',
-                unresolvedReason: null,
+                unresolvedReason: 'BallotPackageInvalid',
             });
             expect(report.proofSizeBytes).toBeGreaterThan(0);
             expect(report.totalComponentProofSizeBytes).toBeGreaterThan(0);

@@ -313,6 +313,8 @@ enum TranscriptCoreCommand {
     GenerateBallotProofRecord,
     VerifyBallotProof,
     VerifyClaimBearingBallotPackage,
+    GenerateAggregateDerivationProof,
+    VerifyAggregateDerivationProof,
 }
 
 fn parse_transcript_core_command(command_name: &str) -> CanonicalResult<TranscriptCoreCommand> {
@@ -480,7 +482,9 @@ fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult<Value> {
         | TranscriptCoreCommand::GenerateBallotComponentProof
         | TranscriptCoreCommand::GenerateBallotProofRecord
         | TranscriptCoreCommand::VerifyBallotProof
-        | TranscriptCoreCommand::VerifyClaimBearingBallotPackage => {
+        | TranscriptCoreCommand::VerifyClaimBearingBallotPackage
+        | TranscriptCoreCommand::GenerateAggregateDerivationProof
+        | TranscriptCoreCommand::VerifyAggregateDerivationProof => {
             run_ballot_privacy_command(command, &request)
         }
     }
@@ -522,162 +526,27 @@ fn run_ballot_privacy_command(
             ))
         }
         TranscriptCoreCommand::VerifyReceiverKeyProof => {
-            let receiver_key_proof = request.get("receiverKeyProof").ok_or_else(|| {
-                CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
-                    "receiverKeyProof is required",
-                )
-            })?;
-            let linear_statement = request.get("linearStatement");
-            let proof_bytes_hex = request.get("proofBytesHex").and_then(Value::as_str);
-            let public_randomness_hex = request.get("publicRandomnessHex").and_then(Value::as_str);
-            let parameter_set = request.get("parameterSet");
-            let proof_encoding = request.get("proofEncoding");
-
-            Ok(
-                crate::ballot_privacy::verify_receiver_key_proof_from_command_fields(
-                    receiver_key_proof,
-                    linear_statement,
-                    proof_bytes_hex,
-                    public_randomness_hex,
-                    parameter_set,
-                    proof_encoding,
-                ),
-            )
+            Ok(crate::ballot_privacy::verify_receiver_key_proof_from_command_request(request))
         }
-        TranscriptCoreCommand::PrepareReceiverKeyProofGeneration => {
-            let linear_statement = request.get("linearStatement");
-            let parameter_set = request.get("parameterSet");
-            let proof_encoding = request.get("proofEncoding");
-            let public_randomness_hex = request.get("publicRandomnessHex").and_then(Value::as_str);
-            let secret_state = request.get("secretState");
-            let prover_randomness_hex = request.get("proverRandomnessHex").and_then(Value::as_str);
-
-            Ok(
-                crate::ballot_privacy::prepare_receiver_key_proof_generation(
-                    linear_statement,
-                    parameter_set,
-                    proof_encoding,
-                    public_randomness_hex,
-                    secret_state,
-                    prover_randomness_hex,
-                ),
-            )
-        }
+        TranscriptCoreCommand::PrepareReceiverKeyProofGeneration => Ok(
+            crate::ballot_privacy::prepare_receiver_key_proof_generation_from_command_request(
+                request,
+            ),
+        ),
         TranscriptCoreCommand::GenerateReceiverKeyProof => {
-            let linear_statement = request.get("linearStatement");
-            let parameter_set = request.get("parameterSet");
-            let proof_encoding = request.get("proofEncoding");
-            let public_randomness_hex = request.get("publicRandomnessHex").and_then(Value::as_str);
-            let secret_state = request.get("secretState");
-            let prover_randomness_hex = request.get("proverRandomnessHex").and_then(Value::as_str);
-
-            Ok(crate::ballot_privacy::generate_receiver_key_proof(
-                linear_statement,
-                parameter_set,
-                proof_encoding,
-                public_randomness_hex,
-                secret_state,
-                prover_randomness_hex,
-            ))
+            Ok(crate::ballot_privacy::generate_receiver_key_proof_from_command_request(request))
         }
         TranscriptCoreCommand::GenerateBallotProof => {
-            let linear_statement = request.get("linearStatement");
-            let parameter_set = request.get("parameterSet");
-            let proof_encoding = request.get("proofEncoding");
-            let public_randomness_hex = request.get("publicRandomnessHex").and_then(Value::as_str);
-            let secret_state = request.get("secretState");
-            let prover_randomness_hex = request.get("proverRandomnessHex").and_then(Value::as_str);
-
-            Ok(
-                crate::ballot_privacy::generate_ballot_proof_from_command_fields(
-                    linear_statement,
-                    parameter_set,
-                    proof_encoding,
-                    public_randomness_hex,
-                    secret_state,
-                    prover_randomness_hex,
-                ),
-            )
+            Ok(crate::ballot_privacy::generate_ballot_proof_from_command_request(request))
         }
-        TranscriptCoreCommand::GenerateBallotComponentProof => {
-            let component_id = request.get("componentId").and_then(Value::as_str);
-            let proof_input = request.get("proofInput");
-            let secret_state = request.get("secretState");
-            let prover_randomness_hex = request.get("proverRandomnessHex").and_then(Value::as_str);
-
-            Ok(
-                crate::ballot_privacy::generate_ballot_component_proof_from_command_fields(
-                    component_id,
-                    proof_input,
-                    secret_state,
-                    prover_randomness_hex,
-                ),
-            )
-        }
+        TranscriptCoreCommand::GenerateBallotComponentProof => Ok(
+            crate::ballot_privacy::generate_ballot_component_proof_from_command_request(request),
+        ),
         TranscriptCoreCommand::GenerateBallotProofRecord => {
-            let statement = request.get("statement");
-            let linear_statement = request.get("linearStatement");
-            let parameter_set = request.get("parameterSet");
-            let proof_encoding = request.get("proofEncoding");
-            let public_randomness_hex = request.get("publicRandomnessHex").and_then(Value::as_str);
-            let component_bundle_statement = request.get("componentBundleStatement");
-            let component_proof_inputs = request.get("componentProofInputs");
-            let secret_state = request.get("secretState");
-            let prover_randomness_hex = request.get("proverRandomnessHex").and_then(Value::as_str);
-            let component_prover_randomness_hexes = request.get("componentProverRandomnessHexes");
-            let component_secret_states = request.get("componentSecretStates");
-
-            Ok(crate::ballot_privacy::generate_ballot_proof_record(
-                crate::ballot_privacy::BallotProofRecordGenerationInput {
-                    statement,
-                    linear_statement,
-                    parameter_set,
-                    proof_encoding,
-                    public_randomness_hex,
-                    component_bundle_statement,
-                    component_proof_inputs,
-                    secret_state,
-                    prover_randomness_hex,
-                    component_prover_randomness_hexes,
-                    component_secret_states,
-                },
-            ))
+            Ok(crate::ballot_privacy::generate_ballot_proof_record_from_command_request(request))
         }
         TranscriptCoreCommand::VerifyBallotProof => {
-            let statement = request.get("statement").ok_or_else(|| {
-                CanonicalError::new(CanonicalErrorCode::InvalidFixture, "statement is required")
-            })?;
-            let ballot_proof = request.get("ballotProof").ok_or_else(|| {
-                CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
-                    "ballotProof is required",
-                )
-            })?;
-            let proof_bytes_hex = request.get("proofBytesHex").and_then(Value::as_str);
-            let linear_statement = request.get("linearStatement");
-            let public_randomness_hex = request.get("publicRandomnessHex").and_then(Value::as_str);
-            let parameter_set = request.get("parameterSet");
-            let proof_encoding = request.get("proofEncoding");
-            let component_bundle_statement = request.get("componentBundleStatement");
-            let component_proof_bundle = request.get("componentProofBundle");
-            let component_proof_inputs = request.get("componentProofInputs");
-
-            Ok(crate::ballot_privacy::verify_ballot_proof(
-                statement,
-                ballot_proof,
-                crate::ballot_privacy::BallotProofVerificationInputs {
-                    component_bundle_statement,
-                    component_proof_inputs,
-                    component_proof_bundle,
-                    linear_statement,
-                    parameter_set,
-                    proof_bytes_hex,
-                    proof_encoding,
-                    public_randomness_hex,
-                    skip_component_backend_verification: false,
-                },
-            ))
+            Ok(crate::ballot_privacy::verify_ballot_proof_from_command_request(request))
         }
         TranscriptCoreCommand::VerifyClaimBearingBallotPackage => {
             let ballot_package = request.get("ballotPackage").ok_or_else(|| {
@@ -686,11 +555,24 @@ fn run_ballot_privacy_command(
                     "ballotPackage is required",
                 )
             })?;
+            let unsafe_small_roster_acknowledged = request
+                .get("unsafeSmallRosterAcknowledged")
+                .and_then(Value::as_bool)
+                == Some(true);
 
             Ok(crate::ballot_privacy::verify_claim_bearing_ballot_package(
                 ballot_package,
+                unsafe_small_roster_acknowledged,
             ))
         }
+        TranscriptCoreCommand::GenerateAggregateDerivationProof => Ok(
+            crate::ballot_privacy::generate_aggregate_derivation_proof_from_command_request(
+                request,
+            ),
+        ),
+        TranscriptCoreCommand::VerifyAggregateDerivationProof => Ok(
+            crate::ballot_privacy::verify_aggregate_derivation_proof_from_command_request(request),
+        ),
         _ => unreachable!("non-ballot command dispatched to ballot privacy handler"),
     }
 }

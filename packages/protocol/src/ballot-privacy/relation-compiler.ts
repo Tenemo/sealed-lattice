@@ -8,12 +8,17 @@ import {
 } from '../plaintext-oracle/field.js';
 
 import {
-    ballotPrivacyMaximumOptionCount,
     ballotPrivacyScoreBucketCount,
     getBallotPrivacyEncodedShareVectorWidth,
     getBallotPrivacyScalarCoordinateIndex,
     getBallotPrivacyScoreBucketCoordinateIndex,
-} from './encoded-share-layout.js';
+} from './protocol-parameters.js';
+import {
+    ballotPrivacyMaximumOptionCount,
+    ballotPrivacyMaximumParticipantCount,
+    ballotPrivacyMinimumOptionCount,
+    ballotPrivacyMinimumUnsafeParticipantCount,
+} from './supported-dimensions.js';
 
 const minimumScore = 1;
 const maximumScore = 10;
@@ -102,21 +107,24 @@ const validateRelationDimensions = (
 
     if (
         !isPositiveSafeInteger(input.optionCount) ||
+        input.optionCount < ballotPrivacyMinimumOptionCount ||
         input.optionCount > ballotPrivacyMaximumOptionCount
     ) {
         addRelationRefusal(
             refusedObjects,
-            'Ballot privacy relation requires one to twenty options.',
+            'Ballot privacy relation requires two to twenty options.',
         );
     }
     if (
         !isPositiveSafeInteger(input.rosterSize) ||
+        input.rosterSize < ballotPrivacyMinimumUnsafeParticipantCount ||
+        input.rosterSize > ballotPrivacyMaximumParticipantCount ||
         !isPositiveSafeInteger(input.pvssThreshold) ||
         input.pvssThreshold > input.rosterSize
     ) {
         addRelationRefusal(
             refusedObjects,
-            'Ballot privacy relation requires a valid roster size and PVSS threshold.',
+            'Ballot privacy relation requires three to fifty participants and a valid PVSS threshold.',
         );
     }
     if (input.normalizedScores.length !== input.optionCount) {

@@ -29,6 +29,11 @@ import {
     wasmHeader,
 } from './shared.js';
 
+import {
+    canonicalJson,
+    deriveProtocolDigest,
+} from '#packages/crypto/src/index';
+
 describe('transcript-core kernel in Node', () => {
     it('normalizes host-specific Rust source paths before digesting', () => {
         const windowsBytes = textEncoder.encode(
@@ -203,6 +208,72 @@ describe('transcript-core kernel in Node', () => {
                 value: {},
             }),
         ).toThrow(TranscriptCoreKernelCommandError);
+    });
+
+    it('keeps TypeScript and Rust canonical JSON behavior aligned for protocol digests', async () => {
+        const kernel = await loadTranscriptCoreKernel();
+        const acceptedValues: readonly unknown[] = [
+            {
+                flags: [true, false, null],
+                nested: {
+                    a: 'Cafe\u0301',
+                    ['\u{10000}']: 'supplementary key',
+                    ['\uE000']: 'private-use key',
+                },
+                numbers: [Number.MIN_SAFE_INTEGER, 0, Number.MAX_SAFE_INTEGER],
+            },
+            {
+                ['receiver\u0301']: {
+                    ballot: ['\u0065\u0301', '\u00E9'],
+                    rosterPosition: 20,
+                },
+                shareVectorWidth: 220,
+            },
+        ];
+
+        for (const value of acceptedValues) {
+            expect(
+                kernel.deriveProtocolDigest({
+                    namespace: 'PollSpecDigest',
+                    value,
+                }),
+            ).toBe(deriveProtocolDigest('PollSpecDigest', value));
+        }
+
+        const rejectedValues: readonly {
+            readonly value: unknown;
+            readonly expectedKernelCode: string;
+        }[] = [
+            {
+                value: { ['e\u0301']: 1, ['\u00E9']: 2 },
+                expectedKernelCode: 'DuplicateField',
+            },
+            {
+                value: { unsafeInteger: Number.MAX_SAFE_INTEGER + 1 },
+                expectedKernelCode: 'InvalidFixture',
+            },
+            {
+                value: { fractional: 1.5 },
+                expectedKernelCode: 'InvalidFixture',
+            },
+        ];
+
+        for (const { value, expectedKernelCode } of rejectedValues) {
+            expect(() => canonicalJson(value)).toThrow(TypeError);
+
+            try {
+                kernel.deriveProtocolDigest({
+                    namespace: 'PollSpecDigest',
+                    value,
+                });
+                throw new Error('Expected kernel canonical JSON rejection.');
+            } catch (error) {
+                expect(error).toBeInstanceOf(TranscriptCoreKernelCommandError);
+                expect((error as TranscriptCoreKernelCommandError).code).toBe(
+                    expectedKernelCode,
+                );
+            }
+        }
     });
 
     it('verifies golden and malformed fixtures with stable outputs', async () => {

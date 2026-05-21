@@ -90,6 +90,7 @@ export type BallotProofRecordGenerationFixture = {
 type BallotProofRecordGenerationFixtureOptions = {
     readonly relationInput: BallotPrivacyRelationCompilerInput;
     readonly topOptionCount: number;
+    readonly unsafeSmallRosterAcknowledged?: boolean;
 };
 
 export const cloneJsonValue = <Value>(value: Value): Value =>
@@ -223,24 +224,28 @@ const deterministicReceiverPayloadCiphertextForTest = (input: {
     };
 };
 
-const singleReceiverRelationInput = (): BallotPrivacyRelationCompilerInput => ({
-    encodedCoordinateShamirCoefficients: Array.from(
-        { length: 11 },
-        () => [] as const,
-    ),
-    normalizedScores: [5],
-    optionCount: 1,
-    pvssThreshold: 1,
-    receivers: [
-        {
-            receiverIdentity: 'receiver-1',
-            receiverRosterPosition: 1,
-            receiverShareVector: [5, ...oneHotScore(5)],
-        },
-    ],
-    rosterSize: 1,
-    scoreOneHotWitnesses: [oneHotScore(5)],
-});
+const smallUnsafeRelationInput = (): BallotPrivacyRelationCompilerInput => {
+    const normalizedScores = [5, 7];
+    const encodedShareVector = encodedShareVectorForScores(normalizedScores);
+
+    return {
+        encodedCoordinateShamirCoefficients: encodedShareVector.map(
+            () => [0] as readonly number[],
+        ),
+        normalizedScores,
+        optionCount: normalizedScores.length,
+        pvssThreshold: 2,
+        receivers: Array.from({ length: 3 }, (_unusedValue, receiverIndex) => ({
+            receiverIdentity: `receiver-${receiverIndex + 1}`,
+            receiverRosterPosition: receiverIndex + 1,
+            receiverShareVector: encodedShareVector,
+        })),
+        rosterSize: 3,
+        scoreOneHotWitnesses: normalizedScores.map((score) =>
+            oneHotScore(score),
+        ),
+    };
+};
 
 export const mandatoryProfileRelationInput =
     (): BallotPrivacyRelationCompilerInput => {
@@ -286,7 +291,9 @@ const publicContextAndProjectionWitness = (
     readonly projectionWitness: BallotProofComponentProjectionWitness;
     readonly publicContext: BallotPrivacyRelationBackendPublicContext;
 } => {
-    const profileSet = createBallotPrivacyProfileSet();
+    const profileSet = createBallotPrivacyProfileSet({
+        optionCount: relationInput.optionCount,
+    });
     const certificate = createShareCommitmentMessageBoundCert({
         maximumCanonicalTurnout: 20,
         shareCommitmentProfile: profileSet.shareCommitmentProfile,
@@ -643,7 +650,7 @@ const ballotProofStatement = (input: {
 };
 
 export {
-    singleReceiverRelationInput,
+    smallUnsafeRelationInput,
     publicContextAndProjectionWitness,
     claimBearingReceiverPayloadShells,
     claimBearingShareCommitmentShells,

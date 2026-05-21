@@ -12,7 +12,7 @@ import {
     type CoverageEntry,
     type CoverageMetric,
     type CoverageSummary,
-} from '../../../tools/generate-coverage-badge';
+} from '#tools/generate-coverage-badge';
 
 const createMetric = (pct: number): CoverageMetric => ({
     covered: 0,

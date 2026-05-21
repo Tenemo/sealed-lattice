@@ -1,6 +1,10 @@
 use super::*;
 
-pub(crate) fn collect_ballot_proof_refusals(statement: &Value, ballot_proof: &Value) -> Vec<Value> {
+pub(crate) fn collect_ballot_proof_refusals(
+    statement: &Value,
+    ballot_proof: &Value,
+    unsafe_small_roster_acknowledged: bool,
+) -> Vec<Value> {
     let mut refused_objects = Vec::new();
     let statement_digest = string_field(statement, "ballotProofStatementDigest");
     let proof_record_digest = string_field(ballot_proof, "ballotProofRecordDigest");
@@ -34,6 +38,11 @@ pub(crate) fn collect_ballot_proof_refusals(statement: &Value, ballot_proof: &Va
             statement_digest,
         ));
     }
+    refused_objects.extend(collect_supported_ballot_privacy_dimension_refusals(
+        statement,
+        statement_digest,
+        unsafe_small_roster_acknowledged,
+    ));
 
     let receiver_public_keys = object_map(statement)
         .and_then(|object| object.get("receiverPublicKeys"))
@@ -329,7 +338,10 @@ pub(crate) fn reference_map(references: Option<&Vec<Value>>) -> BTreeMap<String,
     mapped_references
 }
 
-pub(crate) fn collect_claim_bearing_package_refusals(ballot_package: &Value) -> Vec<Value> {
+pub(crate) fn collect_claim_bearing_package_refusals(
+    ballot_package: &Value,
+    unsafe_small_roster_acknowledged: bool,
+) -> Vec<Value> {
     let Some(package_object) = object_map(ballot_package) else {
         return vec![structural_refusal(
             "Claim-bearing ballot package shell digest or shape is invalid.",
@@ -340,7 +352,8 @@ pub(crate) fn collect_claim_bearing_package_refusals(ballot_package: &Value) -> 
         .get("ballotProofStatement")
         .unwrap_or(&Value::Null);
     let ballot_proof = package_object.get("ballotProof").unwrap_or(&Value::Null);
-    let mut refused_objects = collect_ballot_proof_refusals(statement, ballot_proof);
+    let mut refused_objects =
+        collect_ballot_proof_refusals(statement, ballot_proof, unsafe_small_roster_acknowledged);
     refused_objects.extend(collect_proof_bytes_refusals(
         package_object.get("proofBytesHex").and_then(Value::as_str),
         string_field(ballot_proof, "proofBytesDigest"),
@@ -357,15 +370,6 @@ pub(crate) fn collect_claim_bearing_package_refusals(ballot_package: &Value) -> 
         package_object.get("componentBundleStatement"),
         package_object.get("componentProofBundle"),
         package_object.get("componentProofInputs"),
-    ));
-    refused_objects.extend(collect_mandatory_claim_profile_refusals(
-        statement,
-        string_field(ballot_package, "ballotPackageDigest"),
-    ));
-    refused_objects.extend(collect_mandatory_component_contract_refusals(
-        package_object.get("componentProofBundle"),
-        package_object.get("componentProofInputs"),
-        string_field(ballot_package, "ballotPackageDigest"),
     ));
     refused_objects.extend(collect_receiver_key_proof_root_evidence_refusals(
         package_object

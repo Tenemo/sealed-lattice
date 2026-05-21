@@ -61,6 +61,13 @@ export type {
     ActionContext,
     ActionCurrentForRecoveryEpochInput,
     ActionCurrentForRecoveryEpochResult,
+    AggregateDerivationComponent,
+    AggregateDerivationPackageReference,
+    AggregateDerivationProofRecord,
+    AggregateDerivationProofVerificationInput,
+    AggregateDerivationStatement,
+    AggregateDerivationVerification,
+    AggregateShareCommitment,
     TargetBoundShareSelectionProfile,
     AppendOnlyConsistencyProof,
     BaseClaimProfile,
@@ -336,9 +343,14 @@ export type BallotProofVerificationInput = Parameters<
     TranscriptCoreKernel['verifyBallotProof']
 >[0];
 
-/** Input accepted by the packaged WASM scoped relation-bearing ballot package verifier. */
+/** Input accepted by the packaged WASM scoped relation-bearing ballot package shell validator. */
 export type ClaimBearingBallotPackageVerificationInput = Parameters<
     TranscriptCoreKernel['verifyClaimBearingBallotPackage']
+>[0];
+
+/** Input accepted by the packaged WASM aggregate derivation proof verifier. */
+export type AggregateDerivationComponentVerificationInput = Parameters<
+    TranscriptCoreKernel['verifyAggregateDerivationProof']
 >[0];
 
 /** Verifies a receiver-key proof with the packaged WASM proof backend. */
@@ -359,11 +371,20 @@ export const verifyBallotProof = async (
     return kernel.verifyBallotProof(input);
 };
 
-/** Verifies a scoped relation-bearing ballot package with the packaged WASM proof backend. */
+/** Validates a scoped relation-bearing ballot package shell, then fails closed before package-level claim acceptance. */
 export const verifyClaimBearingBallotPackage = async (
     input: ClaimBearingBallotPackageVerificationInput,
 ): Promise<BallotPrivacyKernelVerification> => {
     const kernel = await loadTranscriptCoreKernel();
 
     return kernel.verifyClaimBearingBallotPackage(input);
+};
+
+/** Verifies an M6 aggregate derivation component with the packaged WASM proof backend. */
+export const verifyAggregateDerivationComponent = async (
+    input: AggregateDerivationComponentVerificationInput,
+): Promise<BallotPrivacyKernelVerification> => {
+    const kernel = await loadTranscriptCoreKernel();
+
+    return kernel.verifyAggregateDerivationProof(input);
 };

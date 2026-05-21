@@ -15,15 +15,6 @@ pub(crate) struct GeneratedLinearProofProfileConstants {
     pub(crate) exact_norm_bound_squared: u64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct GeneratedLinearProofParameterContractConstants {
-    pub(crate) source_ring_degree: usize,
-    pub(crate) proof_system_ring_degree: usize,
-    pub(crate) source_coefficient_modulus: u64,
-    pub(crate) statement_rows: usize,
-    pub(crate) statement_columns: usize,
-}
-
 // Rust short-response cap used by the generated profiles below. It is not a
 // literal LaZer header field. It was verified against each generated
 // `*_stdev1sq` value and log2 standard deviation pair: demo uses log2 stdev
@@ -75,6 +66,7 @@ pub(crate) const DEMO_GENERATED_PROFILE: GeneratedLinearProofProfileConstants =
 // Generator input: `temp/lazer/python/demo/demo_params.py`.
 // Verified fields: generator `deg`, generator `mod`, generator `dim`,
 // generated `_param_ring` degree, and generated `lin_params_t param`.
+#[cfg(test)]
 pub(crate) const DEMO_GENERATED_PARAMETER_CONTRACT: GeneratedLinearProofParameterContractConstants =
     GeneratedLinearProofParameterContractConstants {
         // Generator input field: `deg`.
@@ -135,6 +127,7 @@ pub(crate) const RECEIVER_KEY_GENERATED_PROFILE: GeneratedLinearProofProfileCons
 // Verified fields: generator `deg`, generator `mod`, generator `dim`,
 // generated `_receiver_key_param_ring` degree, and generated
 // `lin_params_t receiver_key_param`.
+#[cfg(test)]
 pub(crate) const RECEIVER_KEY_GENERATED_PARAMETER_CONTRACT:
     GeneratedLinearProofParameterContractConstants =
     GeneratedLinearProofParameterContractConstants {
@@ -196,6 +189,7 @@ pub(crate) const ENCODED_SCORE_FIELD_GENERATED_PROFILE: GeneratedLinearProofProf
 // Verified fields: generator `deg`, generator `mod`, generator `dim`,
 // generated `_ballot_field_param_ring` degree, and generated
 // `lin_params_t ballot_field_param`.
+#[cfg(test)]
 pub(crate) const ENCODED_SCORE_FIELD_GENERATED_PARAMETER_CONTRACT:
     GeneratedLinearProofParameterContractConstants =
     GeneratedLinearProofParameterContractConstants {
@@ -224,6 +218,14 @@ pub(crate) const GENERATED_FIELD_COMPONENT_EXACT_NORM_BOUND_SQUARED: u64 =
 // structured share-commitment component statements.
 pub(crate) const GENERATED_SHARE_COMMITMENT_COMPONENT_EXACT_NORM_BOUND_SQUARED: u64 = 1_048_576;
 
+// M6 aggregate derivation uses the share-commitment source ring and an
+// aggregate witness covering S, rho, Y, and quotient for up to 50 counted
+// ballots and 20 options. This is an implementation-side compatibility bound
+// for the current Rust/WASM proof experiment, not standalone final theorem
+// evidence.
+pub(crate) const AGGREGATE_DERIVATION_COMPONENT_EXACT_NORM_BOUND_SQUARED: u64 =
+    3_000_000_000_000_000;
+
 // Compatibility cap for generated component-proof experiments that reuse the
 // encoded-score decompression tuple over wider generated component statements.
 // This value is not present in the generated LaZer headers as `Bz3sqr`; it is
@@ -237,3 +239,13 @@ pub(crate) const GENERATED_COMPONENT_EUCLIDEAN_RESPONSE_BOUND_SQUARED: u128 = 1_
 // explicit Rust-side cap and must not be described as generated or as
 // standalone final soundness evidence.
 pub(crate) const GENERATED_COMPONENT_INFINITY_RESPONSE_BOUND: u128 = 1_u128 << 48;
+
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct GeneratedLinearProofParameterContractConstants {
+    pub(crate) source_ring_degree: usize,
+    pub(crate) proof_system_ring_degree: usize,
+    pub(crate) source_coefficient_modulus: u64,
+    pub(crate) statement_rows: usize,
+    pub(crate) statement_columns: usize,
+}

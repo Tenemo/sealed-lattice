@@ -183,15 +183,15 @@ describe('ballot proof record generation input', () => {
         const receiverEncryptionStatement =
             receiverEncryptionProofStatement(fixture);
 
-        expect(receiverEncryptionStatement.receiverRows).toHaveLength(1);
+        expect(receiverEncryptionStatement.receiverRows).toHaveLength(3);
         expect(receiverEncryptionStatement.receiverRows[0]).toMatchObject({
-            ciphertextChunkCount: 4,
-            plaintextBitLength: 955,
-            rowCount: 20,
+            ciphertextChunkCount: 5,
+            plaintextBitLength: 1142,
+            rowCount: 25,
         });
         expect(receiverEncryptionStatement).toMatchObject({
-            statementColumns: 40,
-            statementRows: 20,
+            statementColumns: 150,
+            statementRows: 75,
         });
         expect(
             request.componentSecretStates['receiver-encryption-component']

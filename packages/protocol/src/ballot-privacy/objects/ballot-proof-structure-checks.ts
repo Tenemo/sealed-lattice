@@ -9,15 +9,18 @@ import type {
 } from '@sealed-lattice/types';
 
 import { createRefusal } from '../../common/verification-helpers.js';
-import { getBallotPrivacyEncodedShareVectorWidth } from '../encoded-share-layout.js';
+import { getBallotPrivacyEncodedShareVectorWidth } from '../protocol-parameters.js';
+import { collectBallotPrivacyDimensionRefusals } from '../supported-dimensions.js';
 
 import type {
     BallotProofComponentProofVerificationInput,
     UnknownObject,
 } from './object-contracts.js';
 import {
-    ballotProofComponentProofPolicyById,
+    allowedBallotProofComponentStatementFormats,
     collectReceiverReferenceRefusals,
+    componentProofBytesAvailabilityIsExpected,
+    componentProofStatementFormatIsExpected,
     deriveBallotProofChallengeDigest,
     deriveBallotProofRecordDigest,
     deriveBallotProofStatementDigest,
@@ -34,6 +37,7 @@ const collectBallotProofStructuralRefusals = (
     statement: BallotProofStatement,
     ballotProof: BallotProofRecord,
     proofBytesHex?: string,
+    unsafeSmallRosterAcknowledged?: boolean,
 ): readonly RefusalRecord[] => {
     const refusedObjects: RefusalRecord[] = [];
     const statementPayload = omitProperty(
@@ -85,6 +89,15 @@ const collectBallotProofStructuralRefusals = (
             ),
         );
     }
+    refusedObjects.push(
+        ...collectBallotPrivacyDimensionRefusals({
+            objectDigest: statement.ballotProofStatementDigest,
+            optionCount: statement.optionCount,
+            participantCount: statement.receiverPublicKeys.length,
+            shareVectorWidth: statement.shareVectorWidth,
+            unsafeSmallRosterAcknowledged,
+        }),
+    );
     refusedObjects.push(
         ...collectReceiverReferenceRefusals({
             label: 'Ballot proof receiver-key references',
@@ -406,8 +419,6 @@ const collectComponentProofStatementPlanShapeRefusals = (input: {
     readonly proofRecordDigest: ProtocolDigest;
     readonly proofStatement: UnknownObject;
 }): readonly RefusalRecord[] => {
-    const componentProofPolicy =
-        ballotProofComponentProofPolicyById[input.expectedComponentId];
     if (
         input.proofStatement.objectType !==
         'BallotProofComponentProofStatementPlan'
@@ -436,10 +447,23 @@ const collectComponentProofStatementPlanShapeRefusals = (input: {
     const commonShapeIsValid =
         input.proofStatement.objectVersion === 1 &&
         input.proofStatement.componentId === input.expectedComponentId &&
-        input.proofStatement.proofStatementFormat ===
-            componentProofPolicy.proofStatementFormat &&
-        input.proofStatement.proofBytesAvailability ===
-            componentProofPolicy.proofBytesAvailability &&
+        typeof input.proofStatement.proofStatementFormat === 'string' &&
+        allowedBallotProofComponentStatementFormats.has(
+            input.proofStatement
+                .proofStatementFormat as BallotProofComponentProofVerificationInput['proofStatementFormat'],
+        ) &&
+        componentProofStatementFormatIsExpected(
+            input.expectedComponentId,
+            input.proofStatement
+                .proofStatementFormat as BallotProofComponentProofVerificationInput['proofStatementFormat'],
+        ) &&
+        typeof input.proofStatement.proofBytesAvailability === 'string' &&
+        componentProofBytesAvailabilityIsExpected(
+            input.expectedComponentId,
+            input.proofStatement
+                .proofStatementFormat as BallotProofComponentProofVerificationInput['proofStatementFormat'],
+            input.proofStatement.proofBytesAvailability,
+        ) &&
         input.proofStatement.proofLoweringStatus === 'explicitRowsAvailable' &&
         input.proofStatement.relation === 'A*w + t = 0' &&
         isUnsignedDecimalString(input.proofStatement.coefficientModulus) &&
@@ -464,7 +488,7 @@ const collectComponentProofStatementPlanShapeRefusals = (input: {
     const componentSpecificShapeIsValid = (() => {
         if (
             input.expectedComponentId === 'receiver-encryption-component' &&
-            componentProofPolicy.proofStatementFormat ===
+            input.proofStatement.proofStatementFormat ===
                 'structured-module-lwe-linear-proof-v1'
         ) {
             return (
@@ -492,7 +516,7 @@ const collectComponentProofStatementPlanShapeRefusals = (input: {
         }
         if (
             input.expectedComponentId === 'receiver-key-binding-component' &&
-            componentProofPolicy.proofStatementFormat ===
+            input.proofStatement.proofStatementFormat ===
                 'public-zero-witness-binding-check-v1'
         ) {
             return (

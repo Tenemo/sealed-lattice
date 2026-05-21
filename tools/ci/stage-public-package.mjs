@@ -16,6 +16,11 @@ import { fileURLToPath } from 'node:url';
  */
 
 /**
+ * @typedef {object} PublicPackageMetadata
+ * @property {string} description
+ */
+
+/**
  * @typedef {object} StagedPublicPackage
  * @property {string} packageDirectory
  * @property {string} packageJsonPath
@@ -44,6 +49,13 @@ export const getPublicPackageDirectory = (projectRoot = repoRoot) =>
 export const getRootReadmePath = (projectRoot = repoRoot) =>
     path.resolve(projectRoot, 'README.md');
 
+/**
+ * @param {string} [projectRoot]
+ * @returns {string}
+ */
+export const getRootPackageJsonPath = (projectRoot = repoRoot) =>
+    path.resolve(projectRoot, 'package.json');
+
 const requiredPackageEntries = [
     'package.json',
     'LICENSE',
@@ -53,15 +65,41 @@ const requiredPackageEntries = [
 
 /**
  * @param {string} packageJsonText
+ * @param {PublicPackageMetadata} publicPackageMetadata
  * @returns {string}
  */
-export const sanitizePublicPackageJson = (packageJsonText) => {
+export const sanitizePublicPackageJson = (
+    packageJsonText,
+    publicPackageMetadata,
+) => {
     const packageJson = JSON.parse(packageJsonText);
+
+    packageJson.description = publicPackageMetadata.description;
 
     delete packageJson.devDependencies;
     delete packageJson.scripts;
 
     return `${JSON.stringify(packageJson, null, 4)}\n`;
+};
+
+/**
+ * @param {string} projectRoot
+ * @returns {Promise<PublicPackageMetadata>}
+ */
+export const readPublicPackageMetadata = async (projectRoot = repoRoot) => {
+    const rootPackageJson = JSON.parse(
+        await readFile(getRootPackageJsonPath(projectRoot), 'utf8'),
+    );
+    if (
+        typeof rootPackageJson.description !== 'string' ||
+        rootPackageJson.description.length === 0
+    ) {
+        throw new Error('Root package.json must define package description.');
+    }
+
+    return {
+        description: rootPackageJson.description,
+    };
 };
 
 /**
@@ -91,6 +129,7 @@ export const stagePublicPackage = async (input) => {
 
     const publicPackageDirectory = getPublicPackageDirectory(projectRoot);
     const resolvedDestinationPath = path.resolve(destinationPath);
+    const publicPackageMetadata = await readPublicPackageMetadata(projectRoot);
 
     await ensureEmptyDestination(resolvedDestinationPath);
 
@@ -106,7 +145,10 @@ export const stagePublicPackage = async (input) => {
         } else if (packageEntry === 'package.json') {
             await writeFile(
                 destinationEntryPath,
-                sanitizePublicPackageJson(await readFile(sourcePath, 'utf8')),
+                sanitizePublicPackageJson(
+                    await readFile(sourcePath, 'utf8'),
+                    publicPackageMetadata,
+                ),
                 'utf8',
             );
         } else {

@@ -22,7 +22,7 @@ import {
     receiverEncryptionModuleRank,
     shareCommitmentModulus,
     shareCommitmentOpeningForReceiver,
-    singleOptionRelationInput,
+    minimumOptionRelationInput,
     validRelationInput,
 } from './shared.js';
 
@@ -314,7 +314,7 @@ describe('ballot privacy relation backend lowering', () => {
     });
 
     it('builds structured receiver-encryption proof statements with public Module-LWE material', () => {
-        const relationInput = singleOptionRelationInput();
+        const relationInput = minimumOptionRelationInput();
         const { context } = explicitReceiverEncryptionFixture(relationInput);
         const loweringResult = lowerBallotPrivacyRelationToBackendStatement({
             publicContext: context,
@@ -360,13 +360,13 @@ describe('ballot privacy relation backend lowering', () => {
             proofStatementFormat: 'structured-module-lwe-linear-proof-v1',
             proofSystemRingDegree: 64,
             sourceRingDegree: 256,
-            statementColumns: 3 * 4 * 10,
-            statementRows: 3 * 4 * 5,
+            statementColumns: 3 * 5 * 10,
+            statementRows: 3 * 5 * 5,
         });
         expect(structuredStatement.receiverRows).toHaveLength(3);
         expect(
             structuredStatement.receiverRows[0]?.ciphertextChunks,
-        ).toHaveLength(4);
+        ).toHaveLength(5);
         expect(
             structuredStatement.receiverRows[0]?.ciphertextChunks[0]
                 ?.randomnessPolynomialColumnIndices,

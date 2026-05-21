@@ -15,7 +15,7 @@ import {
     validatePublishedKernelIntegrity,
     validatePublishedPackageMetadata,
     validatePublishedPackageFilePaths,
-} from '../../../tools/ci/verify-packed-package';
+} from '#tools/ci/verify-packed-package';
 
 describe('packed package smoke helpers', () => {
     it('parses explicit package manager overrides', () => {
@@ -236,27 +236,35 @@ describe('packed package smoke helpers', () => {
         ]);
     });
 
-    it('rejects public package description metadata', () => {
+    it('requires public package description metadata to match root metadata', () => {
         expect(
-            validatePublishedPackageMetadata({
-                name: 'sealed-lattice',
-                description: 'temporary package summary',
-                devDependencies: {
-                    '@sealed-lattice/types': 'workspace:*',
+            validatePublishedPackageMetadata(
+                {
+                    name: 'sealed-lattice',
+                    description: 'wrong package summary',
+                    devDependencies: {
+                        '@sealed-lattice/types': 'workspace:*',
+                    },
+                    scripts: {
+                        build: 'pnpm run build',
+                    },
                 },
-                scripts: {
-                    build: 'pnpm run build',
-                },
-            }),
+                'Post-quantum threshold homomorphic voting library.',
+            ),
         ).toEqual([
-            'Published package metadata must not include a description field',
+            'Published package metadata description must match the root package description',
             'Published package metadata must not include devDependencies',
             'Published package metadata must not include scripts',
         ]);
         expect(
-            validatePublishedPackageMetadata({
-                name: 'sealed-lattice',
-            }),
+            validatePublishedPackageMetadata(
+                {
+                    name: 'sealed-lattice',
+                    description:
+                        'Post-quantum threshold homomorphic voting library.',
+                },
+                'Post-quantum threshold homomorphic voting library.',
+            ),
         ).toEqual([]);
     });
 

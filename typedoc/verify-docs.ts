@@ -9,8 +9,6 @@ import {
     type ProjectReflection,
 } from 'typedoc';
 
-import publicSurface from '../packages/sdk/public-surface.json' with { type: 'json' };
-import { collectFiles, isWithinDirectory } from '../tools/internal/files.js';
 import config from '../typedoc.config.mjs';
 
 import {
@@ -19,6 +17,9 @@ import {
     docsContentRoot,
     publicApiReferenceEntries,
 } from './public-api-reference';
+
+import publicSurface from '#packages/sdk/public-surface.json' with { type: 'json' };
+import { collectFiles, isWithinDirectory } from '#tools/internal/files.js';
 
 const repoRoot = process.cwd();
 const docsRoot = path.resolve(repoRoot, docsContentRoot);

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import receiverKeyVectorsJson from '../../../../test-vectors/ballot-privacy/receiver-key-proof-vectors.json';
+import receiverKeyVectorsJson from '#test-vectors/ballot-privacy/receiver-key-proof-vectors.json';
 
 type ReceiverKeyVectorCase = {
     readonly caseName: string;

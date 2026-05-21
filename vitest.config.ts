@@ -8,6 +8,8 @@ import type { BrowserInstanceOption } from 'vitest/node';
 const repoRoot = path.dirname(fileURLToPath(import.meta.url));
 const resolveFromRepoRoot = (...segments: string[]): string =>
     path.resolve(repoRoot, ...segments);
+const resolveAliasDirectoryFromRepoRoot = (...segments: string[]): string =>
+    `${resolveFromRepoRoot(...segments).replace(/\\/g, '/')}/`;
 
 const nodeTestTimeoutMs = 60_000;
 const nodeKernelHeavyTestTimeoutMs = 15 * 60_000;
@@ -34,6 +36,7 @@ const nodeHeavyTestIncludes = [
     'packages/protocol/tests/node/ballot-privacy-relation-backend-lowering/**/*.test.ts',
 ] satisfies string[];
 const nodeKernelHeavyTestIncludes = [
+    'packages/wasm/tests/node/transcript-core-kernel/aggregate-derivation-proof.test.ts',
     'packages/wasm/tests/node/transcript-core-kernel/ballot-proof-generation.test.ts',
     'packages/wasm/tests/node/transcript-core-kernel/ballot-proof-rejection.test.ts',
     'packages/wasm/tests/node/transcript-core-kernel/component-bundle-rejection.test.ts',
@@ -152,6 +155,72 @@ const desktopProofBenchmarkBrowserInstances: BrowserInstanceOption[] = [
     },
 ];
 
+const repoRootAliases = [
+    {
+        find: 'sealed-lattice',
+        replacement: resolveFromRepoRoot('packages', 'sdk', 'dist', 'index.js'),
+    },
+    {
+        find: '@sealed-lattice/types',
+        replacement: resolveFromRepoRoot(
+            'packages',
+            'types',
+            'src',
+            'index.ts',
+        ),
+    },
+    {
+        find: '@sealed-lattice/protocol',
+        replacement: resolveFromRepoRoot(
+            'packages',
+            'protocol',
+            'src',
+            'index.ts',
+        ),
+    },
+    {
+        find: '@sealed-lattice/crypto',
+        replacement: resolveFromRepoRoot(
+            'packages',
+            'crypto',
+            'src',
+            'index.ts',
+        ),
+    },
+    {
+        find: '@sealed-lattice/wasm',
+        replacement: resolveFromRepoRoot('packages', 'wasm', 'src', 'index.ts'),
+    },
+    {
+        find: '@sealed-lattice/testkit',
+        replacement: resolveFromRepoRoot(
+            'packages',
+            'testkit',
+            'src',
+            'index.ts',
+        ),
+    },
+    {
+        find: /^#packages\/(.*)$/,
+        replacement: `${resolveAliasDirectoryFromRepoRoot('packages')}$1`,
+    },
+    {
+        find: /^#test-vectors\/(.*)$/,
+        replacement: `${resolveAliasDirectoryFromRepoRoot('test-vectors')}$1`,
+    },
+    {
+        find: /^#tests\/(.*)$/,
+        replacement: `${resolveAliasDirectoryFromRepoRoot('tests')}$1`,
+    },
+    {
+        find: /^#tools\/(.*)$/,
+        replacement: `${resolveAliasDirectoryFromRepoRoot('tools')}$1`,
+    },
+];
+const repoRootResolve = {
+    alias: repoRootAliases,
+};
+
 const mobileThrottledProofBenchmarkBrowserInstances: BrowserInstanceOption[] = [
     {
         browser: 'chromium',
@@ -174,6 +243,7 @@ type BrowserProjectInput = {
 };
 
 type BrowserProject = {
+    readonly resolve: typeof repoRootResolve;
     readonly test: {
         readonly name: string;
         readonly include: string[];
@@ -204,6 +274,7 @@ const makeBrowserProject = ({
     testTimeout,
     hookTimeout,
 }: BrowserProjectInput): BrowserProject => ({
+    resolve: repoRootResolve,
     test: {
         name,
         include,
@@ -226,46 +297,10 @@ const makeBrowserProject = ({
 
 export default defineConfig({
     resolve: {
-        alias: {
-            'sealed-lattice': resolveFromRepoRoot(
-                'packages',
-                'sdk',
-                'dist',
-                'index.js',
-            ),
-            '@sealed-lattice/types': resolveFromRepoRoot(
-                'packages',
-                'types',
-                'src',
-                'index.ts',
-            ),
-            '@sealed-lattice/protocol': resolveFromRepoRoot(
-                'packages',
-                'protocol',
-                'src',
-                'index.ts',
-            ),
-            '@sealed-lattice/crypto': resolveFromRepoRoot(
-                'packages',
-                'crypto',
-                'src',
-                'index.ts',
-            ),
-            '@sealed-lattice/wasm': resolveFromRepoRoot(
-                'packages',
-                'wasm',
-                'src',
-                'index.ts',
-            ),
-            '@sealed-lattice/testkit': resolveFromRepoRoot(
-                'packages',
-                'testkit',
-                'src',
-                'index.ts',
-            ),
-        },
+        alias: repoRootAliases,
     },
     test: {
+        alias: repoRootAliases,
         coverage: {
             provider: 'v8',
             reporter: ['text', 'json-summary', 'lcov'],
@@ -280,6 +315,7 @@ export default defineConfig({
         },
         projects: [
             {
+                resolve: repoRootResolve,
                 test: {
                     name: 'node',
                     include: nodeTestIncludes,
@@ -292,6 +328,7 @@ export default defineConfig({
                 },
             },
             {
+                resolve: repoRootResolve,
                 test: {
                     name: 'node-heavy',
                     include: nodeHeavyTestIncludes,
@@ -299,6 +336,7 @@ export default defineConfig({
                 },
             },
             {
+                resolve: repoRootResolve,
                 test: {
                     name: 'node-kernel-heavy',
                     include: nodeKernelHeavyTestIncludes,
@@ -306,6 +344,7 @@ export default defineConfig({
                 },
             },
             {
+                resolve: repoRootResolve,
                 test: {
                     name: 'node-proof-benchmark',
                     include: nodeProofBenchmarkTestIncludes,

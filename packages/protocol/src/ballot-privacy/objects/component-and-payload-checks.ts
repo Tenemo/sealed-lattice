@@ -13,7 +13,8 @@ import { collectSuppliedComponentProofStatementRefusals } from './ballot-proof-s
 import type { BallotProofComponentProofVerificationInput } from './object-contracts.js';
 import {
     allowedBallotProofComponentStatementFormats,
-    ballotProofComponentProofPolicyById,
+    componentProofBytesMustBeEmpty,
+    componentProofStatementFormatIsExpected,
     deriveBallotProofComponentProofBundleDigest,
     deriveBallotProofComponentProofRecordDigest,
     deriveBallotProofComponentProofRoot,
@@ -29,6 +30,7 @@ import {
     proofBytesHexPattern,
     protocolDigestPattern,
     requiredBallotProofComponentIds,
+    expectedComponentProofStatementFormatLabel,
 } from './object-contracts.js';
 import { digestForInvalidComponentInput } from './proof-shell-builders.js';
 
@@ -88,8 +90,6 @@ function collectBallotProofComponentProofInputRefusals(input: {
     ) {
         const expectedComponentId =
             requiredBallotProofComponentIds[componentIndex];
-        const componentProofPolicy =
-            ballotProofComponentProofPolicyById[expectedComponentId];
         const componentProof =
             input.componentProofBundle.componentProofs[componentIndex];
         const proofInput = proofInputsByComponent.get(expectedComponentId);
@@ -151,21 +151,25 @@ function collectBallotProofComponentProofInputRefusals(input: {
             );
         }
         if (
-            proofInput.proofStatementFormat !==
-            componentProofPolicy.proofStatementFormat
+            !componentProofStatementFormatIsExpected(
+                expectedComponentId,
+                proofInput.proofStatementFormat,
+            )
         ) {
             refusedObjects.push(
                 createRefusal(
                     'BallotPackageInvalid',
-                    `Ballot proof component proof statement format for ${expectedComponentId} must be ${componentProofPolicy.proofStatementFormat}.`,
+                    `Ballot proof component proof statement format for ${expectedComponentId} must be ${expectedComponentProofStatementFormatLabel(expectedComponentId)}.`,
                     proofRecordDigest,
                 ),
             );
         }
-        const proofBytesPattern = componentProofPolicy.proofBytesMustBeEmpty
+        const proofBytesMustBeEmpty =
+            componentProofBytesMustBeEmpty(expectedComponentId);
+        const proofBytesPattern = proofBytesMustBeEmpty
             ? proofBytesHexAllowEmptyPattern
             : proofBytesHexPattern;
-        if (componentProofPolicy.proofBytesMustBeEmpty) {
+        if (proofBytesMustBeEmpty) {
             if (proofInput.proofBytesHex !== '') {
                 refusedObjects.push(
                     createRefusal(
@@ -196,7 +200,7 @@ function collectBallotProofComponentProofInputRefusals(input: {
             continue;
         }
         const proofBytesDigest = deriveProofBytesDigest({
-            allowEmpty: componentProofPolicy.proofBytesMustBeEmpty,
+            allowEmpty: proofBytesMustBeEmpty,
             proofBytesHex: proofInput.proofBytesHex,
         });
         const proofSizeBytes = proofInput.proofBytesHex.length / 2;
@@ -502,8 +506,6 @@ const collectBallotProofComponentProofBundleRefusals = (input: {
     ) {
         const expectedComponentId =
             requiredBallotProofComponentIds[componentIndex];
-        const componentProofPolicy =
-            ballotProofComponentProofPolicyById[expectedComponentId];
         const componentProof =
             input.componentProofBundle.componentProofs[componentIndex];
         if (componentProof === undefined) {
@@ -528,7 +530,7 @@ const collectBallotProofComponentProofBundleRefusals = (input: {
             deriveBallotProofComponentProofRecordDigest(componentProofPayload);
         const proofSizeBytesIsValid =
             Number.isSafeInteger(componentProof.proofSizeBytes) &&
-            (componentProofPolicy.proofBytesMustBeEmpty
+            (componentProofBytesMustBeEmpty(expectedComponentId)
                 ? componentProof.proofSizeBytes === 0
                 : componentProof.proofSizeBytes > 0);
 

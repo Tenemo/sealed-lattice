@@ -2,14 +2,14 @@ import {
     buildBallotProofComponentBundleStatement,
     buildBallotProofComponentProofStatementPlans,
     type BallotProofComponentProjectionWitness,
-} from "../../../packages/protocol/src/ballot-privacy/ballot-proof-linear-statement.js";
-import { lowerBallotPrivacyRelationToBackendStatement } from "../../../packages/protocol/src/ballot-privacy/relation-backend-lowering.js";
+} from "#packages/protocol/src/ballot-privacy/ballot-proof-linear-statement.js";
+import { lowerBallotPrivacyRelationToBackendStatement } from "#packages/protocol/src/ballot-privacy/relation-backend-lowering.js";
 import type {
     BallotPrivacyLoweredLinearRelationStatement,
     BallotPrivacyRelationBackendLoweringResult,
     BallotPrivacyRelationBackendPublicContext,
-} from "../../../packages/protocol/src/ballot-privacy/relation-backend-lowering.js";
-import type { BallotPrivacyRelationCompilerInput } from "../../../packages/protocol/src/ballot-privacy/relation-compiler.js";
+} from "#packages/protocol/src/ballot-privacy/relation-backend-lowering.js";
+import type { BallotPrivacyRelationCompilerInput } from "#packages/protocol/src/ballot-privacy/relation-compiler.js";
 
 import {
     componentProjectionSummaries,

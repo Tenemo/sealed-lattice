@@ -7,12 +7,14 @@ pub(super) fn verify_structured_receiver_encryption_component_proof(
     proof_input: &Value,
 ) -> Value {
     let mut refused_objects = Vec::new();
+    let component_proof_record_digest = string_field(component_proof, "componentProofRecordDigest");
     if component_id != "receiver-encryption-component" {
-        refused_objects.push(json!({
-            "code": "BallotPackageInvalid",
-            "message": format!("Structured receiver-encryption proof statements are only valid for receiver-encryption-component, not {component_id}."),
-            "objectDigest": string_field(component_proof, "componentProofRecordDigest")
-        }));
+        refused_objects.push(component_backend_refusal(
+            format!(
+                "Structured receiver-encryption proof statements are only valid for receiver-encryption-component, not {component_id}."
+            ),
+            component_proof_record_digest,
+        ));
     }
     if let Some(proof_statement) =
         object_map(proof_input).and_then(|object| object.get("proofStatement"))
@@ -20,36 +22,40 @@ pub(super) fn verify_structured_receiver_encryption_component_proof(
         if string_field(proof_statement, "objectType")
             == Some("BallotProofComponentProofStatementPlan")
         {
-            refused_objects.push(json!({
-                "code": "BallotPackageInvalid",
-                "message": format!("Structured receiver-encryption proof bytes for {component_id} require a public structured proof statement, not only the proof statement plan."),
-                "objectDigest": string_field(component_proof, "componentProofRecordDigest")
-            }));
+            refused_objects.push(component_backend_refusal(
+                format!(
+                    "Structured receiver-encryption proof bytes for {component_id} require a public structured proof statement, not only the proof statement plan."
+                ),
+                component_proof_record_digest,
+            ));
         } else if derive_ballot_structured_receiver_encryption_statement_digest(proof_statement)
             .as_deref()
             != string_field(proof_statement, "statementDigest")
         {
-            refused_objects.push(json!({
-                "code": "BallotPackageInvalid",
-                "message": format!("Ballot proof component proof statement digest for {component_id} does not match its canonical payload."),
-                "objectDigest": string_field(component_proof, "componentProofRecordDigest")
-            }));
+            refused_objects.push(component_backend_refusal(
+                format!(
+                    "Ballot proof component proof statement digest for {component_id} does not match its canonical payload."
+                ),
+                component_proof_record_digest,
+            ));
         }
         if string_field(proof_statement, "statementDigest")
             != string_field(proof_input, "componentProofStatementDigest")
         {
-            refused_objects.push(json!({
-                "code": "BallotPackageInvalid",
-                "message": format!("Ballot proof component proof statement for {component_id} is not bound to the supplied proof input."),
-                "objectDigest": string_field(component_proof, "componentProofRecordDigest")
-            }));
+            refused_objects.push(component_backend_refusal(
+                format!(
+                    "Ballot proof component proof statement for {component_id} is not bound to the supplied proof input."
+                ),
+                component_proof_record_digest,
+            ));
         }
     } else {
-        refused_objects.push(json!({
-            "code": "BallotPackageInvalid",
-            "message": format!("Ballot proof component proof input for {component_id} must supply its public proof statement object."),
-            "objectDigest": string_field(component_proof, "componentProofRecordDigest")
-        }));
+        refused_objects.push(component_backend_refusal(
+            format!(
+                "Ballot proof component proof input for {component_id} must supply its public proof statement object."
+            ),
+            component_proof_record_digest,
+        ));
     }
     if !refused_objects.is_empty() {
         return component_proof_backend_rejection(
@@ -82,101 +88,77 @@ pub(super) fn verify_structured_receiver_encryption_component_proof(
     let proof_bytes_hex = match string_field(proof_input, "proofBytesHex") {
         Some(proof_bytes_hex) => proof_bytes_hex,
         None => {
-            return component_proof_backend_rejection(
+            return component_backend_invalid_rejection(
                 operation,
                 component_id,
-                vec![json!({
-                    "code": "BallotPackageInvalid",
-                    "message": format!("Ballot proof component {component_id} has no proof bytes."),
-                    "objectDigest": string_field(component_proof, "componentProofRecordDigest")
-                })],
-                json!("BallotPackageInvalid"),
+                format!("Ballot proof component {component_id} has no proof bytes."),
+                component_proof_record_digest,
             );
         }
     };
     let public_randomness_hex = match string_field(proof_input, "publicRandomnessHex") {
         Some(public_randomness_hex) => public_randomness_hex,
         None => {
-            return component_proof_backend_rejection(
+            return component_backend_invalid_rejection(
                 operation,
                 component_id,
-                vec![json!({
-                    "code": "BallotPackageInvalid",
-                    "message": format!("Ballot proof component {component_id} has no public randomness."),
-                    "objectDigest": string_field(component_proof, "componentProofRecordDigest")
-                })],
-                json!("BallotPackageInvalid"),
+                format!("Ballot proof component {component_id} has no public randomness."),
+                component_proof_record_digest,
             );
         }
     };
-    let parameter_set_value = match object_map(proof_input)
-        .and_then(|object| object.get("proofParameterSet"))
-    {
-        Some(parameter_set_value) => parameter_set_value,
-        None => {
-            return component_proof_backend_rejection(
-                operation,
-                component_id,
-                vec![json!({
-                    "code": "BallotPackageInvalid",
-                    "message": format!("Ballot proof component {component_id} has no parameter set."),
-                    "objectDigest": string_field(component_proof, "componentProofRecordDigest")
-                })],
-                json!("BallotPackageInvalid"),
-            );
-        }
-    };
-    let proof_encoding_value = match object_map(proof_input)
-        .and_then(|object| object.get("proofEncoding"))
-    {
-        Some(proof_encoding_value) => proof_encoding_value,
-        None => {
-            return component_proof_backend_rejection(
-                operation,
-                component_id,
-                vec![json!({
-                    "code": "BallotPackageInvalid",
-                    "message": format!("Ballot proof component {component_id} has no proof encoding."),
-                    "objectDigest": string_field(component_proof, "componentProofRecordDigest")
-                })],
-                json!("BallotPackageInvalid"),
-            );
-        }
-    };
-    let parameter_set: LinearProofParameterSet = match serde_json::from_value(
-        parameter_set_value.clone(),
-    ) {
-        Ok(parameter_set) => parameter_set,
-        Err(error) => {
-            return component_proof_backend_rejection(
-                operation,
-                component_id,
-                vec![json!({
-                    "code": "BallotPackageInvalid",
-                    "message": format!("Ballot proof component {component_id} parameter set is invalid: {error}."),
-                    "objectDigest": string_field(component_proof, "componentProofRecordDigest")
-                })],
-                json!("BallotPackageInvalid"),
-            );
-        }
-    };
-    let proof_encoding: LinearProofEncoding = match serde_json::from_value(
-        proof_encoding_value.clone(),
-    ) {
-        Ok(proof_encoding) => proof_encoding,
-        Err(error) => {
-            return component_proof_backend_rejection(
-                operation,
-                component_id,
-                vec![json!({
-                    "code": "BallotPackageInvalid",
-                    "message": format!("Ballot proof component {component_id} proof encoding is invalid: {error}."),
-                    "objectDigest": string_field(component_proof, "componentProofRecordDigest")
-                })],
-                json!("BallotPackageInvalid"),
-            );
-        }
-    };
+    let parameter_set_value =
+        match object_map(proof_input).and_then(|object| object.get("proofParameterSet")) {
+            Some(parameter_set_value) => parameter_set_value,
+            None => {
+                return component_backend_invalid_rejection(
+                    operation,
+                    component_id,
+                    format!("Ballot proof component {component_id} has no parameter set."),
+                    component_proof_record_digest,
+                );
+            }
+        };
+    let proof_encoding_value =
+        match object_map(proof_input).and_then(|object| object.get("proofEncoding")) {
+            Some(proof_encoding_value) => proof_encoding_value,
+            None => {
+                return component_backend_invalid_rejection(
+                    operation,
+                    component_id,
+                    format!("Ballot proof component {component_id} has no proof encoding."),
+                    component_proof_record_digest,
+                );
+            }
+        };
+    let parameter_set: LinearProofParameterSet =
+        match serde_json::from_value(parameter_set_value.clone()) {
+            Ok(parameter_set) => parameter_set,
+            Err(error) => {
+                return component_backend_invalid_rejection(
+                    operation,
+                    component_id,
+                    format!(
+                        "Ballot proof component {component_id} parameter set is invalid: {error}."
+                    ),
+                    component_proof_record_digest,
+                );
+            }
+        };
+    let proof_encoding: LinearProofEncoding =
+        match serde_json::from_value(proof_encoding_value.clone()) {
+            Ok(proof_encoding) => proof_encoding,
+            Err(error) => {
+                return component_backend_invalid_rejection(
+                    operation,
+                    component_id,
+                    format!(
+                        "Ballot proof component {component_id} proof encoding is invalid: {error}."
+                    ),
+                    component_proof_record_digest,
+                );
+            }
+        };
     let target_coefficient_representation: LinearProofTargetCoefficientRepresentation =
         match serde_json::from_value(
             object_map(proof_statement)
@@ -186,15 +168,13 @@ pub(super) fn verify_structured_receiver_encryption_component_proof(
         ) {
             Ok(target_coefficient_representation) => target_coefficient_representation,
             Err(error) => {
-                return component_proof_backend_rejection(
+                return component_backend_invalid_rejection(
                     operation,
                     component_id,
-                    vec![json!({
-                        "code": "BallotPackageInvalid",
-                        "message": format!("Structured receiver-encryption proof statement for {component_id} has invalid targetCoefficientRepresentation: {error}."),
-                        "objectDigest": string_field(component_proof, "componentProofRecordDigest")
-                    })],
-                    json!("BallotPackageInvalid"),
+                    format!(
+                        "Structured receiver-encryption proof statement for {component_id} has invalid targetCoefficientRepresentation: {error}."
+                    ),
+                    component_proof_record_digest,
                 );
             }
         };
@@ -204,15 +184,14 @@ pub(super) fn verify_structured_receiver_encryption_component_proof(
     ) {
         Ok(matrix_coefficient_representation) => matrix_coefficient_representation,
         Err(error) => {
-            return component_proof_backend_rejection(
+            return component_backend_invalid_rejection(
                 operation,
                 component_id,
-                vec![json!({
-                    "code": "BallotPackageInvalid",
-                    "message": format!("Structured receiver-encryption proof statement for {component_id} has invalid matrixCoefficientRepresentation: {}.", error.message),
-                    "objectDigest": string_field(component_proof, "componentProofRecordDigest")
-                })],
-                json!("BallotPackageInvalid"),
+                format!(
+                    "Structured receiver-encryption proof statement for {component_id} has invalid matrixCoefficientRepresentation: {}.",
+                    error.message
+                ),
+                component_proof_record_digest,
             );
         }
     };

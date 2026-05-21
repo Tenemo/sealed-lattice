@@ -326,7 +326,7 @@ fn ballot_proof_record_generation_emits_bound_component_bundle() {
         "encodedAggregateLayoutDigest": test_digest("encoded-aggregate-layout"),
         "encodedShareVectorLayoutDigest": test_digest("encoded-share-vector-layout"),
         "manifestDigest": test_digest("manifest"),
-        "optionCount": 1,
+        "optionCount": 2,
         "pollSpecDigest": test_digest("poll-spec"),
         "receiverEncryptionProfileDigest": test_digest("receiver-encryption-profile"),
         "receiverKeyProofRoot": test_digest("receiver-key-proof-root"),
@@ -337,6 +337,18 @@ fn ballot_proof_record_generation_emits_bound_component_bundle() {
                 "receiverPayloadCiphertextRoot": test_digest("payload-ciphertext-root"),
                 "receiverPayloadDigest": test_digest("payload"),
                 "receiverRosterPosition": 1
+            },
+            {
+                "receiverIdentity": "receiver-2",
+                "receiverPayloadCiphertextRoot": test_digest("payload-ciphertext-root-2"),
+                "receiverPayloadDigest": test_digest("payload-2"),
+                "receiverRosterPosition": 2
+            },
+            {
+                "receiverIdentity": "receiver-3",
+                "receiverPayloadCiphertextRoot": test_digest("payload-ciphertext-root-3"),
+                "receiverPayloadDigest": test_digest("payload-3"),
+                "receiverRosterPosition": 3
             }
         ],
         "receiverPublicKeys": [
@@ -344,6 +356,16 @@ fn ballot_proof_record_generation_emits_bound_component_bundle() {
                 "receiverIdentity": "receiver-1",
                 "receiverPublicKeyDigest": test_digest("receiver-public-key"),
                 "receiverRosterPosition": 1
+            },
+            {
+                "receiverIdentity": "receiver-2",
+                "receiverPublicKeyDigest": test_digest("receiver-public-key-2"),
+                "receiverRosterPosition": 2
+            },
+            {
+                "receiverIdentity": "receiver-3",
+                "receiverPublicKeyDigest": test_digest("receiver-public-key-3"),
+                "receiverRosterPosition": 3
             }
         ],
         "rosterDigest": test_digest("roster"),
@@ -357,9 +379,19 @@ fn ballot_proof_record_generation_emits_bound_component_bundle() {
                 "receiverIdentity": "receiver-1",
                 "receiverRosterPosition": 1,
                 "shareCommitmentDigest": test_digest("share-commitment")
+            },
+            {
+                "receiverIdentity": "receiver-2",
+                "receiverRosterPosition": 2,
+                "shareCommitmentDigest": test_digest("share-commitment-2")
+            },
+            {
+                "receiverIdentity": "receiver-3",
+                "receiverRosterPosition": 3,
+                "shareCommitmentDigest": test_digest("share-commitment-3")
             }
         ],
-        "shareVectorWidth": 11,
+        "shareVectorWidth": 22,
         "thresholdProfileDigest": test_digest("threshold-profile"),
         "tiePolicyDigest": test_digest("tie-policy"),
         "topOptionCount": 1,
@@ -709,6 +741,7 @@ fn ballot_proof_record_generation_emits_bound_component_bundle() {
             "receiver-encryption-component": "a4".repeat(32)
         })),
         component_secret_states: Some(&component_secret_states),
+        unsafe_small_roster_acknowledged: true,
     });
 
     assert_eq!(
@@ -754,6 +787,7 @@ fn ballot_proof_record_generation_emits_bound_component_bundle() {
                 "receiver-encryption-component": "a4".repeat(32)
             })),
             component_secret_states: Some(&component_secret_states),
+            unsafe_small_roster_acknowledged: true,
         });
     assert_eq!(wrong_generation["ok"], false);
     assert_eq!(wrong_generation["unresolvedReason"], "BallotPackageInvalid");
@@ -761,19 +795,14 @@ fn ballot_proof_record_generation_emits_bound_component_bundle() {
 
 #[test]
 fn malformed_receiver_key_proof_rejects_before_backend_gate() {
-    let verification = super::verify_receiver_key_proof_from_command_fields(
-        &json!({
+    let verification = super::verify_receiver_key_proof_from_command_request(&json!({
+        "receiverKeyProof": {
             "objectType": "ReceiverKeyProof",
             "objectVersion": 1,
             "proofBackend": "LocalLinearLatticeRelation",
             "receiverKeyProofRoot": "00"
-        }),
-        None,
-        None,
-        None,
-        None,
-        None,
-    );
+        }
+    }));
 
     assert_eq!(verification["ok"], false);
     assert_eq!(verification["backendAvailable"], true);

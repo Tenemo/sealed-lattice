@@ -20,6 +20,18 @@
       ],
       "@sealed-lattice/testkit": [
         "./packages/testkit/src/index.ts"
+      ],
+      "#packages/*": [
+        "./packages/*"
+      ],
+      "#test-vectors/*": [
+        "./test-vectors/*"
+      ],
+      "#tests/*": [
+        "./tests/*"
+      ],
+      "#tools/*": [
+        "./tools/*"
       ]
     },
     "target": "ES2020",

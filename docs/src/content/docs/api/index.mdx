@@ -15,7 +15,7 @@ Use the root package name for the full supported public surface. The package cur
 - threshold, lifecycle, poll specification, and capability helpers
 - board consistency, target finality, roster-manifest, cast receipt, close record, first-valid ordering, and recovery-epoch helpers
 - ML-DSA-65 signed-root verification inside those election foundation helpers, including runtime envelope-field checks
-- receiver-key proof, ballot proof record, and claim-bearing encoded-score ballot package verification through the packaged Rust/WASM backend
+- receiver-key proof and ballot proof-record verification through the packaged Rust/WASM backend, plus fail-closed claim-bearing package shell validation
 - fail-closed target-bound decryption gates that require a target-bound share-selection profile and explicit proof certificates before decryption-share or recombination capabilities are allowed
 - generated reference pages that confirm the current public surface stays narrow
 
@@ -35,7 +35,7 @@ import {
 
 - you need the stable published package identity
 - you want to verify transcript-core fixtures and run the safe election foundation
-- you need to verify supported receiver-key proofs, ballot proof records, or claim-bearing encoded-score ballot packages
+- you need to verify supported receiver-key proofs or ballot proof records, or validate claim-bearing package shells without accepting package-level claims
 - you want structured board, finality, manifest, first-valid, or recovery refusals
 - you want to follow the documented path without depending on private workspace packages
 

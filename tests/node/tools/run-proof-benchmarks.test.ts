@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import {
     buildProofBenchmarkCommands,
     parseRequestedProofBenchmarkLanes,
-} from '../../../tools/ci/run-proof-benchmarks';
+} from '#tools/ci/run-proof-benchmarks';
 
 const proofBenchmarkEnvironmentVariableName =
     'VITE_SEALED_LATTICE_ENABLE_THROTTLED_MOBILE_BENCHMARK';

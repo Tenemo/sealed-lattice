@@ -4,12 +4,13 @@ import type {
 } from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
-import goldenTranscriptCoreFixturesJson from '../../../../test-vectors/transcript-core/golden-transcript-core.json';
-import malformedObjectFixturesJson from '../../../../test-vectors/transcript-core/malformed-objects.json';
 import {
     loadTranscriptCoreKernel,
     TranscriptCoreKernelCommandError,
 } from '../../src/index';
+
+import goldenTranscriptCoreFixturesJson from '#test-vectors/transcript-core/golden-transcript-core.json';
+import malformedObjectFixturesJson from '#test-vectors/transcript-core/malformed-objects.json';
 
 type NamedFixture = {
     readonly caseName: string;

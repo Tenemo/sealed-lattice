@@ -12,7 +12,7 @@ import type {
 } from '@sealed-lattice/types';
 
 import { createRefusal } from '../../common/verification-helpers.js';
-import { getBallotPrivacyEncodedShareVectorWidth } from '../encoded-share-layout.js';
+import { getBallotPrivacyEncodedShareVectorWidth } from '../protocol-parameters.js';
 
 import type {
     BallotProofRecordPayload,

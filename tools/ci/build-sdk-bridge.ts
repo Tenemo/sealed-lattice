@@ -29,8 +29,9 @@ import {
     type StringLiteral,
 } from 'typescript';
 
-import publicSurface from '../../packages/sdk/public-surface.json' with { type: 'json' };
 import { collectFiles } from '../internal/files.js';
+
+import publicSurface from '#packages/sdk/public-surface.json' with { type: 'json' };
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const sdkDistDirectoryPath = path.resolve(repoRoot, 'packages', 'sdk', 'dist');

@@ -98,6 +98,7 @@ pub(crate) trait StreamedLinearProofStatement {
     ) -> CanonicalResult<Vec<Vec<Vec<u64>>>>;
 }
 
+#[cfg(test)]
 pub fn derive_linear_statement_transcript(
     parameter_set: &LinearProofParameterSet,
     proof_encoding: &LinearProofEncoding,

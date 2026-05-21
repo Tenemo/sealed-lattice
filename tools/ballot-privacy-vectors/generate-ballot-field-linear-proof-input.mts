@@ -2,16 +2,16 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { deriveProtocolDigest } from "../../packages/crypto/src/digests.js";
+import { deriveProtocolDigest } from "#packages/crypto/src/digests.js";
 import {
     createBallotPrivacyProfileSet,
     createShareCommitmentMessageBoundCert,
-} from "../../packages/protocol/src/ballot-privacy/profiles.js";
-import { buildEncodedScoreFieldLinearProofProjection } from "../../packages/protocol/src/ballot-privacy/ballot-proof-linear-statement.js";
-import { lowerBallotPrivacyRelationToBackendStatement } from "../../packages/protocol/src/ballot-privacy/relation-backend-lowering.js";
-import type { BallotPrivacyRelationBackendPublicContext } from "../../packages/protocol/src/ballot-privacy/relation-backend-lowering.js";
-import type { BallotPrivacyRelationCompilerInput } from "../../packages/protocol/src/ballot-privacy/relation-compiler.js";
-import type { ProtocolDigest } from "../../packages/types/src/index.js";
+} from "#packages/protocol/src/ballot-privacy/profiles.js";
+import { buildEncodedScoreFieldLinearProofProjection } from "#packages/protocol/src/ballot-privacy/ballot-proof-linear-statement.js";
+import { lowerBallotPrivacyRelationToBackendStatement } from "#packages/protocol/src/ballot-privacy/relation-backend-lowering.js";
+import type { BallotPrivacyRelationBackendPublicContext } from "#packages/protocol/src/ballot-privacy/relation-backend-lowering.js";
+import type { BallotPrivacyRelationCompilerInput } from "#packages/protocol/src/ballot-privacy/relation-compiler.js";
+import type { ProtocolDigest } from "#packages/types/src/index.js";
 
 const repoRoot = fileURLToPath(new URL("../../", import.meta.url));
 const defaultOutputPath = path.resolve(

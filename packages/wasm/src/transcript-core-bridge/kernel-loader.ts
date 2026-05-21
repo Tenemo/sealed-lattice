@@ -324,6 +324,8 @@ export const createTranscriptCoreKernelLoader = (
                                 input.componentProverRandomnessHexes,
                             ),
                         componentSecretStates: input.componentSecretStates,
+                        unsafeSmallRosterAcknowledged:
+                            input.unsafeSmallRosterAcknowledged,
                     }),
                 verifyBallotProof: (input): BallotPrivacyKernelVerification =>
                     executeCommand<BallotPrivacyKernelVerification>({
@@ -339,6 +341,8 @@ export const createTranscriptCoreKernelLoader = (
                         proofEncoding: input.proofEncoding,
                         publicRandomnessHex: input.publicRandomnessHex,
                         statement: input.statement,
+                        unsafeSmallRosterAcknowledged:
+                            input.unsafeSmallRosterAcknowledged,
                     }),
                 verifyClaimBearingBallotPackage: (
                     input,
@@ -346,6 +350,27 @@ export const createTranscriptCoreKernelLoader = (
                     executeCommand<BallotPrivacyKernelVerification>({
                         command: 'VerifyClaimBearingBallotPackage',
                         ballotPackage: input.ballotPackage,
+                        unsafeSmallRosterAcknowledged:
+                            input.unsafeSmallRosterAcknowledged,
+                    }),
+                generateAggregateDerivationProof: (
+                    input,
+                ): BallotPrivacyProofGeneration =>
+                    executeCommand<BallotPrivacyProofGeneration>({
+                        command: 'GenerateAggregateDerivationProof',
+                        proofInput: input.proofInput,
+                        secretState: input.secretState,
+                        proverRandomnessHex: suppliedOrFreshRandomnessHex(
+                            input.proverRandomnessHex,
+                        ),
+                    }),
+                verifyAggregateDerivationProof: (
+                    input,
+                ): BallotPrivacyKernelVerification =>
+                    executeCommand<BallotPrivacyKernelVerification>({
+                        command: 'VerifyAggregateDerivationProof',
+                        component: input.component,
+                        proofInput: input.proofInput,
                     }),
             };
         })().catch((error: unknown) => {

@@ -21,11 +21,37 @@ pub(crate) fn array_field<'value>(
     object_map(value)?.get(field_name)?.as_array()
 }
 
+pub(crate) fn required_json_field<'value>(
+    value: &'value Value,
+    field_name: &str,
+    object_name: &str,
+) -> crate::encoding::CanonicalResult<&'value Value> {
+    object_map(value)
+        .and_then(|object| object.get(field_name))
+        .ok_or_else(|| invalid_json_field(format!("{object_name}.{field_name} is required")))
+}
+
+pub(crate) fn required_string_field<'value>(
+    value: &'value Value,
+    field_name: &str,
+    object_name: &str,
+) -> crate::encoding::CanonicalResult<&'value str> {
+    string_field(value, field_name)
+        .ok_or_else(|| invalid_json_field(format!("{object_name}.{field_name} must be a string")))
+}
+
 pub(crate) fn is_protocol_digest(value: &str) -> bool {
     value.len() == 128
         && value
             .bytes()
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+fn invalid_json_field(message: impl Into<String>) -> crate::encoding::CanonicalError {
+    crate::encoding::CanonicalError::new(
+        crate::encoding::CanonicalErrorCode::InvalidFixture,
+        message,
+    )
 }
 
 pub(crate) fn unsigned_decimal_string(value: &str) -> bool {

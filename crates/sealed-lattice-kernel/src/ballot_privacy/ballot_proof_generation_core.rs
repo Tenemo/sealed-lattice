@@ -10,33 +10,54 @@ pub(crate) struct BallotProofGenerationInput<'a> {
 }
 
 impl<'a> BallotProofGenerationInput<'a> {
-    pub(crate) fn from_command_fields(
-        linear_statement: Option<&'a Value>,
-        parameter_set: Option<&'a Value>,
-        proof_encoding: Option<&'a Value>,
-        public_randomness_hex: Option<&'a str>,
-        secret_state: Option<&'a Value>,
-        prover_randomness_hex: Option<&'a str>,
+    pub(crate) fn from_required_fields(
+        linear_statement: &'a Value,
+        parameter_set_value: &'a Value,
+        proof_encoding_value: &'a Value,
+        public_randomness_hex: &'a str,
+        secret_state: &'a Value,
+        prover_randomness_hex: &'a str,
+    ) -> Self {
+        Self {
+            linear_statement,
+            parameter_set_value,
+            proof_encoding_value,
+            public_randomness_hex,
+            secret_state,
+            prover_randomness_hex,
+        }
+    }
+
+    pub(crate) fn from_command_request(
+        request: &'a Value,
     ) -> crate::encoding::CanonicalResult<Self> {
         Ok(Self {
-            linear_statement: linear_statement.ok_or_else(|| {
-                invalid_preflight("linearStatement is required for ballot proof generation")
-            })?,
-            parameter_set_value: parameter_set.ok_or_else(|| {
-                invalid_preflight("parameterSet is required for ballot proof generation")
-            })?,
-            proof_encoding_value: proof_encoding.ok_or_else(|| {
-                invalid_preflight("proofEncoding is required for ballot proof generation")
-            })?,
-            public_randomness_hex: public_randomness_hex.ok_or_else(|| {
-                invalid_preflight("publicRandomnessHex is required for ballot proof generation")
-            })?,
-            secret_state: secret_state.ok_or_else(|| {
-                invalid_preflight("secretState is required for ballot proof generation")
-            })?,
-            prover_randomness_hex: prover_randomness_hex.ok_or_else(|| {
-                invalid_preflight("proverRandomnessHex is required for ballot proof generation")
-            })?,
+            linear_statement: required_json_field(
+                request,
+                "linearStatement",
+                "generateBallotProof",
+            )?,
+            parameter_set_value: required_json_field(
+                request,
+                "parameterSet",
+                "generateBallotProof",
+            )?,
+            proof_encoding_value: required_json_field(
+                request,
+                "proofEncoding",
+                "generateBallotProof",
+            )?,
+            public_randomness_hex: required_string_field(
+                request,
+                "publicRandomnessHex",
+                "generateBallotProof",
+            )?,
+            secret_state: required_json_field(request, "secretState", "generateBallotProof")?,
+            prover_randomness_hex: required_string_field(
+                request,
+                "proverRandomnessHex",
+                "generateBallotProof",
+            )?,
         })
     }
 }
@@ -160,25 +181,44 @@ pub(crate) struct BallotComponentProofGenerationInput<'a> {
 }
 
 impl<'a> BallotComponentProofGenerationInput<'a> {
-    pub(crate) fn from_command_fields(
-        component_id: Option<&'a str>,
-        proof_input: Option<&'a Value>,
-        secret_state: Option<&'a Value>,
-        prover_randomness_hex: Option<&'a str>,
+    pub(crate) fn from_required_fields(
+        component_id: &'a str,
+        proof_input: &'a Value,
+        secret_state: &'a Value,
+        prover_randomness_hex: &'a str,
+    ) -> Self {
+        Self {
+            component_id,
+            proof_input,
+            secret_state,
+            prover_randomness_hex,
+        }
+    }
+
+    pub(crate) fn from_command_request(
+        request: &'a Value,
     ) -> crate::encoding::CanonicalResult<Self> {
         Ok(Self {
-            component_id: component_id.ok_or_else(|| {
-                invalid_preflight("componentId is required for component proof generation")
-            })?,
-            proof_input: proof_input.ok_or_else(|| {
-                invalid_preflight("proofInput is required for component proof generation")
-            })?,
-            secret_state: secret_state.ok_or_else(|| {
-                invalid_preflight("secretState is required for component proof generation")
-            })?,
-            prover_randomness_hex: prover_randomness_hex.ok_or_else(|| {
-                invalid_preflight("proverRandomnessHex is required for component proof generation")
-            })?,
+            component_id: required_string_field(
+                request,
+                "componentId",
+                "generateBallotComponentProof",
+            )?,
+            proof_input: required_json_field(
+                request,
+                "proofInput",
+                "generateBallotComponentProof",
+            )?,
+            secret_state: required_json_field(
+                request,
+                "secretState",
+                "generateBallotComponentProof",
+            )?,
+            prover_randomness_hex: required_string_field(
+                request,
+                "proverRandomnessHex",
+                "generateBallotComponentProof",
+            )?,
         })
     }
 }
@@ -190,22 +230,8 @@ pub(crate) fn generate_ballot_proof(input: BallotProofGenerationInput<'_>) -> Va
     }
 }
 
-pub(crate) fn generate_ballot_proof_from_command_fields(
-    linear_statement: Option<&Value>,
-    parameter_set: Option<&Value>,
-    proof_encoding: Option<&Value>,
-    public_randomness_hex: Option<&str>,
-    secret_state: Option<&Value>,
-    prover_randomness_hex: Option<&str>,
-) -> Value {
-    match BallotProofGenerationInput::from_command_fields(
-        linear_statement,
-        parameter_set,
-        proof_encoding,
-        public_randomness_hex,
-        secret_state,
-        prover_randomness_hex,
-    ) {
+pub(crate) fn generate_ballot_proof_from_command_request(request: &Value) -> Value {
+    match BallotProofGenerationInput::from_command_request(request) {
         Ok(input) => generate_ballot_proof(input),
         Err(error) => structural_rejection("generateBallotProof", vec![error.to_json_value()]),
     }
@@ -275,18 +301,8 @@ pub(crate) fn generate_ballot_component_proof(
     }
 }
 
-pub(crate) fn generate_ballot_component_proof_from_command_fields(
-    component_id: Option<&str>,
-    proof_input: Option<&Value>,
-    secret_state: Option<&Value>,
-    prover_randomness_hex: Option<&str>,
-) -> Value {
-    match BallotComponentProofGenerationInput::from_command_fields(
-        component_id,
-        proof_input,
-        secret_state,
-        prover_randomness_hex,
-    ) {
+pub(crate) fn generate_ballot_component_proof_from_command_request(request: &Value) -> Value {
+    match BallotComponentProofGenerationInput::from_command_request(request) {
         Ok(input) => generate_ballot_component_proof(input),
         Err(error) => {
             structural_rejection("generateBallotComponentProof", vec![error.to_json_value()])

@@ -7,4 +7,4 @@
  *
  * @packageDocumentation
  */
-export * from '../../packages/sdk/src/index.js';
+export * from '#packages/sdk/src/index.js';

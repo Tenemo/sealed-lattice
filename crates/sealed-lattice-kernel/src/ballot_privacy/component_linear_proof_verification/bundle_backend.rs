@@ -12,10 +12,10 @@ pub(crate) fn verify_component_proof_bundle_backend(
             return Some(component_proof_backend_rejection(
                 operation,
                 "component-proof-bundle",
-                vec![json!({
-                    "code": "BallotPackageInvalid",
-                    "message": "Ballot proof component backend verification requires component proof inputs.",
-                })],
+                vec![component_backend_refusal(
+                    "Ballot proof component backend verification requires component proof inputs.",
+                    None,
+                )],
                 json!("BallotPackageInvalid"),
             ));
         }
@@ -26,10 +26,10 @@ pub(crate) fn verify_component_proof_bundle_backend(
             return Some(component_proof_backend_rejection(
                 operation,
                 "component-proof-bundle",
-                vec![json!({
-                    "code": "BallotPackageInvalid",
-                    "message": "Ballot proof component backend verification inputs must be an array.",
-                })],
+                vec![component_backend_refusal(
+                    "Ballot proof component backend verification inputs must be an array.",
+                    None,
+                )],
                 json!("BallotPackageInvalid"),
             ));
         }
@@ -40,10 +40,10 @@ pub(crate) fn verify_component_proof_bundle_backend(
             return Some(component_proof_backend_rejection(
                 operation,
                 "component-proof-bundle",
-                vec![json!({
-                    "code": "BallotPackageInvalid",
-                    "message": "Ballot proof component proof bundle must contain component proofs.",
-                })],
+                vec![component_backend_refusal(
+                    "Ballot proof component proof bundle must contain component proofs.",
+                    None,
+                )],
                 json!("BallotPackageInvalid"),
             ));
         }
@@ -54,10 +54,10 @@ pub(crate) fn verify_component_proof_bundle_backend(
             return Some(component_proof_backend_rejection(
                 operation,
                 "component-proof-bundle",
-                vec![json!({
-                    "code": "BallotPackageInvalid",
-                    "message": "Ballot proof component backend input is missing componentId.",
-                })],
+                vec![component_backend_refusal(
+                    "Ballot proof component backend input is missing componentId.",
+                    None,
+                )],
                 json!("BallotPackageInvalid"),
             ));
         };
@@ -68,10 +68,12 @@ pub(crate) fn verify_component_proof_bundle_backend(
             return Some(component_proof_backend_rejection(
                 operation,
                 component_id,
-                vec![json!({
-                    "code": "BallotPackageInvalid",
-                    "message": format!("Ballot proof component backend inputs contain duplicate componentId {component_id}."),
-                })],
+                vec![component_backend_refusal(
+                    format!(
+                        "Ballot proof component backend inputs contain duplicate componentId {component_id}."
+                    ),
+                    None,
+                )],
                 json!("BallotPackageInvalid"),
             ));
         }
@@ -82,11 +84,10 @@ pub(crate) fn verify_component_proof_bundle_backend(
             return Some(component_proof_backend_rejection(
                 operation,
                 "component-proof-bundle",
-                vec![json!({
-                    "code": "BallotPackageInvalid",
-                    "message": "Ballot proof component backend proof record is missing componentId.",
-                    "objectDigest": string_field(component_proof, "componentProofRecordDigest")
-                })],
+                vec![component_backend_refusal(
+                    "Ballot proof component backend proof record is missing componentId.",
+                    string_field(component_proof, "componentProofRecordDigest"),
+                )],
                 json!("BallotPackageInvalid"),
             ));
         };
@@ -94,11 +95,12 @@ pub(crate) fn verify_component_proof_bundle_backend(
             return Some(component_proof_backend_rejection(
                 operation,
                 component_id,
-                vec![json!({
-                    "code": "BallotPackageInvalid",
-                    "message": format!("Ballot proof component backend proof record for {component_id} has no matching proof input."),
-                    "objectDigest": string_field(component_proof, "componentProofRecordDigest")
-                })],
+                vec![component_backend_refusal(
+                    format!(
+                        "Ballot proof component backend proof record for {component_id} has no matching proof input."
+                    ),
+                    string_field(component_proof, "componentProofRecordDigest"),
+                )],
                 json!("BallotPackageInvalid"),
             ));
         };

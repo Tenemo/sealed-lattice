@@ -51,6 +51,17 @@ describe('transcript-core kernel in Node', () => {
                 },
             });
         const createStatement = (): Record<string, unknown> => {
+            const receiverReferences = Array.from(
+                { length: 20 },
+                (_unusedValue, receiverIndex) => {
+                    const receiverRosterPosition = receiverIndex + 1;
+
+                    return {
+                        receiverIdentity: `receiver-${receiverRosterPosition}`,
+                        receiverRosterPosition,
+                    };
+                },
+            );
             const statementPayload = {
                 actionContextDigest: digest('action-context'),
                 aggregateInputEncodingProfileDigest: digest(
@@ -83,25 +94,25 @@ describe('transcript-core kernel in Node', () => {
                 ),
                 receiverKeyProofRoot: digest('receiver-key-proof-root'),
                 receiverKeyRoot: digest('receiver-key-root'),
-                receiverPayloads: [
-                    {
-                        receiverIdentity: 'receiver-1',
+                receiverPayloads: receiverReferences.map(
+                    (receiverReference) => ({
+                        ...receiverReference,
                         receiverPayloadCiphertextRoot: digest(
-                            'receiver-ciphertext-1',
+                            `receiver-ciphertext-${receiverReference.receiverRosterPosition}`,
                         ),
-                        receiverPayloadDigest: digest('receiver-payload-1'),
-                        receiverRosterPosition: 1,
-                    },
-                ],
-                receiverPublicKeys: [
-                    {
-                        receiverIdentity: 'receiver-1',
+                        receiverPayloadDigest: digest(
+                            `receiver-payload-${receiverReference.receiverRosterPosition}`,
+                        ),
+                    }),
+                ),
+                receiverPublicKeys: receiverReferences.map(
+                    (receiverReference) => ({
+                        ...receiverReference,
                         receiverPublicKeyDigest: digest(
-                            'receiver-public-key-1',
+                            `receiver-public-key-${receiverReference.receiverRosterPosition}`,
                         ),
-                        receiverRosterPosition: 1,
-                    },
-                ],
+                    }),
+                ),
                 rosterDigest: digest('roster'),
                 rosterExternalAcceptanceDigest: digest('external-acceptance'),
                 scoreDomainDigest: digest('score-domain'),
@@ -114,13 +125,14 @@ describe('transcript-core kernel in Node', () => {
                 shareCommitmentProfileDigest: digest(
                     'share-commitment-profile',
                 ),
-                shareCommitments: [
-                    {
-                        receiverIdentity: 'receiver-1',
-                        receiverRosterPosition: 1,
-                        shareCommitmentDigest: digest('share-commitment-1'),
-                    },
-                ],
+                shareCommitments: receiverReferences.map(
+                    (receiverReference) => ({
+                        ...receiverReference,
+                        shareCommitmentDigest: digest(
+                            `share-commitment-${receiverReference.receiverRosterPosition}`,
+                        ),
+                    }),
+                ),
                 shareVectorWidth: 220,
                 thresholdProfileDigest: digest('threshold-profile'),
                 tiePolicyDigest: digest('tie-policy'),

@@ -35,7 +35,8 @@ pub(super) fn ballot_proof_backend_inputs<'a>(
         proof_bytes_hex: parts.proof_bytes_hex,
         proof_encoding: parts.proof_encoding,
         public_randomness_hex: parts.public_randomness_hex,
-        skip_component_backend_verification: false,
+        component_proof_verification_mode: super::ComponentProofVerificationMode::VerifyBackend,
+        unsafe_small_roster_acknowledged: false,
     }
 }
 
@@ -191,14 +192,14 @@ fn ballot_proof_generation_command_emits_verifying_dense_proof_bytes() {
         "sourceWitnessCoefficients": [witness_polynomial]
     });
 
-    let generation = super::generate_ballot_proof_from_command_fields(
-        Some(&linear_statement),
-        Some(&parameter_set_value),
-        Some(&proof_encoding_value),
-        Some(&public_randomness_hex),
-        Some(&secret_state),
-        Some(&prover_randomness_hex),
-    );
+    let generation = super::generate_ballot_proof_from_command_request(&json!({
+        "linearStatement": linear_statement.clone(),
+        "parameterSet": parameter_set_value.clone(),
+        "proofEncoding": proof_encoding_value.clone(),
+        "publicRandomnessHex": public_randomness_hex.clone(),
+        "secretState": secret_state.clone(),
+        "proverRandomnessHex": prover_randomness_hex.clone()
+    }));
 
     assert_eq!(
         generation["ok"], true,
@@ -227,12 +228,13 @@ fn ballot_proof_generation_command_emits_verifying_dense_proof_bytes() {
         "proofEncoding": proof_encoding_value,
         "publicRandomnessHex": public_randomness_hex
     });
-    let component_generation = super::generate_ballot_component_proof_from_command_fields(
-        Some("score-and-shamir-field-component"),
-        Some(&proof_input),
-        Some(&secret_state),
-        Some(&prover_randomness_hex),
-    );
+    let component_generation =
+        super::generate_ballot_component_proof_from_command_request(&json!({
+            "componentId": "score-and-shamir-field-component",
+            "proofInput": proof_input,
+            "secretState": secret_state.clone(),
+            "proverRandomnessHex": prover_randomness_hex
+        }));
 
     assert_eq!(
         component_generation["ok"], true,
@@ -331,12 +333,13 @@ fn structured_share_commitment_component_generation_uses_compact_statement() {
         ]
     });
 
-    let component_generation = super::generate_ballot_component_proof_from_command_fields(
-        Some("share-commitment-component"),
-        Some(&proof_input),
-        Some(&secret_state),
-        Some(&"0c".repeat(32)),
-    );
+    let component_generation =
+        super::generate_ballot_component_proof_from_command_request(&json!({
+            "componentId": "share-commitment-component",
+            "proofInput": proof_input.clone(),
+            "secretState": secret_state.clone(),
+            "proverRandomnessHex": "0c".repeat(32)
+        }));
 
     assert_eq!(
         component_generation["ok"], true,
@@ -352,12 +355,12 @@ fn structured_share_commitment_component_generation_uses_compact_statement() {
     let mut mutated_proof_input = proof_input;
     mutated_proof_input["proofStatement"]["receiverRows"][0]["commitmentPolynomialVector"][0][0] =
         json!(1);
-    let mutated_generation = super::generate_ballot_component_proof_from_command_fields(
-        Some("share-commitment-component"),
-        Some(&mutated_proof_input),
-        Some(&secret_state),
-        Some(&"0c".repeat(32)),
-    );
+    let mutated_generation = super::generate_ballot_component_proof_from_command_request(&json!({
+        "componentId": "share-commitment-component",
+        "proofInput": mutated_proof_input,
+        "secretState": secret_state,
+        "proverRandomnessHex": "0c".repeat(32)
+    }));
     assert_eq!(mutated_generation["ok"], false);
     assert_eq!(
         mutated_generation["unresolvedReason"],

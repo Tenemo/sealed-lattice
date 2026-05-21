@@ -1,16 +1,17 @@
 import { describe, expect, it } from 'vitest';
 
+import { loadTranscriptCoreKernel } from '../../src/index';
+
 import {
     formatProofBenchmarkReport,
     runMandatoryBallotProofRecordBenchmark,
     runReceiverKeyProofBenchmark,
     type RuntimeBenchmarkContext,
-} from '../../../../tests/support/ballot-privacy-proof-benchmarks';
+} from '#tests/support/ballot-privacy-proof-benchmarks';
 import {
     createJsonCheckpointStore,
     shouldResumeFromTestCheckpoints,
-} from '../../../../tests/support/node-test-checkpoints';
-import { loadTranscriptCoreKernel } from '../../src/index';
+} from '#tests/support/node-test-checkpoints';
 
 const proofBenchmarkTimeoutMs = 60 * 60_000;
 
@@ -26,7 +27,7 @@ const expectPositiveFiniteDuration = (durationMs: number): void => {
 
 describe('ballot privacy proof benchmarks', () => {
     it(
-        'records mandatory ballot proof generation and verification metrics through WASM',
+        'records mandatory ballot proof generation, proof verification, and package boundary metrics through WASM',
         async () => {
             const kernel = await loadTranscriptCoreKernel();
             const { claimVerification, generation, report, verification } =
@@ -49,9 +50,9 @@ describe('ballot privacy proof benchmarks', () => {
                 unresolvedReason: null,
             });
             expect(claimVerification).toMatchObject({
-                ok: true,
+                ok: false,
                 operation: 'verifyClaimBearingBallotPackage',
-                unresolvedReason: null,
+                unresolvedReason: 'BallotPackageInvalid',
             });
             expect(report.proofSizeBytes).toBeGreaterThan(0);
             expect(report.totalComponentProofSizeBytes).toBeGreaterThan(0);

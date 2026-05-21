@@ -16,14 +16,18 @@ export {
     addShareCommitmentOpenings,
     createShareCommitment,
     verifyShareCommitmentWitness,
-    generateReceiverState,
-} from './lattice-primitives/share-commitments-and-receiver-keys.js';
+} from './lattice-primitives/share-commitments.js';
+export { generateReceiverState } from './lattice-primitives/receiver-keys.js';
 export {
     verifyReceiverKeyWitness,
     createReceiverKeyProof,
+} from './lattice-primitives/receiver-key-proofs.js';
+export {
     encryptReceiverPayload,
     verifyReceiverPayloadWitness,
+} from './lattice-primitives/payload-encryption.js';
+export {
     createFixtureRandomnessSource,
     assertNoFixtureRandomnessInProduction,
     encodeReceiverPayloadPlaintextForTests,
-} from './lattice-primitives/receiver-key-proofs-and-encryption.js';
+} from './lattice-primitives/fixture-randomness.js';

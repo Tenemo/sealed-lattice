@@ -12,6 +12,33 @@ pub struct BallotProofRecordGenerationInput<'a> {
     pub prover_randomness_hex: Option<&'a str>,
     pub component_prover_randomness_hexes: Option<&'a Value>,
     pub component_secret_states: Option<&'a Value>,
+    pub unsafe_small_roster_acknowledged: bool,
+}
+
+impl<'a> BallotProofRecordGenerationInput<'a> {
+    pub(crate) fn from_command_request(request: &'a Value) -> Self {
+        Self {
+            statement: object_map(request).and_then(|object| object.get("statement")),
+            linear_statement: object_map(request).and_then(|object| object.get("linearStatement")),
+            parameter_set: object_map(request).and_then(|object| object.get("parameterSet")),
+            proof_encoding: object_map(request).and_then(|object| object.get("proofEncoding")),
+            public_randomness_hex: string_field(request, "publicRandomnessHex"),
+            component_bundle_statement: object_map(request)
+                .and_then(|object| object.get("componentBundleStatement")),
+            component_proof_inputs: object_map(request)
+                .and_then(|object| object.get("componentProofInputs")),
+            secret_state: object_map(request).and_then(|object| object.get("secretState")),
+            prover_randomness_hex: string_field(request, "proverRandomnessHex"),
+            component_prover_randomness_hexes: object_map(request)
+                .and_then(|object| object.get("componentProverRandomnessHexes")),
+            component_secret_states: object_map(request)
+                .and_then(|object| object.get("componentSecretStates")),
+            unsafe_small_roster_acknowledged: object_map(request)
+                .and_then(|object| object.get("unsafeSmallRosterAcknowledged"))
+                .and_then(Value::as_bool)
+                == Some(true),
+        }
+    }
 }
 
 pub(crate) struct RequiredBallotProofRecordGenerationInput<'a> {
@@ -26,6 +53,7 @@ pub(crate) struct RequiredBallotProofRecordGenerationInput<'a> {
     pub(crate) prover_randomness_hex: &'a str,
     pub(crate) component_prover_randomness_hexes: &'a Value,
     pub(crate) component_secret_states: Option<&'a Value>,
+    pub(crate) unsafe_small_roster_acknowledged: bool,
 }
 
 impl<'a> RequiredBallotProofRecordGenerationInput<'a> {
@@ -78,6 +106,7 @@ impl<'a> RequiredBallotProofRecordGenerationInput<'a> {
                     )
                 })?,
             component_secret_states: input.component_secret_states,
+            unsafe_small_roster_acknowledged: input.unsafe_small_roster_acknowledged,
         })
     }
 

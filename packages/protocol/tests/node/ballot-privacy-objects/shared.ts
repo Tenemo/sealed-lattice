@@ -3,6 +3,9 @@ import { deriveProtocolDigest } from '@sealed-lattice/crypto';
 import type {
     BallotProofComponentId,
     BallotProofComponentProofBundle,
+    BallotProofReceiverPayloadReference,
+    BallotProofReceiverPublicKeyReference,
+    BallotProofShareCommitmentReference,
     BallotProofStatement,
     ProtocolDigest,
     ReceiverKeyProofRootEvidence,
@@ -32,6 +35,54 @@ import {
 const digest = (label: string): ProtocolDigest =>
     deriveProtocolDigest('ActionContextDigest', { label });
 
+const defaultParticipantCount = 20;
+
+const createReceiverPublicKeyReferences = (
+    participantCount = defaultParticipantCount,
+): readonly BallotProofReceiverPublicKeyReference[] =>
+    Array.from({ length: participantCount }, (_, participantIndex) => {
+        const receiverRosterPosition = participantIndex + 1;
+
+        return {
+            receiverIdentity: `receiver-${receiverRosterPosition}`,
+            receiverRosterPosition,
+            receiverPublicKeyDigest: digest(
+                `receiver-public-key-${receiverRosterPosition}`,
+            ),
+        };
+    });
+
+const createReceiverPayloadReferences = (
+    receiverPublicKeyReferences: ReturnType<
+        typeof createReceiverPublicKeyReferences
+    >,
+): readonly BallotProofReceiverPayloadReference[] =>
+    receiverPublicKeyReferences.map((receiverPublicKeyReference) => ({
+        receiverIdentity: receiverPublicKeyReference.receiverIdentity,
+        receiverRosterPosition:
+            receiverPublicKeyReference.receiverRosterPosition,
+        receiverPayloadDigest: digest(
+            `receiver-payload-${receiverPublicKeyReference.receiverRosterPosition}`,
+        ),
+        receiverPayloadCiphertextRoot: digest(
+            `receiver-ciphertext-${receiverPublicKeyReference.receiverRosterPosition}`,
+        ),
+    }));
+
+const createShareCommitmentReferences = (
+    receiverPublicKeyReferences: ReturnType<
+        typeof createReceiverPublicKeyReferences
+    >,
+): readonly BallotProofShareCommitmentReference[] =>
+    receiverPublicKeyReferences.map((receiverPublicKeyReference) => ({
+        receiverIdentity: receiverPublicKeyReference.receiverIdentity,
+        receiverRosterPosition:
+            receiverPublicKeyReference.receiverRosterPosition,
+        shareCommitmentDigest: digest(
+            `share-commitment-${receiverPublicKeyReference.receiverRosterPosition}`,
+        ),
+    }));
+
 type ClaimBearingPackageVerificationInput = Parameters<
     typeof verifyClaimBearingBallotPackage
 >[0]['ballotPackage'];
@@ -47,11 +98,20 @@ const requiredComponentIds = [
 const createStatement = (
     overrides: Partial<BallotProofStatement> = {},
 ): BallotProofStatement => {
-    const profileSet = createBallotPrivacyProfileSet();
+    const profileOptionCount =
+        typeof overrides.optionCount === 'number' &&
+        overrides.optionCount >= 2 &&
+        overrides.optionCount <= 20
+            ? overrides.optionCount
+            : 20;
+    const profileSet = createBallotPrivacyProfileSet({
+        optionCount: profileOptionCount,
+    });
     const boundCertificate = createShareCommitmentMessageBoundCert({
         maximumCanonicalTurnout: 20,
         shareCommitmentProfile: profileSet.shareCommitmentProfile,
     });
+    const receiverPublicKeys = createReceiverPublicKeyReferences();
 
     return buildBallotProofStatement({
         ceremonyId: 'ceremony-1',
@@ -71,44 +131,9 @@ const createStatement = (
         rosterExternalAcceptanceDigest: digest('external-acceptance'),
         receiverKeyRoot: digest('receiver-key-root'),
         receiverKeyProofRoot: digest('receiver-key-proof-root'),
-        receiverPublicKeys: [
-            {
-                receiverIdentity: 'receiver-1',
-                receiverRosterPosition: 1,
-                receiverPublicKeyDigest: digest('receiver-public-key-1'),
-            },
-            {
-                receiverIdentity: 'receiver-2',
-                receiverRosterPosition: 2,
-                receiverPublicKeyDigest: digest('receiver-public-key-2'),
-            },
-        ],
-        receiverPayloads: [
-            {
-                receiverIdentity: 'receiver-1',
-                receiverRosterPosition: 1,
-                receiverPayloadDigest: digest('receiver-payload-1'),
-                receiverPayloadCiphertextRoot: digest('receiver-ciphertext-1'),
-            },
-            {
-                receiverIdentity: 'receiver-2',
-                receiverRosterPosition: 2,
-                receiverPayloadDigest: digest('receiver-payload-2'),
-                receiverPayloadCiphertextRoot: digest('receiver-ciphertext-2'),
-            },
-        ],
-        shareCommitments: [
-            {
-                receiverIdentity: 'receiver-1',
-                receiverRosterPosition: 1,
-                shareCommitmentDigest: digest('share-commitment-1'),
-            },
-            {
-                receiverIdentity: 'receiver-2',
-                receiverRosterPosition: 2,
-                shareCommitmentDigest: digest('share-commitment-2'),
-            },
-        ],
+        receiverPublicKeys,
+        receiverPayloads: createReceiverPayloadReferences(receiverPublicKeys),
+        shareCommitments: createShareCommitmentReferences(receiverPublicKeys),
         shareCommitmentProfileDigest:
             profileSet.shareCommitmentProfile.shareCommitmentProfileDigest,
         receiverEncryptionProfileDigest:
@@ -205,11 +230,12 @@ function createComponentProofStatementFixture(input: {
         objectVersion: 1,
         proofBytesAvailability:
             input.proofStatementFormat ===
-                'structured-module-lwe-linear-proof-v1' ||
-            input.proofStatementFormat ===
-                'structured-module-sis-share-commitment-v1'
+            'structured-module-lwe-linear-proof-v1'
                 ? 'requires-structured-proof-statement'
-                : 'public-zero-witness-binding-check',
+                : input.proofStatementFormat ===
+                    'structured-module-sis-share-commitment-v1'
+                  ? 'requires-sparse-proof-statement'
+                  : 'public-zero-witness-binding-check',
         proofLoweringStatus: 'explicitRowsAvailable',
         proofStatementFormat: input.proofStatementFormat,
         proofSystemRingDegree:
@@ -434,29 +460,26 @@ const createComponentProofVerificationInputsFixture = (
         ),
     );
 
-const createStructurallyBoundObjects = (): {
+const createStructurallyBoundObjects = (
+    input: {
+        readonly optionCount?: number;
+        readonly participantCount?: number;
+    } = {},
+): {
     readonly statement: BallotProofStatement;
     readonly receiverKeyProofRootEvidence: ReceiverKeyProofRootEvidence;
     readonly receiverPayloads: readonly ReceiverPayload[];
     readonly shareCommitments: readonly ShareCommitment[];
 } => {
-    const profileSet = createBallotPrivacyProfileSet();
+    const optionCount = input.optionCount ?? 20;
+    const participantCount = input.participantCount ?? defaultParticipantCount;
+    const profileSet = createBallotPrivacyProfileSet({ optionCount });
     const boundCertificate = createShareCommitmentMessageBoundCert({
-        maximumCanonicalTurnout: 20,
+        maximumCanonicalTurnout: Math.max(20, participantCount),
         shareCommitmentProfile: profileSet.shareCommitmentProfile,
     });
-    const receiverPublicKeyReferences = [
-        {
-            receiverIdentity: 'receiver-1',
-            receiverRosterPosition: 1,
-            receiverPublicKeyDigest: digest('receiver-public-key-1'),
-        },
-        {
-            receiverIdentity: 'receiver-2',
-            receiverRosterPosition: 2,
-            receiverPublicKeyDigest: digest('receiver-public-key-2'),
-        },
-    ];
+    const receiverPublicKeyReferences =
+        createReceiverPublicKeyReferences(participantCount);
     const receiverPayloads = receiverPublicKeyReferences.map(
         (receiverPublicKeyReference) =>
             createReceiverPayloadShell({
@@ -520,7 +543,7 @@ const createStructurallyBoundObjects = (): {
         scoreDomainDigest: digest('score-domain'),
         tiePolicyDigest: digest('tie-policy'),
         topOptionCount: 3,
-        optionCount: 20,
+        optionCount,
         voterIdentityDigest: digest('voter-1'),
         voterRosterPosition: 1,
         voterSigningKeyDigest: digest('voter-signing-key'),

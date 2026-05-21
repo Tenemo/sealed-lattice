@@ -59,6 +59,10 @@ const requiredPublicFunctions = [
     ],
     ['isValidLifecycleTransition', isValidLifecycleTransition],
     ['validatePollSpec', validatePollSpec],
+    [
+        'verifyAggregateDerivationComponent',
+        publicApiRuntimeRecord.verifyAggregateDerivationComponent,
+    ],
     ['verifyBallotProof', publicApiRuntimeRecord.verifyBallotProof],
     ['verifyBoardConsistency', publicApiRuntimeRecord.verifyBoardConsistency],
     ['verifyBridgeProof', publicApiRuntimeRecord.verifyBridgeProof],

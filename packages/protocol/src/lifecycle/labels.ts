@@ -294,8 +294,8 @@ export const deriveLifecycleLabels = (
         ]),
     );
 
-    if (input.thresholdProfile.rosterProfileKind === 'UnsafeMicroRoster') {
-        modes.push('UnsafeMicroRoster');
+    if (input.thresholdProfile.rosterProfileKind === 'UnsafeSmallRoster') {
+        modes.push('UnsafeSmallRoster');
     }
     modes.push(...deriveSecurityProfileModes(input));
     if (input.mobileFlagshipProfile === true) {

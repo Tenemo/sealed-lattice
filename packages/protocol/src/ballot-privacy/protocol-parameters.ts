@@ -1,10 +1,14 @@
 export const ballotPrivacyMaximumOptionCount = 20 as const;
+export const ballotPrivacyMinimumOptionCount = 2 as const;
 export const ballotPrivacyScoreBucketCount = 10 as const;
 export const ballotPrivacyEncodedCoordinatesPerOption = 11 as const;
 export const ballotPrivacyMandatoryOptionCount = 20 as const;
 export const ballotPrivacyMandatoryReceiverCount = 20 as const;
 export const ballotPrivacyMandatoryThreshold = 7 as const;
 export const ballotPrivacyMandatoryShareVectorWidth = 220 as const;
+export const ballotPrivacyMinimumUnsafeParticipantCount = 3 as const;
+export const ballotPrivacyMinimumSafeParticipantCount = 20 as const;
+export const ballotPrivacyMaximumParticipantCount = 50 as const;
 
 export const ballotPrivacyFieldModulus = 65_537 as const;
 export const ballotPrivacyMaximumCanonicalFieldElement = 65_536 as const;

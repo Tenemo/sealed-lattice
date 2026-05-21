@@ -26,5 +26,5 @@ export const defaultTiePolicy =
     'HigherScoreThenLowerOptionIndex' as const satisfies TiePolicy;
 
 export const minimumUnsafeRosterSize = 3;
-export const mandatoryClaimRosterSize = 20;
-export const maximumCertificateGatedRosterSize = 50;
+export const minimumSafeRosterSize = 20;
+export const maximumSafeRosterSize = 50;

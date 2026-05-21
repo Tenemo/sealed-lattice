@@ -1,4 +1,4 @@
-import type { BallotPrivacyRelationCompilerInput } from "../../../packages/protocol/src/ballot-privacy/relation-compiler.js";
+import type { BallotPrivacyRelationCompilerInput } from "#packages/protocol/src/ballot-privacy/relation-compiler.js";
 
 import { oneHotScore } from "./relation-fixtures-and-summaries.mjs";
 

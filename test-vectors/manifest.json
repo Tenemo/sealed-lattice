@@ -15,7 +15,7 @@
     },
     {
       "path": "ballot-privacy/proof-stack-profile.json",
-      "sha256": "54aa2b69939ed89a68c54d69a1d57a6c33f21f829f778e23bb9095ad0db45a32"
+      "sha256": "f9e154d4a80e438ce7369467376f23b238b3fa8ddfc3b0a71b603241d5778f5a"
     },
     {
       "path": "ballot-privacy/README.md",
@@ -35,7 +35,7 @@
     },
     {
       "path": "election-foundation/capability-refusals.json",
-      "sha256": "79f2693b87d933a5881b2cd84fcfdc22d9a91b74403fd2a21e32808f968f57a9"
+      "sha256": "77cc338417b5cbe4fb699ad8c161e37a7bf77704dae650a40a158179b2d997eb"
     },
     {
       "path": "election-foundation/deterministic-fixtures.json",
@@ -51,7 +51,7 @@
     },
     {
       "path": "election-foundation/threshold-profiles.json",
-      "sha256": "fa7dac1eeb504e9ecdd284c51c757f12c10d1097830e68ab788a1467ec239052"
+      "sha256": "97ba1f9c963c23262cf043703c508685456a93d98cd449a38988c7b64dff52c4"
     },
     {
       "path": "plaintext-oracle/comparator-polynomials.json",
@@ -75,15 +75,15 @@
     },
     {
       "path": "pvss-ballot/aggregate-shares.json",
-      "sha256": "80fb6a5d35ed2f194c3bdb7607ffbc94f976e170b7b25937d93e2aaaf590a039"
+      "sha256": "c3eafcbb6acece5eda1cebb04ef05e15400e3b311ad6f9e20972e2684e82f768"
     },
     {
       "path": "pvss-ballot/ballot-algebra.json",
-      "sha256": "bc0a6cbe8f0eda798b5d0f8191d079bec5e1b62746626bc55888d3b0151d430e"
+      "sha256": "b5e6595cf82c14aa4370464a3fba8abd739cf35d3d8ad5760c7e1e5d0ccb299b"
     },
     {
       "path": "pvss-ballot/canonical-ballot-set.json",
-      "sha256": "c82b8e0323af5f0df94e0aff30e59bc2da4f7cb95c8bf3036e996f1c674ddac0"
+      "sha256": "1b1cf55bcdcc36c4bd8a0aef88bcc92da2ff32ed5e5eed1b7451f55f91f5eaf6"
     },
     {
       "path": "transcript-core/golden-transcript-core.json",

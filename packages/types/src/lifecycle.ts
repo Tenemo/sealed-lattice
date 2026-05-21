@@ -51,20 +51,16 @@ export type ThresholdProfileInput = {
     readonly rosterSize: number;
     readonly heBackendCorruptionModel?: HeBackendCorruptionModel;
     readonly targetBoundShareSelectionProfile?: TargetBoundShareSelectionProfile;
+    readonly unsafeSmallRosterAcknowledged?: boolean;
     readonly unsafeMicroRosterAcknowledged?: boolean;
 };
 
 /** Roster profile classification for the derived threshold parameters. */
-export type RosterProfileKind =
-    | 'UnsafeMicroRoster'
-    | 'MandatoryN20'
-    | 'CertificateGatedRange';
+export type RosterProfileKind = 'UnsafeSmallRoster' | 'SupportedRosterRange';
 
 /** Warning label emitted when threshold parameters require caveats. */
 export type ThresholdWarning =
-    | 'UnsafeMicroRoster'
-    | 'CertificateGatedProfile'
-    | 'BackendCertificateRequired'
+    | 'UnsafeSmallRoster'
     | 'BackendCorruptionBoundTooHigh'
     | 'ShareSelectionProfileRequired';
 
@@ -187,6 +183,8 @@ export type LifecycleState =
 export type PrimaryStatusLabel =
     | 'RosterExternallyAccepted'
     | 'BallotIncluded'
+    | 'AggregateDerivationStructureVerified'
+    | 'AggregateDerivationProofVerified'
     | 'AggregateInputsReady'
     | 'AggregateInputsBridgeVerified'
     | 'AwaitingEvaluation'
@@ -230,7 +228,7 @@ export type FailureStatusLabel =
 
 /** Mode or caveat status label attached to lifecycle outputs. */
 export type ModeStatusLabel =
-    | 'UnsafeMicroRoster'
+    | 'UnsafeSmallRoster'
     | 'PassiveMHEPrototype'
     | 'EvaluationProofClosure'
     | 'CPADClosure'

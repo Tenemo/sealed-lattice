@@ -505,6 +505,7 @@ export type BallotProofRecordGenerationRequest = {
     readonly publicRandomnessHex: string;
     readonly secretState: BallotProofRecordGenerationSecretState;
     readonly statement: BallotProofStatement;
+    readonly unsafeSmallRosterAcknowledged?: boolean;
 };
 
 const linearProofRelation = 'A*w + t = 0' as const;

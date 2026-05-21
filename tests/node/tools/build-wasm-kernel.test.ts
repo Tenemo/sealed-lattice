@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import {
     pinSdkKernelDigestInLoaderSource,
     resolveOutputFilePath,
-} from '../../../tools/ci/build-wasm-kernel';
+} from '#tools/ci/build-wasm-kernel';
 
 const repoRoot = path.resolve('C:\\repo\\sealed-lattice');
 
