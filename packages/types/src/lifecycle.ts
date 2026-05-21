@@ -56,9 +56,7 @@ export type ThresholdProfileInput = {
 };
 
 /** Roster profile classification for the derived threshold parameters. */
-export type RosterProfileKind =
-    | 'UnsafeSmallRoster'
-    | 'SupportedRosterRange';
+export type RosterProfileKind = 'UnsafeSmallRoster' | 'SupportedRosterRange';
 
 /** Warning label emitted when threshold parameters require caveats. */
 export type ThresholdWarning =
@@ -185,6 +183,8 @@ export type LifecycleState =
 export type PrimaryStatusLabel =
     | 'RosterExternallyAccepted'
     | 'BallotIncluded'
+    | 'AggregateDerivationStructureVerified'
+    | 'AggregateDerivationProofVerified'
     | 'AggregateInputsReady'
     | 'AggregateInputsBridgeVerified'
     | 'AwaitingEvaluation'

@@ -1,9 +1,8 @@
 use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
 
-use super::{
-    polynomial_matrix::PolynomialMatrix, polynomial_ring::PolynomialRing,
-    polynomial_vector::PolynomialVector,
-};
+#[cfg(test)]
+use super::polynomial_matrix::PolynomialMatrix;
+use super::{polynomial_ring::PolynomialRing, polynomial_vector::PolynomialVector};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SparsePolynomialMatrixEntry {
@@ -113,6 +112,7 @@ impl SparsePolynomialMatrix {
             .all(|entry| entry.row_index <= entry.column_index)
     }
 
+    #[cfg(test)]
     pub fn to_dense(&self) -> CanonicalResult<PolynomialMatrix> {
         let mut dense_entries = vec![vec![0_u64; self.ring.degree()]; self.rows * self.columns];
         for entry in &self.entries {

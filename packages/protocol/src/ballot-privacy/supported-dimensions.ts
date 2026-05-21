@@ -87,8 +87,5 @@ export {
     ballotPrivacyMaximumOptionCount,
     ballotPrivacyMaximumParticipantCount,
     ballotPrivacyMinimumOptionCount,
-    ballotPrivacyMinimumSafeParticipantCount,
     ballotPrivacyMinimumUnsafeParticipantCount,
-    optionCountIsInSupportedRange,
-    participantCountIsInSupportedRange,
 };

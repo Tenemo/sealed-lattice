@@ -28,5 +28,3 @@ export const defaultTiePolicy =
 export const minimumUnsafeRosterSize = 3;
 export const minimumSafeRosterSize = 20;
 export const maximumSafeRosterSize = 50;
-export const mandatoryClaimRosterSize = minimumSafeRosterSize;
-export const maximumCertificateGatedRosterSize = maximumSafeRosterSize;

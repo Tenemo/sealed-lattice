@@ -39,6 +39,34 @@ fn proof_byte_bearing_ballot_record_rejects_without_full_relation_coverage() {
         .expect("test digest should derive")
     };
     let create_statement = || {
+        let receiver_public_keys = (1..=20)
+            .map(|receiver_roster_position| {
+                json!({
+                    "receiverIdentity": format!("receiver-{receiver_roster_position}"),
+                    "receiverPublicKeyDigest": test_digest(&format!("receiver-public-key-{receiver_roster_position}")),
+                    "receiverRosterPosition": receiver_roster_position
+                })
+            })
+            .collect::<Vec<_>>();
+        let receiver_payloads = (1..=20)
+            .map(|receiver_roster_position| {
+                json!({
+                    "receiverIdentity": format!("receiver-{receiver_roster_position}"),
+                    "receiverPayloadCiphertextRoot": test_digest(&format!("receiver-ciphertext-{receiver_roster_position}")),
+                    "receiverPayloadDigest": test_digest(&format!("receiver-payload-{receiver_roster_position}")),
+                    "receiverRosterPosition": receiver_roster_position
+                })
+            })
+            .collect::<Vec<_>>();
+        let share_commitments = (1..=20)
+            .map(|receiver_roster_position| {
+                json!({
+                    "receiverIdentity": format!("receiver-{receiver_roster_position}"),
+                    "receiverRosterPosition": receiver_roster_position,
+                    "shareCommitmentDigest": test_digest(&format!("share-commitment-{receiver_roster_position}"))
+                })
+            })
+            .collect::<Vec<_>>();
         let statement_payload = json!({
             "actionContextDigest": test_digest("action-context"),
             "aggregateInputEncodingProfileDigest": test_digest("aggregate-input-encoding-profile"),
@@ -59,34 +87,15 @@ fn proof_byte_bearing_ballot_record_rejects_without_full_relation_coverage() {
             "receiverEncryptionProfileDigest": test_digest("receiver-encryption-profile"),
             "receiverKeyProofRoot": test_digest("receiver-key-proof-root"),
             "receiverKeyRoot": test_digest("receiver-key-root"),
-            "receiverPayloads": [
-                {
-                    "receiverIdentity": "receiver-1",
-                    "receiverPayloadCiphertextRoot": test_digest("receiver-ciphertext-1"),
-                    "receiverPayloadDigest": test_digest("receiver-payload-1"),
-                    "receiverRosterPosition": 1
-                }
-            ],
-            "receiverPublicKeys": [
-                {
-                    "receiverIdentity": "receiver-1",
-                    "receiverPublicKeyDigest": test_digest("receiver-public-key-1"),
-                    "receiverRosterPosition": 1
-                }
-            ],
+            "receiverPayloads": receiver_payloads,
+            "receiverPublicKeys": receiver_public_keys,
             "rosterDigest": test_digest("roster"),
             "rosterExternalAcceptanceDigest": test_digest("external-acceptance"),
             "scoreDomainDigest": test_digest("score-domain"),
             "scoreMembershipProfileDigest": test_digest("score-membership-profile"),
             "shareCommitmentMessageBoundCertDigest": test_digest("share-commitment-bound-cert"),
             "shareCommitmentProfileDigest": test_digest("share-commitment-profile"),
-            "shareCommitments": [
-                {
-                    "receiverIdentity": "receiver-1",
-                    "receiverRosterPosition": 1,
-                    "shareCommitmentDigest": test_digest("share-commitment-1")
-                }
-            ],
+            "shareCommitments": share_commitments,
             "shareVectorWidth": 220,
             "thresholdProfileDigest": test_digest("threshold-profile"),
             "tiePolicyDigest": test_digest("tie-policy"),
@@ -436,6 +445,34 @@ fn encoded_score_field_ballot_record_rejects_without_full_relation_coverage() {
         .expect("test digest should derive")
     };
     let create_statement = || {
+        let receiver_public_keys = (1..=20)
+            .map(|receiver_roster_position| {
+                json!({
+                    "receiverIdentity": format!("receiver-{receiver_roster_position}"),
+                    "receiverPublicKeyDigest": test_digest(&format!("receiver-public-key-{receiver_roster_position}")),
+                    "receiverRosterPosition": receiver_roster_position
+                })
+            })
+            .collect::<Vec<_>>();
+        let receiver_payloads = (1..=20)
+            .map(|receiver_roster_position| {
+                json!({
+                    "receiverIdentity": format!("receiver-{receiver_roster_position}"),
+                    "receiverPayloadCiphertextRoot": test_digest(&format!("receiver-ciphertext-{receiver_roster_position}")),
+                    "receiverPayloadDigest": test_digest(&format!("receiver-payload-{receiver_roster_position}")),
+                    "receiverRosterPosition": receiver_roster_position
+                })
+            })
+            .collect::<Vec<_>>();
+        let share_commitments = (1..=20)
+            .map(|receiver_roster_position| {
+                json!({
+                    "receiverIdentity": format!("receiver-{receiver_roster_position}"),
+                    "receiverRosterPosition": receiver_roster_position,
+                    "shareCommitmentDigest": test_digest(&format!("share-commitment-{receiver_roster_position}"))
+                })
+            })
+            .collect::<Vec<_>>();
         let statement_payload = json!({
             "actionContextDigest": test_digest("action-context"),
             "aggregateInputEncodingProfileDigest": test_digest("aggregate-input-encoding-profile"),
@@ -456,34 +493,15 @@ fn encoded_score_field_ballot_record_rejects_without_full_relation_coverage() {
             "receiverEncryptionProfileDigest": test_digest("receiver-encryption-profile"),
             "receiverKeyProofRoot": test_digest("receiver-key-proof-root"),
             "receiverKeyRoot": test_digest("receiver-key-root"),
-            "receiverPayloads": [
-                {
-                    "receiverIdentity": "receiver-1",
-                    "receiverPayloadCiphertextRoot": test_digest("receiver-ciphertext-1"),
-                    "receiverPayloadDigest": test_digest("receiver-payload-1"),
-                    "receiverRosterPosition": 1
-                }
-            ],
-            "receiverPublicKeys": [
-                {
-                    "receiverIdentity": "receiver-1",
-                    "receiverPublicKeyDigest": test_digest("receiver-public-key-1"),
-                    "receiverRosterPosition": 1
-                }
-            ],
+            "receiverPayloads": receiver_payloads,
+            "receiverPublicKeys": receiver_public_keys,
             "rosterDigest": test_digest("roster"),
             "rosterExternalAcceptanceDigest": test_digest("external-acceptance"),
             "scoreDomainDigest": test_digest("score-domain"),
             "scoreMembershipProfileDigest": test_digest("score-membership-profile"),
             "shareCommitmentMessageBoundCertDigest": test_digest("share-commitment-bound-cert"),
             "shareCommitmentProfileDigest": test_digest("share-commitment-profile"),
-            "shareCommitments": [
-                {
-                    "receiverIdentity": "receiver-1",
-                    "receiverRosterPosition": 1,
-                    "shareCommitmentDigest": test_digest("share-commitment-1")
-                }
-            ],
+            "shareCommitments": share_commitments,
             "shareVectorWidth": 220,
             "thresholdProfileDigest": test_digest("threshold-profile"),
             "tiePolicyDigest": test_digest("tie-policy"),

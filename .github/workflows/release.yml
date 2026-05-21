@@ -97,8 +97,7 @@ jobs:
                   components: clippy, rustfmt
                   targets: wasm32-unknown-unknown
             - run: pnpm run check
-            - run: pnpm run test:node
-            - run: pnpm run build
+            - run: pnpm run test:node:built
 
     coverage:
         name: coverage
@@ -133,7 +132,8 @@ jobs:
                   components: clippy, rustfmt
                   targets: wasm32-unknown-unknown
             - run: pnpm exec playwright install --with-deps chromium firefox webkit
-            - run: pnpm run test:browser
+            - run: pnpm run build
+            - run: pnpm run test:browser:built
 
     docs:
         name: docs

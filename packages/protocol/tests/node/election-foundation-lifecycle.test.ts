@@ -195,6 +195,7 @@ describe('election foundation lifecycle', () => {
         const unsafeProfile = deriveThresholdProfile({
             rosterSize: 19,
             unsafeSmallRosterAcknowledged: true,
+            targetBoundShareSelectionProfile,
         });
         const unsafeLabels = deriveLifecycleLabels(
             fullyVerifiedLabelInput({
@@ -209,10 +210,7 @@ describe('election foundation lifecycle', () => {
         );
 
         expect(unsafeLabels.modes).toContain('UnsafeSmallRoster');
-        expect(unsafeLabels.resultClaimLabels).toEqual([
-            'FullyVerifiedResult',
-            'ResultLocallyReplayedAuditable',
-        ]);
+        expect(unsafeLabels.resultClaimLabels).toEqual(['FullyVerifiedResult']);
         expect(passiveLabels.primary).toEqual(['Unresolved']);
         expect(passiveLabels.modes).toContain('PassiveMHEPrototype');
     });

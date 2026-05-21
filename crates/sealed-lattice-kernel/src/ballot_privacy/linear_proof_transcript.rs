@@ -52,20 +52,6 @@ pub fn shake128_32(parts: &[&[u8]]) -> [u8; 32] {
 
 /// SHAKE128 over raw concatenated parts for fixed-boundary LaZer-compatible
 /// expansion. Do not use this helper for new variable-length transcripts.
-pub fn shake128_64(parts: &[&[u8]]) -> [u8; 64] {
-    let mut hasher = Shake128::default();
-    for part in parts {
-        hasher.update(part);
-    }
-    let mut reader = hasher.finalize_xof();
-    let mut output = [0_u8; 64];
-    reader.read(&mut output);
-
-    output
-}
-
-/// SHAKE128 over raw concatenated parts for fixed-boundary LaZer-compatible
-/// expansion. Do not use this helper for new variable-length transcripts.
 pub fn shake128_96(parts: &[&[u8]]) -> [u8; 96] {
     let mut hasher = Shake128::default();
     for part in parts {
@@ -98,6 +84,7 @@ fn shake128_32_framed_hex(parts: &[(&str, &[u8])]) -> String {
     to_hex(&output)
 }
 
+#[cfg(test)]
 pub fn canonical_json_shake128_32_hex(value: &Value) -> CanonicalResult<String> {
     let canonical = canonical_json(value)?;
 

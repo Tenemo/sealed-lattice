@@ -521,7 +521,7 @@ describe('election foundation capability evaluator', () => {
         ).toEqual({ allowed: true, action: 'RecombineAcceptedTarget' });
     });
 
-    it('keeps non-claim-bearing profiles out of claim-bearing capabilities', () => {
+    it('allows acknowledged unsafe small-roster profiles through claim-bearing environment gates', () => {
         const unsafeThresholdProfile = deriveThresholdProfile({
             rosterSize: 19,
             unsafeMicroRosterAcknowledged: true,
@@ -538,7 +538,7 @@ describe('election foundation capability evaluator', () => {
                     bridgeMobileCertificatePresent: true,
                 }),
             ),
-        ).toMatchObject({ reason: 'ProfileNotClaimBearing' });
+        ).toEqual({ allowed: true, action: 'AcceptTarget' });
     });
 
     it('refuses claim-bearing capabilities when mobile environment gates fail', () => {

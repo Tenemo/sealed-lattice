@@ -313,6 +313,8 @@ enum TranscriptCoreCommand {
     GenerateBallotProofRecord,
     VerifyBallotProof,
     VerifyClaimBearingBallotPackage,
+    GenerateAggregateDerivationProof,
+    VerifyAggregateDerivationProof,
 }
 
 fn parse_transcript_core_command(command_name: &str) -> CanonicalResult<TranscriptCoreCommand> {
@@ -480,7 +482,9 @@ fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult<Value> {
         | TranscriptCoreCommand::GenerateBallotComponentProof
         | TranscriptCoreCommand::GenerateBallotProofRecord
         | TranscriptCoreCommand::VerifyBallotProof
-        | TranscriptCoreCommand::VerifyClaimBearingBallotPackage => {
+        | TranscriptCoreCommand::VerifyClaimBearingBallotPackage
+        | TranscriptCoreCommand::GenerateAggregateDerivationProof
+        | TranscriptCoreCommand::VerifyAggregateDerivationProof => {
             run_ballot_privacy_command(command, &request)
         }
     }
@@ -561,6 +565,14 @@ fn run_ballot_privacy_command(
                 unsafe_small_roster_acknowledged,
             ))
         }
+        TranscriptCoreCommand::GenerateAggregateDerivationProof => Ok(
+            crate::ballot_privacy::generate_aggregate_derivation_proof_from_command_request(
+                request,
+            ),
+        ),
+        TranscriptCoreCommand::VerifyAggregateDerivationProof => Ok(
+            crate::ballot_privacy::verify_aggregate_derivation_proof_from_command_request(request),
+        ),
         _ => unreachable!("non-ballot command dispatched to ballot privacy handler"),
     }
 }

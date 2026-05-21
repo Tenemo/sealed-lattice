@@ -32,5 +32,14 @@ export {
     verifyReceiverKeyProof,
 } from './objects.js';
 export type { BallotProofComponentProofVerificationInput } from './objects.js';
+export {
+    aggregateWitnessFromReceiverPlaintext,
+    buildAggregateDerivationProofInput,
+    buildAggregateDerivationStatement,
+    createAggregateDerivationComponent,
+    sumAggregateDerivationWitnesses,
+    verifyAggregateDerivationComponentStructure,
+} from './aggregate-derivation.js';
+export type { AggregateDerivationWitnessInput } from './aggregate-derivation.js';
 export { compileBallotPrivacyRelation } from './relation-compiler.js';
 export type { BallotPrivacyRelationCompilerInput } from './relation-compiler.js';

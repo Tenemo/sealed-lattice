@@ -36,6 +36,7 @@ const nodeHeavyTestIncludes = [
     'packages/protocol/tests/node/ballot-privacy-relation-backend-lowering/**/*.test.ts',
 ] satisfies string[];
 const nodeKernelHeavyTestIncludes = [
+    'packages/wasm/tests/node/transcript-core-kernel/aggregate-derivation-proof.test.ts',
     'packages/wasm/tests/node/transcript-core-kernel/ballot-proof-generation.test.ts',
     'packages/wasm/tests/node/transcript-core-kernel/ballot-proof-rejection.test.ts',
     'packages/wasm/tests/node/transcript-core-kernel/component-bundle-rejection.test.ts',

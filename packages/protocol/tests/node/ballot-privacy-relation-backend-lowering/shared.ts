@@ -95,25 +95,8 @@ const validRelationInput = (): BallotPrivacyRelationCompilerInput => ({
     scoreOneHotWitnesses: [oneHotScore(7), oneHotScore(3)],
 });
 
-const singleOptionRelationInput = (): BallotPrivacyRelationCompilerInput => ({
-    encodedCoordinateShamirCoefficients: [
-        [2],
-        ...Array.from({ length: 10 }, () => [0] as const),
-    ],
-    normalizedScores: [5],
-    optionCount: 1,
-    pvssThreshold: 2,
-    receivers: [1, 2, 3].map((receiverRosterPosition) => ({
-        receiverIdentity: `receiver-${receiverRosterPosition}`,
-        receiverRosterPosition,
-        receiverShareVector: [
-            5 + 2 * receiverRosterPosition,
-            ...oneHotScore(5),
-        ],
-    })),
-    rosterSize: 3,
-    scoreOneHotWitnesses: [oneHotScore(5)],
-});
+const minimumOptionRelationInput = (): BallotPrivacyRelationCompilerInput =>
+    validRelationInput();
 
 const shareCommitmentOpeningForReceiver = (
     receiverRosterPosition: number,
@@ -265,7 +248,9 @@ const projectionWitness = (
 const publicContext = (
     relationInput: BallotPrivacyRelationCompilerInput = validRelationInput(),
 ): BallotPrivacyRelationBackendPublicContext => {
-    const profileSet = createBallotPrivacyProfileSet();
+    const profileSet = createBallotPrivacyProfileSet({
+        optionCount: relationInput.optionCount,
+    });
     const certificate = createShareCommitmentMessageBoundCert({
         maximumCanonicalTurnout: 20,
         shareCommitmentProfile: profileSet.shareCommitmentProfile,
@@ -366,12 +351,14 @@ const publicContext = (
 };
 
 const explicitReceiverEncryptionFixture = (
-    relationInput: BallotPrivacyRelationCompilerInput = singleOptionRelationInput(),
+    relationInput: BallotPrivacyRelationCompilerInput = minimumOptionRelationInput(),
 ): {
     readonly context: BallotPrivacyRelationBackendPublicContext;
     readonly projectionWitness: BallotProofComponentProjectionWitness;
 } => {
-    const profileSet = createBallotPrivacyProfileSet();
+    const profileSet = createBallotPrivacyProfileSet({
+        optionCount: relationInput.optionCount,
+    });
     const context = publicContext(relationInput);
     const encryptedReceiverRecords = relationInput.receivers.map((receiver) => {
         const receiverState = generateReceiverState({
@@ -458,7 +445,7 @@ export {
     digest,
     shareCommitmentModulus,
     validRelationInput,
-    singleOptionRelationInput,
+    minimumOptionRelationInput,
     shareCommitmentOpeningForReceiver,
     receiverEncryptionModuleRank,
     projectionWitness,

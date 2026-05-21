@@ -35,7 +35,7 @@ import {
     mandatoryProfileRelationInput,
     publicContextAndProjectionWitness,
     receiverKeyProofRootEvidence,
-    singleReceiverRelationInput,
+    smallUnsafeRelationInput,
 } from './fixture-inputs.js';
 
 import ballotFieldLinearProofBackendVectorsJson from '#test-vectors/ballot-privacy/ballot-field-linear-proof-vectors.json';
@@ -182,7 +182,16 @@ const componentProofContracts = (input: {
             source: `sealed-lattice/linear-proof/${componentId}-encoding-v1`,
         });
     };
-    if (input.relationInput.optionCount === 1) {
+    const scoreComponentPlan = componentPlanById.get(
+        'score-and-shamir-field-component',
+    );
+    if (scoreComponentPlan === undefined) {
+        throw new Error('Score/Shamir component plan should exist.');
+    }
+    if (
+        scoreComponentPlan.proofStatementFormat !==
+        'sparse-polynomial-matrix-linear-proof-v1'
+    ) {
         const scoreProjection = buildEncodedScoreFieldLinearProofProjection({
             ballotProofStatementDigest:
                 input.statement.ballotProofStatementDigest,
@@ -397,14 +406,22 @@ const createBallotProofRecordGenerationFixtureWithOptions = (
         statement,
     });
     const randomness = deterministicRandomness();
-    const request = buildBallotProofRecordGenerationRequest({
-        proofContracts,
-        projectionWitness,
-        publicContext,
-        randomness,
-        relationInput,
-        statement,
-    });
+    const request = {
+        ...buildBallotProofRecordGenerationRequest({
+            proofContracts,
+            projectionWitness,
+            publicContext,
+            randomness,
+            relationInput,
+            statement,
+        }),
+        ...(options.unsafeSmallRosterAcknowledged === undefined
+            ? {}
+            : {
+                  unsafeSmallRosterAcknowledged:
+                      options.unsafeSmallRosterAcknowledged,
+              }),
+    };
 
     if (
         request.componentProofInputs.length !==
@@ -430,8 +447,9 @@ const createBallotProofRecordGenerationFixtureWithOptions = (
 export const createBallotProofRecordGenerationFixture =
     (): BallotProofRecordGenerationFixture =>
         createBallotProofRecordGenerationFixtureWithOptions({
-            relationInput: singleReceiverRelationInput(),
-            topOptionCount: 1,
+            relationInput: smallUnsafeRelationInput(),
+            topOptionCount: 2,
+            unsafeSmallRosterAcknowledged: true,
         });
 
 export const createMandatoryProfileBallotProofRecordGenerationFixture =

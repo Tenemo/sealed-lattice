@@ -3,6 +3,9 @@ import { deriveProtocolDigest } from '@sealed-lattice/crypto';
 import type {
     BallotProofComponentId,
     BallotProofComponentProofBundle,
+    BallotProofReceiverPayloadReference,
+    BallotProofReceiverPublicKeyReference,
+    BallotProofShareCommitmentReference,
     BallotProofStatement,
     ProtocolDigest,
     ReceiverKeyProofRootEvidence,
@@ -36,7 +39,7 @@ const defaultParticipantCount = 20;
 
 const createReceiverPublicKeyReferences = (
     participantCount = defaultParticipantCount,
-) =>
+): readonly BallotProofReceiverPublicKeyReference[] =>
     Array.from({ length: participantCount }, (_, participantIndex) => {
         const receiverRosterPosition = participantIndex + 1;
 
@@ -53,7 +56,7 @@ const createReceiverPayloadReferences = (
     receiverPublicKeyReferences: ReturnType<
         typeof createReceiverPublicKeyReferences
     >,
-) =>
+): readonly BallotProofReceiverPayloadReference[] =>
     receiverPublicKeyReferences.map((receiverPublicKeyReference) => ({
         receiverIdentity: receiverPublicKeyReference.receiverIdentity,
         receiverRosterPosition:
@@ -70,7 +73,7 @@ const createShareCommitmentReferences = (
     receiverPublicKeyReferences: ReturnType<
         typeof createReceiverPublicKeyReferences
     >,
-) =>
+): readonly BallotProofShareCommitmentReference[] =>
     receiverPublicKeyReferences.map((receiverPublicKeyReference) => ({
         receiverIdentity: receiverPublicKeyReference.receiverIdentity,
         receiverRosterPosition:

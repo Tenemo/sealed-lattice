@@ -324,6 +324,8 @@ export const createTranscriptCoreKernelLoader = (
                                 input.componentProverRandomnessHexes,
                             ),
                         componentSecretStates: input.componentSecretStates,
+                        unsafeSmallRosterAcknowledged:
+                            input.unsafeSmallRosterAcknowledged,
                     }),
                 verifyBallotProof: (input): BallotPrivacyKernelVerification =>
                     executeCommand<BallotPrivacyKernelVerification>({
@@ -350,6 +352,25 @@ export const createTranscriptCoreKernelLoader = (
                         ballotPackage: input.ballotPackage,
                         unsafeSmallRosterAcknowledged:
                             input.unsafeSmallRosterAcknowledged,
+                    }),
+                generateAggregateDerivationProof: (
+                    input,
+                ): BallotPrivacyProofGeneration =>
+                    executeCommand<BallotPrivacyProofGeneration>({
+                        command: 'GenerateAggregateDerivationProof',
+                        proofInput: input.proofInput,
+                        secretState: input.secretState,
+                        proverRandomnessHex: suppliedOrFreshRandomnessHex(
+                            input.proverRandomnessHex,
+                        ),
+                    }),
+                verifyAggregateDerivationProof: (
+                    input,
+                ): BallotPrivacyKernelVerification =>
+                    executeCommand<BallotPrivacyKernelVerification>({
+                        command: 'VerifyAggregateDerivationProof',
+                        component: input.component,
+                        proofInput: input.proofInput,
                     }),
             };
         })().catch((error: unknown) => {

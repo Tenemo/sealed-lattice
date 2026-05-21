@@ -29,15 +29,12 @@ pub(crate) fn collect_supported_ballot_privacy_dimension_refusals(
     let option_count = unsigned_integer_field(statement, "optionCount");
     let share_vector_width = unsigned_integer_field(statement, "shareVectorWidth");
     let expected_share_vector_width = option_count.and_then(|value| {
-        value.checked_mul(u128::from(
-            BALLOT_PRIVACY_ENCODED_COORDINATES_PER_OPTION,
-        ))
+        value.checked_mul(u128::from(BALLOT_PRIVACY_ENCODED_COORDINATES_PER_OPTION))
     });
     let participant_count = array_field(statement, "receiverPublicKeys").map(Vec::len);
 
     if !option_count.is_some_and(|value| {
-        (BALLOT_PRIVACY_MINIMUM_OPTION_COUNT..=BALLOT_PRIVACY_MAXIMUM_OPTION_COUNT)
-            .contains(&value)
+        (BALLOT_PRIVACY_MINIMUM_OPTION_COUNT..=BALLOT_PRIVACY_MAXIMUM_OPTION_COUNT).contains(&value)
     }) {
         refused_objects.push(structural_refusal(
             "Ballot privacy proof statements must use two to twenty options.",
@@ -51,8 +48,7 @@ pub(crate) fn collect_supported_ballot_privacy_dimension_refusals(
         ));
     }
     if !participant_count.is_some_and(|value| {
-        (BALLOT_PRIVACY_MINIMUM_UNSAFE_PARTICIPANT_COUNT
-            ..=BALLOT_PRIVACY_MAXIMUM_PARTICIPANT_COUNT)
+        (BALLOT_PRIVACY_MINIMUM_UNSAFE_PARTICIPANT_COUNT..=BALLOT_PRIVACY_MAXIMUM_PARTICIPANT_COUNT)
             .contains(&value)
     }) {
         refused_objects.push(structural_refusal(
@@ -61,8 +57,7 @@ pub(crate) fn collect_supported_ballot_privacy_dimension_refusals(
         ));
     }
     if participant_count.is_some_and(|value| {
-        value < BALLOT_PRIVACY_MINIMUM_SAFE_PARTICIPANT_COUNT
-            && !unsafe_small_roster_acknowledged
+        value < BALLOT_PRIVACY_MINIMUM_SAFE_PARTICIPANT_COUNT && !unsafe_small_roster_acknowledged
     }) {
         refused_objects.push(structural_refusal(
             "Ballot privacy proof statements with three to nineteen participants require explicit unsafe small-roster acknowledgement.",
@@ -359,12 +354,14 @@ mod tests {
     #[test]
     fn supported_ballot_privacy_dimensions_accept_safe_range() {
         let statement = statement_with_dimensions(2, 20);
-        assert!(collect_supported_ballot_privacy_dimension_refusals(
-            &statement,
-            Some(&digest("package")),
-            false,
-        )
-        .is_empty());
+        assert!(
+            collect_supported_ballot_privacy_dimension_refusals(
+                &statement,
+                Some(&digest("package")),
+                false,
+            )
+            .is_empty()
+        );
 
         let statement = statement_with_dimensions(20, 50);
         assert!(
@@ -387,8 +384,10 @@ mod tests {
         );
 
         assert!(
-            refused_objects.iter().any(|refusal| string_field(refusal, "message")
-                .is_some_and(|message| message.contains("unsafe small-roster"))),
+            refused_objects
+                .iter()
+                .any(|refusal| string_field(refusal, "message")
+                    .is_some_and(|message| message.contains("unsafe small-roster"))),
             "unacknowledged unsafe small roster must be rejected: {refused_objects:?}"
         );
         assert!(
@@ -406,8 +405,14 @@ mod tests {
         for (mut statement, expected_message) in [
             (statement_with_dimensions(1, 20), "two to twenty options"),
             (statement_with_dimensions(21, 20), "two to twenty options"),
-            (statement_with_dimensions(20, 2), "three to fifty participants"),
-            (statement_with_dimensions(20, 51), "three to fifty participants"),
+            (
+                statement_with_dimensions(20, 2),
+                "three to fifty participants",
+            ),
+            (
+                statement_with_dimensions(20, 51),
+                "three to fifty participants",
+            ),
         ] {
             if expected_message == "two to twenty options" {
                 statement["shareVectorWidth"] = json!(220);
@@ -419,8 +424,10 @@ mod tests {
             );
 
             assert!(
-                refused_objects.iter().any(|refusal| string_field(refusal, "message")
-                    .is_some_and(|message| message.contains(expected_message))),
+                refused_objects
+                    .iter()
+                    .any(|refusal| string_field(refusal, "message")
+                        .is_some_and(|message| message.contains(expected_message))),
                 "invalid dimensions must be rejected: {refused_objects:?}"
             );
         }
@@ -433,8 +440,10 @@ mod tests {
             false,
         );
         assert!(
-            refused_objects.iter().any(|refusal| string_field(refusal, "message")
-                .is_some_and(|message| message.contains("shareVectorWidth"))),
+            refused_objects
+                .iter()
+                .any(|refusal| string_field(refusal, "message")
+                    .is_some_and(|message| message.contains("shareVectorWidth"))),
             "wrong share vector width must be rejected: {refused_objects:?}"
         );
     }
@@ -489,5 +498,4 @@ mod tests {
             "missing relation binding metadata must be rejected: {refused_objects:?}"
         );
     }
-
 }

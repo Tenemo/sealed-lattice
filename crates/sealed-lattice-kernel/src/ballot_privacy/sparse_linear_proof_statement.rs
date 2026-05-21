@@ -1,3 +1,4 @@
+#[cfg(test)]
 use serde::{Deserialize, Serialize};
 use sha3::{
     Shake128,
@@ -23,9 +24,11 @@ use super::{
     sparse_polynomial_matrix::{SparsePolynomialMatrix, SparsePolynomialMatrixEntry},
 };
 
+#[cfg(test)]
 const SPARSE_LINEAR_STATEMENT_TRANSCRIPT_DOMAIN: &[u8] =
     b"sealed.vote/internal/sparse-linear-statement-v1";
 
+#[cfg(test)]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SparseLinearStatementTranscript {
@@ -41,6 +44,7 @@ pub struct SparseLinearStatementTranscript {
     pub public_parameters_and_statement_hash_hex: String,
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConstantCoefficientSparseMatrixEntry {
@@ -49,6 +53,7 @@ pub struct ConstantCoefficientSparseMatrixEntry {
     pub constant_coefficient: u64,
 }
 
+#[cfg(test)]
 pub fn build_constant_coefficient_sparse_source_matrix(
     parameter_set: &LinearProofParameterSet,
     entries: &[ConstantCoefficientSparseMatrixEntry],
@@ -80,6 +85,7 @@ pub fn build_constant_coefficient_sparse_source_matrix(
     )
 }
 
+#[cfg(test)]
 pub fn transform_sparse_statement_matrix_to_proof_ring(
     parameter_set: &LinearProofParameterSet,
     proof_encoding: &LinearProofEncoding,
@@ -195,6 +201,7 @@ pub fn transform_sparse_target_vector_to_proof_ring(
     )
 }
 
+#[cfg(test)]
 pub fn derive_sparse_linear_statement_transcript(
     parameter_set: &LinearProofParameterSet,
     proof_encoding: &LinearProofEncoding,
@@ -214,6 +221,7 @@ pub fn derive_sparse_linear_statement_transcript(
     )
 }
 
+#[cfg(test)]
 pub fn derive_sparse_linear_statement_transcript_with_matrix_coefficient_representation(
     parameter_set: &LinearProofParameterSet,
     proof_encoding: &LinearProofEncoding,
@@ -267,6 +275,7 @@ pub fn derive_sparse_linear_statement_transcript_with_matrix_coefficient_represe
     })
 }
 
+#[cfg(test)]
 pub fn derive_dense_compatible_sparse_linear_statement_transcript(
     parameter_set: &LinearProofParameterSet,
     proof_encoding: &LinearProofEncoding,
@@ -376,6 +385,7 @@ fn validate_sparse_target_vector(
     Ok(())
 }
 
+#[cfg(test)]
 fn hash_sparse_transformed_statement(
     parameter_set: &LinearProofParameterSet,
     proof_encoding: &LinearProofEncoding,
@@ -473,6 +483,7 @@ fn shake128_32_from_parts(first_part: &[u8], second_part: &[u8]) -> [u8; 32] {
     output
 }
 
+#[cfg(test)]
 struct SparseStatementHasher {
     hasher: Shake128,
     encoded_bytes: usize,
@@ -579,6 +590,7 @@ impl DenseCompatibleStatementBitHasher {
     }
 }
 
+#[cfg(test)]
 impl SparseStatementHasher {
     fn new() -> Self {
         Self {

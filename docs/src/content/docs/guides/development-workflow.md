@@ -18,9 +18,12 @@ The workspace is only in a good state when the checks, docs, smoke tests, and Ru
 
 ```bash
 pnpm install
+pnpm run build
 pnpm run check
+pnpm run check:static
 pnpm run vectors
 pnpm exec playwright install chromium firefox webkit
+pnpm run test:precommit
 pnpm run test:node:fast
 pnpm run test:node:heavy
 pnpm run test:node:heavy:kernel
@@ -32,13 +35,15 @@ pnpm run test:proof-benchmark:browser:mobile:throttled
 pnpm run verify:docs
 pnpm run smoke:pack
 pnpm run smoke:pack:npm
-pnpm run build
 ```
 
 ## What each command proves
 
-- `pnpm run check`: package typechecks, repo lint, Rust checks, package-boundary checks, vector manifest verification, and dead-code analysis
+- `pnpm run build`: every package builds, the private crypto/runtime bridge is vendored into the SDK, the WASM transcript-core artifact is copied into the internal loader package, and the published SDK loader is pinned to the packaged kernel digest
+- `pnpm run check`: runs `pnpm run build`, then `pnpm run check:static`
+- `pnpm run check:static`: repo lint, TypeScript project typechecking, Rust formatting, Rust clippy, Rust tests, package-boundary checks, vector manifest verification, and dead-code analysis without an implicit build
 - `pnpm run vectors`: committed test vector files match `test-vectors/manifest.json`
+- `pnpm run test:precommit`: fast Node tests plus desktop and mobile browser Vitest projects against the current built output
 - `pnpm run test:node:fast`: pre-commit-friendly Node tests, excluding slow protocol, kernel-heavy WASM, and proof-benchmark suites
 - `pnpm run test:node:heavy`: slow protocol relation and proof-record input tests that remain part of the default Node gate without running under coverage instrumentation
 - `pnpm run test:node:heavy:kernel`: transcript-core WASM loader, parity, fixture, proof-generation, and proof-record integration tests
@@ -50,12 +55,12 @@ pnpm run build
 - `pnpm run verify:docs`: generated API pages, docs link structure, and the production docs site build stay consistent
 - `pnpm run docs:build:site`: builds the docs site without the surrounding verification checks when that narrower target is needed
 - `pnpm run smoke:pack` and `pnpm run smoke:pack:npm`: the published package tarball installs cleanly and exposes safe-by-default helpers for transcript-core fixture verification, election foundation checks, and verification-oriented ballot privacy APIs
-- `pnpm run build`: every package builds, the private crypto/runtime bridge is vendored into the SDK, the WASM transcript-core artifact is copied into the internal loader package, and the published SDK loader is pinned to the packaged kernel digest
+- Built-output variants such as `pnpm run test:node:fast:built` and `pnpm run test:browser:built` skip rebuilding and should be used only after `pnpm run build`
 
 ## Local hooks
 
-The pre-commit hook runs only the fast local gate: `pnpm run tsc`, `pnpm run lint`, and `cargo fmt --check -p sealed-lattice-kernel`.
-The pre-push hook runs the heavier repository gate: `pnpm run check` and `pnpm run test:browser`.
+The pre-commit hook runs `pnpm run build`, `pnpm run check:static`, and `pnpm run test:precommit`.
+This builds once, runs static verification once, then exercises fast Node and browser Vitest projects against the built output.
 Node-heavy and proof benchmark lanes remain explicit commands so they can use checkpoints and focused reruns instead of slowing every local commit. The coverage lane covers the fast Node project only; heavy protocol, kernel, and proof-benchmark coverage comes from their explicit test lanes rather than V8 coverage instrumentation.
 
 ## Heavy proof checkpoints

@@ -29,14 +29,6 @@ impl LinearProofBytes {
         Ok(Self { bytes })
     }
 
-    pub fn len(&self) -> usize {
-        self.bytes.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.bytes.is_empty()
-    }
-
     pub fn bytes(&self) -> &[u8] {
         &self.bytes
     }
@@ -152,6 +144,7 @@ impl DecodedLinearProof {
     }
 }
 
+#[cfg(test)]
 pub fn decode_little_endian_fixed_width_coefficients(
     bytes: &[u8],
     coefficient_byte_length: usize,
@@ -184,6 +177,7 @@ pub fn decode_little_endian_fixed_width_coefficients(
     Ok(coefficients)
 }
 
+#[cfg(test)]
 pub fn decode_linear_proof_fields(
     proof_bytes: &[u8],
     proof_encoding: &LinearProofEncoding,

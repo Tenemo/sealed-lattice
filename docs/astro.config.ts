@@ -24,7 +24,7 @@ export default defineConfig({
         StarlightIntegration({
             title: 'sealed-lattice',
             description:
-                'Documentation for the sealed-lattice workspace, package boundaries, and current public facade.',
+                'Documentation for sealed-lattice transcript-core verification, safe election foundations, and ballot privacy proof-record boundaries.',
             disable404Route: true,
             components: {
                 ThemeSelect: './src/components/ThemeToggle.astro',

@@ -1,0 +1,372 @@
+import type {
+    ClaimBearingBallotPackage,
+    ShareCommitmentMessageBoundCert,
+} from '@sealed-lattice/types';
+import { describe, expect, it } from 'vitest';
+
+import { loadTranscriptCoreKernel } from '../../../src/index';
+
+import { deriveProtocolDigest } from '#packages/crypto/src/index';
+import {
+    aggregateWitnessFromReceiverPlaintext,
+    buildAggregateDerivationProofInput,
+    buildAggregateDerivationStatement,
+    createAggregateDerivationComponent,
+    createBallotPrivacyProfileSet,
+    createShareCommitmentMessageBoundCert,
+    sumAggregateDerivationWitnesses,
+    verifyAggregateDerivationComponentStructure,
+    type AggregateDerivationWitnessInput,
+} from '#packages/protocol/src/ballot-privacy/index';
+import { createWasmBallotProofRecordGenerationFixture } from '#tests/support/ballot-privacy-proof-record-generation-fixtures';
+
+const digest = (label: string): string =>
+    `${label.padEnd(64, '0').slice(0, 64)}${label.padEnd(64, '1').slice(0, 64)}`.replace(
+        /[^a-f0-9]/gu,
+        'a',
+    );
+
+const createFixtureBallotPackage = (input: {
+    readonly fixture: ReturnType<
+        typeof createWasmBallotProofRecordGenerationFixture
+    >;
+    readonly generation: Record<string, unknown>;
+}): ClaimBearingBallotPackage =>
+    ({
+        objectType: 'ClaimBearingBallotPackage',
+        objectVersion: 1,
+        ballotPackageDigest:
+            input.fixture.request.statement.ballotPackageDigest,
+        ballotProofStatement: input.fixture.request.statement,
+        ballotProof: input.generation
+            .ballotProof as ClaimBearingBallotPackage['ballotProof'],
+        proofBytesHex: input.generation.proofBytesHex as string,
+        linearStatement: input.fixture.request.linearStatement,
+        parameterSet: input.generation.parameterSet,
+        proofEncoding: input.generation.proofEncoding,
+        publicRandomnessHex: input.fixture.request.publicRandomnessHex,
+        componentBundleStatement:
+            input.fixture.request.componentBundleStatement,
+        componentProofBundle: input.generation
+            .componentProofBundle as ClaimBearingBallotPackage['componentProofBundle'],
+        componentProofInputs: input.generation
+            .componentProofInputs as ClaimBearingBallotPackage['componentProofInputs'],
+        receiverKeyProofRootEvidence:
+            input.fixture.receiverKeyProofRootEvidence,
+        receiverPayloads: input.fixture.claimBearingReceiverPayloads,
+        shareCommitments: input.fixture.claimBearingShareCommitments,
+    }) as unknown as ClaimBearingBallotPackage;
+
+const receiverWitness = (
+    fixture: ReturnType<typeof createWasmBallotProofRecordGenerationFixture>,
+): AggregateDerivationWitnessInput => {
+    const receiverPayloadPlaintext =
+        fixture.projectionWitness.receiverPayloadPlaintexts?.find(
+            (plaintext) => plaintext.receiverRosterPosition === 1,
+        );
+    const shareCommitmentOpening =
+        fixture.projectionWitness.shareCommitmentOpenings.find(
+            (opening) => opening.receiverRosterPosition === 1,
+        );
+    if (
+        receiverPayloadPlaintext === undefined ||
+        shareCommitmentOpening === undefined
+    ) {
+        throw new Error('Fixture should include receiver-1 witness material.');
+    }
+
+    return aggregateWitnessFromReceiverPlaintext({
+        openingRandomness: shareCommitmentOpening.openingRandomness,
+        receiverShareVector: receiverPayloadPlaintext.receiverShareVector,
+    });
+};
+
+const fixtureCertificate = (
+    fixture: ReturnType<typeof createWasmBallotProofRecordGenerationFixture>,
+): ShareCommitmentMessageBoundCert => {
+    const profileSet = createBallotPrivacyProfileSet({
+        optionCount: fixture.relationInput.optionCount,
+    });
+
+    return createShareCommitmentMessageBoundCert({
+        maximumCanonicalTurnout: 20,
+        shareCommitmentProfile: profileSet.shareCommitmentProfile,
+    });
+};
+
+const certificateThatPermitsWraparound = (
+    certificate: ShareCommitmentMessageBoundCert,
+): ShareCommitmentMessageBoundCert => {
+    const certificatePayload = {
+        ...certificate,
+        commitmentMessageBound: '1',
+        noWraparoundCondition: {
+            maximumAggregateIntegerLessThanCommitmentMessageBound: false,
+            openingRandomnessAggregateBoundMatchesTurnout: true,
+        },
+    };
+    const { shareCommitmentMessageBoundCertDigest, ...withoutDigest } =
+        certificatePayload;
+    void shareCommitmentMessageBoundCertDigest;
+
+    return {
+        ...withoutDigest,
+        shareCommitmentMessageBoundCertDigest: deriveProtocolDigest(
+            'ShareCommitmentMessageBoundCertDigest',
+            withoutDigest,
+        ),
+    } as unknown as ShareCommitmentMessageBoundCert;
+};
+
+describe('aggregate derivation proof through the transcript-core kernel', () => {
+    it('generates and verifies a witness-clean aggregate derivation component', async () => {
+        const kernel = await loadTranscriptCoreKernel();
+        const fixture = createWasmBallotProofRecordGenerationFixture();
+        const ballotProofGeneration = kernel.generateBallotProofRecord(
+            fixture.request,
+        );
+        expect(ballotProofGeneration).toMatchObject({
+            ok: true,
+            generatedProofBytes: true,
+            operation: 'generateBallotProofRecord',
+            unresolvedReason: null,
+        });
+        const ballotPackage = createFixtureBallotPackage({
+            fixture,
+            generation: ballotProofGeneration as Record<string, unknown>,
+        });
+        const certificate = fixtureCertificate(fixture);
+        expect(certificate.shareCommitmentMessageBoundCertDigest).toBe(
+            fixture.statement.shareCommitmentMessageBoundCertDigest,
+        );
+        const statementInput = {
+            ballotPackages: [ballotPackage],
+            closeRecordDigest: digest('close-record'),
+            contributorActionContextDigest:
+                fixture.statement.actionContextDigest,
+            contributorIdentity: 'receiver-1',
+            contributorRosterExternalAcceptanceDigest:
+                fixture.statement.rosterExternalAcceptanceDigest,
+            contributorRosterPosition: 1,
+            postVotingClosedContextDigest: digest('post-close-context'),
+            unsafeSmallRosterAcknowledged: true,
+            votingClosedBoardHeadDigest: digest('closed-board-head'),
+        };
+        expect(() =>
+            buildAggregateDerivationStatement({
+                ...statementInput,
+                unsafeSmallRosterAcknowledged: false,
+            }),
+        ).toThrow(/unsafe small-roster acknowledgement/u);
+        expect(() =>
+            buildAggregateDerivationStatement({
+                ...statementInput,
+                ballotPackages: [ballotPackage, ballotPackage],
+            }),
+        ).toThrow(/duplicates/u);
+        const {
+            proofBytesHex: omittedProofBytesHex,
+            ...packageWithoutProofBytes
+        } = ballotPackage;
+        void omittedProofBytesHex;
+        expect(() =>
+            buildAggregateDerivationStatement({
+                ...statementInput,
+                ballotPackages: [
+                    packageWithoutProofBytes as ClaimBearingBallotPackage,
+                ],
+            }),
+        ).toThrow(/proof-byte-bearing/u);
+        const { aggregateCommitment, statement } =
+            buildAggregateDerivationStatement(statementInput);
+        const witness = sumAggregateDerivationWitnesses({
+            witnesses: [receiverWitness(fixture)],
+        });
+        const wrongWitness = {
+            ...witness,
+            aggregateIntegerShareVector:
+                witness.aggregateIntegerShareVector.map(
+                    (coordinate, coordinateIndex) =>
+                        coordinateIndex === 0 ? coordinate + 1 : coordinate,
+                ),
+        };
+        const wrongProofBuild = buildAggregateDerivationProofInput({
+            aggregateCommitment,
+            statement,
+            witness: wrongWitness,
+        });
+        expect(
+            kernel.generateAggregateDerivationProof({
+                proofInput: wrongProofBuild.proofInput,
+                proverRandomnessHex: '66'.repeat(32),
+                secretState: wrongProofBuild.secretState,
+            }),
+        ).toMatchObject({
+            ok: false,
+            unresolvedReason: 'BallotPackageInvalid',
+        });
+
+        const proofBuild = buildAggregateDerivationProofInput({
+            aggregateCommitment,
+            statement,
+            witness,
+        });
+        const generatedAggregateProof = kernel.generateAggregateDerivationProof(
+            {
+                proofInput: proofBuild.proofInput,
+                proverRandomnessHex: '66'.repeat(32),
+                secretState: proofBuild.secretState,
+            },
+        );
+        expect(generatedAggregateProof.refusedObjects).toEqual([]);
+        expect(generatedAggregateProof).toMatchObject({
+            ok: true,
+            backendAvailable: true,
+            generatedProofBytes: true,
+            operation: 'generateAggregateDerivationProof',
+            unresolvedReason: null,
+        });
+        expect(generatedAggregateProof.statusLabels).toContain(
+            'AggregateDerivationProofVerified',
+        );
+        const component = createAggregateDerivationComponent({
+            aggregateCommitment,
+            proofBytesHex: String(generatedAggregateProof.proofBytesHex),
+            proofInput: proofBuild.proofInput,
+            shareCommitmentMessageBoundCert: certificate,
+            statement,
+        });
+
+        expect(
+            verifyAggregateDerivationComponentStructure(component),
+        ).toMatchObject({
+            ok: true,
+            aggregateDerivationComponentDigest:
+                component.aggregateDerivationComponentDigest,
+        });
+        expect(JSON.stringify(component)).not.toMatch(
+            /aggregateIntegerShareVector|aggregateOpeningRandomness|sourceWitnessCoefficients|receiverPlaintext|proofWitness/u,
+        );
+
+        const verification = kernel.verifyAggregateDerivationProof({
+            component,
+        });
+        expect(verification).toMatchObject({
+            ok: true,
+            backendAvailable: true,
+            operation: 'verifyAggregateDerivationProof',
+            unresolvedReason: null,
+        });
+        expect(verification.statusLabels).toContain(
+            'AggregateDerivationProofVerified',
+        );
+
+        expect(
+            kernel.verifyAggregateDerivationProof({
+                component: {
+                    ...component,
+                    proofInput: {
+                        ...component.proofInput,
+                        proofBytesHex: `00${component.proofInput.proofBytesHex.slice(2)}`,
+                    },
+                },
+            }),
+        ).toMatchObject({
+            ok: false,
+            backendAvailable: true,
+            operation: 'verifyAggregateDerivationProof',
+        });
+
+        expect(
+            kernel.verifyAggregateDerivationProof({
+                component: {
+                    ...component,
+                    proofInput: {
+                        ...component.proofInput,
+                        publicRandomnessHex: '00'.repeat(32),
+                    },
+                },
+            }),
+        ).toMatchObject({
+            ok: false,
+            backendAvailable: true,
+            operation: 'verifyAggregateDerivationProof',
+        });
+
+        const commitmentPolynomialVector =
+            component.aggregateCommitment.commitmentPolynomialVector.map(
+                (polynomial, polynomialIndex) =>
+                    polynomialIndex === 0
+                        ? polynomial.map((coefficient, coefficientIndex) =>
+                              coefficientIndex === 0
+                                  ? coefficient === '0'
+                                      ? '1'
+                                      : '0'
+                                  : coefficient,
+                          )
+                        : polynomial,
+            );
+        expect(
+            kernel.verifyAggregateDerivationProof({
+                component: {
+                    ...component,
+                    aggregateCommitment: {
+                        ...component.aggregateCommitment,
+                        commitmentPolynomialVector,
+                    },
+                },
+            }),
+        ).toMatchObject({
+            ok: false,
+            backendAvailable: true,
+            operation: 'verifyAggregateDerivationProof',
+        });
+
+        const componentWithLeakedWitness = {
+            ...component,
+            witness,
+        };
+        expect(
+            verifyAggregateDerivationComponentStructure(
+                componentWithLeakedWitness,
+            ),
+        ).toMatchObject({
+            ok: false,
+            unresolvedReason: 'BallotPackageInvalid',
+        });
+        expect(
+            kernel.verifyAggregateDerivationProof({
+                component: componentWithLeakedWitness,
+            }),
+        ).toMatchObject({
+            ok: false,
+            unresolvedReason: 'BallotPackageInvalid',
+        });
+
+        const componentWithWraparoundCertificate =
+            createAggregateDerivationComponent({
+                aggregateCommitment,
+                proofBytesHex: String(generatedAggregateProof.proofBytesHex),
+                proofInput: proofBuild.proofInput,
+                shareCommitmentMessageBoundCert:
+                    certificateThatPermitsWraparound(certificate),
+                statement,
+            });
+        expect(
+            verifyAggregateDerivationComponentStructure(
+                componentWithWraparoundCertificate,
+            ),
+        ).toMatchObject({
+            ok: false,
+            unresolvedReason: 'BallotPrivacyProfileInvalid',
+        });
+        expect(
+            kernel.verifyAggregateDerivationProof({
+                component: componentWithWraparoundCertificate,
+            }),
+        ).toMatchObject({
+            ok: false,
+            unresolvedReason: 'BallotPackageInvalid',
+        });
+    }, 900_000);
+});

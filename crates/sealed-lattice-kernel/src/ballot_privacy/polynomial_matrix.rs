@@ -58,6 +58,7 @@ impl PolynomialMatrix {
         Ok(&self.entries[row_index * self.columns + column_index])
     }
 
+    #[cfg(test)]
     pub fn entries_by_row(&self) -> Vec<Vec<Vec<u64>>> {
         self.entries
             .chunks_exact(self.columns)
@@ -65,6 +66,7 @@ impl PolynomialMatrix {
             .collect()
     }
 
+    #[cfg(test)]
     pub fn scale(&self, scalar: u64) -> CanonicalResult<Self> {
         let entries = self
             .entries

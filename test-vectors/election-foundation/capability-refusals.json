@@ -189,7 +189,7 @@
       }
     },
     {
-      "caseName": "accept-target-certificate-gated-profile-not-claim-bearing",
+      "caseName": "accept-target-supported-safe-profile",
       "action": "AcceptTarget",
       "thresholdProfileInput": {
         "rosterSize": 21
@@ -205,9 +205,8 @@
         "bridgeMobileCertificatePresent": true
       },
       "expected": {
-        "allowed": false,
-        "action": "AcceptTarget",
-        "reason": "ProfileNotClaimBearing"
+        "allowed": true,
+        "action": "AcceptTarget"
       }
     },
     {

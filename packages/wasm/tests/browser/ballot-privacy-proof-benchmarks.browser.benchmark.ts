@@ -121,7 +121,7 @@ describe('ballot privacy proof benchmarks in browsers', () => {
     });
 
     it(
-        'records mandatory ballot proof generation and verification metrics',
+        'records mandatory ballot proof generation, proof verification, and package boundary metrics',
         async () => {
             const kernel = await loadTranscriptCoreKernel();
             const { claimVerification, generation, report, verification } =
@@ -142,9 +142,9 @@ describe('ballot privacy proof benchmarks in browsers', () => {
                 unresolvedReason: null,
             });
             expect(claimVerification).toMatchObject({
-                ok: true,
+                ok: false,
                 operation: 'verifyClaimBearingBallotPackage',
-                unresolvedReason: null,
+                unresolvedReason: 'BallotPackageInvalid',
             });
             expect(report.proofSizeBytes).toBeGreaterThan(0);
             expect(report.totalComponentProofSizeBytes).toBeGreaterThan(0);

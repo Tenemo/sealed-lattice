@@ -1,0 +1,1300 @@
+use std::collections::BTreeSet;
+
+use super::*;
+
+const AGGREGATE_DERIVATION_COMPONENT_ID: &str = "aggregate-derivation-component";
+const AGGREGATE_DERIVATION_PARAMETER_PROFILE_ID: &str =
+    "aggregate-derivation-linear-compatibility-v1";
+const AGGREGATE_DERIVATION_PROOF_ENCODING_PROFILE_ID: &str =
+    "aggregate-derivation-linear-proof-encoding-v1";
+const AGGREGATE_DERIVATION_PROOF_STATEMENT_FORMAT: &str =
+    "sparse-polynomial-matrix-linear-proof-v1";
+const AGGREGATE_DERIVATION_SOURCE_RING_DEGREE: usize = 256;
+const AGGREGATE_DERIVATION_PROOF_RING_DEGREE: usize = 64;
+const AGGREGATE_DERIVATION_WITNESS_L2_BOUND_SQUARED: u128 = 3_000_000_000_000_000;
+const AGGREGATE_DERIVATION_PROOF_MODULUS: u64 = 70_368_744_177_829;
+
+pub(crate) fn generate_aggregate_derivation_proof_from_command_request(request: &Value) -> Value {
+    let proof_input =
+        match required_json_field(request, "proofInput", "generateAggregateDerivationProof") {
+            Ok(value) => value,
+            Err(error) => {
+                return structural_rejection(
+                    "generateAggregateDerivationProof",
+                    vec![error.to_json_value()],
+                );
+            }
+        };
+    let secret_state =
+        match required_json_field(request, "secretState", "generateAggregateDerivationProof") {
+            Ok(value) => value,
+            Err(error) => {
+                return structural_rejection(
+                    "generateAggregateDerivationProof",
+                    vec![error.to_json_value()],
+                );
+            }
+        };
+    let prover_randomness_hex = match required_string_field(
+        request,
+        "proverRandomnessHex",
+        "generateAggregateDerivationProof",
+    ) {
+        Ok(value) => value,
+        Err(error) => {
+            return structural_rejection(
+                "generateAggregateDerivationProof",
+                vec![error.to_json_value()],
+            );
+        }
+    };
+
+    let refused_objects = collect_aggregate_proof_input_refusals(proof_input, None, false);
+    if !refused_objects.is_empty() {
+        return structural_rejection("generateAggregateDerivationProof", refused_objects);
+    }
+
+    let generation =
+        generate_aggregate_relation_proof(proof_input, secret_state, prover_randomness_hex);
+
+    match generation {
+        Ok(generation) => json!({
+            "ok": true,
+            "backendAvailable": BALLOT_PRIVACY_PROOF_BACKEND_AVAILABLE,
+            "backendStatus": describe_proof_backend(),
+            "operation": "generateAggregateDerivationProof",
+            "componentId": AGGREGATE_DERIVATION_COMPONENT_ID,
+            "statusLabels": [
+                "AggregateDerivationRelationWitnessChecked",
+                "AggregateDerivationProofBytesGenerated",
+                "AggregateDerivationProofVerified"
+            ],
+            "acceptedDigests": [],
+            "refusedObjects": [],
+            "unresolvedReason": Value::Null,
+            "generatedProofBytes": true,
+            "proofBytesHex": generation.proof_hex,
+            "proofSizeBytes": generation.proof_size_bytes,
+            "summary": {
+                "challengeHex": generation.challenge_hex,
+                "relationCommitmentDigest": generation.relation_commitment_digest
+            }
+        }),
+        Err(error) => structural_rejection(
+            "generateAggregateDerivationProof",
+            vec![error.to_json_value()],
+        ),
+    }
+}
+
+pub(crate) fn verify_aggregate_derivation_proof_from_command_request(request: &Value) -> Value {
+    let component = request.get("component");
+    let proof_input = match component
+        .and_then(|component_value| {
+            required_json_field(component_value, "proofInput", "component").ok()
+        })
+        .or_else(|| request.get("proofInput"))
+    {
+        Some(value) => value,
+        None => {
+            return structural_rejection(
+                "verifyAggregateDerivationProof",
+                vec![structural_refusal(
+                    "verifyAggregateDerivationProof.proofInput is required.",
+                    None,
+                )],
+            );
+        }
+    };
+    let object_digest = component
+        .and_then(|component_value| {
+            string_field(component_value, "aggregateDerivationComponentDigest")
+        })
+        .or_else(|| string_field(proof_input, "statementDigest"));
+    let mut refused_objects = collect_aggregate_proof_input_refusals(proof_input, component, true);
+    if let Some(component_value) = component {
+        refused_objects.extend(collect_aggregate_component_refusals(component_value));
+    }
+    if !refused_objects.is_empty() {
+        return structural_rejection("verifyAggregateDerivationProof", refused_objects);
+    }
+
+    let proof_statement = match required_json_field(proof_input, "proofStatement", "proofInput") {
+        Ok(value) => value,
+        Err(error) => {
+            return structural_rejection(
+                "verifyAggregateDerivationProof",
+                vec![error.to_json_value()],
+            );
+        }
+    };
+    let parameter_set_value =
+        match required_json_field(proof_input, "proofParameterSet", "proofInput") {
+            Ok(value) => value,
+            Err(error) => {
+                return structural_rejection(
+                    "verifyAggregateDerivationProof",
+                    vec![error.to_json_value()],
+                );
+            }
+        };
+    let proof_encoding_value = match required_json_field(proof_input, "proofEncoding", "proofInput")
+    {
+        Ok(value) => value,
+        Err(error) => {
+            return structural_rejection(
+                "verifyAggregateDerivationProof",
+                vec![error.to_json_value()],
+            );
+        }
+    };
+    let public_randomness_hex =
+        match required_string_field(proof_input, "publicRandomnessHex", "proofInput") {
+            Ok(value) => value,
+            Err(error) => {
+                return structural_rejection(
+                    "verifyAggregateDerivationProof",
+                    vec![error.to_json_value()],
+                );
+            }
+        };
+    let proof_hex = match required_string_field(proof_input, "proofBytesHex", "proofInput") {
+        Ok(value) => value,
+        Err(error) => {
+            return structural_rejection(
+                "verifyAggregateDerivationProof",
+                vec![error.to_json_value()],
+            );
+        }
+    };
+    if let Err(error) =
+        serde_json::from_value::<LinearProofParameterSet>(parameter_set_value.clone())
+    {
+        return structural_rejection(
+            "verifyAggregateDerivationProof",
+            vec![structural_refusal(
+                format!("Aggregate derivation parameter set is malformed: {error}"),
+                object_digest,
+            )],
+        );
+    }
+    if let Err(error) = serde_json::from_value::<LinearProofEncoding>(proof_encoding_value.clone())
+    {
+        return structural_rejection(
+            "verifyAggregateDerivationProof",
+            vec![structural_refusal(
+                format!("Aggregate derivation proof encoding is malformed: {error}"),
+                object_digest,
+            )],
+        );
+    }
+    let parsed_sparse_statement =
+        match sparse_matrix_from_sparse_component_statement(proof_statement) {
+            Ok(value) => value,
+            Err(error) => {
+                return component_proof_backend_rejection(
+                    "verifyAggregateDerivationProof",
+                    AGGREGATE_DERIVATION_COMPONENT_ID,
+                    vec![json!({
+                        "code": error.code,
+                        "message": error.message,
+                        "objectDigest": object_digest
+                    })],
+                    json!("BallotPackageInvalid"),
+                );
+            }
+        };
+    let target_coefficient_representation: LinearProofTargetCoefficientRepresentation =
+        match required_json_field(
+            proof_statement,
+            "targetCoefficientRepresentation",
+            "proofInput.proofStatement",
+        )
+        .and_then(|value| {
+            serde_json::from_value(value.clone()).map_err(|error| {
+                invalid_preflight(format!(
+                    "Aggregate derivation target coefficient representation is malformed: {error}"
+                ))
+            })
+        }) {
+            Ok(value) => value,
+            Err(error) => {
+                return structural_rejection(
+                    "verifyAggregateDerivationProof",
+                    vec![error.to_json_value()],
+                );
+            }
+        };
+    let matrix_coefficient_representation = match matrix_coefficient_representation_from_statement(
+        proof_statement,
+        "proofInput.proofStatement",
+    ) {
+        Ok(value) => value,
+        Err(error) => {
+            return structural_rejection(
+                "verifyAggregateDerivationProof",
+                vec![error.to_json_value()],
+            );
+        }
+    };
+
+    if let Err(error) = verify_aggregate_relation_proof(VerifyAggregateRelationProofInput {
+        proof_statement,
+        public_randomness_hex,
+        proof_hex,
+        source_statement_matrix: &parsed_sparse_statement.source_statement_matrix,
+        target_vector_coefficients: &parsed_sparse_statement.target_vector_coefficients,
+        matrix_coefficient_representation,
+        target_coefficient_representation,
+    }) {
+        return structural_rejection(
+            "verifyAggregateDerivationProof",
+            vec![structural_refusal(
+                format!(
+                    "Aggregate derivation relation proof is invalid: {}",
+                    error.message
+                ),
+                object_digest,
+            )],
+        );
+    }
+
+    json!({
+        "ok": true,
+        "backendAvailable": BALLOT_PRIVACY_PROOF_BACKEND_AVAILABLE,
+        "backendStatus": describe_proof_backend(),
+        "operation": "verifyAggregateDerivationProof",
+        "componentId": AGGREGATE_DERIVATION_COMPONENT_ID,
+        "statusLabels": [
+            "AggregateDerivationStructureVerified",
+            "AggregateDerivationProofVerified"
+        ],
+        "acceptedDigests": object_digest.map(|digest| vec![digest]).unwrap_or_default(),
+        "refusedObjects": [],
+        "unresolvedReason": Value::Null
+    })
+}
+
+struct AggregateRelationProofGeneration {
+    proof_hex: String,
+    proof_size_bytes: usize,
+    challenge_hex: String,
+    relation_commitment_digest: String,
+}
+
+struct VerifyAggregateRelationProofInput<'a> {
+    proof_statement: &'a Value,
+    public_randomness_hex: &'a str,
+    proof_hex: &'a str,
+    source_statement_matrix: &'a SparsePolynomialMatrix,
+    target_vector_coefficients: &'a [Vec<u64>],
+    matrix_coefficient_representation: LinearProofMatrixCoefficientRepresentation,
+    target_coefficient_representation: LinearProofTargetCoefficientRepresentation,
+}
+
+struct ParsedAggregateRelationProof {
+    challenge: u64,
+    relation_commitment_vector: PolynomialVector,
+    response_vector: PolynomialVector,
+}
+
+fn generate_aggregate_relation_proof(
+    proof_input: &Value,
+    secret_state: &Value,
+    prover_randomness_hex: &str,
+) -> crate::encoding::CanonicalResult<AggregateRelationProofGeneration> {
+    let proof_statement = required_json_field(proof_input, "proofStatement", "proofInput")?;
+    let public_randomness_hex =
+        required_string_field(proof_input, "publicRandomnessHex", "proofInput")?;
+    let statement_digest = required_string_field(
+        proof_statement,
+        "statementDigest",
+        "proofInput.proofStatement",
+    )?;
+    let parsed_sparse_statement = sparse_matrix_from_sparse_component_statement(proof_statement)
+        .map_err(|error| invalid_preflight(error.message))?;
+    let source_ring = parsed_sparse_statement.source_statement_matrix.ring();
+    let source_witness_coefficients = source_witness_coefficients(secret_state)?;
+    let source_witness_vector =
+        signed_witness_to_source_vector(source_ring, &source_witness_coefficients)?;
+    let target_vector = PolynomialVector::new(
+        source_ring,
+        parsed_sparse_statement.target_vector_coefficients.clone(),
+    )?;
+    require_aggregate_relation_satisfied(
+        &parsed_sparse_statement.source_statement_matrix,
+        &target_vector,
+        &source_witness_vector,
+    )?;
+
+    let mask_vector = sample_aggregate_mask_vector(
+        source_ring,
+        parsed_sparse_statement.source_statement_matrix.columns(),
+        statement_digest,
+        public_randomness_hex,
+        prover_randomness_hex,
+    )?;
+    let relation_commitment_vector = parsed_sparse_statement
+        .source_statement_matrix
+        .multiply_vector(&mask_vector)?;
+    let challenge = aggregate_relation_challenge_scalar(
+        statement_digest,
+        public_randomness_hex,
+        relation_commitment_vector.entries(),
+        source_ring.modulus(),
+    )?;
+    let response_vector =
+        mask_plus_scaled_witness(source_ring, &mask_vector, &source_witness_vector, challenge)?;
+    let proof_value = aggregate_relation_proof_value(
+        statement_digest,
+        public_randomness_hex,
+        challenge,
+        relation_commitment_vector.entries(),
+        response_vector.entries(),
+    );
+    let proof_json = canonical_json(&proof_value)?;
+    let relation_commitment_digest = derive_digest(
+        "AggregateDerivationComponentDigest",
+        &json!({
+            "purpose": "aggregate-derivation-relation-commitment-v1",
+            "relationCommitmentVector": canonical_polynomial_vector_value(relation_commitment_vector.entries())
+        }),
+    )
+    .ok_or_else(|| invalid_preflight("aggregate relation commitment digest did not derive"))?;
+
+    Ok(AggregateRelationProofGeneration {
+        proof_hex: to_hex(proof_json.as_bytes()),
+        proof_size_bytes: proof_json.len(),
+        challenge_hex: format!("{challenge:016x}"),
+        relation_commitment_digest,
+    })
+}
+
+fn verify_aggregate_relation_proof(
+    input: VerifyAggregateRelationProofInput<'_>,
+) -> crate::encoding::CanonicalResult<()> {
+    if input.matrix_coefficient_representation
+        != LinearProofMatrixCoefficientRepresentation::CenteredSignedSourceModulus
+        || input.target_coefficient_representation
+            != LinearProofTargetCoefficientRepresentation::CenteredSignedSourceModulus
+    {
+        return Err(invalid_preflight(
+            "aggregate derivation proof must use centered source-modulus coefficient representations",
+        ));
+    }
+    let statement_digest = required_string_field(
+        input.proof_statement,
+        "statementDigest",
+        "proofInput.proofStatement",
+    )?;
+    let source_ring = input.source_statement_matrix.ring();
+    let target_vector =
+        PolynomialVector::new(source_ring, input.target_vector_coefficients.to_vec())?;
+    let parsed_proof = parse_aggregate_relation_proof(
+        input.proof_hex,
+        statement_digest,
+        input.public_randomness_hex,
+        source_ring,
+        input.source_statement_matrix.rows(),
+        input.source_statement_matrix.columns(),
+    )?;
+    let recomputed_challenge = aggregate_relation_challenge_scalar(
+        statement_digest,
+        input.public_randomness_hex,
+        parsed_proof.relation_commitment_vector.entries(),
+        source_ring.modulus(),
+    )?;
+    if recomputed_challenge != parsed_proof.challenge {
+        return Err(invalid_preflight(
+            "aggregate derivation proof challenge does not match its relation commitment",
+        ));
+    }
+    let response_relation_output = input
+        .source_statement_matrix
+        .multiply_vector(&parsed_proof.response_vector)?;
+    let scaled_target_vector =
+        scale_polynomial_vector(source_ring, &target_vector, parsed_proof.challenge)?;
+    let verification_left = response_relation_output.add(&scaled_target_vector)?;
+    if verification_left.entries() != parsed_proof.relation_commitment_vector.entries() {
+        return Err(invalid_preflight(
+            "aggregate derivation relation proof response does not satisfy the public statement",
+        ));
+    }
+
+    Ok(())
+}
+
+fn require_aggregate_relation_satisfied(
+    source_statement_matrix: &SparsePolynomialMatrix,
+    target_vector: &PolynomialVector,
+    source_witness_vector: &PolynomialVector,
+) -> crate::encoding::CanonicalResult<()> {
+    let relation_output = source_statement_matrix
+        .multiply_vector(source_witness_vector)?
+        .add(target_vector)?;
+    if relation_output
+        .entries()
+        .iter()
+        .any(|polynomial| polynomial.iter().any(|coefficient| *coefficient != 0))
+    {
+        return Err(invalid_preflight(
+            "aggregate derivation witness does not satisfy the public relation",
+        ));
+    }
+
+    Ok(())
+}
+
+fn signed_witness_to_source_vector(
+    source_ring: PolynomialRing,
+    source_witness_coefficients: &[Vec<i64>],
+) -> crate::encoding::CanonicalResult<PolynomialVector> {
+    let entries = source_witness_coefficients
+        .iter()
+        .map(|polynomial| {
+            if polynomial.len() != source_ring.degree() {
+                return Err(invalid_preflight(
+                    "aggregate derivation witness polynomial degree does not match the source ring",
+                ));
+            }
+            polynomial
+                .iter()
+                .map(|coefficient| {
+                    positive_mod_i128_local(i128::from(*coefficient), source_ring.modulus())
+                })
+                .collect::<crate::encoding::CanonicalResult<Vec<_>>>()
+        })
+        .collect::<crate::encoding::CanonicalResult<Vec<_>>>()?;
+
+    PolynomialVector::new(source_ring, entries)
+}
+
+fn sample_aggregate_mask_vector(
+    source_ring: PolynomialRing,
+    vector_length: usize,
+    statement_digest: &str,
+    public_randomness_hex: &str,
+    prover_randomness_hex: &str,
+) -> crate::encoding::CanonicalResult<PolynomialVector> {
+    let entries = (0..vector_length)
+        .map(|column_index| {
+            sample_aggregate_mask_polynomial(
+                source_ring,
+                statement_digest,
+                public_randomness_hex,
+                prover_randomness_hex,
+                column_index,
+            )
+        })
+        .collect::<crate::encoding::CanonicalResult<Vec<_>>>()?;
+
+    PolynomialVector::new(source_ring, entries)
+}
+
+fn sample_aggregate_mask_polynomial(
+    source_ring: PolynomialRing,
+    statement_digest: &str,
+    public_randomness_hex: &str,
+    prover_randomness_hex: &str,
+    column_index: usize,
+) -> crate::encoding::CanonicalResult<Vec<u64>> {
+    let mut coefficients = Vec::with_capacity(source_ring.degree());
+    let column_index_bytes = u64_bytes(column_index)?;
+    let mut block_index = 0_u64;
+    while coefficients.len() < source_ring.degree() {
+        let block_index_bytes = block_index.to_le_bytes();
+        let block = hash512(
+            "sealed-lattice-root/aggregate-derivation-mask-v1",
+            &[
+                statement_digest.as_bytes(),
+                public_randomness_hex.as_bytes(),
+                prover_randomness_hex.as_bytes(),
+                &column_index_bytes,
+                &block_index_bytes,
+            ],
+        );
+        for chunk in block.chunks_exact(8) {
+            let mut value_bytes = [0_u8; 8];
+            value_bytes.copy_from_slice(chunk);
+            coefficients.push(u64::from_le_bytes(value_bytes) % source_ring.modulus());
+            if coefficients.len() == source_ring.degree() {
+                break;
+            }
+        }
+        block_index = block_index
+            .checked_add(1)
+            .ok_or_else(|| invalid_preflight("aggregate derivation mask block index overflowed"))?;
+    }
+
+    Ok(coefficients)
+}
+
+fn aggregate_relation_challenge_scalar(
+    statement_digest: &str,
+    public_randomness_hex: &str,
+    relation_commitment_vector: &[Vec<u64>],
+    modulus: u64,
+) -> crate::encoding::CanonicalResult<u64> {
+    let commitment_value = canonical_polynomial_vector_value(relation_commitment_vector);
+    let commitment_json = canonical_json(&commitment_value)?;
+    let challenge_block = hash512(
+        "sealed-lattice-root/aggregate-derivation-proof-challenge-v1",
+        &[
+            statement_digest.as_bytes(),
+            public_randomness_hex.as_bytes(),
+            commitment_json.as_bytes(),
+        ],
+    );
+    let mut challenge_bytes = [0_u8; 8];
+    challenge_bytes.copy_from_slice(&challenge_block[..8]);
+    let mut challenge = u64::from_le_bytes(challenge_bytes) % modulus;
+    if challenge == 0 {
+        challenge = 1;
+    }
+
+    Ok(challenge)
+}
+
+fn mask_plus_scaled_witness(
+    source_ring: PolynomialRing,
+    mask_vector: &PolynomialVector,
+    source_witness_vector: &PolynomialVector,
+    challenge: u64,
+) -> crate::encoding::CanonicalResult<PolynomialVector> {
+    if mask_vector.len() != source_witness_vector.len() {
+        return Err(invalid_preflight(
+            "aggregate derivation mask and witness lengths do not match",
+        ));
+    }
+    let modulus = u128::from(source_ring.modulus());
+    let entries = mask_vector
+        .entries()
+        .iter()
+        .zip(source_witness_vector.entries())
+        .map(|(mask_polynomial, witness_polynomial)| {
+            mask_polynomial
+                .iter()
+                .zip(witness_polynomial)
+                .map(|(mask_coefficient, witness_coefficient)| {
+                    let scaled =
+                        (u128::from(challenge) * u128::from(*witness_coefficient)) % modulus;
+                    u64::try_from((u128::from(*mask_coefficient) + scaled) % modulus).map_err(
+                        |_| {
+                            invalid_preflight(
+                                "aggregate derivation response coefficient overflowed",
+                            )
+                        },
+                    )
+                })
+                .collect::<crate::encoding::CanonicalResult<Vec<_>>>()
+        })
+        .collect::<crate::encoding::CanonicalResult<Vec<_>>>()?;
+
+    PolynomialVector::new(source_ring, entries)
+}
+
+fn scale_polynomial_vector(
+    source_ring: PolynomialRing,
+    vector: &PolynomialVector,
+    scalar: u64,
+) -> crate::encoding::CanonicalResult<PolynomialVector> {
+    let entries = vector
+        .entries()
+        .iter()
+        .map(|polynomial| source_ring.scale(scalar, polynomial))
+        .collect::<crate::encoding::CanonicalResult<Vec<_>>>()?;
+
+    PolynomialVector::new(source_ring, entries)
+}
+
+fn aggregate_relation_proof_value(
+    statement_digest: &str,
+    public_randomness_hex: &str,
+    challenge: u64,
+    relation_commitment_vector: &[Vec<u64>],
+    response_vector: &[Vec<u64>],
+) -> Value {
+    json!({
+        "objectType": "AggregateDerivationRelationProof",
+        "objectVersion": 1,
+        "challenge": challenge.to_string(),
+        "publicRandomnessHex": public_randomness_hex,
+        "relationCommitmentVector": canonical_polynomial_vector_value(relation_commitment_vector),
+        "responseVector": canonical_polynomial_vector_value(response_vector),
+        "statementDigest": statement_digest
+    })
+}
+
+fn canonical_polynomial_vector_value(entries: &[Vec<u64>]) -> Value {
+    Value::Array(
+        entries
+            .iter()
+            .map(|polynomial| {
+                Value::Array(
+                    polynomial
+                        .iter()
+                        .map(|coefficient| Value::String(coefficient.to_string()))
+                        .collect(),
+                )
+            })
+            .collect(),
+    )
+}
+
+fn parse_aggregate_relation_proof(
+    proof_hex: &str,
+    statement_digest: &str,
+    public_randomness_hex: &str,
+    source_ring: PolynomialRing,
+    expected_rows: usize,
+    expected_columns: usize,
+) -> crate::encoding::CanonicalResult<ParsedAggregateRelationProof> {
+    let proof_bytes = decode_hex(proof_hex)?;
+    let proof_json = std::str::from_utf8(&proof_bytes)
+        .map_err(|_| invalid_preflight("aggregate derivation proof bytes are not UTF-8 JSON"))?;
+    let proof_value: Value = serde_json::from_str(proof_json).map_err(|error| {
+        invalid_preflight(format!(
+            "aggregate derivation proof JSON is malformed: {error}"
+        ))
+    })?;
+    if canonical_json(&proof_value)? != proof_json {
+        return Err(invalid_preflight(
+            "aggregate derivation proof JSON must use canonical serialization",
+        ));
+    }
+    if string_field(&proof_value, "objectType") != Some("AggregateDerivationRelationProof")
+        || u64_object_field(&proof_value, "objectVersion") != Some(1)
+        || string_field(&proof_value, "statementDigest") != Some(statement_digest)
+        || string_field(&proof_value, "publicRandomnessHex") != Some(public_randomness_hex)
+    {
+        return Err(invalid_preflight(
+            "aggregate derivation proof shell is not bound to the statement",
+        ));
+    }
+    let challenge = parse_canonical_u64_decimal(
+        string_field(&proof_value, "challenge")
+            .ok_or_else(|| invalid_preflight("aggregate derivation proof challenge is required"))?,
+        source_ring.modulus(),
+    )?;
+    let relation_commitment_vector = parse_polynomial_vector_value(
+        required_json_field(
+            &proof_value,
+            "relationCommitmentVector",
+            "AggregateDerivationRelationProof",
+        )?,
+        source_ring,
+        expected_rows,
+        "aggregate derivation relation commitment",
+    )?;
+    let response_vector = parse_polynomial_vector_value(
+        required_json_field(
+            &proof_value,
+            "responseVector",
+            "AggregateDerivationRelationProof",
+        )?,
+        source_ring,
+        expected_columns,
+        "aggregate derivation response",
+    )?;
+
+    Ok(ParsedAggregateRelationProof {
+        challenge,
+        relation_commitment_vector,
+        response_vector,
+    })
+}
+
+fn parse_polynomial_vector_value(
+    value: &Value,
+    source_ring: PolynomialRing,
+    expected_length: usize,
+    label: &str,
+) -> crate::encoding::CanonicalResult<PolynomialVector> {
+    let array = value
+        .as_array()
+        .ok_or_else(|| invalid_preflight(format!("{label} must be an array")))?;
+    if array.len() != expected_length {
+        return Err(invalid_preflight(format!(
+            "{label} length does not match the statement"
+        )));
+    }
+    let entries = array
+        .iter()
+        .map(|polynomial_value| {
+            let polynomial_array = polynomial_value
+                .as_array()
+                .ok_or_else(|| invalid_preflight(format!("{label} polynomial must be an array")))?;
+            if polynomial_array.len() != source_ring.degree() {
+                return Err(invalid_preflight(format!(
+                    "{label} polynomial degree does not match the source ring"
+                )));
+            }
+            polynomial_array
+                .iter()
+                .map(|coefficient_value| {
+                    let coefficient = coefficient_value.as_str().ok_or_else(|| {
+                        invalid_preflight(format!("{label} coefficient must be a decimal string"))
+                    })?;
+                    parse_canonical_u64_decimal(coefficient, source_ring.modulus())
+                })
+                .collect::<crate::encoding::CanonicalResult<Vec<_>>>()
+        })
+        .collect::<crate::encoding::CanonicalResult<Vec<_>>>()?;
+
+    PolynomialVector::new(source_ring, entries)
+}
+
+fn parse_canonical_u64_decimal(value: &str, modulus: u64) -> crate::encoding::CanonicalResult<u64> {
+    if !unsigned_decimal_string(value) {
+        return Err(invalid_preflight(
+            "aggregate derivation proof coefficient is not a canonical decimal string",
+        ));
+    }
+    let parsed = value.parse::<u64>().map_err(|_| {
+        invalid_preflight("aggregate derivation proof coefficient does not fit in u64")
+    })?;
+    if parsed >= modulus {
+        return Err(invalid_preflight(
+            "aggregate derivation proof coefficient is outside the source modulus",
+        ));
+    }
+
+    Ok(parsed)
+}
+
+fn positive_mod_i128_local(value: i128, modulus: u64) -> crate::encoding::CanonicalResult<u64> {
+    let modulus_value = i128::from(modulus);
+    let mut reduced = value % modulus_value;
+    if reduced < 0 {
+        reduced += modulus_value;
+    }
+
+    u64::try_from(reduced)
+        .map_err(|_| invalid_preflight("aggregate derivation reduced coefficient overflowed"))
+}
+
+fn u64_bytes(value: usize) -> crate::encoding::CanonicalResult<[u8; 8]> {
+    Ok(u64::try_from(value)
+        .map_err(|_| invalid_preflight("aggregate derivation index does not fit in u64"))?
+        .to_le_bytes())
+}
+
+fn collect_aggregate_proof_input_refusals(
+    proof_input: &Value,
+    component: Option<&Value>,
+    proof_bytes_required: bool,
+) -> Vec<Value> {
+    let object_digest = component
+        .and_then(|component_value| {
+            string_field(component_value, "aggregateDerivationComponentDigest")
+        })
+        .or_else(|| string_field(proof_input, "statementDigest"));
+    let mut refused_objects = Vec::new();
+    if string_field(proof_input, "componentId") != Some(AGGREGATE_DERIVATION_COMPONENT_ID) {
+        refused_objects.push(structural_refusal(
+            "Aggregate derivation proof input must use aggregate-derivation-component.",
+            object_digest,
+        ));
+    }
+    if string_field(proof_input, "proofStatementFormat")
+        != Some(AGGREGATE_DERIVATION_PROOF_STATEMENT_FORMAT)
+    {
+        refused_objects.push(structural_refusal(
+            "Aggregate derivation proof input must use sparse-polynomial-matrix-linear-proof-v1.",
+            object_digest,
+        ));
+    }
+    if proof_bytes_required {
+        match string_field(proof_input, "proofBytesHex") {
+            Some(proof_bytes_hex)
+                if !proof_bytes_hex.is_empty()
+                    && proof_bytes_hex.len().is_multiple_of(2)
+                    && proof_bytes_hex
+                        .bytes()
+                        .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)) => {}
+            _ => refused_objects.push(structural_refusal(
+                "Aggregate derivation proof bytes must be non-empty lowercase hexadecimal bytes.",
+                object_digest,
+            )),
+        }
+    }
+    let Some(proof_statement) = proof_input.get("proofStatement") else {
+        refused_objects.push(structural_refusal(
+            "Aggregate derivation proof input must include proofStatement.",
+            object_digest,
+        ));
+
+        return refused_objects;
+    };
+    let Some(parameter_set) = proof_input.get("proofParameterSet") else {
+        refused_objects.push(structural_refusal(
+            "Aggregate derivation proof input must include proofParameterSet.",
+            object_digest,
+        ));
+
+        return refused_objects;
+    };
+    let Some(proof_encoding) = proof_input.get("proofEncoding") else {
+        refused_objects.push(structural_refusal(
+            "Aggregate derivation proof input must include proofEncoding.",
+            object_digest,
+        ));
+
+        return refused_objects;
+    };
+    let statement_rows = usize_object_field(proof_statement, "statementRows");
+    let statement_columns = usize_object_field(proof_statement, "statementColumns");
+    let share_vector_width =
+        statement_rows.and_then(|rows| rows.checked_sub(SHARE_COMMITMENT_MODULE_RANK));
+    let expected_columns = share_vector_width.and_then(|width| {
+        width
+            .checked_mul(3)?
+            .checked_add(SHARE_COMMITMENT_OPENING_DIMENSION)
+    });
+    let expected_short_response_length = statement_columns.and_then(|columns| {
+        columns
+            .checked_mul(
+                AGGREGATE_DERIVATION_SOURCE_RING_DEGREE / AGGREGATE_DERIVATION_PROOF_RING_DEGREE,
+            )?
+            .checked_add(1)
+    });
+
+    if string_field(proof_statement, "componentId") != Some(AGGREGATE_DERIVATION_COMPONENT_ID)
+        || string_field(proof_statement, "parameterProfileId")
+            != Some(AGGREGATE_DERIVATION_PARAMETER_PROFILE_ID)
+        || string_field(proof_statement, "proofStatementFormat")
+            != Some(AGGREGATE_DERIVATION_PROOF_STATEMENT_FORMAT)
+        || string_field(proof_statement, "projectionCoverage")
+            != Some("aggregate-derivation-full-encoded-layout")
+        || string_field(proof_statement, "matrixCoefficientRepresentation")
+            != Some("centeredSignedSourceModulus")
+        || string_field(proof_statement, "targetCoefficientRepresentation")
+            != Some("centeredSignedSourceModulus")
+        || string_field(proof_statement, "coefficientModulus")
+            != Some(&SHARE_COMMITMENT_MODULUS.to_string())
+        || usize_object_field(proof_statement, "sourceRingDegree")
+            != Some(AGGREGATE_DERIVATION_SOURCE_RING_DEGREE)
+        || statement_rows.is_none()
+        || statement_columns.is_none()
+        || expected_columns != statement_columns
+        || u64_object_field(proof_statement, "witnessL2BoundSquared")
+            != Some(AGGREGATE_DERIVATION_WITNESS_L2_BOUND_SQUARED as u64)
+    {
+        refused_objects.push(structural_refusal(
+            "Aggregate derivation sparse proof statement shape is invalid.",
+            object_digest,
+        ));
+    }
+    let Some(share_vector_width) = share_vector_width else {
+        return refused_objects;
+    };
+    if share_vector_width == 0
+        || share_vector_width % (BALLOT_PRIVACY_ENCODED_COORDINATES_PER_OPTION as usize) != 0
+        || share_vector_width
+            > usize::try_from(BALLOT_PRIVACY_MAXIMUM_OPTION_COUNT)
+                .ok()
+                .and_then(|maximum_option_count| {
+                    maximum_option_count
+                        .checked_mul(BALLOT_PRIVACY_ENCODED_COORDINATES_PER_OPTION as usize)
+                })
+                .unwrap_or(0)
+    {
+        refused_objects.push(structural_refusal(
+            "Aggregate derivation must use the full scalar-plus-one-hot encoded layout.",
+            object_digest,
+        ));
+    }
+    if string_field(parameter_set, "profileId") != Some(AGGREGATE_DERIVATION_PARAMETER_PROFILE_ID)
+        || string_field(parameter_set, "coefficientModulus")
+            != Some(&SHARE_COMMITMENT_MODULUS.to_string())
+        || usize_object_field(parameter_set, "ringDegree")
+            != Some(AGGREGATE_DERIVATION_SOURCE_RING_DEGREE)
+        || usize_object_field(parameter_set, "proofSystemRingDegree")
+            != Some(AGGREGATE_DERIVATION_PROOF_RING_DEGREE)
+        || usize_object_field(parameter_set, "statementRows") != statement_rows
+        || usize_object_field(parameter_set, "statementColumns") != statement_columns
+        || u64_object_field(parameter_set, "witnessL2BoundSquared")
+            != Some(AGGREGATE_DERIVATION_WITNESS_L2_BOUND_SQUARED as u64)
+    {
+        refused_objects.push(structural_refusal(
+            "Aggregate derivation parameter set is not bound to the proof statement.",
+            object_digest,
+        ));
+    }
+    if string_field(proof_encoding, "profileId")
+        != Some(AGGREGATE_DERIVATION_PROOF_ENCODING_PROFILE_ID)
+        || u64_object_field(proof_encoding, "coefficientModulus")
+            != Some(AGGREGATE_DERIVATION_PROOF_MODULUS)
+        || usize_object_field(proof_encoding, "ringDegree")
+            != Some(AGGREGATE_DERIVATION_PROOF_RING_DEGREE)
+        || usize_object_field(proof_encoding, "shortResponseVectorLength")
+            != expected_short_response_length
+    {
+        refused_objects.push(structural_refusal(
+            "Aggregate derivation proof encoding is not bound to the proof statement.",
+            object_digest,
+        ));
+    }
+    if let Some(statement_digest) = string_field(proof_statement, "statementDigest") {
+        let expected_statement_digest =
+            derive_aggregate_sparse_linear_statement_digest(proof_statement);
+        if expected_statement_digest.as_deref() != Some(statement_digest) {
+            refused_objects.push(structural_refusal(
+                "Aggregate derivation proof statement digest does not match its canonical payload.",
+                Some(statement_digest),
+            ));
+        }
+        if string_field(proof_input, "componentProofStatementDigest") != Some(statement_digest) {
+            refused_objects.push(structural_refusal(
+                "Aggregate derivation proof input is not bound to the proof statement digest.",
+                Some(statement_digest),
+            ));
+        }
+    } else {
+        refused_objects.push(structural_refusal(
+            "Aggregate derivation proof statement is missing statementDigest.",
+            object_digest,
+        ));
+    }
+    if let Some(component_value) = component
+        && let Some(statement) = component_value.get("statement")
+        && let Some(challenge_domain_digest) = string_field(statement, "challengeDomainDigest")
+        && challenge_domain_digest.len() >= 64
+        && string_field(proof_input, "publicRandomnessHex") != Some(&challenge_domain_digest[..64])
+    {
+        refused_objects.push(structural_refusal(
+            "Aggregate derivation public randomness must be verifier-derived from the statement challenge domain.",
+            object_digest,
+        ));
+    }
+
+    refused_objects
+}
+
+fn derive_aggregate_sparse_linear_statement_digest(proof_statement: &Value) -> Option<String> {
+    let statement_payload = value_without_field(proof_statement, "statementDigest")?;
+    derive_digest(
+        "ChallengeDomainDigest",
+        &json!({
+            "payload": statement_payload,
+            "purpose": "aggregate-derivation-sparse-linear-proof-statement-v1"
+        }),
+    )
+}
+
+fn collect_aggregate_component_refusals(component: &Value) -> Vec<Value> {
+    let object_digest = string_field(component, "aggregateDerivationComponentDigest");
+    let mut refused_objects =
+        collect_forbidden_witness_field_refusals(component, object_digest, "component");
+    let Some(statement) = component.get("statement") else {
+        refused_objects.push(structural_refusal(
+            "Aggregate derivation component must include statement.",
+            object_digest,
+        ));
+
+        return refused_objects;
+    };
+    let Some(aggregate_commitment) = component.get("aggregateCommitment") else {
+        refused_objects.push(structural_refusal(
+            "Aggregate derivation component must include aggregateCommitment.",
+            object_digest,
+        ));
+
+        return refused_objects;
+    };
+    let Some(certificate) = component.get("shareCommitmentMessageBoundCert") else {
+        refused_objects.push(structural_refusal(
+            "Aggregate derivation component must include a no-wraparound certificate.",
+            object_digest,
+        ));
+
+        return refused_objects;
+    };
+
+    refused_objects.extend(collect_aggregate_statement_refusals(
+        statement,
+        object_digest,
+    ));
+    refused_objects.extend(collect_aggregate_commitment_refusals(
+        aggregate_commitment,
+        statement,
+        object_digest,
+    ));
+    refused_objects.extend(collect_aggregate_certificate_refusals(
+        certificate,
+        statement,
+        object_digest,
+    ));
+
+    refused_objects
+}
+
+fn collect_aggregate_statement_refusals(
+    statement: &Value,
+    object_digest: Option<&str>,
+) -> Vec<Value> {
+    let mut refused_objects = Vec::new();
+    let statement_digest = string_field(statement, "aggregateDerivationStatementDigest");
+    let expected_statement_digest =
+        value_without_field(statement, "aggregateDerivationStatementDigest").and_then(
+            |statement_payload| {
+                derive_digest(
+                    "AggregateDerivationComponentDigest",
+                    &json!({
+                        "purpose": "aggregate-derivation-statement-v1",
+                        "statement": statement_payload
+                    }),
+                )
+            },
+        );
+    let option_count = u64_object_field(statement, "optionCount").unwrap_or(0);
+    let participant_count = usize_object_field(statement, "participantCount").unwrap_or(0);
+    let unsafe_small_roster_acknowledged = statement
+        .get("unsafeSmallRosterAcknowledged")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let small_roster_acknowledgement_matches_policy =
+        if participant_count < BALLOT_PRIVACY_MINIMUM_SAFE_PARTICIPANT_COUNT {
+            unsafe_small_roster_acknowledged
+        } else {
+            !unsafe_small_roster_acknowledged
+        };
+    let share_vector_width = usize_object_field(statement, "shareVectorWidth").unwrap_or(0);
+    let expected_width = option_count.checked_mul(BALLOT_PRIVACY_ENCODED_COORDINATES_PER_OPTION);
+    let package_references = array_field(statement, "packageReferences");
+
+    if string_field(statement, "objectType") != Some("AggregateDerivationStatement")
+        || u64_object_field(statement, "objectVersion") != Some(1)
+        || statement_digest.is_none()
+        || expected_statement_digest.as_deref() != statement_digest
+        || string_field(statement, "proofProfileId") != Some("aggregate-derivation-linear-proof-v1")
+        || string_field(statement, "proofParameterProfileId")
+            != Some(AGGREGATE_DERIVATION_PARAMETER_PROFILE_ID)
+        || string_field(statement, "proofEncodingProfileId")
+            != Some(AGGREGATE_DERIVATION_PROOF_ENCODING_PROFILE_ID)
+        || option_count < BALLOT_PRIVACY_MINIMUM_OPTION_COUNT as u64
+        || option_count > BALLOT_PRIVACY_MAXIMUM_OPTION_COUNT as u64
+        || expected_width.and_then(|width| usize::try_from(width).ok()) != Some(share_vector_width)
+        || !(BALLOT_PRIVACY_MINIMUM_UNSAFE_PARTICIPANT_COUNT
+            ..=BALLOT_PRIVACY_MAXIMUM_PARTICIPANT_COUNT)
+            .contains(&participant_count)
+        || package_references.is_none_or(|references| !package_references_are_canonical(references))
+        || !small_roster_acknowledgement_matches_policy
+    {
+        refused_objects.push(structural_refusal(
+            "Aggregate derivation statement digest, profile, or dimension policy is invalid.",
+            object_digest,
+        ));
+    }
+    refused_objects
+}
+
+fn package_references_are_canonical(package_references: &[Value]) -> bool {
+    let mut seen_package_digests = BTreeSet::new();
+    let mut previous_package_digest: Option<&str> = None;
+
+    for package_reference in package_references {
+        let Some(package_digest) = string_field(package_reference, "ballotPackageDigest") else {
+            return false;
+        };
+        if previous_package_digest.is_some_and(|previous| previous > package_digest) {
+            return false;
+        }
+        if !seen_package_digests.insert(package_digest) {
+            return false;
+        }
+        previous_package_digest = Some(package_digest);
+    }
+
+    true
+}
+
+fn collect_aggregate_commitment_refusals(
+    aggregate_commitment: &Value,
+    statement: &Value,
+    object_digest: Option<&str>,
+) -> Vec<Value> {
+    let mut refused_objects = Vec::new();
+    let commitment_digest = string_field(aggregate_commitment, "aggregateShareCommitmentDigest");
+    let expected_commitment_digest =
+        value_without_field(aggregate_commitment, "aggregateShareCommitmentDigest").and_then(
+            |commitment_payload| {
+                derive_digest("AggregateShareCommitmentDigest", &commitment_payload)
+            },
+        );
+    let commitment_polynomial_vector =
+        array_field(aggregate_commitment, "commitmentPolynomialVector");
+    let vector_shape_is_valid = commitment_polynomial_vector.is_some_and(|vector| {
+        vector.len() == SHARE_COMMITMENT_MODULE_RANK
+            && vector.iter().all(|polynomial| {
+                polynomial.as_array().is_some_and(|coefficients| {
+                    coefficients.len() == SHARE_COMMITMENT_MODULE_DEGREE
+                        && coefficients.iter().all(|coefficient| {
+                            integer_value(coefficient)
+                                .is_some_and(|coefficient| coefficient < SHARE_COMMITMENT_MODULUS)
+                        })
+                })
+            })
+    });
+
+    if string_field(aggregate_commitment, "objectType") != Some("AggregateShareCommitment")
+        || u64_object_field(aggregate_commitment, "objectVersion") != Some(1)
+        || commitment_digest.is_none()
+        || expected_commitment_digest.as_deref() != commitment_digest
+        || commitment_digest != string_field(statement, "aggregateShareCommitmentDigest")
+        || string_field(aggregate_commitment, "ballotSetDigest")
+            != string_field(statement, "ballotSetDigest")
+        || string_field(aggregate_commitment, "ceremonyId") != string_field(statement, "ceremonyId")
+        || string_field(aggregate_commitment, "manifestDigest")
+            != string_field(statement, "manifestDigest")
+        || string_field(aggregate_commitment, "rosterDigest")
+            != string_field(statement, "rosterDigest")
+        || string_field(aggregate_commitment, "pollSpecDigest")
+            != string_field(statement, "pollSpecDigest")
+        || string_field(aggregate_commitment, "contributorIdentity")
+            != string_field(statement, "contributorIdentity")
+        || usize_object_field(aggregate_commitment, "contributorRosterPosition")
+            != usize_object_field(statement, "contributorRosterPosition")
+        || string_field(aggregate_commitment, "shareCommitmentProfileDigest")
+            != string_field(statement, "shareCommitmentProfileDigest")
+        || usize_object_field(aggregate_commitment, "shareVectorWidth")
+            != usize_object_field(statement, "shareVectorWidth")
+        || !vector_shape_is_valid
+    {
+        refused_objects.push(structural_refusal(
+            "Aggregate share commitment digest, context, or polynomial shape is invalid.",
+            object_digest,
+        ));
+    }
+
+    refused_objects
+}
+
+fn collect_aggregate_certificate_refusals(
+    certificate: &Value,
+    statement: &Value,
+    object_digest: Option<&str>,
+) -> Vec<Value> {
+    let mut refused_objects = Vec::new();
+    let certificate_digest = string_field(certificate, "shareCommitmentMessageBoundCertDigest");
+    let expected_certificate_digest =
+        value_without_field(certificate, "shareCommitmentMessageBoundCertDigest").and_then(
+            |certificate_payload| {
+                derive_digest(
+                    "ShareCommitmentMessageBoundCertDigest",
+                    &certificate_payload,
+                )
+            },
+        );
+    let maximum_canonical_turnout = u64_object_field(certificate, "maximumCanonicalTurnout");
+    let maximum_aggregate_integer = u64_object_field(certificate, "maximumAggregateInteger");
+    let opening_single_bound = u64_object_field(certificate, "openingRandomnessSingleBound");
+    let opening_aggregate_bound = u64_object_field(certificate, "openingRandomnessAggregateBound");
+    let quotient_bound = u64_object_field(certificate, "quotientBoundForAggregateReduction");
+    let expected_maximum_aggregate_integer = maximum_canonical_turnout
+        .and_then(|turnout| turnout.checked_mul(BALLOT_PRIVACY_FIELD_MODULUS - 1));
+    let expected_opening_aggregate_bound = maximum_canonical_turnout
+        .zip(opening_single_bound)
+        .and_then(|(turnout, bound)| turnout.checked_mul(bound));
+    let commitment_message_bound_allows_no_wrap =
+        string_field(certificate, "commitmentMessageBound")
+            .and_then(|bound| bound.parse::<u128>().ok())
+            .zip(maximum_aggregate_integer.map(u128::from))
+            .is_some_and(|(bound, maximum)| maximum < bound);
+    let no_wrap_flags = certificate
+        .get("noWraparoundCondition")
+        .and_then(object_map);
+
+    if string_field(certificate, "objectType") != Some("ShareCommitmentMessageBoundCert")
+        || u64_object_field(certificate, "objectVersion") != Some(1)
+        || certificate_digest.is_none()
+        || expected_certificate_digest.as_deref() != certificate_digest
+        || certificate_digest != string_field(statement, "shareCommitmentMessageBoundCertDigest")
+        || string_field(certificate, "shareCommitmentProfileDigest")
+            != string_field(statement, "shareCommitmentProfileDigest")
+        || usize_object_field(certificate, "shareVectorWidth")
+            != usize_object_field(statement, "shareVectorWidth")
+        || maximum_canonical_turnout
+            .zip(u64_object_field(statement, "canonicalTurnout"))
+            .is_none_or(|(maximum_turnout, actual_turnout)| maximum_turnout < actual_turnout)
+        || maximum_aggregate_integer != expected_maximum_aggregate_integer
+        || opening_aggregate_bound != expected_opening_aggregate_bound
+        || quotient_bound != maximum_canonical_turnout
+        || !commitment_message_bound_allows_no_wrap
+        || no_wrap_flags
+            .and_then(|flags| flags.get("maximumAggregateIntegerLessThanCommitmentMessageBound"))
+            .and_then(Value::as_bool)
+            != Some(true)
+        || no_wrap_flags
+            .and_then(|flags| flags.get("openingRandomnessAggregateBoundMatchesTurnout"))
+            .and_then(Value::as_bool)
+            != Some(true)
+    {
+        refused_objects.push(structural_refusal(
+            "Aggregate derivation no-wraparound certificate is invalid or permits wraparound.",
+            object_digest,
+        ));
+    }
+
+    refused_objects
+}
+
+fn collect_forbidden_witness_field_refusals(
+    value: &Value,
+    object_digest: Option<&str>,
+    path: &str,
+) -> Vec<Value> {
+    let mut refused_objects = Vec::new();
+    match value {
+        Value::Array(array) => {
+            for (item_index, item) in array.iter().enumerate() {
+                refused_objects.extend(collect_forbidden_witness_field_refusals(
+                    item,
+                    object_digest,
+                    &format!("{path}[{item_index}]"),
+                ));
+            }
+        }
+        Value::Object(object) => {
+            for (field_name, field_value) in object {
+                if forbidden_public_witness_field(field_name) {
+                    refused_objects.push(structural_refusal(
+                        format!(
+                            "Aggregate derivation public component must not expose witness field {path}.{field_name}."
+                        ),
+                        object_digest,
+                    ));
+                } else {
+                    refused_objects.extend(collect_forbidden_witness_field_refusals(
+                        field_value,
+                        object_digest,
+                        &format!("{path}.{field_name}"),
+                    ));
+                }
+            }
+        }
+        _ => {}
+    }
+
+    refused_objects
+}
+
+fn forbidden_public_witness_field(field_name: &str) -> bool {
+    matches!(
+        field_name,
+        "aggregateIntegerShareVector"
+            | "aggregateOpeningRandomness"
+            | "aggregateShareVector"
+            | "bridgeWitness"
+            | "openingRandomness"
+            | "plaintext"
+            | "proofWitness"
+            | "quotient"
+            | "receiverPlaintext"
+            | "receiverSecretState"
+            | "reducedFieldVector"
+            | "secretState"
+            | "sourceWitnessCoefficients"
+            | "witness"
+    )
+}

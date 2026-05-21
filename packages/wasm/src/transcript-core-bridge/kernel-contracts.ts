@@ -274,6 +274,7 @@ export type TranscriptCoreKernel = {
             Record<string, string>
         >;
         readonly componentSecretStates?: Readonly<Record<string, unknown>>;
+        readonly unsafeSmallRosterAcknowledged?: boolean;
     }): BallotPrivacyProofGeneration;
     verifyBallotProof(input: {
         readonly ballotProof: unknown;
@@ -291,6 +292,15 @@ export type TranscriptCoreKernel = {
     verifyClaimBearingBallotPackage(input: {
         readonly ballotPackage: unknown;
         readonly unsafeSmallRosterAcknowledged?: boolean;
+    }): BallotPrivacyKernelVerification;
+    generateAggregateDerivationProof(input: {
+        readonly proofInput: unknown;
+        readonly secretState: unknown;
+        readonly proverRandomnessHex?: string;
+    }): BallotPrivacyProofGeneration;
+    verifyAggregateDerivationProof(input: {
+        readonly component?: unknown;
+        readonly proofInput?: unknown;
     }): BallotPrivacyKernelVerification;
 };
 
@@ -407,6 +417,7 @@ type TranscriptCoreKernelCommand =
               Record<string, string>
           >;
           readonly componentSecretStates?: Readonly<Record<string, unknown>>;
+          readonly unsafeSmallRosterAcknowledged?: boolean;
       }
     | {
           readonly command: 'VerifyBallotProof';
@@ -426,6 +437,17 @@ type TranscriptCoreKernelCommand =
           readonly command: 'VerifyClaimBearingBallotPackage';
           readonly ballotPackage: unknown;
           readonly unsafeSmallRosterAcknowledged?: boolean;
+      }
+    | {
+          readonly command: 'GenerateAggregateDerivationProof';
+          readonly proofInput: unknown;
+          readonly secretState: unknown;
+          readonly proverRandomnessHex: string;
+      }
+    | {
+          readonly command: 'VerifyAggregateDerivationProof';
+          readonly component?: unknown;
+          readonly proofInput?: unknown;
       };
 
 type TranscriptCoreKernelExports = WebAssembly.Exports & {

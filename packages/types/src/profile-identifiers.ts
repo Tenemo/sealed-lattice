@@ -56,6 +56,18 @@ export const shareCommitmentProfileId =
 /** Ballot privacy proof profile used for the local lattice relation. */
 export const ballotProofProfileId = 'linear-lattice-ballot-privacy-proof-v1';
 
+/** Aggregate derivation proof profile used for post-close contribution proofs. */
+export const aggregateDerivationProofProfileId =
+    'aggregate-derivation-linear-proof-v1';
+
+/** Aggregate derivation sparse proof parameter profile. */
+export const aggregateDerivationProofParameterProfileId =
+    'aggregate-derivation-linear-compatibility-v1';
+
+/** Aggregate derivation sparse proof encoding profile. */
+export const aggregateDerivationProofEncodingProfileId =
+    'aggregate-derivation-linear-proof-encoding-v1';
+
 /** Score membership profile for score values in the supported score domain. */
 export const scoreMembershipProfileId = 'one-hot-score-membership-v1';
 

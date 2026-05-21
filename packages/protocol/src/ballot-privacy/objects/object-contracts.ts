@@ -137,7 +137,7 @@ type ScopedRelationBearingBallotPackageVerificationShell =
     };
 
 const unavailableProofBackendMessage =
-    'The pure TypeScript protocol shell does not verify ballot privacy proof bytes. Use the packaged Rust/WASM verifier for ballot proof and package verification.';
+    'The pure TypeScript protocol shell does not verify ballot privacy proof bytes. Use the packaged Rust/WASM verifier for receiver-key proof and ballot proof-record verification; scoped relation package acceptance remains fail-closed until verifier-derived lowering and trusted public randomness checks exist.';
 
 const protocolDigestPattern = /^[a-f0-9]{128}$/u;
 
@@ -165,7 +165,7 @@ const allowedBallotProofComponentStatementFormats = new Set<
     'public-zero-witness-binding-check-v1',
 ]);
 
-export type BallotProofComponentProofBytesAvailability =
+type BallotProofComponentProofBytesAvailability =
     | 'available-for-small-dense-oracle'
     | 'requires-sparse-proof-statement'
     | 'requires-structured-proof-statement'

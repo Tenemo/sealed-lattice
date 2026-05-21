@@ -52,8 +52,7 @@ jobs:
                   targets: wasm32-unknown-unknown
             - uses: Swatinem/rust-cache@aa7c1c80a07a27a84c0aa76d0cef0aad3830e330
             - run: pnpm run check
-            - run: pnpm run test:node
-            - run: pnpm run build
+            - run: pnpm run test:node:built
 
     coverage:
         name: coverage
@@ -82,7 +81,8 @@ jobs:
                   targets: wasm32-unknown-unknown
             - uses: Swatinem/rust-cache@aa7c1c80a07a27a84c0aa76d0cef0aad3830e330
             - run: pnpm exec playwright install --with-deps chromium firefox webkit
-            - run: pnpm run test:browser
+            - run: pnpm run build
+            - run: pnpm run test:browser:built
 
     docs:
         name: docs

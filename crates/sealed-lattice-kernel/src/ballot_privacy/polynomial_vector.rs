@@ -38,10 +38,6 @@ impl PolynomialVector {
         self.entries.len()
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
-    }
-
     pub fn entries(&self) -> &[Vec<u64>] {
         &self.entries
     }
@@ -70,6 +66,7 @@ impl PolynomialVector {
         Self::new(self.ring, entries)
     }
 
+    #[cfg(test)]
     pub fn scale(&self, scalar: u64) -> CanonicalResult<Self> {
         let entries = self
             .entries
@@ -80,6 +77,7 @@ impl PolynomialVector {
         Self::new(self.ring, entries)
     }
 
+    #[cfg(test)]
     pub fn left_rotate_negacyclic(&self, rotation: usize) -> CanonicalResult<Self> {
         let entries = self
             .entries
@@ -90,6 +88,7 @@ impl PolynomialVector {
         Self::new(self.ring, entries)
     }
 
+    #[cfg(test)]
     pub fn automorphism(&self) -> CanonicalResult<Self> {
         let entries = self
             .entries
@@ -100,6 +99,7 @@ impl PolynomialVector {
         Self::new(self.ring, entries)
     }
 
+    #[cfg(test)]
     pub fn l2_norm_squared_centered(&self) -> CanonicalResult<u128> {
         let mut sum = 0_u128;
         for polynomial in &self.entries {

@@ -352,11 +352,8 @@ pub(crate) fn collect_claim_bearing_package_refusals(
         .get("ballotProofStatement")
         .unwrap_or(&Value::Null);
     let ballot_proof = package_object.get("ballotProof").unwrap_or(&Value::Null);
-    let mut refused_objects = collect_ballot_proof_refusals(
-        statement,
-        ballot_proof,
-        unsafe_small_roster_acknowledged,
-    );
+    let mut refused_objects =
+        collect_ballot_proof_refusals(statement, ballot_proof, unsafe_small_roster_acknowledged);
     refused_objects.extend(collect_proof_bytes_refusals(
         package_object.get("proofBytesHex").and_then(Value::as_str),
         string_field(ballot_proof, "proofBytesDigest"),

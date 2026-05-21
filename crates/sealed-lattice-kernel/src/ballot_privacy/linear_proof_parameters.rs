@@ -3,14 +3,17 @@ use serde::{Deserialize, Deserializer, Serialize, de};
 use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
 
 use super::linear_proof_profile_constants::{
-    DEMO_GENERATED_PARAMETER_CONTRACT, DEMO_GENERATED_PROFILE,
-    ENCODED_SCORE_FIELD_GENERATED_PARAMETER_CONTRACT, ENCODED_SCORE_FIELD_GENERATED_PROFILE,
-    GENERATED_COMPONENT_EUCLIDEAN_RESPONSE_BOUND_SQUARED,
+    AGGREGATE_DERIVATION_COMPONENT_EXACT_NORM_BOUND_SQUARED, DEMO_GENERATED_PROFILE,
+    ENCODED_SCORE_FIELD_GENERATED_PROFILE, GENERATED_COMPONENT_EUCLIDEAN_RESPONSE_BOUND_SQUARED,
     GENERATED_COMPONENT_INFINITY_RESPONSE_BOUND,
     GENERATED_FIELD_COMPONENT_EXACT_NORM_BOUND_SQUARED,
     GENERATED_SHARE_COMMITMENT_COMPONENT_EXACT_NORM_BOUND_SQUARED,
-    GeneratedLinearProofProfileConstants, RECEIVER_KEY_GENERATED_PARAMETER_CONTRACT,
-    RECEIVER_KEY_GENERATED_PROFILE,
+    GeneratedLinearProofProfileConstants, RECEIVER_KEY_GENERATED_PROFILE,
+};
+#[cfg(test)]
+use super::linear_proof_profile_constants::{
+    DEMO_GENERATED_PARAMETER_CONTRACT, ENCODED_SCORE_FIELD_GENERATED_PARAMETER_CONTRACT,
+    RECEIVER_KEY_GENERATED_PARAMETER_CONTRACT,
 };
 
 const UPSTREAM_COMPATIBILITY_DEMO_LINEAR_PROOF_ENCODING_PROFILE_ID: &str =
@@ -243,6 +246,10 @@ pub(crate) fn linear_proof_profile_for_encoding(
             proof_encoding,
             GENERATED_SHARE_COMMITMENT_COMPONENT_EXACT_NORM_BOUND_SQUARED,
         )?,
+        "aggregate-derivation-linear-proof-encoding-v1" => encoded_score_compatible_profile(
+            proof_encoding,
+            AGGREGATE_DERIVATION_COMPONENT_EXACT_NORM_BOUND_SQUARED,
+        )?,
         _ => {
             return Err(invalid_parameter(
                 "proofEncoding.profileId is not a supported linear proof profile",
@@ -364,6 +371,7 @@ fn encoded_score_compatible_profile(
     })
 }
 
+#[cfg(test)]
 pub fn demo_linear_parameter_contract() -> LinearProofParameterSet {
     LinearProofParameterSet {
         profile_id: "demo-linear-proof-compatibility-v1".to_string(),
@@ -379,6 +387,7 @@ pub fn demo_linear_parameter_contract() -> LinearProofParameterSet {
     }
 }
 
+#[cfg(test)]
 pub fn receiver_key_linear_parameter_contract() -> LinearProofParameterSet {
     LinearProofParameterSet {
         profile_id: "receiver-key-linear-module-lwe-v1".to_string(),
@@ -395,6 +404,7 @@ pub fn receiver_key_linear_parameter_contract() -> LinearProofParameterSet {
     }
 }
 
+#[cfg(test)]
 pub fn encoded_score_field_linear_parameter_contract() -> LinearProofParameterSet {
     LinearProofParameterSet {
         profile_id: "encoded-score-field-linear-compatibility-v1".to_string(),
@@ -439,6 +449,7 @@ pub fn demo_linear_proof_encoding_contract() -> LinearProofEncoding {
     }
 }
 
+#[cfg(test)]
 pub fn receiver_key_linear_proof_encoding_contract() -> LinearProofEncoding {
     LinearProofEncoding {
         profile_id: "receiver-key-linear-proof-encoding-v1".to_string(),
@@ -465,6 +476,7 @@ pub fn receiver_key_linear_proof_encoding_contract() -> LinearProofEncoding {
     }
 }
 
+#[cfg(test)]
 pub fn encoded_score_field_linear_proof_encoding_contract() -> LinearProofEncoding {
     LinearProofEncoding {
         profile_id: "encoded-score-field-linear-proof-encoding-v1".to_string(),

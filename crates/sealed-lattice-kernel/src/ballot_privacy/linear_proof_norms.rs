@@ -4,16 +4,8 @@ use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
 
 use super::{
     linear_proof_parameters::{LinearProofEncoding, linear_proof_profile_for_encoding},
-    linear_proof_profile_constants::DEMO_GENERATED_PROFILE,
     proof_coder::DecodedLinearProof,
 };
-
-pub const LINEAR_PROOF_CHALLENGE_CENTERED_BOUND: i64 =
-    DEMO_GENERATED_PROFILE.challenge_centered_bound;
-pub const LINEAR_PROOF_EUCLIDEAN_RESPONSE_BOUND_SQUARED: u128 =
-    DEMO_GENERATED_PROFILE.euclidean_response_bound_squared;
-pub const LINEAR_PROOF_INFINITY_RESPONSE_BOUND: u128 =
-    DEMO_GENERATED_PROFILE.infinity_response_bound;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -138,13 +130,12 @@ fn invalid_norm(message: impl Into<String>) -> CanonicalError {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        LINEAR_PROOF_EUCLIDEAN_RESPONSE_BOUND_SQUARED, LINEAR_PROOF_INFINITY_RESPONSE_BOUND,
-        validate_linear_proof_norms,
-    };
+    use super::validate_linear_proof_norms;
     use crate::{
         ballot_privacy::{
-            linear_proof_parameters::LinearProofEncoding, proof_coder::decode_linear_proof,
+            linear_proof_parameters::LinearProofEncoding,
+            linear_proof_profile_constants::DEMO_GENERATED_PROFILE,
+            proof_coder::decode_linear_proof,
         },
         transcript_core::decode_hex,
     };
@@ -192,16 +183,17 @@ mod tests {
 
         assert!(summary.short_response_l2_squared <= summary.short_response_bound_squared);
         assert!(
-            summary.euclidean_response_l2_squared <= LINEAR_PROOF_EUCLIDEAN_RESPONSE_BOUND_SQUARED
+            summary.euclidean_response_l2_squared
+                <= DEMO_GENERATED_PROFILE.euclidean_response_bound_squared
         );
-        assert!(summary.infinity_response_linf <= LINEAR_PROOF_INFINITY_RESPONSE_BOUND);
+        assert!(summary.infinity_response_linf <= DEMO_GENERATED_PROFILE.infinity_response_bound);
     }
 
     #[test]
     fn euclidean_response_bound_failure_is_reported() {
         let (mut decoded_proof, proof_encoding) = decoded_valid_proof();
         decoded_proof.euclidean_response_vector_mut()[0][0] =
-            (LINEAR_PROOF_EUCLIDEAN_RESPONSE_BOUND_SQUARED as f64).sqrt() as i64 + 10_000;
+            (DEMO_GENERATED_PROFILE.euclidean_response_bound_squared as f64).sqrt() as i64 + 10_000;
 
         let error = validate_linear_proof_norms(&decoded_proof, &proof_encoding)
             .expect_err("oversized euclidean response should fail");
@@ -213,7 +205,7 @@ mod tests {
     fn infinity_response_bound_failure_is_reported() {
         let (mut decoded_proof, proof_encoding) = decoded_valid_proof();
         decoded_proof.infinity_response_vector_mut()[0][0] =
-            i64::try_from(LINEAR_PROOF_INFINITY_RESPONSE_BOUND + 1)
+            i64::try_from(DEMO_GENERATED_PROFILE.infinity_response_bound + 1)
                 .expect("bound should fit in i64");
 
         let error = validate_linear_proof_norms(&decoded_proof, &proof_encoding)

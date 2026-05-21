@@ -1,6 +1,8 @@
 use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
 
-use super::{polynomial_ring::PolynomialRing, polynomial_vector::PolynomialVector};
+use super::polynomial_ring::PolynomialRing;
+#[cfg(test)]
+use super::polynomial_vector::PolynomialVector;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SparsePolynomialVectorEntry {
@@ -90,6 +92,7 @@ impl SparsePolynomialVector {
         &self.entries
     }
 
+    #[cfg(test)]
     pub fn to_dense(&self) -> CanonicalResult<PolynomialVector> {
         let mut dense_entries = vec![vec![0_u64; self.ring.degree()]; self.length];
         for entry in &self.entries {
@@ -200,6 +203,7 @@ impl SparsePolynomialVector {
         Self::new(self.ring, self.length, rotated_entries)
     }
 
+    #[cfg(test)]
     pub fn automorphism(&self) -> CanonicalResult<Self> {
         let mut transformed_entries = Vec::with_capacity(self.entries.len());
         for entry in &self.entries {

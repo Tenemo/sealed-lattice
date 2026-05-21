@@ -21,13 +21,13 @@ import {
     publicContext,
     shareCommitmentModulus,
     shareCommitmentOpeningForReceiver,
-    singleOptionRelationInput,
+    minimumOptionRelationInput,
     validRelationInput,
 } from './shared.js';
 
 describe('ballot privacy relation backend lowering', () => {
     it('builds component proof statement plans for sparse and structured proof paths', () => {
-        const relationInput = singleOptionRelationInput();
+        const relationInput = minimumOptionRelationInput();
         const { context } = explicitReceiverEncryptionFixture(relationInput);
         const loweringResult = lowerBallotPrivacyRelationToBackendStatement({
             publicContext: context,
@@ -53,31 +53,31 @@ describe('ballot privacy relation backend lowering', () => {
             ballotPrivacyBackendProofComponentOrder,
         );
         expect(plans[0]).toMatchObject({
-            denseCoefficientCount: '197120',
+            denseCoefficientCount: '788480',
             proofBytesAvailability: 'available-for-small-dense-oracle',
             proofStatementFormat: 'dense-polynomial-matrix-linear-proof-v1',
-            rowBatchTermCounts: ['153'],
+            rowBatchTermCounts: ['306'],
             sourceRingDegree: 64,
         });
         expect(plans[1]).toMatchObject({
             proofBytesAvailability: 'requires-sparse-proof-statement',
             proofStatementFormat: 'sparse-polynomial-matrix-linear-proof-v1',
-            rowBatchTermCounts: ['450', '3090'],
-            sparseTermCount: '3540',
+            rowBatchTermCounts: ['516', '3684'],
+            sparseTermCount: '4200',
         });
         expect(plans[2]).toMatchObject({
             proofBytesAvailability: 'requires-sparse-proof-statement',
             proofStatementFormat: 'sparse-polynomial-matrix-linear-proof-v1',
-            rowBatchTermCounts: ['230400'],
-            sparseTermCount: '230400',
+            rowBatchTermCounts: ['264192'],
+            sparseTermCount: '264192',
         });
         expect(plans[3]).toMatchObject({
             proofBytesAvailability: 'requires-structured-proof-statement',
             proofStatementFormat: 'structured-module-lwe-linear-proof-v1',
-            rowBatchTermCounts: ['15746865'],
-            structuredCiphertextChunkCount: 12,
+            rowBatchTermCounts: ['19683426'],
+            structuredCiphertextChunkCount: 15,
             structuredReceiverCount: 3,
-            structuredWitnessTermCount: '15746865',
+            structuredWitnessTermCount: '19683426',
         });
         expect(plans[4]).toMatchObject({
             denseCoefficientCount: null,
@@ -267,7 +267,7 @@ describe('ballot privacy relation backend lowering', () => {
     });
 
     it('lowers receiver encryption and receiver-key bindings into explicit backend rows', () => {
-        const relationInput = singleOptionRelationInput();
+        const relationInput = minimumOptionRelationInput();
         const { context, projectionWitness: explicitProjectionWitness } =
             explicitReceiverEncryptionFixture(relationInput);
         const loweringResult = lowerBallotPrivacyRelationToBackendStatement({
@@ -280,14 +280,19 @@ describe('ballot privacy relation backend lowering', () => {
             throw new Error('valid explicit relation input should lower');
         }
 
+        const shareVectorWidth = relationInput.optionCount * 11;
         expect(loweringResult.statement.linearRows).toHaveLength(
-            2 + 3 * 11 + 3 * (11 + 64) + 3 * (11 + 64),
+            2 +
+                relationInput.optionCount +
+                3 * shareVectorWidth +
+                3 * (shareVectorWidth + 64) +
+                3 * (shareVectorWidth + 64),
         );
         expect(loweringResult.statement.backendStatement).toMatchObject({
             digestExpandedRowCount: 0,
             explicitRowCount:
-                35 + 3 * 75 + 3 * 75 + 3 * 1_024 + 3 * 5_120 + 3 * 1_024,
-            rowCount: 35 + 3 * 75 + 3 * 75 + 3 * 1_024 + 3 * 5_120 + 3 * 1_024,
+                70 + 3 * 86 + 3 * 86 + 3 * 1_024 + 3 * 6_400 + 3 * 1_024,
+            rowCount: 70 + 3 * 86 + 3 * 86 + 3 * 1_024 + 3 * 6_400 + 3 * 1_024,
         });
         expect(
             loweringResult.statement.backendStatement.rowBatches.map(
@@ -348,7 +353,7 @@ describe('ballot privacy relation backend lowering', () => {
         ).toMatchObject({
             checkedRowBatchNames: ['receiver_payload_encryption_equation_rows'],
             componentId: 'receiver-encryption-component',
-            rowCount: 3 * 5_120,
+            rowCount: 3 * 6_400,
             verificationStatus: 'explicitRowsSatisfied',
         });
         expect(
@@ -372,7 +377,7 @@ describe('ballot privacy relation backend lowering', () => {
             );
         expect(payloadBitDecompositionRowBatch).toMatchObject({
             batchKind: 'ExplicitSparseRows',
-            rowCount: 3 * 75,
+            rowCount: 3 * 86,
             rowKind: 'ReceiverPayloadPlaintextBitDecompositionRows',
         });
         expect(loweringResult.statement.backendStatement.bounds).toEqual(
@@ -396,7 +401,7 @@ describe('ballot privacy relation backend lowering', () => {
     });
 
     it('rejects explicit receiver-encryption rows when ciphertext or encrypted opening material changes', () => {
-        const relationInput = singleOptionRelationInput();
+        const relationInput = minimumOptionRelationInput();
         const { context, projectionWitness: explicitProjectionWitness } =
             explicitReceiverEncryptionFixture(relationInput);
         const firstLoweringResult =

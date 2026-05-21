@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 mod abdlop_commitment;
 mod encoded_relation_vectors;
 mod linear_proof_abdlop;
@@ -55,9 +53,9 @@ use self::{
     polynomial_ring::PolynomialRing,
     polynomial_vector::PolynomialVector,
     protocol_constants::{
-        BALLOT_PRIVACY_ENCODED_COORDINATES_PER_OPTION, BALLOT_PRIVACY_MAXIMUM_OPTION_COUNT,
-        BALLOT_PRIVACY_MAXIMUM_PARTICIPANT_COUNT, BALLOT_PRIVACY_MINIMUM_OPTION_COUNT,
-        BALLOT_PRIVACY_MINIMUM_SAFE_PARTICIPANT_COUNT,
+        BALLOT_PRIVACY_ENCODED_COORDINATES_PER_OPTION, BALLOT_PRIVACY_FIELD_MODULUS,
+        BALLOT_PRIVACY_MAXIMUM_OPTION_COUNT, BALLOT_PRIVACY_MAXIMUM_PARTICIPANT_COUNT,
+        BALLOT_PRIVACY_MINIMUM_OPTION_COUNT, BALLOT_PRIVACY_MINIMUM_SAFE_PARTICIPANT_COUNT,
         BALLOT_PRIVACY_MINIMUM_UNSAFE_PARTICIPANT_COUNT, SHARE_COMMITMENT_MODULUS,
     },
     receiver_key_vectors::{
@@ -72,6 +70,7 @@ use self::{
 pub const MODULE_MARKER: &str = "ballot-privacy";
 pub const BALLOT_PRIVACY_PROOF_BACKEND_AVAILABLE: bool = true;
 
+mod aggregate_derivation_proof;
 mod backend_status;
 mod ballot_linear_verifier;
 mod ballot_package_verifier;
@@ -97,6 +96,10 @@ mod share_commitment_backend_helpers;
 mod structured_receiver_encryption_statement;
 mod structured_share_commitment_statement;
 
+pub(crate) use aggregate_derivation_proof::{
+    generate_aggregate_derivation_proof_from_command_request,
+    verify_aggregate_derivation_proof_from_command_request,
+};
 pub(crate) use backend_status::{describe_proof_backend, structural_refusal, structural_rejection};
 pub(crate) use ballot_linear_verifier::{
     BallotProofVerificationInputs, ComponentProofVerificationMode, verify_ballot_proof,
