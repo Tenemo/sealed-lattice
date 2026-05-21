@@ -11,11 +11,11 @@
 The published `sealed-lattice` package currently exposes safe-by-default helpers for:
 
 - transcript-core fixture verification through the packaged Rust/WASM kernel;
-- threshold profile derivation and poll-spec validation;
+- poll-spec validation, canonical poll/profile digest derivation, threshold profile derivation, and frozen roster-profile derivation;
 - lifecycle labels, lifecycle transitions, and action capability checks;
 - signed board consistency, cast receipt shells, close record shells, and target finality checks;
 - roster manifest verification, participant roster acceptance, deterministic first-valid ordering, and recovery-epoch checks;
-- verification-oriented ballot privacy APIs for receiver-key proofs and ballot proof records, with scoped relation-bearing package shells kept fail-closed until package verification can rederive lowered relations and trusted public randomness.
+- verification-oriented ballot privacy APIs for receiver-key proofs, ballot proof records, and proof-byte-bearing scoped relation packages through the packaged Rust/WASM verifier;
 - aggregate derivation component verification for the scoped post-close M6 relation, without exposing aggregate shares, openings, quotients, receiver plaintexts, or proof witnesses.
 
 Reserved complete-protocol entry points such as transcript verification, bridge-proof creation, bridge-proof verification, and one-shot share-policy verification currently fail closed with `OperationUnavailable`.
@@ -43,7 +43,9 @@ These pieces are not exported as a public voting API and must not be used for re
 
 ## Ballot privacy status
 
-The ballot privacy implementation currently exposes verification-oriented APIs only. It can verify receiver-key proof records and ballot proof records through the packaged Rust/WASM proof backend, but scoped relation-bearing package verification is fail-closed until the verifier can rederive the lowered relation statements and trusted public randomness from the package. It is not a complete voting API and is not supported-phone-certified.
+The ballot privacy implementation currently exposes verification-oriented APIs only. It can verify receiver-key proof records, ballot proof records, and proof-byte-bearing scoped relation packages through the packaged Rust/WASM proof backend. Package verification requires the public verifier inputs carried with the package shell and is not a complete voting API or supported-phone-certified result.
+
+Current M5 dimensions are: 2 to 20 options; `shareVectorWidth = 11 * optionCount`; `n = 20` as the mandatory benchmark receiver count; dynamic frozen receiver counts from 10 to 50 only when the ballot proof statement carries bound roster-profile evidence; and explicitly acknowledged 3 to 9 receiver casual micro-roster verification only outside claim-bearing package acceptance. The casual micro-roster path has verifier and proof-record generation harness coverage for every receiver count from 3 through 9, but claim-bearing package acceptance still rejects those rosters. Current proof-size and runtime benchmark evidence has only been run for the mandatory `n = 20`, `m = 20`, threshold-7 profile; micro-roster and dynamic-roster benchmark evidence remains future full-suite work.
 
 Implemented internally:
 
@@ -52,15 +54,16 @@ Implemented internally:
 - relation lowering for score/Shamir rows, receiver-payload plaintext binding, share-commitment rows, receiver-encryption structure, and receiver-key binding;
 - receiver-key proof records with proof-byte metadata and Rust/WASM verification for supported linear proof vectors;
 - ballot proof records that bind backend statements, component proof bundles, proof bytes, proof encodings, proof parameter sets, and public randomness;
-- scoped relation-bearing ballot package shell validation that recomputes the package digest, requires accepted receiver-key proof root evidence, checks receiver coverage, rejects witness leakage, and then rejects package acceptance until verifier-derived lowering and trusted public randomness checks exist;
-- aggregate derivation statements and components that bind a canonical post-close counted set of proof-byte-bearing package shells, contributor identity, homomorphic aggregate share commitment, full encoded share layout, no-wraparound certificate, and Rust/WASM proof bytes for hidden aggregate opening knowledge;
+- scoped relation-bearing ballot package verification that recomputes the package digest, requires accepted receiver-key proof root evidence, checks receiver coverage, rejects witness leakage, binds the full ballot relation to the supplied component bundle, and verifies the top-level and component proof bytes;
+- aggregate derivation statements and components that bind a canonical post-close counted set of proof-byte-bearing package shells, voting-closed close-record evidence, contributor action context, contributor identity, homomorphic aggregate share commitment, full encoded share layout, no-wraparound certificate, and Rust/WASM proof bytes for hidden aggregate opening knowledge. Component verification reruns the counted packages through the accepted M5 Rust/WASM package verifier and recomputes the aggregate package references, ballot-set digest, and public aggregate commitment sum;
 - native and WASM verification of public vectors for the supported internal linear proof slices and full encoded-score package path.
 
 Still unavailable:
 
 - public ballot generation or casting APIs;
-- the encoded aggregate bridge and `ScoreBitAggregationRelation-v1` encrypted score-bit input path;
-- the packed bit-sliced BGV evaluator and mandatory evaluation proof;
+- generated certificate/workbook rows and benchmark evidence for every dynamic frozen roster size and every casual micro-roster benchmark profile that later evaluation chooses to measure;
+- the M9 encrypted aggregate bridge from committed aggregate shares to encrypted aggregate TargetBasisData, preserving bridge witness privacy;
+- the M10 encrypted aggregate reconstruction, evaluator-side score-bit/comparison derivation, packed bit-sliced BGV evaluator, and mandatory evaluation proof;
 - production target-bound decryption and result release.
 
 ## Repository layout

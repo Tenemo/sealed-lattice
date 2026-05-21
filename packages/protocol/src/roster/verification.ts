@@ -16,6 +16,8 @@ import {
     createRefusal,
     uniqueStrings,
 } from '../common/verification-helpers.js';
+import { derivePollSpecDigest } from '../lifecycle/poll-spec.js';
+import { deriveFrozenRosterProfile } from '../lifecycle/thresholds.js';
 
 import { deriveRosterDigest } from './digests.js';
 import {
@@ -213,6 +215,85 @@ const verifyRosterManifestTranscriptUnchecked = (
     }
 
     const rosterDigest = deriveRosterDigest(input.registrationEntries);
+    const pollSpecDigest = derivePollSpecDigest(input.pollSpec);
+    if (input.electionManifest.pollSpecDigest !== pollSpecDigest) {
+        refusedObjects.push(
+            createRefusal(
+                'ManifestDigestMismatch',
+                'Election manifest poll spec digest must match the transcript poll specification.',
+                input.electionManifest.electionManifestDigest,
+                'ElectionManifest',
+            ),
+        );
+    }
+    if (input.frozenRosterProfile.pollSpecDigest !== pollSpecDigest) {
+        refusedObjects.push(
+            createRefusal(
+                'ManifestDigestMismatch',
+                'Frozen roster profile poll spec digest must match the transcript poll specification.',
+                input.frozenRosterProfile.thresholdProfileDigest,
+                'FrozenRosterProfile',
+            ),
+        );
+    }
+    if (
+        input.frozenRosterProfile.rosterDigest !== rosterDigest ||
+        input.frozenRosterProfile.rosterSize !== participantIdentities.length
+    ) {
+        refusedObjects.push(
+            createRefusal(
+                'RosterDigestMismatch',
+                'Frozen roster profile must be derived from the accepted frozen roster.',
+                input.frozenRosterProfile.thresholdProfileDigest,
+                'FrozenRosterProfile',
+            ),
+        );
+    }
+    try {
+        const expectedFrozenRosterProfile = deriveFrozenRosterProfile({
+            pollSpec: input.pollSpec,
+            rosterDigest,
+            rosterSize: participantIdentities.length,
+            dynamicRosterProfileCertificateDigest:
+                input.frozenRosterProfile.thresholdProfile
+                    .dynamicRosterProfileCertificateDigest ?? undefined,
+        });
+        if (
+            expectedFrozenRosterProfile.thresholdProfileDigest !==
+            input.frozenRosterProfile.thresholdProfileDigest
+        ) {
+            refusedObjects.push(
+                createRefusal(
+                    'ManifestDigestMismatch',
+                    'Frozen roster profile threshold profile digest must match the roster-freeze derived profile.',
+                    input.frozenRosterProfile.thresholdProfileDigest,
+                    'FrozenRosterProfile',
+                ),
+            );
+        }
+        if (
+            expectedFrozenRosterProfile.thresholdProfileDigest !==
+            input.electionManifest.thresholdProfileDigest
+        ) {
+            refusedObjects.push(
+                createRefusal(
+                    'ManifestDigestMismatch',
+                    'Election manifest threshold profile digest must match the roster-freeze derived profile.',
+                    input.electionManifest.electionManifestDigest,
+                    'ElectionManifest',
+                ),
+            );
+        }
+    } catch {
+        refusedObjects.push(
+            createRefusal(
+                'ManifestDigestMismatch',
+                'Frozen roster profile could not be derived from the poll policy and accepted roster.',
+                input.frozenRosterProfile.thresholdProfileDigest,
+                'FrozenRosterProfile',
+            ),
+        );
+    }
     refusedObjects.push(...verifyManifest(input, rosterDigest));
     refusedObjects.push(
         ...verifyRequiredIncludedObjectPlacement({

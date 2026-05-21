@@ -84,8 +84,8 @@
       0,
       0
     ],
-    "tallyDigest": "29c71c4b997dfa30b615ed0bc2f33b60eee69b5f03fafec0b58fc3e56d47c4f43ddbf565a9f5b41b5711a04215a19942503ebf812da2261bfcfa52cf524e556a",
-    "oracleDigest": "2f310b9b5ea8e33a84633ea397a1f59760d4330a165eecafee49e2b9440737df2504cf95f935fbcfe54cc40c5f686fc0e857e0b7e6f494a45ae7af12d4e3981b"
+    "tallyDigest": "e816ed47588132533313580b1b135f461dc46ea95d0ef2b721e076dce0725c7c3a429226d5aa906f8ddc2515c19e30c455c8700ff220a6d1f5a3bc325d989f25",
+    "oracleDigest": "6e066e296f9b455eb2f4d817fc6e1c845b6eb318fd12509c318469f0a6205cbfe207879eaa362f97d88547befa8b44c48d3dba6d4643f3cf2dba5069c5b4522e"
   },
   "fullTieCase": {
     "pollSpecInput": {
@@ -129,7 +129,7 @@
       2,
       3
     ],
-    "expectedOracleDigest": "b2d29cf83358376b8af2fd6a097c58c86dc29730e89a50fc61a834de5f7711046d64f32b3f68bc8cda272942cf5a3c724b1ed360ddb9a557dbb9e1f5f32a6ebc"
+    "expectedOracleDigest": "95e0d21e9fe636313daa0fb0eb55d9a84f9371a972e264af00ec061eb23507a67fbae1d7c948429c357d411063e5d13c6ab944044121fb07a50fe0178d60b195"
   },
   "topOneClearWinnerCase": {
     "pollSpecInput": {
@@ -196,8 +196,8 @@
       0,
       0
     ],
-    "expectedTallyDigest": "f5304910dc5fa076f7039e92ae09a94044d5295b3437b87b9750df39683db6e855ea1d2678d3b8ce76db4f9093ec65912c842d6f17c178c88ba4c14c9dcad74b",
-    "expectedOracleDigest": "9fa5880dae992597ccf62d614cea48bcd1300f6fa2180281adec816ccd26793102c8dc862d234795ce28a3f6b4d971c3f5565b2bf867580d13cb80ed76c37cbd"
+    "expectedTallyDigest": "e7470c6024a0fd54ddb7d051688d0a1f9e6e2dab711eea450f4ba598bc17b15d594759b549eef94427789d4cc31846730ad4ef4c461d7ac7e1f3e5a905dee6f4",
+    "expectedOracleDigest": "4890ebb14b4c228cdf6776e746cfc453a745fd0cdb8354562741127d0dba0703b6a76d7a4629a7ea448b0af98b7f918d7a3831875c1ab1c6b66dd60e58cffeda"
   },
   "maximumNoWrapCase": {
     "pollSpecInput": {
@@ -296,7 +296,7 @@
       19,
       20
     ],
-    "expectedTallyDigest": "1a1861b180fa7a150185a72857160c8e72ee7434bc7fecc69c6e38b6dd2616f3d08411cbbbf3e1f7bd967608c8a249e4324df0709d203337aab089a11ecc877f",
-    "expectedOracleDigest": "6c56b588ad5904324a2aea70eabb58ef576bcb5d5e29cfbcffc50694a918a8119adcd7d5533f9426f4290bf9c09ffc9a2a9b3508b34424e7f42d832a579eea58"
+    "expectedTallyDigest": "07fb6ea1782537fb2801426e411aaae08ee0b2b07e568a19d0e1a1fe951d4346fe64de1a513c85c20a339f5908f1a941e4d1a647c2f046e8e3e5b43bff3d2528",
+    "expectedOracleDigest": "d8288c69c98ded4faf47bac1d7786c02bbbfa8dc99a5b974a4ff589b125e9b3891caf3fbffcbb0ee27f7251e379ecaa8115a15c896e759e88041837ad6dddb7b"
   }
 }

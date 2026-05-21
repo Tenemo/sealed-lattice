@@ -1,12 +1,19 @@
 import { deriveProtocolDigest } from '@sealed-lattice/crypto';
 import type {
     ElectionManifest,
+    FrozenRosterProfile,
+    PollSpec,
     ReceiverKeyRegistration,
     RegistrationEntry,
     RosterManifestTranscriptInput,
     TrusteeSetupEntry,
 } from '@sealed-lattice/types';
 
+import {
+    derivePollSpecDigest,
+    validatePollSpec,
+} from '../../src/lifecycle/poll-spec';
+import { deriveFrozenRosterProfile } from '../../src/lifecycle/thresholds';
 import {
     deriveElectionManifestDigest,
     deriveReceiverKeyRegistrationDigest,
@@ -28,6 +35,50 @@ import {
     manifestPolicyDigests,
     organizerPublicKeyDigest,
 } from './election-foundation-fixture-constants';
+
+export const createRosterPollSpec = (): PollSpec => {
+    const validation = validatePollSpec({
+        duplicateBallotPolicy: 'LastValidBeforeVotingClosedCounts',
+        maxRosterSize: 50,
+        minRosterSize: 3,
+        options: ['Option A', 'Option B', 'Option C'],
+        pollId: 'poll-main',
+        question: 'Choose options',
+        rosterPolicy: 'OpenLinkPublicRoster',
+        scoreDomain: { max: 10, min: 1, skippedOptionScore: 1 },
+        smallRosterPolicy: 'AllowMicroRoster',
+        thresholdProfileFamily: 'BalancedDefault',
+        tiePolicy: 'HigherScoreThenLowerOptionIndex',
+        topOptionCount: 2,
+    });
+
+    if (!validation.ok) {
+        throw new Error('Roster poll spec fixture must be valid.');
+    }
+
+    return validation.normalized;
+};
+
+const createFrozenRosterProfile = (
+    pollSpec: PollSpec,
+    registrations: readonly RegistrationEntry[],
+): FrozenRosterProfile => {
+    const rosterDigest = deriveRosterDigest(registrations);
+    const rosterSize = registrations.length;
+
+    return deriveFrozenRosterProfile({
+        dynamicRosterProfileCertificateDigest:
+            rosterSize >= 10 && rosterSize !== 20
+                ? deriveProtocolDigest('ThresholdProfileDigest', {
+                      certificate: 'dynamic-roster-profile',
+                      rosterSize,
+                  })
+                : undefined,
+        pollSpec,
+        rosterDigest,
+        rosterSize,
+    });
+};
 
 export const createRegistrationEntry = (
     participantIdentity: string,
@@ -146,18 +197,23 @@ export const createElectionManifest = (
     registrations: readonly RegistrationEntry[],
     overrides: Partial<ElectionManifest> = {},
 ): ElectionManifest => {
+    const pollSpec = createRosterPollSpec();
     const rosterDigest = deriveRosterDigest(registrations);
+    const thresholdProfileDigest =
+        registrations.length >= 3
+            ? createFrozenRosterProfile(pollSpec, registrations)
+                  .thresholdProfileDigest
+            : deriveProtocolDigest('ThresholdProfileDigest', {
+                  fixture: 'below-minimum-roster',
+                  rosterSize: registrations.length,
+              });
     const payload = {
         objectType: 'ElectionManifest',
         objectVersion: 1,
         ceremonyId,
-        pollSpecDigest: deriveProtocolDigest('PollSpecDigest', {
-            poll: 'main',
-        }),
+        pollSpecDigest: derivePollSpecDigest(pollSpec),
         rosterDigest,
-        thresholdProfileDigest: deriveProtocolDigest('ThresholdProfileDigest', {
-            rosterSize: registrations.length,
-        }),
+        thresholdProfileDigest,
         manifestPolicyDigests,
         manifestOpaqueBindings,
         boardSequence: 3,
@@ -227,6 +283,11 @@ export const createRosterManifestTranscriptInput = (
     const { head: setupHead, inclusionProofs: setupInclusionProofs } =
         createBoardHeadWithObjects(1, genesisHead.headDigest, setupObjects);
     const freezeHead = createBoardHead(2, setupHead.headDigest);
+    const pollSpec = createRosterPollSpec();
+    const frozenRosterProfile = createFrozenRosterProfile(
+        pollSpec,
+        rosterRegistrations,
+    );
     const manifest = createElectionManifest(
         rosterRegistrations,
         manifestOverrides,
@@ -278,6 +339,8 @@ export const createRosterManifestTranscriptInput = (
         receiverKeyRegistrationInclusionProofs,
         trusteeSetupEntries,
         trusteeSetupInclusionProofs,
+        pollSpec,
+        frozenRosterProfile,
         electionManifest: manifest,
         organizerPublicKeyDigest,
         organizerIdentity: 'organizer',

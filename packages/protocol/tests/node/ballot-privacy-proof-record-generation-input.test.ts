@@ -5,13 +5,16 @@ import {
     buildBallotProofRecordGenerationRequest,
     type BallotProofRecordGenerationProofContracts,
 } from '../../src/ballot-privacy/ballot-proof-linear-statement';
+import { compileBallotPrivacyRelation } from '../../src/ballot-privacy/index';
 import { lowerBallotPrivacyRelationToBackendStatement } from '../../src/ballot-privacy/relation-backend-lowering';
+import { deriveThresholdProfile } from '../../src/lifecycle/thresholds';
 
 import {
     type BallotProofRecordGenerationFixture,
     cloneJsonValue,
     createBallotProofRecordGenerationFixture,
     createMandatoryProfileBallotProofRecordGenerationFixture,
+    createMicroRosterBallotProofRecordGenerationFixture,
 } from './ballot-privacy-proof-record-generation-fixtures';
 
 const digest = (label: string): string =>
@@ -20,6 +23,7 @@ const digest = (label: string): string =>
         purpose: 'ballot-proof-record-generation-input-test',
     });
 const mandatoryProfileFixtureTimeoutMs = 300_000;
+const casualMicroRosterSizes = [3, 4, 5, 6, 7, 8, 9] as const;
 
 const requireRecord = (
     value: unknown,
@@ -68,7 +72,7 @@ const shareCommitmentProofStatement = (
     fixture: BallotProofRecordGenerationFixture,
 ): {
     readonly proofStatementFormat: string;
-    readonly receiverRows: readonly {
+    readonly receiverRows?: readonly {
         readonly commitmentPolynomialVector: readonly (readonly string[])[];
         readonly rowCount: number;
         readonly rowOffsetWithinStatement: number;
@@ -87,7 +91,7 @@ const shareCommitmentProofStatement = (
 
     return shareCommitmentInput.proofStatement as {
         readonly proofStatementFormat: string;
-        readonly receiverRows: readonly {
+        readonly receiverRows?: readonly {
             readonly commitmentPolynomialVector: readonly (readonly string[])[];
             readonly rowCount: number;
             readonly rowOffsetWithinStatement: number;
@@ -198,6 +202,93 @@ describe('ballot proof record generation input', () => {
                 ?.sourceWitnessCoefficients,
         ).toHaveLength(receiverEncryptionStatement.statementColumns);
     });
+
+    it.each(casualMicroRosterSizes)(
+        'assembles a non-claim casual micro-roster generation harness for roster size %d',
+        (rosterSize) => {
+            const microRosterFixture =
+                createMicroRosterBallotProofRecordGenerationFixture(rosterSize);
+            const thresholdProfile = deriveThresholdProfile({
+                casualMicroRosterAcknowledged: true,
+                rosterSize,
+            });
+            const compiledRelation = compileBallotPrivacyRelation(
+                microRosterFixture.relationInput,
+            );
+            const receiverEncryptionStatementForRoster =
+                receiverEncryptionProofStatement(microRosterFixture);
+            const shareCommitmentStatementForRoster =
+                shareCommitmentProofStatement(microRosterFixture);
+
+            expect(compiledRelation).toMatchObject({
+                ok: true,
+                optionCount: 2,
+                pvssThreshold: thresholdProfile.pvssThreshold,
+                rosterSize,
+                shareVectorWidth: 22,
+            });
+            expect(microRosterFixture.relationInput.receivers).toHaveLength(
+                rosterSize,
+            );
+            expect(
+                microRosterFixture.relationInput
+                    .encodedCoordinateShamirCoefficients,
+            ).toHaveLength(22);
+            expect(
+                microRosterFixture.relationInput
+                    .encodedCoordinateShamirCoefficients[0],
+            ).toHaveLength(thresholdProfile.pvssThreshold - 1);
+            expect(
+                microRosterFixture.statement.receiverPublicKeys,
+            ).toHaveLength(rosterSize);
+            expect(microRosterFixture.statement.shareVectorWidth).toBe(22);
+            expect(
+                microRosterFixture.request.casualMicroRosterAcknowledged,
+            ).toBe(true);
+            expect(
+                microRosterFixture.request.unsafeSmallRosterAcknowledged,
+            ).toBe(true);
+            expect(
+                receiverEncryptionStatementForRoster.receiverRows,
+            ).toHaveLength(rosterSize);
+            expect(shareCommitmentStatementForRoster.statementColumns).toBe(
+                rosterSize * (22 + 64),
+            );
+            expect(
+                shareCommitmentStatementForRoster.sourceBackendColumnIndices,
+            ).toHaveLength(shareCommitmentStatementForRoster.statementColumns);
+            if (rosterSize <= 6) {
+                expect(shareCommitmentStatementForRoster).toMatchObject({
+                    proofStatementFormat:
+                        'sparse-polynomial-matrix-linear-proof-v1',
+                    statementRows: rosterSize * 1_024,
+                });
+                expect(
+                    shareCommitmentStatementForRoster.receiverRows,
+                ).toBeUndefined();
+            } else {
+                expect(shareCommitmentStatementForRoster).toMatchObject({
+                    proofStatementFormat:
+                        'structured-module-sis-share-commitment-v1',
+                    statementRows: rosterSize * 16,
+                });
+                expect(
+                    shareCommitmentStatementForRoster.receiverRows,
+                ).toHaveLength(rosterSize);
+            }
+            expect(
+                microRosterFixture.request.componentProofInputs.map(
+                    (proofInput) => proofInput.componentId,
+                ),
+            ).toEqual([
+                'score-and-shamir-field-component',
+                'payload-plaintext-field-component',
+                'share-commitment-component',
+                'receiver-encryption-component',
+                'receiver-key-binding-component',
+            ]);
+        },
+    );
 
     it('rejects statement and payload context drift before constructing proof inputs', () => {
         expect(() =>
@@ -482,14 +573,21 @@ describe('mandatory-profile ballot proof record generation input', () => {
             statementColumns: 5680,
             statementRows: 320,
         });
-        expect(shareCommitmentStatement.receiverRows).toHaveLength(20);
+        const shareCommitmentReceiverRows =
+            shareCommitmentStatement.receiverRows ??
+            (() => {
+                throw new Error(
+                    'Structured share-commitment statement should expose receiver rows.',
+                );
+            })();
+        expect(shareCommitmentReceiverRows).toHaveLength(20);
         expect(
             shareCommitmentStatement.sourceBackendColumnIndices,
         ).toHaveLength(shareCommitmentStatement.statementColumns);
         for (const [
             receiverIndex,
             receiverRow,
-        ] of shareCommitmentStatement.receiverRows.entries()) {
+        ] of shareCommitmentReceiverRows.entries()) {
             expect(receiverRow.rowCount).toBe(16);
             expect(receiverRow.rowOffsetWithinStatement).toBe(
                 receiverIndex * 16,

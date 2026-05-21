@@ -54,8 +54,9 @@ use self::{
     polynomial_vector::PolynomialVector,
     protocol_constants::{
         BALLOT_PRIVACY_ENCODED_COORDINATES_PER_OPTION, BALLOT_PRIVACY_FIELD_MODULUS,
-        BALLOT_PRIVACY_MAXIMUM_OPTION_COUNT, BALLOT_PRIVACY_MAXIMUM_PARTICIPANT_COUNT,
-        BALLOT_PRIVACY_MINIMUM_OPTION_COUNT, BALLOT_PRIVACY_MINIMUM_SAFE_PARTICIPANT_COUNT,
+        BALLOT_PRIVACY_MANDATORY_RECEIVER_COUNT, BALLOT_PRIVACY_MAXIMUM_OPTION_COUNT,
+        BALLOT_PRIVACY_MAXIMUM_PARTICIPANT_COUNT, BALLOT_PRIVACY_MINIMUM_OPTION_COUNT,
+        BALLOT_PRIVACY_MINIMUM_SAFE_PARTICIPANT_COUNT,
         BALLOT_PRIVACY_MINIMUM_UNSAFE_PARTICIPANT_COUNT, SHARE_COMMITMENT_MODULUS,
     },
     receiver_key_vectors::{
@@ -154,7 +155,7 @@ pub(crate) use linear_proof_binding_validation::{
     LinearProofProfileRequirement, collect_linear_proof_binding_refusals,
 };
 pub(crate) use linear_proof_contract_validation::{
-    collect_full_ballot_binding_contract_refusals,
+    collect_full_ballot_binding_contract_refusals, collect_full_ballot_relation_binding_refusals,
     collect_supported_ballot_privacy_dimension_refusals,
 };
 pub(crate) use proof_binding_digests::{

@@ -38,6 +38,7 @@ const targetBoundShareSelectionProfile = {
     selectedShareRule: 'FirstValidSharesInCanonicalBoardOrder',
 } as const;
 
+const dynamicRosterProfileCertificateDigest = 'a'.repeat(128);
 const uncertifiedThresholdProfile = deriveThresholdProfile({ rosterSize: 20 });
 const thresholdProfile = deriveThresholdProfile({
     rosterSize: 20,
@@ -191,29 +192,44 @@ describe('election foundation lifecycle', () => {
         ]);
     });
 
-    it('marks unsafe small rosters while preserving result claim gates', () => {
-        const unsafeProfile = deriveThresholdProfile({
-            rosterSize: 19,
-            unsafeSmallRosterAcknowledged: true,
-            targetBoundShareSelectionProfile,
-        });
-        const unsafeLabels = deriveLifecycleLabels(
-            fullyVerifiedLabelInput({
-                thresholdProfile: unsafeProfile,
-            }),
-        );
-        const passiveLabels = deriveLifecycleLabels(
-            fullyVerifiedLabelInput({
-                mheSecurityClosure: 'PassiveMHEPrototype',
-                activeMaliciousClosureApplied: false,
-            }),
-        );
+    it.each([3, 4, 5, 6, 7, 8, 9])(
+        'marks roster size %d as casual while preserving dynamic result claim gates',
+        (rosterSize) => {
+            const casualProfile = deriveThresholdProfile({
+                casualMicroRosterAcknowledged: true,
+                rosterSize,
+            });
+            const dynamicProfile = deriveThresholdProfile({
+                dynamicRosterProfileCertificateDigest,
+                rosterSize: 16,
+                targetBoundShareSelectionProfile,
+            });
+            const casualLabels = deriveLifecycleLabels(
+                fullyVerifiedLabelInput({
+                    thresholdProfile: casualProfile,
+                }),
+            );
+            const dynamicLabels = deriveLifecycleLabels(
+                fullyVerifiedLabelInput({
+                    thresholdProfile: dynamicProfile,
+                }),
+            );
+            const passiveLabels = deriveLifecycleLabels(
+                fullyVerifiedLabelInput({
+                    mheSecurityClosure: 'PassiveMHEPrototype',
+                    activeMaliciousClosureApplied: false,
+                }),
+            );
 
-        expect(unsafeLabels.modes).toContain('UnsafeSmallRoster');
-        expect(unsafeLabels.resultClaimLabels).toEqual(['FullyVerifiedResult']);
-        expect(passiveLabels.primary).toEqual(['Unresolved']);
-        expect(passiveLabels.modes).toContain('PassiveMHEPrototype');
-    });
+            expect(casualLabels.modes).toContain('CasualMicroRoster');
+            expect(casualLabels.resultClaimLabels).toEqual([]);
+            expect(dynamicLabels.resultClaimLabels).toEqual([
+                'FullyVerifiedResult',
+            ]);
+            expect(passiveLabels.primary).toEqual(['Unresolved']);
+            expect(passiveLabels.modes).toContain('PassiveMHEPrototype');
+        },
+    );
 
     it('derives closure profile labels from transcript-visible profile IDs', () => {
         const labels = deriveLifecycleLabels({

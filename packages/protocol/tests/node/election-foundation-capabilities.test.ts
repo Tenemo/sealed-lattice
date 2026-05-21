@@ -22,6 +22,7 @@ const targetBoundShareSelectionProfile = {
     selectedShareRule: 'FirstValidSharesInCanonicalBoardOrder',
 } as const;
 
+const dynamicRosterProfileCertificateDigest = 'a'.repeat(128);
 const thresholdProfile = deriveThresholdProfile({ rosterSize: 20 });
 const certifiedThresholdProfile = deriveThresholdProfile({
     rosterSize: 20,
@@ -123,6 +124,36 @@ describe('election foundation capability evaluator', () => {
                 }),
             ),
         ).toEqual({ allowed: true, action: 'SubmitVote' });
+    });
+
+    it('opens voting only after the frozen roster profile and trustee material are complete', () => {
+        expect(
+            evaluateActionCapability(
+                'OpenVoting',
+                createContext({
+                    lifecycleState: 'RosterFrozen',
+                    setupCompleteCount: thresholdProfile.setupCompletionQuorum,
+                }),
+            ),
+        ).toMatchObject({ reason: 'ClaimClosureMissing' });
+
+        expect(
+            evaluateActionCapability(
+                'OpenVoting',
+                createContext({
+                    ballotProofProfileFrozen: true,
+                    cpadProfileReferencePresent: true,
+                    finalRosterDigest: 'final-roster-digest',
+                    frozenRosterProfileDigest: 'threshold-profile-digest',
+                    lifecycleState: 'RosterFrozen',
+                    receiverKeyCoverageComplete: true,
+                    setupCompleteCount: thresholdProfile.setupCompletionQuorum,
+                    shareLayoutFrozen: true,
+                    targetOutputLayoutFrozen: true,
+                    trusteeSetupComplete: true,
+                }),
+            ),
+        ).toEqual({ allowed: true, action: 'OpenVoting' });
     });
 
     it('refuses aggregate contribution before setup and turnout thresholds', () => {
@@ -521,25 +552,45 @@ describe('election foundation capability evaluator', () => {
         ).toEqual({ allowed: true, action: 'RecombineAcceptedTarget' });
     });
 
-    it('allows acknowledged unsafe small-roster profiles through claim-bearing environment gates', () => {
-        const unsafeThresholdProfile = deriveThresholdProfile({
-            rosterSize: 19,
-            unsafeMicroRosterAcknowledged: true,
-        });
+    it.each([3, 4, 5, 6, 7, 8, 9])(
+        'refuses roster size %d casual micro-rosters but allows certified dynamic rosters through claim-bearing gates',
+        (rosterSize) => {
+            const casualThresholdProfile = deriveThresholdProfile({
+                casualMicroRosterAcknowledged: true,
+                rosterSize,
+            });
+            const dynamicThresholdProfile = deriveThresholdProfile({
+                dynamicRosterProfileCertificateDigest,
+                rosterSize: 16,
+            });
 
-        expect(
-            evaluateActionCapability(
-                'AcceptTarget',
-                createContext({
-                    lifecycleState: 'EvaluationProofVerified',
-                    thresholdProfile: unsafeThresholdProfile,
-                    targetFinalityAccepted: true,
-                    evaluationProofVerified: true,
-                    bridgeMobileCertificatePresent: true,
-                }),
-            ),
-        ).toEqual({ allowed: true, action: 'AcceptTarget' });
-    });
+            expect(
+                evaluateActionCapability(
+                    'AcceptTarget',
+                    createContext({
+                        lifecycleState: 'EvaluationProofVerified',
+                        thresholdProfile: casualThresholdProfile,
+                        targetFinalityAccepted: true,
+                        evaluationProofVerified: true,
+                        bridgeMobileCertificatePresent: true,
+                    }),
+                ),
+            ).toMatchObject({ reason: 'ProfileNotClaimBearing' });
+
+            expect(
+                evaluateActionCapability(
+                    'AcceptTarget',
+                    createContext({
+                        lifecycleState: 'EvaluationProofVerified',
+                        thresholdProfile: dynamicThresholdProfile,
+                        targetFinalityAccepted: true,
+                        evaluationProofVerified: true,
+                        bridgeMobileCertificatePresent: true,
+                    }),
+                ),
+            ).toEqual({ allowed: true, action: 'AcceptTarget' });
+        },
+    );
 
     it('refuses claim-bearing capabilities when mobile environment gates fail', () => {
         expect(

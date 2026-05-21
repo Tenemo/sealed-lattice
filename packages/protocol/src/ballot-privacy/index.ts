@@ -22,6 +22,7 @@ export {
     deriveBallotProofEncodingProfileDigest,
     deriveBallotProofParameterSetDigest,
     deriveBallotProofPublicRandomnessDigest,
+    deriveBallotPrivacyRosterProfileEvidenceDigest,
     deriveProofBytesDigest,
     deriveReceiverKeyProofEncodingProfileDigest,
     deriveReceiverKeyProofParameterSetDigest,

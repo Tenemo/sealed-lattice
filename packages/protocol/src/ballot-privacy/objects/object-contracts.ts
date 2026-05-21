@@ -1,6 +1,7 @@
 import { deriveProtocolDigest } from '@sealed-lattice/crypto';
 import type {
     BallotPrivacyProofBackendStatus,
+    BallotPrivacyRosterProfileEvidence,
     BallotProofComponentId,
     BallotProofComponentProofBundle,
     BallotProofComponentProofRecord,
@@ -59,6 +60,11 @@ type BallotProofStatementPayload = Omit<
 type BallotProofRecordPayload = Omit<
     BallotProofRecord,
     'ballotProofRecordDigest'
+>;
+
+type BallotPrivacyRosterProfileEvidencePayload = Omit<
+    BallotPrivacyRosterProfileEvidence,
+    'rosterProfileEvidenceDigest'
 >;
 
 type ScopedRelationBearingBallotPackageDigestPayload = {
@@ -137,7 +143,7 @@ type ScopedRelationBearingBallotPackageVerificationShell =
     };
 
 const unavailableProofBackendMessage =
-    'The pure TypeScript protocol shell does not verify ballot privacy proof bytes. Use the packaged Rust/WASM verifier for receiver-key proof and ballot proof-record verification; scoped relation package acceptance remains fail-closed until verifier-derived lowering and trusted public randomness checks exist.';
+    'The pure TypeScript protocol shell does not verify ballot privacy proof bytes or accept scoped relation package claims. Use the packaged Rust/WASM verifier for receiver-key proof, ballot proof-record, and proof-byte-bearing scoped relation package verification.';
 
 const protocolDigestPattern = /^[a-f0-9]{128}$/u;
 
@@ -316,6 +322,11 @@ const deriveBallotProofRecordDigest = (
     proofRecord: BallotProofRecordPayload,
 ): ProtocolDigest =>
     deriveProtocolDigest('BallotProofRecordDigest', proofRecord);
+
+const deriveBallotPrivacyRosterProfileEvidenceDigest = (
+    evidence: BallotPrivacyRosterProfileEvidencePayload,
+): ProtocolDigest =>
+    deriveProtocolDigest('BallotPrivacyRosterProfileEvidenceDigest', evidence);
 
 const deriveBallotProofComponentProofRecordDigest = (
     proofRecord: BallotProofComponentProofRecordPayload,
@@ -663,6 +674,7 @@ export {
     deriveShareCommitmentDigest,
     deriveBallotProofStatementDigest,
     deriveBallotProofRecordDigest,
+    deriveBallotPrivacyRosterProfileEvidenceDigest,
     deriveBallotProofComponentProofRecordDigest,
     deriveBallotProofComponentProofBundleDigest,
     deriveBallotProofChallengeDigest,

@@ -5,7 +5,8 @@ import type {
 } from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
-import { deriveThresholdProfile } from '../../src/lifecycle/thresholds';
+import { derivePollSpecDigest } from '../../src/lifecycle/poll-spec';
+import { deriveFrozenRosterProfile } from '../../src/lifecycle/thresholds';
 import {
     deriveTestBallotPackage,
     verifyBallotPackageShell,
@@ -24,27 +25,26 @@ const pollSpec = {
         skippedOptionScore: 1,
     },
     duplicateBallotPolicy: 'LastValidBeforeVotingClosedCounts',
+    maxRosterSize: 50,
+    minRosterSize: 10,
+    rosterPolicy: 'OpenLinkPublicRoster',
+    smallRosterPolicy: 'ForbidMicroRoster',
+    thresholdProfileFamily: 'BalancedDefault',
     tiePolicy: 'HigherScoreThenLowerOptionIndex',
 } as const satisfies PollSpec;
-const thresholdProfile = deriveThresholdProfile({ rosterSize: 20 });
 const rosterEntries = Array.from({ length: 20 }, (_unused, rosterIndex) => ({
     participantIdentity: `participant-${String(rosterIndex + 1)}`,
     rosterPosition: rosterIndex + 1,
 }));
-const pollSpecDigest = deriveProtocolDigest('PollSpecDigest', {
-    duplicateBallotPolicy: pollSpec.duplicateBallotPolicy,
-    options: pollSpec.options,
-    pollId: pollSpec.pollId,
-    question: pollSpec.question,
-    scoreDomain: pollSpec.scoreDomain,
-    tiePolicy: pollSpec.tiePolicy,
-    topOptionCount: pollSpec.topOptionCount,
-});
-const thresholdProfileDigest = deriveProtocolDigest(
-    'ThresholdProfileDigest',
-    thresholdProfile,
-);
+const pollSpecDigest = derivePollSpecDigest(pollSpec);
 const rosterDigest = deriveProtocolDigest('RosterDigest', { rosterEntries });
+const frozenRosterProfile = deriveFrozenRosterProfile({
+    pollSpec,
+    rosterDigest,
+    rosterSize: rosterEntries.length,
+});
+const thresholdProfile = frozenRosterProfile.thresholdProfile;
+const thresholdProfileDigest = frozenRosterProfile.thresholdProfileDigest;
 const electionManifestDigest = deriveProtocolDigest('ElectionManifestDigest', {
     ceremonyId,
     pollSpecDigest,

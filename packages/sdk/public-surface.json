@@ -2,8 +2,11 @@
   "schemaVersion": 1,
   "runtimeExports": [
     "createBridgeProof",
+    "deriveFrozenRosterProfile",
     "deriveLifecycleLabels",
+    "derivePollSpecDigest",
     "deriveThresholdProfile",
+    "deriveThresholdProfileDigest",
     "deriveValidatedFirstValidOrder",
     "evaluateActionCapability",
     "isActionCurrentForRecoveryEpoch",
@@ -95,6 +98,7 @@
     "AppendOnlyConsistencyProof",
     "BallotPrivacyKernelVerification",
     "BallotPrivacyProofBackendStatus",
+    "BallotPrivacyRosterProfileEvidence",
     "BallotPrivacyVerification",
     "BallotProofComponentId",
     "BallotProofComponentProofBundle",
@@ -135,6 +139,7 @@
     "FailureStatusLabel",
     "FirstValidOrderingInput",
     "FirstValidOrderingVerification",
+    "FrozenRosterProfile",
     "FutureProtocolOperationResult",
     "GoldenTranscriptCoreFixture",
     "GoldenTranscriptCoreFixtureVerification",
@@ -184,6 +189,7 @@
     "RosterExternalAcceptanceVerificationInput",
     "RosterManifestTranscriptInput",
     "RosterManifestTranscriptVerification",
+    "RosterPolicy",
     "RosterProfileKind",
     "ScoreDomain",
     "ShareCommitment",
@@ -191,6 +197,7 @@
     "SignedBoardHead",
     "SignedObjectType",
     "SignerRole",
+    "SmallRosterPolicy",
     "StructuredProtocolVerificationResult",
     "TargetBoundShareSelectionProfile",
     "TargetFinalityCheckpoint",
@@ -200,6 +207,8 @@
     "TargetFinalityVerificationInput",
     "TargetProposal",
     "ThresholdProfile",
+    "ThresholdProfileClaimBoundary",
+    "ThresholdProfileFamily",
     "ThresholdProfileInput",
     "ThresholdWarning",
     "TiePolicy",
@@ -280,13 +289,16 @@
     {
       "source": "lifecycle/poll-spec.js",
       "exports": [
+        "derivePollSpecDigest",
         "validatePollSpec"
       ]
     },
     {
       "source": "lifecycle/thresholds.js",
       "exports": [
-        "deriveThresholdProfile"
+        "deriveFrozenRosterProfile",
+        "deriveThresholdProfile",
+        "deriveThresholdProfileDigest"
       ]
     },
     {

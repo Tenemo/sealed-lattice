@@ -1,10 +1,37 @@
 import {
     cpadProfileId,
+    type PollSpec,
     targetBoundShareSelectionProfileId,
 } from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
-import { deriveThresholdProfile } from '../../src/index';
+import {
+    deriveFrozenRosterProfile,
+    deriveThresholdProfile,
+} from '../../src/index';
+
+const dynamicRosterProfileCertificateDigest = 'a'.repeat(128);
+const invalidDynamicRosterProfileCertificateDigest = 'not-a-protocol-digest';
+const rosterDigest = 'b'.repeat(128);
+const casualMicroRosterSizes = [3, 4, 5, 6, 7, 8, 9] as const;
+const pollSpec = {
+    duplicateBallotPolicy: 'LastValidBeforeVotingClosedCounts',
+    maxRosterSize: 50,
+    minRosterSize: 10,
+    options: ['Alpha', 'Beta'],
+    pollId: 'threshold-profile-test',
+    question: 'Choose one',
+    rosterPolicy: 'OpenLinkPublicRoster',
+    scoreDomain: {
+        max: 10,
+        min: 1,
+        skippedOptionScore: 1,
+    },
+    smallRosterPolicy: 'ForbidMicroRoster',
+    thresholdProfileFamily: 'BalancedDefault',
+    tiePolicy: 'HigherScoreThenLowerOptionIndex',
+    topOptionCount: 1,
+} as const satisfies PollSpec;
 
 const targetBoundShareSelectionProfile = {
     profileId: targetBoundShareSelectionProfileId,
@@ -21,6 +48,11 @@ const targetBoundShareSelectionProfile = {
 const expectFeasibleThresholds = (rosterSize: number): void => {
     const decryptionThreshold = Math.floor((rosterSize - 1) / 3) + 1;
     const profile = deriveThresholdProfile({
+        casualMicroRosterAcknowledged: rosterSize < 10,
+        dynamicRosterProfileCertificateDigest:
+            rosterSize >= 10 && rosterSize !== 20
+                ? dynamicRosterProfileCertificateDigest
+                : undefined,
         rosterSize,
         targetBoundShareSelectionProfile: {
             ...targetBoundShareSelectionProfile,
@@ -28,7 +60,6 @@ const expectFeasibleThresholds = (rosterSize: number): void => {
             minimumSharesForInterpolation: decryptionThreshold,
             minimumArrivalsForRobustDecode: decryptionThreshold + 2,
         },
-        unsafeMicroRosterAcknowledged: rosterSize < 20,
     });
 
     expect(rosterSize - profile.activeFaultBound).toBeGreaterThanOrEqual(
@@ -48,7 +79,28 @@ const expectFeasibleThresholds = (rosterSize: number): void => {
 describe('election foundation threshold profiles', () => {
     it.each([
         {
+            rosterSize: 11,
+            privacyCorruptionBound: 3,
+            threshold: 4,
+            activeFaultBound: 2,
+            releaseQuorum: 10,
+        },
+        {
+            rosterSize: 16,
+            privacyCorruptionBound: 5,
+            threshold: 6,
+            activeFaultBound: 3,
+            releaseQuorum: 11,
+        },
+        {
             rosterSize: 20,
+            privacyCorruptionBound: 6,
+            threshold: 7,
+            activeFaultBound: 4,
+            releaseQuorum: 14,
+        },
+        {
+            rosterSize: 21,
             privacyCorruptionBound: 6,
             threshold: 7,
             activeFaultBound: 4,
@@ -84,7 +136,13 @@ describe('election foundation threshold profiles', () => {
             activeFaultBound,
             releaseQuorum,
         }) => {
-            const profile = deriveThresholdProfile({ rosterSize });
+            const profile = deriveThresholdProfile({
+                dynamicRosterProfileCertificateDigest:
+                    rosterSize === 20
+                        ? undefined
+                        : dynamicRosterProfileCertificateDigest,
+                rosterSize,
+            });
 
             expect(profile).toMatchObject({
                 rosterSize,
@@ -107,7 +165,7 @@ describe('election foundation threshold profiles', () => {
         ).toBe(9);
     });
 
-    it.each([20, 30, 40, 50])(
+    it.each([...casualMicroRosterSizes, 10, 11, 16, 20, 21, 30, 40, 50])(
         'keeps threshold feasibility invariants for roster size %d',
         expectFeasibleThresholds,
     );
@@ -118,42 +176,123 @@ describe('election foundation threshold profiles', () => {
         );
     });
 
-    it.each([3, 19])(
-        'requires explicit unsafe acknowledgement for roster size %d',
+    it.each(casualMicroRosterSizes)(
+        'requires explicit casual micro-roster acknowledgement for roster size %d',
         (rosterSize) => {
             expect(() => deriveThresholdProfile({ rosterSize })).toThrow(
-                'Unsafe small-roster profiles require explicit acknowledgement.',
+                'Casual micro-roster profiles require explicit acknowledgement.',
             );
         },
     );
 
-    it('marks acknowledged small rosters as unsafe supported profiles', () => {
-        const profile = deriveThresholdProfile({
-            rosterSize: 19,
-            unsafeSmallRosterAcknowledged: true,
-        });
+    it.each([
+        { rosterSize: 3, threshold: 1 },
+        { rosterSize: 4, threshold: 2 },
+        { rosterSize: 5, threshold: 2 },
+        { rosterSize: 6, threshold: 2 },
+        { rosterSize: 7, threshold: 3 },
+        { rosterSize: 8, threshold: 3 },
+        { rosterSize: 9, threshold: 3 },
+    ])(
+        'marks acknowledged roster size $rosterSize as a non-claim casual micro-roster',
+        ({ rosterSize, threshold }) => {
+            const profile = deriveThresholdProfile({
+                casualMicroRosterAcknowledged: true,
+                rosterSize,
+            });
 
-        expect(profile.rosterProfileKind).toBe('UnsafeSmallRoster');
-        expect(profile.claimBearing).toBe(true);
-        expect(profile.warnings).toContain('UnsafeSmallRoster');
-    });
+            expect(profile.rosterProfileKind).toBe('CasualMicroRoster');
+            expect(profile.claimBoundary).toBe('CasualMicroRoster');
+            expect(profile.claimBearing).toBe(false);
+            expect(profile.releaseQuorum).toBe(rosterSize);
+            expect(profile.setupCompletionQuorum).toBe(rosterSize);
+            expect(profile.pvssThreshold).toBe(threshold);
+            expect(profile.decryptionThreshold).toBe(threshold);
+            expect(profile.warnings).toContain('CasualMicroRoster');
+        },
+    );
 
-    it('marks roster size 20 as a supported safe profile', () => {
+    it('marks roster size 20 as the mandatory benchmark profile', () => {
         const profile = deriveThresholdProfile({ rosterSize: 20 });
 
-        expect(profile.rosterProfileKind).toBe('SupportedRosterRange');
+        expect(profile.rosterProfileKind).toBe('MandatoryBenchmarkRoster');
+        expect(profile.claimBoundary).toBe('MandatoryBenchmark');
         expect(profile.claimBearing).toBe(true);
+        expect(profile.dynamicRosterProfileCertificateDigest).toBeNull();
         expect(profile.warnings).toEqual(['ShareSelectionProfileRequired']);
     });
 
-    it.each([21, 50])(
-        'marks roster size %d as a supported safe profile',
+    it('does not carry invalid dynamic roster certificate digests into mandatory benchmark profiles', () => {
+        const profile = deriveThresholdProfile({
+            dynamicRosterProfileCertificateDigest:
+                invalidDynamicRosterProfileCertificateDigest,
+            rosterSize: 20,
+        });
+
+        expect(profile.rosterProfileKind).toBe('MandatoryBenchmarkRoster');
+        expect(profile.claimBoundary).toBe('MandatoryBenchmark');
+        expect(profile.claimBearing).toBe(true);
+        expect(profile.dynamicRosterProfileCertificateDigest).toBeNull();
+
+        const frozenRosterProfile = deriveFrozenRosterProfile({
+            dynamicRosterProfileCertificateDigest:
+                invalidDynamicRosterProfileCertificateDigest,
+            pollSpec,
+            rosterDigest,
+            rosterSize: 20,
+        });
+
+        expect(
+            frozenRosterProfile.dynamicRosterProfileCertificateDigest,
+        ).toBeNull();
+        expect(
+            frozenRosterProfile.thresholdProfile
+                .dynamicRosterProfileCertificateDigest,
+        ).toBeNull();
+        expect(() =>
+            deriveFrozenRosterProfile({
+                dynamicRosterProfileCertificateDigest:
+                    invalidDynamicRosterProfileCertificateDigest,
+                pollSpec,
+                rosterDigest,
+                rosterSize: 21,
+            }),
+        ).toThrow(
+            'Dynamic claim-bearing roster profiles require certificate or workbook coverage for the frozen roster size.',
+        );
+    });
+
+    it.each([10, 11, 16, 21, 50])(
+        'marks roster size %d as a certified dynamic profile',
+        (rosterSize) => {
+            const profile = deriveThresholdProfile({
+                dynamicRosterProfileCertificateDigest,
+                rosterSize,
+            });
+
+            expect(profile.rosterProfileKind).toBe(
+                'SupportedDynamicRosterRange',
+            );
+            expect(profile.claimBoundary).toBe('DynamicRosterCertificate');
+            expect(profile.claimBearing).toBe(true);
+            expect(profile.warnings).toEqual(['ShareSelectionProfileRequired']);
+        },
+    );
+
+    it.each([10, 11, 16, 19, 21, 50])(
+        'marks roster size %d as uncertified without dynamic evidence',
         (rosterSize) => {
             const profile = deriveThresholdProfile({ rosterSize });
 
-            expect(profile.rosterProfileKind).toBe('SupportedRosterRange');
-            expect(profile.claimBearing).toBe(true);
-            expect(profile.warnings).toEqual(['ShareSelectionProfileRequired']);
+            expect(profile.rosterProfileKind).toBe('UncertifiedDynamicRoster');
+            expect(profile.claimBoundary).toBe(
+                'DynamicRosterCertificateMissing',
+            );
+            expect(profile.claimBearing).toBe(false);
+            expect(profile.warnings).toEqual([
+                'DynamicRosterProfileCertificateRequired',
+                'ShareSelectionProfileRequired',
+            ]);
         },
     );
 

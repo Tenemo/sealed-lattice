@@ -51,16 +51,30 @@ export type ThresholdProfileInput = {
     readonly rosterSize: number;
     readonly heBackendCorruptionModel?: HeBackendCorruptionModel;
     readonly targetBoundShareSelectionProfile?: TargetBoundShareSelectionProfile;
+    readonly dynamicRosterProfileCertificateDigest?: ProtocolDigest;
+    readonly casualMicroRosterAcknowledged?: boolean;
     readonly unsafeSmallRosterAcknowledged?: boolean;
     readonly unsafeMicroRosterAcknowledged?: boolean;
 };
 
 /** Roster profile classification for the derived threshold parameters. */
-export type RosterProfileKind = 'UnsafeSmallRoster' | 'SupportedRosterRange';
+export type RosterProfileKind =
+    | 'CasualMicroRoster'
+    | 'MandatoryBenchmarkRoster'
+    | 'SupportedDynamicRosterRange'
+    | 'UncertifiedDynamicRoster';
+
+/** Claim boundary carried by a derived threshold profile. */
+export type ThresholdProfileClaimBoundary =
+    | 'CasualMicroRoster'
+    | 'MandatoryBenchmark'
+    | 'DynamicRosterCertificate'
+    | 'DynamicRosterCertificateMissing';
 
 /** Warning label emitted when threshold parameters require caveats. */
 export type ThresholdWarning =
-    | 'UnsafeSmallRoster'
+    | 'CasualMicroRoster'
+    | 'DynamicRosterProfileCertificateRequired'
     | 'BackendCorruptionBoundTooHigh'
     | 'ShareSelectionProfileRequired';
 
@@ -68,7 +82,9 @@ export type ThresholdWarning =
 export type ThresholdProfile = {
     readonly rosterSize: number;
     readonly rosterProfileKind: RosterProfileKind;
+    readonly claimBoundary: ThresholdProfileClaimBoundary;
     readonly claimBearing: boolean;
+    readonly dynamicRosterProfileCertificateDigest: ProtocolDigest | null;
     readonly structuralCorruptionBound: number;
     readonly backendCorruptionBound: number;
     readonly privacyCorruptionBound: number;
@@ -99,6 +115,18 @@ export type DuplicateBallotPolicy = 'LastValidBeforeVotingClosedCounts';
 /** Tie-breaking policy currently supported by the public facade. */
 export type TiePolicy = 'HigherScoreThenLowerOptionIndex';
 
+/** Public roster admission model selected at poll creation. */
+export type RosterPolicy = 'OpenLinkPublicRoster';
+
+/** Threshold/profile family selected at poll creation. */
+export type ThresholdProfileFamily = 'BalancedDefault';
+
+/** Policy for rosters below the dynamic claim-bearing family. */
+export type SmallRosterPolicy =
+    | 'ForbidMicroRoster'
+    | 'WarnMicroRoster'
+    | 'AllowMicroRoster';
+
 /** Untrusted poll specification input accepted by validation helpers. */
 export type PollSpecInput = {
     readonly pollId: string;
@@ -108,6 +136,11 @@ export type PollSpecInput = {
     readonly scoreDomain?: ScoreDomain;
     readonly duplicateBallotPolicy?: DuplicateBallotPolicy;
     readonly tiePolicy?: TiePolicy;
+    readonly rosterPolicy?: RosterPolicy;
+    readonly minRosterSize?: number;
+    readonly maxRosterSize?: number;
+    readonly thresholdProfileFamily?: ThresholdProfileFamily;
+    readonly smallRosterPolicy?: SmallRosterPolicy;
 };
 
 /** Normalized poll specification after validation defaults have been applied. */
@@ -119,6 +152,28 @@ export type PollSpec = {
     readonly scoreDomain: ScoreDomain;
     readonly duplicateBallotPolicy: DuplicateBallotPolicy;
     readonly tiePolicy: TiePolicy;
+    readonly rosterPolicy: RosterPolicy;
+    readonly minRosterSize: number;
+    readonly maxRosterSize: number;
+    readonly thresholdProfileFamily: ThresholdProfileFamily;
+    readonly smallRosterPolicy: SmallRosterPolicy;
+};
+
+/** Concrete threshold/profile output derived after roster freeze. */
+export type FrozenRosterProfile = {
+    readonly objectType: 'FrozenRosterProfile';
+    readonly objectVersion: 1;
+    readonly thresholdProfileDigest: ProtocolDigest;
+    readonly pollSpecDigest: ProtocolDigest;
+    readonly rosterDigest: ProtocolDigest;
+    readonly rosterSize: number;
+    readonly rosterPolicy: RosterPolicy;
+    readonly thresholdProfileFamily: ThresholdProfileFamily;
+    readonly smallRosterPolicy: SmallRosterPolicy;
+    readonly minRosterSize: number;
+    readonly maxRosterSize: number;
+    readonly dynamicRosterProfileCertificateDigest: ProtocolDigest | null;
+    readonly thresholdProfile: ThresholdProfile;
 };
 
 /** Stable poll specification validation error code. */
@@ -131,7 +186,11 @@ export type PollSpecValidationErrorCode =
     | 'InvalidTopOptionCount'
     | 'UnsupportedScoreDomain'
     | 'UnsupportedDuplicateBallotPolicy'
-    | 'UnsupportedTiePolicy';
+    | 'UnsupportedTiePolicy'
+    | 'UnsupportedRosterPolicy'
+    | 'InvalidRosterBounds'
+    | 'UnsupportedThresholdProfileFamily'
+    | 'UnsupportedSmallRosterPolicy';
 
 /** Structured poll specification validation error. */
 export type PollSpecValidationError = {
@@ -228,7 +287,7 @@ export type FailureStatusLabel =
 
 /** Mode or caveat status label attached to lifecycle outputs. */
 export type ModeStatusLabel =
-    | 'UnsafeSmallRoster'
+    | 'CasualMicroRoster'
     | 'PassiveMHEPrototype'
     | 'EvaluationProofClosure'
     | 'CPADClosure'
@@ -339,6 +398,14 @@ export type CapabilityContext = {
     readonly lifecycleState: LifecycleState;
     readonly thresholdProfile: ThresholdProfile;
     readonly pollSpecValid: boolean;
+    readonly finalRosterDigest?: ProtocolDigest;
+    readonly frozenRosterProfileDigest?: ProtocolDigest;
+    readonly receiverKeyCoverageComplete?: boolean;
+    readonly trusteeSetupComplete?: boolean;
+    readonly ballotProofProfileFrozen?: boolean;
+    readonly shareLayoutFrozen?: boolean;
+    readonly targetOutputLayoutFrozen?: boolean;
+    readonly cpadProfileReferencePresent?: boolean;
     readonly localRosterExternallyAccepted?: boolean;
     readonly rosterExternalAcceptanceDigest?: ProtocolDigest;
     readonly actionContextRosterExternalAcceptanceDigest?: ProtocolDigest | null;

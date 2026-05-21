@@ -35,11 +35,11 @@
     },
     {
       "path": "election-foundation/capability-refusals.json",
-      "sha256": "77cc338417b5cbe4fb699ad8c161e37a7bf77704dae650a40a158179b2d997eb"
+      "sha256": "60c4f718d3d1f05c2c0de72a14222b910f8e3e96992d8760490ba2a4ac72ac73"
     },
     {
       "path": "election-foundation/deterministic-fixtures.json",
-      "sha256": "7c51dc171bdf1b1937164bf42cf4ab7f25a1671a9be7bad7e44f0301b4c49444"
+      "sha256": "9078cbbecb20a5b84b1f5aa4c5ee5d161191059becd34a06555051227644676f"
     },
     {
       "path": "election-foundation/lifecycle-transitions.json",
@@ -51,7 +51,7 @@
     },
     {
       "path": "election-foundation/threshold-profiles.json",
-      "sha256": "97ba1f9c963c23262cf043703c508685456a93d98cd449a38988c7b64dff52c4"
+      "sha256": "bda80be3fad6f43474171dac5be98d3c0e5201445c7fc4dcd987f07d2289d81f"
     },
     {
       "path": "plaintext-oracle/comparator-polynomials.json",
@@ -71,19 +71,19 @@
     },
     {
       "path": "plaintext-oracle/top-k.json",
-      "sha256": "dab38f68df0f48739c1adb2bcefa1ec17c923f5a710142b17ca384b3fec9d3c6"
+      "sha256": "947c5864dbbd95bcfe0164decb4051bb2e56509c3d38ad1bee42decf62327ad9"
     },
     {
       "path": "pvss-ballot/aggregate-shares.json",
-      "sha256": "c3eafcbb6acece5eda1cebb04ef05e15400e3b311ad6f9e20972e2684e82f768"
+      "sha256": "9c217a961c487b82676d4a412b67ef91dfa8c9582363df0c753f012d047469ab"
     },
     {
       "path": "pvss-ballot/ballot-algebra.json",
-      "sha256": "b5e6595cf82c14aa4370464a3fba8abd739cf35d3d8ad5760c7e1e5d0ccb299b"
+      "sha256": "f74bf00628780fe9345ebaa5a3bbee804e8328796cfeccf712eead8901ec2268"
     },
     {
       "path": "pvss-ballot/canonical-ballot-set.json",
-      "sha256": "1b1cf55bcdcc36c4bd8a0aef88bcc92da2ff32ed5e5eed1b7451f55f91f5eaf6"
+      "sha256": "e8873e547dfb2d34763baf6b7fe64f9abb6b16cbec7ea985849c8f21c607825f"
     },
     {
       "path": "transcript-core/golden-transcript-core.json",

@@ -1,4 +1,8 @@
+import { deriveProtocolDigest } from '@sealed-lattice/crypto';
 import type {
+    FrozenRosterProfile,
+    PollSpec,
+    ProtocolDigest,
     TargetBoundShareSelectionProfile,
     DecryptionShareFilteringMode,
     DecryptionShareSelectionRule,
@@ -11,14 +15,23 @@ import type {
 
 import { isNonNegativeInteger } from '../common/verification-helpers.js';
 
+import { derivePollSpecDigest } from './poll-spec.js';
 import {
     targetBoundShareSelectionProfileId,
     cpadProfileId,
-    maximumSafeRosterSize,
-    minimumSafeRosterSize,
-    minimumUnsafeRosterSize,
+    mandatoryBenchmarkRosterSize,
+    maximumSupportedRosterSize,
+    minimumDynamicRosterSize,
+    minimumSupportedRosterSize,
     strictLessThanOneThirdModel,
 } from './profiles.js';
+
+const protocolDigestPattern = /^[0-9a-f]{128}$/u;
+
+const normalizeDynamicRosterProfileCertificateDigest = (
+    digest: ProtocolDigest | undefined,
+): ProtocolDigest | null =>
+    digest !== undefined && protocolDigestPattern.test(digest) ? digest : null;
 
 const normalizeBackendCorruptionModel = (
     rosterSize: number,
@@ -172,39 +185,73 @@ const normalizeTargetBoundShareSelectionProfile = (
 
 const deriveRosterProfile = (
     rosterSize: number,
-    unsafeSmallRosterAcknowledged: boolean | undefined,
+    input: ThresholdProfileInput,
 ): {
+    readonly claimBoundary: ThresholdProfile['claimBoundary'];
     readonly claimBearing: boolean;
+    readonly dynamicRosterProfileCertificateDigest: ProtocolDigest | null;
     readonly rosterProfileKind: RosterProfileKind;
     readonly warnings: readonly ThresholdWarning[];
 } => {
     if (!Number.isInteger(rosterSize)) {
         throw new RangeError('Roster size must be an integer.');
     }
-    if (rosterSize < minimumUnsafeRosterSize) {
+    if (rosterSize < minimumSupportedRosterSize) {
         throw new RangeError('Roster size must be at least 3.');
     }
-    if (rosterSize > maximumSafeRosterSize) {
+    if (rosterSize > maximumSupportedRosterSize) {
         throw new RangeError('Roster size must be at most 50.');
     }
-    if (rosterSize < minimumSafeRosterSize) {
-        if (unsafeSmallRosterAcknowledged !== true) {
+    const dynamicRosterProfileCertificateDigest =
+        normalizeDynamicRosterProfileCertificateDigest(
+            input.dynamicRosterProfileCertificateDigest,
+        );
+
+    if (rosterSize < minimumDynamicRosterSize) {
+        if (
+            input.casualMicroRosterAcknowledged !== true &&
+            input.unsafeSmallRosterAcknowledged !== true &&
+            input.unsafeMicroRosterAcknowledged !== true
+        ) {
             throw new Error(
-                'Unsafe small-roster profiles require explicit acknowledgement.',
+                'Casual micro-roster profiles require explicit acknowledgement.',
             );
         }
 
         return {
+            claimBoundary: 'CasualMicroRoster',
+            claimBearing: false,
+            dynamicRosterProfileCertificateDigest: null,
+            rosterProfileKind: 'CasualMicroRoster',
+            warnings: ['CasualMicroRoster'],
+        };
+    }
+    if (rosterSize === mandatoryBenchmarkRosterSize) {
+        return {
+            claimBoundary: 'MandatoryBenchmark',
             claimBearing: true,
-            rosterProfileKind: 'UnsafeSmallRoster',
-            warnings: ['UnsafeSmallRoster'],
+            dynamicRosterProfileCertificateDigest:
+                dynamicRosterProfileCertificateDigest,
+            rosterProfileKind: 'MandatoryBenchmarkRoster',
+            warnings: [],
+        };
+    }
+    if (dynamicRosterProfileCertificateDigest !== null) {
+        return {
+            claimBoundary: 'DynamicRosterCertificate',
+            claimBearing: true,
+            dynamicRosterProfileCertificateDigest,
+            rosterProfileKind: 'SupportedDynamicRosterRange',
+            warnings: [],
         };
     }
 
     return {
-        claimBearing: true,
-        rosterProfileKind: 'SupportedRosterRange',
-        warnings: [],
+        claimBoundary: 'DynamicRosterCertificateMissing',
+        claimBearing: false,
+        dynamicRosterProfileCertificateDigest: null,
+        rosterProfileKind: 'UncertifiedDynamicRoster',
+        warnings: ['DynamicRosterProfileCertificateRequired'],
     };
 };
 
@@ -212,11 +259,7 @@ export const deriveThresholdProfile = (
     input: ThresholdProfileInput,
 ): ThresholdProfile => {
     const { rosterSize } = input;
-    const rosterProfile = deriveRosterProfile(
-        rosterSize,
-        input.unsafeSmallRosterAcknowledged ??
-            input.unsafeMicroRosterAcknowledged,
-    );
+    const rosterProfile = deriveRosterProfile(rosterSize, input);
     const backendCorruptionModel = normalizeBackendCorruptionModel(
         rosterSize,
         input.heBackendCorruptionModel,
@@ -265,7 +308,10 @@ export const deriveThresholdProfile = (
     return {
         rosterSize,
         rosterProfileKind: rosterProfile.rosterProfileKind,
+        claimBoundary: rosterProfile.claimBoundary,
         claimBearing: rosterProfile.claimBearing,
+        dynamicRosterProfileCertificateDigest:
+            rosterProfile.dynamicRosterProfileCertificateDigest,
         structuralCorruptionBound,
         backendCorruptionBound,
         privacyCorruptionBound,
@@ -281,5 +327,129 @@ export const deriveThresholdProfile = (
         setupCompletionQuorum,
         backendCorruptionModel,
         warnings,
+    };
+};
+
+export const deriveThresholdProfileDigest = (input: {
+    readonly pollSpecDigest: ProtocolDigest;
+    readonly rosterDigest: ProtocolDigest;
+    readonly thresholdProfile: ThresholdProfile;
+    readonly rosterPolicy: PollSpec['rosterPolicy'];
+    readonly thresholdProfileFamily: PollSpec['thresholdProfileFamily'];
+    readonly smallRosterPolicy: PollSpec['smallRosterPolicy'];
+    readonly minRosterSize: number;
+    readonly maxRosterSize: number;
+}): ProtocolDigest =>
+    deriveProtocolDigest('ThresholdProfileDigest', {
+        activeFaultBound: input.thresholdProfile.activeFaultBound,
+        aggregateContributionQuorum:
+            input.thresholdProfile.aggregateContributionQuorum,
+        backendCorruptionBound: input.thresholdProfile.backendCorruptionBound,
+        backendCorruptionModel: input.thresholdProfile.backendCorruptionModel,
+        claimBoundary: input.thresholdProfile.claimBoundary,
+        claimBearing: input.thresholdProfile.claimBearing,
+        decryptionCorruptionBound:
+            input.thresholdProfile.decryptionCorruptionBound,
+        decryptionShareQuorum: input.thresholdProfile.decryptionShareQuorum,
+        decryptionThreshold: input.thresholdProfile.decryptionThreshold,
+        dynamicRosterProfileCertificateDigest:
+            input.thresholdProfile.dynamicRosterProfileCertificateDigest,
+        maxRosterSize: input.maxRosterSize,
+        maximumRaceShares: input.thresholdProfile.maximumRaceShares,
+        minRosterSize: input.minRosterSize,
+        pollSpecDigest: input.pollSpecDigest,
+        privacyCorruptionBound: input.thresholdProfile.privacyCorruptionBound,
+        pvssThreshold: input.thresholdProfile.pvssThreshold,
+        releaseQuorum: input.thresholdProfile.releaseQuorum,
+        rosterDigest: input.rosterDigest,
+        rosterPolicy: input.rosterPolicy,
+        rosterProfileKind: input.thresholdProfile.rosterProfileKind,
+        rosterSize: input.thresholdProfile.rosterSize,
+        setupCompletionQuorum: input.thresholdProfile.setupCompletionQuorum,
+        smallRosterPolicy: input.smallRosterPolicy,
+        structuralCorruptionBound:
+            input.thresholdProfile.structuralCorruptionBound,
+        targetBoundShareSelectionProfile:
+            input.thresholdProfile.targetBoundShareSelectionProfile,
+        thresholdProfileFamily: input.thresholdProfileFamily,
+        warnings: input.thresholdProfile.warnings,
+    });
+
+export const deriveFrozenRosterProfile = (input: {
+    readonly pollSpec: PollSpec;
+    readonly rosterDigest: ProtocolDigest;
+    readonly rosterSize: number;
+    readonly heBackendCorruptionModel?: HeBackendCorruptionModel;
+    readonly targetBoundShareSelectionProfile?: TargetBoundShareSelectionProfile;
+    readonly dynamicRosterProfileCertificateDigest?: ProtocolDigest;
+}): FrozenRosterProfile => {
+    const { pollSpec, rosterSize } = input;
+    const dynamicRosterProfileCertificateDigest =
+        normalizeDynamicRosterProfileCertificateDigest(
+            input.dynamicRosterProfileCertificateDigest,
+        );
+
+    if (
+        rosterSize < pollSpec.minRosterSize ||
+        rosterSize > pollSpec.maxRosterSize
+    ) {
+        throw new RangeError(
+            'Frozen roster size must be inside the poll roster bounds.',
+        );
+    }
+    if (
+        rosterSize < minimumDynamicRosterSize &&
+        pollSpec.smallRosterPolicy === 'ForbidMicroRoster'
+    ) {
+        throw new Error(
+            'Poll policy forbids freezing a casual micro-roster profile.',
+        );
+    }
+    if (
+        rosterSize >= minimumDynamicRosterSize &&
+        rosterSize !== mandatoryBenchmarkRosterSize &&
+        dynamicRosterProfileCertificateDigest === null
+    ) {
+        throw new Error(
+            'Dynamic claim-bearing roster profiles require certificate or workbook coverage for the frozen roster size.',
+        );
+    }
+
+    const thresholdProfile = deriveThresholdProfile({
+        rosterSize,
+        casualMicroRosterAcknowledged: rosterSize < minimumDynamicRosterSize,
+        dynamicRosterProfileCertificateDigest:
+            dynamicRosterProfileCertificateDigest ?? undefined,
+        heBackendCorruptionModel: input.heBackendCorruptionModel,
+        targetBoundShareSelectionProfile:
+            input.targetBoundShareSelectionProfile,
+    });
+    const pollSpecDigest = derivePollSpecDigest(pollSpec);
+    const thresholdProfileDigest = deriveThresholdProfileDigest({
+        maxRosterSize: pollSpec.maxRosterSize,
+        minRosterSize: pollSpec.minRosterSize,
+        pollSpecDigest,
+        rosterDigest: input.rosterDigest,
+        rosterPolicy: pollSpec.rosterPolicy,
+        smallRosterPolicy: pollSpec.smallRosterPolicy,
+        thresholdProfile,
+        thresholdProfileFamily: pollSpec.thresholdProfileFamily,
+    });
+
+    return {
+        objectType: 'FrozenRosterProfile',
+        objectVersion: 1,
+        thresholdProfileDigest,
+        pollSpecDigest,
+        rosterDigest: input.rosterDigest,
+        rosterSize,
+        rosterPolicy: pollSpec.rosterPolicy,
+        thresholdProfileFamily: pollSpec.thresholdProfileFamily,
+        smallRosterPolicy: pollSpec.smallRosterPolicy,
+        minRosterSize: pollSpec.minRosterSize,
+        maxRosterSize: pollSpec.maxRosterSize,
+        dynamicRosterProfileCertificateDigest:
+            thresholdProfile.dynamicRosterProfileCertificateDigest,
+        thresholdProfile,
     };
 };

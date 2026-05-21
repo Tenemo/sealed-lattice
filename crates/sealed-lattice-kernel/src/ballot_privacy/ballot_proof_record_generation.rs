@@ -134,6 +134,7 @@ pub(crate) fn generate_ballot_proof_record_inner(
             component_bundle_statement: Some(component_bundle_statement),
             component_proof_bundle: Some(&component_proof_bundle),
             component_proof_inputs: Some(&component_proof_inputs),
+            dynamic_roster_profile_evidence: None,
             linear_statement: Some(linear_statement),
             parameter_set: Some(&bound_parameter_set),
             proof_bytes_hex: Some(&generated_ballot_proof.proof_bytes_hex),

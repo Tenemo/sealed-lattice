@@ -13,6 +13,15 @@ import { runTimedTestStep, type TimedTestStepMetric } from './timed-test-steps';
 
 import { deriveProtocolDigest } from '#packages/crypto/src/index';
 import {
+    aggregateWitnessFromReceiverPlaintext,
+    buildAggregateDerivationProofInput,
+    buildAggregateDerivationStatement,
+    createAggregateDerivationComponent,
+    createShareCommitmentMessageBoundCert,
+    sumAggregateDerivationWitnesses,
+    type AggregateDerivationWitnessInput,
+} from '#packages/protocol/src/ballot-privacy/index';
+import {
     createFixtureRandomnessSource,
     createReceiverKeyProof,
     generateReceiverState,
@@ -26,9 +35,11 @@ import {
     createReceiverKeyProofMaterial,
 } from '#packages/protocol/src/ballot-privacy/receiver-key-proof-parameters';
 import type {
+    ClaimBearingBallotPackage,
     ProtocolDigest,
     ReceiverEncryptionProfile,
     ReceiverEncryptionPublicKey,
+    ShareCommitmentMessageBoundCert,
 } from '#packages/types/src/index';
 import type {
     BallotPrivacyKernelVerification,
@@ -108,6 +119,24 @@ export type ReceiverKeyProofBenchmarkReport = {
     readonly operation: 'receiver-key-proof';
     readonly proofSizeBytes: number;
     readonly runtime: RuntimeBenchmarkContext;
+    readonly steps: readonly TimedTestStepMetric[];
+    readonly verificationMs: number;
+};
+
+export type AggregateDerivationProofBenchmarkReport = {
+    readonly canonicalTurnout: number;
+    readonly generationMs: number;
+    readonly memoryAfterGeneration: RuntimeMemorySnapshot;
+    readonly memoryAfterVerification: RuntimeMemorySnapshot;
+    readonly memoryBeforeGeneration: RuntimeMemorySnapshot;
+    readonly operation: 'aggregate-derivation-proof';
+    readonly optionCount: number;
+    readonly participantCount: number;
+    readonly proofSizeBytes: number;
+    readonly runtime: RuntimeBenchmarkContext;
+    readonly shareVectorWidth: number;
+    readonly statementColumns: number;
+    readonly statementRows: number;
     readonly steps: readonly TimedTestStepMetric[];
     readonly verificationMs: number;
 };
@@ -453,24 +482,141 @@ export const buildClaimBearingBallotPackageForBenchmark = (input: {
         typeof createMandatoryProfileBallotProofRecordBenchmarkFixture
     >;
     readonly generation: BallotPrivacyProofGeneration;
-}): Record<string, unknown> => ({
-    ballotPackageDigest: input.fixture.request.statement.ballotPackageDigest,
-    ballotProof: input.generation.ballotProof,
-    ballotProofStatement: input.fixture.request.statement,
-    componentBundleStatement: input.fixture.request.componentBundleStatement,
-    componentProofBundle: input.generation.componentProofBundle,
-    componentProofInputs: input.generation.componentProofInputs,
-    linearStatement: input.fixture.request.linearStatement,
-    objectType: 'ClaimBearingBallotPackage',
-    objectVersion: 1,
-    parameterSet: input.generation.parameterSet,
-    proofBytesHex: input.generation.proofBytesHex,
-    proofEncoding: input.generation.proofEncoding,
-    publicRandomnessHex: input.fixture.request.publicRandomnessHex,
-    receiverKeyProofRootEvidence: input.fixture.receiverKeyProofRootEvidence,
-    receiverPayloads: input.fixture.claimBearingReceiverPayloads,
-    shareCommitments: input.fixture.claimBearingShareCommitments,
-});
+}): ClaimBearingBallotPackage =>
+    ({
+        ballotPackageDigest:
+            input.fixture.request.statement.ballotPackageDigest,
+        ballotProof: input.generation.ballotProof,
+        ballotProofStatement: input.fixture.request.statement,
+        componentBundleStatement:
+            input.fixture.request.componentBundleStatement,
+        componentProofBundle: input.generation.componentProofBundle,
+        componentProofInputs: input.generation.componentProofInputs,
+        linearStatement: input.fixture.request.linearStatement,
+        objectType: 'ClaimBearingBallotPackage',
+        objectVersion: 1,
+        parameterSet: input.generation.parameterSet,
+        proofBytesHex: input.generation.proofBytesHex,
+        proofEncoding: input.generation.proofEncoding,
+        publicRandomnessHex: input.fixture.request.publicRandomnessHex,
+        receiverKeyProofRootEvidence:
+            input.fixture.receiverKeyProofRootEvidence,
+        receiverPayloads: input.fixture.claimBearingReceiverPayloads,
+        shareCommitments: input.fixture.claimBearingShareCommitments,
+    }) as ClaimBearingBallotPackage;
+
+const aggregateReceiverWitnessForBenchmark = (
+    fixture: ReturnType<
+        typeof createMandatoryProfileBallotProofRecordBenchmarkFixture
+    >,
+): AggregateDerivationWitnessInput => {
+    const receiverPayloadPlaintext =
+        fixture.projectionWitness.receiverPayloadPlaintexts?.find(
+            (plaintext) => plaintext.receiverRosterPosition === 1,
+        );
+    const shareCommitmentOpening =
+        fixture.projectionWitness.shareCommitmentOpenings.find(
+            (opening) => opening.receiverRosterPosition === 1,
+        );
+    if (
+        receiverPayloadPlaintext === undefined ||
+        shareCommitmentOpening === undefined
+    ) {
+        throw new Error(
+            'Benchmark fixture should include receiver-1 witness material.',
+        );
+    }
+
+    return aggregateWitnessFromReceiverPlaintext({
+        openingRandomness: shareCommitmentOpening.openingRandomness,
+        receiverShareVector: receiverPayloadPlaintext.receiverShareVector,
+    });
+};
+
+const aggregateShareCommitmentMessageBoundCertForBenchmark = (
+    fixture: ReturnType<
+        typeof createMandatoryProfileBallotProofRecordBenchmarkFixture
+    >,
+): ShareCommitmentMessageBoundCert => {
+    const profileSet = createBallotPrivacyProfileSet({
+        optionCount: fixture.relationInput.optionCount,
+    });
+
+    return createShareCommitmentMessageBoundCert({
+        maximumCanonicalTurnout: 20,
+        shareCommitmentProfile: profileSet.shareCommitmentProfile,
+    });
+};
+
+const createAggregatePostCloseEvidenceForBenchmark = (input: {
+    readonly ceremonyId: string;
+    readonly contributorIdentity: string;
+    readonly electionManifestDigest: ProtocolDigest;
+    readonly rosterExternalAcceptanceDigest: ProtocolDigest;
+    readonly votingClosedBoardHeadDigest: ProtocolDigest;
+}): {
+    readonly closeRecord: Record<string, unknown>;
+    readonly contributorActionContext: Record<string, unknown>;
+    readonly closeRecordDigest: ProtocolDigest;
+    readonly postVotingClosedContextDigest: ProtocolDigest;
+} => {
+    const closeRecordPayload = {
+        boardPosition: 0,
+        boardSequence: 7,
+        ceremonyId: input.ceremonyId,
+        closeKind: 'VotingClosed',
+        closedBoardHeadDigest: input.votingClosedBoardHeadDigest,
+        electionManifestDigest: input.electionManifestDigest,
+        objectType: 'CloseRecord',
+        objectVersion: 1,
+        organizerIdentity: 'organizer-1',
+    };
+    const closeRecordDigest = deriveProtocolDigest(
+        'CloseRecordDigest',
+        closeRecordPayload,
+    );
+    const postVotingClosedContextDigest = deriveProtocolDigest(
+        'PostVotingClosedContextDigest',
+        {
+            ceremonyId: input.ceremonyId,
+            closeRecordDigest,
+            electionManifestDigest: input.electionManifestDigest,
+            votingClosedBoardHeadDigest: input.votingClosedBoardHeadDigest,
+        },
+    );
+    const contributorActionContextPayload = {
+        acceptedRecoveryEpochUpdateDigest: null,
+        actionSequence: 1,
+        boardHeadDigest: input.votingClosedBoardHeadDigest,
+        boardSequence: 7,
+        ceremonyId: input.ceremonyId,
+        contextDigest: postVotingClosedContextDigest,
+        deviceEpoch: 0,
+        electionManifestDigest: input.electionManifestDigest,
+        recoveryEpoch: 0,
+        recoveryPolicyDigest: digest('aggregate-recovery-policy'),
+        rosterExternalAcceptanceDigest: input.rosterExternalAcceptanceDigest,
+        signerIdentity: input.contributorIdentity,
+    };
+    const contributorActionContextDigest = deriveProtocolDigest(
+        'ActionContextDigest',
+        contributorActionContextPayload,
+    );
+
+    return {
+        closeRecord: {
+            ...closeRecordPayload,
+            closeRecordDigest,
+            postVotingClosedContextDigest,
+        },
+        closeRecordDigest,
+        contributorActionContext: {
+            ...contributorActionContextPayload,
+            actionContextDigest: contributorActionContextDigest,
+        },
+        postVotingClosedContextDigest,
+    };
+};
 
 export const runMandatoryBallotProofRecordBenchmark = (input: {
     readonly checkpoints?: ProofBenchmarkCheckpointStore;
@@ -478,7 +624,11 @@ export const runMandatoryBallotProofRecordBenchmark = (input: {
     readonly resumeFromCheckpoints?: boolean;
     readonly runtime: RuntimeBenchmarkContext;
 }): {
+    readonly ballotPackage: ClaimBearingBallotPackage;
     readonly claimVerification: BallotPrivacyKernelVerification;
+    readonly fixture: ReturnType<
+        typeof createMandatoryProfileBallotProofRecordBenchmarkFixture
+    >;
     readonly generation: BallotPrivacyProofGeneration;
     readonly report: MandatoryBallotProofRecordBenchmarkReport;
     readonly verification: BallotPrivacyKernelVerification;
@@ -637,7 +787,212 @@ export const runMandatoryBallotProofRecordBenchmark = (input: {
     );
 
     return {
+        ballotPackage,
         claimVerification,
+        fixture,
+        generation,
+        report,
+        verification,
+    };
+};
+
+export const runAggregateDerivationProofBenchmark = (input: {
+    readonly ballotPackage: ClaimBearingBallotPackage;
+    readonly checkpoints?: ProofBenchmarkCheckpointStore;
+    readonly fixture: ReturnType<
+        typeof createMandatoryProfileBallotProofRecordBenchmarkFixture
+    >;
+    readonly kernel: TranscriptCoreKernel;
+    readonly resumeFromCheckpoints?: boolean;
+    readonly runtime: RuntimeBenchmarkContext;
+}): {
+    readonly generation: BallotPrivacyProofGeneration;
+    readonly report: AggregateDerivationProofBenchmarkReport;
+    readonly verification: BallotPrivacyKernelVerification;
+} => {
+    const steps: TimedTestStepMetric[] = [];
+    const postCloseEvidence = runTimedTestStep(
+        steps,
+        'build aggregate derivation post-close evidence',
+        () =>
+            createAggregatePostCloseEvidenceForBenchmark({
+                ceremonyId: input.fixture.request.statement.ceremonyId,
+                contributorIdentity: 'receiver-1',
+                electionManifestDigest:
+                    input.fixture.request.statement.manifestDigest,
+                rosterExternalAcceptanceDigest:
+                    input.fixture.request.statement
+                        .rosterExternalAcceptanceDigest,
+                votingClosedBoardHeadDigest: digest(
+                    'aggregate-voting-closed-board-head',
+                ),
+            }),
+    );
+    const { aggregateCommitment, statement } = runTimedTestStep(
+        steps,
+        'build aggregate derivation statement',
+        () =>
+            buildAggregateDerivationStatement({
+                ballotPackages: [input.ballotPackage],
+                closeRecordDigest: postCloseEvidence.closeRecordDigest,
+                contributorActionContextDigest: postCloseEvidence
+                    .contributorActionContext
+                    .actionContextDigest as ProtocolDigest,
+                contributorIdentity: 'receiver-1',
+                contributorRosterExternalAcceptanceDigest:
+                    input.fixture.request.statement
+                        .rosterExternalAcceptanceDigest,
+                contributorRosterPosition: 1,
+                postVotingClosedContextDigest:
+                    postCloseEvidence.postVotingClosedContextDigest,
+                unsafeSmallRosterAcknowledged: false,
+                votingClosedBoardHeadDigest: digest(
+                    'aggregate-voting-closed-board-head',
+                ),
+            }),
+    );
+    const witness = runTimedTestStep(
+        steps,
+        'build aggregate derivation witness',
+        () =>
+            sumAggregateDerivationWitnesses({
+                witnesses: [
+                    aggregateReceiverWitnessForBenchmark(input.fixture),
+                ],
+            }),
+    );
+    const proofBuild = runTimedTestStep(
+        steps,
+        'build aggregate derivation proof input',
+        () =>
+            buildAggregateDerivationProofInput({
+                aggregateCommitment,
+                statement,
+                witness,
+            }),
+    );
+    const memoryBeforeGeneration = captureRuntimeMemorySnapshot();
+    const generationCheckpoint = checkpointPayload(
+        input.checkpoints?.read?.(
+            mandatoryProofBenchmarkCheckpointNames.aggregateDerivationGeneratedProofRecord,
+        ),
+        mandatoryProofBenchmarkCheckpointNames.aggregateDerivationGeneratedProofRecord,
+    );
+    const checkpointGeneration = recordValue(generationCheckpoint)?.generation;
+    const shouldUseGenerationCheckpoint =
+        input.resumeFromCheckpoints === true &&
+        recordValue(checkpointGeneration) !== undefined;
+    const generation = runTimedTestStep(
+        steps,
+        shouldUseGenerationCheckpoint
+            ? 'load aggregate derivation proof checkpoint'
+            : 'generate aggregate derivation proof',
+        () =>
+            shouldUseGenerationCheckpoint
+                ? (checkpointGeneration as BallotPrivacyProofGeneration)
+                : input.kernel.generateAggregateDerivationProof({
+                      proofInput: proofBuild.proofInput,
+                      proverRandomnessHex: '66'.repeat(32),
+                      secretState: proofBuild.secretState,
+                  }),
+        { reusedCheckpoint: shouldUseGenerationCheckpoint },
+    );
+    const generationMs =
+        steps.find(
+            (step) =>
+                step.name === 'generate aggregate derivation proof' ||
+                step.name === 'load aggregate derivation proof checkpoint',
+        )?.durationMs ?? 0;
+    input.checkpoints?.write?.(
+        mandatoryProofBenchmarkCheckpointNames.aggregateDerivationGeneratedProofRecord,
+        checkpointRecord(
+            mandatoryProofBenchmarkCheckpointNames.aggregateDerivationGeneratedProofRecord,
+            {
+                generation,
+            },
+        ),
+    );
+    const memoryAfterGeneration = captureRuntimeMemorySnapshot();
+    const proofSizeBytes = requireGenerationProofSize(
+        generation,
+        'Aggregate derivation proof generation',
+    );
+    const proofBytesHex = generation.proofBytesHex;
+    if (proofBytesHex === undefined) {
+        throw new Error(
+            'Aggregate derivation proof generation did not emit bytes.',
+        );
+    }
+    const component = runTimedTestStep(
+        steps,
+        'build aggregate derivation component',
+        () =>
+            createAggregateDerivationComponent({
+                aggregateCommitment,
+                proofBytesHex,
+                proofInput: proofBuild.proofInput,
+                shareCommitmentMessageBoundCert:
+                    aggregateShareCommitmentMessageBoundCertForBenchmark(
+                        input.fixture,
+                    ),
+                statement,
+            }),
+    );
+    const verification = runTimedTestStep(
+        steps,
+        'verify aggregate derivation component',
+        () =>
+            input.kernel.verifyAggregateDerivationProof({
+                closeRecord: postCloseEvidence.closeRecord,
+                component,
+                contributorActionContext:
+                    postCloseEvidence.contributorActionContext,
+                countedBallotPackages: [input.ballotPackage],
+            }),
+    );
+    const verificationMs =
+        steps.find(
+            (step) => step.name === 'verify aggregate derivation component',
+        )?.durationMs ?? 0;
+    const memoryAfterVerification = captureRuntimeMemorySnapshot();
+    const proofStatement = recordValue(proofBuild.proofInput.proofStatement);
+    const statementRows = numberValue(proofStatement?.statementRows);
+    const statementColumns = numberValue(proofStatement?.statementColumns);
+    if (statementRows === undefined || statementColumns === undefined) {
+        throw new Error(
+            'Aggregate derivation proof statement did not report its shape.',
+        );
+    }
+
+    const report: AggregateDerivationProofBenchmarkReport = {
+        canonicalTurnout: statement.canonicalTurnout,
+        generationMs,
+        memoryAfterGeneration,
+        memoryAfterVerification,
+        memoryBeforeGeneration,
+        operation: 'aggregate-derivation-proof',
+        optionCount: statement.optionCount,
+        participantCount: statement.participantCount,
+        proofSizeBytes,
+        runtime: input.runtime,
+        shareVectorWidth: statement.shareVectorWidth,
+        statementColumns,
+        statementRows,
+        steps,
+        verificationMs,
+    };
+    input.checkpoints?.write?.(
+        mandatoryProofBenchmarkCheckpointNames.aggregateDerivationVerificationReport,
+        checkpointRecord(
+            mandatoryProofBenchmarkCheckpointNames.aggregateDerivationVerificationReport,
+            {
+                report,
+                verification,
+            },
+        ),
+    );
+
+    return {
         generation,
         report,
         verification,
@@ -728,5 +1083,6 @@ export const runReceiverKeyProofBenchmark = (input: {
 export const formatProofBenchmarkReport = (
     report:
         | MandatoryBallotProofRecordBenchmarkReport
+        | AggregateDerivationProofBenchmarkReport
         | ReceiverKeyProofBenchmarkReport,
 ): string => JSON.stringify(report, null, 2);

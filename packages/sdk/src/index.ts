@@ -1,7 +1,10 @@
 import {
     deriveValidatedFirstValidOrder as deriveValidatedFirstValidOrderInternal,
     deriveLifecycleLabels as deriveLifecycleLabelsInternal,
+    deriveFrozenRosterProfile as deriveFrozenRosterProfileInternal,
+    derivePollSpecDigest as derivePollSpecDigestInternal,
     deriveThresholdProfile as deriveThresholdProfileInternal,
+    deriveThresholdProfileDigest as deriveThresholdProfileDigestInternal,
     evaluateActionCapability as evaluateActionCapabilityInternal,
     verifyCastReceiptShell as verifyCastReceiptShellInternal,
     verifyCloseRecordShell as verifyCloseRecordShellInternal,
@@ -74,6 +77,7 @@ export type {
     BoardConsistencyInput,
     BoardConsistencyVerification,
     BoardEntryMerklePathStep,
+    BallotPrivacyRosterProfileEvidence,
     BallotPrivacyVerification,
     BallotProofComponentId,
     BallotProofComponentProofBundle,
@@ -108,6 +112,7 @@ export type {
     FailureStatusLabel,
     FirstValidOrderingInput,
     FirstValidOrderingVerification,
+    FrozenRosterProfile,
     FutureProtocolOperationResult,
     GoldenTranscriptCoreFixture,
     GoldenTranscriptCoreFixtureVerification,
@@ -157,12 +162,14 @@ export type {
     RosterManifestTranscriptInput,
     RosterManifestTranscriptVerification,
     RosterProfileKind,
+    RosterPolicy,
     ScoreDomain,
     SignatureVerificationResult,
     SignedBoardHead,
     SignedObjectType,
     SignerRole,
     ShareCommitment,
+    SmallRosterPolicy,
     StructuredProtocolVerificationResult,
     TargetFinalityPolicy,
     TargetFinalityCheckpoint,
@@ -171,6 +178,8 @@ export type {
     TargetFinalityVerificationInput,
     TargetProposal,
     ThresholdProfile,
+    ThresholdProfileClaimBoundary,
+    ThresholdProfileFamily,
     ThresholdProfileInput,
     ThresholdWarning,
     TiePolicy,
@@ -196,6 +205,16 @@ export type {
 export const deriveThresholdProfile = (
     input: ThresholdProfileInput,
 ): ThresholdProfile => deriveThresholdProfileInternal(input);
+
+/** Derives the concrete roster profile after registration closes and the roster freezes. */
+export const deriveFrozenRosterProfile = deriveFrozenRosterProfileInternal;
+
+/** Derives the canonical poll-spec digest including roster policy fields. */
+export const derivePollSpecDigest = derivePollSpecDigestInternal;
+
+/** Derives the canonical threshold-profile digest for a frozen roster profile. */
+export const deriveThresholdProfileDigest =
+    deriveThresholdProfileDigestInternal;
 
 /** Validates and normalizes a poll specification from trusted or untrusted input. */
 export function validatePollSpec(input: PollSpecInput): PollSpecValidation;
@@ -343,7 +362,7 @@ export type BallotProofVerificationInput = Parameters<
     TranscriptCoreKernel['verifyBallotProof']
 >[0];
 
-/** Input accepted by the packaged WASM scoped relation-bearing ballot package shell validator. */
+/** Input accepted by the packaged WASM scoped relation-bearing ballot package verifier. */
 export type ClaimBearingBallotPackageVerificationInput = Parameters<
     TranscriptCoreKernel['verifyClaimBearingBallotPackage']
 >[0];
@@ -371,7 +390,7 @@ export const verifyBallotProof = async (
     return kernel.verifyBallotProof(input);
 };
 
-/** Validates a scoped relation-bearing ballot package shell, then fails closed before package-level claim acceptance. */
+/** Verifies a proof-byte-bearing scoped relation-bearing ballot package with the packaged WASM proof backend. */
 export const verifyClaimBearingBallotPackage = async (
     input: ClaimBearingBallotPackageVerificationInput,
 ): Promise<BallotPrivacyKernelVerification> => {

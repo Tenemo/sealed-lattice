@@ -49,8 +49,17 @@ const deriveValidatedFirstValidOrder =
 
 const requiredPublicFunctions = [
     ['createBridgeProof', publicApiRuntimeRecord.createBridgeProof],
+    [
+        'deriveFrozenRosterProfile',
+        publicApiRuntimeRecord.deriveFrozenRosterProfile,
+    ],
     ['deriveLifecycleLabels', deriveLifecycleLabels],
+    ['derivePollSpecDigest', publicApiRuntimeRecord.derivePollSpecDigest],
     ['deriveThresholdProfile', deriveThresholdProfile],
+    [
+        'deriveThresholdProfileDigest',
+        publicApiRuntimeRecord.deriveThresholdProfileDigest,
+    ],
     ['deriveValidatedFirstValidOrder', deriveValidatedFirstValidOrder],
     ['evaluateActionCapability', evaluateActionCapability],
     [

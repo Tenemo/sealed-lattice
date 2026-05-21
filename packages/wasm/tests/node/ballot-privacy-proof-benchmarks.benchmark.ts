@@ -4,6 +4,7 @@ import { loadTranscriptCoreKernel } from '../../src/index';
 
 import {
     formatProofBenchmarkReport,
+    runAggregateDerivationProofBenchmark,
     runMandatoryBallotProofRecordBenchmark,
     runReceiverKeyProofBenchmark,
     type RuntimeBenchmarkContext,
@@ -30,13 +31,30 @@ describe('ballot privacy proof benchmarks', () => {
         'records mandatory ballot proof generation, proof verification, and package boundary metrics through WASM',
         async () => {
             const kernel = await loadTranscriptCoreKernel();
-            const { claimVerification, generation, report, verification } =
-                runMandatoryBallotProofRecordBenchmark({
-                    checkpoints: createJsonCheckpointStore(),
-                    kernel,
-                    resumeFromCheckpoints: shouldResumeFromTestCheckpoints(),
-                    runtime: nodeRuntimeContext(),
-                });
+            const checkpoints = createJsonCheckpointStore();
+            const resumeFromCheckpoints = shouldResumeFromTestCheckpoints();
+            const runtime = nodeRuntimeContext();
+            const {
+                ballotPackage,
+                claimVerification,
+                fixture,
+                generation,
+                report,
+                verification,
+            } = runMandatoryBallotProofRecordBenchmark({
+                checkpoints,
+                kernel,
+                resumeFromCheckpoints,
+                runtime,
+            });
+            const aggregateBenchmark = runAggregateDerivationProofBenchmark({
+                ballotPackage,
+                checkpoints,
+                fixture,
+                kernel,
+                resumeFromCheckpoints,
+                runtime,
+            });
 
             expect(generation).toMatchObject({
                 ok: true,
@@ -50,9 +68,20 @@ describe('ballot privacy proof benchmarks', () => {
                 unresolvedReason: null,
             });
             expect(claimVerification).toMatchObject({
-                ok: false,
+                ok: true,
                 operation: 'verifyClaimBearingBallotPackage',
-                unresolvedReason: 'BallotPackageInvalid',
+                unresolvedReason: null,
+            });
+            expect(aggregateBenchmark.generation).toMatchObject({
+                ok: true,
+                generatedProofBytes: true,
+                operation: 'generateAggregateDerivationProof',
+                unresolvedReason: null,
+            });
+            expect(aggregateBenchmark.verification).toMatchObject({
+                ok: true,
+                operation: 'verifyAggregateDerivationProof',
+                unresolvedReason: null,
             });
             expect(report.proofSizeBytes).toBeGreaterThan(0);
             expect(report.totalComponentProofSizeBytes).toBeGreaterThan(0);
@@ -68,7 +97,18 @@ describe('ballot privacy proof benchmarks', () => {
                     expect(componentProof.proofSizeBytes).toBeGreaterThan(0);
                 }
             }
+            expect(aggregateBenchmark.report.proofSizeBytes).toBeGreaterThan(0);
+            expect(aggregateBenchmark.report.statementRows).toBe(224);
+            expect(aggregateBenchmark.report.statementColumns).toBe(724);
+            expect(aggregateBenchmark.report.canonicalTurnout).toBe(1);
+            expectPositiveFiniteDuration(
+                aggregateBenchmark.report.generationMs,
+            );
+            expectPositiveFiniteDuration(
+                aggregateBenchmark.report.verificationMs,
+            );
             console.info(formatProofBenchmarkReport(report));
+            console.info(formatProofBenchmarkReport(aggregateBenchmark.report));
         },
         proofBenchmarkTimeoutMs,
     );

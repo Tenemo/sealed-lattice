@@ -7,7 +7,8 @@ export const ballotPrivacyMandatoryReceiverCount = 20 as const;
 export const ballotPrivacyMandatoryThreshold = 7 as const;
 export const ballotPrivacyMandatoryShareVectorWidth = 220 as const;
 export const ballotPrivacyMinimumUnsafeParticipantCount = 3 as const;
-export const ballotPrivacyMinimumSafeParticipantCount = 20 as const;
+export const ballotPrivacyMinimumSafeParticipantCount = 10 as const;
+export const ballotPrivacyMinimumSafeClaimBearingParticipantCount = 10 as const;
 export const ballotPrivacyMaximumParticipantCount = 50 as const;
 
 export const ballotPrivacyFieldModulus = 65_537 as const;

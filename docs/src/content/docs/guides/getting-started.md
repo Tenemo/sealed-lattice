@@ -10,7 +10,7 @@ Start with the public package name and the current rule: `sealed-lattice` expose
 ## Public package rules
 
 - The only committed public package name is `sealed-lattice`.
-- The public runtime facade currently exports transcript-core fixture verification plus threshold, lifecycle, poll specification, capability, board, target-finality, roster-manifest, cast receipt, close record, first-valid, recovery, receiver-key proof, ballot proof record, and fail-closed scoped relation-bearing ballot package shell helpers.
+- The public runtime facade currently exports transcript-core fixture verification plus threshold, lifecycle, poll specification, capability, board, target-finality, roster-manifest, cast receipt, close record, first-valid, recovery, receiver-key proof, ballot proof record, and proof-byte-bearing scoped relation-bearing ballot package verification helpers.
 - No public subpaths are promised yet.
 - The current release freezes packaging, docs, smoke checks, transcript-core fixtures, election foundation vectors, ballot privacy verification APIs, and the workspace shape.
 
@@ -25,7 +25,7 @@ import {
 } from "sealed-lattice";
 ```
 
-The transcript-core verifier accepts fixture objects and returns deterministic verification or rejection labels. The election foundation helpers validate public poll shape, derive threshold profiles, check lifecycle transitions, derive status labels, and refuse premature protocol actions. The ballot privacy verifier APIs verify supported receiver-key proofs and ballot proof records through the packaged Rust/WASM backend. Scoped relation-bearing package acceptance stays fail-closed until verifier-derived lowering and trusted public randomness checks exist. These APIs do not implement a full voting workflow.
+The transcript-core verifier accepts fixture objects and returns deterministic verification or rejection labels. The election foundation helpers validate public poll shape, derive threshold profiles, check lifecycle transitions, derive status labels, and refuse premature protocol actions. The ballot privacy verifier APIs verify supported receiver-key proofs, ballot proof records, and proof-byte-bearing scoped relation packages through the packaged Rust/WASM backend. These APIs do not implement a full voting workflow.
 
 ## What the current release includes
 
@@ -34,7 +34,7 @@ The transcript-core verifier accepts fixture objects and returns deterministic v
 - private types, protocol, crypto, wasm, and testkit shells
 - a Rust transcript-core and ballot privacy proof backend plus an internal WASM loader
 - election foundation checks for threshold, lifecycle, poll specification, capability, board/finality, roster-manifest, cast/close receipt, first-valid, and recovery behavior
-- verification-oriented receiver-key proof and ballot proof-record APIs, plus fail-closed scoped relation-bearing package shell validation
+- verification-oriented receiver-key proof, ballot proof-record, and proof-byte-bearing scoped relation-bearing package APIs
 - docs, TypeDoc, pack smoke, vector manifest verification, and CI verification
 
 ## What is not published yet

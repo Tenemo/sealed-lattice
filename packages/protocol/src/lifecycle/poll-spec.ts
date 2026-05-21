@@ -1,16 +1,26 @@
+import { deriveProtocolDigest } from '@sealed-lattice/crypto';
 import type {
     DuplicateBallotPolicy,
     PollSpec,
     PollSpecValidation,
     PollSpecValidationError,
+    ProtocolDigest,
+    RosterPolicy,
     ScoreDomain,
+    SmallRosterPolicy,
+    ThresholdProfileFamily,
     TiePolicy,
 } from '@sealed-lattice/types';
 
 import {
     defaultDuplicateBallotPolicy,
+    defaultRosterPolicy,
     defaultScoreDomain,
+    defaultSmallRosterPolicy,
+    defaultThresholdProfileFamily,
     defaultTiePolicy,
+    maximumSupportedRosterSize,
+    minimumSupportedRosterSize,
 } from './profiles.js';
 
 const addError = (
@@ -42,6 +52,64 @@ const normalizeDuplicateBallotPolicy = (
 const normalizeTiePolicy = (tiePolicy: TiePolicy | undefined): TiePolicy =>
     tiePolicy ?? defaultTiePolicy;
 
+const normalizeRosterPolicy = (
+    rosterPolicy: RosterPolicy | undefined,
+): RosterPolicy => rosterPolicy ?? defaultRosterPolicy;
+
+const normalizeThresholdProfileFamily = (
+    thresholdProfileFamily: ThresholdProfileFamily | undefined,
+): ThresholdProfileFamily =>
+    thresholdProfileFamily ?? defaultThresholdProfileFamily;
+
+const normalizeSmallRosterPolicy = (
+    smallRosterPolicy: SmallRosterPolicy | undefined,
+): SmallRosterPolicy => smallRosterPolicy ?? defaultSmallRosterPolicy;
+
+const isSupportedRosterPolicy = (
+    rosterPolicy: unknown,
+): rosterPolicy is RosterPolicy =>
+    rosterPolicy === undefined || rosterPolicy === defaultRosterPolicy;
+
+const isSupportedThresholdProfileFamily = (
+    thresholdProfileFamily: unknown,
+): thresholdProfileFamily is ThresholdProfileFamily =>
+    thresholdProfileFamily === undefined ||
+    thresholdProfileFamily === defaultThresholdProfileFamily;
+
+const supportedSmallRosterPolicies = new Set<SmallRosterPolicy>([
+    'ForbidMicroRoster',
+    'WarnMicroRoster',
+    'AllowMicroRoster',
+]);
+
+const isSupportedSmallRosterPolicy = (
+    smallRosterPolicy: unknown,
+): smallRosterPolicy is SmallRosterPolicy =>
+    smallRosterPolicy === undefined ||
+    (typeof smallRosterPolicy === 'string' &&
+        supportedSmallRosterPolicies.has(
+            smallRosterPolicy as SmallRosterPolicy,
+        ));
+
+const normalizeRosterBound = (value: unknown, defaultValue: number): number =>
+    typeof value === 'number' ? value : defaultValue;
+
+export const derivePollSpecDigest = (pollSpec: PollSpec): ProtocolDigest =>
+    deriveProtocolDigest('PollSpecDigest', {
+        duplicateBallotPolicy: pollSpec.duplicateBallotPolicy,
+        maxRosterSize: pollSpec.maxRosterSize,
+        minRosterSize: pollSpec.minRosterSize,
+        options: pollSpec.options,
+        pollId: pollSpec.pollId,
+        question: pollSpec.question,
+        rosterPolicy: pollSpec.rosterPolicy,
+        scoreDomain: pollSpec.scoreDomain,
+        smallRosterPolicy: pollSpec.smallRosterPolicy,
+        thresholdProfileFamily: pollSpec.thresholdProfileFamily,
+        tiePolicy: pollSpec.tiePolicy,
+        topOptionCount: pollSpec.topOptionCount,
+    });
+
 export const validatePollSpec = (input: unknown): PollSpecValidation => {
     const errors: PollSpecValidationError[] = [];
     const optionLabels = new Set<string>();
@@ -62,6 +130,11 @@ export const validatePollSpec = (input: unknown): PollSpecValidation => {
     const scoreDomain = inputRecord.scoreDomain;
     const duplicateBallotPolicy = inputRecord.duplicateBallotPolicy;
     const tiePolicy = inputRecord.tiePolicy;
+    const rosterPolicy = inputRecord.rosterPolicy;
+    const thresholdProfileFamily = inputRecord.thresholdProfileFamily;
+    const smallRosterPolicy = inputRecord.smallRosterPolicy;
+    const minRosterSize = inputRecord.minRosterSize;
+    const maxRosterSize = inputRecord.maxRosterSize;
     const normalizedOptions: string[] = [];
 
     if (pollId === undefined || pollId.length === 0) {
@@ -148,6 +221,48 @@ export const validatePollSpec = (input: unknown): PollSpecValidation => {
             message: 'tiePolicy must be HigherScoreThenLowerOptionIndex.',
         });
     }
+    if (!isSupportedRosterPolicy(rosterPolicy)) {
+        addError(errors, {
+            code: 'UnsupportedRosterPolicy',
+            field: 'rosterPolicy',
+            message: 'rosterPolicy must be OpenLinkPublicRoster.',
+        });
+    }
+    if (!isSupportedThresholdProfileFamily(thresholdProfileFamily)) {
+        addError(errors, {
+            code: 'UnsupportedThresholdProfileFamily',
+            field: 'thresholdProfileFamily',
+            message: 'thresholdProfileFamily must be BalancedDefault.',
+        });
+    }
+    if (!isSupportedSmallRosterPolicy(smallRosterPolicy)) {
+        addError(errors, {
+            code: 'UnsupportedSmallRosterPolicy',
+            field: 'smallRosterPolicy',
+            message:
+                'smallRosterPolicy must be ForbidMicroRoster, WarnMicroRoster, or AllowMicroRoster.',
+        });
+    }
+
+    const normalizedMinRosterSize = normalizeRosterBound(minRosterSize, 10);
+    const normalizedMaxRosterSize = normalizeRosterBound(
+        maxRosterSize,
+        maximumSupportedRosterSize,
+    );
+    if (
+        !Number.isInteger(normalizedMinRosterSize) ||
+        !Number.isInteger(normalizedMaxRosterSize) ||
+        normalizedMinRosterSize < minimumSupportedRosterSize ||
+        normalizedMaxRosterSize > maximumSupportedRosterSize ||
+        normalizedMinRosterSize > normalizedMaxRosterSize
+    ) {
+        addError(errors, {
+            code: 'InvalidRosterBounds',
+            field: 'minRosterSize',
+            message:
+                'Roster bounds must be integer bounds in 3..50 with minRosterSize not greater than maxRosterSize.',
+        });
+    }
 
     if (errors.length > 0) {
         return {
@@ -171,6 +286,17 @@ export const validatePollSpec = (input: unknown): PollSpecValidation => {
                 duplicateBallotPolicy as DuplicateBallotPolicy | undefined,
             ),
             tiePolicy: normalizeTiePolicy(tiePolicy as TiePolicy | undefined),
+            rosterPolicy: normalizeRosterPolicy(
+                rosterPolicy as RosterPolicy | undefined,
+            ),
+            minRosterSize: normalizedMinRosterSize,
+            maxRosterSize: normalizedMaxRosterSize,
+            thresholdProfileFamily: normalizeThresholdProfileFamily(
+                thresholdProfileFamily as ThresholdProfileFamily | undefined,
+            ),
+            smallRosterPolicy: normalizeSmallRosterPolicy(
+                smallRosterPolicy as SmallRosterPolicy | undefined,
+            ),
         } satisfies PollSpec,
     };
 };

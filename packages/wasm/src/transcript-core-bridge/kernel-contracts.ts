@@ -274,6 +274,7 @@ export type TranscriptCoreKernel = {
             Record<string, string>
         >;
         readonly componentSecretStates?: Readonly<Record<string, unknown>>;
+        readonly casualMicroRosterAcknowledged?: boolean;
         readonly unsafeSmallRosterAcknowledged?: boolean;
     }): BallotPrivacyProofGeneration;
     verifyBallotProof(input: {
@@ -281,16 +282,20 @@ export type TranscriptCoreKernel = {
         readonly componentBundleStatement?: unknown;
         readonly componentProofBundle?: unknown;
         readonly componentProofInputs?: readonly unknown[];
+        readonly dynamicRosterProfileEvidence?: unknown;
         readonly linearStatement?: unknown;
         readonly parameterSet?: unknown;
         readonly proofBytesHex?: string;
         readonly proofEncoding?: unknown;
         readonly publicRandomnessHex?: string;
         readonly statement: unknown;
+        readonly casualMicroRosterAcknowledged?: boolean;
         readonly unsafeSmallRosterAcknowledged?: boolean;
     }): BallotPrivacyKernelVerification;
     verifyClaimBearingBallotPackage(input: {
         readonly ballotPackage: unknown;
+        readonly dynamicRosterProfileEvidence?: unknown;
+        readonly casualMicroRosterAcknowledged?: boolean;
         readonly unsafeSmallRosterAcknowledged?: boolean;
     }): BallotPrivacyKernelVerification;
     generateAggregateDerivationProof(input: {
@@ -299,8 +304,12 @@ export type TranscriptCoreKernel = {
         readonly proverRandomnessHex?: string;
     }): BallotPrivacyProofGeneration;
     verifyAggregateDerivationProof(input: {
-        readonly component?: unknown;
-        readonly proofInput?: unknown;
+        readonly closeRecord: unknown;
+        readonly component: unknown;
+        readonly contributorActionContext: unknown;
+        readonly countedBallotPackages?: readonly unknown[];
+        readonly casualMicroRosterAcknowledged?: boolean;
+        readonly unsafeSmallRosterAcknowledged?: boolean;
     }): BallotPrivacyKernelVerification;
 };
 
@@ -417,6 +426,7 @@ type TranscriptCoreKernelCommand =
               Record<string, string>
           >;
           readonly componentSecretStates?: Readonly<Record<string, unknown>>;
+          readonly casualMicroRosterAcknowledged?: boolean;
           readonly unsafeSmallRosterAcknowledged?: boolean;
       }
     | {
@@ -425,17 +435,21 @@ type TranscriptCoreKernelCommand =
           readonly componentBundleStatement?: unknown;
           readonly componentProofBundle?: unknown;
           readonly componentProofInputs?: readonly unknown[];
+          readonly dynamicRosterProfileEvidence?: unknown;
           readonly linearStatement?: unknown;
           readonly parameterSet?: unknown;
           readonly proofBytesHex?: string;
           readonly proofEncoding?: unknown;
           readonly publicRandomnessHex?: string;
           readonly statement: unknown;
+          readonly casualMicroRosterAcknowledged?: boolean;
           readonly unsafeSmallRosterAcknowledged?: boolean;
       }
     | {
           readonly command: 'VerifyClaimBearingBallotPackage';
           readonly ballotPackage: unknown;
+          readonly dynamicRosterProfileEvidence?: unknown;
+          readonly casualMicroRosterAcknowledged?: boolean;
           readonly unsafeSmallRosterAcknowledged?: boolean;
       }
     | {
@@ -446,8 +460,12 @@ type TranscriptCoreKernelCommand =
       }
     | {
           readonly command: 'VerifyAggregateDerivationProof';
-          readonly component?: unknown;
-          readonly proofInput?: unknown;
+          readonly closeRecord: unknown;
+          readonly component: unknown;
+          readonly contributorActionContext: unknown;
+          readonly countedBallotPackages?: readonly unknown[];
+          readonly casualMicroRosterAcknowledged?: boolean;
+          readonly unsafeSmallRosterAcknowledged?: boolean;
       };
 
 type TranscriptCoreKernelExports = WebAssembly.Exports & {

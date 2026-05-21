@@ -21,6 +21,7 @@ pub(crate) struct BallotProofVerificationInputs<'a> {
     pub(crate) component_bundle_statement: Option<&'a Value>,
     pub(crate) component_proof_inputs: Option<&'a Value>,
     pub(crate) component_proof_bundle: Option<&'a Value>,
+    pub(crate) dynamic_roster_profile_evidence: Option<&'a Value>,
     pub(crate) component_proof_verification_mode: ComponentProofVerificationMode,
     pub(crate) unsafe_small_roster_acknowledged: bool,
 }
@@ -45,6 +46,8 @@ impl<'a> BallotProofVerificationRequest<'a> {
                     .and_then(|object| object.get("componentProofBundle")),
                 component_proof_inputs: object_map(request)
                     .and_then(|object| object.get("componentProofInputs")),
+                dynamic_roster_profile_evidence: object_map(request)
+                    .and_then(|object| object.get("dynamicRosterProfileEvidence")),
                 linear_statement: object_map(request)
                     .and_then(|object| object.get("linearStatement")),
                 parameter_set: object_map(request).and_then(|object| object.get("parameterSet")),
@@ -55,7 +58,11 @@ impl<'a> BallotProofVerificationRequest<'a> {
                 unsafe_small_roster_acknowledged: object_map(request)
                     .and_then(|object| object.get("unsafeSmallRosterAcknowledged"))
                     .and_then(Value::as_bool)
-                    == Some(true),
+                    == Some(true)
+                    || object_map(request)
+                        .and_then(|object| object.get("casualMicroRosterAcknowledged"))
+                        .and_then(Value::as_bool)
+                        == Some(true),
             },
         })
     }
@@ -164,6 +171,11 @@ pub(crate) fn verify_ballot_linear_proof_bytes(
             parameter_set,
             proof_encoding,
             proof_size_bytes,
+            ballot_proof_record_digest,
+        ));
+        refused_objects.extend(collect_full_ballot_relation_binding_refusals(
+            linear_statement,
+            component_bundle_statement,
             ballot_proof_record_digest,
         ));
     }
@@ -364,6 +376,8 @@ pub(crate) fn verify_ballot_proof(
     let mut refused_objects = collect_ballot_proof_refusals(
         statement,
         ballot_proof,
+        backend_inputs.dynamic_roster_profile_evidence,
+        false,
         backend_inputs.unsafe_small_roster_acknowledged,
     );
     refused_objects.extend(collect_proof_bytes_refusals(

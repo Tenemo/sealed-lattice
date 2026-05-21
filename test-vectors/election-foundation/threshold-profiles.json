@@ -2,14 +2,16 @@
   "schemaVersion": 1,
   "profiles": [
     {
-      "caseName": "n20-supported-safe-profile",
+      "caseName": "n20-mandatory-benchmark-profile",
       "input": {
         "rosterSize": 20
       },
       "expected": {
         "rosterSize": 20,
-        "rosterProfileKind": "SupportedRosterRange",
+        "rosterProfileKind": "MandatoryBenchmarkRoster",
+        "claimBoundary": "MandatoryBenchmark",
         "claimBearing": true,
+        "dynamicRosterProfileCertificateDigest": null,
         "structuralCorruptionBound": 6,
         "backendCorruptionBound": 6,
         "privacyCorruptionBound": 6,
@@ -32,14 +34,17 @@
       }
     },
     {
-      "caseName": "n30-supported-safe-profile",
+      "caseName": "n30-certified-dynamic-profile",
       "input": {
-        "rosterSize": 30
+        "rosterSize": 30,
+        "dynamicRosterProfileCertificateDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
       },
       "expected": {
         "rosterSize": 30,
-        "rosterProfileKind": "SupportedRosterRange",
+        "rosterProfileKind": "SupportedDynamicRosterRange",
+        "claimBoundary": "DynamicRosterCertificate",
         "claimBearing": true,
+        "dynamicRosterProfileCertificateDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "structuralCorruptionBound": 10,
         "backendCorruptionBound": 9,
         "privacyCorruptionBound": 9,
@@ -62,14 +67,17 @@
       }
     },
     {
-      "caseName": "n40-supported-safe-profile",
+      "caseName": "n40-certified-dynamic-profile",
       "input": {
-        "rosterSize": 40
+        "rosterSize": 40,
+        "dynamicRosterProfileCertificateDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
       },
       "expected": {
         "rosterSize": 40,
-        "rosterProfileKind": "SupportedRosterRange",
+        "rosterProfileKind": "SupportedDynamicRosterRange",
+        "claimBoundary": "DynamicRosterCertificate",
         "claimBearing": true,
+        "dynamicRosterProfileCertificateDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "structuralCorruptionBound": 13,
         "backendCorruptionBound": 13,
         "privacyCorruptionBound": 13,
@@ -92,14 +100,17 @@
       }
     },
     {
-      "caseName": "n50-supported-safe-profile",
+      "caseName": "n50-certified-dynamic-profile",
       "input": {
-        "rosterSize": 50
+        "rosterSize": 50,
+        "dynamicRosterProfileCertificateDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
       },
       "expected": {
         "rosterSize": 50,
-        "rosterProfileKind": "SupportedRosterRange",
+        "rosterProfileKind": "SupportedDynamicRosterRange",
+        "claimBoundary": "DynamicRosterCertificate",
         "claimBearing": true,
+        "dynamicRosterProfileCertificateDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "structuralCorruptionBound": 16,
         "backendCorruptionBound": 16,
         "privacyCorruptionBound": 16,
@@ -122,33 +133,35 @@
       }
     },
     {
-      "caseName": "unsafe-small-roster",
+      "caseName": "casual-micro-roster",
       "input": {
-        "rosterSize": 19,
-        "unsafeSmallRosterAcknowledged": true
+        "rosterSize": 9,
+        "casualMicroRosterAcknowledged": true
       },
       "expected": {
-        "rosterSize": 19,
-        "rosterProfileKind": "UnsafeSmallRoster",
-        "claimBearing": true,
-        "structuralCorruptionBound": 6,
-        "backendCorruptionBound": 6,
-        "privacyCorruptionBound": 6,
-        "decryptionCorruptionBound": 6,
-        "activeFaultBound": 3,
-        "pvssThreshold": 7,
-        "decryptionThreshold": 7,
-        "releaseQuorum": 13,
-        "aggregateContributionQuorum": 7,
+        "rosterSize": 9,
+        "rosterProfileKind": "CasualMicroRoster",
+        "claimBoundary": "CasualMicroRoster",
+        "claimBearing": false,
+        "dynamicRosterProfileCertificateDigest": null,
+        "structuralCorruptionBound": 3,
+        "backendCorruptionBound": 2,
+        "privacyCorruptionBound": 2,
+        "decryptionCorruptionBound": 2,
+        "activeFaultBound": 1,
+        "pvssThreshold": 3,
+        "decryptionThreshold": 3,
+        "releaseQuorum": 9,
+        "aggregateContributionQuorum": 3,
         "decryptionShareQuorum": null,
         "targetBoundShareSelectionProfile": null,
-        "maximumRaceShares": 19,
-        "setupCompletionQuorum": 19,
+        "maximumRaceShares": 9,
+        "setupCompletionQuorum": 9,
         "backendCorruptionModel": {
           "kind": "StrictLessThanOneThird"
         },
         "warnings": [
-          "UnsafeSmallRoster",
+          "CasualMicroRoster",
           "ShareSelectionProfileRequired"
         ]
       }
@@ -171,8 +184,10 @@
       },
       "expected": {
         "rosterSize": 20,
-        "rosterProfileKind": "SupportedRosterRange",
+        "rosterProfileKind": "MandatoryBenchmarkRoster",
+        "claimBoundary": "MandatoryBenchmark",
         "claimBearing": true,
+        "dynamicRosterProfileCertificateDigest": null,
         "structuralCorruptionBound": 6,
         "backendCorruptionBound": 6,
         "privacyCorruptionBound": 6,

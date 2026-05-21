@@ -324,6 +324,8 @@ export const createTranscriptCoreKernelLoader = (
                                 input.componentProverRandomnessHexes,
                             ),
                         componentSecretStates: input.componentSecretStates,
+                        casualMicroRosterAcknowledged:
+                            input.casualMicroRosterAcknowledged,
                         unsafeSmallRosterAcknowledged:
                             input.unsafeSmallRosterAcknowledged,
                     }),
@@ -335,12 +337,16 @@ export const createTranscriptCoreKernelLoader = (
                             input.componentBundleStatement,
                         componentProofBundle: input.componentProofBundle,
                         componentProofInputs: input.componentProofInputs,
+                        dynamicRosterProfileEvidence:
+                            input.dynamicRosterProfileEvidence,
                         linearStatement: input.linearStatement,
                         parameterSet: input.parameterSet,
                         proofBytesHex: input.proofBytesHex,
                         proofEncoding: input.proofEncoding,
                         publicRandomnessHex: input.publicRandomnessHex,
                         statement: input.statement,
+                        casualMicroRosterAcknowledged:
+                            input.casualMicroRosterAcknowledged,
                         unsafeSmallRosterAcknowledged:
                             input.unsafeSmallRosterAcknowledged,
                     }),
@@ -350,6 +356,10 @@ export const createTranscriptCoreKernelLoader = (
                     executeCommand<BallotPrivacyKernelVerification>({
                         command: 'VerifyClaimBearingBallotPackage',
                         ballotPackage: input.ballotPackage,
+                        dynamicRosterProfileEvidence:
+                            input.dynamicRosterProfileEvidence,
+                        casualMicroRosterAcknowledged:
+                            input.casualMicroRosterAcknowledged,
                         unsafeSmallRosterAcknowledged:
                             input.unsafeSmallRosterAcknowledged,
                     }),
@@ -369,8 +379,15 @@ export const createTranscriptCoreKernelLoader = (
                 ): BallotPrivacyKernelVerification =>
                     executeCommand<BallotPrivacyKernelVerification>({
                         command: 'VerifyAggregateDerivationProof',
+                        closeRecord: input.closeRecord,
                         component: input.component,
-                        proofInput: input.proofInput,
+                        contributorActionContext:
+                            input.contributorActionContext,
+                        countedBallotPackages: input.countedBallotPackages,
+                        casualMicroRosterAcknowledged:
+                            input.casualMicroRosterAcknowledged,
+                        unsafeSmallRosterAcknowledged:
+                            input.unsafeSmallRosterAcknowledged,
                     }),
             };
         })().catch((error: unknown) => {

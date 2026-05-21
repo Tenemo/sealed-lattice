@@ -492,6 +492,15 @@ fn ballot_proof_record_generation_emits_bound_component_bundle() {
             "componentBundleStatementDigest".to_string(),
             json!(component_bundle_statement_digest),
         );
+    let relation_binding_digest =
+        super::linear_proof_contract_validation::derive_full_relation_binding_digest(
+            &component_bundle_statement,
+        )
+        .expect("relation binding digest should derive");
+    let binding_scalar = super::linear_proof_contract_validation::binding_scalar_from_digest(
+        &relation_binding_digest,
+    )
+    .expect("binding scalar should derive");
     let mut linear_statement = dense_linear_statement(
         "full-ballot-proof",
         &Value::Null,
@@ -504,6 +513,7 @@ fn ballot_proof_record_generation_emits_bound_component_bundle() {
         super::FULL_BALLOT_PROOF_PROJECTION_COVERAGE,
         1,
     );
+    linear_statement["targetVectorCoefficients"][0][0] = json!(65_537 - binding_scalar);
     {
         let linear_statement_object = linear_statement
             .as_object_mut()
@@ -515,7 +525,7 @@ fn ballot_proof_record_generation_emits_bound_component_bundle() {
         );
         linear_statement_object.insert(
             "relationBindingDigest".to_string(),
-            json!(test_digest("relation-binding")),
+            json!(relation_binding_digest),
         );
         linear_statement_object.insert(
             "relationBindingKind".to_string(),
@@ -699,13 +709,16 @@ fn ballot_proof_record_generation_emits_bound_component_bundle() {
             "statementDigest": receiver_key_component["componentStatementDigest"],
         }
     ]);
-    let mut dense_witness_polynomial = vec![0_i64; 64];
-    dense_witness_polynomial[0] = 5;
+    let mut full_ballot_witness_polynomial = vec![0_i64; 64];
+    full_ballot_witness_polynomial[0] =
+        i64::try_from(binding_scalar).expect("binding scalar should fit i64");
     let secret_state = json!({
-        "sourceWitnessCoefficients": [dense_witness_polynomial.clone()]
+        "sourceWitnessCoefficients": [full_ballot_witness_polynomial]
     });
+    let mut dense_component_witness_polynomial = vec![0_i64; 64];
+    dense_component_witness_polynomial[0] = 5;
     let dense_component_secret_state = json!({
-        "sourceWitnessCoefficients": [dense_witness_polynomial]
+        "sourceWitnessCoefficients": [dense_component_witness_polynomial]
     });
     let scalar_component_secret_state = json!({
         "sourceWitnessCoefficients": [vec![0_i64; 64]]
@@ -768,7 +781,8 @@ fn ballot_proof_record_generation_emits_bound_component_bundle() {
     );
 
     let mut wrong_secret_state = secret_state.clone();
-    wrong_secret_state["sourceWitnessCoefficients"][0][0] = json!(1);
+    let wrong_binding_scalar = if binding_scalar == 1 { 2 } else { 1 };
+    wrong_secret_state["sourceWitnessCoefficients"][0][0] = json!(wrong_binding_scalar);
     let wrong_generation =
         super::generate_ballot_proof_record(super::BallotProofRecordGenerationInput {
             statement: Some(&statement),
