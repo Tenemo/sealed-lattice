@@ -31,6 +31,8 @@ describe('ballot privacy proof benchmarks', () => {
         'records mandatory ballot proof generation, proof verification, and package boundary metrics through WASM',
         async () => {
             const kernel = await loadTranscriptCoreKernel();
+            const checkpoints = createJsonCheckpointStore();
+            const resumeFromCheckpoints = shouldResumeFromTestCheckpoints();
             const runtime = nodeRuntimeContext();
             const {
                 ballotPackage,
@@ -40,15 +42,17 @@ describe('ballot privacy proof benchmarks', () => {
                 report,
                 verification,
             } = runMandatoryBallotProofRecordBenchmark({
-                checkpoints: createJsonCheckpointStore(),
+                checkpoints,
                 kernel,
-                resumeFromCheckpoints: shouldResumeFromTestCheckpoints(),
+                resumeFromCheckpoints,
                 runtime,
             });
             const aggregateBenchmark = runAggregateDerivationProofBenchmark({
                 ballotPackage,
+                checkpoints,
                 fixture,
                 kernel,
+                resumeFromCheckpoints,
                 runtime,
             });
 

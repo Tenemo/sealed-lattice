@@ -1,4 +1,8 @@
 export const mandatoryProofBenchmarkCheckpointNames = {
+    aggregateDerivationGeneratedProofRecord:
+        'aggregate-derivation-proof-benchmark-generated-proof-record',
+    aggregateDerivationVerificationReport:
+        'aggregate-derivation-proof-benchmark-verification-report',
     claimBearingPackage: 'ballot-privacy-proof-benchmark-claim-bearing-package',
     generatedProofRecord:
         'ballot-privacy-proof-benchmark-generated-proof-record',

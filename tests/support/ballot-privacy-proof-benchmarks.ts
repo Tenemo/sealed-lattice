@@ -798,10 +798,12 @@ export const runMandatoryBallotProofRecordBenchmark = (input: {
 
 export const runAggregateDerivationProofBenchmark = (input: {
     readonly ballotPackage: ClaimBearingBallotPackage;
+    readonly checkpoints?: ProofBenchmarkCheckpointStore;
     readonly fixture: ReturnType<
         typeof createMandatoryProfileBallotProofRecordBenchmarkFixture
     >;
     readonly kernel: TranscriptCoreKernel;
+    readonly resumeFromCheckpoints?: boolean;
     readonly runtime: RuntimeBenchmarkContext;
 }): {
     readonly generation: BallotPrivacyProofGeneration;
@@ -870,20 +872,46 @@ export const runAggregateDerivationProofBenchmark = (input: {
             }),
     );
     const memoryBeforeGeneration = captureRuntimeMemorySnapshot();
+    const generationCheckpoint = checkpointPayload(
+        input.checkpoints?.read?.(
+            mandatoryProofBenchmarkCheckpointNames.aggregateDerivationGeneratedProofRecord,
+        ),
+        mandatoryProofBenchmarkCheckpointNames.aggregateDerivationGeneratedProofRecord,
+    );
+    const checkpointGeneration = recordValue(generationCheckpoint)?.generation;
+    const shouldUseGenerationCheckpoint =
+        input.resumeFromCheckpoints === true &&
+        recordValue(checkpointGeneration) !== undefined;
     const generation = runTimedTestStep(
         steps,
-        'generate aggregate derivation proof',
+        shouldUseGenerationCheckpoint
+            ? 'load aggregate derivation proof checkpoint'
+            : 'generate aggregate derivation proof',
         () =>
-            input.kernel.generateAggregateDerivationProof({
-                proofInput: proofBuild.proofInput,
-                proverRandomnessHex: '66'.repeat(32),
-                secretState: proofBuild.secretState,
-            }),
+            shouldUseGenerationCheckpoint
+                ? (checkpointGeneration as BallotPrivacyProofGeneration)
+                : input.kernel.generateAggregateDerivationProof({
+                      proofInput: proofBuild.proofInput,
+                      proverRandomnessHex: '66'.repeat(32),
+                      secretState: proofBuild.secretState,
+                  }),
+        { reusedCheckpoint: shouldUseGenerationCheckpoint },
     );
     const generationMs =
         steps.find(
-            (step) => step.name === 'generate aggregate derivation proof',
+            (step) =>
+                step.name === 'generate aggregate derivation proof' ||
+                step.name === 'load aggregate derivation proof checkpoint',
         )?.durationMs ?? 0;
+    input.checkpoints?.write?.(
+        mandatoryProofBenchmarkCheckpointNames.aggregateDerivationGeneratedProofRecord,
+        checkpointRecord(
+            mandatoryProofBenchmarkCheckpointNames.aggregateDerivationGeneratedProofRecord,
+            {
+                generation,
+            },
+        ),
+    );
     const memoryAfterGeneration = captureRuntimeMemorySnapshot();
     const proofSizeBytes = requireGenerationProofSize(
         generation,
@@ -936,25 +964,37 @@ export const runAggregateDerivationProofBenchmark = (input: {
         );
     }
 
+    const report: AggregateDerivationProofBenchmarkReport = {
+        canonicalTurnout: statement.canonicalTurnout,
+        generationMs,
+        memoryAfterGeneration,
+        memoryAfterVerification,
+        memoryBeforeGeneration,
+        operation: 'aggregate-derivation-proof',
+        optionCount: statement.optionCount,
+        participantCount: statement.participantCount,
+        proofSizeBytes,
+        runtime: input.runtime,
+        shareVectorWidth: statement.shareVectorWidth,
+        statementColumns,
+        statementRows,
+        steps,
+        verificationMs,
+    };
+    input.checkpoints?.write?.(
+        mandatoryProofBenchmarkCheckpointNames.aggregateDerivationVerificationReport,
+        checkpointRecord(
+            mandatoryProofBenchmarkCheckpointNames.aggregateDerivationVerificationReport,
+            {
+                report,
+                verification,
+            },
+        ),
+    );
+
     return {
         generation,
-        report: {
-            canonicalTurnout: statement.canonicalTurnout,
-            generationMs,
-            memoryAfterGeneration,
-            memoryAfterVerification,
-            memoryBeforeGeneration,
-            operation: 'aggregate-derivation-proof',
-            optionCount: statement.optionCount,
-            participantCount: statement.participantCount,
-            proofSizeBytes,
-            runtime: input.runtime,
-            shareVectorWidth: statement.shareVectorWidth,
-            statementColumns,
-            statementRows,
-            steps,
-            verificationMs,
-        },
+        report,
         verification,
     };
 };
