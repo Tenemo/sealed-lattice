@@ -121,6 +121,76 @@ const certificateThatPermitsWraparound = (
     } as unknown as ShareCommitmentMessageBoundCert;
 };
 
+const createPostCloseEvidence = (input: {
+    readonly ceremonyId: string;
+    readonly contributorIdentity: string;
+    readonly electionManifestDigest: string;
+    readonly rosterExternalAcceptanceDigest: string;
+    readonly votingClosedBoardHeadDigest: string;
+}): {
+    readonly closeRecord: Record<string, unknown>;
+    readonly contributorActionContext: Record<string, unknown>;
+    readonly closeRecordDigest: string;
+    readonly postVotingClosedContextDigest: string;
+} => {
+    const closeRecordPayload = {
+        boardPosition: 0,
+        boardSequence: 7,
+        ceremonyId: input.ceremonyId,
+        closeKind: 'VotingClosed',
+        closedBoardHeadDigest: input.votingClosedBoardHeadDigest,
+        electionManifestDigest: input.electionManifestDigest,
+        objectType: 'CloseRecord',
+        objectVersion: 1,
+        organizerIdentity: 'organizer-1',
+    };
+    const closeRecordDigest = deriveProtocolDigest(
+        'CloseRecordDigest',
+        closeRecordPayload,
+    );
+    const postVotingClosedContextDigest = deriveProtocolDigest(
+        'PostVotingClosedContextDigest',
+        {
+            ceremonyId: input.ceremonyId,
+            closeRecordDigest,
+            electionManifestDigest: input.electionManifestDigest,
+            votingClosedBoardHeadDigest: input.votingClosedBoardHeadDigest,
+        },
+    );
+    const contributorActionContextPayload = {
+        acceptedRecoveryEpochUpdateDigest: null,
+        actionSequence: 1,
+        boardHeadDigest: input.votingClosedBoardHeadDigest,
+        boardSequence: 7,
+        ceremonyId: input.ceremonyId,
+        contextDigest: postVotingClosedContextDigest,
+        deviceEpoch: 0,
+        electionManifestDigest: input.electionManifestDigest,
+        recoveryEpoch: 0,
+        recoveryPolicyDigest: digest('recovery-policy'),
+        rosterExternalAcceptanceDigest: input.rosterExternalAcceptanceDigest,
+        signerIdentity: input.contributorIdentity,
+    };
+    const contributorActionContextDigest = deriveProtocolDigest(
+        'ActionContextDigest',
+        contributorActionContextPayload,
+    );
+
+    return {
+        closeRecord: {
+            ...closeRecordPayload,
+            closeRecordDigest,
+            postVotingClosedContextDigest,
+        },
+        closeRecordDigest,
+        contributorActionContext: {
+            ...contributorActionContextPayload,
+            actionContextDigest: contributorActionContextDigest,
+        },
+        postVotingClosedContextDigest,
+    };
+};
+
 describe('aggregate derivation proof through the transcript-core kernel', () => {
     it('generates and verifies a witness-clean aggregate derivation component', async () => {
         const kernel = await loadTranscriptCoreKernel();
@@ -143,18 +213,28 @@ describe('aggregate derivation proof through the transcript-core kernel', () => 
         expect(certificate.shareCommitmentMessageBoundCertDigest).toBe(
             fixture.statement.shareCommitmentMessageBoundCertDigest,
         );
+        const postCloseEvidence = createPostCloseEvidence({
+            ceremonyId: fixture.statement.ceremonyId,
+            contributorIdentity: 'receiver-1',
+            electionManifestDigest: fixture.statement.manifestDigest,
+            rosterExternalAcceptanceDigest:
+                fixture.statement.rosterExternalAcceptanceDigest,
+            votingClosedBoardHeadDigest: digest('closed-board-head'),
+        });
         const statementInput = {
             ballotPackages: [ballotPackage],
-            closeRecordDigest: digest('close-record'),
-            contributorActionContextDigest:
-                fixture.statement.actionContextDigest,
+            closeRecordDigest: postCloseEvidence.closeRecordDigest,
+            contributorActionContextDigest: postCloseEvidence
+                .contributorActionContext.actionContextDigest as string,
             contributorIdentity: 'receiver-1',
             contributorRosterExternalAcceptanceDigest:
                 fixture.statement.rosterExternalAcceptanceDigest,
             contributorRosterPosition: 1,
-            postVotingClosedContextDigest: digest('post-close-context'),
+            postVotingClosedContextDigest:
+                postCloseEvidence.postVotingClosedContextDigest,
             unsafeSmallRosterAcknowledged: false,
-            votingClosedBoardHeadDigest: digest('closed-board-head'),
+            votingClosedBoardHeadDigest: postCloseEvidence.closeRecord
+                .closedBoardHeadDigest as string,
         };
         expect(() =>
             buildAggregateDerivationStatement({
@@ -253,7 +333,11 @@ describe('aggregate derivation proof through the transcript-core kernel', () => 
         );
 
         const verification = kernel.verifyAggregateDerivationProof({
+            closeRecord: postCloseEvidence.closeRecord,
             component,
+            contributorActionContext:
+                postCloseEvidence.contributorActionContext,
+            countedBallotPackages: [ballotPackage],
         });
         expect(verification).toMatchObject({
             ok: true,
@@ -264,9 +348,91 @@ describe('aggregate derivation proof through the transcript-core kernel', () => 
         expect(verification.statusLabels).toContain(
             'AggregateDerivationProofVerified',
         );
+        expect(
+            kernel.verifyAggregateDerivationProof({
+                closeRecord: postCloseEvidence.closeRecord,
+                component,
+                contributorActionContext:
+                    postCloseEvidence.contributorActionContext,
+            }),
+        ).toMatchObject({
+            ok: false,
+            backendAvailable: true,
+            operation: 'verifyAggregateDerivationProof',
+        });
+        expect(
+            kernel.verifyAggregateDerivationProof({
+                closeRecord: postCloseEvidence.closeRecord,
+                component,
+                contributorActionContext:
+                    postCloseEvidence.contributorActionContext,
+                countedBallotPackages: [],
+            }),
+        ).toMatchObject({
+            ok: false,
+            backendAvailable: true,
+            operation: 'verifyAggregateDerivationProof',
+        });
+        expect(
+            kernel.verifyAggregateDerivationProof({
+                closeRecord: postCloseEvidence.closeRecord,
+                component,
+                contributorActionContext:
+                    postCloseEvidence.contributorActionContext,
+                countedBallotPackages: [ballotPackage, ballotPackage],
+            }),
+        ).toMatchObject({
+            ok: false,
+            backendAvailable: true,
+            operation: 'verifyAggregateDerivationProof',
+        });
+        expect(
+            kernel.verifyAggregateDerivationProof({
+                closeRecord: postCloseEvidence.closeRecord,
+                component,
+                contributorActionContext:
+                    postCloseEvidence.contributorActionContext,
+                countedBallotPackages: [
+                    packageWithoutProofBytes as ClaimBearingBallotPackage,
+                ],
+            }),
+        ).toMatchObject({
+            ok: false,
+            unresolvedReason: 'BallotPackageInvalid',
+        });
+        expect(
+            kernel.verifyAggregateDerivationProof({
+                closeRecord: {
+                    ...postCloseEvidence.closeRecord,
+                    closeKind: 'RegistrationClosed',
+                },
+                component,
+                contributorActionContext:
+                    postCloseEvidence.contributorActionContext,
+                countedBallotPackages: [ballotPackage],
+            }),
+        ).toMatchObject({
+            ok: false,
+            unresolvedReason: 'BallotPackageInvalid',
+        });
+        expect(
+            kernel.verifyAggregateDerivationProof({
+                closeRecord: postCloseEvidence.closeRecord,
+                component,
+                contributorActionContext: {
+                    ...postCloseEvidence.contributorActionContext,
+                    signerIdentity: 'receiver-2',
+                },
+                countedBallotPackages: [ballotPackage],
+            }),
+        ).toMatchObject({
+            ok: false,
+            unresolvedReason: 'BallotPackageInvalid',
+        });
 
         expect(
             kernel.verifyAggregateDerivationProof({
+                closeRecord: postCloseEvidence.closeRecord,
                 component: {
                     ...component,
                     proofInput: {
@@ -274,6 +440,9 @@ describe('aggregate derivation proof through the transcript-core kernel', () => 
                         proofBytesHex: `00${component.proofInput.proofBytesHex.slice(2)}`,
                     },
                 },
+                contributorActionContext:
+                    postCloseEvidence.contributorActionContext,
+                countedBallotPackages: [ballotPackage],
             }),
         ).toMatchObject({
             ok: false,
@@ -283,6 +452,7 @@ describe('aggregate derivation proof through the transcript-core kernel', () => 
 
         expect(
             kernel.verifyAggregateDerivationProof({
+                closeRecord: postCloseEvidence.closeRecord,
                 component: {
                     ...component,
                     proofInput: {
@@ -290,6 +460,9 @@ describe('aggregate derivation proof through the transcript-core kernel', () => 
                         publicRandomnessHex: '00'.repeat(32),
                     },
                 },
+                contributorActionContext:
+                    postCloseEvidence.contributorActionContext,
+                countedBallotPackages: [ballotPackage],
             }),
         ).toMatchObject({
             ok: false,
@@ -312,6 +485,7 @@ describe('aggregate derivation proof through the transcript-core kernel', () => 
             );
         expect(
             kernel.verifyAggregateDerivationProof({
+                closeRecord: postCloseEvidence.closeRecord,
                 component: {
                     ...component,
                     aggregateCommitment: {
@@ -319,6 +493,9 @@ describe('aggregate derivation proof through the transcript-core kernel', () => 
                         commitmentPolynomialVector,
                     },
                 },
+                contributorActionContext:
+                    postCloseEvidence.contributorActionContext,
+                countedBallotPackages: [ballotPackage],
             }),
         ).toMatchObject({
             ok: false,
@@ -340,7 +517,11 @@ describe('aggregate derivation proof through the transcript-core kernel', () => 
         });
         expect(
             kernel.verifyAggregateDerivationProof({
+                closeRecord: postCloseEvidence.closeRecord,
                 component: componentWithLeakedWitness,
+                contributorActionContext:
+                    postCloseEvidence.contributorActionContext,
+                countedBallotPackages: [ballotPackage],
             }),
         ).toMatchObject({
             ok: false,
@@ -366,11 +547,15 @@ describe('aggregate derivation proof through the transcript-core kernel', () => 
         });
         expect(
             kernel.verifyAggregateDerivationProof({
+                closeRecord: postCloseEvidence.closeRecord,
                 component: componentWithWraparoundCertificate,
+                contributorActionContext:
+                    postCloseEvidence.contributorActionContext,
+                countedBallotPackages: [ballotPackage],
             }),
         ).toMatchObject({
             ok: false,
             unresolvedReason: 'BallotPackageInvalid',
         });
-    }, 900_000);
+    }, 1_800_000);
 });

@@ -88,33 +88,49 @@ pub(crate) fn generate_aggregate_derivation_proof_from_command_request(request: 
 }
 
 pub(crate) fn verify_aggregate_derivation_proof_from_command_request(request: &Value) -> Value {
-    let component = request.get("component");
-    let proof_input = match component
-        .and_then(|component_value| {
-            required_json_field(component_value, "proofInput", "component").ok()
-        })
-        .or_else(|| request.get("proofInput"))
-    {
-        Some(value) => value,
-        None => {
+    let Some(component) = request.get("component") else {
+        return structural_rejection(
+            "verifyAggregateDerivationProof",
+            vec![structural_refusal(
+                "verifyAggregateDerivationProof.component is required for claim-bearing aggregate derivation verification.",
+                None,
+            )],
+        );
+    };
+    let counted_ballot_packages = request.get("countedBallotPackages");
+    let close_record = request.get("closeRecord");
+    let contributor_action_context = request.get("contributorActionContext");
+    let unsafe_small_roster_acknowledged = request
+        .get("unsafeSmallRosterAcknowledged")
+        .and_then(Value::as_bool)
+        == Some(true)
+        || request
+            .get("casualMicroRosterAcknowledged")
+            .and_then(Value::as_bool)
+            == Some(true);
+    let proof_input = match required_json_field(component, "proofInput", "component") {
+        Ok(value) => value,
+        Err(error) => {
             return structural_rejection(
                 "verifyAggregateDerivationProof",
-                vec![structural_refusal(
-                    "verifyAggregateDerivationProof.proofInput is required.",
-                    None,
-                )],
+                vec![error.to_json_value()],
             );
         }
     };
-    let object_digest = component
-        .and_then(|component_value| {
-            string_field(component_value, "aggregateDerivationComponentDigest")
-        })
+    let object_digest = string_field(component, "aggregateDerivationComponentDigest")
         .or_else(|| string_field(proof_input, "statementDigest"));
-    let mut refused_objects = collect_aggregate_proof_input_refusals(proof_input, component, true);
-    if let Some(component_value) = component {
-        refused_objects.extend(collect_aggregate_component_refusals(component_value));
-    }
+    let mut refused_objects =
+        collect_aggregate_proof_input_refusals(proof_input, Some(component), true);
+    refused_objects.extend(collect_aggregate_component_refusals(component));
+    refused_objects.extend(collect_aggregate_post_close_context_refusals(
+        close_record,
+        contributor_action_context,
+        component,
+    ));
+    refused_objects.extend(collect_aggregate_counted_package_preflight_refusals(
+        counted_ballot_packages,
+        component,
+    ));
     if !refused_objects.is_empty() {
         return structural_rejection("verifyAggregateDerivationProof", refused_objects);
     }
@@ -257,6 +273,15 @@ pub(crate) fn verify_aggregate_derivation_proof_from_command_request(request: &V
                 object_digest,
             )],
         );
+    }
+
+    let counted_package_refusals = collect_aggregate_counted_package_refusals(
+        counted_ballot_packages,
+        component,
+        unsafe_small_roster_acknowledged,
+    );
+    if !counted_package_refusals.is_empty() {
+        return structural_rejection("verifyAggregateDerivationProof", counted_package_refusals);
     }
 
     json!({
@@ -978,6 +1003,669 @@ fn derive_aggregate_sparse_linear_statement_digest(proof_statement: &Value) -> O
         &json!({
             "payload": statement_payload,
             "purpose": "aggregate-derivation-sparse-linear-proof-statement-v1"
+        }),
+    )
+}
+
+fn collect_aggregate_post_close_context_refusals(
+    close_record: Option<&Value>,
+    contributor_action_context: Option<&Value>,
+    component: &Value,
+) -> Vec<Value> {
+    let object_digest = string_field(component, "aggregateDerivationComponentDigest");
+    let mut refused_objects = Vec::new();
+    let Some(statement) = component.get("statement") else {
+        return refused_objects;
+    };
+
+    if let Some(close_record_value) = close_record {
+        refused_objects.extend(collect_aggregate_close_record_refusals(
+            close_record_value,
+            statement,
+            object_digest,
+        ));
+    } else {
+        refused_objects.push(structural_refusal(
+            "Aggregate derivation verification requires closeRecord evidence for the voting-closed board head.",
+            object_digest,
+        ));
+    }
+
+    if let Some(action_context_value) = contributor_action_context {
+        refused_objects.extend(collect_aggregate_action_context_refusals(
+            action_context_value,
+            statement,
+            object_digest,
+        ));
+    } else {
+        refused_objects.push(structural_refusal(
+            "Aggregate derivation verification requires contributorActionContext evidence.",
+            object_digest,
+        ));
+    }
+
+    refused_objects
+}
+
+fn derive_close_record_digest_from_value(close_record: &Value) -> Option<String> {
+    derive_digest(
+        "CloseRecordDigest",
+        &json!({
+            "boardPosition": u64_object_field(close_record, "boardPosition")?,
+            "boardSequence": u64_object_field(close_record, "boardSequence")?,
+            "ceremonyId": string_field(close_record, "ceremonyId")?,
+            "closeKind": string_field(close_record, "closeKind")?,
+            "closedBoardHeadDigest": string_field(close_record, "closedBoardHeadDigest")?,
+            "electionManifestDigest": string_field(close_record, "electionManifestDigest")?,
+            "objectType": string_field(close_record, "objectType")?,
+            "objectVersion": u64_object_field(close_record, "objectVersion")?,
+            "organizerIdentity": string_field(close_record, "organizerIdentity")?
+        }),
+    )
+}
+
+fn derive_post_voting_closed_context_digest_from_value(close_record: &Value) -> Option<String> {
+    derive_digest(
+        "PostVotingClosedContextDigest",
+        &json!({
+            "ceremonyId": string_field(close_record, "ceremonyId")?,
+            "closeRecordDigest": string_field(close_record, "closeRecordDigest")?,
+            "electionManifestDigest": string_field(close_record, "electionManifestDigest")?,
+            "votingClosedBoardHeadDigest": string_field(close_record, "closedBoardHeadDigest")?
+        }),
+    )
+}
+
+fn collect_aggregate_close_record_refusals(
+    close_record: &Value,
+    statement: &Value,
+    object_digest: Option<&str>,
+) -> Vec<Value> {
+    let close_record_digest = string_field(close_record, "closeRecordDigest");
+    let mut refused_objects = Vec::new();
+    let close_record_shape_is_valid = string_field(close_record, "objectType")
+        == Some("CloseRecord")
+        && u64_object_field(close_record, "objectVersion") == Some(1)
+        && string_field(close_record, "closeKind") == Some("VotingClosed")
+        && string_field(close_record, "ceremonyId").is_some_and(|value| !value.is_empty())
+        && string_field(close_record, "electionManifestDigest").is_some()
+        && string_field(close_record, "closedBoardHeadDigest").is_some()
+        && string_field(close_record, "postVotingClosedContextDigest").is_some()
+        && u64_object_field(close_record, "boardSequence").is_some()
+        && u64_object_field(close_record, "boardPosition").is_some()
+        && string_field(close_record, "organizerIdentity").is_some_and(|value| !value.is_empty());
+    if !close_record_shape_is_valid {
+        refused_objects.push(structural_refusal(
+            "Aggregate derivation closeRecord evidence must be a canonical VotingClosed close record.",
+            close_record_digest.or(object_digest),
+        ));
+
+        return refused_objects;
+    }
+
+    if derive_close_record_digest_from_value(close_record).as_deref() != close_record_digest {
+        refused_objects.push(structural_refusal(
+            "Aggregate derivation closeRecord digest does not match its canonical payload.",
+            close_record_digest.or(object_digest),
+        ));
+    }
+    let expected_post_context_digest =
+        derive_post_voting_closed_context_digest_from_value(close_record);
+    if expected_post_context_digest.as_deref()
+        != string_field(close_record, "postVotingClosedContextDigest")
+    {
+        refused_objects.push(structural_refusal(
+            "Aggregate derivation closeRecord does not bind the canonical post-voting closed context digest.",
+            close_record_digest.or(object_digest),
+        ));
+    }
+    if string_field(close_record, "ceremonyId") != string_field(statement, "ceremonyId")
+        || string_field(close_record, "electionManifestDigest")
+            != string_field(statement, "manifestDigest")
+        || close_record_digest != string_field(statement, "closeRecordDigest")
+        || string_field(close_record, "closedBoardHeadDigest")
+            != string_field(statement, "votingClosedBoardHeadDigest")
+        || string_field(close_record, "postVotingClosedContextDigest")
+            != string_field(statement, "postVotingClosedContextDigest")
+    {
+        refused_objects.push(structural_refusal(
+            "Aggregate derivation closeRecord evidence is not bound to the aggregate statement voting-closed context.",
+            close_record_digest.or(object_digest),
+        ));
+    }
+
+    refused_objects
+}
+
+fn derive_action_context_digest_from_value(action_context: &Value) -> Option<String> {
+    derive_digest(
+        "ActionContextDigest",
+        &json!({
+            "acceptedRecoveryEpochUpdateDigest": action_context.get("acceptedRecoveryEpochUpdateDigest")?.clone(),
+            "actionSequence": u64_object_field(action_context, "actionSequence")?,
+            "boardHeadDigest": string_field(action_context, "boardHeadDigest")?,
+            "boardSequence": u64_object_field(action_context, "boardSequence")?,
+            "ceremonyId": string_field(action_context, "ceremonyId")?,
+            "contextDigest": string_field(action_context, "contextDigest")?,
+            "deviceEpoch": u64_object_field(action_context, "deviceEpoch")?,
+            "electionManifestDigest": string_field(action_context, "electionManifestDigest")?,
+            "recoveryEpoch": u64_object_field(action_context, "recoveryEpoch")?,
+            "recoveryPolicyDigest": string_field(action_context, "recoveryPolicyDigest")?,
+            "rosterExternalAcceptanceDigest": action_context.get("rosterExternalAcceptanceDigest")?.clone(),
+            "signerIdentity": string_field(action_context, "signerIdentity")?
+        }),
+    )
+}
+
+fn collect_aggregate_action_context_refusals(
+    action_context: &Value,
+    statement: &Value,
+    object_digest: Option<&str>,
+) -> Vec<Value> {
+    let action_context_digest = string_field(action_context, "actionContextDigest");
+    let mut refused_objects = Vec::new();
+    let action_context_shape_is_valid = action_context_digest.is_some()
+        && string_field(action_context, "ceremonyId").is_some_and(|value| !value.is_empty())
+        && string_field(action_context, "electionManifestDigest").is_some()
+        && string_field(action_context, "signerIdentity").is_some_and(|value| !value.is_empty())
+        && string_field(action_context, "boardHeadDigest").is_some()
+        && u64_object_field(action_context, "boardSequence").is_some()
+        && u64_object_field(action_context, "recoveryEpoch").is_some()
+        && u64_object_field(action_context, "deviceEpoch").is_some()
+        && u64_object_field(action_context, "actionSequence").is_some()
+        && string_field(action_context, "recoveryPolicyDigest").is_some()
+        && action_context
+            .get("acceptedRecoveryEpochUpdateDigest")
+            .is_some()
+        && action_context
+            .get("rosterExternalAcceptanceDigest")
+            .is_some()
+        && string_field(action_context, "contextDigest").is_some();
+    if !action_context_shape_is_valid {
+        refused_objects.push(structural_refusal(
+            "Aggregate derivation contributorActionContext evidence must be canonical.",
+            action_context_digest.or(object_digest),
+        ));
+
+        return refused_objects;
+    }
+
+    if derive_action_context_digest_from_value(action_context).as_deref() != action_context_digest {
+        refused_objects.push(structural_refusal(
+            "Aggregate derivation contributorActionContext digest does not match its canonical payload.",
+            action_context_digest.or(object_digest),
+        ));
+    }
+    if action_context_digest != string_field(statement, "contributorActionContextDigest")
+        || string_field(action_context, "ceremonyId") != string_field(statement, "ceremonyId")
+        || string_field(action_context, "electionManifestDigest")
+            != string_field(statement, "manifestDigest")
+        || string_field(action_context, "signerIdentity")
+            != string_field(statement, "contributorIdentity")
+        || string_field(action_context, "boardHeadDigest")
+            != string_field(statement, "votingClosedBoardHeadDigest")
+        || string_field(action_context, "contextDigest")
+            != string_field(statement, "postVotingClosedContextDigest")
+        || action_context
+            .get("rosterExternalAcceptanceDigest")
+            .and_then(Value::as_str)
+            != string_field(statement, "contributorRosterExternalAcceptanceDigest")
+    {
+        refused_objects.push(structural_refusal(
+            "Aggregate derivation contributorActionContext evidence is not bound to the aggregate statement contributor and post-close context.",
+            action_context_digest.or(object_digest),
+        ));
+    }
+
+    refused_objects
+}
+
+fn collect_aggregate_counted_package_preflight_refusals(
+    counted_ballot_packages: Option<&Value>,
+    component: &Value,
+) -> Vec<Value> {
+    let object_digest = string_field(component, "aggregateDerivationComponentDigest");
+    let mut refused_objects = Vec::new();
+    let Some(packages) = counted_ballot_packages.and_then(Value::as_array) else {
+        refused_objects.push(structural_refusal(
+            "Aggregate derivation verification requires countedBallotPackages so the verifier can route the counted set through accepted M5 package verification.",
+            object_digest,
+        ));
+
+        return refused_objects;
+    };
+    if packages.is_empty() {
+        refused_objects.push(structural_refusal(
+            "Aggregate derivation verification requires at least one counted ballot package.",
+            object_digest,
+        ));
+
+        return refused_objects;
+    }
+
+    let mut seen_package_digests = BTreeSet::new();
+    for package in packages {
+        let package_digest = string_field(package, "ballotPackageDigest");
+        let Some(package_digest) = package_digest else {
+            refused_objects.push(structural_refusal(
+                "Aggregate derivation counted package is missing ballotPackageDigest.",
+                object_digest,
+            ));
+            continue;
+        };
+        if !seen_package_digests.insert(package_digest.to_string()) {
+            refused_objects.push(structural_refusal(
+                "Aggregate derivation counted ballot packages must not contain duplicates.",
+                Some(package_digest),
+            ));
+        }
+
+        let missing_field_names = [
+            ("proofBytesHex", package.get("proofBytesHex")),
+            ("linearStatement", package.get("linearStatement")),
+            ("parameterSet", package.get("parameterSet")),
+            ("proofEncoding", package.get("proofEncoding")),
+            ("publicRandomnessHex", package.get("publicRandomnessHex")),
+            (
+                "componentBundleStatement",
+                package.get("componentBundleStatement"),
+            ),
+            ("componentProofBundle", package.get("componentProofBundle")),
+            ("componentProofInputs", package.get("componentProofInputs")),
+        ]
+        .into_iter()
+        .filter_map(|(field_name, value)| value.is_none().then_some(field_name))
+        .collect::<Vec<_>>();
+        if !missing_field_names.is_empty() {
+            refused_objects.push(structural_refusal(
+                format!(
+                    "Aggregate derivation counted ballot packages must carry proof-byte-bearing M5 verifier inputs; missing {}.",
+                    missing_field_names.join(", ")
+                ),
+                Some(package_digest),
+            ));
+        }
+    }
+
+    refused_objects
+}
+
+fn collect_aggregate_counted_package_refusals(
+    counted_ballot_packages: Option<&Value>,
+    component: &Value,
+    unsafe_small_roster_acknowledged: bool,
+) -> Vec<Value> {
+    let preflight_refusals =
+        collect_aggregate_counted_package_preflight_refusals(counted_ballot_packages, component);
+    if !preflight_refusals.is_empty() {
+        return preflight_refusals;
+    }
+
+    let object_digest = string_field(component, "aggregateDerivationComponentDigest");
+    let mut refused_objects = Vec::new();
+    let packages = counted_ballot_packages
+        .and_then(Value::as_array)
+        .expect("counted package preflight guarantees an array");
+
+    let Some(statement) = component.get("statement") else {
+        return refused_objects;
+    };
+    let Some(aggregate_commitment) = component.get("aggregateCommitment") else {
+        return refused_objects;
+    };
+
+    let mut ordered_packages = Vec::new();
+    for package in packages {
+        let package_digest = string_field(package, "ballotPackageDigest");
+        let dynamic_roster_profile_evidence =
+            object_map(package).and_then(|object| object.get("dynamicRosterProfileEvidence"));
+        let verification = verify_claim_bearing_ballot_package(
+            package,
+            dynamic_roster_profile_evidence,
+            unsafe_small_roster_acknowledged,
+        );
+        if verification.get("ok").and_then(Value::as_bool) != Some(true) {
+            refused_objects.push(structural_refusal(
+                format!(
+                    "Aggregate derivation counted package must verify through the accepted M5 Rust/WASM verifier before inclusion. {}",
+                    verification_refusal_summary(&verification)
+                ),
+                package_digest.or(object_digest),
+            ));
+        }
+        ordered_packages.push(package);
+    }
+    ordered_packages.sort_by(|left_package, right_package| {
+        string_field(left_package, "ballotPackageDigest")
+            .unwrap_or("")
+            .cmp(string_field(right_package, "ballotPackageDigest").unwrap_or(""))
+    });
+
+    refused_objects.extend(collect_counted_package_binding_refusals(
+        &ordered_packages,
+        statement,
+        aggregate_commitment,
+        object_digest,
+    ));
+
+    refused_objects
+}
+
+fn verification_refusal_summary(verification: &Value) -> String {
+    let refusal_messages = verification
+        .get("refusedObjects")
+        .and_then(Value::as_array)
+        .map(|refusals| {
+            refusals
+                .iter()
+                .filter_map(|refusal| string_field(refusal, "message"))
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
+        .unwrap_or_default();
+    if !refusal_messages.is_empty() {
+        return refusal_messages;
+    }
+
+    verification
+        .get("unresolvedReason")
+        .and_then(Value::as_str)
+        .filter(|reason| !reason.is_empty())
+        .unwrap_or("No verifier refusal detail was returned.")
+        .to_string()
+}
+
+fn collect_counted_package_binding_refusals(
+    ordered_packages: &[&Value],
+    statement: &Value,
+    aggregate_commitment: &Value,
+    object_digest: Option<&str>,
+) -> Vec<Value> {
+    let mut refused_objects = Vec::new();
+    let Some(contributor_identity) = string_field(statement, "contributorIdentity") else {
+        refused_objects.push(structural_refusal(
+            "Aggregate derivation statement is missing contributor identity.",
+            object_digest,
+        ));
+
+        return refused_objects;
+    };
+    let Some(contributor_roster_position) =
+        positive_roster_position(statement, "contributorRosterPosition")
+    else {
+        refused_objects.push(structural_refusal(
+            "Aggregate derivation statement is missing contributor roster position.",
+            object_digest,
+        ));
+
+        return refused_objects;
+    };
+
+    let mut package_digests = Vec::new();
+    let mut expected_package_references = Vec::new();
+    let mut share_commitment_vectors = Vec::new();
+    for package in ordered_packages {
+        if let Some(package_digest) = string_field(package, "ballotPackageDigest") {
+            package_digests.push(Value::String(package_digest.to_string()));
+        }
+        refused_objects.extend(collect_counted_package_context_refusals(
+            package,
+            statement,
+            object_digest,
+        ));
+        match package_reference_for_contributor(
+            package,
+            contributor_identity,
+            contributor_roster_position,
+        ) {
+            Some(reference) => expected_package_references.push(reference),
+            None => refused_objects.push(structural_refusal(
+                "Aggregate derivation counted package does not address the contributor in both receiver-payload and share-commitment references.",
+                string_field(package, "ballotPackageDigest").or(object_digest),
+            )),
+        }
+        match share_commitment_vector_for_contributor(
+            package,
+            contributor_identity,
+            contributor_roster_position,
+        ) {
+            Some(vector) => share_commitment_vectors.push(vector),
+            None => refused_objects.push(structural_refusal(
+                "Aggregate derivation counted package does not carry a valid public share commitment polynomial vector for the contributor.",
+                string_field(package, "ballotPackageDigest").or(object_digest),
+            )),
+        }
+    }
+
+    let statement_package_references = array_field(statement, "packageReferences");
+    if statement_package_references != Some(&expected_package_references) {
+        refused_objects.push(structural_refusal(
+            "Aggregate derivation statement package references are not derived from the accepted counted M5 packages.",
+            object_digest,
+        ));
+    }
+
+    if let Some(expected_ballot_set_digest) =
+        derive_counted_package_ballot_set_digest(statement, package_digests)
+        && string_field(statement, "ballotSetDigest") != Some(expected_ballot_set_digest.as_str())
+    {
+        refused_objects.push(structural_refusal(
+            "Aggregate derivation ballot-set digest is not derived from the accepted counted M5 packages and post-close context.",
+            object_digest,
+        ));
+    }
+
+    if let Some(expected_commitment_vector) =
+        summed_share_commitment_vector(&share_commitment_vectors)
+    {
+        let expected_commitment_value = Value::Array(
+            expected_commitment_vector
+                .iter()
+                .map(|polynomial| {
+                    Value::Array(
+                        polynomial
+                            .iter()
+                            .map(|coefficient| Value::String(coefficient.clone()))
+                            .collect(),
+                    )
+                })
+                .collect(),
+        );
+        if aggregate_commitment.get("commitmentPolynomialVector")
+            != Some(&expected_commitment_value)
+        {
+            refused_objects.push(structural_refusal(
+                "Aggregate share commitment polynomial vector is not the homomorphic sum of the accepted counted package commitments addressed to the contributor.",
+                string_field(aggregate_commitment, "aggregateShareCommitmentDigest").or(object_digest),
+            ));
+        }
+        if let Some(share_commitment_profile_digest) =
+            string_field(statement, "shareCommitmentProfileDigest")
+            && let Some(expected_body_digest) = derive_digest(
+                "AggregateShareCommitmentDigest",
+                &json!({
+                    "commitmentPolynomialVector": expected_commitment_vector,
+                    "profileDigest": share_commitment_profile_digest,
+                    "purpose": "aggregate-share-commitment-body-v1"
+                }),
+            )
+            && string_field(aggregate_commitment, "commitmentBodyDigest")
+                != Some(expected_body_digest.as_str())
+        {
+            refused_objects.push(structural_refusal(
+                "Aggregate share commitment body digest is not derived from the accepted counted package commitment sum.",
+                string_field(aggregate_commitment, "aggregateShareCommitmentDigest").or(object_digest),
+            ));
+        }
+    }
+
+    refused_objects
+}
+
+fn collect_counted_package_context_refusals(
+    package: &Value,
+    statement: &Value,
+    object_digest: Option<&str>,
+) -> Vec<Value> {
+    let mut refused_objects = Vec::new();
+    let Some(ballot_statement) = package.get("ballotProofStatement") else {
+        return refused_objects;
+    };
+    let context_fields = [
+        "ceremonyId",
+        "manifestDigest",
+        "rosterDigest",
+        "pollSpecDigest",
+        "thresholdProfileDigest",
+        "shareCommitmentProfileDigest",
+        "receiverEncryptionProfileDigest",
+        "ballotScoreEncodingProfileDigest",
+        "ballotShareLayoutProfileDigest",
+        "aggregateInputEncodingProfileDigest",
+        "encodedShareVectorLayoutDigest",
+        "encodedAggregateLayoutDigest",
+        "shareCommitmentMessageBoundCertDigest",
+    ];
+    if context_fields.iter().any(|field_name| {
+        string_field(ballot_statement, field_name) != string_field(statement, field_name)
+    }) || usize_object_field(ballot_statement, "optionCount")
+        != usize_object_field(statement, "optionCount")
+        || usize_object_field(ballot_statement, "shareVectorWidth")
+            != usize_object_field(statement, "shareVectorWidth")
+        || array_field(ballot_statement, "receiverPublicKeys").map(Vec::len)
+            != usize_object_field(statement, "participantCount")
+    {
+        refused_objects.push(structural_refusal(
+            "Aggregate derivation counted package context does not match the aggregate statement context.",
+            string_field(package, "ballotPackageDigest").or(object_digest),
+        ));
+    }
+
+    refused_objects
+}
+
+fn package_reference_for_contributor(
+    package: &Value,
+    contributor_identity: &str,
+    contributor_roster_position: u64,
+) -> Option<Value> {
+    let ballot_statement = package.get("ballotProofStatement")?;
+    let payload_reference = array_field(ballot_statement, "receiverPayloads")?
+        .iter()
+        .find(|reference| {
+            string_field(reference, "receiverIdentity") == Some(contributor_identity)
+                && positive_roster_position(reference, "receiverRosterPosition")
+                    == Some(contributor_roster_position)
+        })?;
+    let commitment_reference = array_field(ballot_statement, "shareCommitments")?
+        .iter()
+        .find(|reference| {
+            string_field(reference, "receiverIdentity") == Some(contributor_identity)
+                && positive_roster_position(reference, "receiverRosterPosition")
+                    == Some(contributor_roster_position)
+        })?;
+
+    Some(json!({
+        "ballotPackageDigest": string_field(package, "ballotPackageDigest")?,
+        "ballotProofStatementDigest": string_field(ballot_statement, "ballotProofStatementDigest")?,
+        "receiverPayloadCiphertextRoot": string_field(payload_reference, "receiverPayloadCiphertextRoot")?,
+        "receiverPayloadDigest": string_field(payload_reference, "receiverPayloadDigest")?,
+        "shareCommitmentDigest": string_field(commitment_reference, "shareCommitmentDigest")?
+    }))
+}
+
+fn share_commitment_vector_for_contributor(
+    package: &Value,
+    contributor_identity: &str,
+    contributor_roster_position: u64,
+) -> Option<Vec<Vec<String>>> {
+    let share_commitment = array_field(package, "shareCommitments")?
+        .iter()
+        .find(|commitment| {
+            string_field(commitment, "receiverIdentity") == Some(contributor_identity)
+                && positive_roster_position(commitment, "receiverRosterPosition")
+                    == Some(contributor_roster_position)
+        })?;
+
+    commitment_polynomial_vector_from_value(share_commitment.get("commitmentPolynomialVector")?)
+}
+
+fn commitment_polynomial_vector_from_value(value: &Value) -> Option<Vec<Vec<String>>> {
+    let vector = value.as_array()?;
+    if vector.len() != SHARE_COMMITMENT_MODULE_RANK {
+        return None;
+    }
+
+    vector
+        .iter()
+        .map(|polynomial| {
+            let coefficients = polynomial.as_array()?;
+            if coefficients.len() != SHARE_COMMITMENT_MODULE_DEGREE {
+                return None;
+            }
+            coefficients
+                .iter()
+                .map(|coefficient| {
+                    let coefficient_string = coefficient.as_str()?;
+                    let coefficient_value = coefficient_string.parse::<u64>().ok()?;
+                    if !unsigned_decimal_string(coefficient_string)
+                        || coefficient_value >= SHARE_COMMITMENT_MODULUS
+                    {
+                        return None;
+                    }
+
+                    Some(coefficient_string.to_string())
+                })
+                .collect::<Option<Vec<_>>>()
+        })
+        .collect()
+}
+
+fn summed_share_commitment_vector(vectors: &[Vec<Vec<String>>]) -> Option<Vec<Vec<String>>> {
+    if vectors.is_empty() {
+        return None;
+    }
+    let mut summed_vector =
+        vec![vec!["0".to_string(); SHARE_COMMITMENT_MODULE_DEGREE]; SHARE_COMMITMENT_MODULE_RANK];
+    for vector in vectors {
+        if vector.len() != SHARE_COMMITMENT_MODULE_RANK {
+            return None;
+        }
+        for (polynomial_index, polynomial) in vector.iter().enumerate() {
+            if polynomial.len() != SHARE_COMMITMENT_MODULE_DEGREE {
+                return None;
+            }
+            for (coefficient_index, coefficient) in polynomial.iter().enumerate() {
+                let left = summed_vector[polynomial_index][coefficient_index]
+                    .parse::<u64>()
+                    .ok()?;
+                let right = coefficient.parse::<u64>().ok()?;
+                let sum =
+                    (u128::from(left) + u128::from(right)) % u128::from(SHARE_COMMITMENT_MODULUS);
+                summed_vector[polynomial_index][coefficient_index] = sum.to_string();
+            }
+        }
+    }
+
+    Some(summed_vector)
+}
+
+fn derive_counted_package_ballot_set_digest(
+    statement: &Value,
+    package_digests: Vec<Value>,
+) -> Option<String> {
+    derive_digest(
+        "BallotSetDigest",
+        &json!({
+            "ballotPackageDigests": package_digests,
+            "closeRecordDigest": string_field(statement, "closeRecordDigest")?,
+            "manifestDigest": string_field(statement, "manifestDigest")?,
+            "pollSpecDigest": string_field(statement, "pollSpecDigest")?,
+            "postVotingClosedContextDigest": string_field(statement, "postVotingClosedContextDigest")?,
+            "purpose": "m6-post-close-counted-m5-ballot-set-v1",
+            "rosterDigest": string_field(statement, "rosterDigest")?,
+            "thresholdProfileDigest": string_field(statement, "thresholdProfileDigest")?,
+            "votingClosedBoardHeadDigest": string_field(statement, "votingClosedBoardHeadDigest")?
         }),
     )
 }

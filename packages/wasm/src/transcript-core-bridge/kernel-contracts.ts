@@ -304,8 +304,12 @@ export type TranscriptCoreKernel = {
         readonly proverRandomnessHex?: string;
     }): BallotPrivacyProofGeneration;
     verifyAggregateDerivationProof(input: {
-        readonly component?: unknown;
-        readonly proofInput?: unknown;
+        readonly closeRecord: unknown;
+        readonly component: unknown;
+        readonly contributorActionContext: unknown;
+        readonly countedBallotPackages?: readonly unknown[];
+        readonly casualMicroRosterAcknowledged?: boolean;
+        readonly unsafeSmallRosterAcknowledged?: boolean;
     }): BallotPrivacyKernelVerification;
 };
 
@@ -456,8 +460,12 @@ type TranscriptCoreKernelCommand =
       }
     | {
           readonly command: 'VerifyAggregateDerivationProof';
-          readonly component?: unknown;
-          readonly proofInput?: unknown;
+          readonly closeRecord: unknown;
+          readonly component: unknown;
+          readonly contributorActionContext: unknown;
+          readonly countedBallotPackages?: readonly unknown[];
+          readonly casualMicroRosterAcknowledged?: boolean;
+          readonly unsafeSmallRosterAcknowledged?: boolean;
       };
 
 type TranscriptCoreKernelExports = WebAssembly.Exports & {

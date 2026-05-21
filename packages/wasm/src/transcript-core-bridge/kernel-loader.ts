@@ -379,8 +379,15 @@ export const createTranscriptCoreKernelLoader = (
                 ): BallotPrivacyKernelVerification =>
                     executeCommand<BallotPrivacyKernelVerification>({
                         command: 'VerifyAggregateDerivationProof',
+                        closeRecord: input.closeRecord,
                         component: input.component,
-                        proofInput: input.proofInput,
+                        contributorActionContext:
+                            input.contributorActionContext,
+                        countedBallotPackages: input.countedBallotPackages,
+                        casualMicroRosterAcknowledged:
+                            input.casualMicroRosterAcknowledged,
+                        unsafeSmallRosterAcknowledged:
+                            input.unsafeSmallRosterAcknowledged,
                     }),
             };
         })().catch((error: unknown) => {
