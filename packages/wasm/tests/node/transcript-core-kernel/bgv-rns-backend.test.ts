@@ -33,6 +33,15 @@ describe('BGV-RNS backend kernel commands', () => {
         expect(profile.profile.dataPrimes).toHaveLength(16);
         expect(profile.profileDigest).toMatch(/^[a-f0-9]{128}$/u);
         expect(profile.batchEncoderDigest).toMatch(/^[a-f0-9]{128}$/u);
+        expect(profile.batchLayoutBindingDigest).toMatch(/^[a-f0-9]{128}$/u);
+        expect(profile.batchLayoutBinding).toMatchObject({
+            layoutKind: 'TargetBasisDataEncodedScoreLayout-v1',
+            coordinateOrder:
+                'score-share-then-one-hot-score-buckets-per-option',
+            oneHotBucketOrder: 'ascending-score-1-through-10',
+            scoreBucketCount: 10,
+            scalarOnlyAggregateLayout: false,
+        });
         expect(profile.statusLabels).toContain('M7ImplementationEvidence');
         expect(profile.nonClaims).toContain('M9BridgeProofNotImplemented');
         expect(operationRegistry.statusLabels).toContain(
@@ -51,15 +60,21 @@ describe('BGV-RNS backend kernel commands', () => {
 
     it('encodes aggregate-share TargetBasisData slots and validates roots byte-identically', async () => {
         const kernel = await loadTranscriptCoreKernel();
+        const profile = kernel.describeBgvRnsProfile();
         const encoded = kernel.encodeBgvBatchPlaintext({
             slots: [0, 1, 65_536, 17, 99],
             level: 0,
+            layoutBinding: profile.batchLayoutBinding,
             includeCanonicalBytesHex: true,
         });
 
         expect(encoded.validation.ok).toBe(true);
         expect(encoded.canonicalBytesHex).toMatch(/^[a-f0-9]+$/u);
         expect(encoded.plaintextRoot).toMatch(/^[a-f0-9]{128}$/u);
+        expect(encoded.batchLayoutBindingDigest).toBe(
+            profile.batchLayoutBindingDigest,
+        );
+        expect(encoded.statusLabels).toContain('TargetBasisDataLayoutBound');
         expect(encoded.sampledSlots).toEqual(
             expect.arrayContaining([
                 { position: 0, value: 0 },
@@ -93,6 +108,17 @@ describe('BGV-RNS backend kernel commands', () => {
             kernel.validateBgvPlaintextObject({
                 canonicalBytesHex: encoded.canonicalBytesHex ?? '',
                 expectedPlaintextRoot: '0'.repeat(128),
+            }),
+        ).toThrow(TranscriptCoreKernelCommandError);
+        const wrongLayoutBinding = {
+            ...(profile.batchLayoutBinding as Record<string, unknown>),
+            scalarOnlyAggregateLayout: true,
+        };
+        expect(() =>
+            kernel.encodeBgvBatchPlaintext({
+                slots: [1, 2, 3],
+                level: 0,
+                layoutBinding: wrongLayoutBinding,
             }),
         ).toThrow(TranscriptCoreKernelCommandError);
     });

@@ -521,6 +521,7 @@ def emit_vectors(repo_root: Path, lazer_root: Path, input_path: Path, out_path: 
         "linearStatement": linear_statement,
         "proofHex": proof_hex,
         "publicRandomnessHex": public_randomness_hex,
+        "matrixCoefficientRepresentation": "canonicalUnsignedSourceModulus",
         "targetCoefficientRepresentation": "canonicalUnsignedSourceModulus",
         "expectedProofSizeBytes": len(proof),
         "requiredCaseNames": REQUIRED_CASE_NAMES,

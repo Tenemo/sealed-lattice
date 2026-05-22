@@ -85,8 +85,23 @@ mod tests {
     }
 
     #[test]
-    fn batch_encoder_rejects_bad_slot_values() {
+    fn batch_encoder_round_trips_all_zero_and_all_max_slots() {
+        for slots in [
+            vec![0_u64; POLYNOMIAL_DEGREE],
+            vec![65_536_u64; POLYNOMIAL_DEGREE],
+        ] {
+            let encoded = encode_batch_plaintext_slots(&slots, 1).expect("encode");
+            let decoded = decode_batch_plaintext_polynomial(&encoded.polynomial).expect("decode");
+
+            assert_eq!(decoded, slots);
+            assert_eq!(encoded.polynomial.moduli, DATA_PRIMES[..=1].to_vec());
+        }
+    }
+
+    #[test]
+    fn batch_encoder_rejects_bad_slot_values_and_levels() {
         assert!(encode_batch_plaintext_slots(&[65_537], 0).is_err());
         assert!(encode_batch_plaintext_slots(&vec![0_u64; POLYNOMIAL_DEGREE + 1], 0).is_err());
+        assert!(encode_batch_plaintext_slots(&[0], DATA_PRIMES.len()).is_err());
     }
 }

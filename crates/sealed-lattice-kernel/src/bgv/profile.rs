@@ -18,6 +18,17 @@ pub(crate) const BATCH_ENCODER_ID: &str = "BGVBatchEncode_65537-v1";
 pub(crate) const CANONICAL_CIPHERTEXT_CONVENTION_ID: &str =
     "sealed-lattice-coefficient-domain-rns-ciphertext-v1";
 pub(crate) const OPERATION_REGISTRY_ID: &str = "sealed-lattice-bgv-allowed-ops-v1";
+pub(crate) const BATCH_LAYOUT_KIND: &str = "TargetBasisDataEncodedScoreLayout-v1";
+pub(crate) const BALLOT_SCORE_ENCODING_PROFILE_ID: &str =
+    "ballot-score-encoding-profile-hidden-one-hot-v1";
+pub(crate) const BALLOT_SHARE_LAYOUT_PROFILE_ID: &str =
+    "ballot-share-layout-score-plus-one-hot-buckets-v1";
+pub(crate) const AGGREGATE_INPUT_ENCODING_PROFILE_ID: &str =
+    "aggregate-input-encoding-profile-m6-derived-shares-v1";
+pub(crate) const ENCODED_AGGREGATE_LAYOUT_ID: &str =
+    "encoded-aggregate-layout-target-basis-data-v1";
+pub(crate) const TOP_K_EVALUATOR_INPUT_LAYOUT_ID: &str =
+    "top-k-evaluator-input-layout-target-basis-data-v1";
 
 pub(crate) const DATA_PRIMES: [u64; 16] = [
     140_737_487_306_753,
@@ -328,6 +339,7 @@ pub(crate) fn batch_encoder_digest() -> CanonicalResult<String> {
             "plaintextModulus": PLAINTEXT_MODULUS,
             "polynomialDegree": POLYNOMIAL_DEGREE,
             "layoutId": AGGREGATE_SHARE_LAYOUT_ID,
+            "layoutBindingDigest": batch_layout_binding_digest()?,
         }),
     )
 }
@@ -344,6 +356,100 @@ pub(crate) fn layout_digest() -> CanonicalResult<String> {
             "bridgePath": "EncryptedAggregateBridge-v1",
             "witnessPrivacy": "contributor-private-aggregate-shares",
         }),
+    )
+}
+
+pub(crate) fn ballot_score_encoding_profile_digest() -> CanonicalResult<String> {
+    derive_protocol_digest(
+        "BallotScoreEncodingProfileDigest",
+        &json!({
+            "profileId": BALLOT_SCORE_ENCODING_PROFILE_ID,
+            "scoreRange": {
+                "minimum": 1,
+                "maximum": 10
+            },
+            "encoding": "score-share-plus-hidden-one-hot-buckets",
+            "bucketCount": 10,
+            "field": "GF(65537)",
+        }),
+    )
+}
+
+pub(crate) fn ballot_share_layout_profile_digest() -> CanonicalResult<String> {
+    derive_protocol_digest(
+        "BallotShareLayoutProfileDigest",
+        &json!({
+            "profileId": BALLOT_SHARE_LAYOUT_PROFILE_ID,
+            "coordinateOrder": "score-share-then-one-hot-score-buckets-per-option",
+            "coordinatesPerOption": 11,
+            "field": "GF(65537)",
+        }),
+    )
+}
+
+pub(crate) fn aggregate_input_encoding_profile_digest() -> CanonicalResult<String> {
+    derive_protocol_digest(
+        "AggregateInputEncodingProfileDigest",
+        &json!({
+            "profileId": AGGREGATE_INPUT_ENCODING_PROFILE_ID,
+            "sourceMilestone": "M6",
+            "sourceObject": "M6DerivedAggregateShareCoordinates",
+            "bridgePath": "EncryptedAggregateBridge-v1",
+            "witnessPrivacy": "contributor-private-aggregate-shares",
+        }),
+    )
+}
+
+pub(crate) fn encoded_aggregate_layout_digest() -> CanonicalResult<String> {
+    derive_protocol_digest(
+        "EncodedAggregateLayoutDigest",
+        &json!({
+            "layoutId": ENCODED_AGGREGATE_LAYOUT_ID,
+            "targetBasisDataLayoutDigest": layout_digest()?,
+            "aggregateInputEncodingProfileDigest": aggregate_input_encoding_profile_digest()?,
+            "slotCount": POLYNOMIAL_DEGREE,
+            "scalarOnlyAggregateLayout": false,
+        }),
+    )
+}
+
+pub(crate) fn top_k_evaluator_input_layout_digest() -> CanonicalResult<String> {
+    derive_protocol_digest(
+        "TopKEvaluatorInputLayoutDigest",
+        &json!({
+            "layoutId": TOP_K_EVALUATOR_INPUT_LAYOUT_ID,
+            "targetBasisDataLayoutDigest": layout_digest()?,
+            "encodedAggregateLayoutDigest": encoded_aggregate_layout_digest()?,
+            "acceptedEvaluatorInput": "encrypted-aggregate-histogram-score-coordinates",
+            "rejectScalarOnlyAggregateLayouts": true,
+        }),
+    )
+}
+
+pub(crate) fn batch_layout_binding_value() -> CanonicalResult<Value> {
+    Ok(json!({
+        "layoutKind": BATCH_LAYOUT_KIND,
+        "ballotScoreEncodingProfileDigest": ballot_score_encoding_profile_digest()?,
+        "ballotShareLayoutProfileDigest": ballot_share_layout_profile_digest()?,
+        "aggregateInputEncodingProfileDigest": aggregate_input_encoding_profile_digest()?,
+        "encodedAggregateLayoutDigest": encoded_aggregate_layout_digest()?,
+        "targetBasisDataLayoutDigest": layout_digest()?,
+        "topKEvaluatorInputLayoutDigest": top_k_evaluator_input_layout_digest()?,
+        "coordinateOrder": "score-share-then-one-hot-score-buckets-per-option",
+        "oneHotBucketOrder": "ascending-score-1-through-10",
+        "scoreBucketCount": 10,
+        "scoreRange": {
+            "minimum": 1,
+            "maximum": 10
+        },
+        "scalarOnlyAggregateLayout": false,
+    }))
+}
+
+pub(crate) fn batch_layout_binding_digest() -> CanonicalResult<String> {
+    derive_protocol_digest(
+        "BGVBatchEncoderLayoutBindingDigest",
+        &batch_layout_binding_value()?,
     )
 }
 
@@ -420,7 +526,8 @@ pub(crate) fn security_estimator_input_digest() -> CanonicalResult<String> {
 mod tests {
     use super::{
         BgvBasisKind, DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE, SPECIAL_PRIME,
-        batch_encoder_digest, layout_digest, profile_digest, root_parameters_for_modulus,
+        batch_encoder_digest, batch_layout_binding_digest, batch_layout_binding_value,
+        layout_digest, profile_digest, root_parameters_for_modulus,
     };
     use crate::bgv::modular_arithmetic::is_prime_for_tests;
 
@@ -464,7 +571,12 @@ mod tests {
 
     #[test]
     fn selected_profile_digests_are_stable_hex_roots() {
-        for digest in [profile_digest(), batch_encoder_digest(), layout_digest()] {
+        for digest in [
+            profile_digest(),
+            batch_encoder_digest(),
+            layout_digest(),
+            batch_layout_binding_digest(),
+        ] {
             let digest = digest.expect("digest should derive");
             assert_eq!(digest.len(), 128);
             assert!(
@@ -473,5 +585,28 @@ mod tests {
                     .all(|character| character.is_ascii_hexdigit())
             );
         }
+    }
+
+    #[test]
+    fn batch_layout_binding_rejects_scalar_only_layouts_by_construction() {
+        let binding = batch_layout_binding_value().expect("layout binding");
+
+        assert_eq!(
+            binding["layoutKind"],
+            "TargetBasisDataEncodedScoreLayout-v1"
+        );
+        assert_eq!(binding["scalarOnlyAggregateLayout"], false);
+        assert_eq!(
+            binding["coordinateOrder"],
+            "score-share-then-one-hot-score-buckets-per-option"
+        );
+        assert_eq!(binding["scoreBucketCount"], 10);
+        assert!(
+            binding["targetBasisDataLayoutDigest"]
+                .as_str()
+                .expect("target digest")
+                .chars()
+                .all(|character| character.is_ascii_hexdigit())
+        );
     }
 }

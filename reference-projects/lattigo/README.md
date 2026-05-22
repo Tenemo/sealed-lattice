@@ -12,7 +12,7 @@ Pinned reference:
 - Archive SHA-256: `33c9049ea3c3eb0189b55619766a5bd07457de1c2c68565778a1253d9039d680`
 - Required Go toolchain for the oracle container: `go1.25.0`
 - Container base image digest: `sha256:81dc45d05a7444ead8c92a389621fafabc8e40f8fd1a19d7e5df14e61e98bc1a`
-- Oracle command digest: `63d1b1c2b60c96e4654b584e2288945e1cdc6bf65f2a9f00077f083757e588c3`
+- Oracle command digest: `da8d56e61b61e4da9b30357a00bf6b7e0058694c27a1e57ddd6aa40593118372`
 - Oracle Dockerfile digest: `9045a4402372359f14cb3baea7e8177b2f12c41059faf66d5ccf203301e45f28`
 
-The oracle tooling in `tools/lattigo-oracle/` may compare behavior that is actually comparable, such as selected ring construction, coefficient-domain arithmetic, and NTT/INTT round trips. It must not accept Lattigo serialization, keys, default parameters, Docker output, or oracle roots as transcript objects.
+The oracle tooling in `tools/lattigo-oracle/` may compare behavior that is actually comparable across all selected M7 moduli, such as selected ring construction, coefficient-domain addition, subtraction, Barrett multiplication, and NTT/INTT round trips. It must not accept Lattigo serialization, keys, default parameters, Docker output, or oracle roots as transcript objects.

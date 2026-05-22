@@ -142,6 +142,7 @@ type BallotFieldLinearProofVectorFile = {
     };
     readonly publicRandomnessHex: string;
     readonly requiredCaseNames: readonly string[];
+    readonly matrixCoefficientRepresentation: 'canonicalUnsignedSourceModulus';
     readonly targetCoefficientRepresentation: 'canonicalUnsignedSourceModulus';
     readonly cases: readonly BallotFieldLinearProofVectorCase[];
 };
@@ -583,6 +584,9 @@ describe('ballot privacy linear proof backend vectors', () => {
         expect(
             ballotFieldLinearProofBackendVectors.provenance.profileWarning,
         ).toContain('encoded-score field-row projection');
+        expect(
+            ballotFieldLinearProofBackendVectors.matrixCoefficientRepresentation,
+        ).toBe('canonicalUnsignedSourceModulus');
         expect(
             ballotFieldLinearProofBackendVectors.targetCoefficientRepresentation,
         ).toBe('canonicalUnsignedSourceModulus');

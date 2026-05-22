@@ -158,6 +158,13 @@ export type BgvRnsProfileReport = {
     readonly backendProfileDigest: ProtocolDigest;
     readonly batchEncoderDigest: ProtocolDigest;
     readonly targetBasisDataLayoutDigest: ProtocolDigest;
+    readonly batchLayoutBinding: unknown;
+    readonly batchLayoutBindingDigest: ProtocolDigest;
+    readonly ballotScoreEncodingProfileDigest: ProtocolDigest;
+    readonly ballotShareLayoutProfileDigest: ProtocolDigest;
+    readonly aggregateInputEncodingProfileDigest: ProtocolDigest;
+    readonly encodedAggregateLayoutDigest: ProtocolDigest;
+    readonly topKEvaluatorInputLayoutDigest: ProtocolDigest;
     readonly canonicalCiphertextConventionDigest: ProtocolDigest;
     readonly allowedEvaluatorOpsDigest: ProtocolDigest;
     readonly securityEstimatorInputDigest: string;
@@ -191,6 +198,7 @@ export type BgvBatchPlaintextEncoding = {
     readonly plaintextRoot: ProtocolDigest;
     readonly canonicalBytesHash512: string;
     readonly canonicalByteLength: number;
+    readonly batchLayoutBindingDigest: ProtocolDigest;
     readonly sampledSlots: readonly {
         readonly position: number;
         readonly value: number;
@@ -422,6 +430,7 @@ export type TranscriptCoreKernel = {
     encodeBgvBatchPlaintext(input: {
         readonly slots: readonly number[];
         readonly level?: number;
+        readonly layoutBinding: unknown;
         readonly includeCanonicalBytesHex?: boolean;
     }): BgvBatchPlaintextEncoding;
     validateBgvPlaintextObject(input: {
@@ -615,6 +624,7 @@ type TranscriptCoreKernelCommand =
           readonly command: 'EncodeBgvBatchPlaintext';
           readonly slots: readonly number[];
           readonly level?: number;
+          readonly layoutBinding: unknown;
           readonly includeCanonicalBytesHex?: boolean;
       }
     | {

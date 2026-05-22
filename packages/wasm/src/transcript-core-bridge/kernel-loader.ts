@@ -412,6 +412,7 @@ export const createTranscriptCoreKernelLoader = (
                         command: 'EncodeBgvBatchPlaintext',
                         slots: input.slots,
                         level: input.level,
+                        layoutBinding: input.layoutBinding,
                         includeCanonicalBytesHex:
                             input.includeCanonicalBytesHex,
                     }),

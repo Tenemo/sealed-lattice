@@ -65,6 +65,7 @@ const ballotFieldLinearProofBackendVectors =
         readonly proofHex: string;
         readonly publicRandomnessHex: string;
         readonly requiredCaseNames: readonly string[];
+        readonly matrixCoefficientRepresentation: string;
         readonly targetCoefficientRepresentation: string;
         readonly cases: readonly Record<string, unknown>[];
     };
@@ -189,6 +190,8 @@ const expandBallotFieldLinearProofVectorCase = (
             compactCase.publicRandomnessHex ??
             ballotFieldLinearProofBackendVectors.publicRandomnessHex,
         statementMatrixCoefficients,
+        matrixCoefficientRepresentation:
+            ballotFieldLinearProofBackendVectors.matrixCoefficientRepresentation,
         targetCoefficientRepresentation:
             ballotFieldLinearProofBackendVectors.targetCoefficientRepresentation,
         targetVectorCoefficients,

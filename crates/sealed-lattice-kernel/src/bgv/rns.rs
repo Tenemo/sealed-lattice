@@ -132,7 +132,9 @@ impl RnsPolynomial {
 #[cfg(test)]
 mod tests {
     use super::{PolynomialDomain, RnsPolynomial};
-    use crate::bgv::profile::{BgvBasisKind, POLYNOMIAL_DEGREE, layout_digest};
+    use crate::bgv::profile::{
+        BgvBasisKind, DATA_PRIMES, POLYNOMIAL_DEGREE, SPECIAL_PRIME, layout_digest,
+    };
 
     #[test]
     fn coefficient_domain_object_validates_selected_basis() {
@@ -150,7 +152,45 @@ mod tests {
     }
 
     #[test]
-    fn rns_validation_rejects_ntt_domain_and_bad_residues() {
+    fn rns_validation_binds_each_selected_basis_and_level() {
+        let layout_digest = layout_digest().expect("layout digest");
+        let data = RnsPolynomial::coefficient_domain(
+            BgvBasisKind::Data,
+            DATA_PRIMES.len() - 1,
+            layout_digest.clone(),
+            DATA_PRIMES
+                .iter()
+                .map(|modulus| vec![modulus - 1; POLYNOMIAL_DEGREE])
+                .collect(),
+        )
+        .expect("full data basis object");
+        assert_eq!(data.moduli, DATA_PRIMES);
+
+        let extended = RnsPolynomial::coefficient_domain(
+            BgvBasisKind::Extended,
+            DATA_PRIMES.len(),
+            layout_digest.clone(),
+            DATA_PRIMES
+                .iter()
+                .chain([SPECIAL_PRIME].iter())
+                .map(|modulus| vec![modulus - 1; POLYNOMIAL_DEGREE])
+                .collect(),
+        )
+        .expect("extended basis object");
+        assert_eq!(extended.moduli.len(), DATA_PRIMES.len() + 1);
+
+        let special = RnsPolynomial::coefficient_domain(
+            BgvBasisKind::Special,
+            0,
+            layout_digest,
+            vec![vec![SPECIAL_PRIME - 1; POLYNOMIAL_DEGREE]],
+        )
+        .expect("special basis object");
+        assert_eq!(special.moduli, vec![SPECIAL_PRIME]);
+    }
+
+    #[test]
+    fn rns_validation_rejects_ntt_domain_bad_residues_and_shape_drift() {
         let mut object = RnsPolynomial::coefficient_domain(
             BgvBasisKind::Data,
             0,
@@ -164,5 +204,26 @@ mod tests {
         object.domain = PolynomialDomain::Coefficient;
         object.residues_by_modulus[0][0] = object.moduli[0];
         assert!(object.validate().is_err());
+
+        let mut wrong_profile = object.clone();
+        wrong_profile.residues_by_modulus[0][0] = 0;
+        wrong_profile.profile_digest = "0".repeat(128);
+        assert!(wrong_profile.validate().is_err());
+
+        let mut wrong_basis = object.clone();
+        wrong_basis.residues_by_modulus[0][0] = 0;
+        wrong_basis.basis_id = "not-a-selected-basis".to_string();
+        assert!(wrong_basis.validate().is_err());
+
+        let mut wrong_coefficient_count = object.clone();
+        wrong_coefficient_count.residues_by_modulus[0][0] = 0;
+        wrong_coefficient_count.coefficient_count = POLYNOMIAL_DEGREE - 1;
+        assert!(wrong_coefficient_count.validate().is_err());
+
+        let mut wrong_limb_count = object;
+        wrong_limb_count
+            .residues_by_modulus
+            .push(vec![0_u64; POLYNOMIAL_DEGREE]);
+        assert!(wrong_limb_count.validate().is_err());
     }
 }

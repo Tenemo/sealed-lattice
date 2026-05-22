@@ -266,7 +266,8 @@ fn validate_component_count(
 #[cfg(test)]
 mod tests {
     use super::{
-        BgvObjectKind, canonical_bytes_hash, parse_bgv_object, plaintext_root, serialize_bgv_object,
+        BgvObjectKind, canonical_bytes_hash, ciphertext_root, parse_bgv_object, plaintext_root,
+        serialize_bgv_object,
     };
     use crate::bgv::{
         encoding::encode_batch_plaintext_slots,
@@ -284,6 +285,31 @@ mod tests {
         assert_eq!(parsed.components[0].moduli, vec![DATA_PRIMES[0]]);
         assert_eq!(canonical_bytes_hash(&canonical_bytes).len(), 128);
         assert_eq!(plaintext_root(&canonical_bytes).len(), 128);
+        assert_eq!(
+            serialize_bgv_object(parsed.object_kind, &parsed.components).expect("reserialize"),
+            canonical_bytes
+        );
+    }
+
+    #[test]
+    fn ciphertext_serialization_binds_component_count_layout_and_root() {
+        let left = encode_batch_plaintext_slots(&[1, 2, 3], 0).expect("left");
+        let right = encode_batch_plaintext_slots(&[4, 5, 6], 0).expect("right");
+        let canonical_bytes = serialize_bgv_object(
+            BgvObjectKind::Ciphertext,
+            &[left.polynomial.clone(), right.polynomial.clone()],
+        )
+        .expect("serialize ciphertext convention fixture");
+        let parsed = parse_bgv_object(&canonical_bytes).expect("parse");
+
+        assert_eq!(parsed.object_kind, BgvObjectKind::Ciphertext);
+        assert_eq!(parsed.components.len(), 2);
+        assert_eq!(
+            parsed.components[0].layout_digest,
+            parsed.components[1].layout_digest
+        );
+        assert_eq!(ciphertext_root(&canonical_bytes).len(), 128);
+        assert!(serialize_bgv_object(BgvObjectKind::Ciphertext, &[left.polynomial]).is_err());
     }
 
     #[test]

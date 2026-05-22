@@ -4,7 +4,10 @@ use crate::{
     bgv::{
         base_conversion::convert_plaintext_lifted_basis,
         encoding::{decode_batch_plaintext_polynomial, encode_batch_plaintext_slots},
-        profile::{BgvBasisKind, DATA_PRIMES, POLYNOMIAL_DEGREE, profile_digest},
+        profile::{
+            BgvBasisKind, DATA_PRIMES, POLYNOMIAL_DEGREE, batch_layout_binding_digest,
+            batch_layout_binding_value, profile_digest,
+        },
         reports::{backend_workbook_report, describe_profile_report, operation_registry_report},
         serialization::{
             BgvObjectKind, canonical_bytes_hash, canonical_bytes_hex, ciphertext_root,
@@ -32,6 +35,7 @@ pub(crate) fn generate_bgv_backend_report() -> CanonicalResult<Value> {
 
 pub(crate) fn encode_bgv_batch_plaintext_from_request(request: &Value) -> CanonicalResult<Value> {
     reject_if_oracle_boundary_fields_present(request)?;
+    validate_batch_layout_binding(request)?;
     let slots = read_slots(request)?;
     let level = request
         .get("level")
@@ -68,6 +72,7 @@ pub(crate) fn encode_bgv_batch_plaintext_from_request(request: &Value) -> Canoni
     )?;
     let mut value = json!({
         "profileDigest": profile_digest()?,
+        "batchLayoutBindingDigest": batch_layout_binding_digest()?,
         "basisId": encoded.polynomial.basis_id,
         "level": encoded.polynomial.level,
         "coefficientCount": encoded.polynomial.coefficient_count,
@@ -81,6 +86,7 @@ pub(crate) fn encode_bgv_batch_plaintext_from_request(request: &Value) -> Canoni
         "validation": validation,
         "statusLabels": [
             "BGVBatchEncoded",
+            "TargetBasisDataLayoutBound",
             "NativeDecodeRoundTripMatched",
             "PlaintextRootBound"
         ],
@@ -90,6 +96,24 @@ pub(crate) fn encode_bgv_batch_plaintext_from_request(request: &Value) -> Canoni
     }
 
     Ok(value)
+}
+
+fn validate_batch_layout_binding(request: &Value) -> CanonicalResult<()> {
+    let supplied_binding = request.get("layoutBinding").ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "BGV batch encoder requires explicit TargetBasisData layout binding",
+        )
+    })?;
+    let expected_binding = batch_layout_binding_value()?;
+    if supplied_binding != &expected_binding {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "BGV batch encoder layout binding does not match the selected TargetBasisData layout",
+        ));
+    }
+
+    Ok(())
 }
 
 pub(crate) fn validate_bgv_plaintext_from_request(request: &Value) -> CanonicalResult<Value> {
@@ -280,6 +304,7 @@ mod tests {
     #[test]
     fn commands_report_profile_and_encode_plaintext() {
         let profile = describe_bgv_rns_profile().expect("profile report");
+        let layout_binding = profile["batchLayoutBinding"].clone();
         assert_eq!(profile["profile"]["polynomialDegree"], 32_768);
         assert_eq!(profile["profile"]["plaintextModulus"], 65_537);
         assert!(
@@ -292,10 +317,24 @@ mod tests {
         let encoded = encode_bgv_batch_plaintext_from_request(&serde_json::json!({
             "slots": [1, 2, 65_536],
             "level": 0,
+            "layoutBinding": layout_binding,
             "includeCanonicalBytesHex": true
         }))
         .expect("encode command");
         assert_eq!(encoded["validation"]["ok"], true);
+        assert!(
+            encoded["statusLabels"]
+                .as_array()
+                .expect("labels")
+                .contains(&serde_json::json!("TargetBasisDataLayoutBound"))
+        );
+        assert!(
+            encode_bgv_batch_plaintext_from_request(&serde_json::json!({
+                "slots": [1, 2, 3],
+                "level": 0
+            }))
+            .is_err()
+        );
         let validated = validate_bgv_plaintext_from_request(&serde_json::json!({
             "canonicalBytesHex": encoded["canonicalBytesHex"].as_str().expect("hex"),
             "expectedPlaintextRoot": encoded["plaintextRoot"].as_str().expect("root")

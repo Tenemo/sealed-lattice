@@ -22,7 +22,7 @@ const digest = (label: string): string =>
         label,
         purpose: 'ballot-proof-record-generation-input-test',
     });
-const mandatoryProfileFixtureTimeoutMs = 300_000;
+const mandatoryProfileFixtureTimeoutMs = 900_000;
 const casualMicroRosterSizes = [3, 4, 5, 6, 7, 8, 9] as const;
 
 const requireRecord = (

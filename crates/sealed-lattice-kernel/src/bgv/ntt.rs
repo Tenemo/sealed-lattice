@@ -175,49 +175,61 @@ pub(crate) fn negacyclic_convolution_for_tests(
 mod tests {
     use super::{forward_negacyclic_ntt, inverse_negacyclic_ntt, negacyclic_convolution_for_tests};
     use crate::{
-        bgv::{modular_arithmetic::sub_mod, profile::DATA_PRIMES},
+        bgv::{
+            modular_arithmetic::sub_mod,
+            profile::{DATA_PRIMES, SPECIAL_PRIME},
+        },
         encoding::CanonicalResult,
     };
 
     #[test]
-    fn ntt_round_trips_aggressive_small_vectors() {
-        let modulus = DATA_PRIMES[2];
-        let inputs = [
-            vec![0_u64; 8],
-            vec![1, 0, 0, 0, 0, 0, 0, 0],
-            vec![modulus - 1, 1, modulus / 2, 17, 99, 1_024, modulus - 2, 7],
-        ];
+    fn ntt_round_trips_aggressive_small_vectors_for_every_selected_prime() {
+        for modulus in selected_ntt_moduli() {
+            let inputs = [
+                vec![0_u64; 8],
+                vec![1, 0, 0, 0, 0, 0, 0, 0],
+                vec![modulus - 1, 1, modulus / 2, 17, 99, 1_024, modulus - 2, 7],
+            ];
 
-        for input in inputs {
-            let transformed = forward_negacyclic_ntt(&input, modulus).expect("NTT should run");
-            if input.iter().any(|value| *value != 0) {
-                assert_ne!(transformed, input);
+            for input in inputs {
+                let transformed = forward_negacyclic_ntt(&input, modulus).expect("NTT should run");
+                if input.iter().any(|value| *value != 0) {
+                    assert_ne!(transformed, input);
+                }
+                let recovered =
+                    inverse_negacyclic_ntt(&transformed, modulus).expect("INTT should run");
+                assert_eq!(recovered, input);
             }
-            let recovered = inverse_negacyclic_ntt(&transformed, modulus).expect("INTT should run");
-            assert_eq!(recovered, input);
         }
     }
 
     #[test]
-    fn ntt_convolution_matches_direct_negacyclic_product() {
-        let modulus = DATA_PRIMES[3];
-        let left = vec![3, 1, 4, 1, 5, 9, 2, 6];
-        let right = vec![5, 3, 5, 8, 9, 7, 9, 3];
+    fn ntt_convolution_matches_direct_negacyclic_product_for_every_selected_prime() {
+        for modulus in selected_ntt_moduli() {
+            let left = vec![3, 1, 4, 1, 5, 9, 2, 6];
+            let right = vec![5, 3, 5, 8, 9, 7, 9, 3];
 
-        let actual = negacyclic_convolution_for_tests(&left, &right, modulus).expect("convolution");
-        let expected = direct_negacyclic_product(&left, &right, modulus).expect("direct product");
+            let actual =
+                negacyclic_convolution_for_tests(&left, &right, modulus).expect("convolution");
+            let expected =
+                direct_negacyclic_product(&left, &right, modulus).expect("direct product");
 
-        assert_eq!(actual, expected);
+            assert_eq!(actual, expected);
+        }
     }
 
     #[test]
-    fn ntt_rejects_wrong_lengths_and_residues() {
-        let modulus = DATA_PRIMES[4];
-
-        assert!(forward_negacyclic_ntt(&[], modulus).is_err());
-        assert!(forward_negacyclic_ntt(&[1, 2, 3], modulus).is_err());
-        assert!(forward_negacyclic_ntt(&[modulus, 0], modulus).is_err());
+    fn ntt_rejects_wrong_lengths_residues_and_unselected_moduli() {
+        for modulus in selected_ntt_moduli() {
+            assert!(forward_negacyclic_ntt(&[], modulus).is_err());
+            assert!(forward_negacyclic_ntt(&[1, 2, 3], modulus).is_err());
+            assert!(forward_negacyclic_ntt(&[modulus, 0], modulus).is_err());
+        }
         assert!(forward_negacyclic_ntt(&[1, 2], 97).is_err());
+    }
+
+    fn selected_ntt_moduli() -> Vec<u64> {
+        DATA_PRIMES.into_iter().chain([SPECIAL_PRIME]).collect()
     }
 
     fn direct_negacyclic_product(

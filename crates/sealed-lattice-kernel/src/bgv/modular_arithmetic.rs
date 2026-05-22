@@ -141,36 +141,48 @@ pub(crate) fn is_prime_for_tests(value: u64) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{add_mod, centered_representative, inverse_mod, mul_mod, pow_mod, sub_mod};
-    use crate::bgv::profile::DATA_PRIMES;
+    use crate::bgv::profile::{DATA_PRIMES, SPECIAL_PRIME};
 
     #[test]
-    fn modular_arithmetic_handles_boundaries_for_selected_prime() {
-        let modulus = DATA_PRIMES[0];
-
-        assert_eq!(add_mod(modulus - 1, 1, modulus).expect("add"), 0);
-        assert_eq!(sub_mod(0, 1, modulus).expect("sub"), modulus - 1);
-        assert_eq!(mul_mod(modulus - 1, modulus - 1, modulus).expect("mul"), 1);
-        assert_eq!(pow_mod(5, 0, modulus).expect("pow"), 1);
-        assert_eq!(pow_mod(5, 1, modulus).expect("pow"), 5);
-        assert_eq!(
-            mul_mod(5, inverse_mod(5, modulus).expect("inverse"), modulus).expect("mul"),
-            1
-        );
-        assert_eq!(centered_representative(0, modulus).expect("center"), 0);
-        assert_eq!(
-            centered_representative(modulus - 1, modulus).expect("center"),
-            -1
-        );
+    fn modular_arithmetic_handles_boundaries_for_every_selected_prime() {
+        for modulus in DATA_PRIMES.into_iter().chain([SPECIAL_PRIME]) {
+            assert_eq!(add_mod(modulus - 1, 1, modulus).expect("add"), 0);
+            assert_eq!(
+                add_mod(modulus / 2, modulus / 2, modulus).expect("add"),
+                modulus - 1
+            );
+            assert_eq!(sub_mod(0, 1, modulus).expect("sub"), modulus - 1);
+            assert_eq!(sub_mod(1, 1, modulus).expect("sub"), 0);
+            assert_eq!(mul_mod(modulus - 1, modulus - 1, modulus).expect("mul"), 1);
+            assert_eq!(mul_mod(modulus - 1, 2, modulus).expect("mul"), modulus - 2);
+            assert_eq!(pow_mod(5, 0, modulus).expect("pow"), 1);
+            assert_eq!(pow_mod(5, 1, modulus).expect("pow"), 5);
+            assert_eq!(
+                mul_mod(5, inverse_mod(5, modulus).expect("inverse"), modulus).expect("mul"),
+                1
+            );
+            assert_eq!(centered_representative(0, modulus).expect("center"), 0);
+            assert_eq!(
+                centered_representative(modulus - 1, modulus).expect("center"),
+                -1
+            );
+            assert_eq!(
+                centered_representative((modulus / 2) + 1, modulus).expect("center"),
+                i128::from((modulus / 2) + 1) - i128::from(modulus)
+            );
+        }
     }
 
     #[test]
-    fn arithmetic_rejects_noncanonical_residues() {
-        let modulus = DATA_PRIMES[1];
-
-        assert!(add_mod(modulus, 0, modulus).is_err());
-        assert!(sub_mod(0, modulus, modulus).is_err());
-        assert!(mul_mod(1, modulus, modulus).is_err());
-        assert!(inverse_mod(0, modulus).is_err());
-        assert!(centered_representative(modulus, modulus).is_err());
+    fn arithmetic_rejects_noncanonical_residues_for_every_selected_prime() {
+        for modulus in DATA_PRIMES.into_iter().chain([SPECIAL_PRIME]) {
+            assert!(add_mod(modulus, 0, modulus).is_err());
+            assert!(sub_mod(0, modulus, modulus).is_err());
+            assert!(mul_mod(1, modulus, modulus).is_err());
+            assert!(pow_mod(modulus, 2, modulus).is_err());
+            assert!(inverse_mod(0, modulus).is_err());
+            assert!(inverse_mod(modulus, modulus).is_err());
+            assert!(centered_representative(modulus, modulus).is_err());
+        }
     }
 }
