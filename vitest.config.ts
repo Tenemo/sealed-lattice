@@ -13,6 +13,7 @@ const resolveAliasDirectoryFromRepoRoot = (...segments: string[]): string =>
 
 const nodeTestTimeoutMs = 60_000;
 const nodeKernelHeavyTestTimeoutMs = 15 * 60_000;
+const nodeCeremonyHeavyTestTimeoutMs = 2 * 60 * 60_000;
 const proofBenchmarkTestTimeoutMs = 60 * 60_000;
 const nodeHookTimeoutMs = 240_000;
 const browserApiHost = '127.0.0.1';
@@ -43,6 +44,9 @@ const nodeHeavyTestIncludes = [
 ] satisfies string[];
 const nodeKernelAggregateTestIncludes = [
     'packages/wasm/tests/node/transcript-core-kernel/aggregate-derivation-proof.test.ts',
+] satisfies string[];
+const nodeCeremonyHeavyTestIncludes = [
+    'packages/wasm/tests/node/transcript-core-kernel/full-ceremony-flow.test.ts',
 ] satisfies string[];
 const nodeKernelRemainingTestIncludes = [
     'packages/wasm/tests/node/transcript-core-kernel/ballot-proof-generation.test.ts',
@@ -75,6 +79,13 @@ const nodeKernelHeavyProject = {
 const nodeHeavyProject = {
     environment: 'node',
     testTimeout: nodeKernelHeavyTestTimeoutMs,
+    hookTimeout: nodeHookTimeoutMs,
+} as const;
+
+const nodeCeremonyHeavyProject = {
+    environment: 'node',
+    fileParallelism: false,
+    testTimeout: nodeCeremonyHeavyTestTimeoutMs,
     hookTimeout: nodeHookTimeoutMs,
 } as const;
 
@@ -333,6 +344,7 @@ export default defineConfig({
                     include: nodeTestIncludes,
                     exclude: [
                         ...nodeHeavyTestIncludes,
+                        ...nodeCeremonyHeavyTestIncludes,
                         ...nodeKernelHeavyTestIncludes,
                         ...nodeProofBenchmarkTestIncludes,
                     ],
@@ -377,6 +389,14 @@ export default defineConfig({
                     name: 'node-kernel-aggregate',
                     include: nodeKernelAggregateTestIncludes,
                     ...nodeKernelHeavyProject,
+                },
+            },
+            {
+                resolve: repoRootResolve,
+                test: {
+                    name: 'node-ceremony-heavy',
+                    include: nodeCeremonyHeavyTestIncludes,
+                    ...nodeCeremonyHeavyProject,
                 },
             },
             {

@@ -56,6 +56,7 @@ Implemented internally:
 - ballot proof records that bind backend statements, component proof bundles, proof bytes, proof encodings, proof parameter sets, and public randomness;
 - scoped relation-bearing ballot package verification that recomputes the package digest, requires accepted receiver-key proof root evidence, checks receiver coverage, rejects witness leakage, binds the full ballot relation to the supplied component bundle, and verifies the top-level and component proof bytes;
 - aggregate derivation statements and components that bind a canonical post-close counted set of proof-byte-bearing package shells, voting-closed close-record evidence, contributor action context, contributor identity, homomorphic aggregate share commitment, full encoded share layout, no-wraparound certificate, and Rust/WASM proof bytes for hidden aggregate opening knowledge. Component verification reruns the counted packages through the accepted M5 Rust/WASM package verifier and recomputes the aggregate package references, ballot-set digest, and public aggregate commitment sum;
+- a dedicated Node-only full implemented ceremony flow suite that freezes a 20-participant roster, generates multiple proof-byte-bearing M5 ballot packages, applies deterministic pre-close duplicate selection, rejects a late cast receipt, verifies the scoped M6 aggregate component, and compares the test-only aggregate witness with the plaintext oracle. This is integration evidence for the implemented boundaries only; it is not mobile evidence, production target acceptance, BGV evaluation, threshold decryption, CPAD, or final theorem closure;
 - native and WASM verification of public vectors for the supported internal linear proof slices and full encoded-score package path.
 
 Still unavailable:
@@ -125,6 +126,7 @@ pnpm run vectors
 pnpm run test:node:fast
 pnpm run test:node:heavy
 pnpm run test:node:heavy:kernel
+pnpm run test:node:ceremony-heavy
 pnpm run test:node
 pnpm run test:browser
 pnpm run test:proof-benchmark
@@ -134,7 +136,7 @@ pnpm run test:proof-benchmark:browser:mobile:throttled
 pnpm run verify:docs
 ```
 
-The pre-commit test command runs the fast Node project plus desktop and mobile browser Vitest projects against already built output. The default Node test command runs the fast Node project plus the heavy protocol and kernel projects. The Node coverage command covers the fast Node project only; heavy protocol, kernel, and proof-benchmark flows still run through their explicit non-coverage lanes. The proof benchmark command builds once, then runs the Node and desktop Chromium benchmark projects sequentially to avoid benchmark worker memory contention on one machine. Use the individual proof-benchmark commands on separate CI workers when parallel resources are available. The mobile proof benchmark is throttled-only and manual-only through `pnpm run test:proof-benchmark:browser:mobile:throttled`.
+The pre-commit test command runs the fast Node project plus desktop and mobile browser Vitest projects against already built output. The default Node test command runs the fast Node project plus the heavy protocol and kernel projects. The full ceremony flow has its own `test:node:ceremony-heavy` lane because it may generate several proof-byte-bearing ballots and an aggregate proof; GitHub CI exposes it only through the manual workflow-dispatch job so the default PR lane does not run it on a shared runner. The Node coverage command covers the fast Node project only; heavy protocol, kernel, ceremony, and proof-benchmark flows still run through their explicit non-coverage lanes. The proof benchmark command builds once, then runs the Node and desktop Chromium benchmark projects sequentially to avoid benchmark worker memory contention on one machine. Use the individual proof-benchmark commands on separate CI workers when parallel resources are available. The mobile proof benchmark is throttled-only and manual-only through `pnpm run test:proof-benchmark:browser:mobile:throttled`.
 
 Heavy ballot privacy proof flows write resumable development checkpoints to `temp/test-checkpoints/`. Checkpoint filenames are named after their test suite and step. Set `SEALED_LATTICE_RESUME_TEST_CHECKPOINTS=1` only when intentionally debugging from the latest local checkpoint.
 

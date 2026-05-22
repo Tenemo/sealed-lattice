@@ -14,11 +14,14 @@ export const nodeTestLaneValues = [
     'proof-input-heavy',
     'kernel-remaining',
     'kernel-aggregate',
+    'ceremony-heavy',
 ] as const;
 
 export type NodeTestLane = (typeof nodeTestLaneValues)[number];
 
-const defaultNodeTestLanes = nodeTestLaneValues;
+const defaultNodeTestLanes = nodeTestLaneValues.filter(
+    (lane) => lane !== 'ceremony-heavy',
+);
 
 const nodeTestLaneProjectNames = {
     fast: 'node',
@@ -26,6 +29,7 @@ const nodeTestLaneProjectNames = {
     'proof-input-heavy': 'node-proof-input-heavy',
     'kernel-remaining': 'node-kernel-remaining',
     'kernel-aggregate': 'node-kernel-aggregate',
+    'ceremony-heavy': 'node-ceremony-heavy',
 } as const satisfies Record<NodeTestLane, string>;
 
 const nodeTestLaneDescriptions = {
@@ -34,6 +38,7 @@ const nodeTestLaneDescriptions = {
     'proof-input-heavy': 'Run proof-input-heavy Node tests',
     'kernel-remaining': 'Run remaining heavy Node kernel tests',
     'kernel-aggregate': 'Run aggregate heavy Node kernel tests',
+    'ceremony-heavy': 'Run full ceremony heavy Node tests',
 } as const satisfies Record<NodeTestLane, string>;
 
 const isNodeTestLane = (lane: string): lane is NodeTestLane =>

@@ -5,6 +5,12 @@ on:
         branches:
             - master
     pull_request:
+    workflow_dispatch:
+        inputs:
+            ceremony_workers:
+                description: Full ceremony local worker count for the manual heavy lane
+                required: false
+                default: "1"
 
 env:
     FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -127,6 +133,24 @@ jobs:
             - uses: Swatinem/rust-cache@aa7c1c80a07a27a84c0aa76d0cef0aad3830e330
             - run: pnpm run build
             - run: pnpm run test:node:kernel-aggregate:built
+
+    node-ceremony-heavy:
+        name: node ceremony heavy
+        if: github.event_name == 'workflow_dispatch'
+        runs-on: ubuntu-latest
+        timeout-minutes: 120
+        env:
+            SEALED_LATTICE_CEREMONY_WORKERS: ${{ inputs.ceremony_workers }}
+        steps:
+            - uses: actions/checkout@v6.0.2
+            - uses: ./.github/actions/bootstrap-pnpm
+            - uses: dtolnay/rust-toolchain@1.90.0
+              with:
+                  components: clippy, rustfmt
+                  targets: wasm32-unknown-unknown
+            - uses: Swatinem/rust-cache@aa7c1c80a07a27a84c0aa76d0cef0aad3830e330
+            - run: pnpm run build
+            - run: pnpm run test:node:ceremony-heavy:built
 
     verify:
         name: verify

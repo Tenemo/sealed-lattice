@@ -75,6 +75,25 @@ type ProofEncoding = Record<string, unknown> & {
     readonly source: string;
 };
 
+type BallotProofRecordGenerationStatementContextOptions = {
+    readonly actionContextDigest?: string;
+    readonly ceremonyId?: string;
+    readonly duplicateBallotPolicyDigest?: string;
+    readonly manifestDigest?: string;
+    readonly payloadContextDigest?: string;
+    readonly pollSpecDigest?: string;
+    readonly receiverKeyProofRoot?: string;
+    readonly receiverKeyRoot?: string;
+    readonly rosterDigest?: string;
+    readonly rosterExternalAcceptanceDigest?: string;
+    readonly scoreDomainDigest?: string;
+    readonly thresholdProfileDigest?: string;
+    readonly tiePolicyDigest?: string;
+    readonly voterIdentityDigest?: string;
+    readonly voterRosterPosition?: number;
+    readonly voterSigningKeyDigest?: string;
+};
+
 export type BallotProofRecordGenerationFixture = {
     readonly proofContracts: BallotProofRecordGenerationProofContracts;
     readonly projectionWitness: BallotProofComponentProjectionWitness;
@@ -92,6 +111,8 @@ type BallotProofRecordGenerationFixtureOptions = {
     readonly relationInput: BallotPrivacyRelationCompilerInput;
     readonly topOptionCount: number;
     readonly casualMicroRosterAcknowledged?: boolean;
+    readonly randomnessSeedLabel?: string;
+    readonly statementContext?: BallotProofRecordGenerationStatementContextOptions;
     readonly unsafeSmallRosterAcknowledged?: boolean;
 };
 
@@ -276,46 +297,56 @@ const casualMicroRosterRelationInput = (
     };
 };
 
-export const mandatoryProfileRelationInput =
-    (): BallotPrivacyRelationCompilerInput => {
-        const optionCount = 20;
-        const pvssThreshold = 7;
-        const normalizedScores = Array.from(
+export const mandatoryProfileRelationInput = (
+    input: {
+        readonly normalizedScores?: readonly number[];
+    } = {},
+): BallotPrivacyRelationCompilerInput => {
+    const optionCount = 20;
+    const pvssThreshold = 7;
+    const normalizedScores =
+        input.normalizedScores ??
+        Array.from(
             { length: optionCount },
             (_unusedValue, optionIndex) => (optionIndex % 10) + 1,
         );
-        const encodedShareVector =
-            encodedShareVectorForScores(normalizedScores);
-        const encodedCoordinateShamirCoefficients = encodedShareVector.map(
-            () =>
-                Array.from(
-                    { length: pvssThreshold - 1 },
-                    () => 0,
-                ) as readonly number[],
+    if (normalizedScores.length !== optionCount) {
+        throw new RangeError(
+            'Mandatory profile fixtures require twenty normalized scores.',
         );
+    }
+    const encodedShareVector = encodedShareVectorForScores(normalizedScores);
+    const encodedCoordinateShamirCoefficients = encodedShareVector.map(
+        () =>
+            Array.from(
+                { length: pvssThreshold - 1 },
+                () => 0,
+            ) as readonly number[],
+    );
 
-        return {
-            encodedCoordinateShamirCoefficients,
-            normalizedScores,
-            optionCount,
-            pvssThreshold,
-            receivers: Array.from(
-                { length: optionCount },
-                (_unusedValue, receiverIndex) => ({
-                    receiverIdentity: `receiver-${receiverIndex + 1}`,
-                    receiverRosterPosition: receiverIndex + 1,
-                    receiverShareVector: encodedShareVector,
-                }),
-            ),
-            rosterSize: optionCount,
-            scoreOneHotWitnesses: normalizedScores.map((score) =>
-                oneHotScore(score),
-            ),
-        };
+    return {
+        encodedCoordinateShamirCoefficients,
+        normalizedScores,
+        optionCount,
+        pvssThreshold,
+        receivers: Array.from(
+            { length: optionCount },
+            (_unusedValue, receiverIndex) => ({
+                receiverIdentity: `receiver-${receiverIndex + 1}`,
+                receiverRosterPosition: receiverIndex + 1,
+                receiverShareVector: encodedShareVector,
+            }),
+        ),
+        rosterSize: optionCount,
+        scoreOneHotWitnesses: normalizedScores.map((score) =>
+            oneHotScore(score),
+        ),
     };
+};
 
 const publicContextAndProjectionWitness = (
     relationInput: BallotPrivacyRelationCompilerInput,
+    statementContext: BallotProofRecordGenerationStatementContextOptions = {},
 ): {
     readonly projectionWitness: BallotProofComponentProjectionWitness;
     readonly publicContext: BallotPrivacyRelationBackendPublicContext;
@@ -328,7 +359,8 @@ const publicContextAndProjectionWitness = (
         shareCommitmentProfile: profileSet.shareCommitmentProfile,
     });
     const baseContext = {
-        actionContextDigest: digest('action-context'),
+        actionContextDigest:
+            statementContext.actionContextDigest ?? digest('action-context'),
         aggregateInputEncodingProfileDigest:
             profileSet.aggregateInputEncodingProfile
                 .aggregateInputEncodingProfileDigest,
@@ -339,23 +371,30 @@ const publicContextAndProjectionWitness = (
                 .ballotScoreEncodingProfileDigest,
         ballotShareLayoutProfileDigest:
             profileSet.ballotShareLayoutProfile.ballotShareLayoutProfileDigest,
-        ceremonyId: 'ceremony-proof-record-generation',
+        ceremonyId:
+            statementContext.ceremonyId ?? 'ceremony-proof-record-generation',
         encodedAggregateLayoutDigest:
             profileSet.encodedAggregateLayoutProfile
                 .encodedAggregateLayoutDigest,
         encodedShareVectorLayoutDigest:
             profileSet.encodedShareVectorLayoutProfile
                 .encodedShareVectorLayoutDigest,
-        manifestDigest: digest('manifest'),
-        payloadContextDigest: digest('payload-context'),
-        pollSpecDigest: digest('poll-spec'),
+        manifestDigest: statementContext.manifestDigest ?? digest('manifest'),
+        payloadContextDigest:
+            statementContext.payloadContextDigest ?? digest('payload-context'),
+        pollSpecDigest: statementContext.pollSpecDigest ?? digest('poll-spec'),
         receiverEncryptionProfileDigest:
             profileSet.receiverEncryptionProfile
                 .receiverEncryptionProfileDigest,
-        receiverKeyProofRoot: digest('receiver-key-proof-root'),
-        receiverKeyRoot: digest('receiver-key-root'),
-        rosterDigest: digest('roster'),
-        rosterExternalAcceptanceDigest: digest('external-acceptance'),
+        receiverKeyProofRoot:
+            statementContext.receiverKeyProofRoot ??
+            digest('receiver-key-proof-root'),
+        receiverKeyRoot:
+            statementContext.receiverKeyRoot ?? digest('receiver-key-root'),
+        rosterDigest: statementContext.rosterDigest ?? digest('roster'),
+        rosterExternalAcceptanceDigest:
+            statementContext.rosterExternalAcceptanceDigest ??
+            digest('external-acceptance'),
         scoreMembershipProfileDigest:
             profileSet.scoreMembershipProfile.scoreMembershipProfileDigest,
         shareCommitmentMessageBoundCertDigest:
@@ -363,6 +402,8 @@ const publicContextAndProjectionWitness = (
         shareCommitmentProfileDigest:
             profileSet.shareCommitmentProfile.shareCommitmentProfileDigest,
     };
+    const voterIdentityDigest =
+        statementContext.voterIdentityDigest ?? digest('voter-1');
     const receiverRecords = relationInput.receivers.map((receiver) => {
         const openingRandomness = shareCommitmentOpeningForReceiver(
             receiver.receiverRosterPosition,
@@ -449,7 +490,7 @@ const publicContextAndProjectionWitness = (
                                 .receiverPublicKeyDigest,
                         receiverRosterPosition: receiver.receiverRosterPosition,
                         rosterDigest: baseContext.rosterDigest,
-                        voterIdentityDigest: digest('voter-1'),
+                        voterIdentityDigest,
                     });
 
                     return {
@@ -595,6 +636,7 @@ const ballotProofStatement = (input: {
     readonly publicContext: BallotPrivacyRelationBackendPublicContext;
     readonly relationInput: BallotPrivacyRelationCompilerInput;
     readonly receiverKeyProofRootEvidence: ReceiverKeyProofRootEvidence;
+    readonly statementContext?: BallotProofRecordGenerationStatementContextOptions;
     readonly topOptionCount: number;
 }): BallotProofStatement => {
     const statementInput = {
@@ -607,7 +649,9 @@ const ballotProofStatement = (input: {
         ballotShareLayoutProfileDigest:
             input.publicContext.ballotShareLayoutProfileDigest,
         ceremonyId: input.publicContext.ceremonyId,
-        duplicateBallotPolicyDigest: digest('duplicate-ballot-policy'),
+        duplicateBallotPolicyDigest:
+            input.statementContext?.duplicateBallotPolicyDigest ??
+            digest('duplicate-ballot-policy'),
         encodedAggregateLayoutDigest:
             input.publicContext.encodedAggregateLayoutDigest,
         encodedShareVectorLayoutDigest:
@@ -640,7 +684,8 @@ const ballotProofStatement = (input: {
         rosterDigest: input.publicContext.rosterDigest,
         rosterExternalAcceptanceDigest:
             input.publicContext.rosterExternalAcceptanceDigest,
-        scoreDomainDigest: digest('score-domain'),
+        scoreDomainDigest:
+            input.statementContext?.scoreDomainDigest ?? digest('score-domain'),
         scoreMembershipProfileDigest:
             input.publicContext.scoreMembershipProfileDigest,
         shareCommitmentMessageBoundCertDigest:
@@ -654,12 +699,18 @@ const ballotProofStatement = (input: {
                 shareCommitmentDigest: shareCommitment.shareCommitmentDigest,
             }),
         ),
-        thresholdProfileDigest: digest('threshold-profile'),
-        tiePolicyDigest: digest('tie-policy'),
+        thresholdProfileDigest:
+            input.statementContext?.thresholdProfileDigest ??
+            digest('threshold-profile'),
+        tiePolicyDigest:
+            input.statementContext?.tiePolicyDigest ?? digest('tie-policy'),
         topOptionCount: input.topOptionCount,
-        voterIdentityDigest: digest('voter-1'),
-        voterRosterPosition: 1,
-        voterSigningKeyDigest: digest('voter-signing-key'),
+        voterIdentityDigest:
+            input.statementContext?.voterIdentityDigest ?? digest('voter-1'),
+        voterRosterPosition: input.statementContext?.voterRosterPosition ?? 1,
+        voterSigningKeyDigest:
+            input.statementContext?.voterSigningKeyDigest ??
+            digest('voter-signing-key'),
     };
     const placeholderStatement = buildBallotProofStatement({
         ...statementInput,
@@ -689,5 +740,6 @@ export {
 export type {
     ProofParameterSet,
     ProofEncoding,
+    BallotProofRecordGenerationStatementContextOptions,
     BallotProofRecordGenerationFixtureOptions,
 };

@@ -1,3 +1,4 @@
+import { deriveProtocolDigest } from '@sealed-lattice/crypto';
 import type { BallotProofStatement } from '@sealed-lattice/types';
 
 import {
@@ -24,6 +25,7 @@ import {
 import type {
     BallotProofRecordGenerationFixture,
     BallotProofRecordGenerationFixtureOptions,
+    BallotProofRecordGenerationStatementContextOptions,
     ProofEncoding,
     ProofParameterSet,
 } from './fixture-inputs.js';
@@ -354,22 +356,72 @@ const componentProofContracts = (input: {
     };
 };
 
-const deterministicRandomness = (): BallotProofRecordGenerationRandomness => ({
+const deterministicRandomnessHex = (input: {
+    readonly randomnessSeedLabel: string;
+    readonly randomnessPurpose: string;
+}): string =>
+    deriveProtocolDigest('ChallengeDomainDigest', {
+        purpose: 'ballot-proof-record-generation-fixture-randomness',
+        randomnessPurpose: input.randomnessPurpose,
+        randomnessSeedLabel: input.randomnessSeedLabel,
+    }).slice(0, 64);
+
+const deterministicRandomness = (
+    randomnessSeedLabel = 'default-ballot-proof-record-generation-fixture',
+): BallotProofRecordGenerationRandomness => ({
     componentProverRandomnessHexes: {
-        'payload-plaintext-field-component': 'a2'.repeat(32),
-        'receiver-encryption-component': 'a4'.repeat(32),
-        'score-and-shamir-field-component': '07'.repeat(32),
-        'share-commitment-component': '0c'.repeat(32),
+        'payload-plaintext-field-component': deterministicRandomnessHex({
+            randomnessPurpose:
+                'payload-plaintext-field-component-prover-randomness',
+            randomnessSeedLabel,
+        }),
+        'receiver-encryption-component': deterministicRandomnessHex({
+            randomnessPurpose:
+                'receiver-encryption-component-prover-randomness',
+            randomnessSeedLabel,
+        }),
+        'score-and-shamir-field-component': deterministicRandomnessHex({
+            randomnessPurpose: 'score-and-shamir-component-prover-randomness',
+            randomnessSeedLabel,
+        }),
+        'share-commitment-component': deterministicRandomnessHex({
+            randomnessPurpose: 'share-commitment-component-prover-randomness',
+            randomnessSeedLabel,
+        }),
     },
     componentPublicRandomnessHexes: {
-        'payload-plaintext-field-component': '22'.repeat(32),
-        'receiver-encryption-component': '44'.repeat(32),
-        'receiver-key-binding-component': '55'.repeat(32),
-        'score-and-shamir-field-component': '11'.repeat(32),
-        'share-commitment-component': '33'.repeat(32),
+        'payload-plaintext-field-component': deterministicRandomnessHex({
+            randomnessPurpose:
+                'payload-plaintext-field-component-public-randomness',
+            randomnessSeedLabel,
+        }),
+        'receiver-encryption-component': deterministicRandomnessHex({
+            randomnessPurpose:
+                'receiver-encryption-component-public-randomness',
+            randomnessSeedLabel,
+        }),
+        'receiver-key-binding-component': deterministicRandomnessHex({
+            randomnessPurpose:
+                'receiver-key-binding-component-public-randomness',
+            randomnessSeedLabel,
+        }),
+        'score-and-shamir-field-component': deterministicRandomnessHex({
+            randomnessPurpose: 'score-and-shamir-component-public-randomness',
+            randomnessSeedLabel,
+        }),
+        'share-commitment-component': deterministicRandomnessHex({
+            randomnessPurpose: 'share-commitment-component-public-randomness',
+            randomnessSeedLabel,
+        }),
     },
-    proverRandomnessHex: '07'.repeat(32),
-    publicRandomnessHex: '00'.repeat(32),
+    proverRandomnessHex: deterministicRandomnessHex({
+        randomnessPurpose: 'top-level-prover-randomness',
+        randomnessSeedLabel,
+    }),
+    publicRandomnessHex: deterministicRandomnessHex({
+        randomnessPurpose: 'top-level-public-randomness',
+        randomnessSeedLabel,
+    }),
 });
 
 const createBallotProofRecordGenerationFixtureWithOptions = (
@@ -377,7 +429,10 @@ const createBallotProofRecordGenerationFixtureWithOptions = (
 ): BallotProofRecordGenerationFixture => {
     const relationInput = options.relationInput;
     const { projectionWitness, publicContext: contextWithoutStatement } =
-        publicContextAndProjectionWitness(relationInput);
+        publicContextAndProjectionWitness(
+            relationInput,
+            options.statementContext,
+        );
     const claimBearingReceiverPayloads = claimBearingReceiverPayloadShells(
         contextWithoutStatement,
     );
@@ -393,6 +448,7 @@ const createBallotProofRecordGenerationFixtureWithOptions = (
         publicContext: contextWithoutStatement,
         relationInput,
         receiverKeyProofRootEvidence: receiverKeyEvidence,
+        statementContext: options.statementContext,
         topOptionCount: options.topOptionCount,
     });
     const publicContext = {
@@ -405,7 +461,7 @@ const createBallotProofRecordGenerationFixtureWithOptions = (
         relationInput,
         statement,
     });
-    const randomness = deterministicRandomness();
+    const randomness = deterministicRandomness(options.randomnessSeedLabel);
     const request = {
         ...buildBallotProofRecordGenerationRequest({
             proofContracts,
@@ -464,12 +520,23 @@ export const createBallotProofRecordGenerationFixture =
     (): BallotProofRecordGenerationFixture =>
         createMicroRosterBallotProofRecordGenerationFixture(3);
 
-export const createMandatoryProfileBallotProofRecordGenerationFixture =
-    (): BallotProofRecordGenerationFixture =>
-        createBallotProofRecordGenerationFixtureWithOptions({
-            relationInput: mandatoryProfileRelationInput(),
-            topOptionCount: 20,
-        });
+type MandatoryProfileBallotProofRecordGenerationFixtureOptions = {
+    readonly normalizedScores?: readonly number[];
+    readonly randomnessSeedLabel?: string;
+    readonly statementContext?: BallotProofRecordGenerationStatementContextOptions;
+};
+
+export const createMandatoryProfileBallotProofRecordGenerationFixture = (
+    options: MandatoryProfileBallotProofRecordGenerationFixtureOptions = {},
+): BallotProofRecordGenerationFixture =>
+    createBallotProofRecordGenerationFixtureWithOptions({
+        randomnessSeedLabel: options.randomnessSeedLabel,
+        relationInput: mandatoryProfileRelationInput({
+            normalizedScores: options.normalizedScores,
+        }),
+        statementContext: options.statementContext,
+        topOptionCount: 20,
+    });
 
 export const createMandatoryProfileBallotProofRecordBenchmarkFixture =
     (): BallotProofRecordGenerationFixture =>
