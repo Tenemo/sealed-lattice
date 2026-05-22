@@ -82,6 +82,42 @@ describe('roster, manifest, first-valid, and recovery shells', () => {
         );
     });
 
+    it('rejects frozen roster profiles with mismatched embedded threshold payloads', () => {
+        const input = createRosterManifestTranscriptInput([
+            createRegistrationEntry('participant-1', 1, 0),
+            createRegistrationEntry('participant-2', 1, 1),
+            createRegistrationEntry('participant-3', 1, 2),
+        ]);
+        const changedFrozenRosterProfile = {
+            ...input.frozenRosterProfile,
+            thresholdProfile: {
+                ...input.frozenRosterProfile.thresholdProfile,
+                claimBearing: true,
+                releaseQuorum:
+                    input.frozenRosterProfile.thresholdProfile.releaseQuorum +
+                    1,
+            },
+        };
+
+        const result = verifyRosterManifestTranscript({
+            ...input,
+            frozenRosterProfile: changedFrozenRosterProfile,
+        });
+
+        expect(result.refusedObjects).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    code: 'ManifestDigestMismatch',
+                    message:
+                        'Frozen roster profile payload must match the roster-freeze derived profile.',
+                    objectDigest:
+                        changedFrozenRosterProfile.thresholdProfileDigest,
+                    objectType: 'FrozenRosterProfile',
+                }),
+            ]),
+        );
+    });
+
     it('rejects a manifest organizer that is not part of the all-trustee roster', () => {
         const input = createRosterManifestTranscriptInput(
             [

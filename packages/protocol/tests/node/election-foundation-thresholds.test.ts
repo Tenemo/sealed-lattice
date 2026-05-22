@@ -222,6 +222,32 @@ describe('election foundation threshold profiles', () => {
         expect(profile.warnings).toEqual(['ShareSelectionProfileRequired']);
     });
 
+    it('keeps mandatory benchmark profiles independent from dynamic roster certificate inputs', () => {
+        const baselineProfile = deriveThresholdProfile({ rosterSize: 20 });
+        const profileWithCertificate = deriveThresholdProfile({
+            dynamicRosterProfileCertificateDigest,
+            rosterSize: 20,
+        });
+
+        expect(profileWithCertificate).toEqual(baselineProfile);
+
+        const baselineFrozenRosterProfile = deriveFrozenRosterProfile({
+            pollSpec,
+            rosterDigest,
+            rosterSize: 20,
+        });
+        const frozenRosterProfileWithCertificate = deriveFrozenRosterProfile({
+            dynamicRosterProfileCertificateDigest,
+            pollSpec,
+            rosterDigest,
+            rosterSize: 20,
+        });
+
+        expect(frozenRosterProfileWithCertificate).toEqual(
+            baselineFrozenRosterProfile,
+        );
+    });
+
     it('does not carry invalid dynamic roster certificate digests into mandatory benchmark profiles', () => {
         const profile = deriveThresholdProfile({
             dynamicRosterProfileCertificateDigest:

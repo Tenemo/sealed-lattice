@@ -15,7 +15,13 @@ describe('Lattigo oracle boundary tooling', () => {
         );
         expect(pinnedReference.runtimeUse).toBe('forbidden');
         expect(pinnedReference.protocolEvidenceUse).toBe('forbidden');
-        expect(verification.commandDigest).toMatch(/^[a-f0-9]{64}$/u);
-        expect(verification.dockerfileDigest).toMatch(/^[a-f0-9]{64}$/u);
+        expect(verification.commandDigest).toBe(
+            pinnedReference.oracleCommandDigest,
+        );
+        expect(verification.dockerfileDigest).toBe(
+            pinnedReference.oracleDockerfileDigest,
+        );
+        expect(typeof verification.archivePresent).toBe('boolean');
+        expect(typeof verification.checkoutPresent).toBe('boolean');
     });
 });

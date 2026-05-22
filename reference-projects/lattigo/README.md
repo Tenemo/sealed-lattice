@@ -13,6 +13,6 @@ Pinned reference:
 - Required Go toolchain for the oracle container: `go1.25.0`
 - Container base image digest: `sha256:81dc45d05a7444ead8c92a389621fafabc8e40f8fd1a19d7e5df14e61e98bc1a`
 - Oracle command digest: `63d1b1c2b60c96e4654b584e2288945e1cdc6bf65f2a9f00077f083757e588c3`
-- Oracle Dockerfile digest: `92b8ed9aacc8fada0cdd59cd49488c1ae1c056487c1cf18ec58a6db9f948bf86`
+- Oracle Dockerfile digest: `9045a4402372359f14cb3baea7e8177b2f12c41059faf66d5ccf203301e45f28`
 
 The oracle tooling in `tools/lattigo-oracle/` may compare behavior that is actually comparable, such as selected ring construction, coefficient-domain arithmetic, and NTT/INTT round trips. It must not accept Lattigo serialization, keys, default parameters, Docker output, or oracle roots as transcript objects.

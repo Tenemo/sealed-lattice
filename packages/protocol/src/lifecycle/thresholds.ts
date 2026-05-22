@@ -230,8 +230,7 @@ const deriveRosterProfile = (
         return {
             claimBoundary: 'MandatoryBenchmark',
             claimBearing: true,
-            dynamicRosterProfileCertificateDigest:
-                dynamicRosterProfileCertificateDigest,
+            dynamicRosterProfileCertificateDigest: null,
             rosterProfileKind: 'MandatoryBenchmarkRoster',
             warnings: [],
         };

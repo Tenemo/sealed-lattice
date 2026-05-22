@@ -14,7 +14,11 @@ const oracleDirectoryPath = path.join(repoRoot, 'tools/lattigo-oracle');
 type PinnedReference = {
     readonly archivePath: string;
     readonly archiveSha256: string;
+    readonly containerBaseImage: string;
+    readonly containerBaseImageDigest: string;
     readonly localCheckoutPath: string;
+    readonly oracleCommandDigest: string;
+    readonly oracleDockerfileDigest: string;
     readonly pinnedCommit: string;
     readonly runtimeUse: string;
     readonly protocolEvidenceUse: string;
@@ -31,6 +35,18 @@ const sha256Text = (text: string): string =>
 
 export const loadPinnedReference = async (): Promise<PinnedReference> =>
     JSON.parse(await readFile(pinnedReferencePath, 'utf8')) as PinnedReference;
+
+const assertPinnedDigest = (
+    label: string,
+    actualDigest: string,
+    expectedDigest: string,
+): void => {
+    if (actualDigest !== expectedDigest) {
+        throw new Error(
+            `The pinned Lattigo ${label} digest changed: ${actualDigest}.`,
+        );
+    }
+};
 
 export const verifyPinnedReference = async (): Promise<{
     readonly archivePresent: boolean;
@@ -88,11 +104,31 @@ export const verifyPinnedReference = async (): Promise<{
         readFile(path.join(oracleDirectoryPath, 'Dockerfile'), 'utf8'),
     ]);
 
+    const expectedBaseImageReference = `${pinnedReference.containerBaseImage}@${pinnedReference.containerBaseImageDigest}`;
+    const dockerfileFirstLine = dockerfile.split(/\r?\n/u)[0];
+    if (dockerfileFirstLine !== `FROM ${expectedBaseImageReference}`) {
+        throw new Error(
+            `The Lattigo oracle Dockerfile must pin ${expectedBaseImageReference}.`,
+        );
+    }
+    const commandDigest = sha256Text(`${mainSource}\n${goModule}`);
+    const dockerfileDigest = sha256Text(dockerfile);
+    assertPinnedDigest(
+        'oracle command',
+        commandDigest,
+        pinnedReference.oracleCommandDigest,
+    );
+    assertPinnedDigest(
+        'oracle Dockerfile',
+        dockerfileDigest,
+        pinnedReference.oracleDockerfileDigest,
+    );
+
     return {
         archivePresent,
         checkoutPresent,
-        commandDigest: sha256Text(`${mainSource}\n${goModule}`),
-        dockerfileDigest: sha256Text(dockerfile),
+        commandDigest,
+        dockerfileDigest,
     };
 };
 
