@@ -539,6 +539,14 @@ fn encoded_score_field_ballot_record_rejects_without_full_relation_coverage() {
             vector_case["statementMatrixCoefficients"].clone(),
         );
         linear_statement_object.insert(
+            "matrixCoefficientRepresentation".to_string(),
+            vector_case
+                .get("matrixCoefficientRepresentation")
+                .or_else(|| vectors.get("matrixCoefficientRepresentation"))
+                .cloned()
+                .unwrap_or_else(|| json!("canonicalUnsignedSourceModulus")),
+        );
+        linear_statement_object.insert(
             "targetVectorCoefficients".to_string(),
             vector_case["targetVectorCoefficients"].clone(),
         );
@@ -804,6 +812,14 @@ pub(super) fn dense_component_proof_input_for_vector(
         proof_statement_object.insert(
             "statementMatrixCoefficients".to_string(),
             vector_case["statementMatrixCoefficients"].clone(),
+        );
+        proof_statement_object.insert(
+            "matrixCoefficientRepresentation".to_string(),
+            vector_case
+                .get("matrixCoefficientRepresentation")
+                .or_else(|| vectors.get("matrixCoefficientRepresentation"))
+                .cloned()
+                .unwrap_or_else(|| json!("canonicalUnsignedSourceModulus")),
         );
         proof_statement_object.insert(
             "targetVectorCoefficients".to_string(),

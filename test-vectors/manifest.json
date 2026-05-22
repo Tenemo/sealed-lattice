@@ -3,7 +3,7 @@
   "entries": [
     {
       "path": "ballot-privacy/ballot-field-linear-proof-vectors.json",
-      "sha256": "e1d24bee3ebf989eaebcbc5ef061f18fb3ccc51baaacca72af4f11b2f58c9727"
+      "sha256": "5ec55aa926c83824e614075af63e10762ac7e65d9aaf71c8dcc9a55c469cad43"
     },
     {
       "path": "ballot-privacy/encoded-ballot-linear-relation-vectors.json",
@@ -11,7 +11,7 @@
     },
     {
       "path": "ballot-privacy/proof-backend-linear-vectors.json",
-      "sha256": "2e05b83d7f76c656d09e8162bb07d192540336fdb661db0b269264df74b0e7d8"
+      "sha256": "39b28f149c90b563fe9617b34bc1ff0e74f325e98bc11b83d8aa57b435018335"
     },
     {
       "path": "ballot-privacy/proof-stack-profile.json",
@@ -23,7 +23,7 @@
     },
     {
       "path": "ballot-privacy/receiver-key-linear-proof-vectors.json",
-      "sha256": "3066111ace6b8c5ce30e396cb524cd544c17b2879868fb6d9c25c810e73566c6"
+      "sha256": "4bb02b9f2697a2a5090b83bfbdacce7a611165ac3e4daef14aa5b41a02b6a583"
     },
     {
       "path": "ballot-privacy/receiver-key-proof-vectors.json",

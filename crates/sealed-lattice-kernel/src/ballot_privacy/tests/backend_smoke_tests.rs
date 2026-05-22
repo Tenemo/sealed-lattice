@@ -98,6 +98,10 @@ pub(super) fn expand_encoded_score_field_vector_case(
             .cloned()
             .unwrap_or_else(|| vectors["publicRandomnessHex"].clone()),
         "statementMatrixCoefficients": statement_matrix,
+        "matrixCoefficientRepresentation": vectors
+            .get("matrixCoefficientRepresentation")
+            .cloned()
+            .unwrap_or_else(|| json!("canonicalUnsignedSourceModulus")),
         "targetVectorCoefficients": target_vector,
         "targetCoefficientRepresentation": vectors["targetCoefficientRepresentation"],
         "proofHex": compact_case

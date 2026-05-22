@@ -110,6 +110,7 @@ fn sparse_component_proof_statement_from_dense_statement(
         "relationStatementDigest": dense_statement["relationStatementDigest"],
         "sourceBackendColumnIndices": source_backend_column_indices,
         "sourceRingDegree": dense_statement["ringDegree"],
+        "matrixCoefficientRepresentation": dense_statement["matrixCoefficientRepresentation"],
         "sparseStatementMatrixDigest": sparse_matrix_digest,
         "sparseStatementMatrixEntries": sparse_matrix_entries_value,
         "sparseStatementTermCount": sparse_matrix_entries_value.as_array().expect("sparse matrix entries should be an array").len(),
@@ -515,7 +516,10 @@ fn component_linear_proof_bytes_verify_dense_and_sparse_public_statements() {
         &dense_proof_input,
     );
 
-    assert_eq!(dense_verification["ok"], true);
+    assert_eq!(
+        dense_verification["ok"], true,
+        "dense component statement should verify: {dense_verification}"
+    );
     assert!(
         dense_verification["statusLabels"]
             .as_array()

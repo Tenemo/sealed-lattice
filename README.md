@@ -56,7 +56,7 @@ Implemented internally:
 - ballot proof records that bind backend statements, component proof bundles, proof bytes, proof encodings, proof parameter sets, and public randomness;
 - scoped relation-bearing ballot package verification that recomputes the package digest, requires accepted receiver-key proof root evidence, checks receiver coverage, rejects witness leakage, binds the full ballot relation to the supplied component bundle, and verifies the top-level and component proof bytes;
 - aggregate derivation statements and components that bind a canonical post-close counted set of proof-byte-bearing package shells, voting-closed close-record evidence, contributor action context, contributor identity, homomorphic aggregate share commitment, full encoded share layout, no-wraparound certificate, and Rust/WASM proof bytes for hidden aggregate opening knowledge. Component verification reruns the counted packages through the accepted M5 Rust/WASM package verifier and recomputes the aggregate package references, ballot-set digest, and public aggregate commitment sum;
-- native and WASM verification of public vectors for the supported internal linear proof slices and full encoded-score package path.
+- native and WASM verification of public vectors for the supported internal linear proof slices and full encoded-score package path, including LaZer-oracle parity for the encoded-score field-row vector's canonical matrix and target coefficient representation.
 
 Still unavailable:
 
