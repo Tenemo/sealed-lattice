@@ -170,18 +170,27 @@ const lowercaseHexBytesPattern = /^(?:[a-f0-9]{2})+$/u;
 
 const forbiddenPublicWitnessFieldNames = new Set([
     'aggregateIntegerShareVector',
+    'aggregateHistogram',
     'aggregateOpeningRandomness',
+    'aggregateScore',
+    'aggregateScoreBits',
     'aggregateShareVector',
     'bridgeWitness',
     'openingRandomness',
     'plaintext',
+    'plaintextComparisonInputs',
+    'plaintextScoreBitInputs',
     'proofWitness',
     'quotient',
+    'rawAggregateWitness',
     'receiverPlaintext',
     'receiverSecretState',
     'reducedFieldVector',
     'secretState',
     'sourceWitnessCoefficients',
+    'targetBasisDataPlaintext',
+    'tPvss',
+    't_pvss',
     'witness',
 ]);
 

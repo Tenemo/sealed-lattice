@@ -142,6 +142,31 @@ describe('roster, manifest, first-valid, and recovery shells', () => {
                 },
             },
         );
+        const manifestWithUnexpectedOpaqueBinding = createElectionManifest(
+            registrations,
+            {
+                boardSequence: 4,
+                manifestOpaqueBindings: {
+                    ...manifestOpaqueBindings,
+                    unexpectedBridgeBindingDigest: deriveProtocolDigest(
+                        'BridgeLayoutDigest',
+                        { profile: 'unexpected-profile-binding' },
+                    ),
+                } as typeof manifestOpaqueBindings,
+            },
+        );
+        const incompleteOpaqueBindings = {
+            ...manifestOpaqueBindings,
+        } as Record<string, unknown>;
+        delete incompleteOpaqueBindings.encryptedAggregateBridgeDigest;
+        const manifestWithIncompleteOpaqueBindings = createElectionManifest(
+            registrations,
+            {
+                boardSequence: 4,
+                manifestOpaqueBindings:
+                    incompleteOpaqueBindings as typeof manifestOpaqueBindings,
+            },
+        );
         const changedPollSpecManifest = createElectionManifest(registrations, {
             boardSequence: 4,
             pollSpecDigest: deriveProtocolDigest('PollSpecDigest', {
@@ -226,6 +251,25 @@ describe('roster, manifest, first-valid, and recovery shells', () => {
                 expect.objectContaining({ code: 'ManifestDigestMismatch' }),
             ]),
         );
+        for (const manifest of [
+            manifestWithUnexpectedOpaqueBinding,
+            manifestWithIncompleteOpaqueBindings,
+        ]) {
+            expect(
+                verifyRosterManifestTranscript({
+                    ...input,
+                    electionManifest: manifest,
+                }).refusedObjects,
+            ).toEqual(
+                expect.arrayContaining([
+                    expect.objectContaining({
+                        code: 'ManifestDigestMismatch',
+                        message:
+                            'Election manifest opaque bindings must use the current encrypted-aggregate profile schema.',
+                    }),
+                ]),
+            );
+        }
         expect(
             verifyRosterManifestTranscript({
                 ...input,

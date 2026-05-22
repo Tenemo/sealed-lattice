@@ -1,8 +1,8 @@
 import { verifySignedObjectSignature } from '@sealed-lattice/crypto';
 import {
-    bridgeProofProfileId,
+    bridgeWitnessPrivacyProfileId,
     cpadProfileId,
-    directTargetBasisDataBridgeProfileId,
+    encryptedAggregateBridgeProfileId,
     evaluationProofProfileId,
     mobileProfileId,
     thresholdDecryptionProfileId,
@@ -40,6 +40,42 @@ const protocolDigestPattern = /^[0-9a-f]{128}$/u;
 const isProtocolDigestString = (value: ProtocolDigest): boolean =>
     protocolDigestPattern.test(value);
 
+const manifestOpaqueBindingFieldNames = new Set([
+    'encryptedAggregateBridgeProfileId',
+    'bridgeWitnessPrivacyProfileId',
+    'heParamDigest',
+    'bgvProfileDigest',
+    'rustBgvBackendProfileDigest',
+    'bgvPublicKeyRoot',
+    'collectivePublicKeyRoot',
+    'canonicalCiphertextConventionDigest',
+    'encryptedAggregateBridgeDigest',
+    'bridgeWitnessPrivacyProfileDigest',
+    'bgvBatchEncoderDigest',
+    'bridgeLayoutDigest',
+    'encryptedAggregateTargetBasisDataRoot',
+    'encryptedAggregateShareCiphertextRoot',
+    'encryptedAggregateReconstructionDigest',
+    'scoreBitDerivationCircuitDigest',
+    'comparisonInputDerivationCircuitDigest',
+    'encryptedComparisonInputDigest',
+    'evaluationNoiseProfileDigest',
+    'heEvaluationNoiseCertDigest',
+    'allowedEvaluatorOpsDigest',
+    'evaluationProofProfileId',
+    'evaluationProofProfileDigest',
+    'thresholdDecryptionProfileId',
+    'thresholdDecryptionProfileDigest',
+    'bgvAsyncThresholdCPADProfileDigest',
+    'cpadProfileId',
+    'cpadProfileDigest',
+    'targetBasisDigest',
+    'mobileProfileId',
+    'bridgeMobileCertificatePolicyDigest',
+]);
+
+const manifestOpaqueBindingFieldCount = manifestOpaqueBindingFieldNames.size;
+
 const collectManifestOpaqueBindingRefusals = (
     manifest: ElectionManifest,
 ): readonly RefusalRecord[] => {
@@ -47,9 +83,10 @@ const collectManifestOpaqueBindingRefusals = (
     const bindings = manifest.manifestOpaqueBindings;
 
     if (
-        bindings.bridgeProofProfileId !== bridgeProofProfileId ||
-        bindings.directTargetBasisDataBridgeProfileId !==
-            directTargetBasisDataBridgeProfileId ||
+        bindings.encryptedAggregateBridgeProfileId !==
+            encryptedAggregateBridgeProfileId ||
+        bindings.bridgeWitnessPrivacyProfileId !==
+            bridgeWitnessPrivacyProfileId ||
         bindings.evaluationProofProfileId !== evaluationProofProfileId ||
         bindings.thresholdDecryptionProfileId !==
             thresholdDecryptionProfileId ||
@@ -65,6 +102,22 @@ const collectManifestOpaqueBindingRefusals = (
             ),
         );
     }
+    const bindingFieldNames = Object.keys(bindings);
+    if (
+        bindingFieldNames.length !== manifestOpaqueBindingFieldCount ||
+        bindingFieldNames.some(
+            (fieldName) => !manifestOpaqueBindingFieldNames.has(fieldName),
+        )
+    ) {
+        refusedObjects.push(
+            createRefusal(
+                'ManifestDigestMismatch',
+                'Election manifest opaque bindings must use the current encrypted-aggregate profile schema.',
+                manifest.electionManifestDigest,
+                'ElectionManifest',
+            ),
+        );
+    }
 
     const requiredDigestFields = [
         bindings.heParamDigest,
@@ -73,11 +126,16 @@ const collectManifestOpaqueBindingRefusals = (
         bindings.bgvPublicKeyRoot,
         bindings.collectivePublicKeyRoot,
         bindings.canonicalCiphertextConventionDigest,
-        bindings.bridgeProofProfileDigest,
+        bindings.encryptedAggregateBridgeDigest,
+        bindings.bridgeWitnessPrivacyProfileDigest,
         bindings.bgvBatchEncoderDigest,
         bindings.bridgeLayoutDigest,
-        bindings.scoreBitAggregationRelationDigest,
-        bindings.encryptedScoreBitInputLayoutDigest,
+        bindings.encryptedAggregateTargetBasisDataRoot,
+        bindings.encryptedAggregateShareCiphertextRoot,
+        bindings.encryptedAggregateReconstructionDigest,
+        bindings.scoreBitDerivationCircuitDigest,
+        bindings.comparisonInputDerivationCircuitDigest,
+        bindings.encryptedComparisonInputDigest,
         bindings.evaluationNoiseProfileDigest,
         bindings.heEvaluationNoiseCertDigest,
         bindings.allowedEvaluatorOpsDigest,

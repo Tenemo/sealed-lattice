@@ -64,19 +64,24 @@ export type ManifestPolicyDigests = {
 
 /** Opaque cryptographic implementation bindings embedded in a manifest. */
 export type ManifestOpaqueBindings = {
-    readonly bridgeProofProfileId: string;
-    readonly directTargetBasisDataBridgeProfileId: string;
+    readonly encryptedAggregateBridgeProfileId: string;
+    readonly bridgeWitnessPrivacyProfileId: string;
     readonly heParamDigest: ProtocolDigest;
     readonly bgvProfileDigest: ProtocolDigest;
     readonly rustBgvBackendProfileDigest: ProtocolDigest;
     readonly bgvPublicKeyRoot: ProtocolDigest;
     readonly collectivePublicKeyRoot: ProtocolDigest;
     readonly canonicalCiphertextConventionDigest: ProtocolDigest;
-    readonly bridgeProofProfileDigest: ProtocolDigest;
+    readonly encryptedAggregateBridgeDigest: ProtocolDigest;
+    readonly bridgeWitnessPrivacyProfileDigest: ProtocolDigest;
     readonly bgvBatchEncoderDigest: ProtocolDigest;
     readonly bridgeLayoutDigest: ProtocolDigest;
-    readonly scoreBitAggregationRelationDigest: ProtocolDigest;
-    readonly encryptedScoreBitInputLayoutDigest: ProtocolDigest;
+    readonly encryptedAggregateTargetBasisDataRoot: ProtocolDigest;
+    readonly encryptedAggregateShareCiphertextRoot: ProtocolDigest;
+    readonly encryptedAggregateReconstructionDigest: ProtocolDigest;
+    readonly scoreBitDerivationCircuitDigest: ProtocolDigest;
+    readonly comparisonInputDerivationCircuitDigest: ProtocolDigest;
+    readonly encryptedComparisonInputDigest: ProtocolDigest;
     readonly evaluationNoiseProfileDigest: ProtocolDigest;
     readonly heEvaluationNoiseCertDigest: ProtocolDigest;
     readonly allowedEvaluatorOpsDigest: ProtocolDigest;

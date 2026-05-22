@@ -5,13 +5,11 @@ export const targetBoundShareSelectionProfileId =
 /** CPAD profile required by the target-bound decryption path. */
 export const cpadProfileId = 'CPAD-BGV-AsyncThreshold-v1';
 
-/** Bridge proof profile required by accepted manifests. */
-export const bridgeProofProfileId =
-    'CommittedAggregateShare-TargetBasisData-HwangPiEnc-BGV-v1';
+/** Encrypted aggregate bridge profile required by accepted manifests. */
+export const encryptedAggregateBridgeProfileId = 'EncryptedAggregateBridge-v1';
 
-/** Direct TargetBasisData BGV binding profile required inside accepted manifests. */
-export const directTargetBasisDataBridgeProfileId =
-    'CommittedAggregateShare-TargetBasisData-BGV-v1';
+/** Bridge witness privacy profile required by accepted manifests. */
+export const bridgeWitnessPrivacyProfileId = 'BridgeWitnessPrivacy-v1';
 
 /** Evaluation proof profile required by accepted manifests. */
 export const evaluationProofProfileId = 'PQEvalProof-STARK-BGVReplay-v1';

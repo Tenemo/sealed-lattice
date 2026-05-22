@@ -6,9 +6,9 @@ import {
     deriveProtocolSignatureDigest,
 } from '@sealed-lattice/crypto';
 import {
-    bridgeProofProfileId,
+    bridgeWitnessPrivacyProfileId,
     cpadProfileId,
-    directTargetBasisDataBridgeProfileId,
+    encryptedAggregateBridgeProfileId,
     evaluationNoiseProfileId,
     evaluationProofProfileId,
     mobileProfileId,
@@ -94,6 +94,10 @@ export const defaultTopKEvaluationRecordDigest = deriveProtocolDigest(
     'TopKEvaluationRecordDigest',
     { proposal: 'top-k' },
 );
+export const defaultThresholdProfileDigest = deriveProtocolDigest(
+    'ThresholdProfileDigest',
+    { profile: 'default-target-finality-threshold-profile' },
+);
 export const witnessPublicKeyDigests = Object.fromEntries(
     witnessIdentities.map((witnessIdentity) => [
         witnessIdentity,
@@ -132,8 +136,8 @@ export const manifestPolicyDigests: ManifestPolicyDigests = {
     witnessPolicyDigest,
 };
 export const manifestOpaqueBindings: ManifestOpaqueBindings = {
-    bridgeProofProfileId,
-    directTargetBasisDataBridgeProfileId,
+    encryptedAggregateBridgeProfileId,
+    bridgeWitnessPrivacyProfileId,
     heParamDigest: deriveProtocolDigest('HEParamDigest', {
         profile: 'BGV-RNS-v1',
     }),
@@ -156,25 +160,58 @@ export const manifestOpaqueBindings: ManifestOpaqueBindings = {
         'CanonicalCiphertextConventionDigest',
         { convention: 'bgv-rns-coefficient-domain-c0-plus-c1-s' },
     ),
-    bridgeProofProfileDigest: deriveProtocolDigest('BridgeProofProfileDigest', {
-        profile: bridgeProofProfileId,
-    }),
+    encryptedAggregateBridgeDigest: deriveProtocolDigest(
+        'EncryptedAggregateBridgeDigest',
+        {
+            profile: encryptedAggregateBridgeProfileId,
+        },
+    ),
+    bridgeWitnessPrivacyProfileDigest: deriveProtocolDigest(
+        'BridgeWitnessPrivacyProfileDigest',
+        {
+            profile: bridgeWitnessPrivacyProfileId,
+        },
+    ),
     bgvBatchEncoderDigest: deriveProtocolDigest('BGVBatchEncoderDigest', {
         layout: 'WinnerRankTopK-v1',
     }),
     bridgeLayoutDigest: deriveProtocolDigest('BridgeLayoutDigest', {
-        layout: 'target-basis-data-encoded-aggregate-layout-v1',
+        layout: 'encrypted-aggregate-target-basis-data-layout-v1',
     }),
-    scoreBitAggregationRelationDigest: deriveProtocolDigest(
-        'ScoreBitAggregationRelationDigest',
+    encryptedAggregateTargetBasisDataRoot: deriveProtocolDigest(
+        'EncryptedAggregateTargetBasisDataRoot',
         {
-            relation: 'ScoreBitAggregationRelation-v1',
+            layout: 'encrypted-aggregate-target-basis-data-v1',
         },
     ),
-    encryptedScoreBitInputLayoutDigest: deriveProtocolDigest(
-        'EncryptedScoreBitInputLayoutDigest',
+    encryptedAggregateShareCiphertextRoot: deriveProtocolDigest(
+        'EncryptedAggregateShareCiphertextRoot',
         {
-            layout: 'encrypted-score-bit-target-basis-data-v1',
+            layout: 'encrypted-aggregate-share-ciphertexts-v1',
+        },
+    ),
+    encryptedAggregateReconstructionDigest: deriveProtocolDigest(
+        'EncryptedAggregateReconstructionDigest',
+        {
+            circuit: 'encrypted-aggregate-reconstruction-v1',
+        },
+    ),
+    scoreBitDerivationCircuitDigest: deriveProtocolDigest(
+        'ScoreBitDerivationCircuitDigest',
+        {
+            circuit: 'score-bit-derivation-circuit-v1',
+        },
+    ),
+    comparisonInputDerivationCircuitDigest: deriveProtocolDigest(
+        'ComparisonInputDerivationCircuitDigest',
+        {
+            circuit: 'comparison-input-derivation-circuit-v1',
+        },
+    ),
+    encryptedComparisonInputDigest: deriveProtocolDigest(
+        'EncryptedComparisonInputDigest',
+        {
+            layout: 'encrypted-comparison-inputs-v1',
         },
     ),
     evaluationNoiseProfileDigest: deriveProtocolDigest(

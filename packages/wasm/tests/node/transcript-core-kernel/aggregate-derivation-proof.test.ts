@@ -28,6 +28,23 @@ const digest = (label: string): string =>
         /[^a-f0-9]/gu,
         'a',
     );
+const forbiddenBridgeWitnessFieldNames = [
+    'aggregateHistogram',
+    'aggregateIntegerShareVector',
+    'aggregateOpeningRandomness',
+    'aggregateScore',
+    'aggregateScoreBits',
+    'plaintextComparisonInputs',
+    'plaintextScoreBitInputs',
+    'proofWitness',
+    'rawAggregateWitness',
+    'receiverPlaintext',
+    'sourceWitnessCoefficients',
+    'targetBasisDataPlaintext',
+    'tPvss',
+    't_pvss',
+    'witness',
+] as const;
 
 const createFixtureBallotPackage = (input: {
     readonly fixture: ReturnType<
@@ -329,7 +346,7 @@ describe('aggregate derivation proof through the transcript-core kernel', () => 
                 component.aggregateDerivationComponentDigest,
         });
         expect(JSON.stringify(component)).not.toMatch(
-            /aggregateIntegerShareVector|aggregateOpeningRandomness|sourceWitnessCoefficients|receiverPlaintext|proofWitness/u,
+            /aggregateHistogram|aggregateIntegerShareVector|aggregateOpeningRandomness|aggregateScore|aggregateScoreBits|plaintextComparisonInputs|plaintextScoreBitInputs|proofWitness|rawAggregateWitness|receiverPlaintext|sourceWitnessCoefficients|targetBasisDataPlaintext|tPvss|t_pvss/u,
         );
 
         const verification = kernel.verifyAggregateDerivationProof({
@@ -527,6 +544,38 @@ describe('aggregate derivation proof through the transcript-core kernel', () => 
             ok: false,
             unresolvedReason: 'BallotPackageInvalid',
         });
+        for (const publicWitnessFieldName of forbiddenBridgeWitnessFieldNames) {
+            const componentWithPublicWitness = {
+                ...component,
+                [publicWitnessFieldName]: {
+                    fieldName: publicWitnessFieldName,
+                    leaked: true,
+                },
+            };
+
+            expect(
+                verifyAggregateDerivationComponentStructure(
+                    componentWithPublicWitness,
+                ),
+                publicWitnessFieldName,
+            ).toMatchObject({
+                ok: false,
+                unresolvedReason: 'BallotPackageInvalid',
+            });
+            expect(
+                kernel.verifyAggregateDerivationProof({
+                    closeRecord: postCloseEvidence.closeRecord,
+                    component: componentWithPublicWitness,
+                    contributorActionContext:
+                        postCloseEvidence.contributorActionContext,
+                    countedBallotPackages: [ballotPackage],
+                }),
+                publicWitnessFieldName,
+            ).toMatchObject({
+                ok: false,
+                unresolvedReason: 'BallotPackageInvalid',
+            });
+        }
 
         const componentWithWraparoundCertificate =
             createAggregateDerivationComponent({

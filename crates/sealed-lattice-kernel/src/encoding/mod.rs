@@ -315,6 +315,16 @@ enum TranscriptCoreCommand {
     VerifyClaimBearingBallotPackage,
     GenerateAggregateDerivationProof,
     VerifyAggregateDerivationProof,
+    DescribeBgvRnsProfile,
+    DescribeBgvOperationRegistry,
+    GenerateBgvBackendReport,
+    EncodeBgvBatchPlaintext,
+    ValidateBgvPlaintextObject,
+    ValidateBgvCiphertextObject,
+    GenerateBgvCiphertextConventionFixture,
+    GenerateBgvBaseConversionFixture,
+    AnalyzeBgvCanonicalObject,
+    RejectBgvReferenceOracleArtifact,
 }
 
 fn parse_transcript_core_command(command_name: &str) -> CanonicalResult<TranscriptCoreCommand> {
@@ -487,6 +497,18 @@ fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult<Value> {
         | TranscriptCoreCommand::VerifyAggregateDerivationProof => {
             run_ballot_privacy_command(command, &request)
         }
+        TranscriptCoreCommand::DescribeBgvRnsProfile
+        | TranscriptCoreCommand::DescribeBgvOperationRegistry
+        | TranscriptCoreCommand::GenerateBgvBackendReport
+        | TranscriptCoreCommand::EncodeBgvBatchPlaintext
+        | TranscriptCoreCommand::ValidateBgvPlaintextObject
+        | TranscriptCoreCommand::ValidateBgvCiphertextObject
+        | TranscriptCoreCommand::GenerateBgvCiphertextConventionFixture
+        | TranscriptCoreCommand::GenerateBgvBaseConversionFixture
+        | TranscriptCoreCommand::AnalyzeBgvCanonicalObject
+        | TranscriptCoreCommand::RejectBgvReferenceOracleArtifact => {
+            run_bgv_command(command, &request)
+        }
     }
 }
 
@@ -580,6 +602,42 @@ fn run_ballot_privacy_command(
             crate::ballot_privacy::verify_aggregate_derivation_proof_from_command_request(request),
         ),
         _ => unreachable!("non-ballot command dispatched to ballot privacy handler"),
+    }
+}
+
+fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> CanonicalResult<Value> {
+    match command {
+        TranscriptCoreCommand::DescribeBgvRnsProfile => {
+            crate::bgv::commands::describe_bgv_rns_profile()
+        }
+        TranscriptCoreCommand::DescribeBgvOperationRegistry => {
+            crate::bgv::commands::describe_bgv_operation_registry()
+        }
+        TranscriptCoreCommand::GenerateBgvBackendReport => {
+            crate::bgv::commands::generate_bgv_backend_report()
+        }
+        TranscriptCoreCommand::EncodeBgvBatchPlaintext => {
+            crate::bgv::commands::encode_bgv_batch_plaintext_from_request(request)
+        }
+        TranscriptCoreCommand::ValidateBgvPlaintextObject => {
+            crate::bgv::commands::validate_bgv_plaintext_from_request(request)
+        }
+        TranscriptCoreCommand::ValidateBgvCiphertextObject => {
+            crate::bgv::commands::validate_bgv_ciphertext_from_request(request)
+        }
+        TranscriptCoreCommand::GenerateBgvCiphertextConventionFixture => {
+            crate::bgv::commands::generate_bgv_ciphertext_convention_fixture_from_request(request)
+        }
+        TranscriptCoreCommand::GenerateBgvBaseConversionFixture => {
+            crate::bgv::commands::generate_bgv_base_conversion_fixture_from_request(request)
+        }
+        TranscriptCoreCommand::AnalyzeBgvCanonicalObject => {
+            crate::bgv::commands::analyze_bgv_canonical_object_from_request(request)
+        }
+        TranscriptCoreCommand::RejectBgvReferenceOracleArtifact => {
+            Ok(crate::bgv::commands::reject_bgv_reference_oracle_artifact_from_request(request))
+        }
+        _ => unreachable!("non-BGV command dispatched to BGV handler"),
     }
 }
 

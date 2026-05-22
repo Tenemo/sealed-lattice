@@ -11,6 +11,12 @@ export type {
     BallotPrivacyReceiverKeyProofGenerationPreparation,
     BallotPrivacyReceiverKeyProofGeneration,
     BallotPrivacyProofGeneration,
+    BgvBaseConversionFixture,
+    BgvBatchPlaintextEncoding,
+    BgvCiphertextConventionFixture,
+    BgvObjectValidation,
+    BgvReferenceOracleRejection,
+    BgvRnsProfileReport,
     TranscriptCoreKernel,
 } from './transcript-core-bridge/kernel-contracts.js';
 export {

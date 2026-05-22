@@ -152,6 +152,7 @@ export type TargetProposal = {
     readonly targetProposalDigest: ProtocolDigest;
     readonly ceremonyId: string;
     readonly electionManifestDigest: ProtocolDigest;
+    readonly thresholdProfileDigest: ProtocolDigest;
     readonly evaluationContextDigest: ProtocolDigest;
     readonly topKEvaluationRecordDigest: ProtocolDigest;
     readonly topKCiphertextDigest: ProtocolDigest;
@@ -229,6 +230,7 @@ export type AcceptedTargetFinalityCheckpoint = {
     readonly targetFinalityCheckpointDigest: ProtocolDigest;
     readonly finalizedBoardHeadDigest: ProtocolDigest;
     readonly topKEvaluationRecordDigest: ProtocolDigest;
+    readonly thresholdProfileDigest: ProtocolDigest;
     readonly evaluationContextDigest: ProtocolDigest;
     readonly topKCiphertextDigest: ProtocolDigest;
     readonly publicSlotMaskDigest: ProtocolDigest;

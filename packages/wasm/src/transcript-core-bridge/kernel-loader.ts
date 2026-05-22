@@ -14,6 +14,12 @@ import type {
     BallotPrivacyReceiverKeyProofGeneration,
     BallotPrivacyReceiverKeyProofGenerationPreparation,
     BallotPrivacyReceiverKeyVectorVerification,
+    BgvBaseConversionFixture,
+    BgvBatchPlaintextEncoding,
+    BgvCiphertextConventionFixture,
+    BgvObjectValidation,
+    BgvReferenceOracleRejection,
+    BgvRnsProfileReport,
     TranscriptCoreKernel,
     TranscriptCoreKernelCommand,
     TranscriptCoreKernelExports,
@@ -388,6 +394,67 @@ export const createTranscriptCoreKernelLoader = (
                             input.casualMicroRosterAcknowledged,
                         unsafeSmallRosterAcknowledged:
                             input.unsafeSmallRosterAcknowledged,
+                    }),
+                describeBgvRnsProfile: (): BgvRnsProfileReport =>
+                    executeCommand<BgvRnsProfileReport>({
+                        command: 'DescribeBgvRnsProfile',
+                    }),
+                describeBgvOperationRegistry: (): unknown =>
+                    executeCommand<unknown>({
+                        command: 'DescribeBgvOperationRegistry',
+                    }),
+                generateBgvBackendReport: (): unknown =>
+                    executeCommand<unknown>({
+                        command: 'GenerateBgvBackendReport',
+                    }),
+                encodeBgvBatchPlaintext: (input): BgvBatchPlaintextEncoding =>
+                    executeCommand<BgvBatchPlaintextEncoding>({
+                        command: 'EncodeBgvBatchPlaintext',
+                        slots: input.slots,
+                        level: input.level,
+                        includeCanonicalBytesHex:
+                            input.includeCanonicalBytesHex,
+                    }),
+                validateBgvPlaintextObject: (input): BgvObjectValidation =>
+                    executeCommand<BgvObjectValidation>({
+                        command: 'ValidateBgvPlaintextObject',
+                        canonicalBytesHex: input.canonicalBytesHex,
+                        expectedPlaintextRoot: input.expectedPlaintextRoot,
+                    }),
+                validateBgvCiphertextObject: (input): BgvObjectValidation =>
+                    executeCommand<BgvObjectValidation>({
+                        command: 'ValidateBgvCiphertextObject',
+                        canonicalBytesHex: input.canonicalBytesHex,
+                        expectedCiphertextRoot: input.expectedCiphertextRoot,
+                    }),
+                generateBgvCiphertextConventionFixture: (
+                    input,
+                ): BgvCiphertextConventionFixture =>
+                    executeCommand<BgvCiphertextConventionFixture>({
+                        command: 'GenerateBgvCiphertextConventionFixture',
+                        leftSlots: input.leftSlots,
+                        rightSlots: input.rightSlots,
+                        includeCanonicalBytesHex:
+                            input.includeCanonicalBytesHex,
+                    }),
+                generateBgvBaseConversionFixture: (
+                    input,
+                ): BgvBaseConversionFixture =>
+                    executeCommand<BgvBaseConversionFixture>({
+                        command: 'GenerateBgvBaseConversionFixture',
+                        slots: input.slots,
+                    }),
+                analyzeBgvCanonicalObject: (input): unknown =>
+                    executeCommand<unknown>({
+                        command: 'AnalyzeBgvCanonicalObject',
+                        canonicalBytesHex: input.canonicalBytesHex,
+                    }),
+                rejectBgvReferenceOracleArtifact: (
+                    input,
+                ): BgvReferenceOracleRejection =>
+                    executeCommand<BgvReferenceOracleRejection>({
+                        command: 'RejectBgvReferenceOracleArtifact',
+                        artifact: input.artifact,
                     }),
             };
         })().catch((error: unknown) => {

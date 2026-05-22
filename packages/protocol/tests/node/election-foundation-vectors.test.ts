@@ -175,6 +175,16 @@ const capabilityRefusals = capabilityRefusalsJson as CapabilityVectors;
 const boardFinality = boardFinalityJson as unknown as BoardFinalityVectors;
 const deterministicFixtures =
     deterministicFixturesJson as unknown as DeterministicFixtureVectors;
+const currentBridgeAndEvaluatorNamespaces = [
+    'EncryptedAggregateBridgeDigest',
+    'EncryptedAggregateTargetBasisDataRoot',
+    'EncryptedAggregateShareCiphertextRoot',
+    'EncryptedAggregateReconstructionDigest',
+    'BridgeWitnessPrivacyProfileDigest',
+    'ScoreBitDerivationCircuitDigest',
+    'ComparisonInputDerivationCircuitDigest',
+    'EncryptedComparisonInputDigest',
+] as const;
 
 describe('election foundation test vectors', () => {
     it('matches deterministic threshold-profile vectors', () => {
@@ -266,6 +276,9 @@ describe('election foundation test vectors', () => {
         for (const namespace of boardFinality.requiredDigestNamespaces) {
             expect(protocolDigestNamespaceValues).toContain(namespace);
         }
+        expect(boardFinality.requiredDigestNamespaces).toEqual(
+            expect.arrayContaining([...currentBridgeAndEvaluatorNamespaces]),
+        );
 
         const { expectedOrderedObjectDigests, ...orderingInput } =
             boardFinality.firstValidOrdering;

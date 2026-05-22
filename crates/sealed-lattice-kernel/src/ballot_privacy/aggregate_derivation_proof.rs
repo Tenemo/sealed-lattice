@@ -1971,18 +1971,27 @@ fn forbidden_public_witness_field(field_name: &str) -> bool {
     matches!(
         field_name,
         "aggregateIntegerShareVector"
+            | "aggregateHistogram"
             | "aggregateOpeningRandomness"
+            | "aggregateScore"
+            | "aggregateScoreBits"
             | "aggregateShareVector"
             | "bridgeWitness"
             | "openingRandomness"
             | "plaintext"
+            | "plaintextComparisonInputs"
+            | "plaintextScoreBitInputs"
             | "proofWitness"
             | "quotient"
+            | "rawAggregateWitness"
             | "receiverPlaintext"
             | "receiverSecretState"
             | "reducedFieldVector"
             | "secretState"
             | "sourceWitnessCoefficients"
+            | "targetBasisDataPlaintext"
+            | "tPvss"
+            | "t_pvss"
             | "witness"
     )
 }

@@ -16,7 +16,7 @@ The published `sealed-lattice` package currently exposes safe-by-default helpers
 - signed board consistency, cast receipt shells, close record shells, and target finality checks;
 - roster manifest verification, participant roster acceptance, deterministic first-valid ordering, and recovery-epoch checks;
 - verification-oriented ballot privacy APIs for receiver-key proofs, ballot proof records, and proof-byte-bearing scoped relation packages through the packaged Rust/WASM verifier;
-- aggregate derivation component verification for the scoped post-close M6 relation, without exposing aggregate shares, openings, quotients, receiver plaintexts, or proof witnesses.
+- aggregate derivation component verification for the scoped post-close M6 relation, without exposing aggregate shares, aggregate histograms, exact aggregate scores, aggregate score bits, openings, quotients, plaintext comparison inputs, receiver plaintexts, or proof witnesses.
 
 Reserved complete-protocol entry points such as transcript verification, bridge-proof creation, bridge-proof verification, and one-shot share-policy verification currently fail closed with `OperationUnavailable`.
 
@@ -36,8 +36,9 @@ Several protocol components exist only as workspace-internal implementation, tes
 - plaintext `GF(65537)` arithmetic, Shamir interpolation, top-k tallying, and sparse target fixtures;
 - deterministic PVSS ballot-algebra helpers used for regression tests;
 - ballot privacy profile, relation, proof-record, receiver-key proof, and scoped relation package shell infrastructure;
+- M7 sealed-lattice Rust/WASM BGV-RNS profile, selected-prime arithmetic, RNS coefficient objects, NTT/INTT, plaintext-lifted base conversion, `BGVBatchEncode_65537`, canonical plaintext/ciphertext roots, object validation, allowed-operation registry, and report commands for the encrypted aggregate path;
 - Rust/WASM transcript-core commands used to keep TypeScript and native canonicalization behavior aligned;
-- offline proof-oracle comparison tooling and generated public test vectors.
+- offline proof-oracle comparison tooling, development-only Lattigo oracle tooling, and generated public test vectors.
 
 These pieces are not exported as a public voting API and must not be used for real ballot secrecy.
 
@@ -55,8 +56,9 @@ Implemented internally:
 - receiver-key proof records with proof-byte metadata and Rust/WASM verification for supported linear proof vectors;
 - ballot proof records that bind backend statements, component proof bundles, proof bytes, proof encodings, proof parameter sets, and public randomness;
 - scoped relation-bearing ballot package verification that recomputes the package digest, requires accepted receiver-key proof root evidence, checks receiver coverage, rejects witness leakage, binds the full ballot relation to the supplied component bundle, and verifies the top-level and component proof bytes;
-- aggregate derivation statements and components that bind a canonical post-close counted set of proof-byte-bearing package shells, voting-closed close-record evidence, contributor action context, contributor identity, homomorphic aggregate share commitment, full encoded share layout, no-wraparound certificate, and Rust/WASM proof bytes for hidden aggregate opening knowledge. Component verification reruns the counted packages through the accepted M5 Rust/WASM package verifier and recomputes the aggregate package references, ballot-set digest, and public aggregate commitment sum;
+- aggregate derivation statements and components that bind a canonical post-close counted set of proof-byte-bearing package shells, voting-closed close-record evidence, contributor action context, contributor identity, homomorphic aggregate share commitment, full encoded share layout, no-wraparound certificate, and Rust/WASM proof bytes for hidden aggregate opening knowledge. Component verification reruns the counted packages through the accepted M5 Rust/WASM package verifier, recomputes the aggregate package references, ballot-set digest, and public aggregate commitment sum, and rejects public leakage of aggregate histograms, exact aggregate scores, aggregate score bits, plaintext comparison inputs, and raw aggregate witnesses;
 - native and WASM verification of public vectors for the supported internal linear proof slices and full encoded-score package path.
+- M7 BGV-RNS backend evidence is implemented internally for the selected v60 encrypted aggregate path: `N = 32768`, `p = 65537`, 16 selected 47-bit data primes, one 47-bit special prime, coefficient-domain canonical RNS objects, `PlaintextRoot`, `CiphertextRoot`, `BGVProfileDigest`, `BGVBatchEncoderDigest`, allowed evaluator-operation registry, and M6-to-M7 encrypted aggregate TargetBasisData layout/report bindings. This is backend and encoding evidence only, not setup, encryption, bridge proof, evaluator closure, decryption, CPAD, mobile certification, or active-malicious closure.
 
 Still unavailable:
 
@@ -74,6 +76,7 @@ sealed-lattice/
     sealed-lattice-kernel/      Rust transcript-core and proof-verifier kernel
   docs/                         Public documentation site
   implementation-documentation/ Internal protocol planning notes
+  reference-projects/          Ignored development-only external reference checkouts
   packages/
     crypto/                     Internal canonical JSON, digests, signatures
     protocol/                   Internal protocol logic and reference paths
@@ -127,6 +130,7 @@ pnpm run test:node:heavy
 pnpm run test:node:heavy:kernel
 pnpm run test:node
 pnpm run test:browser
+pnpm run test:lattigo-oracle
 pnpm run test:proof-benchmark
 pnpm run test:proof-benchmark:node
 pnpm run test:proof-benchmark:browser:desktop
