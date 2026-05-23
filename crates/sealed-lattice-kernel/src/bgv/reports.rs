@@ -15,7 +15,6 @@ use crate::{
             security_estimator_input_digest, selected_profile_value,
             top_k_evaluator_input_layout_digest,
         },
-        serialization::canonical_bytes_hash,
     },
     encoding::CanonicalResult,
     hashing::derive_protocol_digest,
@@ -197,11 +196,6 @@ pub(crate) fn backend_parameter_certificate_report() -> CanonicalResult<Value> {
     Ok(json!({
         "parameterCertificate": parameter_certificate_value,
         "parameterCertificateDigest": derive_protocol_digest("HEParamDigest", &parameter_certificate_value)?,
-        "parameterCertificateCanonicalBytesHash512": canonical_bytes_hash(
-            serde_json::to_string(&parameter_certificate_value)
-                .expect("parameter certificate report should serialize")
-                .as_bytes()
-        ),
         "statusLabels": [
             "ParameterCertificateReportEmitted",
             "SecurityEstimatorInputRecorded",

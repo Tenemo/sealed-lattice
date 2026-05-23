@@ -94,7 +94,7 @@ export type ManifestOpaqueBindings = {
     readonly cpadProfileDigest: ProtocolDigest;
     readonly targetBasisDigest: ProtocolDigest;
     readonly mobileProfileId: string;
-    readonly bridgeMobileCertificatePolicyDigest: ProtocolDigest;
+    readonly bridgeBenchmarkReportPolicyDigest: ProtocolDigest;
 };
 
 /** Signed election manifest accepted after roster and setup checks. */

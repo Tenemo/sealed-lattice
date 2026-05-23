@@ -266,7 +266,6 @@ export type FailureStatusLabel =
     | 'unsupportedKllpsCpadProfile'
     | 'rejectedEvaluationKeySizeProfile'
     | 'outsideMeasuredRuntimeProfile'
-    | 'localReplayUnavailable'
     | 'rejectedLocalReplayDiagnostic'
     | 'rejectedBridgeBenchmarkReport'
     | 'rejectedBoardFinalityProfile';
@@ -301,6 +300,7 @@ export type LifecycleLabelInput = {
     readonly ownBallotSubmitted?: boolean;
     readonly evaluationLocallyReplayed?: boolean;
     readonly localReplayDiagnosticVerified?: boolean;
+    readonly localReplayUnavailable?: boolean;
     readonly aggregateInputsBridgeVerified?: boolean;
     readonly witnessEquivocationEvidence?: boolean;
     readonly targetFinalityNotReached?: boolean;

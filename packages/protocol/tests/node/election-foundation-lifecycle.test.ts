@@ -184,6 +184,22 @@ describe('election foundation lifecycle', () => {
         expect(labels.resultClaimLabels).toEqual(['fullyVerified']);
     });
 
+    it('reports unavailable local replay as a diagnostic mode only', () => {
+        const labels = deriveLifecycleLabels(
+            fullyVerifiedLabelInput({
+                evaluationLocallyReplayed: true,
+                localReplayDiagnosticVerified: false,
+                localReplayUnavailable: true,
+            }),
+        );
+
+        expect(labels.modes).toContain('localReplayUnavailable');
+        expect(labels.modes).not.toContain('localReplayMatched');
+        expect(labels.modes).not.toContain('localReplayFailed');
+        expect(labels.failures).not.toContain('localReplayUnavailable');
+        expect(labels.resultClaimLabels).toEqual(['fullyVerified']);
+    });
+
     it('does not emit removed pre-v63 formal lifecycle labels', () => {
         const labels = deriveLifecycleLabels(
             fullyVerifiedLabelInput({

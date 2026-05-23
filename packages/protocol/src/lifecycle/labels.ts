@@ -211,10 +211,15 @@ export const deriveLifecycleLabels = (
     if (input.longRunningCryptographicCheck === true) {
         modes.push('longRunningCryptographicCheck');
     }
-    if (input.evaluationLocallyReplayed === true) {
+    if (input.localReplayUnavailable === true) {
+        modes.push('localReplayUnavailable');
+    } else if (input.evaluationLocallyReplayed === true) {
         modes.push('localReplayMatched');
     }
-    if (input.localReplayDiagnosticVerified === false) {
+    if (
+        input.localReplayUnavailable !== true &&
+        input.localReplayDiagnosticVerified === false
+    ) {
         modes.push('localReplayFailed');
     }
 

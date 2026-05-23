@@ -126,7 +126,7 @@ reserved_root_namespaces! {
     TARGET_BASIS_DIGEST_NAMESPACE => "sealed-lattice-root/target-basis-digest-v1",
     TOP_K_EVALUATOR_INPUT_LAYOUT_DIGEST_NAMESPACE => "sealed-lattice-root/top-k-evaluator-input-layout-digest-v1",
     MOBILE_PROFILE_CERT_DIGEST_NAMESPACE => "sealed-lattice-root/mobile-profile-cert-digest-v1",
-    BRIDGE_MOBILE_CERT_DIGEST_NAMESPACE => "sealed-lattice-root/bridge-mobile-cert-digest-v1",
+    BRIDGE_BENCHMARK_REPORT_POLICY_DIGEST_NAMESPACE => "sealed-lattice-root/bridge-benchmark-report-policy-digest-v1",
     BRIDGE_BATCHING_CERT_DIGEST_NAMESPACE => "sealed-lattice-root/bridge-batching-cert-digest-v1",
     AGGREGATE_BRIDGE_PROVER_CERT_DIGEST_NAMESPACE => "sealed-lattice-root/aggregate-bridge-prover-cert-digest-v1",
     ENCRYPTED_ENVELOPE_ROOT_NAMESPACE => "sealed-lattice-root/encrypted-envelope-root-v1",

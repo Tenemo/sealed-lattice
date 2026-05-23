@@ -62,11 +62,15 @@ pub(crate) fn convert_plaintext_lifted_basis(
     for (coefficient_index, first_limb_coefficient) in
         first_limb.iter().enumerate().take(source.coefficient_count)
     {
-        let field_value = *first_limb_coefficient % PLAINTEXT_MODULUS;
+        let field_value = *first_limb_coefficient;
+        if field_value >= PLAINTEXT_MODULUS {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "source basis is not a canonical plaintext-lifted BGV-RNS object",
+            ));
+        }
         for (modulus_index, modulus) in source.moduli.iter().enumerate() {
-            if source.residues_by_modulus[modulus_index][coefficient_index] % PLAINTEXT_MODULUS
-                != field_value
-            {
+            if source.residues_by_modulus[modulus_index][coefficient_index] != field_value {
                 return Err(CanonicalError::new(
                     CanonicalErrorCode::InvalidFixture,
                     "source basis is not a consistent plaintext-lifted BGV-RNS object",
@@ -129,6 +133,21 @@ mod tests {
         )
         .expect("data basis object");
         source.residues_by_modulus[1][0] = 8;
+
+        assert!(convert_plaintext_lifted_basis(&source, BgvBasisKind::Extended, 2).is_err());
+    }
+
+    #[test]
+    fn base_conversion_rejects_congruent_but_non_lifted_residues() {
+        let coefficients = vec![7_u64; POLYNOMIAL_DEGREE];
+        let mut source = lift_plaintext_coefficients_to_basis(
+            &coefficients,
+            BgvBasisKind::Data,
+            1,
+            layout_digest().expect("layout digest"),
+        )
+        .expect("data basis object");
+        source.residues_by_modulus[1][0] = 7 + 65_537;
 
         assert!(convert_plaintext_lifted_basis(&source, BgvBasisKind::Extended, 2).is_err());
     }

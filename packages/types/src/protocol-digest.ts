@@ -106,7 +106,7 @@ export const protocolDigestNamespaceValues = [
     'ShareReplayRefusalDigest',
     'TargetBasisDigest',
     'MobileProfileCertDigest',
-    'BridgeMobileCertDigest',
+    'BridgeBenchmarkReportPolicyDigest',
     'BridgeBatchingCertDigest',
     'AggregateBridgeProverCertDigest',
     'EncryptedEnvelopeRoot',

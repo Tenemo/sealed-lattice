@@ -1,5 +1,5 @@
 use crate::{
-    bgv::profile::{BgvBasisKind, POLYNOMIAL_DEGREE, profile_digest},
+    bgv::profile::{BgvBasisKind, POLYNOMIAL_DEGREE, layout_digest, profile_digest},
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
 };
 
@@ -101,6 +101,12 @@ impl RnsPolynomial {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
                 "claim-path BGV-RNS objects must be coefficient-domain canonical objects",
+            ));
+        }
+        if self.layout_digest != layout_digest()? {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::ProfileComponentMismatch,
+                "BGV-RNS object layout digest does not match the selected encrypted aggregate layout",
             ));
         }
         if self.residues_by_modulus.len() != self.moduli.len() {
@@ -219,6 +225,11 @@ mod tests {
         wrong_coefficient_count.residues_by_modulus[0][0] = 0;
         wrong_coefficient_count.coefficient_count = POLYNOMIAL_DEGREE - 1;
         assert!(wrong_coefficient_count.validate().is_err());
+
+        let mut wrong_layout = object.clone();
+        wrong_layout.residues_by_modulus[0][0] = 0;
+        wrong_layout.layout_digest = "0".repeat(128);
+        assert!(wrong_layout.validate().is_err());
 
         let mut wrong_limb_count = object;
         wrong_limb_count

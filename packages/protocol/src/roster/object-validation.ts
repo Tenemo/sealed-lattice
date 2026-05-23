@@ -71,7 +71,7 @@ const manifestOpaqueBindingFieldNames = new Set([
     'cpadProfileDigest',
     'targetBasisDigest',
     'mobileProfileId',
-    'bridgeMobileCertificatePolicyDigest',
+    'bridgeBenchmarkReportPolicyDigest',
 ]);
 
 const manifestOpaqueBindingFieldCount = manifestOpaqueBindingFieldNames.size;
@@ -144,7 +144,7 @@ const collectManifestOpaqueBindingRefusals = (
         bindings.kllpsTargetDecryptionProfileDigest,
         bindings.cpadProfileDigest,
         bindings.targetBasisDigest,
-        bindings.bridgeMobileCertificatePolicyDigest,
+        bindings.bridgeBenchmarkReportPolicyDigest,
     ];
 
     if (

@@ -7,7 +7,7 @@ type BlockedTargetAcceptanceTypes = [
     // @ts-expect-error target-acceptance shell types are intentionally not public.
     publicTypes.LocalReplayRecord,
     // @ts-expect-error target-acceptance shell types are intentionally not public.
-    publicTypes.targetAcceptedRecord,
+    publicTypes.TargetAcceptedRecord,
     // @ts-expect-error target-acceptance shell types are intentionally not public.
     publicTypes.TopKDecryptionShareShell,
 ];

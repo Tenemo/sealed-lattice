@@ -250,9 +250,9 @@ export const manifestOpaqueBindings: ManifestOpaqueBindings = {
         profile: 'target-basis-v1',
     }),
     mobileProfileId,
-    bridgeMobileCertificatePolicyDigest: deriveProtocolDigest(
-        'BridgeMobileCertDigest',
-        { policy: 'mobile-bridge-cert' },
+    bridgeBenchmarkReportPolicyDigest: deriveProtocolDigest(
+        'BridgeBenchmarkReportPolicyDigest',
+        { policy: 'bridge-benchmark-report' },
     ),
 };
 

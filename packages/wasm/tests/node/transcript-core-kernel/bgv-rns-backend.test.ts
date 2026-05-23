@@ -99,6 +99,9 @@ describe('BGV-RNS backend kernel commands', () => {
         expect(backendReport.statusLabels).toContain(
             'ParameterCertificateReportEmitted',
         );
+        expect(backendReport).not.toHaveProperty(
+            'parameterCertificateCanonicalBytesHash512',
+        );
     });
 
     it('encodes aggregate-share EncryptedAggregateInput slots and validates roots byte-identically', async () => {
@@ -153,6 +156,21 @@ describe('BGV-RNS backend kernel commands', () => {
             kernel.validateBgvPlaintextObject({
                 canonicalBytesHex: encoded.canonicalBytesHex ?? '',
                 expectedPlaintextRoot: '0'.repeat(128),
+            }),
+        ).toThrow(TranscriptCoreKernelCommandError);
+        const layoutDigestHex = Buffer.from(
+            profile.encryptedAggregateInputLayoutDigest,
+            'utf8',
+        ).toString('hex');
+        const wrongLayoutCanonicalBytesHex = (
+            encoded.canonicalBytesHex ?? ''
+        ).replace(
+            layoutDigestHex,
+            Buffer.from('0'.repeat(128), 'utf8').toString('hex'),
+        );
+        expect(() =>
+            kernel.validateBgvPlaintextObject({
+                canonicalBytesHex: wrongLayoutCanonicalBytesHex,
             }),
         ).toThrow(TranscriptCoreKernelCommandError);
         const wrongLayoutBinding = {
