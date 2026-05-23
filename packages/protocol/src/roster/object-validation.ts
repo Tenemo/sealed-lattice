@@ -1,5 +1,6 @@
 import { verifySignedObjectSignature } from '@sealed-lattice/crypto';
 import {
+    bgvPassiveSetupProfileId,
     bridgeWitnessPrivacyProfileId,
     cpadProfileId,
     encryptedAggregateBridgeProfileId,
@@ -42,12 +43,18 @@ const isProtocolDigestString = (value: ProtocolDigest): boolean =>
 
 const manifestOpaqueBindingFieldNames = new Set([
     'encryptedAggregateBridgeProfileId',
+    'bgvPassiveSetupProfileId',
     'bridgeWitnessPrivacyProfileId',
     'heParamDigest',
+    'bgvPassiveSetupPackageDigest',
+    'bgvSetupParameterCertificateDigest',
     'bgvProfileDigest',
     'rustBgvBackendProfileDigest',
     'bgvPublicKeyRoot',
     'collectivePublicKeyRoot',
+    'collectiveSecretDistributionCertificateDigest',
+    'errorDistributionCertificateDigest',
+    'keySwitchDecompositionDigest',
     'canonicalCiphertextConventionDigest',
     'encryptedAggregateBridgeDigest',
     'bridgeWitnessPrivacyProfileDigest',
@@ -62,6 +69,11 @@ const manifestOpaqueBindingFieldNames = new Set([
     'evaluationNoiseProfileDigest',
     'heEvaluationNoiseCertDigest',
     'allowedEvaluatorOpsDigest',
+    'rotSetDigest',
+    'evaluationKeyRoot',
+    'evaluationKeySizeProfileDigest',
+    'thresholdShareVerificationKeyRoot',
+    'thresholdShareVerificationKeyDigest',
     'evaluationProofProfileId',
     'evaluationProofProfileDigest',
     'thresholdDecryptionProfileId',
@@ -85,6 +97,7 @@ const collectManifestOpaqueBindingRefusals = (
     if (
         bindings.encryptedAggregateBridgeProfileId !==
             encryptedAggregateBridgeProfileId ||
+        bindings.bgvPassiveSetupProfileId !== bgvPassiveSetupProfileId ||
         bindings.bridgeWitnessPrivacyProfileId !==
             bridgeWitnessPrivacyProfileId ||
         bindings.evaluationProofProfileId !== evaluationProofProfileId ||
@@ -121,10 +134,15 @@ const collectManifestOpaqueBindingRefusals = (
 
     const requiredDigestFields = [
         bindings.heParamDigest,
+        bindings.bgvPassiveSetupPackageDigest,
+        bindings.bgvSetupParameterCertificateDigest,
         bindings.bgvProfileDigest,
         bindings.rustBgvBackendProfileDigest,
         bindings.bgvPublicKeyRoot,
         bindings.collectivePublicKeyRoot,
+        bindings.collectiveSecretDistributionCertificateDigest,
+        bindings.errorDistributionCertificateDigest,
+        bindings.keySwitchDecompositionDigest,
         bindings.canonicalCiphertextConventionDigest,
         bindings.encryptedAggregateBridgeDigest,
         bindings.bridgeWitnessPrivacyProfileDigest,
@@ -139,6 +157,11 @@ const collectManifestOpaqueBindingRefusals = (
         bindings.evaluationNoiseProfileDigest,
         bindings.heEvaluationNoiseCertDigest,
         bindings.allowedEvaluatorOpsDigest,
+        bindings.rotSetDigest,
+        bindings.evaluationKeyRoot,
+        bindings.evaluationKeySizeProfileDigest,
+        bindings.thresholdShareVerificationKeyRoot,
+        bindings.thresholdShareVerificationKeyDigest,
         bindings.evaluationProofProfileDigest,
         bindings.thresholdDecryptionProfileDigest,
         bindings.kllpsTargetDecryptionProfileDigest,
@@ -355,11 +378,24 @@ export const verifyTrusteeSetupEntry = (
     const expectedDigest = deriveTrusteeSetupEntryDigest({
         boardPosition: entry.boardPosition,
         boardSequence: entry.boardSequence,
+        bgvProfileDigest: entry.bgvProfileDigest,
+        collectivePublicKeyRoot: entry.collectivePublicKeyRoot,
         ceremonyId: entry.ceremonyId,
         deviceEpoch: entry.deviceEpoch,
+        evaluationKeyRoot: entry.evaluationKeyRoot,
         objectType: entry.objectType,
         objectVersion: entry.objectVersion,
+        participantSetupRecordDigest: entry.participantSetupRecordDigest,
+        publicKeyShareRoot: entry.publicKeyShareRoot,
         recoveryEpoch: entry.recoveryEpoch,
+        rotSetDigest: entry.rotSetDigest,
+        rustBgvBackendProfileDigest: entry.rustBgvBackendProfileDigest,
+        setupProfileId: entry.setupProfileId,
+        thresholdDecryptionProfileId: entry.thresholdDecryptionProfileId,
+        thresholdShareVerificationKeyRoot:
+            entry.thresholdShareVerificationKeyRoot,
+        trusteeThresholdVerificationKeyDigest:
+            entry.trusteeThresholdVerificationKeyDigest,
         trusteeIdentity: entry.trusteeIdentity,
         trusteeSetupRoot: entry.trusteeSetupRoot,
     });
@@ -377,6 +413,8 @@ export const verifyTrusteeSetupEntry = (
     if (
         entry.objectType !== 'TrusteeSetupEntry' ||
         entry.objectVersion !== 1 ||
+        entry.setupProfileId !== bgvPassiveSetupProfileId ||
+        entry.thresholdDecryptionProfileId !== thresholdDecryptionProfileId ||
         !isNonNegativeInteger(entry.boardSequence) ||
         !isNonNegativeInteger(entry.boardPosition) ||
         !isNonNegativeInteger(entry.recoveryEpoch) ||
@@ -386,6 +424,53 @@ export const verifyTrusteeSetupEntry = (
             createRefusal(
                 'InvalidSignedRoot',
                 'Trustee setup entry object shape is not canonical.',
+                entry.trusteeSetupEntryDigest,
+                'TrusteeSetupEntry',
+            ),
+        );
+    }
+    const requiredSetupDigests = [
+        entry.trusteeSetupRoot,
+        entry.bgvProfileDigest,
+        entry.rustBgvBackendProfileDigest,
+        entry.participantSetupRecordDigest,
+        entry.publicKeyShareRoot,
+        entry.collectivePublicKeyRoot,
+        entry.trusteeThresholdVerificationKeyDigest,
+        entry.thresholdShareVerificationKeyRoot,
+        entry.evaluationKeyRoot,
+        entry.rotSetDigest,
+    ];
+    if (
+        requiredSetupDigests.some(
+            (digestField) => !isProtocolDigestString(digestField),
+        )
+    ) {
+        refusedObjects.push(
+            createRefusal(
+                'InvalidSignedRoot',
+                'Trustee setup entry must bind complete M8 setup roots and digests.',
+                entry.trusteeSetupEntryDigest,
+                'TrusteeSetupEntry',
+            ),
+        );
+    }
+    const manifestBindings = input.electionManifest.manifestOpaqueBindings;
+    if (
+        entry.bgvProfileDigest !== manifestBindings.bgvProfileDigest ||
+        entry.rustBgvBackendProfileDigest !==
+            manifestBindings.rustBgvBackendProfileDigest ||
+        entry.collectivePublicKeyRoot !==
+            manifestBindings.collectivePublicKeyRoot ||
+        entry.thresholdShareVerificationKeyRoot !==
+            manifestBindings.thresholdShareVerificationKeyRoot ||
+        entry.evaluationKeyRoot !== manifestBindings.evaluationKeyRoot ||
+        entry.rotSetDigest !== manifestBindings.rotSetDigest
+    ) {
+        refusedObjects.push(
+            createRefusal(
+                'InvalidSignedRoot',
+                'Trustee setup entry M8 roots must match the election manifest setup bindings.',
                 entry.trusteeSetupEntryDigest,
                 'TrusteeSetupEntry',
             ),

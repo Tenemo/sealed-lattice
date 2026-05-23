@@ -61,6 +61,9 @@ describe('BGV-RNS backend kernel commands', () => {
             scalarOnlyAggregateLayout: false,
         });
         expect(profile.statusLabels).toContain('M7ImplementationEvidence');
+        expect(profile.statusLabels).toContain(
+            'M8PassiveSetupCommandAvailable',
+        );
         expect(profile.nonClaims).toContain('M9BridgeProofNotImplemented');
         expect(operationRegistry.statusLabels).toContain(
             'GenericFheApiNotExported',
@@ -87,10 +90,10 @@ describe('BGV-RNS backend kernel commands', () => {
                 },
             },
             secretDistributionCertificate: {
-                status: 'pending-M8-collective-secret-distribution',
+                status: 'available-in-M8-passive-setup-package',
             },
             errorDistributionCertificate: {
-                status: 'pending-M8-error-distribution',
+                status: 'available-in-M8-passive-setup-package',
             },
         });
         expect(backendReport.parameterCertificate.estimatorRows).toHaveLength(

@@ -18,6 +18,8 @@ import type {
     BgvBatchPlaintextEncoding,
     BgvCiphertextConventionFixture,
     BgvObjectValidation,
+    BgvPassiveSetupPackage,
+    BgvPassiveSetupVerification,
     BgvReferenceOracleRejection,
     BgvRnsProfileReport,
     TranscriptCoreKernel,
@@ -406,6 +408,34 @@ export const createTranscriptCoreKernelLoader = (
                 generateBgvBackendReport: (): unknown =>
                     executeCommand<unknown>({
                         command: 'GenerateBgvBackendReport',
+                    }),
+                describeBgvPassiveSetupObjectModel: (): unknown =>
+                    executeCommand<unknown>({
+                        command: 'DescribeBgvPassiveSetupObjectModel',
+                    }),
+                generateBgvPassiveSetup: (input): BgvPassiveSetupPackage =>
+                    executeCommand<BgvPassiveSetupPackage>({
+                        command: 'GenerateBgvPassiveSetup',
+                        ceremonyId: input.ceremonyId,
+                        manifestDigest: input.manifestDigest,
+                        rosterDigest: input.rosterDigest,
+                        thresholdProfileDigest: input.thresholdProfileDigest,
+                        participants: input.participants,
+                        setupSeed: input.setupSeed,
+                    }),
+                verifyBgvPassiveSetup: (input): BgvPassiveSetupVerification =>
+                    executeCommand<BgvPassiveSetupVerification>({
+                        command: 'VerifyBgvPassiveSetup',
+                        setupPackage: input.setupPackage,
+                        expectedSetupPackageDigest:
+                            input.expectedSetupPackageDigest,
+                        expectedManifestDigest: input.expectedManifestDigest,
+                        expectedRosterDigest: input.expectedRosterDigest,
+                        expectedCollectivePublicKeyRoot:
+                            input.expectedCollectivePublicKeyRoot,
+                        expectedRotSetDigest: input.expectedRotSetDigest,
+                        expectedEvaluationKeyRoot:
+                            input.expectedEvaluationKeyRoot,
                     }),
                 encodeBgvBatchPlaintext: (input): BgvBatchPlaintextEncoding =>
                     executeCommand<BgvBatchPlaintextEncoding>({

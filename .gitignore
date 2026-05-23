@@ -42,6 +42,6 @@ tmp-*
 # env
 .env
 
-# Development-only external reference checkouts
-reference-projects/lattigo/upstream/
-reference-projects/lattigo/*.zip
+# External references
+reference-projects/
+reference-documents/

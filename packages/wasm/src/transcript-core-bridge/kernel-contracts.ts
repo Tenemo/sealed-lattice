@@ -249,6 +249,75 @@ export type BgvBaseConversionFixture = {
     readonly statusLabels: readonly string[];
 };
 
+export type BgvPassiveSetupParticipantInput =
+    | string
+    | {
+          readonly trusteeIdentity: string;
+          readonly rosterPosition?: number;
+          readonly boardPosition?: number;
+          readonly recoveryEpoch?: number;
+          readonly deviceEpoch?: number;
+      };
+
+export type BgvPassiveSetupPackage = {
+    readonly objectType: 'BgvPassiveSetupPackage';
+    readonly objectVersion: 1;
+    readonly setupProfileId: string;
+    readonly setupMode: string;
+    readonly setupPackageDigest: ProtocolDigest;
+    readonly setupInputs: {
+        readonly ceremonyId: string;
+        readonly manifestDigest: ProtocolDigest;
+        readonly rosterDigest: ProtocolDigest;
+        readonly thresholdProfileDigest: ProtocolDigest;
+        readonly participantCount: number;
+        readonly participantIdentities: readonly string[];
+        readonly setupSeedDigest: string;
+    };
+    readonly profileBindings: Readonly<Record<string, unknown>>;
+    readonly participants: readonly unknown[];
+    readonly collectivePublicKey: {
+        readonly collectivePublicKeyRoot: ProtocolDigest;
+        readonly bgvPublicKeyRoot: ProtocolDigest;
+        readonly statusLabels: readonly string[];
+        readonly record: unknown;
+    };
+    readonly thresholdVerificationMaterial: Readonly<Record<string, unknown>>;
+    readonly evaluationKeys: {
+        readonly rotSetDigest: ProtocolDigest;
+        readonly evaluationKeyRoot: ProtocolDigest;
+        readonly relinearizationKeyRoot: ProtocolDigest;
+        readonly keySwitchKeyRoot: ProtocolDigest;
+        readonly keySwitchDecompositionDigest: ProtocolDigest;
+        readonly rotationKeyRoots: readonly unknown[];
+        readonly statusLabels: readonly string[];
+        readonly record: unknown;
+        readonly rotSet: unknown;
+    };
+    readonly developmentEncryptionFixture: Readonly<Record<string, unknown>>;
+    readonly certificates: Readonly<Record<string, unknown>>;
+    readonly trustedDealerBoundary: Readonly<Record<string, unknown>>;
+    readonly kllpsCompatibility: {
+        readonly thresholdDecryptionProfileId: string;
+        readonly thresholdDecryptionProfileDigest: ProtocolDigest;
+        readonly kllpsTargetDecryptionProfileDigest: ProtocolDigest;
+        readonly setupMaterialCompatibleWithKLLPS: boolean;
+        readonly KLLPSPartDecImplemented: boolean;
+        readonly KLLPSC1C4Certified: boolean;
+    };
+    readonly statusLabels: readonly string[];
+    readonly nonClaims: readonly string[];
+};
+
+export type BgvPassiveSetupVerification = {
+    readonly ok: boolean;
+    readonly operation: 'verifyBgvPassiveSetupPackage';
+    readonly acceptedDigests: readonly ProtocolDigest[];
+    readonly refusedObjects: readonly unknown[];
+    readonly unresolvedReason: string | null;
+    readonly statusLabels: readonly string[];
+};
+
 const createFreshRandomnessHex = (): string => {
     const cryptoProvider = globalThis.crypto;
     if (cryptoProvider === undefined) {
@@ -427,6 +496,24 @@ export type TranscriptCoreKernel = {
     describeBgvRnsProfile(): BgvRnsProfileReport;
     describeBgvOperationRegistry(): unknown;
     generateBgvBackendReport(): unknown;
+    describeBgvPassiveSetupObjectModel(): unknown;
+    generateBgvPassiveSetup(input: {
+        readonly ceremonyId: string;
+        readonly manifestDigest: ProtocolDigest;
+        readonly rosterDigest: ProtocolDigest;
+        readonly thresholdProfileDigest: ProtocolDigest;
+        readonly participants: readonly BgvPassiveSetupParticipantInput[];
+        readonly setupSeed?: string;
+    }): BgvPassiveSetupPackage;
+    verifyBgvPassiveSetup(input: {
+        readonly setupPackage: BgvPassiveSetupPackage;
+        readonly expectedSetupPackageDigest?: ProtocolDigest;
+        readonly expectedManifestDigest?: ProtocolDigest;
+        readonly expectedRosterDigest?: ProtocolDigest;
+        readonly expectedCollectivePublicKeyRoot?: ProtocolDigest;
+        readonly expectedRotSetDigest?: ProtocolDigest;
+        readonly expectedEvaluationKeyRoot?: ProtocolDigest;
+    }): BgvPassiveSetupVerification;
     encodeBgvBatchPlaintext(input: {
         readonly slots: readonly number[];
         readonly level?: number;
@@ -619,6 +706,28 @@ type TranscriptCoreKernelCommand =
       }
     | {
           readonly command: 'GenerateBgvBackendReport';
+      }
+    | {
+          readonly command: 'DescribeBgvPassiveSetupObjectModel';
+      }
+    | {
+          readonly command: 'GenerateBgvPassiveSetup';
+          readonly ceremonyId: string;
+          readonly manifestDigest: ProtocolDigest;
+          readonly rosterDigest: ProtocolDigest;
+          readonly thresholdProfileDigest: ProtocolDigest;
+          readonly participants: readonly BgvPassiveSetupParticipantInput[];
+          readonly setupSeed?: string;
+      }
+    | {
+          readonly command: 'VerifyBgvPassiveSetup';
+          readonly setupPackage: BgvPassiveSetupPackage;
+          readonly expectedSetupPackageDigest?: ProtocolDigest;
+          readonly expectedManifestDigest?: ProtocolDigest;
+          readonly expectedRosterDigest?: ProtocolDigest;
+          readonly expectedCollectivePublicKeyRoot?: ProtocolDigest;
+          readonly expectedRotSetDigest?: ProtocolDigest;
+          readonly expectedEvaluationKeyRoot?: ProtocolDigest;
       }
     | {
           readonly command: 'EncodeBgvBatchPlaintext';

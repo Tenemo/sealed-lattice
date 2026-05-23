@@ -318,6 +318,9 @@ enum TranscriptCoreCommand {
     DescribeBgvRnsProfile,
     DescribeBgvOperationRegistry,
     GenerateBgvBackendReport,
+    DescribeBgvPassiveSetupObjectModel,
+    GenerateBgvPassiveSetup,
+    VerifyBgvPassiveSetup,
     EncodeBgvBatchPlaintext,
     ValidateBgvPlaintextObject,
     ValidateBgvCiphertextObject,
@@ -500,6 +503,9 @@ fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult<Value> {
         TranscriptCoreCommand::DescribeBgvRnsProfile
         | TranscriptCoreCommand::DescribeBgvOperationRegistry
         | TranscriptCoreCommand::GenerateBgvBackendReport
+        | TranscriptCoreCommand::DescribeBgvPassiveSetupObjectModel
+        | TranscriptCoreCommand::GenerateBgvPassiveSetup
+        | TranscriptCoreCommand::VerifyBgvPassiveSetup
         | TranscriptCoreCommand::EncodeBgvBatchPlaintext
         | TranscriptCoreCommand::ValidateBgvPlaintextObject
         | TranscriptCoreCommand::ValidateBgvCiphertextObject
@@ -615,6 +621,15 @@ fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> Canonical
         }
         TranscriptCoreCommand::GenerateBgvBackendReport => {
             crate::bgv::commands::generate_bgv_backend_report()
+        }
+        TranscriptCoreCommand::DescribeBgvPassiveSetupObjectModel => {
+            crate::bgv::commands::describe_bgv_passive_setup_object_model()
+        }
+        TranscriptCoreCommand::GenerateBgvPassiveSetup => {
+            crate::bgv::commands::generate_bgv_passive_setup_from_request(request)
+        }
+        TranscriptCoreCommand::VerifyBgvPassiveSetup => {
+            crate::bgv::commands::verify_bgv_passive_setup_from_request(request)
         }
         TranscriptCoreCommand::EncodeBgvBatchPlaintext => {
             crate::bgv::commands::encode_bgv_batch_plaintext_from_request(request)

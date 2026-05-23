@@ -39,7 +39,7 @@
     },
     {
       "path": "election-foundation/deterministic-fixtures.json",
-      "sha256": "932348f41407f4eddf6696abb0d68f3a232acc605ae1811b243faed8da8a66d7"
+      "sha256": "1db1e6279c072962fcf5ecc76f3a87f31ed26fd93d2f9c635f9105968b44a01b"
     },
     {
       "path": "election-foundation/lifecycle-transitions.json",

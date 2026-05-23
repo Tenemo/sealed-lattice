@@ -54,11 +54,13 @@ pub(crate) fn describe_profile_report() -> CanonicalResult<Value> {
         ],
         "statusLabels": [
             "M7ImplementationEvidence",
+            "M8PassiveSetupCommandAvailable",
             "SealedLatticeRustWasmOwned",
             "ReferenceOracleDevelopmentOnly"
         ],
         "nonClaims": [
-            "M8SetupNotImplemented",
+            "ActiveMaliciousSetupNotImplemented",
+            "FinalAppendixBPendingQTarget",
             "M9BridgeProofNotImplemented",
             "M10EvaluatorNotImplemented",
             "StageXNotClosed",
@@ -104,11 +106,11 @@ pub(crate) fn backend_parameter_certificate_report() -> CanonicalResult<Value> {
         "publicRlweSamplesByBasis": {
             "data": {
                 "modulusBits": q_data_bits,
-                "sampleCountStatus": "pending-M8-key-material"
+                "sampleCountStatus": "available-via-GenerateBgvPassiveSetup"
             },
             "qpPublic": {
                 "modulusBits": qp_public_bits,
-                "sampleCountStatus": "pending-M8-evaluation-key-material"
+                "sampleCountStatus": "available-via-GenerateBgvPassiveSetup"
             },
             "target": {
                 "modulusBits": null,
@@ -116,11 +118,11 @@ pub(crate) fn backend_parameter_certificate_report() -> CanonicalResult<Value> {
             }
         },
         "secretDistributionCertificate": {
-            "status": "pending-M8-collective-secret-distribution",
+            "status": "available-in-M8-passive-setup-package",
             "sparseOrFixedHammingSecretsRequireSeparateCertification": true
         },
         "errorDistributionCertificate": {
-            "status": "pending-M8-error-distribution"
+            "status": "available-in-M8-passive-setup-package"
         },
         "estimatorRows": [
             {

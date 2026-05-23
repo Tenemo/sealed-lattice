@@ -6,6 +6,7 @@ import {
     deriveProtocolSignatureDigest,
 } from '@sealed-lattice/crypto';
 import {
+    bgvPassiveSetupProfileId,
     bridgeWitnessPrivacyProfileId,
     cpadProfileId,
     encryptedAggregateBridgeProfileId,
@@ -137,10 +138,23 @@ export const manifestPolicyDigests: ManifestPolicyDigests = {
 };
 export const manifestOpaqueBindings: ManifestOpaqueBindings = {
     encryptedAggregateBridgeProfileId,
+    bgvPassiveSetupProfileId,
     bridgeWitnessPrivacyProfileId,
     heParamDigest: deriveProtocolDigest('HEParamDigest', {
         profile: 'BGV-RNS-v1',
     }),
+    bgvPassiveSetupPackageDigest: deriveProtocolDigest(
+        'BGVPassiveSetupPackageDigest',
+        {
+            setup: 'passive-full-roster-bgv',
+        },
+    ),
+    bgvSetupParameterCertificateDigest: deriveProtocolDigest(
+        'BGVSetupParameterCertificateDigest',
+        {
+            setup: 'parameter-certificate',
+        },
+    ),
     bgvProfileDigest: deriveProtocolDigest('BGVProfileDigest', {
         profile: 'BGV-RNS-v1',
     }),
@@ -156,6 +170,24 @@ export const manifestOpaqueBindings: ManifestOpaqueBindings = {
     collectivePublicKeyRoot: deriveProtocolDigest('CollectivePublicKeyRoot', {
         key: 'bgv-collective',
     }),
+    collectiveSecretDistributionCertificateDigest: deriveProtocolDigest(
+        'CollectiveSecretDistributionCertificateDigest',
+        {
+            setup: 'secret-distribution',
+        },
+    ),
+    errorDistributionCertificateDigest: deriveProtocolDigest(
+        'ErrorDistributionCertificateDigest',
+        {
+            setup: 'error-distribution',
+        },
+    ),
+    keySwitchDecompositionDigest: deriveProtocolDigest(
+        'KeySwitchDecompositionDigest',
+        {
+            profile: 'key-switch-decomposition',
+        },
+    ),
     canonicalCiphertextConventionDigest: deriveProtocolDigest(
         'CanonicalCiphertextConventionDigest',
         { convention: 'bgv-rns-coefficient-domain-c0-plus-c1-s' },
@@ -227,6 +259,30 @@ export const manifestOpaqueBindings: ManifestOpaqueBindings = {
     allowedEvaluatorOpsDigest: deriveProtocolDigest(
         'AllowedEvaluatorOpsDigest',
         { operations: 'packed-bit-sliced-bgv-top-k-v1' },
+    ),
+    rotSetDigest: deriveProtocolDigest('RotSetDigest', {
+        rotations: 'provisional-m10-top-k',
+    }),
+    evaluationKeyRoot: deriveProtocolDigest('EvalKeyRoot', {
+        keys: 'provisional-m10-top-k',
+    }),
+    evaluationKeySizeProfileDigest: deriveProtocolDigest(
+        'EvaluationKeySizeProfileDigest',
+        {
+            profile: 'm8-evaluation-key-size',
+        },
+    ),
+    thresholdShareVerificationKeyRoot: deriveProtocolDigest(
+        'ThresholdShareVerificationKeyRoot',
+        {
+            setup: 'threshold-share-verification-key-set',
+        },
+    ),
+    thresholdShareVerificationKeyDigest: deriveProtocolDigest(
+        'ThresholdShareVerificationKeyDigest',
+        {
+            setup: 'threshold-share-verification-key-set',
+        },
     ),
     evaluationProofProfileId,
     evaluationProofProfileDigest: deriveProtocolDigest(

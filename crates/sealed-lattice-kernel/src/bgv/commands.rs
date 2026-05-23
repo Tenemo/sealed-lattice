@@ -16,6 +16,10 @@ use crate::{
             BgvObjectKind, canonical_bytes_hash, canonical_bytes_hex, ciphertext_root,
             parse_bgv_object_hex, plaintext_root, serialize_bgv_object,
         },
+        setup::{
+            describe_passive_setup_object_model, generate_passive_setup_package_from_request,
+            verify_passive_setup_package_from_request,
+        },
         validation::{
             reject_if_oracle_boundary_fields_present, reject_reference_oracle_artifact,
             validate_ciphertext_hex, validate_plaintext_hex,
@@ -34,6 +38,18 @@ pub(crate) fn describe_bgv_operation_registry() -> CanonicalResult<Value> {
 
 pub(crate) fn generate_bgv_backend_report() -> CanonicalResult<Value> {
     backend_parameter_certificate_report()
+}
+
+pub(crate) fn describe_bgv_passive_setup_object_model() -> CanonicalResult<Value> {
+    describe_passive_setup_object_model()
+}
+
+pub(crate) fn generate_bgv_passive_setup_from_request(request: &Value) -> CanonicalResult<Value> {
+    generate_passive_setup_package_from_request(request)
+}
+
+pub(crate) fn verify_bgv_passive_setup_from_request(request: &Value) -> CanonicalResult<Value> {
+    verify_passive_setup_package_from_request(request)
 }
 
 pub(crate) fn encode_bgv_batch_plaintext_from_request(request: &Value) -> CanonicalResult<Value> {
