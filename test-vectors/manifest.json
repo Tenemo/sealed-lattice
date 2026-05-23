@@ -31,19 +31,19 @@
     },
     {
       "path": "election-foundation/board-finality.json",
-      "sha256": "41d2f3286f97116753d7709f4ee9875be480f38a9b1d1843f7f8a52b95fa56b4"
+      "sha256": "e3d4ef6a0b8094454fccd7eea7f981ae4c025384f48e4152980b5777769c8ef5"
     },
     {
       "path": "election-foundation/capability-refusals.json",
-      "sha256": "60c4f718d3d1f05c2c0de72a14222b910f8e3e96992d8760490ba2a4ac72ac73"
+      "sha256": "e9d4184eb33ffe6182fcfd4e8ce09d6e2c20b1690a0ed5a83055dcb41d3da496"
     },
     {
       "path": "election-foundation/deterministic-fixtures.json",
-      "sha256": "a9cb06d841c4cfee36e65e0d0da7ef8ad12256509ad21bfe61324a0b1d823a55"
+      "sha256": "7ee92982a1089f83735cd4cf9992901ad72795e5a3e7206ef5d0dc7fa7fe62aa"
     },
     {
       "path": "election-foundation/lifecycle-transitions.json",
-      "sha256": "d58485606c405482022dff2f2bace3960cb4984b6da3b4d422cd151981a27556"
+      "sha256": "5b674b10c79bac46555405b631cc96eca2f422054eeb8d4db3edc9096c47c96d"
     },
     {
       "path": "election-foundation/poll-specs.json",
@@ -51,7 +51,7 @@
     },
     {
       "path": "election-foundation/threshold-profiles.json",
-      "sha256": "bda80be3fad6f43474171dac5be98d3c0e5201445c7fc4dcd987f07d2289d81f"
+      "sha256": "4d1ac90b45909dacf5d3279faec274dae9c3b8c075d987c742910e90a5543f96"
     },
     {
       "path": "plaintext-oracle/comparator-polynomials.json",
@@ -71,7 +71,7 @@
     },
     {
       "path": "plaintext-oracle/top-k.json",
-      "sha256": "947c5864dbbd95bcfe0164decb4051bb2e56509c3d38ad1bee42decf62327ad9"
+      "sha256": "c0ea571d25b580eb50eb8110fa4b68f834df123f8e718a6ef158db0fc42600b1"
     },
     {
       "path": "pvss-ballot/aggregate-shares.json",
@@ -87,15 +87,15 @@
     },
     {
       "path": "transcript-core/golden-transcript-core.json",
-      "sha256": "1bb34b414e8965184c779d733c3b70ccbf9d9d0099ff48106466aa57af688f84"
+      "sha256": "b48d51b346768c4e6617d56da961f9ad9e096e6e584caef404d8208825c03127"
     },
     {
       "path": "transcript-core/malformed-objects.json",
-      "sha256": "260728c35d22537293ab5e80925c8268d92fde50d3bcd4feb06589975ba28080"
+      "sha256": "54c04e0f857f2ae6c8279589aaa036f26f097bf959a0c61524b04f49b3e03db7"
     },
     {
       "path": "transcript-core/transcript-core-replay.json",
-      "sha256": "abd18ac44065396c05b5104193af5159574774352097370e7159b2c05c47e996"
+      "sha256": "2c434c4967b8918614f5b8d1474996600475572541adab245e4242eee6426daf"
     }
   ]
 }

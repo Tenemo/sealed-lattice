@@ -410,7 +410,7 @@ export const deriveFrozenRosterProfile = (input: {
         dynamicRosterProfileCertificateDigest === null
     ) {
         throw new Error(
-            'Dynamic claim-bearing roster profiles require certificate or workbook coverage for the frozen roster size.',
+            'Dynamic claim-bearing roster profiles require parameter certificate coverage for the frozen roster size.',
         );
     }
 

@@ -13,7 +13,25 @@ describe('BGV-RNS backend kernel commands', () => {
             readonly statusLabels: readonly string[];
         };
         const backendReport = kernel.generateBgvBackendReport() as {
-            readonly workbook: {
+            readonly parameterCertificate: {
+                readonly qDataBits: number;
+                readonly qTargetBits: null;
+                readonly qpPublicBits: number;
+                readonly largestExposedModulusBits: null;
+                readonly largestKnownExposedModulusBits: number;
+                readonly exposedBasisClass: string;
+                readonly publicRlweSamplesByBasis: {
+                    readonly target: {
+                        readonly modulusBits: null;
+                    };
+                };
+                readonly secretDistributionCertificate: {
+                    readonly status: string;
+                };
+                readonly errorDistributionCertificate: {
+                    readonly status: string;
+                };
+                readonly estimatorRows: readonly unknown[];
                 readonly referenceOracleBoundary: {
                     readonly lattigoRuntimeDependency: boolean;
                     readonly oracleVectorsAcceptedAsProtocolEvidence: boolean;
@@ -35,7 +53,7 @@ describe('BGV-RNS backend kernel commands', () => {
         expect(profile.batchEncoderDigest).toMatch(/^[a-f0-9]{128}$/u);
         expect(profile.batchLayoutBindingDigest).toMatch(/^[a-f0-9]{128}$/u);
         expect(profile.batchLayoutBinding).toMatchObject({
-            layoutKind: 'TargetBasisDataEncodedScoreLayout-v1',
+            layoutKind: 'EncryptedAggregateInputEncodedScoreLayout-v1',
             coordinateOrder:
                 'score-share-then-one-hot-score-buckets-per-option',
             oneHotBucketOrder: 'ascending-score-1-through-10',
@@ -48,17 +66,42 @@ describe('BGV-RNS backend kernel commands', () => {
             'GenericFheApiNotExported',
         );
         expect(
-            backendReport.workbook.referenceOracleBoundary
+            backendReport.parameterCertificate.referenceOracleBoundary
                 .lattigoRuntimeDependency,
         ).toBe(false);
         expect(
-            backendReport.workbook.referenceOracleBoundary
+            backendReport.parameterCertificate.referenceOracleBoundary
                 .oracleVectorsAcceptedAsProtocolEvidence,
         ).toBe(false);
-        expect(backendReport.statusLabels).toContain('WorkbookReportEmitted');
+        expect(backendReport.parameterCertificate).toMatchObject({
+            qDataBits: 752,
+            qTargetBits: null,
+            qpPublicBits: 799,
+            largestExposedModulusBits: null,
+            largestKnownExposedModulusBits: 799,
+            exposedBasisClass:
+                'data-plus-special-public-estimator-input-target-pending',
+            publicRlweSamplesByBasis: {
+                target: {
+                    modulusBits: null,
+                },
+            },
+            secretDistributionCertificate: {
+                status: 'pending-M8-collective-secret-distribution',
+            },
+            errorDistributionCertificate: {
+                status: 'pending-M8-error-distribution',
+            },
+        });
+        expect(backendReport.parameterCertificate.estimatorRows).toHaveLength(
+            3,
+        );
+        expect(backendReport.statusLabels).toContain(
+            'ParameterCertificateReportEmitted',
+        );
     });
 
-    it('encodes aggregate-share TargetBasisData slots and validates roots byte-identically', async () => {
+    it('encodes aggregate-share EncryptedAggregateInput slots and validates roots byte-identically', async () => {
         const kernel = await loadTranscriptCoreKernel();
         const profile = kernel.describeBgvRnsProfile();
         const encoded = kernel.encodeBgvBatchPlaintext({
@@ -74,7 +117,9 @@ describe('BGV-RNS backend kernel commands', () => {
         expect(encoded.batchLayoutBindingDigest).toBe(
             profile.batchLayoutBindingDigest,
         );
-        expect(encoded.statusLabels).toContain('TargetBasisDataLayoutBound');
+        expect(encoded.statusLabels).toContain(
+            'EncryptedAggregateInputLayoutBound',
+        );
         expect(encoded.sampledSlots).toEqual(
             expect.arrayContaining([
                 { position: 0, value: 0 },

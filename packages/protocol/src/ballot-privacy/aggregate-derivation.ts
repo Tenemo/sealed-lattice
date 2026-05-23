@@ -188,7 +188,7 @@ const forbiddenPublicWitnessFieldNames = new Set([
     'reducedFieldVector',
     'secretState',
     'sourceWitnessCoefficients',
-    'targetBasisDataPlaintext',
+    'aggregateInputPlaintext',
     'tPvss',
     't_pvss',
     'witness',
@@ -1515,7 +1515,7 @@ export const verifyAggregateDerivationComponentStructure = (
             ballotPrivacyMinimumUnsafeParticipantCount &&
         component.statement.participantCount <
             ballotPrivacyMinimumSafeParticipantCount
-            ? (['CasualMicroRoster'] as const)
+            ? (['casualMicroRoster'] as const)
             : [];
     if (refusedObjects.length > 0) {
         return {
@@ -1539,10 +1539,7 @@ export const verifyAggregateDerivationComponentStructure = (
         aggregateDerivationComponentDigest: componentDigest,
         backendAvailable: false,
         refusedObjects: [],
-        statusLabels: [
-            'AggregateDerivationStructureVerified',
-            ...unsafeSmallRosterStatusLabels,
-        ],
+        statusLabels: ['pending', ...unsafeSmallRosterStatusLabels],
         unresolvedReason: null,
     };
 };

@@ -29,6 +29,15 @@ import {
     verifyRosterManifestTranscript,
 } from './election-foundation-test-helpers';
 
+const retiredGenericThresholdDecryptionProfileId = [
+    'BGV-RNS',
+    'AsyncThresholdDecryption',
+    'CPAD-v1',
+].join('-');
+const retiredGenericCpadProfileId = ['CPAD', 'BGV', 'AsyncThreshold-v1'].join(
+    '-',
+);
+
 describe('roster, manifest, first-valid, and recovery shells', () => {
     it('accepts an honest registration to manifest transcript', () => {
         const registrations = [
@@ -50,6 +59,77 @@ describe('roster, manifest, first-valid, and recovery shells', () => {
         expect(result.rosterDigest).toBe(
             deriveRosterDigest(input.registrationEntries),
         );
+    });
+
+    it('requires object signatures rather than transport authentication for manifests', () => {
+        const input = createRosterManifestTranscriptInput([
+            createRegistrationEntry('participant-1', 1, 0),
+            createRegistrationEntry('participant-2', 1, 1),
+            createRegistrationEntry('participant-3', 1, 2),
+        ]);
+        const transportOnlyKey = createKeyFixture('transport-session-only');
+        const manifestWithTransportOnlySignature = {
+            ...input.electionManifest,
+            signature: createSignature(
+                'ElectionManifest',
+                'Participant',
+                'participant-1',
+                transportOnlyKey.publicKeyDigest,
+                input.electionManifest.electionManifestDigest,
+            ),
+        };
+
+        const result = verifyRosterManifestTranscript({
+            ...input,
+            electionManifest: manifestWithTransportOnlySignature,
+        });
+
+        expect(result.ok).toBe(false);
+        expect(result.refusedObjects).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({ code: 'WrongSignerRole' }),
+            ]),
+        );
+    });
+
+    it('rejects retired generic CPAD profile identifiers in claim-bearing manifests', () => {
+        const registrations = [
+            createRegistrationEntry('participant-1', 1, 0),
+            createRegistrationEntry('participant-2', 1, 1),
+            createRegistrationEntry('participant-3', 1, 2),
+        ];
+        const oldThresholdProfileInput = createRosterManifestTranscriptInput(
+            registrations,
+            {
+                manifestOpaqueBindings: {
+                    ...manifestOpaqueBindings,
+                    thresholdDecryptionProfileId:
+                        retiredGenericThresholdDecryptionProfileId,
+                },
+            },
+        );
+        const oldCpadProfileInput = createRosterManifestTranscriptInput(
+            registrations,
+            {
+                manifestOpaqueBindings: {
+                    ...manifestOpaqueBindings,
+                    cpadProfileId: retiredGenericCpadProfileId,
+                },
+            },
+        );
+
+        for (const input of [oldThresholdProfileInput, oldCpadProfileInput]) {
+            const result = verifyRosterManifestTranscript(input);
+
+            expect(result.ok).toBe(false);
+            expect(result.refusedObjects).toEqual(
+                expect.arrayContaining([
+                    expect.objectContaining({
+                        code: 'ManifestDigestMismatch',
+                    }),
+                ]),
+            );
+        }
     });
 
     it('attributes frozen roster profile mismatches to the frozen profile', () => {

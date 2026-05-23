@@ -1,8 +1,8 @@
 /** Claim profile label attached to transcript-core fixtures and results. */
-export type BaseClaimProfile = 'FullyVerifiedResult';
+export type BaseClaimProfile = 'fullyVerified';
 
 /** High-level malicious security closure claimed by transcript-core fixtures. */
-export type MheSecurityClosure = 'PassiveMHEPrototype' | 'ActiveMalicious';
+export type MheSecurityClosure = 'developmentIntegration' | 'ActiveMalicious';
 
 /**
  * Alias retained for backward compatibility with consumers that read

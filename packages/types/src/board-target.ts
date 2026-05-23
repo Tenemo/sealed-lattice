@@ -275,7 +275,7 @@ export type LocalReplayRecord = {
     readonly replayContextDigest: ProtocolDigest;
     readonly recoveryEpoch: number;
     readonly deviceEpoch: number;
-    readonly mobileReplayCertDigest: ProtocolDigest;
+    readonly localReplayDiagnosticDigest: ProtocolDigest;
     readonly signature: ProtocolSignatureEnvelope;
 };
 
@@ -300,7 +300,7 @@ export type TargetAcceptedRecord = {
     readonly cpadProfileId: string;
     readonly thresholdDecryptionProfileDigest: ProtocolDigest;
     readonly thresholdDecryptionProfileId: string;
-    readonly bgvAsyncThresholdCPADProfileDigest: ProtocolDigest;
+    readonly kllpsTargetDecryptionProfileDigest: ProtocolDigest;
     readonly targetBasisDigest: ProtocolDigest;
     readonly acceptanceMode: 'evaluation-proof';
     readonly boardSequence: number;
@@ -327,7 +327,7 @@ export type TopKDecryptionShareShell = {
     readonly targetCiphertextDigest: ProtocolDigest;
     readonly cpadProfileDigest: ProtocolDigest;
     readonly thresholdDecryptionProfileDigest: ProtocolDigest;
-    readonly bgvAsyncThresholdCPADProfileDigest: ProtocolDigest;
+    readonly kllpsTargetDecryptionProfileDigest: ProtocolDigest;
     readonly targetDecryptionPreparationRecordDigest: ProtocolDigest;
     readonly targetDecryptionCiphertextDigest: ProtocolDigest;
     readonly targetBasisDigest: ProtocolDigest;

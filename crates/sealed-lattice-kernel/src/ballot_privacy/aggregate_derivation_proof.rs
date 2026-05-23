@@ -1989,7 +1989,7 @@ fn forbidden_public_witness_field(field_name: &str) -> bool {
             | "reducedFieldVector"
             | "secretState"
             | "sourceWitnessCoefficients"
-            | "targetBasisDataPlaintext"
+            | "aggregateInputPlaintext"
             | "tPvss"
             | "t_pvss"
             | "witness"

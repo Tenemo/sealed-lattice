@@ -40,7 +40,7 @@ const forbiddenBridgeWitnessFieldNames = [
     'rawAggregateWitness',
     'receiverPlaintext',
     'sourceWitnessCoefficients',
-    'targetBasisDataPlaintext',
+    'aggregateInputPlaintext',
     'tPvss',
     't_pvss',
     'witness',
@@ -327,9 +327,7 @@ describe('aggregate derivation proof through the transcript-core kernel', () => 
             operation: 'generateAggregateDerivationProof',
             unresolvedReason: null,
         });
-        expect(generatedAggregateProof.statusLabels).toContain(
-            'AggregateDerivationProofVerified',
-        );
+        expect(generatedAggregateProof.statusLabels).toContain('pending');
         const component = createAggregateDerivationComponent({
             aggregateCommitment,
             proofBytesHex: String(generatedAggregateProof.proofBytesHex),
@@ -346,7 +344,7 @@ describe('aggregate derivation proof through the transcript-core kernel', () => 
                 component.aggregateDerivationComponentDigest,
         });
         expect(JSON.stringify(component)).not.toMatch(
-            /aggregateHistogram|aggregateIntegerShareVector|aggregateOpeningRandomness|aggregateScore|aggregateScoreBits|plaintextComparisonInputs|plaintextScoreBitInputs|proofWitness|rawAggregateWitness|receiverPlaintext|sourceWitnessCoefficients|targetBasisDataPlaintext|tPvss|t_pvss/u,
+            /aggregateHistogram|aggregateIntegerShareVector|aggregateOpeningRandomness|aggregateScore|aggregateScoreBits|plaintextComparisonInputs|plaintextScoreBitInputs|proofWitness|rawAggregateWitness|receiverPlaintext|sourceWitnessCoefficients|aggregateInputPlaintext|tPvss|t_pvss/u,
         );
 
         const verification = kernel.verifyAggregateDerivationProof({
@@ -362,9 +360,7 @@ describe('aggregate derivation proof through the transcript-core kernel', () => 
             operation: 'verifyAggregateDerivationProof',
             unresolvedReason: null,
         });
-        expect(verification.statusLabels).toContain(
-            'AggregateDerivationProofVerified',
-        );
+        expect(verification.statusLabels).toContain('pending');
         expect(
             kernel.verifyAggregateDerivationProof({
                 closeRecord: postCloseEvidence.closeRecord,

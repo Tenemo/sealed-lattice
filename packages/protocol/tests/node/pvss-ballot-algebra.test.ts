@@ -113,7 +113,7 @@ const aggregateSharesVector = aggregateSharesVectorJson as {
 
 const createBallotWitness = (
     voterRosterPosition: number,
-    scores: readonly (number | null | undefined)[],
+    scores: readonly (number | undefined)[],
     fixtureEntropy = `entropy-${String(voterRosterPosition)}`,
 ): BallotPackageWitness => {
     const voterIdentity = `participant-${String(voterRosterPosition)}`;
@@ -405,6 +405,16 @@ describe('internal PVSS ballot algebra', () => {
                 thresholdProfile,
             }),
         ).toEqual([]);
+    });
+
+    it('normalizes only unset options to score one and rejects null scores', () => {
+        expect(
+            createBallotWitness(1, [7], 'missing-score').polynomialSet
+                .normalizedBallot.scores,
+        ).toEqual([7, 1, 1, 1]);
+        expect(() =>
+            createBallotWitness(1, [null, 2, 3, 4] as never, 'null-score'),
+        ).toThrow('Scores must be integers');
     });
 
     it('rejects malformed test helper witnesses and digest references', () => {

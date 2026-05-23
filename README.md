@@ -6,13 +6,17 @@
 
 `sealed-lattice` is a browser-first, mobile-first, post-quantum threshold homomorphic voting library workspace. Its public package is intentionally narrow while the protocol implementation is still being built and verified.
 
+## Prototype API policy
+
+This repository is an early prototype and is not in production use. Public API stability is not protected for legacy consumers yet; obsolete labels, helper-role surfaces, and compatibility-only names are removed when they conflict with the current documentation and claim boundaries. Existing v1 transcript digest namespaces remain only where current vectors require them, while new public-facing names use Hash terminology.
+
 ## What the package exposes
 
 The published `sealed-lattice` package currently exposes safe-by-default helpers for:
 
 - transcript-core fixture verification through the packaged Rust/WASM kernel;
-- poll-spec validation, canonical poll/profile digest derivation, threshold profile derivation, and frozen roster-profile derivation;
-- lifecycle labels, lifecycle transitions, and action capability checks;
+- poll-spec validation, canonical poll/profile Hash-facing derivation over v1 transcript digest namespaces, threshold profile derivation, and frozen roster-profile derivation;
+- compact lifecycle labels, structured status reasons, lifecycle transitions, and action capability checks;
 - signed board consistency, cast receipt shells, close record shells, and target finality checks;
 - roster manifest verification, participant roster acceptance, deterministic first-valid ordering, and recovery-epoch checks;
 - verification-oriented ballot privacy APIs for receiver-key proofs, ballot proof records, and proof-byte-bearing scoped relation packages through the packaged Rust/WASM verifier;
@@ -36,7 +40,7 @@ Several protocol components exist only as workspace-internal implementation, tes
 - plaintext `GF(65537)` arithmetic, Shamir interpolation, top-k tallying, and sparse target fixtures;
 - deterministic PVSS ballot-algebra helpers used for regression tests;
 - ballot privacy profile, relation, proof-record, receiver-key proof, and scoped relation package shell infrastructure;
-- M7 sealed-lattice Rust/WASM BGV-RNS profile, selected-prime arithmetic, RNS coefficient objects, NTT/INTT, plaintext-lifted base conversion, `BGVBatchEncode_65537`, canonical plaintext/ciphertext roots, TargetBasisData layout binding, object validation, allowed-operation registry, and report commands for the encrypted aggregate path;
+- M7 sealed-lattice Rust/WASM BGV-RNS profile, selected-prime arithmetic, RNS coefficient objects, NTT/INTT, plaintext-lifted base conversion, `BGVBatchEncode_65537`, canonical plaintext/ciphertext roots, encrypted aggregate input layout binding, object validation, allowed-operation registry, and report commands for the encrypted aggregate path;
 - Rust/WASM transcript-core commands used to keep TypeScript and native canonicalization behavior aligned;
 - offline proof-oracle comparison tooling, development-only Lattigo oracle tooling, and generated public test vectors.
 
@@ -44,7 +48,9 @@ These pieces are not exported as a public voting API and must not be used for re
 
 ## Ballot privacy status
 
-The ballot privacy implementation currently exposes verification-oriented APIs only. It can verify receiver-key proof records, ballot proof records, and proof-byte-bearing scoped relation packages through the packaged Rust/WASM proof backend. Package verification requires the public verifier inputs carried with the package shell and is not a complete voting API or supported-phone-certified result.
+The ballot privacy implementation currently exposes verification-oriented APIs only. It can verify receiver-key proof records, ballot proof records, and proof-byte-bearing scoped relation packages through the packaged Rust/WASM proof backend. Package verification requires the public verifier inputs carried with the package shell and is not a complete voting API or measured runtime profile-certified result.
+
+The public status surface uses compact claim labels such as `pending`, `rosterFrozen`, `ballotSubmitted`, `targetAccepted`, `evaluationProofVerified`, `cpadProfileVerified`, `fullyVerified`, `forkDetected`, and `outsideClaim`, with structured reasons for missing evidence or outside-claim cases. Local replay is diagnostic only and never accepts a target or replaces the mandatory evaluation proof.
 
 Current M5 dimensions are: 2 to 20 options; `shareVectorWidth = 11 * optionCount`; `n = 20` as the mandatory benchmark receiver count; dynamic frozen receiver counts from 10 to 50 only when the ballot proof statement carries bound roster-profile evidence; and explicitly acknowledged 3 to 9 receiver casual micro-roster verification only outside claim-bearing package acceptance. The casual micro-roster path has verifier and proof-record generation harness coverage for every receiver count from 3 through 9, but claim-bearing package acceptance still rejects those rosters. Current proof-size and runtime benchmark evidence has only been run for the mandatory `n = 20`, `m = 20`, threshold-7 profile; micro-roster and dynamic-roster benchmark evidence remains future full-suite work.
 
@@ -58,13 +64,13 @@ Implemented internally:
 - scoped relation-bearing ballot package verification that recomputes the package digest, requires accepted receiver-key proof root evidence, checks receiver coverage, rejects witness leakage, binds the full ballot relation to the supplied component bundle, and verifies the top-level and component proof bytes;
 - aggregate derivation statements and components that bind a canonical post-close counted set of proof-byte-bearing package shells, voting-closed close-record evidence, contributor action context, contributor identity, homomorphic aggregate share commitment, full encoded share layout, no-wraparound certificate, and Rust/WASM proof bytes for hidden aggregate opening knowledge. Component verification reruns the counted packages through the accepted M5 Rust/WASM package verifier, recomputes the aggregate package references, ballot-set digest, and public aggregate commitment sum, and rejects public leakage of aggregate histograms, exact aggregate scores, aggregate score bits, plaintext comparison inputs, and raw aggregate witnesses;
 - native and WASM verification of public vectors for the supported internal linear proof slices and full encoded-score package path, including LaZer-oracle parity for canonical matrix and target coefficient representations.
-- M7 BGV-RNS backend evidence is implemented internally for the selected v60 encrypted aggregate path: `N = 32768`, `p = 65537`, 16 selected 47-bit data primes, one 47-bit special prime, coefficient-domain canonical RNS objects, `PlaintextRoot`, `CiphertextRoot`, `BGVProfileDigest`, `BGVBatchEncoderDigest`, `BGVBatchEncoderLayoutBindingDigest`, allowed evaluator-operation registry, and M6-to-M7 encrypted aggregate TargetBasisData layout/report bindings. The pinned Lattigo oracle lane is development-only and covers comparable all-selected-moduli ring/RNS/NTT and coefficient-arithmetic behavior only. This is backend and encoding evidence only, not setup, encryption, bridge proof, evaluator closure, decryption, CPAD, mobile certification, or active-malicious closure.
+- M7 BGV-RNS backend evidence is implemented internally for the selected v63 encrypted aggregate path: `N = 32768`, `p = 65537`, 16 selected 47-bit data primes, one 47-bit special prime, coefficient-domain canonical RNS objects, `PlaintextRoot`, `CiphertextRoot`, `BGVProfileDigest`, `BGVBatchEncoderDigest`, `BGVBatchEncoderLayoutBindingDigest`, allowed evaluator-operation registry, and M6-to-M7 encrypted aggregate input layout/report bindings. The pinned Lattigo oracle lane is development-only and covers comparable all-selected-moduli ring/RNS/NTT and coefficient-arithmetic behavior only. This is backend and encoding evidence only, not setup, encryption, bridge proof, evaluator closure, decryption, KLLPS CPAD, measured runtime closure, or active-malicious closure.
 
 Still unavailable:
 
 - public ballot generation or casting APIs;
-- generated certificate/workbook rows and benchmark evidence for every dynamic frozen roster size and every casual micro-roster benchmark profile that later evaluation chooses to measure;
-- the M9 encrypted aggregate bridge from committed aggregate shares to encrypted aggregate TargetBasisData, preserving bridge witness privacy;
+- generated parameter certificate rows and benchmark evidence for every dynamic frozen roster size and every casual micro-roster benchmark profile that later evaluation chooses to measure;
+- the M9 encrypted aggregate bridge from committed aggregate shares to encrypted aggregate input, preserving bridge witness privacy;
 - the M10 encrypted aggregate reconstruction, evaluator-side score-bit/comparison derivation, packed bit-sliced BGV evaluator, and mandatory evaluation proof;
 - production target-bound decryption and result release.
 

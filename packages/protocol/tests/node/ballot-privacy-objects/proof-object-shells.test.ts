@@ -751,7 +751,9 @@ describe('ballot privacy proof object boundary', () => {
         });
         expect(
             missingEvidenceResult.refusedObjects.some((refusal) =>
-                refusal.message.includes('roster profile certificate'),
+                refusal.message.includes(
+                    'roster profile parameter certificate',
+                ),
             ),
         ).toBe(true);
 

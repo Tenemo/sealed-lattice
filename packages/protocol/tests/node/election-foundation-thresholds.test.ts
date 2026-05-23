@@ -44,6 +44,11 @@ const targetBoundShareSelectionProfile = {
     invalidShareFilteringMode: 'ProofVerifiedSharesOnly',
     selectedShareRule: 'FirstValidSharesInCanonicalBoardOrder',
 } as const;
+const retiredGenericThresholdDecryptionProfileId = [
+    'BGV-RNS',
+    'AsyncThresholdDecryption',
+    'CPAD-v1',
+].join('-');
 
 const expectFeasibleThresholds = (rosterSize: number): void => {
     const decryptionThreshold = Math.floor((rosterSize - 1) / 3) + 1;
@@ -284,7 +289,7 @@ describe('election foundation threshold profiles', () => {
                 rosterSize: 21,
             }),
         ).toThrow(
-            'Dynamic claim-bearing roster profiles require certificate or workbook coverage for the frozen roster size.',
+            'Dynamic claim-bearing roster profiles require parameter certificate coverage for the frozen roster size.',
         );
     });
 
@@ -377,6 +382,17 @@ describe('election foundation threshold profiles', () => {
                 targetBoundShareSelectionProfile: {
                     ...targetBoundShareSelectionProfile,
                     cpadProfileId: 'arbitrary-cpad-profile',
+                },
+            }),
+        ).toThrow(
+            'Target-bound share-selection profile uses an unsupported CPAD profile ID.',
+        );
+        expect(() =>
+            deriveThresholdProfile({
+                rosterSize: 20,
+                targetBoundShareSelectionProfile: {
+                    ...targetBoundShareSelectionProfile,
+                    cpadProfileId: retiredGenericThresholdDecryptionProfileId,
                 },
             }),
         ).toThrow(

@@ -50,7 +50,7 @@ const verifyLocalReplayRecordShape = (
         deviceEpoch: record.deviceEpoch,
         electionManifestDigest: record.electionManifestDigest,
         evaluationProofRecordDigest: record.evaluationProofRecordDigest,
-        mobileReplayCertDigest: record.mobileReplayCertDigest,
+        localReplayDiagnosticDigest: record.localReplayDiagnosticDigest,
         objectType: record.objectType,
         objectVersion: record.objectVersion,
         participantIdentity: record.participantIdentity,
@@ -221,8 +221,8 @@ const verifyTargetAcceptedRecordShape = (
         boardPosition: targetAcceptedRecord.boardPosition,
         boardSequence: targetAcceptedRecord.boardSequence,
         acceptanceMode: targetAcceptedRecord.acceptanceMode,
-        bgvAsyncThresholdCPADProfileDigest:
-            targetAcceptedRecord.bgvAsyncThresholdCPADProfileDigest,
+        kllpsTargetDecryptionProfileDigest:
+            targetAcceptedRecord.kllpsTargetDecryptionProfileDigest,
         ceremonyId: targetAcceptedRecord.ceremonyId,
         cpadProfileDigest: targetAcceptedRecord.cpadProfileDigest,
         cpadProfileId: targetAcceptedRecord.cpadProfileId,
@@ -441,8 +441,8 @@ const verifyTopKDecryptionShareShape = (
     const { decryptionShare, targetAcceptedRecord } = input;
     const refusedObjects: RefusalRecord[] = [];
     const expectedDigest = deriveTopKDecryptionShareDigest({
-        bgvAsyncThresholdCPADProfileDigest:
-            decryptionShare.bgvAsyncThresholdCPADProfileDigest,
+        kllpsTargetDecryptionProfileDigest:
+            decryptionShare.kllpsTargetDecryptionProfileDigest,
         boardPosition: decryptionShare.boardPosition,
         boardSequence: decryptionShare.boardSequence,
         ceremonyId: decryptionShare.ceremonyId,
@@ -533,8 +533,8 @@ const verifyTopKDecryptionShareShape = (
             targetAcceptedRecord.targetBasisDigest ||
         decryptionShare.targetContextDigest !==
             targetAcceptedRecord.targetContextDigest ||
-        decryptionShare.bgvAsyncThresholdCPADProfileDigest !==
-            targetAcceptedRecord.bgvAsyncThresholdCPADProfileDigest ||
+        decryptionShare.kllpsTargetDecryptionProfileDigest !==
+            targetAcceptedRecord.kllpsTargetDecryptionProfileDigest ||
         decryptionShare.thresholdDecryptionProfileDigest !==
             targetAcceptedRecord.thresholdDecryptionProfileDigest
     ) {

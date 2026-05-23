@@ -4,7 +4,7 @@ use serde_json::{Value, json};
 use crate::{
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
     transcript_core::{
-        FULLY_VERIFIED_ACTIVE_MALICIOUS_PROFILE, FULLY_VERIFIED_PASSIVE_MHE_PROFILE,
+        FULLY_VERIFIED_ACTIVE_MALICIOUS_PROFILE, FULLY_VERIFIED_DEVELOPMENT_INTEGRATION_PROFILE,
         TranscriptCoreProfile, analyze_canonical_object, canonical_transcript_core_object,
         decode_hex, encode_hex, mutate_base_claim_profile_mismatch_fixture,
         mutate_duplicate_field_fixture, mutate_field_order_fixture,
@@ -94,8 +94,8 @@ pub fn verify_fixture(fixture: &TranscriptCoreFixture) -> CanonicalResult<Value>
 pub fn canonical_fixture_set() -> CanonicalResult<Vec<TranscriptCoreFixture>> {
     Ok(vec![
         TranscriptCoreFixture::GoldenTranscriptCore(Box::new(build_golden_fixture(
-            "fully-verified-passive-mhe-transcript-core",
-            FULLY_VERIFIED_PASSIVE_MHE_PROFILE,
+            "fully-verified-development-integration-transcript-core",
+            FULLY_VERIFIED_DEVELOPMENT_INTEGRATION_PROFILE,
         )?)),
         TranscriptCoreFixture::GoldenTranscriptCore(Box::new(build_golden_fixture(
             "fully-verified-active-malicious-transcript-core",

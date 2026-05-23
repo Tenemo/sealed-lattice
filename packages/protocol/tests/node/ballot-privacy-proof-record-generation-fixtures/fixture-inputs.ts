@@ -226,16 +226,16 @@ const deterministicReceiverPayloadCiphertextForTest = (input: {
     };
 };
 
-const minimumCasualMicroRosterSize = 3;
-const maximumCasualMicroRosterSize = 9;
+const minimumcasualMicroRosterSize = 3;
+const maximumcasualMicroRosterSize = 9;
 
 const casualMicroRosterRelationInput = (
-    rosterSize = minimumCasualMicroRosterSize,
+    rosterSize = minimumcasualMicroRosterSize,
 ): BallotPrivacyRelationCompilerInput => {
     if (
         !Number.isSafeInteger(rosterSize) ||
-        rosterSize < minimumCasualMicroRosterSize ||
-        rosterSize > maximumCasualMicroRosterSize
+        rosterSize < minimumcasualMicroRosterSize ||
+        rosterSize > maximumcasualMicroRosterSize
     ) {
         throw new RangeError(
             'Casual micro-roster fixtures require roster size 3 to 9.',

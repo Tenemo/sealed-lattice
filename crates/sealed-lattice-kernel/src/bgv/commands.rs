@@ -8,7 +8,10 @@ use crate::{
             BgvBasisKind, DATA_PRIMES, POLYNOMIAL_DEGREE, batch_layout_binding_digest,
             batch_layout_binding_value, profile_digest,
         },
-        reports::{backend_workbook_report, describe_profile_report, operation_registry_report},
+        reports::{
+            backend_parameter_certificate_report, describe_profile_report,
+            operation_registry_report,
+        },
         serialization::{
             BgvObjectKind, canonical_bytes_hash, canonical_bytes_hex, ciphertext_root,
             parse_bgv_object_hex, plaintext_root, serialize_bgv_object,
@@ -30,7 +33,7 @@ pub(crate) fn describe_bgv_operation_registry() -> CanonicalResult<Value> {
 }
 
 pub(crate) fn generate_bgv_backend_report() -> CanonicalResult<Value> {
-    backend_workbook_report()
+    backend_parameter_certificate_report()
 }
 
 pub(crate) fn encode_bgv_batch_plaintext_from_request(request: &Value) -> CanonicalResult<Value> {
@@ -86,7 +89,7 @@ pub(crate) fn encode_bgv_batch_plaintext_from_request(request: &Value) -> Canoni
         "validation": validation,
         "statusLabels": [
             "BGVBatchEncoded",
-            "TargetBasisDataLayoutBound",
+            "EncryptedAggregateInputLayoutBound",
             "NativeDecodeRoundTripMatched",
             "PlaintextRootBound"
         ],
@@ -102,14 +105,14 @@ fn validate_batch_layout_binding(request: &Value) -> CanonicalResult<()> {
     let supplied_binding = request.get("layoutBinding").ok_or_else(|| {
         CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "BGV batch encoder requires explicit TargetBasisData layout binding",
+            "BGV batch encoder requires explicit EncryptedAggregateInput layout binding",
         )
     })?;
     let expected_binding = batch_layout_binding_value()?;
     if supplied_binding != &expected_binding {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
-            "BGV batch encoder layout binding does not match the selected TargetBasisData layout",
+            "BGV batch encoder layout binding does not match the selected EncryptedAggregateInput layout",
         ));
     }
 
@@ -326,7 +329,7 @@ mod tests {
             encoded["statusLabels"]
                 .as_array()
                 .expect("labels")
-                .contains(&serde_json::json!("TargetBasisDataLayoutBound"))
+                .contains(&serde_json::json!("EncryptedAggregateInputLayoutBound"))
         );
         assert!(
             encode_bgv_batch_plaintext_from_request(&serde_json::json!({

@@ -23,10 +23,9 @@ pub(super) const REQUIRED_FIELDS: [u64; 6] = [
     FIELD_CHECKPOINTS,
 ];
 
-pub const FULLY_VERIFIED_RESULT_PROFILE_ID: &str =
-    "transcript-core-fully-verified-result-profile-v1";
-pub const PASSIVE_MHE_PROTOTYPE_PROFILE_ID: &str =
-    "transcript-core-passive-mhe-prototype-profile-v1";
+pub const FULLY_VERIFIED_PROFILE_ID: &str = "transcript-core-fully-verified-profile-v1";
+pub const DEVELOPMENT_INTEGRATION_PROFILE_ID: &str =
+    "transcript-core-development-integration-profile-v1";
 pub const ACTIVE_MALICIOUS_MHE_PROFILE_ID: &str = "transcript-core-active-malicious-mhe-profile-v1";
 pub const NO_HE_SETUP_PROOF_PROFILE_ID: &str = "transcript-core-no-he-setup-proof-v1";
 pub const MANDATORY_EVALUATION_PROOF_PROFILE_ID: &str = "PQEvalProof-STARK-BGVReplay-v1";
@@ -34,53 +33,53 @@ pub const NO_DECRYPTION_PROOF_PROFILE_ID: &str = "transcript-core-no-decryption-
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum BaseClaimProfile {
-    FullyVerifiedResult,
+    FullyVerified,
 }
 
 impl BaseClaimProfile {
     pub fn code(self) -> u64 {
         match self {
-            Self::FullyVerifiedResult => 2,
+            Self::FullyVerified => 2,
         }
     }
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::FullyVerifiedResult => "FullyVerifiedResult",
+            Self::FullyVerified => "fullyVerified",
         }
     }
 
     pub fn expected_profile_id(self) -> &'static str {
         match self {
-            Self::FullyVerifiedResult => FULLY_VERIFIED_RESULT_PROFILE_ID,
+            Self::FullyVerified => FULLY_VERIFIED_PROFILE_ID,
         }
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum MheSecurityClosure {
-    PassiveMhePrototype,
+    DevelopmentIntegration,
     ActiveMalicious,
 }
 
 impl MheSecurityClosure {
     pub fn code(self) -> u64 {
         match self {
-            Self::PassiveMhePrototype => 1,
+            Self::DevelopmentIntegration => 1,
             Self::ActiveMalicious => 2,
         }
     }
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::PassiveMhePrototype => "PassiveMHEPrototype",
+            Self::DevelopmentIntegration => "developmentIntegration",
             Self::ActiveMalicious => "ActiveMalicious",
         }
     }
 
     pub fn expected_profile_id(self) -> &'static str {
         match self {
-            Self::PassiveMhePrototype => PASSIVE_MHE_PROTOTYPE_PROFILE_ID,
+            Self::DevelopmentIntegration => DEVELOPMENT_INTEGRATION_PROFILE_ID,
             Self::ActiveMalicious => ACTIVE_MALICIOUS_MHE_PROFILE_ID,
         }
     }
@@ -112,13 +111,14 @@ impl TranscriptCoreProfile {
     }
 }
 
-pub const FULLY_VERIFIED_PASSIVE_MHE_PROFILE: TranscriptCoreProfile = TranscriptCoreProfile::new(
-    BaseClaimProfile::FullyVerifiedResult,
-    MheSecurityClosure::PassiveMhePrototype,
-);
+pub const FULLY_VERIFIED_DEVELOPMENT_INTEGRATION_PROFILE: TranscriptCoreProfile =
+    TranscriptCoreProfile::new(
+        BaseClaimProfile::FullyVerified,
+        MheSecurityClosure::DevelopmentIntegration,
+    );
 pub const FULLY_VERIFIED_ACTIVE_MALICIOUS_PROFILE: TranscriptCoreProfile =
     TranscriptCoreProfile::new(
-        BaseClaimProfile::FullyVerifiedResult,
+        BaseClaimProfile::FullyVerified,
         MheSecurityClosure::ActiveMalicious,
     );
 

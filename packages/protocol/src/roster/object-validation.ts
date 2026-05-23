@@ -53,7 +53,7 @@ const manifestOpaqueBindingFieldNames = new Set([
     'bridgeWitnessPrivacyProfileDigest',
     'bgvBatchEncoderDigest',
     'bridgeLayoutDigest',
-    'encryptedAggregateTargetBasisDataRoot',
+    'encryptedAggregateInputRoot',
     'encryptedAggregateShareCiphertextRoot',
     'encryptedAggregateReconstructionDigest',
     'scoreBitDerivationCircuitDigest',
@@ -66,7 +66,7 @@ const manifestOpaqueBindingFieldNames = new Set([
     'evaluationProofProfileDigest',
     'thresholdDecryptionProfileId',
     'thresholdDecryptionProfileDigest',
-    'bgvAsyncThresholdCPADProfileDigest',
+    'kllpsTargetDecryptionProfileDigest',
     'cpadProfileId',
     'cpadProfileDigest',
     'targetBasisDigest',
@@ -130,7 +130,7 @@ const collectManifestOpaqueBindingRefusals = (
         bindings.bridgeWitnessPrivacyProfileDigest,
         bindings.bgvBatchEncoderDigest,
         bindings.bridgeLayoutDigest,
-        bindings.encryptedAggregateTargetBasisDataRoot,
+        bindings.encryptedAggregateInputRoot,
         bindings.encryptedAggregateShareCiphertextRoot,
         bindings.encryptedAggregateReconstructionDigest,
         bindings.scoreBitDerivationCircuitDigest,
@@ -141,7 +141,7 @@ const collectManifestOpaqueBindingRefusals = (
         bindings.allowedEvaluatorOpsDigest,
         bindings.evaluationProofProfileDigest,
         bindings.thresholdDecryptionProfileDigest,
-        bindings.bgvAsyncThresholdCPADProfileDigest,
+        bindings.kllpsTargetDecryptionProfileDigest,
         bindings.cpadProfileDigest,
         bindings.targetBasisDigest,
         bindings.bridgeMobileCertificatePolicyDigest,
@@ -622,8 +622,7 @@ export const verifyRosterExternalAcceptance = (
 
         return {
             ok: refusedObjects.length === 0,
-            statusLabels:
-                refusedObjects.length === 0 ? ['RosterExternallyAccepted'] : [],
+            statusLabels: refusedObjects.length === 0 ? ['rosterFrozen'] : [],
             acceptedDigests:
                 refusedObjects.length === 0
                     ? [acceptance.rosterExternalAcceptanceDigest]

@@ -39,7 +39,7 @@ pub(crate) fn describe_profile_report() -> CanonicalResult<Value> {
         "batchEncoderDigest": batch_encoder_digest,
         "batchLayoutBinding": batch_layout_binding,
         "batchLayoutBindingDigest": batch_layout_binding_digest,
-        "targetBasisDataLayoutDigest": layout_digest,
+        "encryptedAggregateInputLayoutDigest": layout_digest,
         "ballotScoreEncodingProfileDigest": ballot_score_encoding_profile_digest()?,
         "ballotShareLayoutProfileDigest": ballot_share_layout_profile_digest()?,
         "aggregateInputEncodingProfileDigest": aggregate_input_encoding_profile_digest()?,
@@ -64,7 +64,7 @@ pub(crate) fn describe_profile_report() -> CanonicalResult<Value> {
             "M10EvaluatorNotImplemented",
             "StageXNotClosed",
             "CPADNotImplemented",
-            "SupportedPhoneNotCertified"
+            "RuntimeBenchmarkReportMissing"
         ],
     }))
 }
@@ -80,10 +80,12 @@ pub(crate) fn operation_registry_report() -> CanonicalResult<Value> {
     }))
 }
 
-pub(crate) fn backend_workbook_report() -> CanonicalResult<Value> {
+pub(crate) fn backend_parameter_certificate_report() -> CanonicalResult<Value> {
     let profile_digest = profile_digest()?;
-    let workbook_value = json!({
-        "workbookId": "m7-bgv-rns-backend-workbook-v1",
+    let q_data_bits = DATA_PRIMES.len() * 47;
+    let qp_public_bits = (DATA_PRIMES.len() + 1) * 47;
+    let parameter_certificate_value = json!({
+        "parameterCertificateId": "m7-bgv-rns-backend-parameter-certificate-v1",
         "profileId": PROFILE_ID,
         "backendProfileId": BACKEND_PROFILE_ID,
         "profileDigest": profile_digest,
@@ -92,8 +94,52 @@ pub(crate) fn backend_workbook_report() -> CanonicalResult<Value> {
         "dataPrimeCount": DATA_PRIMES.len(),
         "dataPrimeBitLength": 47,
         "specialPrimeCount": 1,
-        "totalModulusBitsAtFullDataLevel": DATA_PRIMES.len() * 47,
-        "totalModulusBitsAtExtendedLevel": (DATA_PRIMES.len() + 1) * 47,
+        "totalModulusBitsAtFullDataLevel": q_data_bits,
+        "totalModulusBitsAtExtendedLevel": qp_public_bits,
+        "qDataBits": q_data_bits,
+        "qTargetBits": null,
+        "qpPublicBits": qp_public_bits,
+        "largestExposedModulusBits": null,
+        "largestKnownExposedModulusBits": qp_public_bits,
+        "exposedBasisClass": "data-plus-special-public-estimator-input-target-pending",
+        "publicRlweSamplesByBasis": {
+            "data": {
+                "modulusBits": q_data_bits,
+                "sampleCountStatus": "pending-M8-key-material"
+            },
+            "qpPublic": {
+                "modulusBits": qp_public_bits,
+                "sampleCountStatus": "pending-M8-evaluation-key-material"
+            },
+            "target": {
+                "modulusBits": null,
+                "sampleCountStatus": "pending-Appendix-C-Q-target"
+            }
+        },
+        "secretDistributionCertificate": {
+            "status": "pending-M8-collective-secret-distribution",
+            "sparseOrFixedHammingSecretsRequireSeparateCertification": true
+        },
+        "errorDistributionCertificate": {
+            "status": "pending-M8-error-distribution"
+        },
+        "estimatorRows": [
+            {
+                "basis": "data",
+                "modulusBits": q_data_bits,
+                "status": "preliminary-M7-input"
+            },
+            {
+                "basis": "qpPublic",
+                "modulusBits": qp_public_bits,
+                "status": "preliminary-M7-input"
+            },
+            {
+                "basis": "target",
+                "modulusBits": null,
+                "status": "pending-Appendix-C-Q-target"
+            }
+        ],
         "securityEstimatorInputDigest": security_estimator_input_digest()?,
         "noiseBudgetHook": {
             "status": "hook-only-for-M8-through-M10",
@@ -109,8 +155,8 @@ pub(crate) fn backend_workbook_report() -> CanonicalResult<Value> {
             "sourceMilestone": "M6",
             "bridgePath": "EncryptedAggregateBridge-v1",
             "inputWitnessCustody": "each contributor keeps aggregate witness private",
-            "targetBasisDataLayoutId": "encrypted-aggregate-target-basis-data-layout-v1",
-            "targetBasisDataLayoutDigest": layout_digest()?,
+            "encryptedAggregateInputLayoutId": "encrypted-aggregate-input-layout-v1",
+            "encryptedAggregateInputLayoutDigest": layout_digest()?,
             "batchLayoutBinding": batch_layout_binding_value()?,
             "batchLayoutBindingDigest": batch_layout_binding_digest()?,
             "batchEncoderId": BATCH_ENCODER_ID,
@@ -149,15 +195,15 @@ pub(crate) fn backend_workbook_report() -> CanonicalResult<Value> {
     });
 
     Ok(json!({
-        "workbook": workbook_value,
-        "workbookDigest": derive_protocol_digest("HEParamDigest", &workbook_value)?,
-        "workbookCanonicalBytesHash512": canonical_bytes_hash(
-            serde_json::to_string(&workbook_value)
-                .expect("workbook report should serialize")
+        "parameterCertificate": parameter_certificate_value,
+        "parameterCertificateDigest": derive_protocol_digest("HEParamDigest", &parameter_certificate_value)?,
+        "parameterCertificateCanonicalBytesHash512": canonical_bytes_hash(
+            serde_json::to_string(&parameter_certificate_value)
+                .expect("parameter certificate report should serialize")
                 .as_bytes()
         ),
         "statusLabels": [
-            "WorkbookReportEmitted",
+            "ParameterCertificateReportEmitted",
             "SecurityEstimatorInputRecorded",
             "NoiseBudgetHookRecorded"
         ],

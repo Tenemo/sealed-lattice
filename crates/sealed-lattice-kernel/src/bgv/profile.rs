@@ -12,13 +12,12 @@ pub(crate) const PLAINTEXT_MODULUS: u64 = 65_537;
 pub(crate) const DATA_BASIS_ID: &str = "sealed-lattice-bgv-rns-data-basis-v1";
 pub(crate) const EXTENDED_BASIS_ID: &str = "sealed-lattice-bgv-rns-extended-basis-v1";
 pub(crate) const SPECIAL_BASIS_ID: &str = "sealed-lattice-bgv-rns-special-basis-v1";
-pub(crate) const AGGREGATE_SHARE_LAYOUT_ID: &str =
-    "encrypted-aggregate-target-basis-data-layout-v1";
+pub(crate) const AGGREGATE_SHARE_LAYOUT_ID: &str = "encrypted-aggregate-input-layout-v1";
 pub(crate) const BATCH_ENCODER_ID: &str = "BGVBatchEncode_65537-v1";
 pub(crate) const CANONICAL_CIPHERTEXT_CONVENTION_ID: &str =
     "sealed-lattice-coefficient-domain-rns-ciphertext-v1";
 pub(crate) const OPERATION_REGISTRY_ID: &str = "sealed-lattice-bgv-allowed-ops-v1";
-pub(crate) const BATCH_LAYOUT_KIND: &str = "TargetBasisDataEncodedScoreLayout-v1";
+pub(crate) const BATCH_LAYOUT_KIND: &str = "EncryptedAggregateInputEncodedScoreLayout-v1";
 pub(crate) const BALLOT_SCORE_ENCODING_PROFILE_ID: &str =
     "ballot-score-encoding-profile-hidden-one-hot-v1";
 pub(crate) const BALLOT_SHARE_LAYOUT_PROFILE_ID: &str =
@@ -26,9 +25,9 @@ pub(crate) const BALLOT_SHARE_LAYOUT_PROFILE_ID: &str =
 pub(crate) const AGGREGATE_INPUT_ENCODING_PROFILE_ID: &str =
     "aggregate-input-encoding-profile-m6-derived-shares-v1";
 pub(crate) const ENCODED_AGGREGATE_LAYOUT_ID: &str =
-    "encoded-aggregate-layout-target-basis-data-v1";
+    "encoded-aggregate-layout-encrypted-aggregate-input-v1";
 pub(crate) const TOP_K_EVALUATOR_INPUT_LAYOUT_ID: &str =
-    "top-k-evaluator-input-layout-target-basis-data-v1";
+    "top-k-evaluator-input-layout-encrypted-aggregate-input-v1";
 
 pub(crate) const DATA_PRIMES: [u64; 16] = [
     140_737_487_306_753,
@@ -405,7 +404,7 @@ pub(crate) fn encoded_aggregate_layout_digest() -> CanonicalResult<String> {
         "EncodedAggregateLayoutDigest",
         &json!({
             "layoutId": ENCODED_AGGREGATE_LAYOUT_ID,
-            "targetBasisDataLayoutDigest": layout_digest()?,
+            "encryptedAggregateInputLayoutDigest": layout_digest()?,
             "aggregateInputEncodingProfileDigest": aggregate_input_encoding_profile_digest()?,
             "slotCount": POLYNOMIAL_DEGREE,
             "scalarOnlyAggregateLayout": false,
@@ -418,7 +417,7 @@ pub(crate) fn top_k_evaluator_input_layout_digest() -> CanonicalResult<String> {
         "TopKEvaluatorInputLayoutDigest",
         &json!({
             "layoutId": TOP_K_EVALUATOR_INPUT_LAYOUT_ID,
-            "targetBasisDataLayoutDigest": layout_digest()?,
+            "encryptedAggregateInputLayoutDigest": layout_digest()?,
             "encodedAggregateLayoutDigest": encoded_aggregate_layout_digest()?,
             "acceptedEvaluatorInput": "encrypted-aggregate-histogram-score-coordinates",
             "rejectScalarOnlyAggregateLayouts": true,
@@ -433,7 +432,7 @@ pub(crate) fn batch_layout_binding_value() -> CanonicalResult<Value> {
         "ballotShareLayoutProfileDigest": ballot_share_layout_profile_digest()?,
         "aggregateInputEncodingProfileDigest": aggregate_input_encoding_profile_digest()?,
         "encodedAggregateLayoutDigest": encoded_aggregate_layout_digest()?,
-        "targetBasisDataLayoutDigest": layout_digest()?,
+        "encryptedAggregateInputLayoutDigest": layout_digest()?,
         "topKEvaluatorInputLayoutDigest": top_k_evaluator_input_layout_digest()?,
         "coordinateOrder": "score-share-then-one-hot-score-buckets-per-option",
         "oneHotBucketOrder": "ascending-score-1-through-10",
@@ -471,7 +470,7 @@ pub(crate) fn allowed_operation_registry_value() -> CanonicalResult<Value> {
         "profileDigest": profile_digest()?,
         "batchEncoderDigest": batch_encoder_digest()?,
         "allowedOperations": [
-            "encodeEncryptedAggregateShareTargetBasisData",
+            "encodeEncryptedAggregateInput",
             "validateCoefficientDomainPlaintext",
             "validateCoefficientDomainCiphertext",
             "homomorphicAggregateShareAddition",
@@ -593,7 +592,7 @@ mod tests {
 
         assert_eq!(
             binding["layoutKind"],
-            "TargetBasisDataEncodedScoreLayout-v1"
+            "EncryptedAggregateInputEncodedScoreLayout-v1"
         );
         assert_eq!(binding["scalarOnlyAggregateLayout"], false);
         assert_eq!(
@@ -602,7 +601,7 @@ mod tests {
         );
         assert_eq!(binding["scoreBucketCount"], 10);
         assert!(
-            binding["targetBasisDataLayoutDigest"]
+            binding["encryptedAggregateInputLayoutDigest"]
                 .as_str()
                 .expect("target digest")
                 .chars()

@@ -1,13 +1,25 @@
-import { protocolDigestNamespaceValues } from '@sealed-lattice/types';
+import {
+    protocolDigestNamespaceByHashAlias,
+    protocolDigestNamespaceValues,
+    protocolHashAliasByDigestNamespace,
+    protocolHashSemanticNameValues,
+} from '@sealed-lattice/types';
 import type {
     ProtocolDigest,
     ProtocolDigestNamespace,
+    ProtocolHash,
+    ProtocolHashSemanticName,
 } from '@sealed-lattice/types';
 
 import { canonicalJson, hash512Hex } from './canonical-json.js';
 
-export { protocolDigestNamespaceValues };
-export type { ProtocolDigestNamespace };
+export {
+    protocolDigestNamespaceByHashAlias,
+    protocolDigestNamespaceValues,
+    protocolHashAliasByDigestNamespace,
+    protocolHashSemanticNameValues,
+};
+export type { ProtocolDigestNamespace, ProtocolHashSemanticName };
 
 const textEncoder = new TextEncoder();
 
@@ -60,6 +72,16 @@ export const deriveProtocolDigest = (
     hash512Hex(resolveProtocolDigestDomain(namespace), [
         textEncoder.encode(canonicalJson(value)),
     ]);
+
+export const resolveProtocolHashNamespace = (
+    semanticName: ProtocolHashSemanticName,
+): ProtocolDigestNamespace => protocolDigestNamespaceByHashAlias[semanticName];
+
+export const deriveProtocolHash = (
+    semanticName: ProtocolHashSemanticName,
+    value: unknown,
+): ProtocolHash =>
+    deriveProtocolDigest(resolveProtocolHashNamespace(semanticName), value);
 
 export const derivePolicyDigest = (
     namespace: ProtocolDigestNamespace,

@@ -19,7 +19,7 @@ import {
     expandBallotFieldLinearProofVectorCase,
     findFixture,
     fullyVerifiedActiveFixture,
-    fullyVerifiedPassiveFixture,
+    fullyVerifiedDevelopmentIntegrationFixture,
     invalidEnumFixture,
     linearProofBackendVectors,
     receiverKeyLinearProofBackendVectors,
@@ -146,30 +146,32 @@ describe('transcript-core kernel in Node', () => {
     it('analyzes golden transcript-core fixtures through WASM', async () => {
         const kernel = await loadTranscriptCoreKernel();
 
-        const fullyVerifiedPassiveAnalysis = kernel.analyzeCanonicalObject({
-            canonicalBytesHex: fullyVerifiedPassiveFixture.canonicalBytesHex,
-            chunkSize: fullyVerifiedPassiveFixture.chunkSize,
-        });
+        const fullyVerifiedDevelopmentIntegrationAnalysis =
+            kernel.analyzeCanonicalObject({
+                canonicalBytesHex:
+                    fullyVerifiedDevelopmentIntegrationFixture.canonicalBytesHex,
+                chunkSize: fullyVerifiedDevelopmentIntegrationFixture.chunkSize,
+            });
         const fullyVerifiedActiveAnalysis = kernel.analyzeCanonicalObject({
             canonicalBytesHex: fullyVerifiedActiveFixture.canonicalBytesHex,
             chunkSize: fullyVerifiedActiveFixture.chunkSize,
         });
 
-        expect(fullyVerifiedPassiveAnalysis.baseClaimProfile).toBe(
-            'FullyVerifiedResult',
-        );
-        expect(fullyVerifiedPassiveAnalysis.evaluationProofProfileId).toBe(
-            evaluationProofProfileId,
-        );
+        expect(
+            fullyVerifiedDevelopmentIntegrationAnalysis.baseClaimProfile,
+        ).toBe('fullyVerified');
+        expect(
+            fullyVerifiedDevelopmentIntegrationAnalysis.evaluationProofProfileId,
+        ).toBe(evaluationProofProfileId);
         expect(fullyVerifiedActiveAnalysis.mheSecurityClosure).toBe(
             'ActiveMalicious',
         );
         expect(fullyVerifiedActiveAnalysis.evaluationProofProfileId).toBe(
             evaluationProofProfileId,
         );
-        expect(fullyVerifiedPassiveAnalysis.objectHash512).not.toBe(
-            fullyVerifiedActiveAnalysis.objectHash512,
-        );
+        expect(
+            fullyVerifiedDevelopmentIntegrationAnalysis.objectHash512,
+        ).not.toBe(fullyVerifiedActiveAnalysis.objectHash512);
     });
 
     it('derives claim-bearing digests and field results through WASM', async () => {
@@ -279,12 +281,17 @@ describe('transcript-core kernel in Node', () => {
     it('verifies golden and malformed fixtures with stable outputs', async () => {
         const kernel = await loadTranscriptCoreKernel();
 
-        expect(kernel.verifyFixture(fullyVerifiedPassiveFixture)).toEqual({
+        expect(
+            kernel.verifyFixture(fullyVerifiedDevelopmentIntegrationFixture),
+        ).toEqual({
             verified: true,
-            caseName: 'fully-verified-passive-mhe-transcript-core',
-            objectHash512: fullyVerifiedPassiveFixture.expectedObjectHash512,
-            chunkRoot: fullyVerifiedPassiveFixture.expectedChunkRoot,
-            statusLabels: fullyVerifiedPassiveFixture.expectedStatusLabels,
+            caseName: 'fully-verified-development-integration-transcript-core',
+            objectHash512:
+                fullyVerifiedDevelopmentIntegrationFixture.expectedObjectHash512,
+            chunkRoot:
+                fullyVerifiedDevelopmentIntegrationFixture.expectedChunkRoot,
+            statusLabels:
+                fullyVerifiedDevelopmentIntegrationFixture.expectedStatusLabels,
         });
         expect(kernel.verifyFixture(invalidEnumFixture)).toEqual({
             verified: true,
@@ -324,13 +331,18 @@ describe('transcript-core kernel in Node', () => {
 
     it('verifies fixtures through the public WASM wrapper', async () => {
         await expect(
-            verifyTranscriptCoreFixture(fullyVerifiedPassiveFixture),
+            verifyTranscriptCoreFixture(
+                fullyVerifiedDevelopmentIntegrationFixture,
+            ),
         ).resolves.toEqual({
             verified: true,
-            caseName: 'fully-verified-passive-mhe-transcript-core',
-            objectHash512: fullyVerifiedPassiveFixture.expectedObjectHash512,
-            chunkRoot: fullyVerifiedPassiveFixture.expectedChunkRoot,
-            statusLabels: fullyVerifiedPassiveFixture.expectedStatusLabels,
+            caseName: 'fully-verified-development-integration-transcript-core',
+            objectHash512:
+                fullyVerifiedDevelopmentIntegrationFixture.expectedObjectHash512,
+            chunkRoot:
+                fullyVerifiedDevelopmentIntegrationFixture.expectedChunkRoot,
+            statusLabels:
+                fullyVerifiedDevelopmentIntegrationFixture.expectedStatusLabels,
         });
     });
 

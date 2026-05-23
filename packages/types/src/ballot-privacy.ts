@@ -463,7 +463,7 @@ export type BallotProofRecord = {
     readonly publicRandomnessDigest?: ProtocolDigest;
 };
 
-/** Certificate/workbook row evidence for one frozen dynamic M5 roster size. */
+/** Parameter certificate row evidence for one frozen dynamic M5 roster size. */
 export type BallotPrivacyRosterProfileEvidence = {
     readonly objectType: 'BallotPrivacyRosterProfileEvidence';
     readonly objectVersion: 1;

@@ -12,16 +12,24 @@ const pinnedReferencePath = path.join(
 const oracleDirectoryPath = path.join(repoRoot, 'tools/lattigo-oracle');
 
 type PinnedReference = {
+    readonly allowedUse: string;
     readonly archivePath: string;
     readonly archiveSha256: string;
+    readonly claimBoundary: string;
     readonly containerBaseImage: string;
     readonly containerBaseImageDigest: string;
+    readonly goToolchain: string;
     readonly localCheckoutPath: string;
     readonly oracleCommandDigest: string;
     readonly oracleDockerfileDigest: string;
     readonly pinnedCommit: string;
+    readonly pinnedCommitDate: string;
+    readonly pinnedCommitUrl: string;
+    readonly referenceName: string;
+    readonly repository: string;
     readonly runtimeUse: string;
     readonly protocolEvidenceUse: string;
+    readonly schemaVersion: number;
 };
 
 const sha256File = async (filePath: string): Promise<string> => {
@@ -36,14 +44,89 @@ const sha256Text = (text: string): string =>
 export const loadPinnedReference = async (): Promise<PinnedReference> =>
     JSON.parse(await readFile(pinnedReferencePath, 'utf8')) as PinnedReference;
 
-const assertPinnedDigest = (
+export const assertPinnedDigest = (
     label: string,
     actualDigest: string,
     expectedDigest: string,
 ): void => {
     if (actualDigest !== expectedDigest) {
         throw new Error(
-            `The pinned Lattigo ${label} digest changed: ${actualDigest}.`,
+            `The pinned Lattigo ${label} digest changed: actual ${actualDigest}, expected ${expectedDigest}. Review the oracle change before updating reference-projects/lattigo/pinned-reference.json.`,
+        );
+    }
+};
+
+const goVersionFromPinnedToolchain = (goToolchain: string): string => {
+    const match = /^go(?<version>\d+\.\d+\.\d+)$/u.exec(goToolchain);
+    if (match?.groups?.version === undefined) {
+        throw new Error(
+            `The pinned Lattigo Go toolchain is malformed: ${goToolchain}.`,
+        );
+    }
+
+    return match.groups.version;
+};
+
+export const verifyPinnedReferenceMetadata = (
+    pinnedReference: PinnedReference,
+    goModule: string,
+    dockerfile: string,
+): void => {
+    if (pinnedReference.schemaVersion !== 1) {
+        throw new Error(
+            `Unsupported Lattigo pinned-reference schema version: ${pinnedReference.schemaVersion}. Expected 1.`,
+        );
+    }
+    if (pinnedReference.referenceName !== 'Lattigo') {
+        throw new Error('The pinned reference must describe Lattigo.');
+    }
+    if (
+        !pinnedReference.pinnedCommitUrl.endsWith(pinnedReference.pinnedCommit)
+    ) {
+        throw new Error(
+            'The pinned Lattigo commit URL must end with the pinned commit.',
+        );
+    }
+    if (!pinnedReference.archivePath.includes(pinnedReference.pinnedCommit)) {
+        throw new Error(
+            'The pinned Lattigo archive path must include the pinned commit.',
+        );
+    }
+    if (
+        !pinnedReference.localCheckoutPath.includes(
+            pinnedReference.pinnedCommit,
+        )
+    ) {
+        throw new Error(
+            'The pinned Lattigo checkout path must include the pinned commit.',
+        );
+    }
+
+    const pinnedGoVersion = goVersionFromPinnedToolchain(
+        pinnedReference.goToolchain,
+    );
+    const goModuleVersion = /^go\s+(?<version>\d+\.\d+\.\d+)$/mu.exec(goModule)
+        ?.groups?.version;
+    if (goModuleVersion !== pinnedGoVersion) {
+        throw new Error(
+            `The Lattigo oracle go.mod Go version is ${goModuleVersion ?? 'missing'}, expected ${pinnedGoVersion} from pinned-reference.json.`,
+        );
+    }
+    if (
+        !pinnedReference.containerBaseImage.startsWith(
+            `golang:${pinnedGoVersion}-`,
+        )
+    ) {
+        throw new Error(
+            `The Lattigo oracle container base image ${pinnedReference.containerBaseImage} must use Go ${pinnedGoVersion}.`,
+        );
+    }
+
+    const expectedBaseImageReference = `${pinnedReference.containerBaseImage}@${pinnedReference.containerBaseImageDigest}`;
+    const dockerfileFirstLine = dockerfile.split(/\r?\n/u)[0];
+    if (dockerfileFirstLine !== `FROM ${expectedBaseImageReference}`) {
+        throw new Error(
+            `The Lattigo oracle Dockerfile must pin ${expectedBaseImageReference}.`,
         );
     }
 };
@@ -78,11 +161,11 @@ export const verifyPinnedReference = async (): Promise<{
     try {
         const archiveDigest = await sha256File(archiveAbsolutePath);
         archivePresent = true;
-        if (archiveDigest !== pinnedReference.archiveSha256) {
-            throw new Error(
-                `The pinned Lattigo archive digest changed: ${archiveDigest}.`,
-            );
-        }
+        assertPinnedDigest(
+            'archive',
+            archiveDigest,
+            pinnedReference.archiveSha256,
+        );
     } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
             throw error;
@@ -104,13 +187,7 @@ export const verifyPinnedReference = async (): Promise<{
         readFile(path.join(oracleDirectoryPath, 'Dockerfile'), 'utf8'),
     ]);
 
-    const expectedBaseImageReference = `${pinnedReference.containerBaseImage}@${pinnedReference.containerBaseImageDigest}`;
-    const dockerfileFirstLine = dockerfile.split(/\r?\n/u)[0];
-    if (dockerfileFirstLine !== `FROM ${expectedBaseImageReference}`) {
-        throw new Error(
-            `The Lattigo oracle Dockerfile must pin ${expectedBaseImageReference}.`,
-        );
-    }
+    verifyPinnedReferenceMetadata(pinnedReference, goModule, dockerfile);
     const commandDigest = sha256Text(`${mainSource}\n${goModule}`);
     const dockerfileDigest = sha256Text(dockerfile);
     assertPinnedDigest(

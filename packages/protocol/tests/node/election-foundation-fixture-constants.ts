@@ -176,12 +176,12 @@ export const manifestOpaqueBindings: ManifestOpaqueBindings = {
         layout: 'WinnerRankTopK-v1',
     }),
     bridgeLayoutDigest: deriveProtocolDigest('BridgeLayoutDigest', {
-        layout: 'encrypted-aggregate-target-basis-data-layout-v1',
+        layout: 'encrypted-aggregate-input-layout-v1',
     }),
-    encryptedAggregateTargetBasisDataRoot: deriveProtocolDigest(
-        'EncryptedAggregateTargetBasisDataRoot',
+    encryptedAggregateInputRoot: deriveProtocolDigest(
+        'EncryptedAggregateInputRoot',
         {
-            layout: 'encrypted-aggregate-target-basis-data-v1',
+            layout: 'encrypted-aggregate-input-v1',
         },
     ),
     encryptedAggregateShareCiphertextRoot: deriveProtocolDigest(
@@ -238,8 +238,8 @@ export const manifestOpaqueBindings: ManifestOpaqueBindings = {
         'ThresholdDecryptionProfileDigest',
         { profile: thresholdDecryptionProfileId },
     ),
-    bgvAsyncThresholdCPADProfileDigest: deriveProtocolDigest(
-        'BGVAsyncThresholdCPADProfileDigest',
+    kllpsTargetDecryptionProfileDigest: deriveProtocolDigest(
+        'KllpsTargetDecryptionProfileDigest',
         { profile: thresholdDecryptionProfileId },
     ),
     cpadProfileId,

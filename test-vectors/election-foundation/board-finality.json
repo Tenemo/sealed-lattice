@@ -166,7 +166,7 @@
     "CollectivePublicKeyRoot",
     "BGVBatchEncoderDigest",
     "EncryptedAggregateBridgeDigest",
-    "EncryptedAggregateTargetBasisDataRoot",
+    "EncryptedAggregateInputRoot",
     "EncryptedAggregateShareCiphertextRoot",
     "EncryptedAggregateReconstructionDigest",
     "BridgeWitnessPrivacyProfileDigest",
@@ -195,7 +195,7 @@
     "TargetDecryptionCiphertextDigest",
     "ShareReplayEvidenceDigest",
     "ShareReplayRefusalDigest",
-    "BGVAsyncThresholdCPADProfileDigest",
+    "KllpsTargetDecryptionProfileDigest",
     "TargetBasisDigest"
   ],
   "firstValidOrdering": {

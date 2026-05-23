@@ -75,16 +75,16 @@ describe('election foundation public package API in browsers', () => {
         ).toMatchObject({ ok: true });
         expect(
             evaluateActionCapability('DeriveAggregateContribution', {
-                lifecycleState: 'VotingClosed',
+                lifecycleState: 'votingClosed',
                 thresholdProfile,
                 pollSpecValid: true,
-                localRosterExternallyAccepted: true,
+                localRosterAccepted: true,
                 rosterExternalAcceptanceDigest: 'accepted-roster-digest',
                 actionContextRosterExternalAcceptanceDigest:
                     'accepted-roster-digest',
                 setupCompleteCount: thresholdProfile.setupCompletionQuorum,
                 turnoutCount: thresholdProfile.releaseQuorum,
-                bridgeMobileCertificatePresent: true,
+                bridgeBenchmarkReportPresent: true,
                 bridgeProverCertificatePresent: true,
             }),
         ).toEqual({

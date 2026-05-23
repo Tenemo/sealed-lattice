@@ -48,7 +48,6 @@ const deriveValidatedFirstValidOrder =
     publicApiRuntimeRecord.deriveValidatedFirstValidOrder as DeriveValidatedFirstValidOrder;
 
 const requiredPublicFunctions = [
-    ['createBridgeProof', publicApiRuntimeRecord.createBridgeProof],
     [
         'deriveFrozenRosterProfile',
         publicApiRuntimeRecord.deriveFrozenRosterProfile,
@@ -158,67 +157,44 @@ describe('election foundation public package API in Node', () => {
         ).toMatchObject({ ok: true });
         expect(
             isValidLifecycleTransition({
-                from: 'VotingOpen',
-                to: 'VotingClosed',
+                from: 'votingOpen',
+                to: 'votingClosed',
             }),
         ).toBe(true);
         const labels = deriveLifecycleLabels({
-            lifecycleState: 'FullyVerifiedResult',
+            lifecycleState: 'fullyVerified',
             thresholdProfile,
             mheSecurityClosure: 'ActiveMalicious',
-            localRosterExternallyAccepted: true,
-            mobileClaimGatePassed: true,
-            bridgeMobileCertificatePresent: true,
+            localRosterAccepted: true,
+            runtimeClaimGatePassed: true,
+            bridgeBenchmarkReportPresent: true,
             bridgeProverCertificatePresent: true,
             evaluationProofCertificatePresent: true,
             oneShotDecryptionProofCertificatePresent: true,
-            cpadCertificatePresent: true,
+            kllpsCpadCertificatePresent: true,
             thresholdDecryptionCertificatePresent: true,
             evaluationProofClosureApplied: true,
-            cpadClosureApplied: true,
+            kllpsCpadClosureApplied: true,
             activeMaliciousClosureApplied: true,
             decodedResultLayoutVerified: true,
         });
 
-        expect(labels.resultClaimLabels).toEqual(['FullyVerifiedResult']);
+        expect(labels.resultClaimLabels).toEqual(['fullyVerified']);
         expect(labels.modes).toEqual([]);
         expect(
             evaluateActionCapability('AcceptTarget', {
-                lifecycleState: 'EvaluationProofVerified',
+                lifecycleState: 'evaluationProofVerified',
                 thresholdProfile,
                 pollSpecValid: true,
-                localRosterExternallyAccepted: true,
+                localRosterAccepted: true,
                 rosterExternalAcceptanceDigest: 'accepted-roster-digest',
                 actionContextRosterExternalAcceptanceDigest:
                     'accepted-roster-digest',
                 targetFinalityAccepted: true,
                 evaluationProofVerified: true,
-                bridgeMobileCertificatePresent: true,
+                bridgeBenchmarkReportPresent: true,
             }),
         ).toEqual({ allowed: true, action: 'AcceptTarget' });
-        expect(
-            publicApiRuntimeRecord.createBridgeProof as () => {
-                readonly ok: boolean;
-                readonly refusedObjects: readonly {
-                    readonly code: string;
-                }[];
-            },
-        ).toBeTypeOf('function');
-        expect(
-            (
-                publicApiRuntimeRecord.createBridgeProof as () => {
-                    readonly ok: boolean;
-                    readonly refusedObjects: readonly {
-                        readonly code: string;
-                    }[];
-                }
-            )(),
-        ).toMatchObject({
-            ok: false,
-            refusedObjects: [
-                expect.objectContaining({ code: 'OperationUnavailable' }),
-            ],
-        });
         expect(
             deriveValidatedFirstValidOrder({
                 requiredContextDigest: 'context',

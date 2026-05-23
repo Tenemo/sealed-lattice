@@ -40,7 +40,7 @@ export const protocolDigestNamespaceValues = [
     'BGVProfileDigest',
     'RustBgvBackendProfileDigest',
     'EncryptedAggregateBridgeDigest',
-    'EncryptedAggregateTargetBasisDataRoot',
+    'EncryptedAggregateInputRoot',
     'EncryptedAggregateShareCiphertextRoot',
     'EncryptedAggregateReconstructionDigest',
     'BridgeWitnessPrivacyProfileDigest',
@@ -77,13 +77,13 @@ export const protocolDigestNamespaceValues = [
     'TargetPreimageDigest',
     'TargetContextDigest',
     'LocalReplayRecordDigest',
-    'MobileReplayCertDigest',
+    'LocalReplayDiagnosticDigest',
     'TopKDecryptionShareDigest',
     'VerifiedTopKResultDigest',
     'CPADProfileDigest',
     'CPADProfileVerificationDigest',
     'ThresholdDecryptionProfileDigest',
-    'BGVAsyncThresholdCPADProfileDigest',
+    'KllpsTargetDecryptionProfileDigest',
     'BridgeProofRecordDigest',
     'CanonicalCiphertextConventionDigest',
     'BGVBatchEncoderDigest',
@@ -133,3 +133,65 @@ export const protocolDigestNamespaceValues = [
 
 export type ProtocolDigestNamespace =
     (typeof protocolDigestNamespaceValues)[number];
+
+/** Semantic Hash names for document-facing APIs that still resolve to v1 namespaces. */
+export const protocolHashSemanticNameValues = [
+    'ManifestHash',
+    'RosterHash',
+    'LocalRosterAcceptanceHash',
+    'TargetProposalHash',
+    'EvaluationContextHash',
+    'TopKEvaluationRecordHash',
+    'EvaluationProofRecordHash',
+    'TargetAcceptedRecordHash',
+    'TargetContextHash',
+    'TargetPreimageHash',
+    'TargetCiphertextHash',
+    'EncryptedAggregateInputRootHash',
+    'KllpsTargetDecryptionProfileHash',
+    'LocalReplayRecordHash',
+    'LocalReplayDiagnosticHash',
+] as const;
+
+export type ProtocolHashSemanticName =
+    (typeof protocolHashSemanticNameValues)[number];
+
+export type ProtocolHash = ProtocolDigest;
+
+export const protocolDigestNamespaceByHashAlias = {
+    ManifestHash: 'ElectionManifestDigest',
+    RosterHash: 'RosterDigest',
+    LocalRosterAcceptanceHash: 'RosterExternalAcceptanceDigest',
+    TargetProposalHash: 'TargetProposalDigest',
+    EvaluationContextHash: 'EvaluationContextDigest',
+    TopKEvaluationRecordHash: 'TopKEvaluationRecordDigest',
+    EvaluationProofRecordHash: 'EvaluationProofRecordDigest',
+    TargetAcceptedRecordHash: 'TargetAcceptedRecordDigest',
+    TargetContextHash: 'TargetContextDigest',
+    TargetPreimageHash: 'TargetPreimageDigest',
+    TargetCiphertextHash: 'CiphertextRoot',
+    EncryptedAggregateInputRootHash: 'EncryptedAggregateInputRoot',
+    KllpsTargetDecryptionProfileHash: 'KllpsTargetDecryptionProfileDigest',
+    LocalReplayRecordHash: 'LocalReplayRecordDigest',
+    LocalReplayDiagnosticHash: 'LocalReplayDiagnosticDigest',
+} as const satisfies Record<ProtocolHashSemanticName, ProtocolDigestNamespace>;
+
+export const protocolHashAliasByDigestNamespace = {
+    ElectionManifestDigest: 'ManifestHash',
+    RosterDigest: 'RosterHash',
+    RosterExternalAcceptanceDigest: 'LocalRosterAcceptanceHash',
+    TargetProposalDigest: 'TargetProposalHash',
+    EvaluationContextDigest: 'EvaluationContextHash',
+    TopKEvaluationRecordDigest: 'TopKEvaluationRecordHash',
+    EvaluationProofRecordDigest: 'EvaluationProofRecordHash',
+    TargetAcceptedRecordDigest: 'TargetAcceptedRecordHash',
+    TargetContextDigest: 'TargetContextHash',
+    TargetPreimageDigest: 'TargetPreimageHash',
+    CiphertextRoot: 'TargetCiphertextHash',
+    EncryptedAggregateInputRoot: 'EncryptedAggregateInputRootHash',
+    KllpsTargetDecryptionProfileDigest: 'KllpsTargetDecryptionProfileHash',
+    LocalReplayRecordDigest: 'LocalReplayRecordHash',
+    LocalReplayDiagnosticDigest: 'LocalReplayDiagnosticHash',
+} as const satisfies Partial<
+    Record<ProtocolDigestNamespace, ProtocolHashSemanticName>
+>;

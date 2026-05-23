@@ -177,7 +177,7 @@ const deterministicFixtures =
     deterministicFixturesJson as unknown as DeterministicFixtureVectors;
 const currentBridgeAndEvaluatorNamespaces = [
     'EncryptedAggregateBridgeDigest',
-    'EncryptedAggregateTargetBasisDataRoot',
+    'EncryptedAggregateInputRoot',
     'EncryptedAggregateShareCiphertextRoot',
     'EncryptedAggregateReconstructionDigest',
     'BridgeWitnessPrivacyProfileDigest',

@@ -76,7 +76,7 @@ export type ManifestOpaqueBindings = {
     readonly bridgeWitnessPrivacyProfileDigest: ProtocolDigest;
     readonly bgvBatchEncoderDigest: ProtocolDigest;
     readonly bridgeLayoutDigest: ProtocolDigest;
-    readonly encryptedAggregateTargetBasisDataRoot: ProtocolDigest;
+    readonly encryptedAggregateInputRoot: ProtocolDigest;
     readonly encryptedAggregateShareCiphertextRoot: ProtocolDigest;
     readonly encryptedAggregateReconstructionDigest: ProtocolDigest;
     readonly scoreBitDerivationCircuitDigest: ProtocolDigest;
@@ -89,7 +89,7 @@ export type ManifestOpaqueBindings = {
     readonly evaluationProofProfileDigest: ProtocolDigest;
     readonly thresholdDecryptionProfileId: string;
     readonly thresholdDecryptionProfileDigest: ProtocolDigest;
-    readonly bgvAsyncThresholdCPADProfileDigest: ProtocolDigest;
+    readonly kllpsTargetDecryptionProfileDigest: ProtocolDigest;
     readonly cpadProfileId: string;
     readonly cpadProfileDigest: ProtocolDigest;
     readonly targetBasisDigest: ProtocolDigest;

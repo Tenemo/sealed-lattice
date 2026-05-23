@@ -13,20 +13,18 @@ import { allowAction, refuseAction } from './refusal.js';
 const claimBearingActions = new Set<ProtocolAction>([
     'SubmitVote',
     'DeriveAggregateContribution',
-    'CreateBridgeProof',
     'VerifyBridgeProof',
     'VerifyEvaluationProof',
     'AcceptTarget',
     'CreateTargetBoundDecryptionShare',
     'VerifyDecryptionShare',
     'VerifyOneShotSharePolicy',
-    'VerifyCPADProfile',
+    'VerifyKllpsTargetDecryptionProfile',
     'RecombineAcceptedTarget',
     'DecodeVerifiedTopK',
 ]);
 
-const bridgeMobileCertificateActions = new Set<ProtocolAction>([
-    'CreateBridgeProof',
+const bridgeBenchmarkReportActions = new Set<ProtocolAction>([
     'VerifyBridgeProof',
     'DeriveAggregateContribution',
     'VerifyEvaluationProof',
@@ -37,7 +35,7 @@ const decryptionCertificateActions = new Set<ProtocolAction>([
     'CreateTargetBoundDecryptionShare',
     'VerifyDecryptionShare',
     'VerifyOneShotSharePolicy',
-    'VerifyCPADProfile',
+    'VerifyKllpsTargetDecryptionProfile',
     'RecombineAcceptedTarget',
     'DecodeVerifiedTopK',
 ]);
@@ -97,8 +95,8 @@ const evaluateAggregateContribution = (
     context: CapabilityContext,
 ): CapabilityDecision => {
     if (
-        context.lifecycleState !== 'VotingClosed' &&
-        context.lifecycleState !== 'AwaitingAggregateContributors'
+        context.lifecycleState !== 'votingClosed' &&
+        context.lifecycleState !== 'aggregatePending'
     ) {
         return refuseAction(action, 'InvalidLifecycleState');
     }
@@ -108,7 +106,7 @@ const evaluateAggregateContribution = (
             context.thresholdProfile.setupCompletionQuorum,
         )
     ) {
-        return refuseAction(action, 'SetupIncomplete');
+        return refuseAction(action, 'setupIncomplete');
     }
     if (
         !countAtLeast(
@@ -116,10 +114,10 @@ const evaluateAggregateContribution = (
             context.thresholdProfile.releaseQuorum,
         )
     ) {
-        return refuseAction(action, 'TurnoutBelowReleaseFloor');
+        return refuseAction(action, 'turnoutFloorNotReached');
     }
-    if (context.bridgeMobileCertificatePresent !== true) {
-        return refuseAction(action, 'MissingBridgeMobileCertificate');
+    if (context.bridgeBenchmarkReportPresent !== true) {
+        return refuseAction(action, 'MissingBridgeBenchmarkReport');
     }
     if (context.bridgeProverCertificatePresent !== true) {
         return refuseAction(action, 'MissingBridgeProverCertificate');
@@ -133,8 +131,8 @@ const evaluateEvaluationProof = (
     context: CapabilityContext,
 ): CapabilityDecision => {
     if (
-        context.lifecycleState !== 'TargetFinalityReached' &&
-        context.lifecycleState !== 'EvaluationProofOpen'
+        context.lifecycleState !== 'targetFinalityReached' &&
+        context.lifecycleState !== 'evaluationProofPending'
     ) {
         return refuseAction(action, 'InvalidLifecycleState');
     }
@@ -144,8 +142,8 @@ const evaluateEvaluationProof = (
     if (context.evaluationProofCertificatePresent !== true) {
         return refuseAction(action, 'MissingEvaluationProofCertificate');
     }
-    if (context.bridgeMobileCertificatePresent !== true) {
-        return refuseAction(action, 'MissingBridgeMobileCertificate');
+    if (context.bridgeBenchmarkReportPresent !== true) {
+        return refuseAction(action, 'MissingBridgeBenchmarkReport');
     }
 
     return allowAction(action);
@@ -155,7 +153,7 @@ const evaluateTargetAcceptance = (
     action: ProtocolAction,
     context: CapabilityContext,
 ): CapabilityDecision => {
-    if (context.lifecycleState !== 'EvaluationProofVerified') {
+    if (context.lifecycleState !== 'evaluationProofVerified') {
         return refuseAction(action, 'InvalidLifecycleState');
     }
     if (context.targetFinalityAccepted !== true) {
@@ -164,8 +162,8 @@ const evaluateTargetAcceptance = (
     if (context.evaluationProofVerified !== true) {
         return refuseAction(action, 'EvaluationProofMissing');
     }
-    if (context.bridgeMobileCertificatePresent !== true) {
-        return refuseAction(action, 'MissingBridgeMobileCertificate');
+    if (context.bridgeBenchmarkReportPresent !== true) {
+        return refuseAction(action, 'MissingBridgeBenchmarkReport');
     }
 
     return allowAction(action);
@@ -176,11 +174,11 @@ const evaluateLocalReplay = (
     context: CapabilityContext,
 ): CapabilityDecision => {
     if (
-        context.lifecycleState !== 'TargetAccepted' &&
-        context.lifecycleState !== 'AwaitingFirstDecryptionShares' &&
-        context.lifecycleState !== 'FirstThresholdSharesReached' &&
-        context.lifecycleState !== 'CPADProfileVerified' &&
-        context.lifecycleState !== 'FullyVerifiedResult'
+        context.lifecycleState !== 'targetAccepted' &&
+        context.lifecycleState !== 'decryptionPending' &&
+        context.lifecycleState !== 'decryptionSharesReady' &&
+        context.lifecycleState !== 'cpadProfileVerified' &&
+        context.lifecycleState !== 'fullyVerified'
     ) {
         return refuseAction(action, 'InvalidLifecycleState');
     }
@@ -199,8 +197,8 @@ const evaluateDecryptionShare = (
     context: CapabilityContext,
 ): CapabilityDecision => {
     if (
-        context.lifecycleState !== 'TargetAccepted' &&
-        context.lifecycleState !== 'AwaitingFirstDecryptionShares'
+        context.lifecycleState !== 'targetAccepted' &&
+        context.lifecycleState !== 'decryptionPending'
     ) {
         return refuseAction(action, 'InvalidLifecycleState');
     }
@@ -231,15 +229,15 @@ const evaluateDecryptionShare = (
     return allowAction(action);
 };
 
-const evaluateCPADProfile = (
+const evaluateKllpsCpadProfile = (
     action: ProtocolAction,
     context: CapabilityContext,
 ): CapabilityDecision => {
-    if (context.lifecycleState !== 'FirstThresholdSharesReached') {
+    if (context.lifecycleState !== 'decryptionSharesReady') {
         return refuseAction(action, 'InvalidLifecycleState');
     }
-    if (context.cpadCertificatePresent !== true) {
-        return refuseAction(action, 'MissingCPADCertificate');
+    if (context.kllpsCpadCertificatePresent !== true) {
+        return refuseAction(action, 'MissingKllpsCpadCertificate');
     }
     const certifiedDecryptionShareQuorum =
         getCertifiedDecryptionShareQuorum(context);
@@ -266,9 +264,9 @@ const evaluateRecombination = (
     context: CapabilityContext,
 ): CapabilityDecision => {
     if (
-        context.lifecycleState !== 'FirstThresholdSharesReached' &&
-        context.lifecycleState !== 'CPADProfileVerified' &&
-        context.lifecycleState !== 'FullyVerifiedResult'
+        context.lifecycleState !== 'decryptionSharesReady' &&
+        context.lifecycleState !== 'cpadProfileVerified' &&
+        context.lifecycleState !== 'fullyVerified'
     ) {
         return refuseAction(action, 'InvalidLifecycleState');
     }
@@ -282,7 +280,7 @@ const evaluateRecombination = (
         return refuseAction(action, 'EvaluationProofMissing');
     }
     if (context.cpadProfileVerified !== true) {
-        return refuseAction(action, 'CPADProfileNotVerified');
+        return refuseAction(action, 'KllpsCpadProfileNotVerified');
     }
     const certifiedDecryptionShareQuorum =
         getCertifiedDecryptionShareQuorum(context);
@@ -311,7 +309,7 @@ const evaluateClaimBearingEnvironment = (
     if (!claimBearingActions.has(action)) {
         return undefined;
     }
-    if (context.localRosterExternallyAccepted !== true) {
+    if (context.localRosterAccepted !== true) {
         return refuseAction(action, 'LocalRosterNotAccepted');
     }
     if (
@@ -332,13 +330,9 @@ const evaluateClaimBearingEnvironment = (
     if (!context.thresholdProfile.claimBearing) {
         return refuseAction(action, 'ProfileNotClaimBearing');
     }
-    if (context.mobileProfileSupported === false) {
-        return refuseAction(action, 'UnsupportedMobileProfile');
+    if (context.runtimeProfileSupported === false) {
+        return refuseAction(action, 'OutsideMeasuredRuntimeProfile');
     }
-    if (context.storageQuotaSufficient === false) {
-        return refuseAction(action, 'InsufficientStorageQuota');
-    }
-
     return undefined;
 };
 
@@ -349,7 +343,7 @@ const evaluateOpenVoting = (
     action: ProtocolAction,
     context: CapabilityContext,
 ): CapabilityDecision => {
-    if (!lifecycleAllows(context, 'VotingOpen')) {
+    if (!lifecycleAllows(context, 'votingOpen')) {
         return refuseAction(action, 'InvalidLifecycleState');
     }
     if (!context.thresholdProfile.claimBearing) {
@@ -361,7 +355,7 @@ const evaluateOpenVoting = (
         context.ballotProofProfileFrozen !== true ||
         context.shareLayoutFrozen !== true ||
         context.targetOutputLayoutFrozen !== true ||
-        context.cpadProfileReferencePresent !== true
+        context.kllpsCpadProfileReferencePresent !== true
     ) {
         return refuseAction(action, 'ClaimClosureMissing');
     }
@@ -373,9 +367,9 @@ const evaluateOpenVoting = (
             context.thresholdProfile.setupCompletionQuorum,
         )
     ) {
-        return refuseAction(action, 'SetupIncomplete');
+        return refuseAction(action, 'setupIncomplete');
     }
-    if (context.localRosterExternallyAccepted !== true) {
+    if (context.localRosterAccepted !== true) {
         return refuseAction(action, 'LocalRosterNotAccepted');
     }
 
@@ -387,10 +381,10 @@ const evaluateUnavailableFutureAction = (
     context: CapabilityContext,
 ): CapabilityDecision => {
     if (
-        bridgeMobileCertificateActions.has(action) &&
-        context.bridgeMobileCertificatePresent === false
+        bridgeBenchmarkReportActions.has(action) &&
+        context.bridgeBenchmarkReportPresent === false
     ) {
-        return refuseAction(action, 'MissingBridgeMobileCertificate');
+        return refuseAction(action, 'MissingBridgeBenchmarkReport');
     }
     if (
         decryptionCertificateActions.has(action) &&
@@ -406,9 +400,6 @@ export const evaluateActionCapability = (
     action: ProtocolAction,
     context: CapabilityContext,
 ): CapabilityDecision => {
-    if (context.browserSupported === false) {
-        return refuseAction(action, 'UnsupportedBrowserContext');
-    }
     if (!context.pollSpecValid) {
         return refuseAction(action, 'PollSpecInvalid');
     }
@@ -420,40 +411,39 @@ export const evaluateActionCapability = (
 
     switch (action) {
         case 'CreatePoll':
-            return context.lifecycleState === 'DraftPoll'
+            return context.lifecycleState === 'draft'
                 ? allowAction(action)
                 : refuseAction(action, 'InvalidLifecycleState');
         case 'OpenRegistration':
-            return evaluateLifecycleAction(action, context, 'RegistrationOpen');
+            return evaluateLifecycleAction(action, context, 'registrationOpen');
         case 'CreateRegistrationEntry':
-            return context.lifecycleState === 'RegistrationOpen'
+            return context.lifecycleState === 'registrationOpen'
                 ? allowAction(action)
                 : refuseAction(action, 'InvalidLifecycleState');
         case 'CreateTrusteeSetupEntry':
-            return context.lifecycleState === 'TrusteeSetupOpen'
+            return context.lifecycleState === 'trusteeSetupOpen'
                 ? allowAction(action)
                 : refuseAction(action, 'InvalidLifecycleState');
         case 'CloseRegistration':
             return evaluateLifecycleAction(
                 action,
                 context,
-                'RegistrationClosed',
+                'registrationClosed',
             );
         case 'FreezeRoster':
-            return evaluateLifecycleAction(action, context, 'RosterFrozen');
+            return evaluateLifecycleAction(action, context, 'rosterFrozen');
         case 'OpenVoting':
             return evaluateOpenVoting(action, context);
         case 'SubmitVote':
-            return context.lifecycleState === 'VotingOpen'
+            return context.lifecycleState === 'votingOpen'
                 ? allowAction(action)
                 : refuseAction(action, 'InvalidLifecycleState');
         case 'CloseVoting':
-            return evaluateLifecycleAction(action, context, 'VotingClosed');
+            return evaluateLifecycleAction(action, context, 'votingClosed');
         case 'VerifyTranscript':
             return evaluateUnavailableFutureAction(action, context);
         case 'DeriveAggregateContribution':
             return evaluateAggregateContribution(action, context);
-        case 'CreateBridgeProof':
         case 'VerifyBridgeProof':
             return evaluateUnavailableFutureAction(action, context);
         case 'VerifyEvaluationProof':
@@ -461,12 +451,12 @@ export const evaluateActionCapability = (
         case 'AcceptTarget':
             return evaluateTargetAcceptance(action, context);
         case 'ReplayEvaluation':
-        case 'CreateLocalReplayRecord':
+        case 'CreateLocalReplayDiagnostic':
             return evaluateLocalReplay(action, context);
         case 'CreateTargetBoundDecryptionShare':
             return evaluateDecryptionShare(action, context);
-        case 'VerifyCPADProfile':
-            return evaluateCPADProfile(action, context);
+        case 'VerifyKllpsTargetDecryptionProfile':
+            return evaluateKllpsCpadProfile(action, context);
         case 'RecombineAcceptedTarget':
             return evaluateRecombination(action, context);
         case 'DecodeVerifiedTopK':

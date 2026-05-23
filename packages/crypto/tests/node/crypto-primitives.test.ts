@@ -8,10 +8,14 @@ import {
     createProtocolSignatureFixture,
     deriveMlDsaPublicKeyDigest,
     deriveProtocolDigest,
+    deriveProtocolHash,
     deriveProtocolSignatureDigest,
     hash512,
     hash512Hex,
+    protocolDigestNamespaceByHashAlias,
+    protocolHashAliasByDigestNamespace,
     resolveProtocolDigestDomain,
+    resolveProtocolHashNamespace,
     verifySignedObjectSignature,
 } from '../../src/index';
 
@@ -84,6 +88,23 @@ describe('crypto primitive boundary', () => {
                 receiver: 'fixture',
             }),
         ).toThrow('reserved');
+    });
+
+    it('maps document-facing Hash names onto reserved v1 namespaces', () => {
+        const targetProposal = { target: 'proposal' };
+
+        expect(resolveProtocolHashNamespace('TargetProposalHash')).toBe(
+            'TargetProposalDigest',
+        );
+        expect(protocolDigestNamespaceByHashAlias.ManifestHash).toBe(
+            'ElectionManifestDigest',
+        );
+        expect(
+            protocolHashAliasByDigestNamespace.KllpsTargetDecryptionProfileDigest,
+        ).toBe('KllpsTargetDecryptionProfileHash');
+        expect(deriveProtocolHash('TargetProposalHash', targetProposal)).toBe(
+            deriveProtocolDigest('TargetProposalDigest', targetProposal),
+        );
     });
 
     it('canonicalizes JSON deterministically and rejects unsupported values', () => {

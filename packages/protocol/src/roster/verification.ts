@@ -404,11 +404,7 @@ const verifyRosterManifestTranscriptUnchecked = (
     const statusLabels: readonly ProtocolVerificationStatusLabel[] =
         conflictingManifest === undefined && forkEvidence === undefined
             ? []
-            : [
-                  'BoardForkSuspected',
-                  'BoardEvidencePublished',
-                  'ForkedElection',
-              ];
+            : ['boardForkSuspected', 'boardEvidencePublished', 'forkDetected'];
     if (conflictingManifest !== undefined) {
         refusedObjects.push(
             createRefusal(

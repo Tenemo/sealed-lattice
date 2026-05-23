@@ -157,7 +157,7 @@ export type BgvRnsProfileReport = {
     readonly profileDigest: ProtocolDigest;
     readonly backendProfileDigest: ProtocolDigest;
     readonly batchEncoderDigest: ProtocolDigest;
-    readonly targetBasisDataLayoutDigest: ProtocolDigest;
+    readonly encryptedAggregateInputLayoutDigest: ProtocolDigest;
     readonly batchLayoutBinding: unknown;
     readonly batchLayoutBindingDigest: ProtocolDigest;
     readonly ballotScoreEncodingProfileDigest: ProtocolDigest;

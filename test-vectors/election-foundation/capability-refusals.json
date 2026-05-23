@@ -6,10 +6,10 @@
       "action": "DeriveAggregateContribution",
       "context": {
         "pollSpecValid": true,
-        "localRosterExternallyAccepted": true,
+        "localRosterAccepted": true,
         "rosterExternalAcceptanceDigest": "accepted-roster-digest",
         "actionContextRosterExternalAcceptanceDigest": "accepted-roster-digest",
-        "lifecycleState": "VotingOpen"
+        "lifecycleState": "votingOpen"
       },
       "expected": {
         "allowed": false,
@@ -22,17 +22,17 @@
       "action": "DeriveAggregateContribution",
       "context": {
         "pollSpecValid": true,
-        "localRosterExternallyAccepted": true,
+        "localRosterAccepted": true,
         "rosterExternalAcceptanceDigest": "accepted-roster-digest",
         "actionContextRosterExternalAcceptanceDigest": "accepted-roster-digest",
-        "lifecycleState": "VotingClosed",
+        "lifecycleState": "votingClosed",
         "setupCompleteCount": 20,
         "turnoutCount": 13
       },
       "expected": {
         "allowed": false,
         "action": "DeriveAggregateContribution",
-        "reason": "TurnoutBelowReleaseFloor"
+        "reason": "turnoutFloorNotReached"
       }
     },
     {
@@ -40,12 +40,12 @@
       "action": "VerifyEvaluationProof",
       "context": {
         "pollSpecValid": true,
-        "localRosterExternallyAccepted": true,
+        "localRosterAccepted": true,
         "rosterExternalAcceptanceDigest": "accepted-roster-digest",
         "actionContextRosterExternalAcceptanceDigest": "accepted-roster-digest",
-        "lifecycleState": "EvaluationProofOpen",
+        "lifecycleState": "evaluationProofPending",
         "targetFinalityAccepted": true,
-        "bridgeMobileCertificatePresent": true
+        "bridgeBenchmarkReportPresent": true
       },
       "expected": {
         "allowed": false,
@@ -58,8 +58,8 @@
       "action": "SubmitVote",
       "context": {
         "pollSpecValid": true,
-        "localRosterExternallyAccepted": true,
-        "lifecycleState": "VotingOpen",
+        "localRosterAccepted": true,
+        "lifecycleState": "votingOpen",
         "rosterExternalAcceptanceDigest": "accepted-roster-digest"
       },
       "expected": {
@@ -73,8 +73,8 @@
       "action": "SubmitVote",
       "context": {
         "pollSpecValid": true,
-        "localRosterExternallyAccepted": true,
-        "lifecycleState": "VotingOpen",
+        "localRosterAccepted": true,
+        "lifecycleState": "votingOpen",
         "rosterExternalAcceptanceDigest": "accepted-roster-digest",
         "actionContextRosterExternalAcceptanceDigest": "different-roster-digest"
       },
@@ -89,13 +89,13 @@
       "action": "AcceptTarget",
       "context": {
         "pollSpecValid": true,
-        "localRosterExternallyAccepted": true,
+        "localRosterAccepted": true,
         "rosterExternalAcceptanceDigest": "accepted-roster-digest",
         "actionContextRosterExternalAcceptanceDigest": "accepted-roster-digest",
-        "lifecycleState": "EvaluationProofVerified",
+        "lifecycleState": "evaluationProofVerified",
         "targetFinalityAccepted": true,
         "evaluationProofVerified": true,
-        "bridgeMobileCertificatePresent": true
+        "bridgeBenchmarkReportPresent": true
       },
       "expected": {
         "allowed": true,
@@ -110,7 +110,7 @@
         "targetBoundShareSelectionProfile": {
           "profileId": "target-bound-first-valid-share-selection-v1",
           "certificateDigest": "target-bound-certificate-digest",
-          "cpadProfileId": "CPAD-BGV-AsyncThreshold-v1",
+          "cpadProfileId": "KLLPS26-AsyncLagrangeTarget-CPAD-v1",
           "targetBasisDigest": "target-basis-digest",
           "decryptionShareQuorum": 9,
           "minimumSharesForInterpolation": 7,
@@ -121,10 +121,10 @@
       },
       "context": {
         "pollSpecValid": true,
-        "localRosterExternallyAccepted": true,
+        "localRosterAccepted": true,
         "rosterExternalAcceptanceDigest": "accepted-roster-digest",
         "actionContextRosterExternalAcceptanceDigest": "accepted-roster-digest",
-        "lifecycleState": "TargetAccepted",
+        "lifecycleState": "targetAccepted",
         "targetFinalityAccepted": true,
         "targetAccepted": true,
         "evaluationProofVerified": true,
@@ -143,10 +143,10 @@
       "action": "CreateTargetBoundDecryptionShare",
       "context": {
         "pollSpecValid": true,
-        "localRosterExternallyAccepted": true,
+        "localRosterAccepted": true,
         "rosterExternalAcceptanceDigest": "accepted-roster-digest",
         "actionContextRosterExternalAcceptanceDigest": "accepted-roster-digest",
-        "lifecycleState": "TargetAccepted",
+        "lifecycleState": "targetAccepted",
         "targetFinalityAccepted": true,
         "targetAccepted": true,
         "evaluationProofVerified": true
@@ -165,7 +165,7 @@
         "targetBoundShareSelectionProfile": {
           "profileId": "target-bound-first-valid-share-selection-v1",
           "certificateDigest": "target-bound-certificate-digest",
-          "cpadProfileId": "CPAD-BGV-AsyncThreshold-v1",
+          "cpadProfileId": "KLLPS26-AsyncLagrangeTarget-CPAD-v1",
           "targetBasisDigest": "target-basis-digest",
           "decryptionShareQuorum": 9,
           "minimumSharesForInterpolation": 7,
@@ -176,10 +176,10 @@
       },
       "context": {
         "pollSpecValid": true,
-        "localRosterExternallyAccepted": true,
+        "localRosterAccepted": true,
         "rosterExternalAcceptanceDigest": "accepted-roster-digest",
         "actionContextRosterExternalAcceptanceDigest": "accepted-roster-digest",
-        "lifecycleState": "FullyVerifiedResult",
+        "lifecycleState": "fullyVerified",
         "decryptionShareCount": 9
       },
       "expected": {
@@ -197,13 +197,13 @@
       },
       "context": {
         "pollSpecValid": true,
-        "localRosterExternallyAccepted": true,
+        "localRosterAccepted": true,
         "rosterExternalAcceptanceDigest": "accepted-roster-digest",
         "actionContextRosterExternalAcceptanceDigest": "accepted-roster-digest",
-        "lifecycleState": "EvaluationProofVerified",
+        "lifecycleState": "evaluationProofVerified",
         "targetFinalityAccepted": true,
         "evaluationProofVerified": true,
-        "bridgeMobileCertificatePresent": true
+        "bridgeBenchmarkReportPresent": true
       },
       "expected": {
         "allowed": true,
@@ -215,39 +215,19 @@
       "action": "AcceptTarget",
       "context": {
         "pollSpecValid": true,
-        "localRosterExternallyAccepted": true,
+        "localRosterAccepted": true,
         "rosterExternalAcceptanceDigest": "accepted-roster-digest",
         "actionContextRosterExternalAcceptanceDigest": "accepted-roster-digest",
-        "lifecycleState": "EvaluationProofVerified",
+        "lifecycleState": "evaluationProofVerified",
         "targetFinalityAccepted": true,
         "evaluationProofVerified": true,
-        "bridgeMobileCertificatePresent": true,
-        "mobileProfileSupported": false
+        "bridgeBenchmarkReportPresent": true,
+        "runtimeProfileSupported": false
       },
       "expected": {
         "allowed": false,
         "action": "AcceptTarget",
-        "reason": "UnsupportedMobileProfile"
-      }
-    },
-    {
-      "caseName": "accept-target-insufficient-storage-quota",
-      "action": "AcceptTarget",
-      "context": {
-        "pollSpecValid": true,
-        "localRosterExternallyAccepted": true,
-        "rosterExternalAcceptanceDigest": "accepted-roster-digest",
-        "actionContextRosterExternalAcceptanceDigest": "accepted-roster-digest",
-        "lifecycleState": "EvaluationProofVerified",
-        "targetFinalityAccepted": true,
-        "evaluationProofVerified": true,
-        "bridgeMobileCertificatePresent": true,
-        "storageQuotaSufficient": false
-      },
-      "expected": {
-        "allowed": false,
-        "action": "AcceptTarget",
-        "reason": "InsufficientStorageQuota"
+        "reason": "OutsideMeasuredRuntimeProfile"
       }
     },
     {
@@ -255,13 +235,13 @@
       "action": "DeriveAggregateContribution",
       "context": {
         "pollSpecValid": true,
-        "localRosterExternallyAccepted": true,
+        "localRosterAccepted": true,
         "rosterExternalAcceptanceDigest": "accepted-roster-digest",
         "actionContextRosterExternalAcceptanceDigest": "accepted-roster-digest",
-        "lifecycleState": "VotingClosed",
+        "lifecycleState": "votingClosed",
         "setupCompleteCount": 20,
         "turnoutCount": 14,
-        "bridgeMobileCertificatePresent": true,
+        "bridgeBenchmarkReportPresent": true,
         "bridgeProverCertificatePresent": false
       },
       "expected": {
@@ -272,13 +252,13 @@
     },
     {
       "caseName": "cpad-profile-missing-certificate",
-      "action": "VerifyCPADProfile",
+      "action": "VerifyKllpsTargetDecryptionProfile",
       "thresholdProfileInput": {
         "rosterSize": 20,
         "targetBoundShareSelectionProfile": {
           "profileId": "target-bound-first-valid-share-selection-v1",
           "certificateDigest": "target-bound-certificate-digest",
-          "cpadProfileId": "CPAD-BGV-AsyncThreshold-v1",
+          "cpadProfileId": "KLLPS26-AsyncLagrangeTarget-CPAD-v1",
           "targetBasisDigest": "target-basis-digest",
           "decryptionShareQuorum": 9,
           "minimumSharesForInterpolation": 7,
@@ -289,17 +269,17 @@
       },
       "context": {
         "pollSpecValid": true,
-        "localRosterExternallyAccepted": true,
+        "localRosterAccepted": true,
         "rosterExternalAcceptanceDigest": "accepted-roster-digest",
         "actionContextRosterExternalAcceptanceDigest": "accepted-roster-digest",
-        "lifecycleState": "FirstThresholdSharesReached",
-        "cpadCertificatePresent": false,
+        "lifecycleState": "decryptionSharesReady",
+        "kllpsCpadCertificatePresent": false,
         "thresholdDecryptionCertificatePresent": true
       },
       "expected": {
         "allowed": false,
-        "action": "VerifyCPADProfile",
-        "reason": "MissingCPADCertificate"
+        "action": "VerifyKllpsTargetDecryptionProfile",
+        "reason": "MissingKllpsCpadCertificate"
       }
     }
   ]

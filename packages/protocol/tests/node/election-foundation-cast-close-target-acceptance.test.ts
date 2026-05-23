@@ -202,8 +202,8 @@ const createTargetAcceptedRecord = (
         targetCiphertextDigest: evaluationProofRecord.targetCiphertextDigest,
         targetLayoutDigest: evaluationProofRecord.targetLayoutDigest,
         acceptanceMode: 'evaluation-proof',
-        bgvAsyncThresholdCPADProfileDigest:
-            manifestOpaqueBindings.bgvAsyncThresholdCPADProfileDigest,
+        kllpsTargetDecryptionProfileDigest:
+            manifestOpaqueBindings.kllpsTargetDecryptionProfileDigest,
         targetBasisDigest: manifestOpaqueBindings.targetBasisDigest,
         cpadProfileId: manifestOpaqueBindings.cpadProfileId,
         cpadProfileDigest: manifestOpaqueBindings.cpadProfileDigest,
@@ -280,8 +280,8 @@ const createDecryptionShare = (
         cpadProfileDigest: targetAcceptedRecord.cpadProfileDigest,
         thresholdDecryptionProfileDigest:
             targetAcceptedRecord.thresholdDecryptionProfileDigest,
-        bgvAsyncThresholdCPADProfileDigest:
-            targetAcceptedRecord.bgvAsyncThresholdCPADProfileDigest,
+        kllpsTargetDecryptionProfileDigest:
+            targetAcceptedRecord.kllpsTargetDecryptionProfileDigest,
         targetDecryptionPreparationRecordDigest: deriveProtocolDigest(
             'TargetDecryptionPreparationRecordDigest',
             { target: 'accepted-target-decryption-preparation' },
@@ -371,9 +371,12 @@ const createLocalReplayRecord = (
         }),
         recoveryEpoch: 0,
         deviceEpoch: 0,
-        mobileReplayCertDigest: deriveProtocolDigest('MobileReplayCertDigest', {
-            replay: 'participant-1',
-        }),
+        localReplayDiagnosticDigest: deriveProtocolDigest(
+            'LocalReplayDiagnosticDigest',
+            {
+                replay: 'participant-1',
+            },
+        ),
     } as const;
     const localReplayRecordDigest = deriveLocalReplayRecordDigest(payload);
 

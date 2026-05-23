@@ -580,11 +580,11 @@ const verifyTargetFinalityUnchecked = (
         forkEvidence === undefined
             ? []
             : uniqueStrings([
-                  'BoardForkSuspected',
-                  'BoardEvidencePublished',
-                  'ForkedElection',
+                  'boardForkSuspected',
+                  'boardEvidencePublished',
+                  'forkDetected',
                   ...(equivocatingWitnessIdentities.length > 0
-                      ? (['WitnessEquivocationEvidence'] as const)
+                      ? (['witnessEquivocationEvidence'] as const)
                       : []),
               ]);
     const acceptedDigests = uniqueStrings([
