@@ -52,6 +52,8 @@ The ballot privacy implementation currently exposes verification-oriented APIs o
 
 The public status surface uses compact claim labels such as `pending`, `rosterFrozen`, `ballotSubmitted`, `targetAccepted`, `evaluationProofVerified`, `cpadProfileVerified`, `fullyVerified`, `forkDetected`, and `outsideClaim`, with structured reasons for missing evidence or outside-claim cases. Local replay is diagnostic only and never accepts a target or replaces the mandatory evaluation proof.
 
+Successful M6 aggregate derivation proof generation and component verification still report `pending`, because the encrypted aggregate bridge, evaluation proof, target acceptance, threshold decryption, CPAD closure, and final result claims remain unavailable.
+
 Current M5 dimensions are: 2 to 20 options; `shareVectorWidth = 11 * optionCount`; `n = 20` as the mandatory benchmark receiver count; dynamic frozen receiver counts from 10 to 50 only when the ballot proof statement carries bound roster-profile evidence; and explicitly acknowledged 3 to 9 receiver casual micro-roster verification only outside claim-bearing package acceptance. The casual micro-roster path has verifier and proof-record generation harness coverage for every receiver count from 3 through 9, but claim-bearing package acceptance still rejects those rosters. Current proof-size and runtime benchmark evidence has only been run for the mandatory `n = 20`, `m = 20`, threshold-7 profile; micro-roster and dynamic-roster benchmark evidence remains future full-suite work.
 
 Implemented internally:

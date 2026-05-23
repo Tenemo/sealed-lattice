@@ -65,9 +65,7 @@ pub(crate) fn generate_aggregate_derivation_proof_from_command_request(request: 
             "operation": "generateAggregateDerivationProof",
             "componentId": AGGREGATE_DERIVATION_COMPONENT_ID,
             "statusLabels": [
-                "AggregateDerivationRelationWitnessChecked",
-                "AggregateDerivationProofBytesGenerated",
-                "AggregateDerivationProofVerified"
+                "pending"
             ],
             "acceptedDigests": [],
             "refusedObjects": [],
@@ -291,8 +289,7 @@ pub(crate) fn verify_aggregate_derivation_proof_from_command_request(request: &V
         "operation": "verifyAggregateDerivationProof",
         "componentId": AGGREGATE_DERIVATION_COMPONENT_ID,
         "statusLabels": [
-            "AggregateDerivationStructureVerified",
-            "AggregateDerivationProofVerified"
+            "pending"
         ],
         "acceptedDigests": object_digest.map(|digest| vec![digest]).unwrap_or_default(),
         "refusedObjects": [],
