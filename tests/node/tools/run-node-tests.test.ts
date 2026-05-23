@@ -27,14 +27,22 @@ const readWorkspacePackageScripts = async (): Promise<
 };
 
 describe('node test runner', () => {
-    it('routes the package script through the TypeScript runner', async () => {
+    it('keeps package scripts focused on local build entry points', async () => {
         const scripts = await readWorkspacePackageScripts();
 
-        expect(scripts['test:node:built']).toBe(
-            'tsx ./tools/ci/run-node-tests.ts',
+        expect(
+            Object.keys(scripts).filter((scriptName) =>
+                scriptName.endsWith(':built'),
+            ),
+        ).toEqual([]);
+        expect(scripts['test:node']).toBe(
+            'pnpm run build && tsx ./tools/ci/run-node-tests.ts',
         );
-        expect(scripts['test:node:fast:built']).toBe(
-            'tsx ./tools/ci/run-node-tests.ts --only fast',
+        expect(scripts['test:node:fast']).toBe(
+            'pnpm run build && tsx ./tools/ci/run-node-tests.ts --only fast',
+        );
+        expect(scripts['test:browser']).toBe(
+            'pnpm run build && vitest --project browser-desktop --project browser-mobile --run',
         );
     });
 

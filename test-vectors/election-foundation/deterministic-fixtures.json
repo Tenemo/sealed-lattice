@@ -1820,20 +1820,41 @@
         ],
         "witnessQuorum": 5,
         "totalWitnesses": 7
+      },
+      "witnessPublicKeyDigests": {
+        "witness-1": "4cf03f749ac3f02f2d0cbabcfb97d090b2c6fa0b7a58fdab04c28d13b9e9367d8ea6d66924d9a9643cbe01b3424b7c69db7b6033982684a68b5c7e7fbd275c3e",
+        "witness-2": "d9d25b9a8364d4c3dd46a35c0de425c9a05f8cc6596dfea069c6b0ee512de9cdaa6ec061904b092df7c7337a56936cb48d712f4894b099a3b2aab6736dc91b63",
+        "witness-3": "b8d48fa77fc8aaf9c20986530b2dd76b4e1e67b7062563e487a4d9525ba87e10590666ce3882c2dd4bd005a5e775f02f5d29c7129a28a6adf98de997f1d9afe1",
+        "witness-4": "4a4af2bc4a33c9cbaa4a8063b532303928e7cdb9693673a867d577ab0d3b4f88ec3c558afc316c810df37c66b182612eb9586ad150b212fd9020b5b3d90dad5b",
+        "witness-5": "69e6dda934f192c8921d6b43d834f66f37101d6936b8efb9cccc8688fa3b03cf553a0ef75edd8f9273ef17bf0b973669c5cf32c44aa8a84cd610f4d092ccef27",
+        "witness-6": "6d1d46e9287796ccfec131cae49fbd6367ccd0c6b50da9c6078b6c0be3d1549f2757fb2d3d9f97e0d57927bf5c8da44c72cdc98c5f2defc29f511dd3802219e5",
+        "witness-7": "606f2735d68855daae13017201292e635d9deb831c3c64ca2dcd6f389c1049c6869a92aa48b891d86dc00cedbe4427987c29081bcfcd29029d641dcd8032dcbc"
       }
     },
     "expectedVerification": {
-      "acceptedDigests": [],
-      "equivocatingWitnessIdentities": [],
-      "ok": false,
-      "refusedObjects": [
-        {
-          "code": "TargetFinalityPolicyMismatch",
-          "message": "Target finality evidence could not be canonicalized or validated.",
-          "objectType": "TargetFinalityRecord"
-        }
+      "acceptedDigests": [
+        "762a38530faf7041a49e84d7e182a8c607427afa95479343af761c618d6028133f2641e3e77243a65e42a6ed0e7978f8680fcde56c1c5d718b90fbc69f75d4d6",
+        "56f0c58f82af089f2c878383dcd431fe99fdb134e8c0027528892b88e7e369c48719fc2b1797313f6bd001a0308aa963108d4988674551deff71560ff800d9e2",
+        "1c4d961072f2e7d9b6d4a3d9b1a5c4bed1976aa8d1fa55b22d29cbccc02380a71f0bd33c5e3f30de664350b117a46e1fc940a85148ae4d0e24fe332425fe966e",
+        "b366e8e4c17aebc0142245829b1f4b530529cf59aed7b2584fa1291d434e495f04e00231a943c1d644535815bc1734f599d5f4b63823aab5dc2e98333a086d0d",
+        "c46879c53522cbe6bcdc74efa520bfe43a3b87618685de06093882e40bc74c14f9f5813aeba7599d6f7147c97aacb11ee275ee37b834b5bf0a8f46dc67323cd9",
+        "2106ed6fd564d59c9caeb4a9b539cb9f558960c5474d3e4a3663c58c6388814a348a0924af33421c1f43042bae0da2bf1a850f162a173c9f5ea363efe6433a8c",
+        "c19cbc4d460710900ae9fbc800c8a962a7c10189f34d71d0df0d1f053260ae81c7a57e18cc63b4ff84a14dc78158cc422ebb27a58b8a8d9b616c26a304abbcc4",
+        "e2a5ae9f9d87dededf4979b0612d2e92502244be3b09a3b019ca5054a3701dec556b76f4773fa7593bd6390c300a8c6e25fa687a05b5befa91c730d5173d9bba"
       ],
-      "validWitnessIdentities": []
+      "equivocatingWitnessIdentities": [],
+      "ok": true,
+      "refusedObjects": [],
+      "targetFinalityCheckpointDigest": "8d8cddf464b0000b32b40865fe99dda3d844377f89c415e5cbee73ab8daf13cc333e4afd2be69e7934eeddac2b3dab1f3b105dea42fe5861ebf16ad801f744f3",
+      "targetFinalityRecordDigest": "1c4d961072f2e7d9b6d4a3d9b1a5c4bed1976aa8d1fa55b22d29cbccc02380a71f0bd33c5e3f30de664350b117a46e1fc940a85148ae4d0e24fe332425fe966e",
+      "targetProposalDigest": "ea825826bc42be090ac2fd36a9179ea5825bd9ef49930603cc3e28c5caa3214a25dfcb868cc5d046b219cb6cf962a6d9b63b6daf7ed8318b0e9cb790d7f4c459",
+      "validWitnessIdentities": [
+        "witness-1",
+        "witness-2",
+        "witness-3",
+        "witness-4",
+        "witness-5"
+      ]
     }
   },
   "recovery": {
