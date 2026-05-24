@@ -14,7 +14,7 @@ export const deriveLocalReplayRecordDigest = (
         deviceEpoch: record.deviceEpoch,
         electionManifestDigest: record.electionManifestDigest,
         evaluationProofRecordDigest: record.evaluationProofRecordDigest,
-        mobileReplayCertDigest: record.mobileReplayCertDigest,
+        localReplayDiagnosticDigest: record.localReplayDiagnosticDigest,
         objectType: record.objectType,
         objectVersion: record.objectVersion,
         participantIdentity: record.participantIdentity,
@@ -34,8 +34,8 @@ export const deriveTargetAcceptedRecordDigest = (
         boardPosition: record.boardPosition,
         boardSequence: record.boardSequence,
         acceptanceMode: record.acceptanceMode,
-        bgvAsyncThresholdCPADProfileDigest:
-            record.bgvAsyncThresholdCPADProfileDigest,
+        kllpsTargetDecryptionProfileDigest:
+            record.kllpsTargetDecryptionProfileDigest,
         ceremonyId: record.ceremonyId,
         cpadProfileDigest: record.cpadProfileDigest,
         cpadProfileId: record.cpadProfileId,
@@ -67,8 +67,8 @@ export const deriveTopKDecryptionShareDigest = (
     >,
 ): ProtocolDigest =>
     deriveProtocolDigest('TopKDecryptionShareDigest', {
-        bgvAsyncThresholdCPADProfileDigest:
-            share.bgvAsyncThresholdCPADProfileDigest,
+        kllpsTargetDecryptionProfileDigest:
+            share.kllpsTargetDecryptionProfileDigest,
         boardPosition: share.boardPosition,
         boardSequence: share.boardSequence,
         ceremonyId: share.ceremonyId,

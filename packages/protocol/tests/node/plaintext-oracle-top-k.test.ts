@@ -220,6 +220,19 @@ describe('plaintext tally and top-k oracle', () => {
         );
     });
 
+    it('encodes unset options exactly as score one without a skip bucket', () => {
+        const pollSpec = assertValidPollSpec(topKVectors.pollSpecInput);
+        const oracle = derivePlaintextTopKOracle({
+            ballots: [{ scores: [10] }],
+            pollSpec: pollSpec.normalized,
+        });
+
+        expect(oracle.tally.normalizedBallots[0]?.scores).toEqual([
+            10, 1, 1, 1,
+        ]);
+        expect(oracle.tally.optionTallies).toEqual([10, 1, 1, 1]);
+    });
+
     it('rejects malformed score vectors and no-wrap violations', () => {
         const pollSpec = assertValidPollSpec(topKVectors.pollSpecInput);
 
@@ -232,6 +245,12 @@ describe('plaintext tally and top-k oracle', () => {
         expect(() =>
             derivePlaintextTopKOracle({
                 ballots: [{ scores: [1, 1, 1, 11] }],
+                pollSpec: pollSpec.normalized,
+            }),
+        ).toThrow('1..10');
+        expect(() =>
+            derivePlaintextTopKOracle({
+                ballots: [{ scores: [null, 1, 1, 1] as never }],
                 pollSpec: pollSpec.normalized,
             }),
         ).toThrow('1..10');

@@ -195,6 +195,12 @@ mod tests {
                 .cloned()
                 .unwrap_or_else(|| vectors["publicRandomnessHex"].clone()),
             "statementMatrixCoefficients": statement_matrix,
+            "matrixCoefficientRepresentation": vectors
+                .get("matrixCoefficientRepresentation")
+                .cloned()
+                .expect(
+                    "encoded-score field vectors should define matrixCoefficientRepresentation",
+                ),
             "targetVectorCoefficients": target_vector,
             "targetCoefficientRepresentation": vectors["targetCoefficientRepresentation"],
             "proofHex": compact_case

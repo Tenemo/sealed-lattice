@@ -324,7 +324,7 @@ describe('ballot privacy proof object boundary', () => {
             result.refusedObjects.some(
                 (refusal) =>
                     refusal.message ===
-                    'Dynamic ballot privacy verification requires roster profile certificate or workbook evidence for the frozen receiver count.',
+                    'Dynamic ballot privacy verification requires roster profile parameter certificate evidence for the frozen receiver count.',
             ),
         ).toBe(true);
     });

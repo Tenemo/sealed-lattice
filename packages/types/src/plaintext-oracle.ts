@@ -56,13 +56,13 @@ export type WorstCaseInterpolationCoefficientReport = {
 /** Supported normalized score value for one option. */
 export type PlaintextScore = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;
 
-/** Input ballot before skipped scores are normalized. */
+/** Input ballot before unset options are normalized. */
 export type PlaintextScoreBallotInput = {
-    readonly scores: readonly (number | null | undefined)[];
+    readonly scores: readonly (number | undefined)[];
     readonly voterIdentity?: string;
 };
 
-/** Ballot after skipped scores have been filled with score one. */
+/** Ballot after unset options have been filled with score one. */
 export type NormalizedPlaintextScoreBallot = {
     readonly scores: readonly PlaintextScore[];
     readonly voterIdentity?: string;

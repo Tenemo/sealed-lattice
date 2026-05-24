@@ -165,6 +165,14 @@
     "BGVPublicKeyRoot",
     "CollectivePublicKeyRoot",
     "BGVBatchEncoderDigest",
+    "EncryptedAggregateBridgeDigest",
+    "EncryptedAggregateInputRoot",
+    "EncryptedAggregateShareCiphertextRoot",
+    "EncryptedAggregateReconstructionDigest",
+    "BridgeWitnessPrivacyProfileDigest",
+    "ScoreBitDerivationCircuitDigest",
+    "ComparisonInputDerivationCircuitDigest",
+    "EncryptedComparisonInputDigest",
     "EvaluationNoiseProfileDigest",
     "HEEvaluationNoiseCertDigest",
     "AllowedEvaluatorOpsDigest",
@@ -187,7 +195,7 @@
     "TargetDecryptionCiphertextDigest",
     "ShareReplayEvidenceDigest",
     "ShareReplayRefusalDigest",
-    "BGVAsyncThresholdCPADProfileDigest",
+    "KllpsTargetDecryptionProfileDigest",
     "TargetBasisDigest"
   ],
   "firstValidOrdering": {

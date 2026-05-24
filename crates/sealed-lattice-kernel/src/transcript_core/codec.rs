@@ -2,13 +2,12 @@ use serde_json::Value;
 
 use super::rng::DeterministicFixtureRng;
 use super::types::{
-    ACTIVE_MALICIOUS_MHE_PROFILE_ID, BaseClaimProfile, ENVELOPE_VERSION, FIELD_CHECKPOINTS,
-    FIELD_PAYLOAD, FIELD_SEQUENCE, FIELD_STATUS, FIELD_TAGS, FIELD_TITLE,
-    FULLY_VERIFIED_RESULT_PROFILE_ID, MAGIC, MANDATORY_EVALUATION_PROOF_PROFILE_ID,
+    ACTIVE_MALICIOUS_MHE_PROFILE_ID, BaseClaimProfile, DEVELOPMENT_INTEGRATION_PROFILE_ID,
+    ENVELOPE_VERSION, FIELD_CHECKPOINTS, FIELD_PAYLOAD, FIELD_SEQUENCE, FIELD_STATUS, FIELD_TAGS,
+    FIELD_TITLE, FULLY_VERIFIED_PROFILE_ID, MAGIC, MANDATORY_EVALUATION_PROOF_PROFILE_ID,
     MheSecurityClosure, NO_DECRYPTION_PROOF_PROFILE_ID, NO_HE_SETUP_PROOF_PROFILE_ID,
-    PASSIVE_MHE_PROTOTYPE_PROFILE_ID, REQUIRED_FIELDS, TRANSCRIPT_CORE_OBJECT_TYPE,
-    TRANSCRIPT_CORE_OBJECT_VERSION, TranscriptCoreAnalysis, TranscriptCoreObject,
-    TranscriptCoreProfile, TranscriptCoreStatus,
+    REQUIRED_FIELDS, TRANSCRIPT_CORE_OBJECT_TYPE, TRANSCRIPT_CORE_OBJECT_VERSION,
+    TranscriptCoreAnalysis, TranscriptCoreObject, TranscriptCoreProfile, TranscriptCoreStatus,
 };
 use crate::encoding::{
     CanonicalError, CanonicalErrorCode, CanonicalReader, CanonicalResult, append_bytes,
@@ -71,40 +70,40 @@ pub fn canonical_transcript_core_object(profile: TranscriptCoreProfile) -> Trans
         evaluation_proof_profile_id: MANDATORY_EVALUATION_PROOF_PROFILE_ID.to_string(),
         decryption_proof_profile_id: NO_DECRYPTION_PROOF_PROFILE_ID.to_string(),
         title: match (base_claim_profile, mhe_security_closure) {
-            (BaseClaimProfile::FullyVerifiedResult, MheSecurityClosure::PassiveMhePrototype) => {
-                "Transcript core fully verified passive MHE".to_string()
+            (BaseClaimProfile::FullyVerified, MheSecurityClosure::DevelopmentIntegration) => {
+                "Transcript core fully verified development integration".to_string()
             }
-            (BaseClaimProfile::FullyVerifiedResult, MheSecurityClosure::ActiveMalicious) => {
+            (BaseClaimProfile::FullyVerified, MheSecurityClosure::ActiveMalicious) => {
                 "Transcript core fully verified active malicious".to_string()
             }
         },
         sequence: match (base_claim_profile, mhe_security_closure) {
-            (BaseClaimProfile::FullyVerifiedResult, MheSecurityClosure::PassiveMhePrototype) => 44,
-            (BaseClaimProfile::FullyVerifiedResult, MheSecurityClosure::ActiveMalicious) => 45,
+            (BaseClaimProfile::FullyVerified, MheSecurityClosure::DevelopmentIntegration) => 44,
+            (BaseClaimProfile::FullyVerified, MheSecurityClosure::ActiveMalicious) => 45,
         },
         payload: fixture_rng.next_bytes(6),
         status: TranscriptCoreStatus::TranscriptCoreVerified,
         tags: match (base_claim_profile, mhe_security_closure) {
-            (BaseClaimProfile::FullyVerifiedResult, MheSecurityClosure::PassiveMhePrototype) => {
+            (BaseClaimProfile::FullyVerified, MheSecurityClosure::DevelopmentIntegration) => {
                 vec![
                     "canonical".to_string(),
-                    "fully-verified-result".to_string(),
-                    "passive-mhe-prototype".to_string(),
+                    "fully-verified".to_string(),
+                    "development-integration".to_string(),
                     "mandatory-proof-profile".to_string(),
                 ]
             }
-            (BaseClaimProfile::FullyVerifiedResult, MheSecurityClosure::ActiveMalicious) => vec![
+            (BaseClaimProfile::FullyVerified, MheSecurityClosure::ActiveMalicious) => vec![
                 "canonical".to_string(),
-                "fully-verified-result".to_string(),
+                "fully-verified".to_string(),
                 "active-malicious".to_string(),
                 "mandatory-proof-profile".to_string(),
             ],
         },
         checkpoints: match (base_claim_profile, mhe_security_closure) {
-            (BaseClaimProfile::FullyVerifiedResult, MheSecurityClosure::PassiveMhePrototype) => {
+            (BaseClaimProfile::FullyVerified, MheSecurityClosure::DevelopmentIntegration) => {
                 vec![3, 6, 9, 12, 15]
             }
-            (BaseClaimProfile::FullyVerifiedResult, MheSecurityClosure::ActiveMalicious) => {
+            (BaseClaimProfile::FullyVerified, MheSecurityClosure::ActiveMalicious) => {
                 vec![5, 10, 15, 20, 25]
             }
         },
@@ -319,7 +318,7 @@ pub fn analyze_canonical_object_hex(
 
 fn parse_base_claim_profile(value: u64) -> CanonicalResult<BaseClaimProfile> {
     match value {
-        2 => Ok(BaseClaimProfile::FullyVerifiedResult),
+        2 => Ok(BaseClaimProfile::FullyVerified),
         _ => Err(CanonicalError::new(
             CanonicalErrorCode::UnknownBaseClaimProfile,
             "base claim profile is not supported",
@@ -329,7 +328,7 @@ fn parse_base_claim_profile(value: u64) -> CanonicalResult<BaseClaimProfile> {
 
 fn parse_mhe_security_closure(value: u64) -> CanonicalResult<MheSecurityClosure> {
     match value {
-        1 => Ok(MheSecurityClosure::PassiveMhePrototype),
+        1 => Ok(MheSecurityClosure::DevelopmentIntegration),
         2 => Ok(MheSecurityClosure::ActiveMalicious),
         _ => Err(CanonicalError::new(
             CanonicalErrorCode::UnknownMheSecurityClosure,
@@ -358,7 +357,7 @@ fn validate_profiles(
     decryption_proof_profile_id: &str,
 ) -> CanonicalResult<()> {
     if base_claim_profile_id != base_claim_profile.expected_profile_id() {
-        let allowed = [FULLY_VERIFIED_RESULT_PROFILE_ID];
+        let allowed = [FULLY_VERIFIED_PROFILE_ID];
         if !allowed.contains(&base_claim_profile_id) {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::UnknownProofProfile,
@@ -372,7 +371,7 @@ fn validate_profiles(
     }
     if mhe_security_profile_id != mhe_security_closure.expected_profile_id() {
         let allowed = [
-            PASSIVE_MHE_PROTOTYPE_PROFILE_ID,
+            DEVELOPMENT_INTEGRATION_PROFILE_ID,
             ACTIVE_MALICIOUS_MHE_PROFILE_ID,
         ];
         if !allowed.contains(&mhe_security_profile_id) {
@@ -397,7 +396,7 @@ fn validate_profiles(
     if evaluation_proof_profile_id != MANDATORY_EVALUATION_PROOF_PROFILE_ID {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
-            "FullyVerifiedResult requires the mandatory evaluation-proof profile",
+            "fullyVerified requires the mandatory evaluation-proof profile",
         ));
     }
 

@@ -65,6 +65,7 @@ const ballotFieldLinearProofBackendVectors =
         readonly proofHex: string;
         readonly publicRandomnessHex: string;
         readonly requiredCaseNames: readonly string[];
+        readonly matrixCoefficientRepresentation: string;
         readonly targetCoefficientRepresentation: string;
         readonly cases: readonly Record<string, unknown>[];
     };
@@ -189,6 +190,8 @@ const expandBallotFieldLinearProofVectorCase = (
             compactCase.publicRandomnessHex ??
             ballotFieldLinearProofBackendVectors.publicRandomnessHex,
         statementMatrixCoefficients,
+        matrixCoefficientRepresentation:
+            ballotFieldLinearProofBackendVectors.matrixCoefficientRepresentation,
         targetCoefficientRepresentation:
             ballotFieldLinearProofBackendVectors.targetCoefficientRepresentation,
         targetVectorCoefficients,
@@ -197,9 +200,9 @@ const expandBallotFieldLinearProofVectorCase = (
     };
 };
 
-const fullyVerifiedPassiveFixture = findFixture(
+const fullyVerifiedDevelopmentIntegrationFixture = findFixture(
     goldenTranscriptCoreFixtures,
-    'fully-verified-passive-mhe-transcript-core',
+    'fully-verified-development-integration-transcript-core',
 );
 
 const fullyVerifiedActiveFixture = findFixture(
@@ -353,7 +356,7 @@ export {
     cloneJsonValue,
     expectRefusalMessage,
     expandBallotFieldLinearProofVectorCase,
-    fullyVerifiedPassiveFixture,
+    fullyVerifiedDevelopmentIntegrationFixture,
     fullyVerifiedActiveFixture,
     invalidEnumFixture,
     textEncoder,

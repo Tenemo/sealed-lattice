@@ -248,6 +248,8 @@ export const createEncodedScoreFieldBallotProofRecordFixture =
                 ),
                 ballotProofStatementDigest:
                     statement.ballotProofStatementDigest,
+                matrixCoefficientRepresentation:
+                    vectorCase.matrixCoefficientRepresentation,
                 statementMatrixCoefficients,
                 statementMatrixDigest: kernel.deriveProtocolDigest({
                     namespace: 'ChallengeDomainDigest',
@@ -256,6 +258,8 @@ export const createEncodedScoreFieldBallotProofRecordFixture =
                         statementMatrixCoefficients,
                     },
                 }),
+                targetCoefficientRepresentation:
+                    vectorCase.targetCoefficientRepresentation,
                 targetVectorCoefficients,
                 targetVectorDigest: kernel.deriveProtocolDigest({
                     namespace: 'ChallengeDomainDigest',

@@ -170,18 +170,27 @@ const lowercaseHexBytesPattern = /^(?:[a-f0-9]{2})+$/u;
 
 const forbiddenPublicWitnessFieldNames = new Set([
     'aggregateIntegerShareVector',
+    'aggregateHistogram',
     'aggregateOpeningRandomness',
+    'aggregateScore',
+    'aggregateScoreBits',
     'aggregateShareVector',
     'bridgeWitness',
     'openingRandomness',
     'plaintext',
+    'plaintextComparisonInputs',
+    'plaintextScoreBitInputs',
     'proofWitness',
     'quotient',
+    'rawAggregateWitness',
     'receiverPlaintext',
     'receiverSecretState',
     'reducedFieldVector',
     'secretState',
     'sourceWitnessCoefficients',
+    'aggregateInputPlaintext',
+    'tPvss',
+    't_pvss',
     'witness',
 ]);
 
@@ -1506,7 +1515,7 @@ export const verifyAggregateDerivationComponentStructure = (
             ballotPrivacyMinimumUnsafeParticipantCount &&
         component.statement.participantCount <
             ballotPrivacyMinimumSafeParticipantCount
-            ? (['CasualMicroRoster'] as const)
+            ? (['casualMicroRoster'] as const)
             : [];
     if (refusedObjects.length > 0) {
         return {
@@ -1530,10 +1539,7 @@ export const verifyAggregateDerivationComponentStructure = (
         aggregateDerivationComponentDigest: componentDigest,
         backendAvailable: false,
         refusedObjects: [],
-        statusLabels: [
-            'AggregateDerivationStructureVerified',
-            ...unsafeSmallRosterStatusLabels,
-        ],
+        statusLabels: ['pending', ...unsafeSmallRosterStatusLabels],
         unresolvedReason: null,
     };
 };

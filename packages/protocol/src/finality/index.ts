@@ -64,6 +64,7 @@ const verifyTargetRecordShape = (
         topKCiphertextDigest: checkpoint.topKCiphertextDigest,
         ceremonyId: checkpoint.ceremonyId,
         electionManifestDigest: checkpoint.electionManifestDigest,
+        thresholdProfileDigest: checkpoint.thresholdProfileDigest,
         evaluationContextDigest: checkpoint.evaluationContextDigest,
         evaluationProofProfileDigest: checkpoint.evaluationProofProfileDigest,
         publicSlotMaskDigest: checkpoint.publicSlotMaskDigest,
@@ -77,6 +78,7 @@ const verifyTargetRecordShape = (
         topKCiphertextDigest: checkpoint.topKCiphertextDigest,
         ceremonyId: checkpoint.ceremonyId,
         electionManifestDigest: checkpoint.electionManifestDigest,
+        thresholdProfileDigest: checkpoint.thresholdProfileDigest,
         evaluationContextDigest: checkpoint.evaluationContextDigest,
         evaluationProofProfileDigest: checkpoint.evaluationProofProfileDigest,
         finalizedBoardHeadDigest: checkpoint.finalizedBoardHeadDigest,
@@ -578,11 +580,11 @@ const verifyTargetFinalityUnchecked = (
         forkEvidence === undefined
             ? []
             : uniqueStrings([
-                  'BoardForkSuspected',
-                  'BoardEvidencePublished',
-                  'ForkedElection',
+                  'boardForkSuspected',
+                  'boardEvidencePublished',
+                  'forkDetected',
                   ...(equivocatingWitnessIdentities.length > 0
-                      ? (['WitnessEquivocationEvidence'] as const)
+                      ? (['witnessEquivocationEvidence'] as const)
                       : []),
               ]);
     const acceptedDigests = uniqueStrings([

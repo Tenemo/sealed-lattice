@@ -29,6 +29,15 @@ import {
     verifyRosterManifestTranscript,
 } from './election-foundation-test-helpers';
 
+const retiredGenericThresholdDecryptionProfileId = [
+    'BGV-RNS',
+    'AsyncThresholdDecryption',
+    'CPAD-v1',
+].join('-');
+const retiredGenericCpadProfileId = ['CPAD', 'BGV', 'AsyncThreshold-v1'].join(
+    '-',
+);
+
 describe('roster, manifest, first-valid, and recovery shells', () => {
     it('accepts an honest registration to manifest transcript', () => {
         const registrations = [
@@ -50,6 +59,77 @@ describe('roster, manifest, first-valid, and recovery shells', () => {
         expect(result.rosterDigest).toBe(
             deriveRosterDigest(input.registrationEntries),
         );
+    });
+
+    it('requires object signatures rather than transport authentication for manifests', () => {
+        const input = createRosterManifestTranscriptInput([
+            createRegistrationEntry('participant-1', 1, 0),
+            createRegistrationEntry('participant-2', 1, 1),
+            createRegistrationEntry('participant-3', 1, 2),
+        ]);
+        const transportOnlyKey = createKeyFixture('transport-session-only');
+        const manifestWithTransportOnlySignature = {
+            ...input.electionManifest,
+            signature: createSignature(
+                'ElectionManifest',
+                'Participant',
+                'participant-1',
+                transportOnlyKey.publicKeyDigest,
+                input.electionManifest.electionManifestDigest,
+            ),
+        };
+
+        const result = verifyRosterManifestTranscript({
+            ...input,
+            electionManifest: manifestWithTransportOnlySignature,
+        });
+
+        expect(result.ok).toBe(false);
+        expect(result.refusedObjects).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({ code: 'WrongSignerRole' }),
+            ]),
+        );
+    });
+
+    it('rejects retired generic CPAD profile identifiers in claim-bearing manifests', () => {
+        const registrations = [
+            createRegistrationEntry('participant-1', 1, 0),
+            createRegistrationEntry('participant-2', 1, 1),
+            createRegistrationEntry('participant-3', 1, 2),
+        ];
+        const oldThresholdProfileInput = createRosterManifestTranscriptInput(
+            registrations,
+            {
+                manifestOpaqueBindings: {
+                    ...manifestOpaqueBindings,
+                    thresholdDecryptionProfileId:
+                        retiredGenericThresholdDecryptionProfileId,
+                },
+            },
+        );
+        const oldCpadProfileInput = createRosterManifestTranscriptInput(
+            registrations,
+            {
+                manifestOpaqueBindings: {
+                    ...manifestOpaqueBindings,
+                    cpadProfileId: retiredGenericCpadProfileId,
+                },
+            },
+        );
+
+        for (const input of [oldThresholdProfileInput, oldCpadProfileInput]) {
+            const result = verifyRosterManifestTranscript(input);
+
+            expect(result.ok).toBe(false);
+            expect(result.refusedObjects).toEqual(
+                expect.arrayContaining([
+                    expect.objectContaining({
+                        code: 'ManifestDigestMismatch',
+                    }),
+                ]),
+            );
+        }
     });
 
     it('attributes frozen roster profile mismatches to the frozen profile', () => {
@@ -74,6 +154,42 @@ describe('roster, manifest, first-valid, and recovery shells', () => {
             expect.arrayContaining([
                 expect.objectContaining({
                     code: 'ManifestDigestMismatch',
+                    objectDigest:
+                        changedFrozenRosterProfile.thresholdProfileDigest,
+                    objectType: 'FrozenRosterProfile',
+                }),
+            ]),
+        );
+    });
+
+    it('rejects frozen roster profiles with mismatched embedded threshold payloads', () => {
+        const input = createRosterManifestTranscriptInput([
+            createRegistrationEntry('participant-1', 1, 0),
+            createRegistrationEntry('participant-2', 1, 1),
+            createRegistrationEntry('participant-3', 1, 2),
+        ]);
+        const changedFrozenRosterProfile = {
+            ...input.frozenRosterProfile,
+            thresholdProfile: {
+                ...input.frozenRosterProfile.thresholdProfile,
+                claimBearing: true,
+                releaseQuorum:
+                    input.frozenRosterProfile.thresholdProfile.releaseQuorum +
+                    1,
+            },
+        };
+
+        const result = verifyRosterManifestTranscript({
+            ...input,
+            frozenRosterProfile: changedFrozenRosterProfile,
+        });
+
+        expect(result.refusedObjects).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    code: 'ManifestDigestMismatch',
+                    message:
+                        'Frozen roster profile payload must match the roster-freeze derived profile.',
                     objectDigest:
                         changedFrozenRosterProfile.thresholdProfileDigest,
                     objectType: 'FrozenRosterProfile',
@@ -140,6 +256,31 @@ describe('roster, manifest, first-valid, and recovery shells', () => {
                     evaluationProofProfileId:
                         'unsupported-evaluation-proof-profile',
                 },
+            },
+        );
+        const manifestWithUnexpectedOpaqueBinding = createElectionManifest(
+            registrations,
+            {
+                boardSequence: 4,
+                manifestOpaqueBindings: {
+                    ...manifestOpaqueBindings,
+                    unexpectedBridgeBindingDigest: deriveProtocolDigest(
+                        'BridgeLayoutDigest',
+                        { profile: 'unexpected-profile-binding' },
+                    ),
+                } as typeof manifestOpaqueBindings,
+            },
+        );
+        const incompleteOpaqueBindings = {
+            ...manifestOpaqueBindings,
+        } as Record<string, unknown>;
+        delete incompleteOpaqueBindings.encryptedAggregateBridgeDigest;
+        const manifestWithIncompleteOpaqueBindings = createElectionManifest(
+            registrations,
+            {
+                boardSequence: 4,
+                manifestOpaqueBindings:
+                    incompleteOpaqueBindings as typeof manifestOpaqueBindings,
             },
         );
         const changedPollSpecManifest = createElectionManifest(registrations, {
@@ -226,6 +367,25 @@ describe('roster, manifest, first-valid, and recovery shells', () => {
                 expect.objectContaining({ code: 'ManifestDigestMismatch' }),
             ]),
         );
+        for (const manifest of [
+            manifestWithUnexpectedOpaqueBinding,
+            manifestWithIncompleteOpaqueBindings,
+        ]) {
+            expect(
+                verifyRosterManifestTranscript({
+                    ...input,
+                    electionManifest: manifest,
+                }).refusedObjects,
+            ).toEqual(
+                expect.arrayContaining([
+                    expect.objectContaining({
+                        code: 'ManifestDigestMismatch',
+                        message:
+                            'Election manifest opaque bindings must use the current encrypted-aggregate profile schema.',
+                    }),
+                ]),
+            );
+        }
         expect(
             verifyRosterManifestTranscript({
                 ...input,

@@ -116,7 +116,7 @@ jobs:
     node-kernel-aggregate:
         name: node kernel aggregate
         runs-on: ubuntu-latest
-        timeout-minutes: 40
+        timeout-minutes: 60
         steps:
             - uses: actions/checkout@v6.0.2
             - uses: ./.github/actions/bootstrap-pnpm

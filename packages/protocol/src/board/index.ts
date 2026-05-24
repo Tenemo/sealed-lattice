@@ -678,11 +678,7 @@ const verifyBoardConsistencyUnchecked = (
     const statusLabels: readonly ProtocolVerificationStatusLabel[] =
         discoveredForkEvidence === undefined
             ? []
-            : [
-                  'BoardForkSuspected',
-                  'BoardEvidencePublished',
-                  'ForkedElection',
-              ];
+            : ['boardForkSuspected', 'boardEvidencePublished', 'forkDetected'];
 
     return {
         ok: refusedObjects.length === 0 && discoveredForkEvidence === undefined,

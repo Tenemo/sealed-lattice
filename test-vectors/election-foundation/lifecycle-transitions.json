@@ -2,126 +2,126 @@
   "schemaVersion": 1,
   "validTransitions": [
     {
-      "from": "DraftPoll",
-      "to": "RegistrationOpen"
+      "from": "draft",
+      "to": "registrationOpen"
     },
     {
-      "from": "RegistrationOpen",
-      "to": "TrusteeSetupOpen"
+      "from": "registrationOpen",
+      "to": "trusteeSetupOpen"
     },
     {
-      "from": "TrusteeSetupOpen",
-      "to": "RegistrationClosed"
+      "from": "trusteeSetupOpen",
+      "to": "registrationClosed"
     },
     {
-      "from": "RegistrationClosed",
-      "to": "RosterFrozen"
+      "from": "registrationClosed",
+      "to": "rosterFrozen"
     },
     {
-      "from": "RosterFrozen",
-      "to": "VotingOpen"
+      "from": "rosterFrozen",
+      "to": "votingOpen"
     },
     {
-      "from": "VotingOpen",
-      "to": "VotingClosed"
+      "from": "votingOpen",
+      "to": "votingClosed"
     },
     {
-      "from": "VotingClosed",
-      "to": "AwaitingAggregateContributors"
+      "from": "votingClosed",
+      "to": "aggregatePending"
     },
     {
-      "from": "AwaitingAggregateContributors",
-      "to": "AggregateInputsReady"
+      "from": "aggregatePending",
+      "to": "aggregateReady"
     },
     {
-      "from": "AggregateInputsReady",
-      "to": "AggregateInputsBridgeVerified"
+      "from": "aggregateReady",
+      "to": "aggregateBridgeVerified"
     },
     {
-      "from": "AggregateInputsBridgeVerified",
-      "to": "AwaitingEvaluation"
+      "from": "aggregateBridgeVerified",
+      "to": "evaluationPending"
     },
     {
-      "from": "AwaitingEvaluation",
-      "to": "TopKEvaluated"
+      "from": "evaluationPending",
+      "to": "topKEvaluated"
     },
     {
-      "from": "TopKEvaluated",
-      "to": "TargetFinalityReached"
+      "from": "topKEvaluated",
+      "to": "targetFinalityReached"
     },
     {
-      "from": "TargetFinalityReached",
-      "to": "EvaluationProofOpen"
+      "from": "targetFinalityReached",
+      "to": "evaluationProofPending"
     },
     {
-      "from": "EvaluationProofOpen",
-      "to": "EvaluationProofVerified"
+      "from": "evaluationProofPending",
+      "to": "evaluationProofVerified"
     },
     {
-      "from": "EvaluationProofVerified",
-      "to": "TargetAccepted"
+      "from": "evaluationProofVerified",
+      "to": "targetAccepted"
     },
     {
-      "from": "TargetAccepted",
-      "to": "AwaitingFirstDecryptionShares"
+      "from": "targetAccepted",
+      "to": "decryptionPending"
     },
     {
-      "from": "AwaitingFirstDecryptionShares",
-      "to": "FirstThresholdSharesReached"
+      "from": "decryptionPending",
+      "to": "decryptionSharesReady"
     },
     {
-      "from": "FirstThresholdSharesReached",
-      "to": "CPADProfileVerified"
+      "from": "decryptionSharesReady",
+      "to": "cpadProfileVerified"
     },
     {
-      "from": "CPADProfileVerified",
-      "to": "FullyVerifiedResult"
+      "from": "cpadProfileVerified",
+      "to": "fullyVerified"
     },
     {
-      "from": "EvaluationProofOpen",
-      "to": "EvaluationProofRejected"
+      "from": "evaluationProofPending",
+      "to": "outsideClaim"
     },
     {
-      "from": "EvaluationProofOpen",
-      "to": "EvaluationProofProfileRejected"
+      "from": "evaluationProofPending",
+      "to": "outsideClaim"
     },
     {
-      "from": "FirstThresholdSharesReached",
-      "to": "CPADProfileRejected"
+      "from": "decryptionSharesReady",
+      "to": "outsideClaim"
     }
   ],
   "invalidTransitions": [
     {
-      "from": "VotingOpen",
-      "to": "TargetAccepted"
+      "from": "votingOpen",
+      "to": "targetAccepted"
     },
     {
-      "from": "AggregateInputsReady",
-      "to": "AwaitingEvaluation"
+      "from": "aggregateReady",
+      "to": "evaluationPending"
     },
     {
-      "from": "AggregateInputsBridgeVerified",
-      "to": "FullyVerifiedResult"
+      "from": "aggregateBridgeVerified",
+      "to": "fullyVerified"
     },
     {
-      "from": "TopKEvaluated",
-      "to": "AwaitingFirstDecryptionShares"
+      "from": "topKEvaluated",
+      "to": "decryptionPending"
     },
     {
-      "from": "TargetFinalityReached",
-      "to": "TargetAccepted"
+      "from": "targetFinalityReached",
+      "to": "targetAccepted"
     },
     {
-      "from": "EvaluationProofOpen",
-      "to": "TargetAccepted"
+      "from": "evaluationProofPending",
+      "to": "targetAccepted"
     },
     {
-      "from": "FirstThresholdSharesReached",
-      "to": "FullyVerifiedResult"
+      "from": "decryptionSharesReady",
+      "to": "fullyVerified"
     },
     {
-      "from": "DraftPoll",
-      "to": "VotingOpen"
+      "from": "draft",
+      "to": "votingOpen"
     }
   ]
 }

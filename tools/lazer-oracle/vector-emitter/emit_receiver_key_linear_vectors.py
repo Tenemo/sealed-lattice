@@ -456,6 +456,7 @@ def emit_vectors(repo_root: Path, lazer_root: Path, out_path: Path) -> None:
         "provenance": provenance,
         "parameterSet": parameter_set,
         "proofEncoding": proof_encoding,
+        "targetCoefficientRepresentation": "centeredSignedSourceModulus",
         "requiredCaseNames": REQUIRED_CASE_NAMES,
         "cases": cases,
     }

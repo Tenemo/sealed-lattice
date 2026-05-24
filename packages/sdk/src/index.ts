@@ -259,10 +259,6 @@ const unavailableFutureProtocolOperation = (
 export const verifyTranscript = (): FutureProtocolOperationResult =>
     unavailableFutureProtocolOperation('verifyTranscript');
 
-/** Reserved bridge-proof creation entry point for the future aggregate path. */
-export const createBridgeProof = (): FutureProtocolOperationResult =>
-    unavailableFutureProtocolOperation('createBridgeProof');
-
 /** Reserved bridge-proof verification entry point for the future aggregate path. */
 export const verifyBridgeProof = (): FutureProtocolOperationResult =>
     unavailableFutureProtocolOperation('verifyBridgeProof');

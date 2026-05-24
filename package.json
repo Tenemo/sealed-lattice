@@ -18,6 +18,7 @@
         "tsc": "tsc --build --pretty false",
         "vectors": "tsx ./tools/ci/verify-test-vectors.ts",
         "vectors:generate": "tsx ./tools/ci/verify-test-vectors.ts --generate",
+        "test:lattigo-oracle": "tsx ./tools/lattigo-oracle/verify-lattigo-oracle.ts",
         "check:static": "pnpm run lint && pnpm run tsc && cargo fmt --check -p sealed-lattice-kernel && cargo clippy --workspace --all-targets --all-features -- -D warnings && cargo test --workspace && tsx ./tools/ci/check-package-boundaries.ts && pnpm run vectors && knip",
         "check": "pnpm run build && pnpm run check:static",
         "build": "tsx ./tools/run-turbo.ts build",

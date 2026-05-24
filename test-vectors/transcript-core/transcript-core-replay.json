@@ -1,28 +1,28 @@
 {
-  "schemaVersion": 1,
-  "caseName": "fully-verified-passive-mhe-transcript-core-replay",
-  "fixture": {
-    "kind": "golden-transcript-core",
-    "fixtureVersion": 1,
-    "caseName": "fully-verified-passive-mhe-transcript-core",
-    "canonicalBytesHex": "534c42450101010201307472616e7363726970742d636f72652d66756c6c792d76657269666965642d726573756c742d70726f66696c652d7631307472616e7363726970742d636f72652d706173736976652d6d68652d70726f746f747970652d70726f66696c652d7631247472616e7363726970742d636f72652d6e6f2d68652d73657475702d70726f6f662d76311e50514576616c50726f6f662d535441524b2d4247565265706c61792d7631267472616e7363726970742d636f72652d6e6f2d64656372797074696f6e2d70726f6f662d763106012a5472616e73637269707420636f72652066756c6c792076657269666965642070617373697665204d4845022c03066d7d24cb0447040105040963616e6f6e6963616c1566756c6c792d76657269666965642d726573756c7415706173736976652d6d68652d70726f746f74797065176d616e6461746f72792d70726f6f662d70726f66696c6506050306090c0f",
-    "objectType": "TranscriptCore",
-    "objectVersion": 1,
-    "baseClaimProfile": "FullyVerifiedResult",
-    "mheSecurityClosure": "PassiveMHEPrototype",
-    "baseClaimProfileId": "transcript-core-fully-verified-result-profile-v1",
-    "mheSecurityProfileId": "transcript-core-passive-mhe-prototype-profile-v1",
-    "heSetupProofProfileId": "transcript-core-no-he-setup-proof-v1",
-    "evaluationProofProfileId": "PQEvalProof-STARK-BGVReplay-v1",
-    "decryptionProofProfileId": "transcript-core-no-decryption-proof-v1",
-    "expectedObjectHash512": "ca47a787bbf41655651f585636c1dd549a446b95b06097dde306ccdaec243daaa86940280f69b8db7e01c1ac0e677497cde6c32e2ef6120eb8942c425cf4c11d",
-    "expectedChunkRoot": "c140bd09bd478a4df7a614f3ca5cc3b1be718e0c6d3e9998ac4b6170f4b1633fec4e9573552ed0d204447232cf5f33d9ef49fc541f2a8616af8e236adc371100",
-    "chunkSize": 8,
-    "expectedStatusLabels": [
-      "TranscriptCoreVerified"
-    ]
-  },
+  "caseName": "fully-verified-development-integration-transcript-core-replay",
   "expectedStatusLabels": [
     "TranscriptCoreVerified"
-  ]
+  ],
+  "fixture": {
+    "baseClaimProfile": "fullyVerified",
+    "baseClaimProfileId": "transcript-core-fully-verified-profile-v1",
+    "canonicalBytesHex": "534c42450101010201297472616e7363726970742d636f72652d66756c6c792d76657269666965642d70726f66696c652d7631327472616e7363726970742d636f72652d646576656c6f706d656e742d696e746567726174696f6e2d70726f66696c652d7631247472616e7363726970742d636f72652d6e6f2d68652d73657475702d70726f6f662d76311e50514576616c50726f6f662d535441524b2d4247565265706c61792d7631267472616e7363726970742d636f72652d6e6f2d64656372797074696f6e2d70726f6f662d76310601365472616e73637269707420636f72652066756c6c7920766572696669656420646576656c6f706d656e7420696e746567726174696f6e022c0306b357a3d20f0d040105040963616e6f6e6963616c0e66756c6c792d766572696669656417646576656c6f706d656e742d696e746567726174696f6e176d616e6461746f72792d70726f6f662d70726f66696c6506050306090c0f",
+    "caseName": "fully-verified-development-integration-transcript-core",
+    "chunkSize": 8,
+    "decryptionProofProfileId": "transcript-core-no-decryption-proof-v1",
+    "evaluationProofProfileId": "PQEvalProof-STARK-BGVReplay-v1",
+    "expectedChunkRoot": "06f1dfad910be4a65f093a64c14e434ff7890c96c89f2bb9e636f830e093b0152614fb295fa9876cbac320b66c60c373c2417d8cc1cf55b8b11630cdaf8042fe",
+    "expectedObjectHash512": "bacf6a13c4279d9f99ee149172ac42464a0d36daaba1f62360d66401294019aa4ceebc090ae9b22e2d278c3cfc67a7f5b231be693540c7d73780252ae2fa5b4b",
+    "expectedStatusLabels": [
+      "TranscriptCoreVerified"
+    ],
+    "fixtureVersion": 1,
+    "heSetupProofProfileId": "transcript-core-no-he-setup-proof-v1",
+    "kind": "golden-transcript-core",
+    "mheSecurityClosure": "developmentIntegration",
+    "mheSecurityProfileId": "transcript-core-development-integration-profile-v1",
+    "objectType": "TranscriptCore",
+    "objectVersion": 1
+  },
+  "schemaVersion": 1
 }

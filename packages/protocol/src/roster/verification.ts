@@ -1,3 +1,4 @@
+import { canonicalJson } from '@sealed-lattice/crypto';
 import type {
     ElectionManifest,
     ProtocolDigest,
@@ -272,6 +273,19 @@ const verifyRosterManifestTranscriptUnchecked = (
             );
         }
         if (
+            canonicalJson(expectedFrozenRosterProfile) !==
+            canonicalJson(input.frozenRosterProfile)
+        ) {
+            refusedObjects.push(
+                createRefusal(
+                    'ManifestDigestMismatch',
+                    'Frozen roster profile payload must match the roster-freeze derived profile.',
+                    input.frozenRosterProfile.thresholdProfileDigest,
+                    'FrozenRosterProfile',
+                ),
+            );
+        }
+        if (
             expectedFrozenRosterProfile.thresholdProfileDigest !==
             input.electionManifest.thresholdProfileDigest
         ) {
@@ -390,11 +404,7 @@ const verifyRosterManifestTranscriptUnchecked = (
     const statusLabels: readonly ProtocolVerificationStatusLabel[] =
         conflictingManifest === undefined && forkEvidence === undefined
             ? []
-            : [
-                  'BoardForkSuspected',
-                  'BoardEvidencePublished',
-                  'ForkedElection',
-              ];
+            : ['boardForkSuspected', 'boardEvidencePublished', 'forkDetected'];
     if (conflictingManifest !== undefined) {
         refusedObjects.push(
             createRefusal(

@@ -136,6 +136,119 @@ export type BallotPrivacyProofGeneration =
         readonly verification?: BallotPrivacyKernelVerification;
     };
 
+export type BgvRnsProfileReport = {
+    readonly profile: {
+        readonly profileId: string;
+        readonly backendProfileId: string;
+        readonly polynomialDegree: number;
+        readonly plaintextModulus: number;
+        readonly dataBasisId: string;
+        readonly extendedBasisId: string;
+        readonly specialBasisId: string;
+        readonly dataPrimes: readonly number[];
+        readonly specialPrime: number;
+        readonly dataPrimeBitLength: number;
+        readonly dataLevels: number;
+        readonly extendedLevels: number;
+        readonly aggregateShareLayoutId: string;
+        readonly batchEncoderId: string;
+        readonly canonicalCiphertextConventionId: string;
+    };
+    readonly profileDigest: ProtocolDigest;
+    readonly backendProfileDigest: ProtocolDigest;
+    readonly batchEncoderDigest: ProtocolDigest;
+    readonly encryptedAggregateInputLayoutDigest: ProtocolDigest;
+    readonly batchLayoutBinding: unknown;
+    readonly batchLayoutBindingDigest: ProtocolDigest;
+    readonly ballotScoreEncodingProfileDigest: ProtocolDigest;
+    readonly ballotShareLayoutProfileDigest: ProtocolDigest;
+    readonly aggregateInputEncodingProfileDigest: ProtocolDigest;
+    readonly encodedAggregateLayoutDigest: ProtocolDigest;
+    readonly topKEvaluatorInputLayoutDigest: ProtocolDigest;
+    readonly canonicalCiphertextConventionDigest: ProtocolDigest;
+    readonly allowedEvaluatorOpsDigest: ProtocolDigest;
+    readonly securityEstimatorInputDigest: string;
+    readonly basisReports: readonly unknown[];
+    readonly statusLabels: readonly string[];
+    readonly nonClaims: readonly string[];
+};
+
+export type BgvObjectValidation = {
+    readonly ok: boolean;
+    readonly objectKind: 'plaintext' | 'ciphertext';
+    readonly componentCount: number;
+    readonly profileDigest: ProtocolDigest;
+    readonly basisId: string;
+    readonly level: number;
+    readonly coefficientCount: number;
+    readonly layoutDigest: ProtocolDigest;
+    readonly plaintextRoot?: ProtocolDigest;
+    readonly ciphertextRoot?: ProtocolDigest;
+    readonly canonicalBytesHash512: string;
+    readonly statusLabels: readonly string[];
+};
+
+export type BgvBatchPlaintextEncoding = {
+    readonly profileDigest: ProtocolDigest;
+    readonly basisId: string;
+    readonly level: number;
+    readonly coefficientCount: number;
+    readonly suppliedSlotCount: number;
+    readonly slotCount: number;
+    readonly plaintextRoot: ProtocolDigest;
+    readonly canonicalBytesHash512: string;
+    readonly canonicalByteLength: number;
+    readonly batchLayoutBindingDigest: ProtocolDigest;
+    readonly sampledSlots: readonly {
+        readonly position: number;
+        readonly value: number;
+    }[];
+    readonly sampledCoefficientsModPlaintext: readonly {
+        readonly position: number;
+        readonly value: number;
+    }[];
+    readonly validation: BgvObjectValidation;
+    readonly statusLabels: readonly string[];
+    readonly canonicalBytesHex?: string;
+};
+
+export type BgvReferenceOracleRejection = {
+    readonly ok: false;
+    readonly artifactKind: string;
+    readonly acceptedAsProtocolEvidence: false;
+    readonly statusLabels: readonly string[];
+    readonly refusedObjects: readonly {
+        readonly code: string;
+        readonly message: string;
+    }[];
+};
+
+export type BgvCiphertextConventionFixture = {
+    readonly profileDigest: ProtocolDigest;
+    readonly ciphertextRoot: ProtocolDigest;
+    readonly canonicalBytesHash512: string;
+    readonly canonicalByteLength: number;
+    readonly componentCount: number;
+    readonly validation: BgvObjectValidation;
+    readonly statusLabels: readonly string[];
+    readonly canonicalBytesHex?: string;
+};
+
+export type BgvBaseConversionFixture = {
+    readonly sourcePlaintextRoot: ProtocolDigest;
+    readonly convertedPlaintextRoot: ProtocolDigest;
+    readonly sourceCanonicalBytesHash512: string;
+    readonly convertedCanonicalBytesHash512: string;
+    readonly sourceBasisId: string;
+    readonly convertedBasisId: string;
+    readonly convertedModulusCount: number;
+    readonly sampledConvertedResidues: readonly {
+        readonly position: number;
+        readonly value: number;
+    }[];
+    readonly statusLabels: readonly string[];
+};
+
 const createFreshRandomnessHex = (): string => {
     const cryptoProvider = globalThis.crypto;
     if (cryptoProvider === undefined) {
@@ -311,6 +424,37 @@ export type TranscriptCoreKernel = {
         readonly casualMicroRosterAcknowledged?: boolean;
         readonly unsafeSmallRosterAcknowledged?: boolean;
     }): BallotPrivacyKernelVerification;
+    describeBgvRnsProfile(): BgvRnsProfileReport;
+    describeBgvOperationRegistry(): unknown;
+    generateBgvBackendReport(): unknown;
+    encodeBgvBatchPlaintext(input: {
+        readonly slots: readonly number[];
+        readonly level?: number;
+        readonly layoutBinding: unknown;
+        readonly includeCanonicalBytesHex?: boolean;
+    }): BgvBatchPlaintextEncoding;
+    validateBgvPlaintextObject(input: {
+        readonly canonicalBytesHex: string;
+        readonly expectedPlaintextRoot?: string;
+    }): BgvObjectValidation;
+    validateBgvCiphertextObject(input: {
+        readonly canonicalBytesHex: string;
+        readonly expectedCiphertextRoot?: string;
+    }): BgvObjectValidation;
+    generateBgvCiphertextConventionFixture(input: {
+        readonly leftSlots: readonly number[];
+        readonly rightSlots: readonly number[];
+        readonly includeCanonicalBytesHex?: boolean;
+    }): BgvCiphertextConventionFixture;
+    generateBgvBaseConversionFixture(input: {
+        readonly slots: readonly number[];
+    }): BgvBaseConversionFixture;
+    analyzeBgvCanonicalObject(input: {
+        readonly canonicalBytesHex: string;
+    }): unknown;
+    rejectBgvReferenceOracleArtifact(input: {
+        readonly artifact: unknown;
+    }): BgvReferenceOracleRejection;
 };
 
 type TranscriptCoreKernelCommand =
@@ -466,6 +610,50 @@ type TranscriptCoreKernelCommand =
           readonly countedBallotPackages?: readonly unknown[];
           readonly casualMicroRosterAcknowledged?: boolean;
           readonly unsafeSmallRosterAcknowledged?: boolean;
+      }
+    | {
+          readonly command: 'DescribeBgvRnsProfile';
+      }
+    | {
+          readonly command: 'DescribeBgvOperationRegistry';
+      }
+    | {
+          readonly command: 'GenerateBgvBackendReport';
+      }
+    | {
+          readonly command: 'EncodeBgvBatchPlaintext';
+          readonly slots: readonly number[];
+          readonly level?: number;
+          readonly layoutBinding: unknown;
+          readonly includeCanonicalBytesHex?: boolean;
+      }
+    | {
+          readonly command: 'ValidateBgvPlaintextObject';
+          readonly canonicalBytesHex: string;
+          readonly expectedPlaintextRoot?: string;
+      }
+    | {
+          readonly command: 'ValidateBgvCiphertextObject';
+          readonly canonicalBytesHex: string;
+          readonly expectedCiphertextRoot?: string;
+      }
+    | {
+          readonly command: 'GenerateBgvCiphertextConventionFixture';
+          readonly leftSlots: readonly number[];
+          readonly rightSlots: readonly number[];
+          readonly includeCanonicalBytesHex?: boolean;
+      }
+    | {
+          readonly command: 'GenerateBgvBaseConversionFixture';
+          readonly slots: readonly number[];
+      }
+    | {
+          readonly command: 'AnalyzeBgvCanonicalObject';
+          readonly canonicalBytesHex: string;
+      }
+    | {
+          readonly command: 'RejectBgvReferenceOracleArtifact';
+          readonly artifact: unknown;
       };
 
 type TranscriptCoreKernelExports = WebAssembly.Exports & {

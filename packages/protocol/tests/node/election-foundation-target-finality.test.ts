@@ -298,7 +298,7 @@ describe('target finality', () => {
         expect(verification.acceptedDigests).toEqual([]);
         expect(verification.targetFinalityRecordDigest).toBeUndefined();
         expect(verification.statusLabels).toEqual(
-            expect.arrayContaining(['WitnessEquivocationEvidence']),
+            expect.arrayContaining(['witnessEquivocationEvidence']),
         );
         expect(verification.equivocatingWitnessIdentities).toEqual(
             witnessIdentities.slice(0, 5),

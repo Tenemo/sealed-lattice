@@ -27,6 +27,7 @@ import {
     ceremonyId,
     createKeyFixture,
     createSignature,
+    defaultThresholdProfileDigest,
     defaultTopKEvaluationRecordDigest,
     manifestOpaqueBindings,
     targetFinalityPolicyDigest,
@@ -260,6 +261,7 @@ export const createTargetFinalityRecord = (
             ceremonyId,
             marker: 'default-manifest',
         }),
+        thresholdProfileDigest: defaultThresholdProfileDigest,
         evaluationContextDigest: deriveProtocolDigest(
             'EvaluationContextDigest',
             { ceremonyId, marker: 'top-k-evaluation' },

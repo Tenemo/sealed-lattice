@@ -173,7 +173,7 @@
         "targetBoundShareSelectionProfile": {
           "profileId": "target-bound-first-valid-share-selection-v1",
           "certificateDigest": "target-bound-certificate-digest",
-          "cpadProfileId": "CPAD-BGV-AsyncThreshold-v1",
+          "cpadProfileId": "KLLPS26-AsyncLagrangeTarget-CPAD-v1",
           "targetBasisDigest": "target-basis-digest",
           "decryptionShareQuorum": 9,
           "minimumSharesForInterpolation": 7,
@@ -201,7 +201,7 @@
         "targetBoundShareSelectionProfile": {
           "profileId": "target-bound-first-valid-share-selection-v1",
           "certificateDigest": "target-bound-certificate-digest",
-          "cpadProfileId": "CPAD-BGV-AsyncThreshold-v1",
+          "cpadProfileId": "KLLPS26-AsyncLagrangeTarget-CPAD-v1",
           "targetBasisDigest": "target-basis-digest",
           "decryptionShareQuorum": 9,
           "minimumSharesForInterpolation": 7,

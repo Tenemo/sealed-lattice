@@ -5,6 +5,7 @@
 //! reached through transcript-core commands so claim boundaries stay centralized.
 
 pub(crate) mod ballot_privacy;
+pub(crate) mod bgv;
 mod encoding;
 pub mod fixtures;
 pub(crate) mod hashing;
@@ -105,7 +106,7 @@ pub unsafe extern "C" fn sealed_lattice_transcript_core_command_with_length(
 #[cfg(test)]
 mod tests {
     use super::{
-        TRANSCRIPT_CORE_COMMAND_CONTRACT_VERSION, ballot_privacy, encoding, fixtures, hashing,
+        TRANSCRIPT_CORE_COMMAND_CONTRACT_VERSION, ballot_privacy, bgv, encoding, fixtures, hashing,
         ring, sealed_lattice_allocate, sealed_lattice_deallocate, sealed_lattice_roundtrip,
         sealed_lattice_transcript_core_command_with_length, transcript_core,
     };
@@ -119,6 +120,7 @@ mod tests {
         );
         assert_eq!(encoding::MODULE_MARKER, "encoding");
         assert_eq!(ballot_privacy::MODULE_MARKER, "ballot-privacy");
+        assert_eq!(bgv::MODULE_MARKER, "bgv");
         assert_eq!(hashing::MODULE_MARKER, "hashing");
         assert_eq!(transcript_core::MODULE_MARKER, "transcript-core");
         assert_eq!(fixtures::MODULE_MARKER, "fixtures");

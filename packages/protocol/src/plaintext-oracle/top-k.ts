@@ -27,8 +27,12 @@ import { deriveSparseTopKTarget } from './sparse-target.js';
 
 const supportedScores = new Set<number>([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
 
-const toPlaintextScore = (score: number): PlaintextScore => {
-    if (!supportedScores.has(score)) {
+const toPlaintextScore = (score: unknown): PlaintextScore => {
+    if (
+        typeof score !== 'number' ||
+        !Number.isInteger(score) ||
+        !supportedScores.has(score)
+    ) {
         throw new RangeError('Scores must be integers in 1..10.');
     }
 
@@ -79,7 +83,9 @@ export const normalizePlaintextScoreBallot = (
         (_unused, optionIndex) => {
             const score = ballot.scores[optionIndex];
 
-            return toPlaintextScore(score ?? 1);
+            return score === undefined
+                ? toPlaintextScore(1)
+                : toPlaintextScore(score);
         },
     );
 
