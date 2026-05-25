@@ -130,7 +130,7 @@ pub(crate) fn collect_ballot_proof_refusals(
     .iter()
     .filter(|field_present| **field_present)
     .count();
-    if proof_backend_metadata_field_count != 7 {
+    if proof_backend_metadata_field_count > 0 && proof_backend_metadata_field_count != 7 {
         refused_objects.push(structural_refusal(
             "Ballot proof backend metadata must include all backend proof fields.",
             proof_record_digest,
@@ -570,10 +570,8 @@ mod tests {
 
     use super::collect_ballot_proof_refusals;
 
-    #[test]
-    fn ballot_proof_record_requires_complete_backend_metadata() {
-        let digest = "1".repeat(128);
-        let statement = json!({
+    fn base_statement(digest: &str) -> serde_json::Value {
+        json!({
             "objectType": "BallotProofStatement",
             "objectVersion": 1,
             "ballotProofStatementDigest": digest,
@@ -583,8 +581,11 @@ mod tests {
             "receiverPublicKeys": [],
             "receiverPayloads": [],
             "shareCommitments": []
-        });
-        let ballot_proof = json!({
+        })
+    }
+
+    fn base_ballot_proof(digest: &str) -> serde_json::Value {
+        json!({
             "objectType": "BallotProofRecord",
             "objectVersion": 1,
             "ballotProofRecordDigest": digest,
@@ -596,7 +597,30 @@ mod tests {
             "proofRoot": digest,
             "proofSizeBytes": 1,
             "relationStatementDigest": digest
-        });
+        })
+    }
+
+    #[test]
+    fn ballot_proof_record_allows_absent_backend_metadata() {
+        let digest = "1".repeat(128);
+        let statement = base_statement(&digest);
+        let ballot_proof = base_ballot_proof(&digest);
+
+        let refusals = collect_ballot_proof_refusals(&statement, &ballot_proof, None, false, false);
+
+        assert!(!refusals.iter().any(|refusal| {
+            refusal["message"]
+                .as_str()
+                .is_some_and(|message| message.contains("backend metadata"))
+        }));
+    }
+
+    #[test]
+    fn ballot_proof_record_rejects_partial_backend_metadata() {
+        let digest = "1".repeat(128);
+        let statement = base_statement(&digest);
+        let mut ballot_proof = base_ballot_proof(&digest);
+        ballot_proof["backendStatementDigest"] = json!(digest);
 
         let refusals = collect_ballot_proof_refusals(&statement, &ballot_proof, None, false, false);
 

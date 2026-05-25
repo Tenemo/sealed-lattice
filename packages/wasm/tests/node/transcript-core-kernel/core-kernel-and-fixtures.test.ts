@@ -109,11 +109,25 @@ describe('transcript-core kernel in Node', () => {
             0x80,
             0x80,
         ]);
+        const overflowingLengthBytes = Uint8Array.from([
+            ...wasmHeader,
+            1,
+            0x80,
+            0x80,
+            0x80,
+            0x80,
+            0x10,
+        ]);
         const truncatedLengthBytes = Uint8Array.from([...wasmHeader, 1, 0x80]);
         const truncatedSectionBytes = Uint8Array.from([...wasmHeader, 1, 2, 0]);
 
         expect(() =>
             normalizeTranscriptCoreKernelBytesForDigest(invalidLengthBytes),
+        ).toThrow(
+            'The transcript-core kernel contains an invalid WASM section length.',
+        );
+        expect(() =>
+            normalizeTranscriptCoreKernelBytesForDigest(overflowingLengthBytes),
         ).toThrow(
             'The transcript-core kernel contains an invalid WASM section length.',
         );

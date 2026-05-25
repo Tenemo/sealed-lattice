@@ -114,7 +114,18 @@ export const readWasmVarUint32 = (
         byteOffset += 1
     ) {
         const byte = bytes[byteOffset];
+        const groupIndex = byteOffset - startOffset;
+        if (groupIndex >= 5 || (groupIndex === 4 && byte > 0x0f)) {
+            throw new Error(
+                'The transcript-core kernel contains an invalid WASM section length.',
+            );
+        }
         value += (byte & 0x7f) * multiplier;
+        if (value > 0xffff_ffff) {
+            throw new Error(
+                'The transcript-core kernel contains an invalid WASM section length.',
+            );
+        }
         if (byte < 0x80) {
             return {
                 nextOffset: byteOffset + 1,
