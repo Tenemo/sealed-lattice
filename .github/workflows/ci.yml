@@ -65,8 +65,7 @@ jobs:
                   components: clippy, rustfmt
                   targets: wasm32-unknown-unknown
             - uses: Swatinem/rust-cache@aa7c1c80a07a27a84c0aa76d0cef0aad3830e330
-            - run: pnpm run build
-            - run: pnpm run test:node:fast:built
+            - run: pnpm run test:node:fast
 
     node-relation-heavy:
         name: node relation heavy
@@ -80,8 +79,7 @@ jobs:
                   components: clippy, rustfmt
                   targets: wasm32-unknown-unknown
             - uses: Swatinem/rust-cache@aa7c1c80a07a27a84c0aa76d0cef0aad3830e330
-            - run: pnpm run build
-            - run: pnpm run test:node:relation-heavy:built
+            - run: pnpm run test:node:relation-heavy
 
     node-proof-input-heavy:
         name: node proof input heavy
@@ -95,8 +93,7 @@ jobs:
                   components: clippy, rustfmt
                   targets: wasm32-unknown-unknown
             - uses: Swatinem/rust-cache@aa7c1c80a07a27a84c0aa76d0cef0aad3830e330
-            - run: pnpm run build
-            - run: pnpm run test:node:proof-input-heavy:built
+            - run: pnpm run test:node:proof-input-heavy
 
     node-kernel-remaining:
         name: node kernel remaining
@@ -110,8 +107,7 @@ jobs:
                   components: clippy, rustfmt
                   targets: wasm32-unknown-unknown
             - uses: Swatinem/rust-cache@aa7c1c80a07a27a84c0aa76d0cef0aad3830e330
-            - run: pnpm run build
-            - run: pnpm run test:node:kernel-remaining:built
+            - run: pnpm run test:node:kernel-remaining
 
     node-kernel-aggregate:
         name: node kernel aggregate
@@ -125,8 +121,7 @@ jobs:
                   components: clippy, rustfmt
                   targets: wasm32-unknown-unknown
             - uses: Swatinem/rust-cache@aa7c1c80a07a27a84c0aa76d0cef0aad3830e330
-            - run: pnpm run build
-            - run: pnpm run test:node:kernel-aggregate:built
+            - run: pnpm run test:node:kernel-aggregate
 
     verify:
         name: verify
@@ -180,7 +175,7 @@ jobs:
             - uses: Swatinem/rust-cache@aa7c1c80a07a27a84c0aa76d0cef0aad3830e330
             - run: pnpm exec playwright install --with-deps chromium firefox webkit
             - run: pnpm run build
-            - run: pnpm run test:browser:built
+            - run: pnpm exec vitest --project browser-desktop --project browser-mobile --run
 
     docs:
         name: docs

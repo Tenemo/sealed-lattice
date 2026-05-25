@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "m7-sealed-lattice-canonical-rns-coefficient-material-v1",
+  "source": "sealed-lattice-rust-wasm-canonical-rns-fixture",
+  "polynomialDegree": 32768,
+  "moduli": [
+    140737487306753,
+    140737486716929,
+    140737486520321,
+    140737485864961,
+    140737484685313,
+    140737483898881,
+    140737482981377,
+    140737481801729,
+    140737481342977,
+    140737480949761,
+    140737480359937,
+    140737479639041,
+    140737476100097,
+    140737472299009,
+    140737471971329,
+    140737471774721,
+    140737471578113
+  ],
+  "samplePositions": [0, 1, 2, 17, 16384, 32767],
+  "leftCoefficientFormula": "position^2 + 31 * position + 7 mod modulus",
+  "rightCoefficientFormula": "(position + 17)^2 + 31 * (position + 17) + 7 mod modulus",
+  "referenceSerializationPolicy": "sealed-lattice-canonical-material-only-lattigo-serialization-rejected",
+  "protocolEvidence": false
+}

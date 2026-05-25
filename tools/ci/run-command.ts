@@ -1,4 +1,6 @@
 import { spawnSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 export type CommandInvocation = {
@@ -13,18 +15,34 @@ export type PackageManagerRunner = {
     readonly commandArgumentsPrefix: readonly string[];
 };
 
+const resolveCorepackPnpmEntryPoint = (): string | undefined => {
+    const corepackPnpmEntryPointPath = path.join(
+        path.dirname(process.execPath),
+        'node_modules',
+        'corepack',
+        'dist',
+        'pnpm.js',
+    );
+
+    return existsSync(corepackPnpmEntryPointPath)
+        ? corepackPnpmEntryPointPath
+        : undefined;
+};
+
 export const resolvePackageManagerRunner = (
     packageManagerEntryPointPath = process.env.npm_execpath,
 ): PackageManagerRunner => {
-    if (packageManagerEntryPointPath === undefined) {
+    const resolvedPackageManagerEntryPointPath =
+        packageManagerEntryPointPath ?? resolveCorepackPnpmEntryPoint();
+    if (resolvedPackageManagerEntryPointPath === undefined) {
         throw new Error(
-            'npm_execpath is required to run package manager commands through the Node entry point.',
+            'npm_execpath or the Corepack pnpm Node entry point is required to run package manager commands through Node.',
         );
     }
 
     return {
         command: process.execPath,
-        commandArgumentsPrefix: [packageManagerEntryPointPath],
+        commandArgumentsPrefix: [resolvedPackageManagerEntryPointPath],
     };
 };
 

@@ -8,6 +8,7 @@ mod ntt;
 mod reports;
 mod rns;
 mod serialization;
+mod setup;
 mod validation;
 
 #[cfg(test)]

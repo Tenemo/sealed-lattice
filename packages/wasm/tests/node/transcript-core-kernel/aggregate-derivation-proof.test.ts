@@ -524,9 +524,9 @@ describe.sequential(
                             operation: 'generateAggregateDerivationProof',
                             unresolvedReason: null,
                         });
-                        expect(generatedAggregateProof.statusLabels).toContain(
-                            'pending',
-                        );
+                        expect(generatedAggregateProof.statusLabels).toEqual([
+                            'AggregateDerivationProofGenerated',
+                        ]);
                         const component = createAggregateDerivationComponent({
                             aggregateCommitment: context.aggregateCommitment,
                             proofBytesHex: String(
@@ -592,7 +592,9 @@ describe.sequential(
                             operation: 'verifyAggregateDerivationProof',
                             unresolvedReason: null,
                         });
-                        expect(verification.statusLabels).toContain('pending');
+                        expect(verification.statusLabels).toEqual([
+                            'AggregateDerivationProofVerified',
+                        ]);
                         expect(
                             kernel.verifyAggregateDerivationProof({
                                 closeRecord: postCloseEvidence.closeRecord,

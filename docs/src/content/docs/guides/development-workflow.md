@@ -53,9 +53,8 @@ pnpm run smoke:pack:npm
 - `pnpm run test:proof-benchmark:browser:desktop`: desktop Chromium proof benchmark lane, suitable for a separate CI worker
 - `pnpm run test:proof-benchmark:browser:mobile:throttled`: manual-only calibrated mobile CPU-throttled benchmark lane
 - `pnpm run verify:docs`: generated API pages, docs link structure, and the production docs site build stay consistent
-- `pnpm run docs:build:site`: builds the docs site without the surrounding verification checks when that narrower target is needed
+- `pnpm run docs:build`: builds the docs site without the surrounding verification checks when that narrower target is needed
 - `pnpm run smoke:pack` and `pnpm run smoke:pack:npm`: the published package tarball installs cleanly and exposes safe-by-default helpers for transcript-core fixture verification, election foundation checks, and verification-oriented ballot privacy APIs
-- Built-output variants such as `pnpm run test:node:fast:built` and `pnpm run test:browser:built` skip rebuilding and should be used only after `pnpm run build`
 
 ## Local hooks
 

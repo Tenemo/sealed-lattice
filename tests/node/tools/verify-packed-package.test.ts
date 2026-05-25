@@ -217,6 +217,11 @@ describe('packed package smoke helpers', () => {
                 'dist/internal/election-foundation/plaintext-oracle/index.js',
                 'dist/internal/election-foundation/target-acceptance/index.js',
                 'dist/tsconfig.tsbuildinfo',
+                'tools/lattigo-oracle/main.go',
+                'tools/lattigo-oracle/Dockerfile',
+                'tools/lattigo-oracle/pinned-reference.json',
+                'dist/internal/oracle-vector-generator.js',
+                'go.mod',
             ]),
         ).toEqual([
             'Published package is missing required file: LICENSE',
@@ -233,6 +238,11 @@ describe('packed package smoke helpers', () => {
             'Published package must not include TypeScript build metadata: dist/tsconfig.tsbuildinfo',
             'Published package must not include internal protocol runtime: dist/internal/election-foundation/plaintext-oracle/index.js',
             'Published package must not include internal protocol runtime: dist/internal/election-foundation/target-acceptance/index.js',
+            'Published package must not include development oracle artifact: tools/lattigo-oracle/main.go',
+            'Published package must not include development oracle artifact: tools/lattigo-oracle/Dockerfile',
+            'Published package must not include development oracle artifact: tools/lattigo-oracle/pinned-reference.json',
+            'Published package must not include development oracle artifact: dist/internal/oracle-vector-generator.js',
+            'Published package must not include development oracle artifact: go.mod',
         ]);
     });
 

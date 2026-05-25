@@ -12,13 +12,13 @@ const packageManagerRunner = {
     commandArgumentsPrefix: ['pnpm-entrypoint.js'],
 } as const;
 
+const readWorkspaceFile = async (relativePath: string): Promise<string> =>
+    readFile(new URL(`../../../${relativePath}`, import.meta.url), 'utf8');
+
 const readWorkspacePackageScripts = async (): Promise<
     Record<string, string>
 > => {
-    const packageJsonText = await readFile(
-        new URL('../../../package.json', import.meta.url),
-        'utf8',
-    );
+    const packageJsonText = await readWorkspaceFile('package.json');
     const packageJson = JSON.parse(packageJsonText) as {
         readonly scripts?: Record<string, string>;
     };
@@ -26,16 +26,60 @@ const readWorkspacePackageScripts = async (): Promise<
     return packageJson.scripts ?? {};
 };
 
+const splitNodeLaneScriptNames = [
+    'test:node:fast',
+    'test:node:relation-heavy',
+    'test:node:proof-input-heavy',
+    'test:node:kernel-remaining',
+    'test:node:kernel-aggregate',
+] as const;
+
 describe('node test runner', () => {
-    it('routes the package script through the TypeScript runner', async () => {
+    it('keeps package scripts focused on local build entry points', async () => {
         const scripts = await readWorkspacePackageScripts();
 
-        expect(scripts['test:node:built']).toBe(
-            'tsx ./tools/ci/run-node-tests.ts',
+        expect(
+            Object.keys(scripts).filter((scriptName) =>
+                scriptName.endsWith(':built'),
+            ),
+        ).toEqual([]);
+        expect(scripts['test:node']).toBe(
+            'pnpm run build && tsx ./tools/ci/run-node-tests.ts',
         );
-        expect(scripts['test:node:fast:built']).toBe(
-            'tsx ./tools/ci/run-node-tests.ts --only fast',
+        expect(scripts['test:node:fast']).toBe(
+            'pnpm run build && tsx ./tools/ci/run-node-tests.ts --only fast',
         );
+        expect(scripts['test:node:relation-heavy']).toBe(
+            'pnpm run build && tsx ./tools/ci/run-node-tests.ts --only relation-heavy',
+        );
+        expect(scripts['test:node:proof-input-heavy']).toBe(
+            'pnpm run build && tsx ./tools/ci/run-node-tests.ts --only proof-input-heavy',
+        );
+        expect(scripts['test:node:kernel-remaining']).toBe(
+            'pnpm run build && tsx ./tools/ci/run-node-tests.ts --only kernel-remaining',
+        );
+        expect(scripts['test:node:kernel-aggregate']).toBe(
+            'pnpm run build && tsx ./tools/ci/run-node-tests.ts --only kernel-aggregate',
+        );
+        expect(scripts['test:browser']).toBe(
+            'pnpm run build && vitest --project browser-desktop --project browser-mobile --run',
+        );
+    });
+
+    it('keeps split workflow jobs on package script entry points', async () => {
+        const workflowTexts = await Promise.all([
+            readWorkspaceFile('.github/workflows/ci.yml'),
+            readWorkspaceFile('.github/workflows/release.yml'),
+        ]);
+
+        for (const workflowText of workflowTexts) {
+            expect(workflowText).not.toContain(
+                'pnpm exec tsx ./tools/ci/run-node-tests.ts',
+            );
+            for (const scriptName of splitNodeLaneScriptNames) {
+                expect(workflowText).toContain(`- run: pnpm run ${scriptName}`);
+            }
+        }
     });
 
     it('keeps heavy Node lanes independently runnable', () => {

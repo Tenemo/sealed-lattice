@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
     assertPinnedDigest,
+    buildReferenceOracleDigestBindings,
     loadPinnedReference,
     verifyPinnedReferenceMetadata,
     verifyPinnedReference,
@@ -25,6 +26,47 @@ describe('Lattigo oracle boundary tooling', () => {
         expect(verification.dockerfileDigest).toBe(
             pinnedReference.oracleDockerfileDigest,
         );
+        expect(
+            verification.referenceOracleDigestBindings.records.commandRecord,
+        ).toMatchObject({
+            referenceName: 'Lattigo',
+            oracleCommandDigest: verification.commandDigest,
+            protocolEvidenceUse: 'forbidden',
+        });
+        expect(
+            verification.referenceOracleDigestBindings.records.vectorRecord,
+        ).toMatchObject({
+            serializationSource:
+                'sealed-lattice-rust-wasm-canonical-rns-fixture',
+            oracleVectorsAcceptedAsProtocolEvidence: false,
+        });
+        expect(
+            verification.referenceOracleDigestBindings
+                .referenceOracleCommitDigest,
+        ).toMatch(/^[a-f0-9]{128}$/u);
+        expect(
+            verification.referenceOracleDigestBindings
+                .referenceOracleContainerDigest,
+        ).toMatch(/^[a-f0-9]{128}$/u);
+        expect(
+            verification.referenceOracleDigestBindings
+                .referenceOracleCommandDigest,
+        ).toMatch(/^[a-f0-9]{128}$/u);
+        expect(
+            verification.referenceOracleDigestBindings
+                .referenceOracleVectorRoot,
+        ).toMatch(/^[a-f0-9]{128}$/u);
+        expect(
+            verification.referenceOracleDigestBindings
+                .referenceOracleProfileDigest,
+        ).toMatch(/^[a-f0-9]{128}$/u);
+        expect(
+            buildReferenceOracleDigestBindings(
+                pinnedReference,
+                verification.commandDigest,
+                verification.dockerfileDigest,
+            ),
+        ).toEqual(verification.referenceOracleDigestBindings);
         expect(typeof verification.archivePresent).toBe('boolean');
         expect(typeof verification.checkoutPresent).toBe('boolean');
     });
@@ -32,7 +74,13 @@ describe('Lattigo oracle boundary tooling', () => {
     it('fails clearly when pinned metadata or digests drift', async () => {
         const pinnedReference = await loadPinnedReference();
         const goModule = `module sealed-lattice-lattigo-oracle\n\ngo 1.25.0\n`;
-        const dockerfile = `FROM ${pinnedReference.containerBaseImage}@${pinnedReference.containerBaseImageDigest}\n`;
+        const dockerfile = [
+            `FROM ${pinnedReference.containerBaseImage}@${pinnedReference.containerBaseImageDigest}`,
+            `COPY ${pinnedReference.archivePath} /workspace/${pinnedReference.archivePath}`,
+            `RUN echo "${pinnedReference.archiveSha256}  /workspace/${pinnedReference.archivePath}" | sha256sum -c - && go mod download && go mod verify`,
+            'CMD ["go", "run", "-mod=readonly", "."]',
+            '',
+        ].join('\n');
 
         expect(() =>
             verifyPinnedReferenceMetadata(
@@ -61,6 +109,50 @@ describe('Lattigo oracle boundary tooling', () => {
                 dockerfile,
             ),
         ).toThrow(/must use Go 1\.25\.0/u);
+        expect(() =>
+            verifyPinnedReferenceMetadata(
+                pinnedReference,
+                goModule,
+                dockerfile.replace(
+                    pinnedReference.archiveSha256,
+                    '0'.repeat(64),
+                ),
+            ),
+        ).toThrow(/archive SHA-256/u);
+        expect(() =>
+            verifyPinnedReferenceMetadata(
+                pinnedReference,
+                goModule,
+                [
+                    `FROM ${pinnedReference.containerBaseImage}@${pinnedReference.containerBaseImageDigest}`,
+                    `COPY ${pinnedReference.archivePath} /workspace/${pinnedReference.archivePath}`,
+                    `# pinned archive digest: ${pinnedReference.archiveSha256}`,
+                    `RUN echo "${'0'.repeat(64)}  /workspace/${pinnedReference.archivePath}" | sha256sum -c - && go mod download && go mod verify`,
+                    'CMD ["go", "run", "-mod=readonly", "."]',
+                    '',
+                ].join('\n'),
+            ),
+        ).toThrow(/sha256sum -c/u);
+        expect(() =>
+            verifyPinnedReferenceMetadata(
+                pinnedReference,
+                goModule,
+                dockerfile.replace(
+                    `COPY ${pinnedReference.archivePath} /workspace/${pinnedReference.archivePath}`,
+                    [
+                        `COPY ${pinnedReference.archivePath} /workspace/${pinnedReference.archivePath}`,
+                        `COPY ${pinnedReference.localCheckoutPath} /workspace/${pinnedReference.localCheckoutPath}`,
+                    ].join('\n'),
+                ),
+            ),
+        ).toThrow(/mutable local checkout/u);
+        expect(() =>
+            verifyPinnedReferenceMetadata(
+                pinnedReference,
+                goModule,
+                dockerfile.replace(' && go mod verify', ''),
+            ),
+        ).toThrow(/go\.sum verification/u);
         expect(() =>
             assertPinnedDigest(
                 'oracle command',

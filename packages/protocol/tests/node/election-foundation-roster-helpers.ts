@@ -166,10 +166,39 @@ export const createTrusteeSetupEntry = (
         objectType: 'TrusteeSetupEntry',
         objectVersion: 1,
         ceremonyId,
+        setupProfileId: manifestOpaqueBindings.bgvPassiveSetupProfileId,
+        thresholdDecryptionProfileId:
+            manifestOpaqueBindings.thresholdDecryptionProfileId,
         trusteeIdentity,
-        trusteeSetupRoot: deriveProtocolDigest('CollectivePublicKeyRoot', {
+        trusteeSetupRoot: deriveProtocolDigest(
+            'ParticipantBgvSetupRecordDigest',
+            {
+                trusteeIdentity,
+            },
+        ),
+        bgvProfileDigest: manifestOpaqueBindings.bgvProfileDigest,
+        rustBgvBackendProfileDigest:
+            manifestOpaqueBindings.rustBgvBackendProfileDigest,
+        participantSetupRecordDigest: deriveProtocolDigest(
+            'ParticipantBgvSetupRecordDigest',
+            {
+                trusteeIdentity,
+            },
+        ),
+        publicKeyShareRoot: deriveProtocolDigest('PublicKeyShareRoot', {
             trusteeIdentity,
         }),
+        collectivePublicKeyRoot: manifestOpaqueBindings.collectivePublicKeyRoot,
+        trusteeThresholdVerificationKeyDigest: deriveProtocolDigest(
+            'TrusteeThresholdVerificationKeyDigest',
+            {
+                trusteeIdentity,
+            },
+        ),
+        thresholdShareVerificationKeyRoot:
+            manifestOpaqueBindings.thresholdShareVerificationKeyRoot,
+        evaluationKeyRoot: manifestOpaqueBindings.evaluationKeyRoot,
+        rotSetDigest: manifestOpaqueBindings.rotSetDigest,
         boardSequence,
         boardPosition,
         recoveryEpoch: 0,

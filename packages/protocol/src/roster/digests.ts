@@ -49,11 +49,24 @@ export const deriveTrusteeSetupEntryDigest = (
     deriveProtocolDigest('TrusteeSetupEntryDigest', {
         boardPosition: entry.boardPosition,
         boardSequence: entry.boardSequence,
+        bgvProfileDigest: entry.bgvProfileDigest,
+        collectivePublicKeyRoot: entry.collectivePublicKeyRoot,
         ceremonyId: entry.ceremonyId,
         deviceEpoch: entry.deviceEpoch,
+        evaluationKeyRoot: entry.evaluationKeyRoot,
         objectType: entry.objectType,
         objectVersion: entry.objectVersion,
+        participantSetupRecordDigest: entry.participantSetupRecordDigest,
+        publicKeyShareRoot: entry.publicKeyShareRoot,
         recoveryEpoch: entry.recoveryEpoch,
+        rotSetDigest: entry.rotSetDigest,
+        rustBgvBackendProfileDigest: entry.rustBgvBackendProfileDigest,
+        setupProfileId: entry.setupProfileId,
+        thresholdDecryptionProfileId: entry.thresholdDecryptionProfileId,
+        thresholdShareVerificationKeyRoot:
+            entry.thresholdShareVerificationKeyRoot,
+        trusteeThresholdVerificationKeyDigest:
+            entry.trusteeThresholdVerificationKeyDigest,
         trusteeIdentity: entry.trusteeIdentity,
         trusteeSetupRoot: entry.trusteeSetupRoot,
     });

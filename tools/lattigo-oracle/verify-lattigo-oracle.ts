@@ -4,12 +4,21 @@ import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+import { deriveProtocolDigest } from '#packages/crypto/src/index';
+
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const pinnedReferencePath = path.join(
     repoRoot,
-    'reference-projects/lattigo/pinned-reference.json',
+    'tools/lattigo-oracle/pinned-reference.json',
 );
 const oracleDirectoryPath = path.join(repoRoot, 'tools/lattigo-oracle');
+const oracleCommandInputRelativePaths = [
+    'main.go',
+    'go.mod',
+    'go.sum',
+    'sealed-lattice-canonical-rns-fixtures.json',
+    'internal/extract-pinned-archive/main.go',
+] as const;
 
 type PinnedReference = {
     readonly allowedUse: string;
@@ -32,6 +41,21 @@ type PinnedReference = {
     readonly schemaVersion: number;
 };
 
+export type ReferenceOracleDigestBindings = {
+    readonly referenceOracleCommitDigest: string;
+    readonly referenceOracleContainerDigest: string;
+    readonly referenceOracleCommandDigest: string;
+    readonly referenceOracleVectorRoot: string;
+    readonly referenceOracleProfileDigest: string;
+    readonly records: {
+        readonly commitRecord: unknown;
+        readonly containerRecord: unknown;
+        readonly commandRecord: unknown;
+        readonly vectorRecord: unknown;
+        readonly profileRecord: unknown;
+    };
+};
+
 const sha256File = async (filePath: string): Promise<string> => {
     const bytes = await readFile(filePath);
 
@@ -40,6 +64,21 @@ const sha256File = async (filePath: string): Promise<string> => {
 
 const sha256Text = (text: string): string =>
     createHash('sha256').update(text).digest('hex');
+
+const escapeRegExp = (value: string): string =>
+    value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+
+const sha256OracleCommandInputs = (
+    commandInputs: readonly {
+        readonly relativePath: string;
+        readonly source: string;
+    }[],
+): string =>
+    sha256Text(
+        commandInputs
+            .map(({ relativePath, source }) => `${relativePath}\n${source}`)
+            .join('\n'),
+    );
 
 export const loadPinnedReference = async (): Promise<PinnedReference> =>
     JSON.parse(await readFile(pinnedReferencePath, 'utf8')) as PinnedReference;
@@ -51,7 +90,7 @@ export const assertPinnedDigest = (
 ): void => {
     if (actualDigest !== expectedDigest) {
         throw new Error(
-            `The pinned Lattigo ${label} digest changed: actual ${actualDigest}, expected ${expectedDigest}. Review the oracle change before updating reference-projects/lattigo/pinned-reference.json.`,
+            `The pinned Lattigo ${label} digest changed: actual ${actualDigest}, expected ${expectedDigest}. Review the oracle change before updating tools/lattigo-oracle/pinned-reference.json.`,
         );
     }
 };
@@ -129,6 +168,118 @@ export const verifyPinnedReferenceMetadata = (
             `The Lattigo oracle Dockerfile must pin ${expectedBaseImageReference}.`,
         );
     }
+    const expectedArchiveCopyLine = `COPY ${pinnedReference.archivePath} /workspace/${pinnedReference.archivePath}`;
+    if (!dockerfile.includes(expectedArchiveCopyLine)) {
+        throw new Error(
+            'The Lattigo oracle Dockerfile must build from the pinned archive path.',
+        );
+    }
+    const archiveChecksumCommandPattern = new RegExp(
+        [
+            String.raw`(?:^|\n)\s*RUN\s+echo\s+["']`,
+            escapeRegExp(pinnedReference.archiveSha256),
+            String.raw`\s+/workspace/`,
+            escapeRegExp(pinnedReference.archivePath),
+            String.raw`["']\s*\|\s*sha256sum\s+-c\s+-`,
+        ].join(''),
+        'u',
+    );
+    if (!archiveChecksumCommandPattern.test(dockerfile)) {
+        throw new Error(
+            'The Lattigo oracle Dockerfile must verify the pinned archive SHA-256 digest with sha256sum -c against the pinned archive path.',
+        );
+    }
+    if (dockerfile.includes(`COPY ${pinnedReference.localCheckoutPath}`)) {
+        throw new Error(
+            'The Lattigo oracle Dockerfile must not copy the mutable local checkout as the build input.',
+        );
+    }
+    if (
+        !dockerfile.includes('go mod download') ||
+        !dockerfile.includes('go mod verify') ||
+        !dockerfile.includes('-mod=readonly')
+    ) {
+        throw new Error(
+            'The Lattigo oracle Dockerfile must use pinned module resolution with go.sum verification.',
+        );
+    }
+};
+
+export const buildReferenceOracleDigestBindings = (
+    pinnedReference: PinnedReference,
+    commandDigest: string,
+    dockerfileDigest: string,
+): ReferenceOracleDigestBindings => {
+    const commitRecord = {
+        referenceName: pinnedReference.referenceName,
+        repository: pinnedReference.repository,
+        pinnedCommit: pinnedReference.pinnedCommit,
+        pinnedCommitDate: pinnedReference.pinnedCommitDate,
+        pinnedCommitUrl: pinnedReference.pinnedCommitUrl,
+        runtimeUse: pinnedReference.runtimeUse,
+        protocolEvidenceUse: pinnedReference.protocolEvidenceUse,
+    };
+    const containerRecord = {
+        referenceName: pinnedReference.referenceName,
+        containerBaseImage: pinnedReference.containerBaseImage,
+        containerBaseImageDigest: pinnedReference.containerBaseImageDigest,
+        goToolchain: pinnedReference.goToolchain,
+        oracleDockerfileDigest: dockerfileDigest,
+        protocolEvidenceUse: pinnedReference.protocolEvidenceUse,
+    };
+    const commandRecord = {
+        referenceName: pinnedReference.referenceName,
+        oracleCommandDigest: commandDigest,
+        commandInputRelativePaths: oracleCommandInputRelativePaths,
+        runtimeUse: pinnedReference.runtimeUse,
+        protocolEvidenceUse: pinnedReference.protocolEvidenceUse,
+    };
+    const vectorRecord = {
+        referenceName: pinnedReference.referenceName,
+        canonicalMaterialFixture:
+            'tools/lattigo-oracle/sealed-lattice-canonical-rns-fixtures.json',
+        serializationSource: 'sealed-lattice-rust-wasm-canonical-rns-fixture',
+        oracleVectorsAcceptedAsProtocolEvidence: false,
+        protocolEvidenceUse: pinnedReference.protocolEvidenceUse,
+    };
+    const profileRecord = {
+        referenceName: pinnedReference.referenceName,
+        allowedUse: pinnedReference.allowedUse,
+        claimBoundary: pinnedReference.claimBoundary,
+        comparableScope: 'ring/RNS/NTT and coefficient arithmetic parity only',
+        runtimeUse: pinnedReference.runtimeUse,
+        protocolEvidenceUse: pinnedReference.protocolEvidenceUse,
+    };
+
+    return {
+        referenceOracleCommitDigest: deriveProtocolDigest(
+            'ReferenceOracleCommitDigest',
+            commitRecord,
+        ),
+        referenceOracleContainerDigest: deriveProtocolDigest(
+            'ReferenceOracleContainerDigest',
+            containerRecord,
+        ),
+        referenceOracleCommandDigest: deriveProtocolDigest(
+            'ReferenceOracleCommandDigest',
+            commandRecord,
+        ),
+        referenceOracleVectorRoot: deriveProtocolDigest(
+            'ReferenceOracleVectorRoot',
+            vectorRecord,
+        ),
+        referenceOracleProfileDigest: deriveProtocolDigest(
+            'ReferenceOracleProfileDigest',
+            profileRecord,
+        ),
+        records: {
+            commitRecord,
+            containerRecord,
+            commandRecord,
+            vectorRecord,
+            profileRecord,
+        },
+    };
 };
 
 export const verifyPinnedReference = async (): Promise<{
@@ -136,6 +287,7 @@ export const verifyPinnedReference = async (): Promise<{
     readonly checkoutPresent: boolean;
     readonly commandDigest: string;
     readonly dockerfileDigest: string;
+    readonly referenceOracleDigestBindings: ReferenceOracleDigestBindings;
 }> => {
     const pinnedReference = await loadPinnedReference();
     if (pinnedReference.runtimeUse !== 'forbidden') {
@@ -181,14 +333,27 @@ export const verifyPinnedReference = async (): Promise<{
         }
     }
 
-    const [mainSource, goModule, dockerfile] = await Promise.all([
-        readFile(path.join(oracleDirectoryPath, 'main.go'), 'utf8'),
-        readFile(path.join(oracleDirectoryPath, 'go.mod'), 'utf8'),
+    const [dockerfile, commandInputs] = await Promise.all([
         readFile(path.join(oracleDirectoryPath, 'Dockerfile'), 'utf8'),
+        Promise.all(
+            oracleCommandInputRelativePaths.map(async (relativePath) => ({
+                relativePath,
+                source: await readFile(
+                    path.join(oracleDirectoryPath, relativePath),
+                    'utf8',
+                ),
+            })),
+        ),
     ]);
+    const goModule = commandInputs.find(
+        ({ relativePath }) => relativePath === 'go.mod',
+    )?.source;
+    if (goModule === undefined) {
+        throw new Error('The Lattigo oracle go.mod command input is missing.');
+    }
 
     verifyPinnedReferenceMetadata(pinnedReference, goModule, dockerfile);
-    const commandDigest = sha256Text(`${mainSource}\n${goModule}`);
+    const commandDigest = sha256OracleCommandInputs(commandInputs);
     const dockerfileDigest = sha256Text(dockerfile);
     assertPinnedDigest(
         'oracle command',
@@ -206,6 +371,11 @@ export const verifyPinnedReference = async (): Promise<{
         checkoutPresent,
         commandDigest,
         dockerfileDigest,
+        referenceOracleDigestBindings: buildReferenceOracleDigestBindings(
+            pinnedReference,
+            commandDigest,
+            dockerfileDigest,
+        ),
     };
 };
 

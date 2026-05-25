@@ -1,6 +1,6 @@
 name: release
 
-run-name: release ${{ inputs.release_type }} from ${{ github.ref_name }}
+run-name: release ${{ inputs.release_type }} from master
 
 on:
     workflow_dispatch:
@@ -40,10 +40,10 @@ jobs:
             run:
                 shell: bash
         steps:
-            - name: ensure master dispatch
+            - name: ensure master release
               run: |
                   if [[ "${GITHUB_REF_TYPE}" != "branch" || "${GITHUB_REF_NAME}" != "master" ]]; then
-                    echo "Releases must be started from the master branch." >&2
+                    echo "The GitHub manual-dispatch branch selector cannot be disabled. Select master for releases." >&2
                     exit 1
                   fi
 
@@ -81,12 +81,12 @@ jobs:
                   targets: wasm32-unknown-unknown
             - run: cargo build --workspace --lib --target wasm32-unknown-unknown --release
 
-    verify:
-        name: verify
+    verify-static:
+        name: verify static
         needs:
             - validate-dispatch
         runs-on: ubuntu-latest
-        timeout-minutes: 35
+        timeout-minutes: 25
         steps:
             - uses: actions/checkout@v6.0.2
               with:
@@ -97,7 +97,115 @@ jobs:
                   components: clippy, rustfmt
                   targets: wasm32-unknown-unknown
             - run: pnpm run check
-            - run: pnpm run test:node:built
+
+    node-fast:
+        name: node fast
+        needs:
+            - validate-dispatch
+        runs-on: ubuntu-latest
+        timeout-minutes: 15
+        steps:
+            - uses: actions/checkout@v6.0.2
+              with:
+                  persist-credentials: false
+            - uses: ./.github/actions/bootstrap-pnpm
+            - uses: dtolnay/rust-toolchain@1.90.0
+              with:
+                  components: clippy, rustfmt
+                  targets: wasm32-unknown-unknown
+            - run: pnpm run test:node:fast
+
+    node-relation-heavy:
+        name: node relation heavy
+        needs:
+            - validate-dispatch
+        runs-on: ubuntu-latest
+        timeout-minutes: 20
+        steps:
+            - uses: actions/checkout@v6.0.2
+              with:
+                  persist-credentials: false
+            - uses: ./.github/actions/bootstrap-pnpm
+            - uses: dtolnay/rust-toolchain@1.90.0
+              with:
+                  components: clippy, rustfmt
+                  targets: wasm32-unknown-unknown
+            - run: pnpm run test:node:relation-heavy
+
+    node-proof-input-heavy:
+        name: node proof input heavy
+        needs:
+            - validate-dispatch
+        runs-on: ubuntu-latest
+        timeout-minutes: 30
+        steps:
+            - uses: actions/checkout@v6.0.2
+              with:
+                  persist-credentials: false
+            - uses: ./.github/actions/bootstrap-pnpm
+            - uses: dtolnay/rust-toolchain@1.90.0
+              with:
+                  components: clippy, rustfmt
+                  targets: wasm32-unknown-unknown
+            - run: pnpm run test:node:proof-input-heavy
+
+    node-kernel-remaining:
+        name: node kernel remaining
+        needs:
+            - validate-dispatch
+        runs-on: ubuntu-latest
+        timeout-minutes: 25
+        steps:
+            - uses: actions/checkout@v6.0.2
+              with:
+                  persist-credentials: false
+            - uses: ./.github/actions/bootstrap-pnpm
+            - uses: dtolnay/rust-toolchain@1.90.0
+              with:
+                  components: clippy, rustfmt
+                  targets: wasm32-unknown-unknown
+            - run: pnpm run test:node:kernel-remaining
+
+    node-kernel-aggregate:
+        name: node kernel aggregate
+        needs:
+            - validate-dispatch
+        runs-on: ubuntu-latest
+        timeout-minutes: 60
+        steps:
+            - uses: actions/checkout@v6.0.2
+              with:
+                  persist-credentials: false
+            - uses: ./.github/actions/bootstrap-pnpm
+            - uses: dtolnay/rust-toolchain@1.90.0
+              with:
+                  components: clippy, rustfmt
+                  targets: wasm32-unknown-unknown
+            - run: pnpm run test:node:kernel-aggregate
+
+    verify:
+        name: verify
+        runs-on: ubuntu-latest
+        timeout-minutes: 5
+        needs:
+            - verify-static
+            - node-fast
+            - node-relation-heavy
+            - node-proof-input-heavy
+            - node-kernel-remaining
+            - node-kernel-aggregate
+        if: ${{ always() }}
+        steps:
+            - name: Check split verify jobs
+              env:
+                  NEEDS_JSON: ${{ toJSON(needs) }}
+              run: >-
+                  node -e "const needs = JSON.parse(process.env.NEEDS_JSON);
+                  const failed = Object.entries(needs).filter(([, job]) =>
+                  job.result !== 'success'); if (failed.length > 0) {
+                  console.error(failed.map(([name, job]) => name + ': ' +
+                  job.result).join('\n')); process.exit(1); }
+                  console.log('Split verify jobs passed.');"
 
     coverage:
         name: coverage
@@ -133,7 +241,7 @@ jobs:
                   targets: wasm32-unknown-unknown
             - run: pnpm exec playwright install --with-deps chromium firefox webkit
             - run: pnpm run build
-            - run: pnpm run test:browser:built
+            - run: pnpm exec vitest --project browser-desktop --project browser-mobile --run
 
     docs:
         name: docs

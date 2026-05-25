@@ -43,8 +43,19 @@ export type TrusteeSetupEntry = {
     readonly objectVersion: 1;
     readonly trusteeSetupEntryDigest: ProtocolDigest;
     readonly ceremonyId: string;
+    readonly setupProfileId: string;
+    readonly thresholdDecryptionProfileId: string;
     readonly trusteeIdentity: string;
     readonly trusteeSetupRoot: ProtocolDigest;
+    readonly bgvProfileDigest: ProtocolDigest;
+    readonly rustBgvBackendProfileDigest: ProtocolDigest;
+    readonly participantSetupRecordDigest: ProtocolDigest;
+    readonly publicKeyShareRoot: ProtocolDigest;
+    readonly collectivePublicKeyRoot: ProtocolDigest;
+    readonly trusteeThresholdVerificationKeyDigest: ProtocolDigest;
+    readonly thresholdShareVerificationKeyRoot: ProtocolDigest;
+    readonly evaluationKeyRoot: ProtocolDigest;
+    readonly rotSetDigest: ProtocolDigest;
     readonly boardSequence: number;
     readonly boardPosition: number;
     readonly recoveryEpoch: number;
@@ -65,12 +76,18 @@ export type ManifestPolicyDigests = {
 /** Opaque cryptographic implementation bindings embedded in a manifest. */
 export type ManifestOpaqueBindings = {
     readonly encryptedAggregateBridgeProfileId: string;
+    readonly bgvPassiveSetupProfileId: string;
     readonly bridgeWitnessPrivacyProfileId: string;
     readonly heParamDigest: ProtocolDigest;
+    readonly bgvPassiveSetupPackageDigest: ProtocolDigest;
+    readonly bgvSetupParameterCertificateDigest: ProtocolDigest;
     readonly bgvProfileDigest: ProtocolDigest;
     readonly rustBgvBackendProfileDigest: ProtocolDigest;
     readonly bgvPublicKeyRoot: ProtocolDigest;
     readonly collectivePublicKeyRoot: ProtocolDigest;
+    readonly collectiveSecretDistributionCertificateDigest: ProtocolDigest;
+    readonly errorDistributionCertificateDigest: ProtocolDigest;
+    readonly keySwitchDecompositionDigest: ProtocolDigest;
     readonly canonicalCiphertextConventionDigest: ProtocolDigest;
     readonly encryptedAggregateBridgeDigest: ProtocolDigest;
     readonly bridgeWitnessPrivacyProfileDigest: ProtocolDigest;
@@ -85,6 +102,11 @@ export type ManifestOpaqueBindings = {
     readonly evaluationNoiseProfileDigest: ProtocolDigest;
     readonly heEvaluationNoiseCertDigest: ProtocolDigest;
     readonly allowedEvaluatorOpsDigest: ProtocolDigest;
+    readonly rotSetDigest: ProtocolDigest;
+    readonly evaluationKeyRoot: ProtocolDigest;
+    readonly evaluationKeySizeProfileDigest: ProtocolDigest;
+    readonly thresholdShareVerificationKeyRoot: ProtocolDigest;
+    readonly thresholdShareVerificationKeyDigest: ProtocolDigest;
     readonly evaluationProofProfileId: string;
     readonly evaluationProofProfileDigest: ProtocolDigest;
     readonly thresholdDecryptionProfileId: string;
