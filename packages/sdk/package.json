@@ -1,6 +1,6 @@
 {
     "name": "sealed-lattice",
-    "version": "0.0.12",
+    "version": "0.0.14",
     "author": "Piotr Piech <piotr@piech.dev>",
     "license": "MPL-2.0",
     "type": "module",
