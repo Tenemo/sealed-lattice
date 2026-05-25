@@ -15,7 +15,7 @@ const invalidDynamicRosterProfileCertificateDigest = 'not-a-protocol-digest';
 const rosterDigest = 'b'.repeat(128);
 const casualMicroRosterSizes = [3, 4, 5, 6, 7, 8, 9] as const;
 const pollSpec = {
-    duplicateBallotPolicy: 'LastValidBeforeVotingClosedCounts',
+    duplicateBallotPolicy: 'FirstValidBeforeVotingClosedCounts',
     maxRosterSize: 50,
     minRosterSize: 10,
     options: ['Alpha', 'Beta'],

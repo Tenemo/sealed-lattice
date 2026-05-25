@@ -108,7 +108,7 @@ export type ScoreDomain = {
 };
 
 /** Duplicate ballot policy currently supported by the public facade. */
-export type DuplicateBallotPolicy = 'LastValidBeforeVotingClosedCounts';
+export type DuplicateBallotPolicy = 'FirstValidBeforeVotingClosedCounts';
 
 /** Tie-breaking policy currently supported by the public facade. */
 export type TiePolicy = 'HigherScoreThenLowerOptionIndex';

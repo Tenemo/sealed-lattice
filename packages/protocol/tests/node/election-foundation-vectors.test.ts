@@ -182,6 +182,7 @@ const currentBridgeAndEvaluatorNamespaces = [
     'EncryptedAggregateReconstructionDigest',
     'BridgeWitnessPrivacyProfileDigest',
     'ScoreBitDerivationCircuitDigest',
+    'EncryptedScoreBitInputDigest',
     'ComparisonInputDerivationCircuitDigest',
     'EncryptedComparisonInputDigest',
 ] as const;

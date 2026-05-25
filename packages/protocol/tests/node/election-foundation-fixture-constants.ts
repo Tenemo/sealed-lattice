@@ -125,7 +125,7 @@ export const manifestPolicyDigests: ManifestPolicyDigests = {
     ),
     duplicateBallotPolicyDigest: deriveProtocolDigest(
         'DuplicateBallotPolicyDigest',
-        { policy: 'last-valid-before-close' },
+        { policy: 'first-valid-before-close' },
     ),
     firstValidPolicyDigest: deriveProtocolDigest('FirstValidPolicyDigest', {
         policy: 'canonical-signed-board-order-current-epoch',
@@ -232,18 +232,34 @@ export const manifestOpaqueBindings: ManifestOpaqueBindings = {
         'ScoreBitDerivationCircuitDigest',
         {
             circuit: 'score-bit-derivation-circuit-v1',
+            selectedEvaluatorPath:
+                'encrypted-aggregate-score-bit-derivation-v1',
+        },
+    ),
+    encryptedScoreBitInputDigest: deriveProtocolDigest(
+        'EncryptedScoreBitInputDigest',
+        {
+            layout: 'encrypted-score-bit-inputs-v1',
+            selectedEvaluatorPath:
+                'encrypted-aggregate-score-bit-derivation-v1',
         },
     ),
     comparisonInputDerivationCircuitDigest: deriveProtocolDigest(
         'ComparisonInputDerivationCircuitDigest',
         {
             circuit: 'comparison-input-derivation-circuit-v1',
+            futureRdrRequired: true,
+            selectedEvaluatorPath:
+                'inactive-future-direct-comparison-input-profile',
         },
     ),
     encryptedComparisonInputDigest: deriveProtocolDigest(
         'EncryptedComparisonInputDigest',
         {
+            futureRdrRequired: true,
             layout: 'encrypted-comparison-inputs-v1',
+            selectedEvaluatorPath:
+                'inactive-future-direct-comparison-input-profile',
         },
     ),
     evaluationNoiseProfileDigest: deriveProtocolDigest(

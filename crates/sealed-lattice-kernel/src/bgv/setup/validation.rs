@@ -746,7 +746,7 @@ fn validate_required_rotation_groups(
     }
     for purpose in [
         "bit-sliced-projection",
-        "score-bit-comparison-input-derivation",
+        "encrypted-aggregate-score-bit-derivation",
         "rank-accumulation",
         "target-projection",
     ] {
@@ -764,7 +764,7 @@ fn validate_required_rotation_groups(
 fn expected_required_rotation_group(purpose: &str) -> Option<BTreeSet<i64>> {
     let rotations = match purpose {
         "bit-sliced-projection" => vec![1, 2, 4, 8, 16, -1, -2, -4, -8, -16],
-        "score-bit-comparison-input-derivation" => vec![32, 64, 128, -32, -64, -128],
+        "encrypted-aggregate-score-bit-derivation" => vec![32, 64, 128, -32, -64, -128],
         "rank-accumulation" => vec![256, 512, 1024, 2048, -256, -512, -1024, -2048],
         "target-projection" => vec![4096, 8192, -4096, -8192],
         _ => return None,

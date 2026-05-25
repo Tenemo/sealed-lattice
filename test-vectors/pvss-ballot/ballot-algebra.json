@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
-  "ballotPackageDigest": "1020359b07bc288d2edd8e2ec0c02e8e0389ac7509004eb077fb491ddd4cc3d0eb92a4bedd67baa8a98552ee14802d58e0509dc1def3bff5a0b1e587662ebbad",
-  "ballotPolynomialSetDigest": "9d18c5de4ddeb79034ba1dc26ec96a185e92894de905ed374ecf179b334ae5294990432f193c9019bbb2a6bab866725f52893a40ac09685dba91d78c8e8173ed",
-  "firstReceiverPayloadDigest": "7e619ed3548be532f8cedab2dc1b1e5bf9594b3350751ded99f1cd25e01af2bcf61fe86152a9027713130dc178ac5da949897741c922108ea0a2f7e8de9216dc",
+  "ballotPackageDigest": "abbd49021a22b2ec41fe30934f051df15d2acbce2b2f237b1c1967973686670a92ed007bcc777c7ca561019d3d556950b9c39f9c54ea9008c0949e3989cb57c2",
+  "ballotPolynomialSetDigest": "d8b8e6fe52b321bb2f6f0f3e8ad27c2716624b12a26cad9d4cad435dc7ac9ef7325aae1b0e538009dc1df8b07ec09e8957aeea43a578144bc165a9b9911d236d",
+  "firstReceiverPayloadDigest": "669c27ef878f3f475d530c716c7a586646c6aed35981005a824e8957de92c9cd3b206c3783f44b255e3d94f0a4037ba62641f215d7c092c158c3acab1cea3a39",
   "firstReceiverShareVector": [
-    11601,
-    20082,
-    42762,
-    37573,
+    42175,
+    35668,
+    38106,
+    26482,
     0,
     0,
     0,
@@ -25,7 +25,7 @@
     0,
     0
   ],
-  "firstShareCommitmentDigest": "d147ed00bc513e7379d626a2b4b92864f87c13b08fdfcf1d3b53a3875beff05beb85008c966143c9844744272497f82027a9785886a74333f1657c3d441a2f54",
+  "firstShareCommitmentDigest": "efb86b867f101fcfee3064f7337182f3a5ea6aee9e29898a2cbdf25946ad271c6768d952a3c72abdaf10e1f61c45d846fd5923b2be26296d9cef4086a05e589d",
   "normalizedScores": [
     10,
     1,

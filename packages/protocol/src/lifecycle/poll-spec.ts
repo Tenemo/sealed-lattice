@@ -211,7 +211,7 @@ export const validatePollSpec = (input: unknown): PollSpecValidation => {
             code: 'UnsupportedDuplicateBallotPolicy',
             field: 'duplicateBallotPolicy',
             message:
-                'duplicateBallotPolicy must be LastValidBeforeVotingClosedCounts.',
+                'duplicateBallotPolicy must be FirstValidBeforeVotingClosedCounts.',
         });
     }
     if (tiePolicy !== undefined && tiePolicy !== defaultTiePolicy) {

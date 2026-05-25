@@ -23,7 +23,7 @@ export const defaultScoreDomain = {
 } as const satisfies ScoreDomain;
 
 export const defaultDuplicateBallotPolicy =
-    'LastValidBeforeVotingClosedCounts' as const satisfies DuplicateBallotPolicy;
+    'FirstValidBeforeVotingClosedCounts' as const satisfies DuplicateBallotPolicy;
 
 export const defaultTiePolicy =
     'HigherScoreThenLowerOptionIndex' as const satisfies TiePolicy;

@@ -171,6 +171,7 @@
     "EncryptedAggregateReconstructionDigest",
     "BridgeWitnessPrivacyProfileDigest",
     "ScoreBitDerivationCircuitDigest",
+    "EncryptedScoreBitInputDigest",
     "ComparisonInputDerivationCircuitDigest",
     "EncryptedComparisonInputDigest",
     "EvaluationNoiseProfileDigest",

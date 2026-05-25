@@ -24,7 +24,7 @@ const pollSpec = {
         max: 10,
         skippedOptionScore: 1,
     },
-    duplicateBallotPolicy: 'LastValidBeforeVotingClosedCounts',
+    duplicateBallotPolicy: 'FirstValidBeforeVotingClosedCounts',
     maxRosterSize: 50,
     minRosterSize: 10,
     rosterPolicy: 'OpenLinkPublicRoster',
@@ -53,7 +53,7 @@ const electionManifestDigest = deriveProtocolDigest('ElectionManifestDigest', {
 });
 const duplicateBallotPolicyDigest = deriveProtocolDigest(
     'DuplicateBallotPolicyDigest',
-    { policy: 'last-valid-before-close' },
+    { policy: 'first-valid-before-close' },
 );
 
 const createDummySignature = (

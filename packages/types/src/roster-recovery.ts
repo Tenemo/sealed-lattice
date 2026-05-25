@@ -97,6 +97,7 @@ export type ManifestOpaqueBindings = {
     readonly encryptedAggregateShareCiphertextRoot: ProtocolDigest;
     readonly encryptedAggregateReconstructionDigest: ProtocolDigest;
     readonly scoreBitDerivationCircuitDigest: ProtocolDigest;
+    readonly encryptedScoreBitInputDigest: ProtocolDigest;
     readonly comparisonInputDerivationCircuitDigest: ProtocolDigest;
     readonly encryptedComparisonInputDigest: ProtocolDigest;
     readonly evaluationNoiseProfileDigest: ProtocolDigest;

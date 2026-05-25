@@ -1466,6 +1466,7 @@ fn m8_evaluator_context_bindings() -> CanonicalResult<Value> {
         "objectType": "ScoreBitDerivationCircuitBinding",
         "objectVersion": 1,
         "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
+        "selectedEvaluatorPath": "encrypted-aggregate-score-bit-derivation-v1",
         "inputLayoutDigest": top_k_evaluator_input_layout_digest()?,
         "encodedAggregateLayoutDigest": encoded_aggregate_layout_digest()?,
         "allowedEvaluatorOpsDigest": allowed_operation_registry_digest()?,
@@ -1475,15 +1476,18 @@ fn m8_evaluator_context_bindings() -> CanonicalResult<Value> {
         "objectType": "ComparisonInputDerivationCircuitBinding",
         "objectVersion": 1,
         "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
+        "selectedEvaluatorPath": "inactive-future-direct-comparison-input-profile",
         "inputLayoutDigest": top_k_evaluator_input_layout_digest()?,
         "encodedAggregateLayoutDigest": encoded_aggregate_layout_digest()?,
         "allowedEvaluatorOpsDigest": allowed_operation_registry_digest()?,
-        "circuitClosurePendingM10": true,
+        "circuitClosurePendingM10": false,
+        "futureRdrRequired": true,
     });
     let encrypted_score_bit_input_record = json!({
         "objectType": "EncryptedScoreBitInputBinding",
         "objectVersion": 1,
         "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
+        "selectedEvaluatorPath": "encrypted-aggregate-score-bit-derivation-v1",
         "scoreBitDerivationCircuitDigest": derive_protocol_digest(
             "ScoreBitDerivationCircuitDigest",
             &score_bit_derivation_record,
@@ -1496,13 +1500,15 @@ fn m8_evaluator_context_bindings() -> CanonicalResult<Value> {
         "objectType": "EncryptedComparisonInputBinding",
         "objectVersion": 1,
         "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
+        "selectedEvaluatorPath": "inactive-future-direct-comparison-input-profile",
         "comparisonInputDerivationCircuitDigest": derive_protocol_digest(
             "ComparisonInputDerivationCircuitDigest",
             &comparison_input_derivation_record,
         )?,
         "ciphertextConventionDigest": canonical_ciphertext_convention_digest()?,
         "packingLayoutDigest": top_k_evaluator_input_layout_digest()?,
-        "claimUsePendingM10": true,
+        "claimUsePendingM10": false,
+        "futureRdrRequired": true,
     });
     let comparator_record = json!({
         "objectType": "BitSlicedComparatorBinding",
@@ -1574,6 +1580,8 @@ fn m8_evaluator_context_bindings() -> CanonicalResult<Value> {
         "encryptedComparisonInputDigest": encrypted_comparison_input_digest,
         "bitSlicedComparatorDigest": bit_sliced_comparator_digest,
         "encryptedSparseTargetProjectionDigest": encrypted_sparse_target_projection_digest,
+        "selectedEvaluatorPath": "encrypted-aggregate-score-bit-derivation-v1",
+        "directComparisonInputDerivationStatus": "inactive-future-profile",
         "claimUse": "binding-only-until-M9-M10-closure",
     });
 
@@ -1609,7 +1617,7 @@ fn provisional_rotation_set() -> CanonicalResult<Value> {
         ],
         "dependencies": [
             "encrypted-aggregate-reconstruction",
-            "score-bit-or-comparison-input-derivation",
+            "encrypted-aggregate-score-bit-derivation",
             "bit-sliced-GT-EQ",
             "rank-accumulation",
             "encrypted-sparse-target-projection",
@@ -1621,7 +1629,7 @@ fn provisional_rotation_set() -> CanonicalResult<Value> {
                 "rotations": [1, 2, 4, 8, 16, -1, -2, -4, -8, -16]
             },
             {
-                "purpose": "score-bit-comparison-input-derivation",
+                "purpose": "encrypted-aggregate-score-bit-derivation",
                 "rotations": [32, 64, 128, -32, -64, -128]
             },
             {

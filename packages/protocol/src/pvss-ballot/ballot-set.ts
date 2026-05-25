@@ -276,8 +276,8 @@ const deriveCanonicalBallotSetUnchecked = (
         ...boardResult.refusedObjects,
         ...validateSetInput(input, headsByDigest),
     ];
-    const validCandidates: CountedBallotPackage[] = [];
     const rejectedCandidates: RejectedBallotCandidate[] = [];
+    const selectedByVoter = new Map<string, CountedBallotPackage>();
     const seenValidBallotPackageDigests = new Set<ProtocolDigest>();
     const conflictingBoardPositionKeys = findConflictingBoardPositionKeys(
         input.candidateBallots,
@@ -380,26 +380,31 @@ const deriveCanonicalBallotSetUnchecked = (
             candidate.ballotPackage.ballotPackageDigest,
         );
 
-        validCandidates.push({
+        const validCandidate = {
             ...candidate,
             signedBoardOrder,
-        });
+        };
+
+        if (selectedByVoter.has(candidate.ballotPackage.voterIdentity)) {
+            rejectedCandidates.push(
+                deriveRejectedCandidate(candidate, [
+                    createRefusal(
+                        'DuplicateBallotPackage',
+                        'Later valid ballot from the same voter is duplicate evidence and is not counted.',
+                        candidate.ballotPackage.ballotPackageDigest,
+                        'BallotPackage',
+                    ),
+                ]),
+            );
+            continue;
+        }
+
+        selectedByVoter.set(
+            candidate.ballotPackage.voterIdentity,
+            validCandidate,
+        );
     }
 
-    const selectedByVoter = new Map<string, CountedBallotPackage>();
-    for (const candidate of validCandidates.sort(
-        (left, right) =>
-            compareSignedBoardOrder(
-                left.signedBoardOrder,
-                right.signedBoardOrder,
-            ) ||
-            compareCanonicalStrings(
-                left.ballotPackage.ballotPackageDigest,
-                right.ballotPackage.ballotPackageDigest,
-            ),
-    )) {
-        selectedByVoter.set(candidate.ballotPackage.voterIdentity, candidate);
-    }
     const countedBallots = [...selectedByVoter.values()].sort(
         (left, right) =>
             compareSignedBoardOrder(

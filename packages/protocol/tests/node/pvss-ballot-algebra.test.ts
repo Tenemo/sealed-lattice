@@ -50,7 +50,7 @@ const pollSpec = {
         max: 10,
         skippedOptionScore: 1,
     },
-    duplicateBallotPolicy: 'LastValidBeforeVotingClosedCounts',
+    duplicateBallotPolicy: 'FirstValidBeforeVotingClosedCounts',
     maxRosterSize: 50,
     minRosterSize: 10,
     rosterPolicy: 'OpenLinkPublicRoster',
@@ -525,9 +525,9 @@ describe('internal PVSS ballot algebra', () => {
         ).toThrow('canonical option polynomial slots');
     });
 
-    it('selects the last valid ballot before close and records invalid or late candidates', () => {
+    it('selects the first valid ballot before close and records invalid, duplicate, or late candidates', () => {
         const first = createBallotWitness(1, [1, 2, 3, 4], 'first');
-        const replacement = createBallotWitness(1, [9, 8, 7, 6], 'replacement');
+        const duplicate = createBallotWitness(1, [9, 8, 7, 6], 'duplicate');
         const invalidLater = createBallotWitness(2, [4, 4, 4, 4], 'invalid');
         const late = createBallotWitness(3, [5, 5, 5, 5], 'late');
         const invalidShell = mutateBallotPackage(invalidLater.ballotPackage, {
@@ -539,7 +539,7 @@ describe('internal PVSS ballot algebra', () => {
             createBallotSetInput(
                 [
                     first,
-                    replacement,
+                    duplicate,
                     {
                         ...invalidLater,
                         ballotPackage: invalidShell,
@@ -554,7 +554,12 @@ describe('internal PVSS ballot algebra', () => {
             ballotSet.countedBallots.map(
                 (candidate) => candidate.ballotPackage.ballotPackageDigest,
             ),
-        ).toEqual([replacement.ballotPackage.ballotPackageDigest]);
+        ).toEqual([first.ballotPackage.ballotPackageDigest]);
+        const duplicateRejection = ballotSet.rejectedCandidates.find(
+            (candidate) =>
+                candidate.ballotPackageDigest ===
+                duplicate.ballotPackage.ballotPackageDigest,
+        );
         const invalidLaterRejection = ballotSet.rejectedCandidates.find(
             (candidate) =>
                 candidate.ballotPackageDigest ===
@@ -566,6 +571,9 @@ describe('internal PVSS ballot algebra', () => {
                 late.ballotPackage.ballotPackageDigest,
         );
 
+        expect(duplicateRejection?.refusalCodes).toContain(
+            'DuplicateBallotPackage',
+        );
         expect(invalidLaterRejection?.refusalCodes).toContain(
             'BallotPackageInvalid',
         );
@@ -575,12 +583,8 @@ describe('internal PVSS ballot algebra', () => {
 
     it('deduplicates retransmitted packages in canonical board order', () => {
         const first = createBallotWitness(1, [1, 2, 3, 4], 'first');
-        const replacement = createBallotWitness(1, [9, 8, 7, 6], 'replacement');
-        const ballotSetInput = createBallotSetInput([
-            first,
-            replacement,
-            first,
-        ]);
+        const duplicate = createBallotWitness(1, [9, 8, 7, 6], 'duplicate');
+        const ballotSetInput = createBallotSetInput([first, duplicate, first]);
         const shuffledBallotSetInput = {
             ...ballotSetInput,
             candidateBallots: [
@@ -598,12 +602,12 @@ describe('internal PVSS ballot algebra', () => {
             boardOrderResult.countedBallots.map(
                 (candidate) => candidate.ballotPackage.ballotPackageDigest,
             ),
-        ).toEqual([replacement.ballotPackage.ballotPackageDigest]);
+        ).toEqual([first.ballotPackage.ballotPackageDigest]);
         expect(
             shuffledResult.countedBallots.map(
                 (candidate) => candidate.ballotPackage.ballotPackageDigest,
             ),
-        ).toEqual([replacement.ballotPackage.ballotPackageDigest]);
+        ).toEqual([first.ballotPackage.ballotPackageDigest]);
         expect(shuffledResult.ballotSetDigest).toBe(
             boardOrderResult.ballotSetDigest,
         );

@@ -78,6 +78,7 @@ Verification helpers return structured results with accepted digests, status lab
 - aggregation or tally evaluation APIs
 - standalone receiver-encryption parameter-security certification for the current Module-LWE profile
 - claim-strength aggregate-opening proof closure
+- HE-bearing security certification; the private BGV profile remains pending final `Q_target` and Appendix A acceptance, and ML-KEM/ML-DSA transport/signature choices do not imply category-3 end-to-end security
 - production target-bound decryption or result release
 - production-readiness, audit, or certification claims
 

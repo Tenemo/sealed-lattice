@@ -36,7 +36,7 @@ export const validatePollAndThreshold = (
         pollSpec.scoreDomain.max !== 10 ||
         pollSpec.scoreDomain.skippedOptionScore !== 1 ||
         pollSpec.tiePolicy !== 'HigherScoreThenLowerOptionIndex' ||
-        pollSpec.duplicateBallotPolicy !== 'LastValidBeforeVotingClosedCounts'
+        pollSpec.duplicateBallotPolicy !== 'FirstValidBeforeVotingClosedCounts'
     ) {
         refusedObjects.push(
             createRefusal(

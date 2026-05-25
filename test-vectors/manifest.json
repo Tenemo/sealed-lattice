@@ -31,7 +31,7 @@
     },
     {
       "path": "election-foundation/board-finality.json",
-      "sha256": "e3d4ef6a0b8094454fccd7eea7f981ae4c025384f48e4152980b5777769c8ef5"
+      "sha256": "416b3835245927d8e11530836958cc6d07e0cb35a78bf12dc897525e216b23ef"
     },
     {
       "path": "election-foundation/capability-refusals.json",
@@ -39,7 +39,7 @@
     },
     {
       "path": "election-foundation/deterministic-fixtures.json",
-      "sha256": "ce5ec2b02f4bb186f6d5bade35ed88f9b5cec3d65274b5bae87a97ad0d401cba"
+      "sha256": "d3fbc86b85093f4525d04bf2aefc52d2e59de0b98f5351c5d5e3022c275523e2"
     },
     {
       "path": "election-foundation/lifecycle-transitions.json",
@@ -47,7 +47,7 @@
     },
     {
       "path": "election-foundation/poll-specs.json",
-      "sha256": "5faf5583a06cad506cbf26dea221db7fa246d10cc54922f9a8a2fa1818c182c3"
+      "sha256": "372a4230bb71916706d725dc302edcdb84d91028e109a94d7caceb0bea1e7eee"
     },
     {
       "path": "election-foundation/threshold-profiles.json",
@@ -71,19 +71,19 @@
     },
     {
       "path": "plaintext-oracle/top-k.json",
-      "sha256": "c0ea571d25b580eb50eb8110fa4b68f834df123f8e718a6ef158db0fc42600b1"
+      "sha256": "28f0d21429440dd033ea89801f8725e7238673c761bd723686f5387bc6fac0ea"
     },
     {
       "path": "pvss-ballot/aggregate-shares.json",
-      "sha256": "9c217a961c487b82676d4a412b67ef91dfa8c9582363df0c753f012d047469ab"
+      "sha256": "4ef3bb65fb94a1d10f86d6a18fa1279f3dccb0fd7986365c432c086a676a5140"
     },
     {
       "path": "pvss-ballot/ballot-algebra.json",
-      "sha256": "f74bf00628780fe9345ebaa5a3bbee804e8328796cfeccf712eead8901ec2268"
+      "sha256": "4e804a4dd16ea980e8d434b66c4043ff45b3a0dcf0bfb68f29eb1940b02188be"
     },
     {
       "path": "pvss-ballot/canonical-ballot-set.json",
-      "sha256": "e8873e547dfb2d34763baf6b7fe64f9abb6b16cbec7ea985849c8f21c607825f"
+      "sha256": "fa453a1ca9d7591b867ab65d576b3ba7094d0d7929fe6b41de6d8250be02a515"
     },
     {
       "path": "transcript-core/golden-transcript-core.json",
