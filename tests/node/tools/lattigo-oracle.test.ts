@@ -123,6 +123,20 @@ describe('Lattigo oracle boundary tooling', () => {
             verifyPinnedReferenceMetadata(
                 pinnedReference,
                 goModule,
+                [
+                    `FROM ${pinnedReference.containerBaseImage}@${pinnedReference.containerBaseImageDigest}`,
+                    `COPY ${pinnedReference.archivePath} /workspace/${pinnedReference.archivePath}`,
+                    `# pinned archive digest: ${pinnedReference.archiveSha256}`,
+                    `RUN echo "${'0'.repeat(64)}  /workspace/${pinnedReference.archivePath}" | sha256sum -c - && go mod download && go mod verify`,
+                    'CMD ["go", "run", "-mod=readonly", "."]',
+                    '',
+                ].join('\n'),
+            ),
+        ).toThrow(/sha256sum -c/u);
+        expect(() =>
+            verifyPinnedReferenceMetadata(
+                pinnedReference,
+                goModule,
                 dockerfile.replace(
                     `COPY ${pinnedReference.archivePath} /workspace/${pinnedReference.archivePath}`,
                     [

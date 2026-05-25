@@ -65,6 +65,9 @@ const sha256File = async (filePath: string): Promise<string> => {
 const sha256Text = (text: string): string =>
     createHash('sha256').update(text).digest('hex');
 
+const escapeRegExp = (value: string): string =>
+    value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+
 const sha256OracleCommandInputs = (
     commandInputs: readonly {
         readonly relativePath: string;
@@ -171,9 +174,19 @@ export const verifyPinnedReferenceMetadata = (
             'The Lattigo oracle Dockerfile must build from the pinned archive path.',
         );
     }
-    if (!dockerfile.includes(pinnedReference.archiveSha256)) {
+    const archiveChecksumCommandPattern = new RegExp(
+        [
+            String.raw`(?:^|\n)\s*RUN\s+echo\s+["']`,
+            escapeRegExp(pinnedReference.archiveSha256),
+            String.raw`\s+/workspace/`,
+            escapeRegExp(pinnedReference.archivePath),
+            String.raw`["']\s*\|\s*sha256sum\s+-c\s+-`,
+        ].join(''),
+        'u',
+    );
+    if (!archiveChecksumCommandPattern.test(dockerfile)) {
         throw new Error(
-            'The Lattigo oracle Dockerfile must verify the pinned archive SHA-256 digest.',
+            'The Lattigo oracle Dockerfile must verify the pinned archive SHA-256 digest with sha256sum -c against the pinned archive path.',
         );
     }
     if (dockerfile.includes(`COPY ${pinnedReference.localCheckoutPath}`)) {
