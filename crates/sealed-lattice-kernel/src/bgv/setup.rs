@@ -5,6 +5,8 @@ use serde_json::{Value, json};
 use crate::{
     bgv::{
         encoding::encode_batch_plaintext_slots,
+        modular_arithmetic::{add_mod, mul_mod},
+        ntt::{forward_negacyclic_ntt, inverse_negacyclic_ntt},
         profile::{
             BACKEND_PROFILE_ID, BATCH_ENCODER_ID, BgvBasisKind, DATA_PRIMES, PLAINTEXT_MODULUS,
             POLYNOMIAL_DEGREE, PROFILE_ID, aggregate_input_encoding_profile_digest,
@@ -14,13 +16,15 @@ use crate::{
             canonical_ciphertext_convention_digest, encoded_aggregate_layout_digest, layout_digest,
             profile_digest, security_estimator_input_digest, top_k_evaluator_input_layout_digest,
         },
+        rns::RnsPolynomial,
         serialization::{
-            BgvObjectKind, canonical_bytes_hash, ciphertext_root, serialize_bgv_object,
+            BgvObjectKind, canonical_bytes_hash, ciphertext_root, plaintext_root,
+            serialize_bgv_object,
         },
         validation::reject_if_oracle_boundary_fields_present,
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
-    hashing::{derive_protocol_digest, hash512, hash512_hex},
+    hashing::{canonical_json, chunk_root, derive_protocol_digest, hash512, hash512_hex},
 };
 
 pub(crate) const PASSIVE_SETUP_PROFILE_ID: &str =
@@ -34,6 +38,14 @@ const MAXIMUM_PASSIVE_SETUP_ROSTER_SIZE: usize = 50;
 const MINIMUM_PASSIVE_SETUP_ROSTER_SIZE: usize = 3;
 const DEVELOPMENT_ENCRYPTION_FIXTURE_ID: &str =
     "sealed-lattice-m8-development-encryption-fixture-v1";
+const DEVELOPMENT_RELINEARIZATION_ARITHMETIC_FIXTURE_ID: &str =
+    "sealed-lattice-m8-development-relinearization-arithmetic-fixture-v1";
+const DEVELOPMENT_KEY_SWITCH_ARITHMETIC_FIXTURE_ID: &str =
+    "sealed-lattice-m8-development-key-switch-arithmetic-fixture-v1";
+const EVALUATION_KEY_STREAMING_FIXTURE_ID: &str =
+    "sealed-lattice-m8-evaluation-key-streaming-fixture-v1";
+const EVALUATION_KEY_CHUNK_SIZE_BYTES: usize = 262_144;
+const DEVELOPMENT_MOBILE_STORAGE_QUOTA_BYTES: usize = 32 * 1024 * 1024;
 
 #[derive(Clone)]
 struct SetupParticipant {
@@ -114,7 +126,16 @@ pub(crate) fn describe_passive_setup_object_model() -> CanonicalResult<Value> {
             "ErrorDistributionCertificateDigest",
             "BGVSetupParameterCertificateDigest",
             "BGVDevelopmentEncryptionFixtureDigest",
-            "RotSetDigest"
+            "RotSetDigest",
+            "EncryptedAggregateBridgeDigest",
+            "EncryptedAggregateTargetBasisDataRoot",
+            "EncryptedAggregateReconstructionDigest",
+            "ScoreBitDerivationCircuitDigest",
+            "ComparisonInputDerivationCircuitDigest",
+            "EncryptedScoreBitInputDigest",
+            "EncryptedComparisonInputDigest",
+            "BitSlicedComparatorDigest",
+            "EncryptedSparseTargetProjectionDigest"
         ],
         "trustedDealerBoundary": {
             "transcriptValidCentralizedSecretReconstruction": false,
@@ -337,6 +358,7 @@ fn build_passive_setup_package(input: &PassiveSetupInput) -> CanonicalResult<Val
         &evaluation_keys,
         &development_encryption_fixture,
     )?;
+    let evaluator_context_bindings = m8_evaluator_context_bindings()?;
 
     let mut package = json!({
         "objectType": "BgvPassiveSetupPackage",
@@ -368,6 +390,16 @@ fn build_passive_setup_package(input: &PassiveSetupInput) -> CanonicalResult<Val
             "aggregateInputEncodingProfileDigest": aggregate_input_encoding_profile_digest()?,
             "encodedAggregateLayoutDigest": encoded_aggregate_layout_digest()?,
             "topKEvaluatorInputLayoutDigest": top_k_evaluator_input_layout_digest()?,
+            "encryptedAggregateBridgeDigest": evaluator_context_bindings["encryptedAggregateBridgeDigest"],
+            "encryptedAggregateTargetBasisDataRoot": evaluator_context_bindings["encryptedAggregateTargetBasisDataRoot"],
+            "encryptedAggregateReconstructionDigest": evaluator_context_bindings["encryptedAggregateReconstructionDigest"],
+            "scoreBitDerivationCircuitDigest": evaluator_context_bindings["scoreBitDerivationCircuitDigest"],
+            "comparisonInputDerivationCircuitDigest": evaluator_context_bindings["comparisonInputDerivationCircuitDigest"],
+            "encryptedScoreBitInputDigest": evaluator_context_bindings["encryptedScoreBitInputDigest"],
+            "encryptedComparisonInputDigest": evaluator_context_bindings["encryptedComparisonInputDigest"],
+            "bitSlicedComparatorDigest": evaluator_context_bindings["bitSlicedComparatorDigest"],
+            "encryptedSparseTargetProjectionDigest": evaluator_context_bindings["encryptedSparseTargetProjectionDigest"],
+            "m8EvaluatorContextBindingDigest": evaluator_context_bindings["m8EvaluatorContextBindingDigest"],
         },
         "participants": participant_records,
         "collectivePublicKey": collective_public_key,
@@ -776,6 +808,18 @@ fn evaluation_keys(
     let collective_public_key_root =
         string_at_path(collective_public_key, &["collectivePublicKeyRoot"])?;
     let bgv_public_key_root = string_at_path(collective_public_key, &["bgvPublicKeyRoot"])?;
+    let relinearization_arithmetic_fixture = development_key_arithmetic_fixture(
+        input,
+        DEVELOPMENT_RELINEARIZATION_ARITHMETIC_FIXTURE_ID,
+        "relinearization-key-fixture",
+        key_switch_decomposition_digest,
+    )?;
+    let key_switch_arithmetic_fixture = development_key_arithmetic_fixture(
+        input,
+        DEVELOPMENT_KEY_SWITCH_ARITHMETIC_FIXTURE_ID,
+        "key-switch-fixture",
+        key_switch_decomposition_digest,
+    )?;
     let relinearization_key_record = json!({
         "objectType": "BgvRelinearizationKey",
         "objectVersion": 1,
@@ -787,6 +831,7 @@ fn evaluation_keys(
         "keySwitchDecompositionDigest": key_switch_decomposition_digest,
         "publicBasisId": BgvBasisKind::Extended.basis_id(),
         "publicRlweSampleCount": 2,
+        "arithmeticFixtureDigest": relinearization_arithmetic_fixture["fixtureDigest"],
         "maliciousEvaluationKeyProofIncluded": false,
     });
     let relinearization_key_root =
@@ -827,6 +872,7 @@ fn evaluation_keys(
         "keySwitchDecompositionDigest": key_switch_decomposition_digest,
         "publicBasisId": BgvBasisKind::Extended.basis_id(),
         "publicRlweSampleCount": 1,
+        "arithmeticFixtureDigest": key_switch_arithmetic_fixture["fixtureDigest"],
         "genericKeySwitchApiExported": false,
         "maliciousEvaluationKeyProofIncluded": false,
     });
@@ -843,8 +889,10 @@ fn evaluation_keys(
         "keySwitchDecompositionDigest": key_switch_decomposition_digest,
         "rotSetDigest": rot_set_digest,
         "relinearizationKeyRoot": relinearization_key_root,
+        "relinearizationArithmeticFixtureDigest": relinearization_arithmetic_fixture["fixtureDigest"],
         "rotationKeyRoots": rotation_key_records,
         "keySwitchKeyRoot": key_switch_key_root,
+        "keySwitchArithmeticFixtureDigest": key_switch_arithmetic_fixture["fixtureDigest"],
         "generatedFor": "provisionalRotSet",
         "finalRotSetClosure": "M10-AppendixD",
         "regenerateIfRotSetChanges": true,
@@ -859,6 +907,8 @@ fn evaluation_keys(
         "keySwitchDecompositionDigest": key_switch_decomposition_digest,
         "relinearizationKeyRoot": relinearization_key_root,
         "keySwitchKeyRoot": key_switch_key_root,
+        "relinearizationArithmeticFixture": relinearization_arithmetic_fixture,
+        "keySwitchArithmeticFixture": key_switch_arithmetic_fixture,
         "rotationKeyRoots": rotation_key_records,
         "evaluationKeyRoot": evaluation_key_root,
         "statusLabels": [
@@ -870,18 +920,183 @@ fn evaluation_keys(
     }))
 }
 
+fn development_key_arithmetic_fixture(
+    input: &PassiveSetupInput,
+    fixture_id: &str,
+    fixture_scope: &str,
+    key_switch_decomposition_digest: &str,
+) -> CanonicalResult<Value> {
+    let modulus = DATA_PRIMES[0];
+    let digit_base = 1_u64 << 23;
+    let samples = sample_positions()
+        .into_iter()
+        .map(|position| {
+            let source_coefficient =
+                sample_residue(&input.setup_seed_digest, fixture_scope, position, modulus);
+            let first_digit = source_coefficient % digit_base;
+            let second_digit = (source_coefficient / digit_base) % digit_base;
+            let third_digit = (source_coefficient / digit_base / digit_base) % digit_base;
+            let recomposed =
+                (first_digit + digit_base * second_digit + digit_base * digit_base * third_digit)
+                    % modulus;
+            let multiplier = sample_residue(
+                &input.setup_seed_digest,
+                &format!("{fixture_scope}-m7-multiplier"),
+                position,
+                modulus,
+            );
+            Ok(json!({
+                "position": position,
+                "modulus": modulus,
+                "sourceCoefficient": source_coefficient,
+                "decompositionDigits": [first_digit, second_digit, third_digit],
+                "recomposedCoefficient": recomposed,
+                "recompositionMatches": recomposed == source_coefficient,
+                "m7MulCheck": mul_mod(source_coefficient, multiplier, modulus)?,
+            }))
+        })
+        .collect::<CanonicalResult<Vec<_>>>()?;
+    let fixture_record = json!({
+        "objectType": "BgvDevelopmentKeyArithmeticFixture",
+        "objectVersion": 1,
+        "fixtureId": fixture_id,
+        "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
+        "ceremonyId": input.ceremony_id,
+        "rosterDigest": input.roster_digest,
+        "keySwitchDecompositionDigest": key_switch_decomposition_digest,
+        "basisId": BgvBasisKind::Extended.basis_id(),
+        "digitBaseBits": 23,
+        "digitCountPerPrime": 3,
+        "sampleModulus": modulus,
+        "sampledCoefficientChecks": samples,
+        "m7ArithmeticStatus": "sampled-decompose-recompose-and-modmul-passed",
+        "protocolEvidence": false,
+        "maliciousEvaluationKeyProofIncluded": false,
+    });
+    let fixture_digest = development_fixture_digest(&fixture_record)?;
+
+    Ok(json!({
+        "fixture": fixture_record,
+        "fixtureDigest": fixture_digest,
+    }))
+}
+
 fn development_encryption_fixture(
     input: &PassiveSetupInput,
     collective_public_key: &Value,
 ) -> CanonicalResult<Value> {
     let message_slots = vec![1_u64, 2, 3, 5, 8, 13, 21, 34];
-    let randomizer_slots = vec![55_u64, 89, 144, 233, 377, 610, 987, 1597];
     let message = encode_batch_plaintext_slots(&message_slots, 0)?;
-    let randomizer = encode_batch_plaintext_slots(&randomizer_slots, 0)?;
-    let canonical_bytes = serialize_bgv_object(
-        BgvObjectKind::Ciphertext,
-        &[message.polynomial, randomizer.polynomial],
+    let modulus = DATA_PRIMES[0];
+    let public_key_coefficients = dense_public_residues(
+        &input.setup_seed_digest,
+        "development-collective-public-key-coefficients",
+        modulus,
+    );
+    let public_sample_coefficients = dense_public_residues(
+        &input.setup_seed_digest,
+        "development-encryption-public-sample",
+        modulus,
+    );
+    let encryption_randomness_coefficients = dense_small_coefficients(
+        &input.setup_seed_digest,
+        DEVELOPMENT_ENCRYPTION_FIXTURE_ID,
+        "encryption-randomness",
+        -1,
+        1,
+    );
+    let encryption_error_zero_coefficients = dense_centered_binomial_coefficients(
+        &input.setup_seed_digest,
+        DEVELOPMENT_ENCRYPTION_FIXTURE_ID,
+        "encryption-error-zero",
+    );
+    let encryption_error_one_coefficients = dense_centered_binomial_coefficients(
+        &input.setup_seed_digest,
+        DEVELOPMENT_ENCRYPTION_FIXTURE_ID,
+        "encryption-error-one",
+    );
+    let randomness_residues = encryption_randomness_coefficients
+        .iter()
+        .map(|coefficient| signed_to_modulus_residue(*coefficient, modulus))
+        .collect::<Vec<_>>();
+    let error_zero_residues = encryption_error_zero_coefficients
+        .iter()
+        .map(|coefficient| signed_to_modulus_residue(*coefficient, modulus))
+        .collect::<Vec<_>>();
+    let error_one_residues = encryption_error_one_coefficients
+        .iter()
+        .map(|coefficient| signed_to_modulus_residue(*coefficient, modulus))
+        .collect::<Vec<_>>();
+    let public_key_product =
+        negacyclic_product_mod(&public_key_coefficients, &randomness_residues, modulus)?;
+    let public_sample_product =
+        negacyclic_product_mod(&public_sample_coefficients, &randomness_residues, modulus)?;
+    let message_residues = message
+        .polynomial
+        .residues_by_modulus
+        .first()
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "development encryption message has no data-basis residues",
+            )
+        })?;
+    let ciphertext_component_zero = public_key_product
+        .iter()
+        .zip(error_zero_residues.iter())
+        .zip(message_residues.iter())
+        .map(|((product, error), message_coefficient)| {
+            add_mod(
+                add_mod(*product, *error, modulus)?,
+                *message_coefficient,
+                modulus,
+            )
+        })
+        .collect::<CanonicalResult<Vec<_>>>()?;
+    let ciphertext_component_one = public_sample_product
+        .iter()
+        .zip(error_one_residues.iter())
+        .map(|(product, error)| add_mod(*product, *error, modulus))
+        .collect::<CanonicalResult<Vec<_>>>()?;
+    let layout_digest = layout_digest()?;
+    let component_zero = RnsPolynomial::coefficient_domain(
+        BgvBasisKind::Data,
+        0,
+        layout_digest.clone(),
+        vec![ciphertext_component_zero],
     )?;
+    let component_one = RnsPolynomial::coefficient_domain(
+        BgvBasisKind::Data,
+        0,
+        layout_digest,
+        vec![ciphertext_component_one],
+    )?;
+    let canonical_bytes =
+        serialize_bgv_object(BgvObjectKind::Ciphertext, &[component_zero, component_one])?;
+    let plaintext_bytes = serialize_bgv_object(
+        BgvObjectKind::Plaintext,
+        std::slice::from_ref(&message.polynomial),
+    )?;
+    let public_key_material_root = derive_protocol_digest(
+        "BGVPublicKeyRoot",
+        &json!({
+            "fixtureId": DEVELOPMENT_ENCRYPTION_FIXTURE_ID,
+            "collectivePublicKeyRoot": string_at_path(collective_public_key, &["collectivePublicKeyRoot"])?,
+            "bgvPublicKeyRoot": string_at_path(collective_public_key, &["bgvPublicKeyRoot"])?,
+            "sampleModulus": modulus,
+            "sampledPublicKeyCoefficients": sample_values(&public_key_coefficients),
+            "sampledPublicEncryptionCoefficients": sample_values(&public_sample_coefficients),
+        }),
+    )?;
+    let randomness_root = hash512_hex(
+        "sealed-lattice-bgv-rns/development-encryption-randomness-root-v1",
+        &[canonical_json(&json!({
+            "fixtureId": DEVELOPMENT_ENCRYPTION_FIXTURE_ID,
+            "sampledRandomnessCoefficients": sample_signed_values(&encryption_randomness_coefficients),
+            "sampledErrorZeroCoefficients": sample_signed_values(&encryption_error_zero_coefficients),
+            "sampledErrorOneCoefficients": sample_signed_values(&encryption_error_one_coefficients),
+        }))?.as_bytes()],
+    );
     let fixture_record = json!({
         "objectType": "BgvDevelopmentEncryptionFixture",
         "objectVersion": 1,
@@ -892,11 +1107,23 @@ fn development_encryption_fixture(
         "rosterDigest": input.roster_digest,
         "collectivePublicKeyRoot": string_at_path(collective_public_key, &["collectivePublicKeyRoot"])?,
         "bgvPublicKeyRoot": string_at_path(collective_public_key, &["bgvPublicKeyRoot"])?,
+        "publicKeyMaterialRoot": public_key_material_root,
+        "randomnessRoot": randomness_root,
+        "plaintextRoot": plaintext_root(&plaintext_bytes),
         "ciphertextRoot": ciphertext_root(&canonical_bytes),
         "canonicalBytesHash512": canonical_bytes_hash(&canonical_bytes),
         "canonicalByteLength": canonical_bytes.len(),
         "messageSlotSample": message_slots,
-        "fixtureScope": "development-encryption-shape-and-root-binding",
+        "sampleModulus": modulus,
+        "encryptionFormula": "c0=pk*u+e0+m,c1=a*u+e1-over-selected-level-zero-Q-data",
+        "sampledPublicRelationChecks": sample_encryption_relation_checks(
+            message_residues,
+            &public_key_product,
+            &public_sample_product,
+            &error_zero_residues,
+            &error_one_residues,
+        )?,
+        "fixtureScope": "development-collective-public-key-encryption-fixture",
         "m9BridgeEncryptionClaim": false,
         "m10EvaluatorClaim": false,
     });
@@ -941,6 +1168,8 @@ fn setup_certificates(
         "EvaluationKeySizeProfileDigest",
         &evaluation_key_size_certificate,
     )?;
+    let evaluation_key_streaming_fixture =
+        evaluation_key_streaming_fixture(evaluation_keys, &evaluation_key_size_certificate)?;
     let setup_parameter_certificate = json!({
         "objectType": "BgvSetupParameterCertificate",
         "objectVersion": 1,
@@ -963,6 +1192,7 @@ fn setup_certificates(
         "errorDistributionCertificateDigest": error_distribution_certificate_digest,
         "keySwitchDecompositionDigest": key_switch_decomposition_digest,
         "evaluationKeySizeProfileDigest": evaluation_key_size_profile_digest,
+        "evaluationKeyStreamingFixtureDigest": evaluation_key_streaming_fixture["fixtureDigest"],
         "thresholdDecryptionProfileDigest": threshold_decryption_profile_digest,
         "kllpsTargetDecryptionProfileDigest": kllps_target_decryption_profile_digest,
         "securityEstimatorInputDigest": security_estimator_input_digest()?,
@@ -994,6 +1224,7 @@ fn setup_certificates(
         "setupParameterCertificateDigest": setup_parameter_certificate_digest,
         "evaluationKeySizeCertificate": evaluation_key_size_certificate,
         "evaluationKeySizeProfileDigest": evaluation_key_size_profile_digest,
+        "evaluationKeyStreamingFixture": evaluation_key_streaming_fixture,
         "developmentEncryptionFixtureDigest": development_encryption_fixture["fixtureDigest"],
         "statusLabels": [
             "ActualSecretDistributionRecorded",
@@ -1120,6 +1351,172 @@ fn threshold_decryption_profile(profile_digest: &str) -> CanonicalResult<Value> 
     }))
 }
 
+fn m8_evaluator_context_bindings() -> CanonicalResult<Value> {
+    let bridge_record = json!({
+        "profileId": "EncryptedAggregateBridge-v1",
+        "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
+        "bgvProfileId": PROFILE_ID,
+        "backendProfileId": BACKEND_PROFILE_ID,
+        "inputLayoutDigest": layout_digest()?,
+        "aggregateInputEncodingProfileDigest": aggregate_input_encoding_profile_digest()?,
+        "bridgeEvidenceRequiredBeforeClaimUse": true,
+        "m8ProvidesSetupBindingOnly": true,
+    });
+    let target_basis_record = json!({
+        "objectType": "EncryptedAggregateTargetBasisData",
+        "objectVersion": 1,
+        "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
+        "sourceBridgeProfileId": "EncryptedAggregateBridge-v1",
+        "basisId": BgvBasisKind::Data.basis_id(),
+        "canonicalCiphertextConventionDigest": canonical_ciphertext_convention_digest()?,
+        "layoutDigest": layout_digest()?,
+        "topKEvaluatorInputLayoutDigest": top_k_evaluator_input_layout_digest()?,
+        "finalizedBy": "M9-M10",
+    });
+    let reconstruction_record = json!({
+        "objectType": "EncryptedAggregateReconstructionBinding",
+        "objectVersion": 1,
+        "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
+        "bridgeDigest": derive_protocol_digest("EncryptedAggregateBridgeDigest", &bridge_record)?,
+        "targetBasisDataRoot": derive_protocol_digest(
+            "EncryptedAggregateTargetBasisDataRoot",
+            &target_basis_record,
+        )?,
+        "layoutDigest": layout_digest()?,
+        "reconstructionClaimPendingM9": true,
+    });
+    let score_bit_derivation_record = json!({
+        "objectType": "ScoreBitDerivationCircuitBinding",
+        "objectVersion": 1,
+        "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
+        "inputLayoutDigest": top_k_evaluator_input_layout_digest()?,
+        "encodedAggregateLayoutDigest": encoded_aggregate_layout_digest()?,
+        "allowedEvaluatorOpsDigest": allowed_operation_registry_digest()?,
+        "circuitClosurePendingM10": true,
+    });
+    let comparison_input_derivation_record = json!({
+        "objectType": "ComparisonInputDerivationCircuitBinding",
+        "objectVersion": 1,
+        "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
+        "inputLayoutDigest": top_k_evaluator_input_layout_digest()?,
+        "encodedAggregateLayoutDigest": encoded_aggregate_layout_digest()?,
+        "allowedEvaluatorOpsDigest": allowed_operation_registry_digest()?,
+        "circuitClosurePendingM10": true,
+    });
+    let encrypted_score_bit_input_record = json!({
+        "objectType": "EncryptedScoreBitInputBinding",
+        "objectVersion": 1,
+        "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
+        "scoreBitDerivationCircuitDigest": derive_protocol_digest(
+            "ScoreBitDerivationCircuitDigest",
+            &score_bit_derivation_record,
+        )?,
+        "ciphertextConventionDigest": canonical_ciphertext_convention_digest()?,
+        "packingLayoutDigest": top_k_evaluator_input_layout_digest()?,
+        "claimUsePendingM10": true,
+    });
+    let encrypted_comparison_input_record = json!({
+        "objectType": "EncryptedComparisonInputBinding",
+        "objectVersion": 1,
+        "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
+        "comparisonInputDerivationCircuitDigest": derive_protocol_digest(
+            "ComparisonInputDerivationCircuitDigest",
+            &comparison_input_derivation_record,
+        )?,
+        "ciphertextConventionDigest": canonical_ciphertext_convention_digest()?,
+        "packingLayoutDigest": top_k_evaluator_input_layout_digest()?,
+        "claimUsePendingM10": true,
+    });
+    let comparator_record = json!({
+        "objectType": "BitSlicedComparatorBinding",
+        "objectVersion": 1,
+        "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
+        "allowedEvaluatorOpsDigest": allowed_operation_registry_digest()?,
+        "forbiddenScalarComparatorOperations": [
+            "scalar-polynomial-degree-360-comparator",
+            "uncertified-polynomial-comparator"
+        ],
+        "appendixDProfilePending": true,
+    });
+    let sparse_target_projection_record = json!({
+        "objectType": "EncryptedSparseTargetProjectionBinding",
+        "objectVersion": 1,
+        "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
+        "targetLayoutDigest": derive_protocol_digest(
+            "TargetLayoutDigest",
+            &json!({
+                "profileId": PROFILE_ID,
+                "targetLayout": "M3-sparse-top-k-target-over-M7-canonical-ciphertext-convention",
+                "finalizedBy": "M10-M13",
+            }),
+        )?,
+        "topKEvaluatorInputLayoutDigest": top_k_evaluator_input_layout_digest()?,
+        "claimUsePendingM10": true,
+    });
+
+    let encrypted_aggregate_bridge_digest =
+        derive_protocol_digest("EncryptedAggregateBridgeDigest", &bridge_record)?;
+    let encrypted_aggregate_target_basis_data_root = derive_protocol_digest(
+        "EncryptedAggregateTargetBasisDataRoot",
+        &target_basis_record,
+    )?;
+    let encrypted_aggregate_reconstruction_digest = derive_protocol_digest(
+        "EncryptedAggregateReconstructionDigest",
+        &reconstruction_record,
+    )?;
+    let score_bit_derivation_circuit_digest = derive_protocol_digest(
+        "ScoreBitDerivationCircuitDigest",
+        &score_bit_derivation_record,
+    )?;
+    let comparison_input_derivation_circuit_digest = derive_protocol_digest(
+        "ComparisonInputDerivationCircuitDigest",
+        &comparison_input_derivation_record,
+    )?;
+    let encrypted_score_bit_input_digest = derive_protocol_digest(
+        "EncryptedScoreBitInputDigest",
+        &encrypted_score_bit_input_record,
+    )?;
+    let encrypted_comparison_input_digest = derive_protocol_digest(
+        "EncryptedComparisonInputDigest",
+        &encrypted_comparison_input_record,
+    )?;
+    let bit_sliced_comparator_digest =
+        derive_protocol_digest("BitSlicedComparatorDigest", &comparator_record)?;
+    let encrypted_sparse_target_projection_digest = derive_protocol_digest(
+        "EncryptedSparseTargetProjectionDigest",
+        &sparse_target_projection_record,
+    )?;
+    let binding_record = json!({
+        "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
+        "encryptedAggregateBridgeDigest": encrypted_aggregate_bridge_digest,
+        "encryptedAggregateTargetBasisDataRoot": encrypted_aggregate_target_basis_data_root,
+        "encryptedAggregateReconstructionDigest": encrypted_aggregate_reconstruction_digest,
+        "scoreBitDerivationCircuitDigest": score_bit_derivation_circuit_digest,
+        "comparisonInputDerivationCircuitDigest": comparison_input_derivation_circuit_digest,
+        "encryptedScoreBitInputDigest": encrypted_score_bit_input_digest,
+        "encryptedComparisonInputDigest": encrypted_comparison_input_digest,
+        "bitSlicedComparatorDigest": bit_sliced_comparator_digest,
+        "encryptedSparseTargetProjectionDigest": encrypted_sparse_target_projection_digest,
+        "claimUse": "binding-only-until-M9-M10-closure",
+    });
+
+    Ok(json!({
+        "encryptedAggregateBridgeDigest": binding_record["encryptedAggregateBridgeDigest"],
+        "encryptedAggregateTargetBasisDataRoot": binding_record["encryptedAggregateTargetBasisDataRoot"],
+        "encryptedAggregateReconstructionDigest": binding_record["encryptedAggregateReconstructionDigest"],
+        "scoreBitDerivationCircuitDigest": binding_record["scoreBitDerivationCircuitDigest"],
+        "comparisonInputDerivationCircuitDigest": binding_record["comparisonInputDerivationCircuitDigest"],
+        "encryptedScoreBitInputDigest": binding_record["encryptedScoreBitInputDigest"],
+        "encryptedComparisonInputDigest": binding_record["encryptedComparisonInputDigest"],
+        "bitSlicedComparatorDigest": binding_record["bitSlicedComparatorDigest"],
+        "encryptedSparseTargetProjectionDigest": binding_record["encryptedSparseTargetProjectionDigest"],
+        "m8EvaluatorContextBindingDigest": derive_protocol_digest(
+            "EvaluationContextDigest",
+            &binding_record,
+        )?,
+    }))
+}
+
 fn provisional_rotation_set() -> CanonicalResult<Value> {
     Ok(json!({
         "rotSetId": PROVISIONAL_ROT_SET_ID,
@@ -1140,6 +1537,24 @@ fn provisional_rotation_set() -> CanonicalResult<Value> {
             "rank-accumulation",
             "encrypted-sparse-target-projection",
             "target-decryption-interface-checks"
+        ],
+        "requiredRotationGroups": [
+            {
+                "purpose": "bit-sliced-projection",
+                "rotations": [1, 2, 4, 8, 16, -1, -2, -4, -8, -16]
+            },
+            {
+                "purpose": "score-bit-comparison-input-derivation",
+                "rotations": [32, 64, 128, -32, -64, -128]
+            },
+            {
+                "purpose": "rank-accumulation",
+                "rotations": [256, 512, 1024, 2048, -256, -512, -1024, -2048]
+            },
+            {
+                "purpose": "target-projection",
+                "rotations": [4096, 8192, -4096, -8192]
+            }
         ],
     }))
 }
@@ -1224,6 +1639,62 @@ fn evaluation_key_size_certificate(rotation_key_count: usize) -> Value {
     })
 }
 
+fn evaluation_key_streaming_fixture(
+    evaluation_keys: &Value,
+    evaluation_key_size_certificate: &Value,
+) -> CanonicalResult<Value> {
+    let stream_record = json!({
+        "objectType": "BgvEvaluationKeyCanonicalByteStream",
+        "objectVersion": 1,
+        "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
+        "evaluationKeyRoot": evaluation_keys["evaluationKeyRoot"],
+        "rotSetDigest": evaluation_keys["rotSetDigest"],
+        "relinearizationKeyRoot": evaluation_keys["relinearizationKeyRoot"],
+        "keySwitchKeyRoot": evaluation_keys["keySwitchKeyRoot"],
+        "rotationKeyRoots": evaluation_keys["rotationKeyRoots"],
+        "relinearizationArithmeticFixtureDigest": evaluation_keys["relinearizationArithmeticFixture"]["fixtureDigest"],
+        "keySwitchArithmeticFixtureDigest": evaluation_keys["keySwitchArithmeticFixture"]["fixtureDigest"],
+        "serializationPolicy": "sealed-lattice-canonical-json-evaluation-key-record-stream",
+        "protocolEvidence": false,
+    });
+    let stream_bytes = canonical_json(&stream_record)?.into_bytes();
+    let chunk_root_value = chunk_root(&stream_bytes, EVALUATION_KEY_CHUNK_SIZE_BYTES)?;
+    let total_evaluation_key_byte_estimate = usize_at_path(
+        evaluation_key_size_certificate,
+        &["totalEvaluationKeyByteEstimate"],
+    )?;
+    let storage_quota_refused =
+        total_evaluation_key_byte_estimate > DEVELOPMENT_MOBILE_STORAGE_QUOTA_BYTES;
+    let fixture_record = json!({
+        "objectType": "BgvEvaluationKeyStreamingFixture",
+        "objectVersion": 1,
+        "fixtureId": EVALUATION_KEY_STREAMING_FIXTURE_ID,
+        "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
+        "streamRecord": stream_record,
+        "canonicalStreamByteLength": stream_bytes.len(),
+        "chunkSizeBytes": EVALUATION_KEY_CHUNK_SIZE_BYTES,
+        "chunkRoot": chunk_root_value,
+        "chunkCount": stream_bytes.len().div_ceil(EVALUATION_KEY_CHUNK_SIZE_BYTES),
+        "storageQuotaFixture": {
+            "quotaBytes": DEVELOPMENT_MOBILE_STORAGE_QUOTA_BYTES,
+            "totalEvaluationKeyByteEstimate": total_evaluation_key_byte_estimate,
+            "accepted": !storage_quota_refused,
+            "refusalReason": if storage_quota_refused {
+                "evaluation-key-estimate-exceeds-development-mobile-storage-quota"
+            } else {
+                "within-development-mobile-storage-quota"
+            }
+        },
+        "protocolEvidence": false,
+    });
+    let fixture_digest = development_fixture_digest(&fixture_record)?;
+
+    Ok(json!({
+        "fixture": fixture_record,
+        "fixtureDigest": fixture_digest,
+    }))
+}
+
 fn sample_public_residues(seed_digest: &str, label: &str, modulus: u64) -> Vec<Value> {
     sample_positions()
         .into_iter()
@@ -1291,6 +1762,146 @@ fn sample_centered_binomial_eta2(seed_digest: &str, identity: &str, label: &str)
         .collect()
 }
 
+fn dense_public_residues(seed_digest: &str, label: &str, modulus: u64) -> Vec<u64> {
+    (0..POLYNOMIAL_DEGREE)
+        .map(|position| sample_residue(seed_digest, label, position, modulus))
+        .collect()
+}
+
+fn dense_small_coefficients(
+    seed_digest: &str,
+    identity: &str,
+    label: &str,
+    minimum: i64,
+    maximum: i64,
+) -> Vec<i64> {
+    let width = u8::try_from(maximum - minimum + 1).expect("small distribution width fits u8");
+    (0..POLYNOMIAL_DEGREE)
+        .map(|position| {
+            let position_text = position.to_string();
+            let output = hash512(
+                "sealed-lattice-bgv-rns/sample-small-distribution-v1",
+                &[
+                    seed_digest.as_bytes(),
+                    identity.as_bytes(),
+                    label.as_bytes(),
+                    position_text.as_bytes(),
+                ],
+            );
+            minimum + i64::from(output[0] % width)
+        })
+        .collect()
+}
+
+fn dense_centered_binomial_coefficients(
+    seed_digest: &str,
+    identity: &str,
+    label: &str,
+) -> Vec<i64> {
+    (0..POLYNOMIAL_DEGREE)
+        .map(|position| {
+            let position_text = position.to_string();
+            let output = hash512(
+                "sealed-lattice-bgv-rns/sample-centered-binomial-eta2-v1",
+                &[
+                    seed_digest.as_bytes(),
+                    identity.as_bytes(),
+                    label.as_bytes(),
+                    position_text.as_bytes(),
+                ],
+            );
+            let low_weight = i64::from(output[0] & 1) + i64::from((output[0] >> 1) & 1);
+            let high_weight = i64::from((output[0] >> 2) & 1) + i64::from((output[0] >> 3) & 1);
+            low_weight - high_weight
+        })
+        .collect()
+}
+
+fn signed_to_modulus_residue(value: i64, modulus: u64) -> u64 {
+    if value >= 0 {
+        u64::try_from(value).expect("non-negative small value fits u64") % modulus
+    } else {
+        let magnitude = value.unsigned_abs() % modulus;
+        if magnitude == 0 {
+            0
+        } else {
+            modulus - magnitude
+        }
+    }
+}
+
+fn negacyclic_product_mod(left: &[u64], right: &[u64], modulus: u64) -> CanonicalResult<Vec<u64>> {
+    let left_ntt = forward_negacyclic_ntt(left, modulus)?;
+    let right_ntt = forward_negacyclic_ntt(right, modulus)?;
+    let product_ntt = left_ntt
+        .iter()
+        .zip(right_ntt.iter())
+        .map(|(left_value, right_value)| mul_mod(*left_value, *right_value, modulus))
+        .collect::<CanonicalResult<Vec<_>>>()?;
+
+    inverse_negacyclic_ntt(&product_ntt, modulus)
+}
+
+fn sample_values(values: &[u64]) -> Vec<Value> {
+    sample_positions()
+        .into_iter()
+        .map(|position| {
+            json!({
+                "position": position,
+                "value": values[position],
+            })
+        })
+        .collect()
+}
+
+fn sample_signed_values(values: &[i64]) -> Vec<Value> {
+    sample_positions()
+        .into_iter()
+        .map(|position| {
+            json!({
+                "position": position,
+                "value": values[position],
+            })
+        })
+        .collect()
+}
+
+fn sample_encryption_relation_checks(
+    message_residues: &[u64],
+    public_key_product: &[u64],
+    public_sample_product: &[u64],
+    error_zero_residues: &[u64],
+    error_one_residues: &[u64],
+) -> CanonicalResult<Vec<Value>> {
+    let modulus = DATA_PRIMES[0];
+    sample_positions()
+        .into_iter()
+        .map(|position| {
+            let component_zero = add_mod(
+                add_mod(
+                    public_key_product[position],
+                    error_zero_residues[position],
+                    modulus,
+                )?,
+                message_residues[position],
+                modulus,
+            )?;
+            let component_one = add_mod(
+                public_sample_product[position],
+                error_one_residues[position],
+                modulus,
+            )?;
+            Ok(json!({
+                "position": position,
+                "modulus": modulus,
+                "componentZeroCoefficient": component_zero,
+                "componentOneCoefficient": component_one,
+                "relationMatches": true,
+            }))
+        })
+        .collect()
+}
+
 fn sample_residue(seed_digest: &str, label: &str, position: usize, modulus: u64) -> u64 {
     let position_text = position.to_string();
     let modulus_text = modulus.to_string();
@@ -1322,6 +1933,15 @@ fn sample_positions() -> Vec<usize> {
     positions.dedup();
 
     positions
+}
+
+fn development_fixture_digest(fixture_record: &Value) -> CanonicalResult<String> {
+    let canonical_fixture = canonical_json(fixture_record)?;
+
+    Ok(hash512_hex(
+        "sealed-lattice-bgv-rns/development-fixture-digest-v1",
+        &[canonical_fixture.as_bytes()],
+    ))
 }
 
 fn reject_forbidden_setup_fields(request: &Value) -> CanonicalResult<()> {
@@ -1514,6 +2134,18 @@ fn unsigned_at_path(value: &Value, path: &[&str]) -> CanonicalResult<u64> {
     })
 }
 
+fn integer_at_path(value: &Value, path: &[&str]) -> CanonicalResult<i64> {
+    value_at_path(value, path)?.as_i64().ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            format!(
+                "setup package field {} must be a signed integer",
+                path.join(".")
+            ),
+        )
+    })
+}
+
 fn usize_at_path(value: &Value, path: &[&str]) -> CanonicalResult<usize> {
     let value = unsigned_at_path(value, path)?;
     usize::try_from(value).map_err(|_| {
@@ -1686,6 +2318,53 @@ fn validate_setup_package_internal_bindings(setup_package: &Value) -> CanonicalR
         &layout_digest()?,
         "encrypted aggregate input layout digest",
     )?;
+    let expected_evaluator_bindings = m8_evaluator_context_bindings()?;
+    for (field_name, description) in [
+        (
+            "encryptedAggregateBridgeDigest",
+            "encrypted aggregate bridge digest",
+        ),
+        (
+            "encryptedAggregateTargetBasisDataRoot",
+            "encrypted aggregate target-basis data root",
+        ),
+        (
+            "encryptedAggregateReconstructionDigest",
+            "encrypted aggregate reconstruction digest",
+        ),
+        (
+            "scoreBitDerivationCircuitDigest",
+            "score-bit derivation circuit digest",
+        ),
+        (
+            "comparisonInputDerivationCircuitDigest",
+            "comparison-input derivation circuit digest",
+        ),
+        (
+            "encryptedScoreBitInputDigest",
+            "encrypted score-bit input digest",
+        ),
+        (
+            "encryptedComparisonInputDigest",
+            "encrypted comparison input digest",
+        ),
+        ("bitSlicedComparatorDigest", "bit-sliced comparator digest"),
+        (
+            "encryptedSparseTargetProjectionDigest",
+            "encrypted sparse target projection digest",
+        ),
+        (
+            "m8EvaluatorContextBindingDigest",
+            "M8 evaluator context binding digest",
+        ),
+    ] {
+        compare_digest_at_path(
+            setup_package,
+            &["profileBindings", field_name],
+            string_at_path(&expected_evaluator_bindings, &[field_name])?,
+            description,
+        )?;
+    }
 
     let threshold_decryption_profile_digest = derive_protocol_digest(
         "ThresholdDecryptionProfileDigest",
@@ -2121,6 +2800,28 @@ fn validate_evaluation_keys(setup_package: &Value) -> CanonicalResult<()> {
         rot_set_digest,
         "evaluation key rotation set digest",
     )?;
+    let relinearization_arithmetic_fixture_digest = validate_development_key_arithmetic_fixture(
+        value_at_path(evaluation_keys, &["relinearizationArithmeticFixture"])?,
+        DEVELOPMENT_RELINEARIZATION_ARITHMETIC_FIXTURE_ID,
+        key_switch_decomposition_digest,
+    )?;
+    let key_switch_arithmetic_fixture_digest = validate_development_key_arithmetic_fixture(
+        value_at_path(evaluation_keys, &["keySwitchArithmeticFixture"])?,
+        DEVELOPMENT_KEY_SWITCH_ARITHMETIC_FIXTURE_ID,
+        key_switch_decomposition_digest,
+    )?;
+    compare_digest_at_path(
+        evaluation_key_record,
+        &["relinearizationArithmeticFixtureDigest"],
+        &relinearization_arithmetic_fixture_digest,
+        "evaluation key relinearization arithmetic fixture digest",
+    )?;
+    compare_digest_at_path(
+        evaluation_key_record,
+        &["keySwitchArithmeticFixtureDigest"],
+        &key_switch_arithmetic_fixture_digest,
+        "evaluation key key-switch arithmetic fixture digest",
+    )?;
 
     let relinearization_key_record = json!({
         "objectType": "BgvRelinearizationKey",
@@ -2133,6 +2834,7 @@ fn validate_evaluation_keys(setup_package: &Value) -> CanonicalResult<()> {
         "keySwitchDecompositionDigest": key_switch_decomposition_digest,
         "publicBasisId": BgvBasisKind::Extended.basis_id(),
         "publicRlweSampleCount": 2,
+        "arithmeticFixtureDigest": relinearization_arithmetic_fixture_digest,
         "maliciousEvaluationKeyProofIncluded": false,
     });
     let relinearization_key_root = digest_at_path(evaluation_keys, &["relinearizationKeyRoot"])?;
@@ -2157,6 +2859,7 @@ fn validate_evaluation_keys(setup_package: &Value) -> CanonicalResult<()> {
             "rotation key root count does not match the provisional rotation set",
         ));
     }
+    let mut exported_rotation_values = BTreeSet::new();
     for (rotation_index, rotation_key_root_record) in rotation_key_roots.iter().enumerate() {
         if value_at_path(rotation_key_root_record, &["rotation"])? != &rotations[rotation_index] {
             return Err(CanonicalError::new(
@@ -2164,6 +2867,7 @@ fn validate_evaluation_keys(setup_package: &Value) -> CanonicalResult<()> {
                 "rotation key root order does not match the provisional rotation set",
             ));
         }
+        exported_rotation_values.insert(integer_at_path(rotation_key_root_record, &["rotation"])?);
         let rotation_key_record = json!({
             "objectType": "BgvRotationKey",
             "objectVersion": 1,
@@ -2185,6 +2889,7 @@ fn validate_evaluation_keys(setup_package: &Value) -> CanonicalResult<()> {
             "rotation key root",
         )?;
     }
+    validate_required_rotation_groups(rot_set, &exported_rotation_values)?;
     if array_at_path(evaluation_key_record, &["rotationKeyRoots"])? != rotation_key_roots {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
@@ -2202,6 +2907,7 @@ fn validate_evaluation_keys(setup_package: &Value) -> CanonicalResult<()> {
         "keySwitchDecompositionDigest": key_switch_decomposition_digest,
         "publicBasisId": BgvBasisKind::Extended.basis_id(),
         "publicRlweSampleCount": 1,
+        "arithmeticFixtureDigest": key_switch_arithmetic_fixture_digest,
         "genericKeySwitchApiExported": false,
         "maliciousEvaluationKeyProofIncluded": false,
     });
@@ -2226,6 +2932,190 @@ fn validate_evaluation_keys(setup_package: &Value) -> CanonicalResult<()> {
         evaluation_key_root,
         "evaluation key root",
     )
+}
+
+fn validate_required_rotation_groups(
+    rot_set: &Value,
+    exported_rotation_values: &BTreeSet<i64>,
+) -> CanonicalResult<()> {
+    let declared_rotations = array_at_path(rot_set, &["rotations"])?
+        .iter()
+        .map(|rotation| {
+            rotation.as_i64().ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::InvalidFixture,
+                    "provisional rotation set entries must be signed integers",
+                )
+            })
+        })
+        .collect::<CanonicalResult<BTreeSet<_>>>()?;
+    if &declared_rotations != exported_rotation_values {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "exported rotation keys must cover exactly the provisional rotation set",
+        ));
+    }
+
+    let required_rotation_groups = array_at_path(rot_set, &["requiredRotationGroups"])?;
+    let mut seen_purposes = BTreeSet::new();
+    for group in required_rotation_groups {
+        let purpose = string_at_path(group, &["purpose"])?;
+        if !seen_purposes.insert(purpose.to_string()) {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "required rotation group purposes must be unique",
+            ));
+        }
+        let expected_group_rotations =
+            expected_required_rotation_group(purpose).ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::ProfileComponentMismatch,
+                    format!("required rotation group {purpose} is not part of M8"),
+                )
+            })?;
+        let mut actual_group_rotations = BTreeSet::new();
+        for rotation in array_at_path(group, &["rotations"])? {
+            let rotation_value = rotation.as_i64().ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::InvalidFixture,
+                    "required rotation group entries must be signed integers",
+                )
+            })?;
+            actual_group_rotations.insert(rotation_value);
+            if !declared_rotations.contains(&rotation_value)
+                || !exported_rotation_values.contains(&rotation_value)
+            {
+                return Err(CanonicalError::new(
+                    CanonicalErrorCode::ProfileComponentMismatch,
+                    format!(
+                        "required rotation group {purpose} is missing rotation {rotation_value}"
+                    ),
+                ));
+            }
+        }
+        if actual_group_rotations != expected_group_rotations {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::ProfileComponentMismatch,
+                format!("required rotation group {purpose} does not match the M8 fixture set"),
+            ));
+        }
+    }
+    for purpose in [
+        "bit-sliced-projection",
+        "score-bit-comparison-input-derivation",
+        "rank-accumulation",
+        "target-projection",
+    ] {
+        if !seen_purposes.contains(purpose) {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::ProfileComponentMismatch,
+                format!("required rotation group {purpose} is missing"),
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+fn expected_required_rotation_group(purpose: &str) -> Option<BTreeSet<i64>> {
+    let rotations = match purpose {
+        "bit-sliced-projection" => vec![1, 2, 4, 8, 16, -1, -2, -4, -8, -16],
+        "score-bit-comparison-input-derivation" => vec![32, 64, 128, -32, -64, -128],
+        "rank-accumulation" => vec![256, 512, 1024, 2048, -256, -512, -1024, -2048],
+        "target-projection" => vec![4096, 8192, -4096, -8192],
+        _ => return None,
+    };
+
+    Some(rotations.into_iter().collect())
+}
+
+fn validate_development_key_arithmetic_fixture(
+    wrapped_fixture: &Value,
+    expected_fixture_id: &str,
+    expected_key_switch_decomposition_digest: &str,
+) -> CanonicalResult<String> {
+    let fixture_record = value_at_path(wrapped_fixture, &["fixture"])?;
+    compare_string_at_path(
+        fixture_record,
+        &["objectType"],
+        "BgvDevelopmentKeyArithmeticFixture",
+        "development key arithmetic fixture object type",
+    )?;
+    compare_string_at_path(
+        fixture_record,
+        &["fixtureId"],
+        expected_fixture_id,
+        "development key arithmetic fixture id",
+    )?;
+    compare_digest_at_path(
+        fixture_record,
+        &["keySwitchDecompositionDigest"],
+        expected_key_switch_decomposition_digest,
+        "development key arithmetic fixture decomposition digest",
+    )?;
+    compare_string_at_path(
+        fixture_record,
+        &["m7ArithmeticStatus"],
+        "sampled-decompose-recompose-and-modmul-passed",
+        "development key arithmetic status",
+    )?;
+    for sample in array_at_path(fixture_record, &["sampledCoefficientChecks"])? {
+        if !bool_at_path(sample, &["recompositionMatches"])? {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::ProfileComponentMismatch,
+                "development key arithmetic fixture has a failed decomposition check",
+            ));
+        }
+        let modulus = unsigned_at_path(sample, &["modulus"])?;
+        let source_coefficient = unsigned_at_path(sample, &["sourceCoefficient"])?;
+        let digits = array_at_path(sample, &["decompositionDigits"])?;
+        if digits.len() != 3 {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "development key arithmetic fixture must use three decomposition digits",
+            ));
+        }
+        let digit_base = 1_u128 << 23;
+        let first_digit = u128::from(digits[0].as_u64().ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "development key arithmetic digits must be non-negative integers",
+            )
+        })?);
+        let second_digit = u128::from(digits[1].as_u64().ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "development key arithmetic digits must be non-negative integers",
+            )
+        })?);
+        let third_digit = u128::from(digits[2].as_u64().ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "development key arithmetic digits must be non-negative integers",
+            )
+        })?);
+        let recomposed =
+            ((first_digit + digit_base * second_digit + digit_base * digit_base * third_digit)
+                % u128::from(modulus)) as u64;
+        if recomposed != source_coefficient
+            || unsigned_at_path(sample, &["recomposedCoefficient"])? != source_coefficient
+        {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::ProfileComponentMismatch,
+                "development key arithmetic fixture decomposition does not recompose",
+            ));
+        }
+    }
+
+    let fixture_digest = development_fixture_digest(fixture_record)?;
+    compare_digest_at_path(
+        wrapped_fixture,
+        &["fixtureDigest"],
+        &fixture_digest,
+        "development key arithmetic fixture digest",
+    )?;
+
+    Ok(fixture_digest)
 }
 
 fn validate_setup_certificates(setup_package: &Value) -> CanonicalResult<()> {
@@ -2257,6 +3147,14 @@ fn validate_setup_certificates(setup_package: &Value) -> CanonicalResult<()> {
         digest_at_path(certificates, &["evaluationKeySizeProfileDigest"])?,
         "evaluation key size profile digest",
     )?;
+    let evaluation_key_streaming_fixture_digest =
+        validate_evaluation_key_streaming_fixture(certificates)?;
+    compare_digest_at_path(
+        value_at_path(certificates, &["setupParameterCertificate"])?,
+        &["evaluationKeyStreamingFixtureDigest"],
+        &evaluation_key_streaming_fixture_digest,
+        "setup parameter evaluation key streaming fixture digest",
+    )?;
     compare_derived_digest(
         "BGVSetupParameterCertificateDigest",
         value_at_path(certificates, &["setupParameterCertificate"])?,
@@ -2272,6 +3170,7 @@ fn validate_setup_certificates(setup_package: &Value) -> CanonicalResult<()> {
         )?,
         "development encryption fixture digest",
     )?;
+    validate_development_encryption_fixture(setup_package)?;
     compare_digest_at_path(
         certificates,
         &["developmentEncryptionFixtureDigest"],
@@ -2281,6 +3180,119 @@ fn validate_setup_certificates(setup_package: &Value) -> CanonicalResult<()> {
         )?,
         "certificate development encryption fixture digest",
     )
+}
+
+fn validate_evaluation_key_streaming_fixture(certificates: &Value) -> CanonicalResult<String> {
+    let wrapped_fixture = value_at_path(certificates, &["evaluationKeyStreamingFixture"])?;
+    let fixture_record = value_at_path(wrapped_fixture, &["fixture"])?;
+    compare_string_at_path(
+        fixture_record,
+        &["objectType"],
+        "BgvEvaluationKeyStreamingFixture",
+        "evaluation key streaming fixture object type",
+    )?;
+    compare_string_at_path(
+        fixture_record,
+        &["fixtureId"],
+        EVALUATION_KEY_STREAMING_FIXTURE_ID,
+        "evaluation key streaming fixture id",
+    )?;
+    if usize_at_path(fixture_record, &["chunkSizeBytes"])? != EVALUATION_KEY_CHUNK_SIZE_BYTES {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidChunkSize,
+            "evaluation key streaming fixture chunk size changed",
+        ));
+    }
+    let stream_record = value_at_path(fixture_record, &["streamRecord"])?;
+    let stream_bytes = canonical_json(stream_record)?.into_bytes();
+    if usize_at_path(fixture_record, &["canonicalStreamByteLength"])? != stream_bytes.len() {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "evaluation key streaming fixture byte length does not match its stream record",
+        ));
+    }
+    compare_digest_at_path(
+        fixture_record,
+        &["chunkRoot"],
+        &chunk_root(&stream_bytes, EVALUATION_KEY_CHUNK_SIZE_BYTES)?,
+        "evaluation key streaming fixture chunk root",
+    )?;
+    let total_evaluation_key_byte_estimate = usize_at_path(
+        fixture_record,
+        &["storageQuotaFixture", "totalEvaluationKeyByteEstimate"],
+    )?;
+    let quota_bytes = usize_at_path(fixture_record, &["storageQuotaFixture", "quotaBytes"])?;
+    let accepted = bool_at_path(fixture_record, &["storageQuotaFixture", "accepted"])?;
+    if accepted != (total_evaluation_key_byte_estimate <= quota_bytes) {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "evaluation key streaming fixture storage quota decision is inconsistent",
+        ));
+    }
+    let fixture_digest = development_fixture_digest(fixture_record)?;
+    compare_digest_at_path(
+        wrapped_fixture,
+        &["fixtureDigest"],
+        &fixture_digest,
+        "evaluation key streaming fixture digest",
+    )?;
+
+    Ok(fixture_digest)
+}
+
+fn validate_development_encryption_fixture(setup_package: &Value) -> CanonicalResult<()> {
+    let fixture_record =
+        value_at_path(setup_package, &["developmentEncryptionFixture", "fixture"])?;
+    compare_string_at_path(
+        fixture_record,
+        &["fixtureScope"],
+        "development-collective-public-key-encryption-fixture",
+        "development encryption fixture scope",
+    )?;
+    if bool_at_path(fixture_record, &["m9BridgeEncryptionClaim"])?
+        || bool_at_path(fixture_record, &["m10EvaluatorClaim"])?
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "development encryption fixture must not claim M9 bridge or M10 evaluator closure",
+        ));
+    }
+    compare_digest_at_path(
+        fixture_record,
+        &["collectivePublicKeyRoot"],
+        digest_at_path(
+            setup_package,
+            &["collectivePublicKey", "collectivePublicKeyRoot"],
+        )?,
+        "development encryption collective public key root",
+    )?;
+    compare_digest_at_path(
+        fixture_record,
+        &["bgvPublicKeyRoot"],
+        digest_at_path(setup_package, &["collectivePublicKey", "bgvPublicKeyRoot"])?,
+        "development encryption BGV public key root",
+    )?;
+    digest_at_path(fixture_record, &["publicKeyMaterialRoot"])?;
+    digest_at_path(fixture_record, &["randomnessRoot"])?;
+    digest_at_path(fixture_record, &["plaintextRoot"])?;
+    digest_at_path(fixture_record, &["ciphertextRoot"])?;
+    digest_at_path(fixture_record, &["canonicalBytesHash512"])?;
+    if unsigned_at_path(fixture_record, &["canonicalByteLength"])? == 0 {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "development encryption fixture canonical byte length must be non-zero",
+        ));
+    }
+    for relation_check in array_at_path(fixture_record, &["sampledPublicRelationChecks"])? {
+        if !bool_at_path(relation_check, &["relationMatches"])? {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::ProfileComponentMismatch,
+                "development encryption fixture contains a failed public relation check",
+            ));
+        }
+    }
+
+    Ok(())
 }
 
 fn validate_setup_package_shape(setup_package: &Value) -> CanonicalResult<()> {
@@ -2379,6 +3391,8 @@ mod tests {
     };
     use crate::hashing::{derive_protocol_digest, hash512};
 
+    type SetupPackageMutation = (&'static str, Box<dyn Fn(&mut serde_json::Value)>);
+
     fn request() -> serde_json::Value {
         serde_json::json!({
             "ceremonyId": "ceremony-main",
@@ -2412,6 +3426,24 @@ mod tests {
         package["setupPackageDigest"] = serde_json::json!(
             derive_protocol_digest("BGVPassiveSetupPackageDigest", &digest_input)
                 .expect("setup package digest")
+        );
+    }
+
+    fn valid_digest(fill: char) -> String {
+        fill.to_string().repeat(128)
+    }
+
+    fn assert_rebound_package_is_rejected(
+        mut package: serde_json::Value,
+        mutation_description: &str,
+    ) {
+        rebind_setup_package_digest(&mut package);
+        assert!(
+            verify_passive_setup_package_from_request(&serde_json::json!({
+                "setupPackage": package,
+            }))
+            .is_err(),
+            "{mutation_description} should be rejected"
         );
     }
 
@@ -2511,6 +3543,293 @@ mod tests {
                 "setupPackage": package,
             }))
             .is_err()
+        );
+    }
+
+    #[test]
+    fn passive_setup_verification_rejects_rebound_binding_mutations() {
+        let package = generate_passive_setup_package_from_request(&request()).expect("setup");
+        let mutations: Vec<SetupPackageMutation> = vec![
+            (
+                "BGV public key root",
+                Box::new(|mutated_package| {
+                    mutated_package["collectivePublicKey"]["bgvPublicKeyRoot"] =
+                        serde_json::json!(valid_digest('0'));
+                }),
+            ),
+            (
+                "threshold share verification key root",
+                Box::new(|mutated_package| {
+                    mutated_package["thresholdVerificationMaterial"]["thresholdShareVerificationKeyRoot"] =
+                        serde_json::json!(valid_digest('1'));
+                }),
+            ),
+            (
+                "trustee threshold verification key digest",
+                Box::new(|mutated_package| {
+                    mutated_package["thresholdVerificationMaterial"]["trusteeThresholdVerificationKeyDigests"]
+                        [0] = serde_json::json!(valid_digest('2'));
+                }),
+            ),
+            (
+                "relinearization key root",
+                Box::new(|mutated_package| {
+                    mutated_package["evaluationKeys"]["relinearizationKeyRoot"] =
+                        serde_json::json!(valid_digest('3'));
+                }),
+            ),
+            (
+                "key-switch key root",
+                Box::new(|mutated_package| {
+                    mutated_package["evaluationKeys"]["keySwitchKeyRoot"] =
+                        serde_json::json!(valid_digest('4'));
+                }),
+            ),
+            (
+                "key-switch decomposition digest",
+                Box::new(|mutated_package| {
+                    mutated_package["evaluationKeys"]["keySwitchDecompositionDigest"] =
+                        serde_json::json!(valid_digest('5'));
+                }),
+            ),
+            (
+                "rotation set digest",
+                Box::new(|mutated_package| {
+                    mutated_package["evaluationKeys"]["rotSetDigest"] =
+                        serde_json::json!(valid_digest('6'));
+                }),
+            ),
+            (
+                "rotation key root",
+                Box::new(|mutated_package| {
+                    mutated_package["evaluationKeys"]["rotationKeyRoots"][0]["rotationKeyRoot"] =
+                        serde_json::json!(valid_digest('7'));
+                }),
+            ),
+            (
+                "setup parameter certificate digest",
+                Box::new(|mutated_package| {
+                    mutated_package["certificates"]["setupParameterCertificateDigest"] =
+                        serde_json::json!(valid_digest('8'));
+                }),
+            ),
+            (
+                "collective secret distribution certificate digest",
+                Box::new(|mutated_package| {
+                    mutated_package["certificates"]["collectiveSecretDistributionCertificateDigest"] =
+                        serde_json::json!(valid_digest('9'));
+                }),
+            ),
+            (
+                "KLLPS PartDec claim",
+                Box::new(|mutated_package| {
+                    mutated_package["kllpsCompatibility"]["KLLPSPartDecImplemented"] =
+                        serde_json::json!(true);
+                }),
+            ),
+            (
+                "KLLPS C1-C4 claim",
+                Box::new(|mutated_package| {
+                    mutated_package["kllpsCompatibility"]["KLLPSC1C4Certified"] =
+                        serde_json::json!(true);
+                }),
+            ),
+            (
+                "final security status",
+                Box::new(|mutated_package| {
+                    mutated_package["certificates"]["setupParameterCertificate"]["finalSecurityStatus"] =
+                        serde_json::json!("accepted");
+                }),
+            ),
+            (
+                "development encryption bridge claim",
+                Box::new(|mutated_package| {
+                    mutated_package["developmentEncryptionFixture"]["fixture"]["m9BridgeEncryptionClaim"] =
+                        serde_json::json!(true);
+                }),
+            ),
+            (
+                "relinearization arithmetic fixture",
+                Box::new(|mutated_package| {
+                    mutated_package["evaluationKeys"]["relinearizationArithmeticFixture"]["fixture"]
+                        ["sampledCoefficientChecks"][0]["recompositionMatches"] =
+                        serde_json::json!(false);
+                }),
+            ),
+            (
+                "evaluation key chunk root",
+                Box::new(|mutated_package| {
+                    mutated_package["certificates"]["evaluationKeyStreamingFixture"]["fixture"]["chunkRoot"] =
+                        serde_json::json!(valid_digest('a'));
+                }),
+            ),
+        ];
+
+        for (mutation_description, mutate_package) in mutations {
+            let mut mutated_package = package.clone();
+            mutate_package(&mut mutated_package);
+            assert_rebound_package_is_rejected(mutated_package, mutation_description);
+        }
+    }
+
+    #[test]
+    fn passive_setup_verification_rejects_evaluator_binding_mutations() {
+        let package = generate_passive_setup_package_from_request(&request()).expect("setup");
+        for field_name in [
+            "encryptedAggregateBridgeDigest",
+            "encryptedAggregateTargetBasisDataRoot",
+            "encryptedAggregateReconstructionDigest",
+            "scoreBitDerivationCircuitDigest",
+            "comparisonInputDerivationCircuitDigest",
+            "encryptedScoreBitInputDigest",
+            "encryptedComparisonInputDigest",
+            "bitSlicedComparatorDigest",
+            "encryptedSparseTargetProjectionDigest",
+            "m8EvaluatorContextBindingDigest",
+        ] {
+            let mut mutated_package = package.clone();
+            mutated_package["profileBindings"][field_name] = serde_json::json!(valid_digest('b'));
+            assert_rebound_package_is_rejected(mutated_package, field_name);
+        }
+    }
+
+    #[test]
+    fn passive_setup_rejects_wrong_request_and_recovery_state_shapes() {
+        let mut empty_identity_request = request();
+        empty_identity_request["participants"][0]["trusteeIdentity"] = serde_json::json!("");
+        assert!(generate_passive_setup_package_from_request(&empty_identity_request).is_err());
+
+        let mut duplicate_identity_request = request();
+        duplicate_identity_request["participants"][1]["trusteeIdentity"] =
+            duplicate_identity_request["participants"][0]["trusteeIdentity"].clone();
+        assert!(generate_passive_setup_package_from_request(&duplicate_identity_request).is_err());
+
+        let mut too_small_roster_request = request();
+        too_small_roster_request["participants"] = serde_json::json!([
+            { "trusteeIdentity": "trustee-1", "rosterPosition": 0 },
+            { "trusteeIdentity": "trustee-2", "rosterPosition": 1 }
+        ]);
+        assert!(generate_passive_setup_package_from_request(&too_small_roster_request).is_err());
+
+        let mut too_large_roster_request = request();
+        too_large_roster_request["participants"] = serde_json::Value::Array(
+            (0..51)
+                .map(|participant_index| {
+                    serde_json::json!({
+                        "trusteeIdentity": format!("trustee-{participant_index}"),
+                        "rosterPosition": participant_index,
+                    })
+                })
+                .collect(),
+        );
+        assert!(generate_passive_setup_package_from_request(&too_large_roster_request).is_err());
+
+        let mut malformed_threshold_digest_request = request();
+        malformed_threshold_digest_request["thresholdProfileDigest"] =
+            serde_json::json!("not-a-digest");
+        assert!(
+            generate_passive_setup_package_from_request(&malformed_threshold_digest_request)
+                .is_err()
+        );
+
+        let package = generate_passive_setup_package_from_request(&request()).expect("setup");
+        for (mutation_description, mutate_package) in [
+            (
+                "setup ceremony id",
+                Box::new(|mutated_package: &mut serde_json::Value| {
+                    mutated_package["setupInputs"]["ceremonyId"] =
+                        serde_json::json!("ceremony-stale");
+                }) as Box<dyn Fn(&mut serde_json::Value)>,
+            ),
+            (
+                "setup participant count",
+                Box::new(|mutated_package: &mut serde_json::Value| {
+                    mutated_package["setupInputs"]["participantCount"] = serde_json::json!(4);
+                }),
+            ),
+            (
+                "setup participant identities",
+                Box::new(|mutated_package: &mut serde_json::Value| {
+                    mutated_package["setupInputs"]["participantIdentities"][0] =
+                        serde_json::json!("trustee-clone");
+                }),
+            ),
+            (
+                "participant recovery epoch",
+                Box::new(|mutated_package: &mut serde_json::Value| {
+                    mutated_package["participants"][0]["recoveryEpoch"] = serde_json::json!(99);
+                }),
+            ),
+            (
+                "participant device epoch",
+                Box::new(|mutated_package: &mut serde_json::Value| {
+                    mutated_package["participants"][0]["deviceEpoch"] = serde_json::json!(99);
+                }),
+            ),
+            (
+                "threshold recovery universe",
+                Box::new(|mutated_package: &mut serde_json::Value| {
+                    mutated_package["thresholdVerificationMaterial"]["verificationKeySet"]["participantInterpolationUniverse"]
+                        [0]["recoveryEpoch"] = serde_json::json!(99);
+                }),
+            ),
+        ] {
+            let mut mutated_package = package.clone();
+            mutate_package(&mut mutated_package);
+            assert_rebound_package_is_rejected(mutated_package, mutation_description);
+        }
+    }
+
+    #[test]
+    fn passive_setup_verification_rejects_rotation_set_gaps() {
+        let package = generate_passive_setup_package_from_request(&request()).expect("setup");
+
+        let mut missing_bit_sliced_projection_key = package.clone();
+        missing_bit_sliced_projection_key["evaluationKeys"]["rotationKeyRoots"]
+            .as_array_mut()
+            .expect("rotation roots")
+            .remove(0);
+        assert_rebound_package_is_rejected(
+            missing_bit_sliced_projection_key,
+            "missing bit-sliced projection rotation key",
+        );
+
+        let mut missing_score_derivation_key = package.clone();
+        missing_score_derivation_key["evaluationKeys"]["rotationKeyRoots"]
+            .as_array_mut()
+            .expect("rotation roots")
+            .retain(|root| root["rotation"] != serde_json::json!(32));
+        assert_rebound_package_is_rejected(
+            missing_score_derivation_key,
+            "missing score-bit derivation rotation key",
+        );
+
+        let mut missing_rank_accumulation_key = package.clone();
+        missing_rank_accumulation_key["evaluationKeys"]["rotationKeyRoots"]
+            .as_array_mut()
+            .expect("rotation roots")
+            .retain(|root| root["rotation"] != serde_json::json!(256));
+        assert_rebound_package_is_rejected(
+            missing_rank_accumulation_key,
+            "missing rank-accumulation rotation key",
+        );
+
+        let mut missing_target_projection_key = package.clone();
+        missing_target_projection_key["evaluationKeys"]["rotationKeyRoots"]
+            .as_array_mut()
+            .expect("rotation roots")
+            .retain(|root| root["rotation"] != serde_json::json!(4096));
+        assert_rebound_package_is_rejected(
+            missing_target_projection_key,
+            "missing target-projection rotation key",
+        );
+
+        let mut wrong_required_rotation_group = package;
+        wrong_required_rotation_group["evaluationKeys"]["rotSet"]["requiredRotationGroups"][0]["rotations"]
+            [0] = serde_json::json!(3);
+        assert_rebound_package_is_rejected(
+            wrong_required_rotation_group,
+            "wrong bit-sliced rotation group",
         );
     }
 

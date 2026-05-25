@@ -65,7 +65,7 @@ pub(crate) fn generate_aggregate_derivation_proof_from_command_request(request: 
             "operation": "generateAggregateDerivationProof",
             "componentId": AGGREGATE_DERIVATION_COMPONENT_ID,
             "statusLabels": [
-                "AggregateDerivationProofVerified"
+                "AggregateDerivationProofGenerated"
             ],
             "acceptedDigests": [],
             "refusedObjects": [],

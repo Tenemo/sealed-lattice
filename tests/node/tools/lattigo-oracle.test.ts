@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
     assertPinnedDigest,
+    buildReferenceOracleDigestBindings,
     loadPinnedReference,
     verifyPinnedReferenceMetadata,
     verifyPinnedReference,
@@ -25,6 +26,47 @@ describe('Lattigo oracle boundary tooling', () => {
         expect(verification.dockerfileDigest).toBe(
             pinnedReference.oracleDockerfileDigest,
         );
+        expect(
+            verification.referenceOracleDigestBindings.records.commandRecord,
+        ).toMatchObject({
+            referenceName: 'Lattigo',
+            oracleCommandDigest: verification.commandDigest,
+            protocolEvidenceUse: 'forbidden',
+        });
+        expect(
+            verification.referenceOracleDigestBindings.records.vectorRecord,
+        ).toMatchObject({
+            serializationSource:
+                'sealed-lattice-rust-wasm-canonical-rns-fixture',
+            oracleVectorsAcceptedAsProtocolEvidence: false,
+        });
+        expect(
+            verification.referenceOracleDigestBindings
+                .referenceOracleCommitDigest,
+        ).toMatch(/^[a-f0-9]{128}$/u);
+        expect(
+            verification.referenceOracleDigestBindings
+                .referenceOracleContainerDigest,
+        ).toMatch(/^[a-f0-9]{128}$/u);
+        expect(
+            verification.referenceOracleDigestBindings
+                .referenceOracleCommandDigest,
+        ).toMatch(/^[a-f0-9]{128}$/u);
+        expect(
+            verification.referenceOracleDigestBindings
+                .referenceOracleVectorRoot,
+        ).toMatch(/^[a-f0-9]{128}$/u);
+        expect(
+            verification.referenceOracleDigestBindings
+                .referenceOracleProfileDigest,
+        ).toMatch(/^[a-f0-9]{128}$/u);
+        expect(
+            buildReferenceOracleDigestBindings(
+                pinnedReference,
+                verification.commandDigest,
+                verification.dockerfileDigest,
+            ),
+        ).toEqual(verification.referenceOracleDigestBindings);
         expect(typeof verification.archivePresent).toBe('boolean');
         expect(typeof verification.checkoutPresent).toBe('boolean');
     });

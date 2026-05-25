@@ -5,8 +5,8 @@ use crate::{
         base_conversion::convert_plaintext_lifted_basis,
         encoding::{decode_batch_plaintext_polynomial, encode_batch_plaintext_slots},
         profile::{
-            BgvBasisKind, DATA_PRIMES, POLYNOMIAL_DEGREE, batch_layout_binding_digest,
-            batch_layout_binding_value, profile_digest,
+            BgvBasisKind, DATA_PRIMES, POLYNOMIAL_DEGREE, allowed_operation_registry_value,
+            batch_layout_binding_digest, batch_layout_binding_value, profile_digest,
         },
         reports::{
             backend_parameter_certificate_report, describe_profile_report,
@@ -21,6 +21,7 @@ use crate::{
             verify_passive_setup_package_from_request,
         },
         validation::{
+            bgv_profile_rejection, bgv_profile_rejection_from_error,
             reject_if_oracle_boundary_fields_present, reject_reference_oracle_artifact,
             validate_ciphertext_hex, validate_plaintext_hex,
         },
@@ -34,6 +35,58 @@ pub(crate) fn describe_bgv_rns_profile() -> CanonicalResult<Value> {
 
 pub(crate) fn describe_bgv_operation_registry() -> CanonicalResult<Value> {
     operation_registry_report()
+}
+
+pub(crate) fn validate_bgv_evaluator_operation_from_request(
+    request: &Value,
+) -> CanonicalResult<Value> {
+    let operation_name = read_string_field(request, "operation")?;
+
+    let registry = allowed_operation_registry_value()?;
+    let allowed_operations = registry
+        .get("allowedOperations")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "BGV operation registry is missing allowed operations",
+            )
+        })?;
+    if allowed_operations
+        .iter()
+        .any(|operation| operation.as_str() == Some(operation_name))
+    {
+        return Ok(json!({
+            "ok": true,
+            "operation": "validateBgvEvaluatorOperation",
+            "acceptedOperation": operation_name,
+            "allowedEvaluatorOpsDigest": crate::bgv::profile::allowed_operation_registry_digest()?,
+            "statusLabels": [
+                "BGVEvaluatorOperationAllowed"
+            ],
+        }));
+    }
+
+    Ok(bgv_profile_rejection(
+        "validateBgvEvaluatorOperation",
+        if registry
+            .get("forbiddenOperations")
+            .and_then(Value::as_array)
+            .is_some_and(|forbidden_operations| {
+                forbidden_operations
+                    .iter()
+                    .any(|operation| operation.as_str() == Some(operation_name))
+            })
+        {
+            "ForbiddenEvaluatorOperation"
+        } else {
+            "UncertifiedEvaluatorOperation"
+        },
+        format!(
+            "BGV evaluator operation {operation_name} is not part of the selected M7/M10 operation registry"
+        ),
+        None,
+    ))
 }
 
 pub(crate) fn generate_bgv_backend_report() -> CanonicalResult<Value> {
@@ -248,6 +301,13 @@ pub(crate) fn analyze_bgv_canonical_object_from_request(request: &Value) -> Cano
     }))
 }
 
+pub(crate) fn bgv_input_result(operation: &str, result: CanonicalResult<Value>) -> Value {
+    match result {
+        Ok(value) => value,
+        Err(error) => bgv_profile_rejection_from_error(operation, &error),
+    }
+}
+
 fn read_slots(request: &Value) -> CanonicalResult<Vec<u64>> {
     read_named_slots(request, "slots")
 }
@@ -360,6 +420,60 @@ mod tests {
         }))
         .expect("validate command");
         assert_eq!(validated["plaintextRoot"], encoded["plaintextRoot"]);
+    }
+
+    #[test]
+    fn native_commands_emit_stable_m7_canonical_roots() {
+        let profile = describe_bgv_rns_profile().expect("profile report");
+        let layout_binding = profile["batchLayoutBinding"].clone();
+        let encoded = encode_bgv_batch_plaintext_from_request(&serde_json::json!({
+            "slots": [0, 1, 65_536, 17, 99],
+            "level": 0,
+            "layoutBinding": layout_binding,
+            "includeCanonicalBytesHex": true
+        }))
+        .expect("encoded fixture");
+
+        assert_eq!(
+            encoded["plaintextRoot"],
+            "59a29e210357f4e860c4c7b44b541956fc2d2ca425eefcb344dbd303420ffa44419674197bf746a0ca4dee937832b925a34ac008194c411c96ad9c6f94285c75"
+        );
+        assert_eq!(
+            encoded["canonicalBytesHash512"],
+            "73a193fc97dad594fe063c04e1b0184d57901441ac520e8355f0e176378c1e1877bc86be1ebf9d873c7007551024cdb08b4af32935e7b56993e233c5a1771b70"
+        );
+        assert_eq!(encoded["canonicalByteLength"], 90_441);
+
+        let ciphertext =
+            generate_bgv_ciphertext_convention_fixture_from_request(&serde_json::json!({
+                "leftSlots": [1, 2, 3],
+                "rightSlots": [4, 5, 6],
+                "includeCanonicalBytesHex": true
+            }))
+            .expect("ciphertext fixture");
+        assert_eq!(
+            ciphertext["ciphertextRoot"],
+            "a5096b8c8f0d14bea7895d29254fb0aa1f50fa81bd8345cafdeb88ec36389ef01933478448e81f3ec0ce39bd07f69cfdc4f0022e223d769a6ab43160f5224622"
+        );
+        assert_eq!(
+            ciphertext["canonicalBytesHash512"],
+            "f961235b3d1c61e3a4fa70eecb752f940715e7d768a8b7cca0dc8d90649f9b0c813c543f94fa7768a4a3380e57e11397508797d78728c215cb6552aa913c264e"
+        );
+        assert_eq!(ciphertext["canonicalByteLength"], 180_781);
+
+        let base_conversion =
+            generate_bgv_base_conversion_fixture_from_request(&serde_json::json!({
+                "slots": [7, 8, 9, 65_536]
+            }))
+            .expect("base conversion fixture");
+        assert_eq!(
+            base_conversion["sourcePlaintextRoot"],
+            "2cd073e151a0f86fc2c7b504edb6c2ac39c97cd6a143da4bbb83df400cd25b8d9215c59dc1de6e7d28bf72c80ed5faa9ebe97cff538d07ab048780f1ee0fec7f"
+        );
+        assert_eq!(
+            base_conversion["convertedPlaintextRoot"],
+            "9eebccb784a8508da0d21089c3ed0e46c476bbee278785e693dcc0cc3e5e1efa51bb6442bc3da9f533947380bcfd16d701d04b3acc7f1e09fd4bdf77745c62a9"
+        );
     }
 
     #[test]

@@ -13,6 +13,7 @@ import (
 
 const polynomialDegree = 32768
 const pinnedCommit = "5dbffbdea05394de2ca3a432ed5318aa832e3f40"
+const canonicalMaterialFixturePath = "sealed-lattice-canonical-rns-fixtures.json"
 
 var selectedModuli = []uint64{
 	140737487306753,
@@ -39,22 +40,39 @@ type sample struct {
 	Value    uint64 `json:"value"`
 }
 
+type canonicalRnsFixture struct {
+	SchemaVersion                int      `json:"schemaVersion"`
+	FixtureID                    string   `json:"fixtureId"`
+	Source                       string   `json:"source"`
+	PolynomialDegree             int      `json:"polynomialDegree"`
+	Moduli                       []uint64 `json:"moduli"`
+	SamplePositions              []int    `json:"samplePositions"`
+	LeftCoefficientFormula       string   `json:"leftCoefficientFormula"`
+	RightCoefficientFormula      string   `json:"rightCoefficientFormula"`
+	ReferenceSerializationPolicy string   `json:"referenceSerializationPolicy"`
+	ProtocolEvidence             bool     `json:"protocolEvidence"`
+}
+
 type oracleReport struct {
-	ArtifactKind               string   `json:"artifactKind"`
-	PinnedCommit               string   `json:"pinnedCommit"`
-	PolynomialDegree           int      `json:"polynomialDegree"`
-	Moduli                     []uint64 `json:"moduli"`
-	ComparableOperations       []string `json:"comparableOperations"`
-	ConventionDifferences      []string `json:"conventionDifferences"`
-	RoundTripMatched           bool     `json:"roundTripMatched"`
-	AdditionMatched            bool     `json:"additionMatched"`
-	SubtractionMatched         bool     `json:"subtractionMatched"`
-	MultiplicationMatched      bool     `json:"multiplicationMatched"`
-	ReferenceSerializationUsed bool     `json:"referenceSerializationUsed"`
-	ProtocolEvidence           bool     `json:"protocolEvidence"`
-	InputDigest                string   `json:"inputDigest"`
-	RoundTripSamples           []sample `json:"roundTripSamples"`
-	AdditionSamples            []sample `json:"additionSamples"`
+	ArtifactKind                         string   `json:"artifactKind"`
+	PinnedCommit                         string   `json:"pinnedCommit"`
+	PolynomialDegree                     int      `json:"polynomialDegree"`
+	Moduli                               []uint64 `json:"moduli"`
+	ComparableOperations                 []string `json:"comparableOperations"`
+	ConventionDifferences                []string `json:"conventionDifferences"`
+	RoundTripMatched                     bool     `json:"roundTripMatched"`
+	AdditionMatched                      bool     `json:"additionMatched"`
+	SubtractionMatched                   bool     `json:"subtractionMatched"`
+	MultiplicationMatched                bool     `json:"multiplicationMatched"`
+	SealedLatticeCanonicalMaterialUsed   bool     `json:"sealedLatticeCanonicalMaterialUsed"`
+	CanonicalMaterialFixtureID           string   `json:"canonicalMaterialFixtureId"`
+	CanonicalMaterialFixtureDigest       string   `json:"canonicalMaterialFixtureDigest"`
+	CanonicalMaterialSerializationPolicy string   `json:"canonicalMaterialSerializationPolicy"`
+	ReferenceSerializationUsed           bool     `json:"referenceSerializationUsed"`
+	ProtocolEvidence                     bool     `json:"protocolEvidence"`
+	InputDigest                          string   `json:"inputDigest"`
+	RoundTripSamples                     []sample `json:"roundTripSamples"`
+	AdditionSamples                      []sample `json:"additionSamples"`
 }
 
 func main() {
@@ -72,13 +90,17 @@ func main() {
 }
 
 func buildReport() (oracleReport, error) {
+	fixture, fixtureDigest, err := loadCanonicalFixture()
+	if err != nil {
+		return oracleReport{}, err
+	}
 	referenceRing, err := ring.NewRing(polynomialDegree, selectedModuli)
 	if err != nil {
 		return oracleReport{}, fmt.Errorf("create Lattigo ring: %w", err)
 	}
 	left := ring.NewPoly(polynomialDegree, len(selectedModuli)-1)
 	right := ring.NewPoly(polynomialDegree, len(selectedModuli)-1)
-	for modulusIndex, modulus := range selectedModuli {
+	for modulusIndex, modulus := range fixture.Moduli {
 		for coefficientIndex := 0; coefficientIndex < polynomialDegree; coefficientIndex++ {
 			left.Coeffs[modulusIndex][coefficientIndex] = patternValue(coefficientIndex, modulus)
 			right.Coeffs[modulusIndex][coefficientIndex] = patternValue(coefficientIndex+17, modulus)
@@ -121,22 +143,82 @@ func buildReport() (oracleReport, error) {
 	}
 
 	return oracleReport{
-		ArtifactKind:               "lattigo-development-oracle-vector",
-		PinnedCommit:               pinnedCommit,
-		PolynomialDegree:           polynomialDegree,
-		Moduli:                     selectedModuli,
-		ComparableOperations:       []string{"ring.NewRing", "NTTThenINTTRoundTrip", "CoefficientAddition", "CoefficientSubtraction", "CoefficientMultiplicationBarrett"},
-		ConventionDifferences:      []string{"coefficient-ordering-reviewed", "ntt-root-direction-reviewed", "automorphism-direction-not-used", "slot-ordering-not-accepted-as-protocol-evidence", "plaintext-encoding-convention-not-accepted-as-protocol-evidence", "key-switch-decomposition-not-covered", "ciphertext-component-order-not-covered"},
-		RoundTripMatched:           roundTripMatched,
-		AdditionMatched:            additionMatched,
-		SubtractionMatched:         subtractionMatched,
-		MultiplicationMatched:      multiplicationMatched,
-		ReferenceSerializationUsed: false,
-		ProtocolEvidence:           false,
-		InputDigest:                digestInputs(left),
-		RoundTripSamples:           samples(recovered.Coeffs[0]),
-		AdditionSamples:            samples(addition.Coeffs[0]),
+		ArtifactKind:                         "lattigo-development-oracle-vector",
+		PinnedCommit:                         pinnedCommit,
+		PolynomialDegree:                     polynomialDegree,
+		Moduli:                               selectedModuli,
+		ComparableOperations:                 []string{"ring.NewRing", "NTTThenINTTRoundTrip", "CoefficientAddition", "CoefficientSubtraction", "CoefficientMultiplicationBarrett"},
+		ConventionDifferences:                []string{"coefficient-ordering-reviewed", "ntt-root-direction-reviewed", "automorphism-direction-not-used", "slot-ordering-not-accepted-as-protocol-evidence", "plaintext-encoding-convention-not-accepted-as-protocol-evidence", "key-switch-decomposition-not-covered", "ciphertext-component-order-not-covered"},
+		RoundTripMatched:                     roundTripMatched,
+		AdditionMatched:                      additionMatched,
+		SubtractionMatched:                   subtractionMatched,
+		MultiplicationMatched:                multiplicationMatched,
+		SealedLatticeCanonicalMaterialUsed:   true,
+		CanonicalMaterialFixtureID:           fixture.FixtureID,
+		CanonicalMaterialFixtureDigest:       fixtureDigest,
+		CanonicalMaterialSerializationPolicy: fixture.ReferenceSerializationPolicy,
+		ReferenceSerializationUsed:           false,
+		ProtocolEvidence:                     false,
+		InputDigest:                          digestInputs(left),
+		RoundTripSamples:                     samples(recovered.Coeffs[0], fixture.SamplePositions),
+		AdditionSamples:                      samples(addition.Coeffs[0], fixture.SamplePositions),
 	}, nil
+}
+
+func loadCanonicalFixture() (canonicalRnsFixture, string, error) {
+	source, err := os.ReadFile(canonicalMaterialFixturePath)
+	if err != nil {
+		return canonicalRnsFixture{}, "", fmt.Errorf("read sealed-lattice canonical material fixture: %w", err)
+	}
+	digest := sha256.Sum256(source)
+
+	var fixture canonicalRnsFixture
+	if err := json.Unmarshal(source, &fixture); err != nil {
+		return canonicalRnsFixture{}, "", fmt.Errorf("parse sealed-lattice canonical material fixture: %w", err)
+	}
+	if err := validateCanonicalFixture(fixture); err != nil {
+		return canonicalRnsFixture{}, "", err
+	}
+
+	return fixture, hex.EncodeToString(digest[:]), nil
+}
+
+func validateCanonicalFixture(fixture canonicalRnsFixture) error {
+	if fixture.SchemaVersion != 1 {
+		return fmt.Errorf("sealed-lattice canonical material fixture schema version is %d, expected 1", fixture.SchemaVersion)
+	}
+	if fixture.Source != "sealed-lattice-rust-wasm-canonical-rns-fixture" {
+		return fmt.Errorf("sealed-lattice canonical material fixture source is %q", fixture.Source)
+	}
+	if fixture.PolynomialDegree != polynomialDegree {
+		return fmt.Errorf("sealed-lattice canonical material fixture polynomial degree is %d, expected %d", fixture.PolynomialDegree, polynomialDegree)
+	}
+	if len(fixture.Moduli) != len(selectedModuli) {
+		return fmt.Errorf("sealed-lattice canonical material fixture modulus count is %d, expected %d", len(fixture.Moduli), len(selectedModuli))
+	}
+	for modulusIndex, modulus := range selectedModuli {
+		if fixture.Moduli[modulusIndex] != modulus {
+			return fmt.Errorf("sealed-lattice canonical material fixture modulus %d is %d, expected %d", modulusIndex, fixture.Moduli[modulusIndex], modulus)
+		}
+	}
+	if fixture.ProtocolEvidence {
+		return fmt.Errorf("sealed-lattice canonical material fixture must not claim protocol evidence")
+	}
+	if fixture.ReferenceSerializationPolicy != "sealed-lattice-canonical-material-only-lattigo-serialization-rejected" {
+		return fmt.Errorf("sealed-lattice canonical material fixture has unexpected serialization policy %q", fixture.ReferenceSerializationPolicy)
+	}
+
+	expectedSamplePositions := []int{0, 1, 2, 17, polynomialDegree / 2, polynomialDegree - 1}
+	if len(fixture.SamplePositions) != len(expectedSamplePositions) {
+		return fmt.Errorf("sealed-lattice canonical material fixture sample position count is %d, expected %d", len(fixture.SamplePositions), len(expectedSamplePositions))
+	}
+	for index, position := range expectedSamplePositions {
+		if fixture.SamplePositions[index] != position {
+			return fmt.Errorf("sealed-lattice canonical material fixture sample position %d is %d, expected %d", index, fixture.SamplePositions[index], position)
+		}
+	}
+
+	return nil
 }
 
 func patternValue(position int, modulus uint64) uint64 {
@@ -150,8 +232,7 @@ func mulModExpected(left, right, modulus uint64) uint64 {
 	return remainder
 }
 
-func samples(values []uint64) []sample {
-	positions := []int{0, 1, 2, 17, len(values) / 2, len(values) - 1}
+func samples(values []uint64, positions []int) []sample {
 	output := make([]sample, 0, len(positions))
 	for _, position := range positions {
 		output = append(output, sample{
@@ -165,7 +246,7 @@ func samples(values []uint64) []sample {
 func digestInputs(poly ring.Poly) string {
 	hasher := sha256.New()
 	for _, limb := range poly.Coeffs {
-		for _, value := range samples(limb) {
+		for _, value := range samples(limb, []int{0, 1, 2, 17, len(limb) / 2, len(limb) - 1}) {
 			_, _ = fmt.Fprintf(hasher, "%d:%d;", value.Position, value.Value)
 		}
 	}

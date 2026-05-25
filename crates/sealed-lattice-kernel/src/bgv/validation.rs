@@ -8,6 +8,78 @@ use crate::{
     transcript_core::decode_hex,
 };
 
+pub(crate) fn bgv_profile_rejection(
+    operation: &str,
+    reason_code: &str,
+    message: impl Into<String>,
+    object_digest: Option<&str>,
+) -> Value {
+    let mut refused_object = json!({
+        "code": "BGVProfileRejected",
+        "reasonCode": reason_code,
+        "message": message.into(),
+    });
+    if let Some(digest) = object_digest {
+        refused_object["objectDigest"] = Value::String(digest.to_string());
+    }
+
+    json!({
+        "ok": false,
+        "operation": operation,
+        "acceptedDigests": [],
+        "refusedObjects": [refused_object],
+        "unresolvedReason": "BGVProfileRejected",
+        "statusLabels": [
+            "BGVProfileRejected"
+        ],
+    })
+}
+
+pub(crate) fn bgv_profile_rejection_from_error(operation: &str, error: &CanonicalError) -> Value {
+    bgv_profile_rejection(
+        operation,
+        rejection_reason_code(error),
+        &error.message,
+        None,
+    )
+}
+
+fn rejection_reason_code(error: &CanonicalError) -> &'static str {
+    let message = error.message.as_str();
+    if message.contains("coefficient count") || message.contains("polynomial degree") {
+        "UnsupportedRingDimension"
+    } else if message.contains("basis")
+        || message.contains("modulus list")
+        || message.contains("residue limb")
+    {
+        "InvalidRnsBasis"
+    } else if message.contains("profile")
+        || message.contains("layout")
+        || message.contains("root")
+        || message.contains("expected")
+    {
+        "ProfileMismatch"
+    } else if message.contains("estimator") {
+        "MissingEstimatorRow"
+    } else if message.contains("noise") {
+        "InvalidNoiseCertificate"
+    } else if message.contains("parameter") {
+        "InvalidParameters"
+    } else if matches!(
+        error.code,
+        CanonicalErrorCode::MalformedMagic
+            | CanonicalErrorCode::InvalidUtf8
+            | CanonicalErrorCode::InvalidEnum
+            | CanonicalErrorCode::MalformedLength
+            | CanonicalErrorCode::TrailingBytes
+            | CanonicalErrorCode::InvalidFixture
+    ) {
+        "InvalidCanonicalEncoding"
+    } else {
+        "InvalidParameters"
+    }
+}
+
 pub(crate) fn validate_plaintext_hex(
     canonical_bytes_hex: &str,
     expected_plaintext_root: Option<&str>,
@@ -129,10 +201,18 @@ pub(crate) fn reject_reference_oracle_artifact(artifact: &Value) -> Value {
 }
 
 pub(crate) fn reject_if_oracle_boundary_fields_present(request: &Value) -> CanonicalResult<()> {
-    const FORBIDDEN_FIELDS: [&str; 6] = [
+    const FORBIDDEN_FIELDS: [&str; 14] = [
         "lattigoObject",
+        "lattigoPublicKey",
+        "lattigoRelinearizationKey",
+        "lattigoRotationKey",
         "lattigoSerializationHex",
+        "lattigoSetupKeyVector",
+        "lattigoKeySerialization",
         "dockerOracleOutput",
+        "oracleSetupSerializer",
+        "oracleKeySerializer",
+        "oracleVector",
         "referenceOracleVectorRoot",
         "referenceOracleProfileDigest",
         "oracleAcceptedAsEvidence",
@@ -180,12 +260,24 @@ mod tests {
 
     #[test]
     fn oracle_boundary_material_is_rejected() {
-        assert!(
-            reject_if_oracle_boundary_fields_present(&serde_json::json!({
-                "referenceOracleVectorRoot": "abc"
-            }))
-            .is_err()
-        );
+        for field_name in [
+            "referenceOracleVectorRoot",
+            "lattigoSetupKeyVector",
+            "lattigoPublicKey",
+            "lattigoRelinearizationKey",
+            "lattigoRotationKey",
+            "lattigoKeySerialization",
+            "oracleSetupSerializer",
+            "oracleKeySerializer",
+        ] {
+            assert!(
+                reject_if_oracle_boundary_fields_present(&serde_json::json!({
+                    field_name: "abc"
+                }))
+                .is_err(),
+                "{field_name} should be rejected"
+            );
+        }
         assert_eq!(
             reject_reference_oracle_artifact(&serde_json::json!({
                 "artifactKind": "lattigo-vector"

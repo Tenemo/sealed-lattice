@@ -489,6 +489,9 @@ pub(crate) fn allowed_operation_registry_value() -> CanonicalResult<Value> {
             "rawThresholdDecrypt",
             "rawRnsLimbAccess",
             "rawNttTranscriptRoot",
+            "scalarDegree360Comparator",
+            "uncertifiedScoreBitDerivationOperation",
+            "uncertifiedComparisonInputDerivationOperation",
             "lattigoRuntimeObjectImport",
             "referenceOracleVectorAcceptance",
             "genericFheApiSurface"
@@ -525,8 +528,12 @@ pub(crate) fn security_estimator_input_digest() -> CanonicalResult<String> {
 mod tests {
     use super::{
         BgvBasisKind, DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE, SPECIAL_PRIME,
+        aggregate_input_encoding_profile_digest, allowed_operation_registry_digest,
+        ballot_score_encoding_profile_digest, ballot_share_layout_profile_digest,
         batch_encoder_digest, batch_layout_binding_digest, batch_layout_binding_value,
-        layout_digest, profile_digest, root_parameters_for_modulus,
+        canonical_ciphertext_convention_digest, encoded_aggregate_layout_digest, layout_digest,
+        profile_digest, root_parameters_for_modulus, security_estimator_input_digest,
+        top_k_evaluator_input_layout_digest,
     };
     use crate::bgv::modular_arithmetic::is_prime_for_tests;
 
@@ -570,19 +577,60 @@ mod tests {
 
     #[test]
     fn selected_profile_digests_are_stable_hex_roots() {
-        for digest in [
-            profile_digest(),
-            batch_encoder_digest(),
-            layout_digest(),
-            batch_layout_binding_digest(),
-        ] {
-            let digest = digest.expect("digest should derive");
-            assert_eq!(digest.len(), 128);
-            assert!(
-                digest
-                    .chars()
-                    .all(|character| character.is_ascii_hexdigit())
-            );
+        let stable_digests = [
+            (
+                profile_digest(),
+                "d875931773a704df5f3b5d3dad4ef526bbe671a66465b75c19b2c1190929f86326822cd3ede1233eba2905a4b3c086e0426af5a3f7150f537d76b8349f73b3c2",
+            ),
+            (
+                batch_encoder_digest(),
+                "dd8249296f1b3d5f13ab5229b9ae94b15f10ec68b1a65c1e578d1b4d144fe772d205ea2d715114188e6ffbff414b9af75487987862effdbb4fae42ad6b257fe4",
+            ),
+            (
+                layout_digest(),
+                "88451e87d7f817d6b902d5d8ca4473e381aa56a78140ae165c7554403ebd7bfa44fe2edfab250afea26a3829108879fea523e14c28828356ffd87f80a0d9a89e",
+            ),
+            (
+                batch_layout_binding_digest(),
+                "14e66d0972e0a8afc5799add5cea3d09c3ae1f08c6850558d988e47b8f953dc847922c1fba7b372051a565e6b7e1ea5a2f6a864f31dc3b26607c933d9b462e8f",
+            ),
+            (
+                ballot_score_encoding_profile_digest(),
+                "f8ef46e35e3845d7736dbd4e2def724b6082e98b01cc9936d0fb59216b65f6d6f8462b987c6c1f2e0593a8de330734dae85e8b58e963f8808b700ef03ceacf30",
+            ),
+            (
+                ballot_share_layout_profile_digest(),
+                "c44544accf39fd10bf19a3c26be13352deac6e682b7339f19a420991505c858e1be7d9be2ebbc2632c421a9b56f9a98d592b92fa4a3e75614e536fe8f4e0dfd7",
+            ),
+            (
+                aggregate_input_encoding_profile_digest(),
+                "d9136003638ac0ab717681cd58a37e182f986a17a3b45612a6089080cdf95b80622b01857b6c5aea8a37da60ca8595bd1da1a665fb76faed2f0ba4a23181c35b",
+            ),
+            (
+                encoded_aggregate_layout_digest(),
+                "2e26e73278c79f9fdf8def4a68601500ddb86882a73ac43ffe25c90a7c0760c18ae72530a80d6f7b8f8aeff3abb31cbd35e7e59cb93edbedb4a4c455a13340e5",
+            ),
+            (
+                top_k_evaluator_input_layout_digest(),
+                "648022bf9e49d1bfacb52bc4391b6a4dd1729236495de0f27975141fea91e52557b379fa25aecb6a5e07f122bbb3c4166b8028773c168063356be37676960915",
+            ),
+            (
+                canonical_ciphertext_convention_digest(),
+                "71822f4b2f96f38140609db8621bd0c55948dca126eead0c80bffe5e287772af901e2e9dc83f5cce3578781ec595cb846936d804d70a9c084c58c3439017ed31",
+            ),
+            (
+                allowed_operation_registry_digest(),
+                "a9040aab3345f6a38f01a1d279c7cb15a3b845cf36f39a5221c99658c57e113613bd3dd95aaa933157cc46fd6d51a947fd9c45627753b35d5d402fd5c70e1156",
+            ),
+            (
+                security_estimator_input_digest(),
+                "4bce752346f1caf9652f456f27645da0a19ff8c9cf5376eef941d9cb4411e22fa4c2f8eaf8707df98b7a48318ef3987ba85e656143e71587d68e16edfdb2f428",
+            ),
+        ];
+
+        for (actual_digest, expected_digest) in stable_digests {
+            let actual_digest = actual_digest.expect("digest should derive");
+            assert_eq!(actual_digest, expected_digest);
         }
     }
 

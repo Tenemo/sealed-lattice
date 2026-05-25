@@ -4,16 +4,19 @@ import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+import { deriveProtocolDigest } from '#packages/crypto/src/index';
+
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const pinnedReferencePath = path.join(
     repoRoot,
-    'reference-projects/lattigo/pinned-reference.json',
+    'tools/lattigo-oracle/pinned-reference.json',
 );
 const oracleDirectoryPath = path.join(repoRoot, 'tools/lattigo-oracle');
 const oracleCommandInputRelativePaths = [
     'main.go',
     'go.mod',
     'go.sum',
+    'sealed-lattice-canonical-rns-fixtures.json',
     'internal/extract-pinned-archive/main.go',
 ] as const;
 
@@ -36,6 +39,21 @@ type PinnedReference = {
     readonly runtimeUse: string;
     readonly protocolEvidenceUse: string;
     readonly schemaVersion: number;
+};
+
+export type ReferenceOracleDigestBindings = {
+    readonly referenceOracleCommitDigest: string;
+    readonly referenceOracleContainerDigest: string;
+    readonly referenceOracleCommandDigest: string;
+    readonly referenceOracleVectorRoot: string;
+    readonly referenceOracleProfileDigest: string;
+    readonly records: {
+        readonly commitRecord: unknown;
+        readonly containerRecord: unknown;
+        readonly commandRecord: unknown;
+        readonly vectorRecord: unknown;
+        readonly profileRecord: unknown;
+    };
 };
 
 const sha256File = async (filePath: string): Promise<string> => {
@@ -69,7 +87,7 @@ export const assertPinnedDigest = (
 ): void => {
     if (actualDigest !== expectedDigest) {
         throw new Error(
-            `The pinned Lattigo ${label} digest changed: actual ${actualDigest}, expected ${expectedDigest}. Review the oracle change before updating reference-projects/lattigo/pinned-reference.json.`,
+            `The pinned Lattigo ${label} digest changed: actual ${actualDigest}, expected ${expectedDigest}. Review the oracle change before updating tools/lattigo-oracle/pinned-reference.json.`,
         );
     }
 };
@@ -174,11 +192,89 @@ export const verifyPinnedReferenceMetadata = (
     }
 };
 
+export const buildReferenceOracleDigestBindings = (
+    pinnedReference: PinnedReference,
+    commandDigest: string,
+    dockerfileDigest: string,
+): ReferenceOracleDigestBindings => {
+    const commitRecord = {
+        referenceName: pinnedReference.referenceName,
+        repository: pinnedReference.repository,
+        pinnedCommit: pinnedReference.pinnedCommit,
+        pinnedCommitDate: pinnedReference.pinnedCommitDate,
+        pinnedCommitUrl: pinnedReference.pinnedCommitUrl,
+        runtimeUse: pinnedReference.runtimeUse,
+        protocolEvidenceUse: pinnedReference.protocolEvidenceUse,
+    };
+    const containerRecord = {
+        referenceName: pinnedReference.referenceName,
+        containerBaseImage: pinnedReference.containerBaseImage,
+        containerBaseImageDigest: pinnedReference.containerBaseImageDigest,
+        goToolchain: pinnedReference.goToolchain,
+        oracleDockerfileDigest: dockerfileDigest,
+        protocolEvidenceUse: pinnedReference.protocolEvidenceUse,
+    };
+    const commandRecord = {
+        referenceName: pinnedReference.referenceName,
+        oracleCommandDigest: commandDigest,
+        commandInputRelativePaths: oracleCommandInputRelativePaths,
+        runtimeUse: pinnedReference.runtimeUse,
+        protocolEvidenceUse: pinnedReference.protocolEvidenceUse,
+    };
+    const vectorRecord = {
+        referenceName: pinnedReference.referenceName,
+        canonicalMaterialFixture:
+            'tools/lattigo-oracle/sealed-lattice-canonical-rns-fixtures.json',
+        serializationSource: 'sealed-lattice-rust-wasm-canonical-rns-fixture',
+        oracleVectorsAcceptedAsProtocolEvidence: false,
+        protocolEvidenceUse: pinnedReference.protocolEvidenceUse,
+    };
+    const profileRecord = {
+        referenceName: pinnedReference.referenceName,
+        allowedUse: pinnedReference.allowedUse,
+        claimBoundary: pinnedReference.claimBoundary,
+        comparableScope: 'ring/RNS/NTT and coefficient arithmetic parity only',
+        runtimeUse: pinnedReference.runtimeUse,
+        protocolEvidenceUse: pinnedReference.protocolEvidenceUse,
+    };
+
+    return {
+        referenceOracleCommitDigest: deriveProtocolDigest(
+            'ReferenceOracleCommitDigest',
+            commitRecord,
+        ),
+        referenceOracleContainerDigest: deriveProtocolDigest(
+            'ReferenceOracleContainerDigest',
+            containerRecord,
+        ),
+        referenceOracleCommandDigest: deriveProtocolDigest(
+            'ReferenceOracleCommandDigest',
+            commandRecord,
+        ),
+        referenceOracleVectorRoot: deriveProtocolDigest(
+            'ReferenceOracleVectorRoot',
+            vectorRecord,
+        ),
+        referenceOracleProfileDigest: deriveProtocolDigest(
+            'ReferenceOracleProfileDigest',
+            profileRecord,
+        ),
+        records: {
+            commitRecord,
+            containerRecord,
+            commandRecord,
+            vectorRecord,
+            profileRecord,
+        },
+    };
+};
+
 export const verifyPinnedReference = async (): Promise<{
     readonly archivePresent: boolean;
     readonly checkoutPresent: boolean;
     readonly commandDigest: string;
     readonly dockerfileDigest: string;
+    readonly referenceOracleDigestBindings: ReferenceOracleDigestBindings;
 }> => {
     const pinnedReference = await loadPinnedReference();
     if (pinnedReference.runtimeUse !== 'forbidden') {
@@ -262,6 +358,11 @@ export const verifyPinnedReference = async (): Promise<{
         checkoutPresent,
         commandDigest,
         dockerfileDigest,
+        referenceOracleDigestBindings: buildReferenceOracleDigestBindings(
+            pinnedReference,
+            commandDigest,
+            dockerfileDigest,
+        ),
     };
 };
 

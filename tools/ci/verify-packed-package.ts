@@ -51,6 +51,12 @@ const forbiddenPublishedRuntimePathFragments = [
     'dist/internal/election-foundation/plaintext-oracle/',
     'dist/internal/election-foundation/target-acceptance/',
 ] as const;
+const forbiddenPublishedOraclePathFragments = [
+    'tools/lattigo-oracle/',
+    'lattigo-oracle',
+    'oracle-vector',
+    'oracle-serializer',
+] as const;
 const forbiddenPublishedTestVectorPathFragments = [
     'test-vectors/',
     'ballot-field-linear-proof-vectors.json',
@@ -74,6 +80,11 @@ const requiredPublishedPackageFilePaths = [
     'dist/internal/transcript-core.d.ts',
     'public-surface.json',
 ] as const;
+const forbiddenPublishedOracleFileNames = new Set([
+    'Dockerfile',
+    'go.mod',
+    'go.sum',
+]);
 const publishedKernelDigestPattern =
     /const packagedTranscriptCoreKernelNormalizedSha256Hex\s*=\s*(?<digest>undefined|'[a-f0-9]{64}');/u;
 
@@ -408,6 +419,21 @@ export const validatePublishedPackageFilePaths = (
         ) {
             failures.push(
                 `Published package must not include repository test vectors: ${publishedPackageFilePath}`,
+            );
+        }
+        const publishedPackageBaseName = path.basename(
+            publishedPackageFilePath,
+        );
+        if (
+            forbiddenPublishedOraclePathFragments.some(
+                (forbiddenPathFragment) =>
+                    publishedPackageFilePath.includes(forbiddenPathFragment),
+            ) ||
+            forbiddenPublishedOracleFileNames.has(publishedPackageBaseName) ||
+            publishedPackageFilePath.endsWith('.go')
+        ) {
+            failures.push(
+                `Published package must not include development oracle artifact: ${publishedPackageFilePath}`,
             );
         }
     }

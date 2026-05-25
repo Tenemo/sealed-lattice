@@ -317,6 +317,7 @@ enum TranscriptCoreCommand {
     VerifyAggregateDerivationProof,
     DescribeBgvRnsProfile,
     DescribeBgvOperationRegistry,
+    ValidateBgvEvaluatorOperation,
     GenerateBgvBackendReport,
     DescribeBgvPassiveSetupObjectModel,
     GenerateBgvPassiveSetup,
@@ -502,6 +503,7 @@ fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult<Value> {
         }
         TranscriptCoreCommand::DescribeBgvRnsProfile
         | TranscriptCoreCommand::DescribeBgvOperationRegistry
+        | TranscriptCoreCommand::ValidateBgvEvaluatorOperation
         | TranscriptCoreCommand::GenerateBgvBackendReport
         | TranscriptCoreCommand::DescribeBgvPassiveSetupObjectModel
         | TranscriptCoreCommand::GenerateBgvPassiveSetup
@@ -619,6 +621,12 @@ fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> Canonical
         TranscriptCoreCommand::DescribeBgvOperationRegistry => {
             crate::bgv::commands::describe_bgv_operation_registry()
         }
+        TranscriptCoreCommand::ValidateBgvEvaluatorOperation => {
+            Ok(crate::bgv::commands::bgv_input_result(
+                "validateBgvEvaluatorOperation",
+                crate::bgv::commands::validate_bgv_evaluator_operation_from_request(request),
+            ))
+        }
         TranscriptCoreCommand::GenerateBgvBackendReport => {
             crate::bgv::commands::generate_bgv_backend_report()
         }
@@ -632,22 +640,42 @@ fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> Canonical
             crate::bgv::commands::verify_bgv_passive_setup_from_request(request)
         }
         TranscriptCoreCommand::EncodeBgvBatchPlaintext => {
-            crate::bgv::commands::encode_bgv_batch_plaintext_from_request(request)
+            Ok(crate::bgv::commands::bgv_input_result(
+                "encodeBgvBatchPlaintext",
+                crate::bgv::commands::encode_bgv_batch_plaintext_from_request(request),
+            ))
         }
         TranscriptCoreCommand::ValidateBgvPlaintextObject => {
-            crate::bgv::commands::validate_bgv_plaintext_from_request(request)
+            Ok(crate::bgv::commands::bgv_input_result(
+                "validateBgvPlaintextObject",
+                crate::bgv::commands::validate_bgv_plaintext_from_request(request),
+            ))
         }
         TranscriptCoreCommand::ValidateBgvCiphertextObject => {
-            crate::bgv::commands::validate_bgv_ciphertext_from_request(request)
+            Ok(crate::bgv::commands::bgv_input_result(
+                "validateBgvCiphertextObject",
+                crate::bgv::commands::validate_bgv_ciphertext_from_request(request),
+            ))
         }
         TranscriptCoreCommand::GenerateBgvCiphertextConventionFixture => {
-            crate::bgv::commands::generate_bgv_ciphertext_convention_fixture_from_request(request)
+            Ok(crate::bgv::commands::bgv_input_result(
+                "generateBgvCiphertextConventionFixture",
+                crate::bgv::commands::generate_bgv_ciphertext_convention_fixture_from_request(
+                    request,
+                ),
+            ))
         }
         TranscriptCoreCommand::GenerateBgvBaseConversionFixture => {
-            crate::bgv::commands::generate_bgv_base_conversion_fixture_from_request(request)
+            Ok(crate::bgv::commands::bgv_input_result(
+                "generateBgvBaseConversionFixture",
+                crate::bgv::commands::generate_bgv_base_conversion_fixture_from_request(request),
+            ))
         }
         TranscriptCoreCommand::AnalyzeBgvCanonicalObject => {
-            crate::bgv::commands::analyze_bgv_canonical_object_from_request(request)
+            Ok(crate::bgv::commands::bgv_input_result(
+                "analyzeBgvCanonicalObject",
+                crate::bgv::commands::analyze_bgv_canonical_object_from_request(request),
+            ))
         }
         TranscriptCoreCommand::RejectBgvReferenceOracleArtifact => {
             Ok(crate::bgv::commands::reject_bgv_reference_oracle_artifact_from_request(request))

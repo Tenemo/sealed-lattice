@@ -43,5 +43,4 @@ tmp-*
 .env
 
 # External references
-reference-projects/
 reference-documents/
