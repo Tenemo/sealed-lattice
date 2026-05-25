@@ -61,6 +61,16 @@ struct ParticipantSetupMaterial {
     trustee_threshold_verification_key_digest: String,
 }
 
+struct VerifiedParticipantSetupBinding {
+    trustee_identity: String,
+    roster_position: usize,
+    recovery_epoch: u64,
+    device_epoch: u64,
+    public_key_share_root: String,
+    participant_setup_record_digest: String,
+    trustee_threshold_verification_key_digest: String,
+}
+
 pub(crate) fn describe_passive_setup_object_model() -> CanonicalResult<Value> {
     Ok(json!({
         "objectModelId": "sealed-lattice-m8-passive-setup-object-model-v1",
@@ -204,6 +214,7 @@ pub(crate) fn verify_passive_setup_package_from_request(request: &Value) -> Cano
     )?;
 
     validate_setup_package_shape(setup_package)?;
+    validate_setup_package_internal_bindings(setup_package)?;
 
     Ok(json!({
         "ok": true,
@@ -446,11 +457,20 @@ fn read_passive_setup_input(request: &Value) -> CanonicalResult<PassiveSetupInpu
         ));
     }
     let mut identities = BTreeSet::new();
+    let mut roster_positions = BTreeSet::new();
     for participant in &participants {
         if !identities.insert(participant.trustee_identity.as_str()) {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
                 "M8 passive setup participant identities must be unique",
+            ));
+        }
+        if participant.roster_position >= participants.len()
+            || !roster_positions.insert(participant.roster_position)
+        {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "M8 passive setup roster positions must be unique and cover the frozen roster",
             ));
         }
     }
@@ -566,12 +586,10 @@ fn participant_setup_material(
             -1,
             1,
         ),
-        "sampledLocalErrorCoefficients": sample_small_distribution(
+        "sampledLocalErrorCoefficients": sample_centered_binomial_eta2(
             &input.setup_seed_digest,
             &participant.trustee_identity,
             "local-error",
-            -2,
-            2,
         ),
     });
     let public_key_share_root =
@@ -694,7 +712,7 @@ fn threshold_verification_material(
         .iter()
         .map(|participant| {
             json!({
-                "trusteeIdentity": participant.trustee_identity,
+                "trusteeIdentity": participant.trustee_identity.clone(),
                 "rosterPosition": participant.roster_position,
                 "interpolationPoint": participant.roster_position + 1,
                 "recoveryEpoch": participant.recovery_epoch,
@@ -1249,6 +1267,30 @@ fn sample_small_distribution(
         .collect()
 }
 
+fn sample_centered_binomial_eta2(seed_digest: &str, identity: &str, label: &str) -> Vec<Value> {
+    sample_positions()
+        .into_iter()
+        .map(|position| {
+            let position_text = position.to_string();
+            let output = hash512(
+                "sealed-lattice-bgv-rns/sample-centered-binomial-eta2-v1",
+                &[
+                    seed_digest.as_bytes(),
+                    identity.as_bytes(),
+                    label.as_bytes(),
+                    position_text.as_bytes(),
+                ],
+            );
+            let low_weight = i64::from(output[0] & 1) + i64::from((output[0] >> 1) & 1);
+            let high_weight = i64::from((output[0] >> 2) & 1) + i64::from((output[0] >> 3) & 1);
+            json!({
+                "position": position,
+                "value": low_weight - high_weight,
+            })
+        })
+        .collect()
+}
+
 fn sample_residue(seed_digest: &str, label: &str, position: usize, modulus: u64) -> u64 {
     let position_text = position.to_string();
     let modulus_text = modulus.to_string();
@@ -1335,10 +1377,16 @@ fn read_non_empty_string<'a>(value: &'a Value, field_name: &str) -> CanonicalRes
 
 fn read_digest_field<'a>(value: &'a Value, field_name: &str) -> CanonicalResult<&'a str> {
     let digest = read_non_empty_string(value, field_name)?;
+    validate_digest_string(digest, field_name)?;
+
+    Ok(digest)
+}
+
+fn validate_digest_string(digest: &str, field_name: &str) -> CanonicalResult<()> {
     if digest.len() != 128
         || !digest
             .chars()
-            .all(|character| character.is_ascii_hexdigit())
+            .all(|character| character.is_ascii_digit() || ('a'..='f').contains(&character))
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
@@ -1346,7 +1394,7 @@ fn read_digest_field<'a>(value: &'a Value, field_name: &str) -> CanonicalResult<
         ));
     }
 
-    Ok(digest)
+    Ok(())
 }
 
 fn read_optional_u64(value: &Value, field_name: &str) -> CanonicalResult<Option<u64>> {
@@ -1382,13 +1430,14 @@ fn compare_expected_string(
     actual: &str,
     description: &str,
 ) -> CanonicalResult<()> {
-    if let Some(expected) = request.get(expected_field_name).and_then(Value::as_str)
-        && expected != actual
-    {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
-            format!("BGV passive setup {description} does not match {expected_field_name}"),
-        ));
+    if let Some(expected) = request.get(expected_field_name).and_then(Value::as_str) {
+        validate_digest_string(expected, expected_field_name)?;
+        if expected != actual {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::ProfileComponentMismatch,
+                format!("BGV passive setup {description} does not match {expected_field_name}"),
+            ));
+        }
     }
 
     Ok(())
@@ -1428,6 +1477,810 @@ fn bool_at_path(value: &Value, path: &[&str]) -> CanonicalResult<bool> {
             format!("setup package field {} must be a boolean", path.join(".")),
         )
     })
+}
+
+fn value_at_path<'a>(value: &'a Value, path: &[&str]) -> CanonicalResult<&'a Value> {
+    let mut current = value;
+    for field_name in path {
+        current = current.get(*field_name).ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                format!("missing setup package field {}", path.join(".")),
+            )
+        })?;
+    }
+
+    Ok(current)
+}
+
+fn array_at_path<'a>(value: &'a Value, path: &[&str]) -> CanonicalResult<&'a Vec<Value>> {
+    value_at_path(value, path)?.as_array().ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            format!("setup package field {} must be an array", path.join(".")),
+        )
+    })
+}
+
+fn unsigned_at_path(value: &Value, path: &[&str]) -> CanonicalResult<u64> {
+    value_at_path(value, path)?.as_u64().ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            format!(
+                "setup package field {} must be a non-negative integer",
+                path.join(".")
+            ),
+        )
+    })
+}
+
+fn usize_at_path(value: &Value, path: &[&str]) -> CanonicalResult<usize> {
+    let value = unsigned_at_path(value, path)?;
+    usize::try_from(value).map_err(|_| {
+        CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            format!("setup package field {} does not fit usize", path.join(".")),
+        )
+    })
+}
+
+fn digest_at_path<'a>(value: &'a Value, path: &[&str]) -> CanonicalResult<&'a str> {
+    let digest = string_at_path(value, path)?;
+    validate_digest_string(digest, &path.join("."))?;
+
+    Ok(digest)
+}
+
+fn compare_required_string(actual: &str, expected: &str, description: &str) -> CanonicalResult<()> {
+    if actual != expected {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            format!("M8 setup package {description} does not match its canonical binding"),
+        ));
+    }
+
+    Ok(())
+}
+
+fn compare_string_at_path(
+    value: &Value,
+    path: &[&str],
+    expected: &str,
+    description: &str,
+) -> CanonicalResult<()> {
+    compare_required_string(string_at_path(value, path)?, expected, description)
+}
+
+fn compare_digest_at_path(
+    value: &Value,
+    path: &[&str],
+    expected: &str,
+    description: &str,
+) -> CanonicalResult<()> {
+    compare_required_string(digest_at_path(value, path)?, expected, description)
+}
+
+fn compare_derived_digest(
+    namespace: &str,
+    value: &Value,
+    actual_digest: &str,
+    description: &str,
+) -> CanonicalResult<()> {
+    let expected_digest = derive_protocol_digest(namespace, value)?;
+    if actual_digest != expected_digest {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            format!("M8 setup package {description} does not match its canonical payload"),
+        ));
+    }
+
+    Ok(())
+}
+
+fn is_forbidden_setup_package_secret_field(field_name: &str) -> bool {
+    matches!(
+        field_name,
+        "secretShares"
+            | "rawSecretShares"
+            | "globalSecret"
+            | "globalSecretPolynomial"
+            | "fullSecretPolynomial"
+            | "trustedDealerSecret"
+            | "trustedDealerSecretHex"
+            | "centralizedSecret"
+            | "rawKeySwitchSecret"
+            | "rawDecryptionSecret"
+    )
+}
+
+fn reject_forbidden_setup_package_secret_fields(value: &Value) -> CanonicalResult<()> {
+    match value {
+        Value::Array(items) => {
+            for item in items {
+                reject_forbidden_setup_package_secret_fields(item)?;
+            }
+        }
+        Value::Object(fields) => {
+            for (field_name, field_value) in fields {
+                if is_forbidden_setup_package_secret_field(field_name) {
+                    return Err(CanonicalError::new(
+                        CanonicalErrorCode::InvalidFixture,
+                        format!(
+                            "{field_name} would expose BGV secret material and cannot be accepted by M8 setup verification"
+                        ),
+                    ));
+                }
+                if (field_name == "centralizedSecretReconstruction"
+                    || field_name == "rawSecretShareExported")
+                    && field_value.as_bool() != Some(false)
+                {
+                    return Err(CanonicalError::new(
+                        CanonicalErrorCode::ProfileComponentMismatch,
+                        format!("M8 setup package field {field_name} must remain false"),
+                    ));
+                }
+                reject_forbidden_setup_package_secret_fields(field_value)?;
+            }
+        }
+        _ => {}
+    }
+
+    Ok(())
+}
+
+fn validate_setup_package_internal_bindings(setup_package: &Value) -> CanonicalResult<()> {
+    reject_forbidden_setup_package_secret_fields(setup_package)?;
+    let profile_digest = profile_digest()?;
+    let backend_profile_digest = backend_profile_digest()?;
+    compare_string_at_path(
+        setup_package,
+        &["profileBindings", "profileId"],
+        PROFILE_ID,
+        "profile id",
+    )?;
+    compare_string_at_path(
+        setup_package,
+        &["profileBindings", "backendProfileId"],
+        BACKEND_PROFILE_ID,
+        "backend profile id",
+    )?;
+    compare_digest_at_path(
+        setup_package,
+        &["profileBindings", "profileDigest"],
+        &profile_digest,
+        "profile digest",
+    )?;
+    compare_digest_at_path(
+        setup_package,
+        &["profileBindings", "backendProfileDigest"],
+        &backend_profile_digest,
+        "backend profile digest",
+    )?;
+    compare_digest_at_path(
+        setup_package,
+        &["profileBindings", "canonicalCiphertextConventionDigest"],
+        &canonical_ciphertext_convention_digest()?,
+        "canonical ciphertext convention digest",
+    )?;
+    compare_digest_at_path(
+        setup_package,
+        &["profileBindings", "batchEncoderDigest"],
+        &batch_encoder_digest()?,
+        "batch encoder digest",
+    )?;
+    compare_digest_at_path(
+        setup_package,
+        &["profileBindings", "batchLayoutBindingDigest"],
+        &batch_layout_binding_digest()?,
+        "batch layout binding digest",
+    )?;
+    compare_digest_at_path(
+        setup_package,
+        &["profileBindings", "allowedEvaluatorOpsDigest"],
+        &allowed_operation_registry_digest()?,
+        "allowed evaluator operation digest",
+    )?;
+    compare_digest_at_path(
+        setup_package,
+        &["profileBindings", "encryptedAggregateInputLayoutDigest"],
+        &layout_digest()?,
+        "encrypted aggregate input layout digest",
+    )?;
+
+    let threshold_decryption_profile_digest = derive_protocol_digest(
+        "ThresholdDecryptionProfileDigest",
+        &threshold_decryption_profile(&profile_digest)?,
+    )?;
+    let kllps_target_decryption_profile_digest = derive_protocol_digest(
+        "KllpsTargetDecryptionProfileDigest",
+        &json!({
+            "profileId": THRESHOLD_DECRYPTION_PROFILE_ID,
+            "thresholdDecryptionProfileDigest": threshold_decryption_profile_digest,
+            "profileStatus": "future-target-decryption-profile-binding",
+        }),
+    )?;
+    compare_string_at_path(
+        setup_package,
+        &["kllpsCompatibility", "thresholdDecryptionProfileId"],
+        THRESHOLD_DECRYPTION_PROFILE_ID,
+        "threshold decryption profile id",
+    )?;
+    compare_digest_at_path(
+        setup_package,
+        &["kllpsCompatibility", "thresholdDecryptionProfileDigest"],
+        &threshold_decryption_profile_digest,
+        "threshold decryption profile digest",
+    )?;
+    compare_digest_at_path(
+        setup_package,
+        &["kllpsCompatibility", "kllpsTargetDecryptionProfileDigest"],
+        &kllps_target_decryption_profile_digest,
+        "KLLPS target decryption profile digest",
+    )?;
+
+    let participant_bindings = validate_participant_setup_records(
+        setup_package,
+        &profile_digest,
+        &backend_profile_digest,
+        &threshold_decryption_profile_digest,
+        &kllps_target_decryption_profile_digest,
+    )?;
+    validate_collective_public_key(
+        setup_package,
+        &participant_bindings,
+        &profile_digest,
+        &backend_profile_digest,
+    )?;
+    validate_threshold_verification_material(
+        setup_package,
+        &participant_bindings,
+        &threshold_decryption_profile_digest,
+        &kllps_target_decryption_profile_digest,
+    )?;
+    validate_evaluation_keys(setup_package)?;
+    validate_setup_certificates(setup_package)?;
+
+    Ok(())
+}
+
+fn validate_participant_setup_records(
+    setup_package: &Value,
+    profile_digest: &str,
+    backend_profile_digest: &str,
+    threshold_decryption_profile_digest: &str,
+    kllps_target_decryption_profile_digest: &str,
+) -> CanonicalResult<Vec<VerifiedParticipantSetupBinding>> {
+    let ceremony_id = string_at_path(setup_package, &["setupInputs", "ceremonyId"])?;
+    let manifest_digest = digest_at_path(setup_package, &["setupInputs", "manifestDigest"])?;
+    let roster_digest = digest_at_path(setup_package, &["setupInputs", "rosterDigest"])?;
+    let threshold_profile_digest =
+        digest_at_path(setup_package, &["setupInputs", "thresholdProfileDigest"])?;
+    let participants = array_at_path(setup_package, &["participants"])?;
+    let participant_identities =
+        array_at_path(setup_package, &["setupInputs", "participantIdentities"])?;
+    if participant_identities.len() != participants.len() {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "setupPackage participant identities do not match participant records",
+        ));
+    }
+
+    let mut identities = BTreeSet::new();
+    let mut roster_positions = BTreeSet::new();
+    let mut verified_participants = Vec::with_capacity(participants.len());
+    for (participant_index, participant_record) in participants.iter().enumerate() {
+        compare_string_at_path(
+            participant_record,
+            &["objectType"],
+            "ParticipantBgvSetupRecord",
+            "participant record object type",
+        )?;
+        if unsigned_at_path(participant_record, &["objectVersion"])? != 1 {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "participant setup record object version must be 1",
+            ));
+        }
+        compare_string_at_path(
+            participant_record,
+            &["setupProfileId"],
+            PASSIVE_SETUP_PROFILE_ID,
+            "participant setup profile id",
+        )?;
+        compare_string_at_path(
+            participant_record,
+            &["ceremonyId"],
+            ceremony_id,
+            "participant ceremony id",
+        )?;
+        compare_digest_at_path(
+            participant_record,
+            &["manifestDigest"],
+            manifest_digest,
+            "participant manifest digest",
+        )?;
+        compare_digest_at_path(
+            participant_record,
+            &["rosterDigest"],
+            roster_digest,
+            "participant roster digest",
+        )?;
+        compare_digest_at_path(
+            participant_record,
+            &["thresholdProfileDigest"],
+            threshold_profile_digest,
+            "participant threshold profile digest",
+        )?;
+        compare_digest_at_path(
+            participant_record,
+            &["profileDigest"],
+            profile_digest,
+            "participant profile digest",
+        )?;
+        compare_digest_at_path(
+            participant_record,
+            &["backendProfileDigest"],
+            backend_profile_digest,
+            "participant backend profile digest",
+        )?;
+        let trustee_identity = string_at_path(participant_record, &["trusteeIdentity"])?;
+        let listed_identity = participant_identities[participant_index]
+            .as_str()
+            .ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::InvalidFixture,
+                    "setupPackage participant identities must be strings",
+                )
+            })?;
+        if listed_identity != trustee_identity {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::ProfileComponentMismatch,
+                "setupPackage participant identity order does not match participant records",
+            ));
+        }
+        let roster_position = usize_at_path(participant_record, &["rosterPosition"])?;
+        if roster_position >= participants.len() || !roster_positions.insert(roster_position) {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "setupPackage participant roster positions must be unique and cover the frozen roster",
+            ));
+        }
+        if !identities.insert(trustee_identity.to_string()) {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "setupPackage participant identities must be unique",
+            ));
+        }
+        let recovery_epoch = unsigned_at_path(participant_record, &["recoveryEpoch"])?;
+        let device_epoch = unsigned_at_path(participant_record, &["deviceEpoch"])?;
+        let public_key_share_root = digest_at_path(participant_record, &["publicKeyShareRoot"])?;
+        let participant_setup_record_digest =
+            digest_at_path(participant_record, &["participantSetupRecordDigest"])?;
+        let trustee_threshold_verification_key_digest = digest_at_path(
+            participant_record,
+            &["trusteeThresholdVerificationKeyDigest"],
+        )?;
+        digest_at_path(participant_record, &["localSecretShareCommitmentDigest"])?;
+        digest_at_path(participant_record, &["localErrorCommitmentDigest"])?;
+
+        let mut participant_record_without_digest = participant_record.clone();
+        participant_record_without_digest
+            .as_object_mut()
+            .ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::InvalidFixture,
+                    "participant setup record must be an object",
+                )
+            })?
+            .remove("participantSetupRecordDigest");
+        compare_derived_digest(
+            "ParticipantBgvSetupRecordDigest",
+            &participant_record_without_digest,
+            participant_setup_record_digest,
+            "participant setup record digest",
+        )?;
+
+        let trustee_threshold_verification_key = json!({
+            "objectType": "TrusteeThresholdVerificationKey",
+            "objectVersion": 1,
+            "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
+            "thresholdDecryptionProfileId": THRESHOLD_DECRYPTION_PROFILE_ID,
+            "thresholdDecryptionProfileDigest": threshold_decryption_profile_digest,
+            "kllpsTargetDecryptionProfileDigest": kllps_target_decryption_profile_digest,
+            "ceremonyId": ceremony_id,
+            "rosterDigest": roster_digest,
+            "trusteeIdentity": trustee_identity,
+            "rosterPosition": roster_position,
+            "recoveryEpoch": recovery_epoch,
+            "deviceEpoch": device_epoch,
+            "publicKeyShareRoot": public_key_share_root,
+            "verificationStatement": "passive-transcript-identity-profile-and-share-domain-binding",
+            "maliciousDkgProofIncluded": false,
+        });
+        compare_derived_digest(
+            "TrusteeThresholdVerificationKeyDigest",
+            &trustee_threshold_verification_key,
+            trustee_threshold_verification_key_digest,
+            "trustee threshold verification key digest",
+        )?;
+
+        verified_participants.push(VerifiedParticipantSetupBinding {
+            trustee_identity: trustee_identity.to_string(),
+            roster_position,
+            recovery_epoch,
+            device_epoch,
+            public_key_share_root: public_key_share_root.to_string(),
+            participant_setup_record_digest: participant_setup_record_digest.to_string(),
+            trustee_threshold_verification_key_digest: trustee_threshold_verification_key_digest
+                .to_string(),
+        });
+    }
+
+    Ok(verified_participants)
+}
+
+fn validate_collective_public_key(
+    setup_package: &Value,
+    participant_bindings: &[VerifiedParticipantSetupBinding],
+    profile_digest: &str,
+    backend_profile_digest: &str,
+) -> CanonicalResult<()> {
+    let collective_public_key = value_at_path(setup_package, &["collectivePublicKey"])?;
+    let collective_public_key_record = value_at_path(collective_public_key, &["record"])?;
+    compare_string_at_path(
+        collective_public_key_record,
+        &["objectType"],
+        "BgvCollectivePublicKey",
+        "collective public key object type",
+    )?;
+    compare_digest_at_path(
+        collective_public_key_record,
+        &["profileDigest"],
+        profile_digest,
+        "collective public key profile digest",
+    )?;
+    compare_digest_at_path(
+        collective_public_key_record,
+        &["backendProfileDigest"],
+        backend_profile_digest,
+        "collective public key backend profile digest",
+    )?;
+    if usize_at_path(collective_public_key_record, &["participantCount"])?
+        != participant_bindings.len()
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "collective public key participant count does not match participant records",
+        ));
+    }
+    let expected_public_key_share_roots = participant_bindings
+        .iter()
+        .map(|participant| Value::String(participant.public_key_share_root.clone()))
+        .collect::<Vec<_>>();
+    if array_at_path(collective_public_key_record, &["publicKeyShareRoots"])?
+        != &expected_public_key_share_roots
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "collective public key share roots do not match participant records",
+        ));
+    }
+
+    let collective_public_key_root =
+        digest_at_path(collective_public_key, &["collectivePublicKeyRoot"])?;
+    compare_derived_digest(
+        "CollectivePublicKeyRoot",
+        collective_public_key_record,
+        collective_public_key_root,
+        "collective public key root",
+    )?;
+    let expected_bgv_public_key_root = derive_protocol_digest(
+        "BGVPublicKeyRoot",
+        &json!({
+            "collectivePublicKeyRoot": collective_public_key_root,
+            "profileDigest": profile_digest,
+            "backendProfileDigest": backend_profile_digest,
+            "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
+        }),
+    )?;
+    compare_digest_at_path(
+        collective_public_key,
+        &["bgvPublicKeyRoot"],
+        &expected_bgv_public_key_root,
+        "BGV public key root",
+    )
+}
+
+fn validate_threshold_verification_material(
+    setup_package: &Value,
+    participant_bindings: &[VerifiedParticipantSetupBinding],
+    threshold_decryption_profile_digest: &str,
+    kllps_target_decryption_profile_digest: &str,
+) -> CanonicalResult<()> {
+    let threshold_material = value_at_path(setup_package, &["thresholdVerificationMaterial"])?;
+    let verification_key_set = value_at_path(threshold_material, &["verificationKeySet"])?;
+    let expected_participant_setup_record_digests = participant_bindings
+        .iter()
+        .map(|participant| Value::String(participant.participant_setup_record_digest.clone()))
+        .collect::<Vec<_>>();
+    let expected_trustee_threshold_verification_key_digests = participant_bindings
+        .iter()
+        .map(|participant| {
+            Value::String(
+                participant
+                    .trustee_threshold_verification_key_digest
+                    .clone(),
+            )
+        })
+        .collect::<Vec<_>>();
+    if array_at_path(verification_key_set, &["participantSetupRecordDigests"])?
+        != &expected_participant_setup_record_digests
+        || array_at_path(
+            verification_key_set,
+            &["trusteeThresholdVerificationKeyDigests"],
+        )? != &expected_trustee_threshold_verification_key_digests
+        || array_at_path(
+            threshold_material,
+            &["trusteeThresholdVerificationKeyDigests"],
+        )? != &expected_trustee_threshold_verification_key_digests
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "threshold verification material does not match participant setup records",
+        ));
+    }
+
+    let expected_interpolation_universe = participant_bindings
+        .iter()
+        .map(|participant| {
+            json!({
+                "trusteeIdentity": participant.trustee_identity,
+                "rosterPosition": participant.roster_position,
+                "interpolationPoint": participant.roster_position + 1,
+                "recoveryEpoch": participant.recovery_epoch,
+                "deviceEpoch": participant.device_epoch,
+            })
+        })
+        .collect::<Vec<_>>();
+    if array_at_path(verification_key_set, &["participantInterpolationUniverse"])?
+        != &expected_interpolation_universe
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "threshold interpolation universe does not match participant setup records",
+        ));
+    }
+
+    let threshold_share_verification_key_root =
+        digest_at_path(threshold_material, &["thresholdShareVerificationKeyRoot"])?;
+    compare_derived_digest(
+        "ThresholdShareVerificationKeyRoot",
+        verification_key_set,
+        threshold_share_verification_key_root,
+        "threshold share verification key root",
+    )?;
+    let expected_threshold_share_verification_key_digest = derive_protocol_digest(
+        "ThresholdShareVerificationKeyDigest",
+        &json!({
+            "thresholdShareVerificationKeyRoot": threshold_share_verification_key_root,
+            "thresholdDecryptionProfileDigest": threshold_decryption_profile_digest,
+            "kllpsTargetDecryptionProfileDigest": kllps_target_decryption_profile_digest,
+        }),
+    )?;
+    compare_digest_at_path(
+        threshold_material,
+        &["thresholdShareVerificationKeyDigest"],
+        &expected_threshold_share_verification_key_digest,
+        "threshold share verification key digest",
+    )
+}
+
+fn validate_evaluation_keys(setup_package: &Value) -> CanonicalResult<()> {
+    let evaluation_keys = value_at_path(setup_package, &["evaluationKeys"])?;
+    let evaluation_key_record = value_at_path(evaluation_keys, &["record"])?;
+    let rot_set = value_at_path(evaluation_keys, &["rotSet"])?;
+    let rot_set_digest = digest_at_path(evaluation_keys, &["rotSetDigest"])?;
+    compare_derived_digest(
+        "RotSetDigest",
+        rot_set,
+        rot_set_digest,
+        "rotation set digest",
+    )?;
+    let key_switch_decomposition_digest =
+        digest_at_path(evaluation_keys, &["keySwitchDecompositionDigest"])?;
+    compare_digest_at_path(
+        evaluation_key_record,
+        &["keySwitchDecompositionDigest"],
+        key_switch_decomposition_digest,
+        "evaluation key decomposition digest",
+    )?;
+    compare_digest_at_path(
+        setup_package,
+        &["certificates", "keySwitchDecompositionDigest"],
+        key_switch_decomposition_digest,
+        "certificate key-switch decomposition digest",
+    )?;
+    let collective_public_key_root =
+        digest_at_path(evaluation_key_record, &["collectivePublicKeyRoot"])?;
+    let bgv_public_key_root = digest_at_path(evaluation_key_record, &["bgvPublicKeyRoot"])?;
+    compare_digest_at_path(
+        setup_package,
+        &["collectivePublicKey", "collectivePublicKeyRoot"],
+        collective_public_key_root,
+        "evaluation key collective public key root",
+    )?;
+    compare_digest_at_path(
+        setup_package,
+        &["collectivePublicKey", "bgvPublicKeyRoot"],
+        bgv_public_key_root,
+        "evaluation key BGV public key root",
+    )?;
+    compare_digest_at_path(
+        evaluation_key_record,
+        &["rotSetDigest"],
+        rot_set_digest,
+        "evaluation key rotation set digest",
+    )?;
+
+    let relinearization_key_record = json!({
+        "objectType": "BgvRelinearizationKey",
+        "objectVersion": 1,
+        "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
+        "ceremonyId": string_at_path(evaluation_key_record, &["ceremonyId"])?,
+        "rosterDigest": digest_at_path(evaluation_key_record, &["rosterDigest"])?,
+        "collectivePublicKeyRoot": collective_public_key_root,
+        "bgvPublicKeyRoot": bgv_public_key_root,
+        "keySwitchDecompositionDigest": key_switch_decomposition_digest,
+        "publicBasisId": BgvBasisKind::Extended.basis_id(),
+        "publicRlweSampleCount": 2,
+        "maliciousEvaluationKeyProofIncluded": false,
+    });
+    let relinearization_key_root = digest_at_path(evaluation_keys, &["relinearizationKeyRoot"])?;
+    compare_derived_digest(
+        "RelinearizationKeyRoot",
+        &relinearization_key_record,
+        relinearization_key_root,
+        "relinearization key root",
+    )?;
+    compare_digest_at_path(
+        evaluation_key_record,
+        &["relinearizationKeyRoot"],
+        relinearization_key_root,
+        "evaluation key relinearization root",
+    )?;
+
+    let rotation_key_roots = array_at_path(evaluation_keys, &["rotationKeyRoots"])?;
+    let rotations = array_at_path(rot_set, &["rotations"])?;
+    if rotation_key_roots.len() != rotations.len() {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "rotation key root count does not match the provisional rotation set",
+        ));
+    }
+    for (rotation_index, rotation_key_root_record) in rotation_key_roots.iter().enumerate() {
+        if value_at_path(rotation_key_root_record, &["rotation"])? != &rotations[rotation_index] {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::ProfileComponentMismatch,
+                "rotation key root order does not match the provisional rotation set",
+            ));
+        }
+        let rotation_key_record = json!({
+            "objectType": "BgvRotationKey",
+            "objectVersion": 1,
+            "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
+            "ceremonyId": string_at_path(evaluation_key_record, &["ceremonyId"])?,
+            "rosterDigest": digest_at_path(evaluation_key_record, &["rosterDigest"])?,
+            "collectivePublicKeyRoot": collective_public_key_root,
+            "rotSetDigest": rot_set_digest,
+            "rotation": rotations[rotation_index].clone(),
+            "keySwitchDecompositionDigest": key_switch_decomposition_digest,
+            "publicBasisId": BgvBasisKind::Extended.basis_id(),
+            "publicRlweSampleCount": 1,
+            "maliciousEvaluationKeyProofIncluded": false,
+        });
+        compare_derived_digest(
+            "RotationKeyRoot",
+            &rotation_key_record,
+            digest_at_path(rotation_key_root_record, &["rotationKeyRoot"])?,
+            "rotation key root",
+        )?;
+    }
+    if array_at_path(evaluation_key_record, &["rotationKeyRoots"])? != rotation_key_roots {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "evaluation key record rotation roots do not match exported rotation roots",
+        ));
+    }
+
+    let key_switch_key_record = json!({
+        "objectType": "BgvKeySwitchKey",
+        "objectVersion": 1,
+        "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
+        "ceremonyId": string_at_path(evaluation_key_record, &["ceremonyId"])?,
+        "rosterDigest": digest_at_path(evaluation_key_record, &["rosterDigest"])?,
+        "collectivePublicKeyRoot": collective_public_key_root,
+        "keySwitchDecompositionDigest": key_switch_decomposition_digest,
+        "publicBasisId": BgvBasisKind::Extended.basis_id(),
+        "publicRlweSampleCount": 1,
+        "genericKeySwitchApiExported": false,
+        "maliciousEvaluationKeyProofIncluded": false,
+    });
+    let key_switch_key_root = digest_at_path(evaluation_keys, &["keySwitchKeyRoot"])?;
+    compare_derived_digest(
+        "KeySwitchKeyRoot",
+        &key_switch_key_record,
+        key_switch_key_root,
+        "key-switch key root",
+    )?;
+    compare_digest_at_path(
+        evaluation_key_record,
+        &["keySwitchKeyRoot"],
+        key_switch_key_root,
+        "evaluation key key-switch root",
+    )?;
+
+    let evaluation_key_root = digest_at_path(evaluation_keys, &["evaluationKeyRoot"])?;
+    compare_derived_digest(
+        "EvalKeyRoot",
+        evaluation_key_record,
+        evaluation_key_root,
+        "evaluation key root",
+    )
+}
+
+fn validate_setup_certificates(setup_package: &Value) -> CanonicalResult<()> {
+    let certificates = value_at_path(setup_package, &["certificates"])?;
+    compare_derived_digest(
+        "CollectiveSecretDistributionCertificateDigest",
+        value_at_path(certificates, &["collectiveSecretDistributionCertificate"])?,
+        digest_at_path(
+            certificates,
+            &["collectiveSecretDistributionCertificateDigest"],
+        )?,
+        "collective secret distribution certificate digest",
+    )?;
+    compare_derived_digest(
+        "ErrorDistributionCertificateDigest",
+        value_at_path(certificates, &["errorDistributionCertificate"])?,
+        digest_at_path(certificates, &["errorDistributionCertificateDigest"])?,
+        "error distribution certificate digest",
+    )?;
+    compare_derived_digest(
+        "KeySwitchDecompositionDigest",
+        value_at_path(certificates, &["keySwitchDecomposition"])?,
+        digest_at_path(certificates, &["keySwitchDecompositionDigest"])?,
+        "key-switch decomposition digest",
+    )?;
+    compare_derived_digest(
+        "EvaluationKeySizeProfileDigest",
+        value_at_path(certificates, &["evaluationKeySizeCertificate"])?,
+        digest_at_path(certificates, &["evaluationKeySizeProfileDigest"])?,
+        "evaluation key size profile digest",
+    )?;
+    compare_derived_digest(
+        "BGVSetupParameterCertificateDigest",
+        value_at_path(certificates, &["setupParameterCertificate"])?,
+        digest_at_path(certificates, &["setupParameterCertificateDigest"])?,
+        "setup parameter certificate digest",
+    )?;
+    compare_derived_digest(
+        "BGVDevelopmentEncryptionFixtureDigest",
+        value_at_path(setup_package, &["developmentEncryptionFixture", "fixture"])?,
+        digest_at_path(
+            setup_package,
+            &["developmentEncryptionFixture", "fixtureDigest"],
+        )?,
+        "development encryption fixture digest",
+    )?;
+    compare_digest_at_path(
+        certificates,
+        &["developmentEncryptionFixtureDigest"],
+        digest_at_path(
+            setup_package,
+            &["developmentEncryptionFixture", "fixtureDigest"],
+        )?,
+        "certificate development encryption fixture digest",
+    )
 }
 
 fn validate_setup_package_shape(setup_package: &Value) -> CanonicalResult<()> {
@@ -1521,9 +2374,10 @@ fn validate_setup_package_shape(setup_package: &Value) -> CanonicalResult<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        generate_passive_setup_package_from_request, verify_passive_setup_package_from_request,
+        generate_passive_setup_package_from_request, sample_centered_binomial_eta2,
+        verify_passive_setup_package_from_request,
     };
-    use crate::hashing::derive_protocol_digest;
+    use crate::hashing::{derive_protocol_digest, hash512};
 
     fn request() -> serde_json::Value {
         serde_json::json!({
@@ -1547,6 +2401,18 @@ mod tests {
             ],
             "setupSeed": "m8-test-seed",
         })
+    }
+
+    fn rebind_setup_package_digest(package: &mut serde_json::Value) {
+        let mut digest_input = package.clone();
+        digest_input
+            .as_object_mut()
+            .expect("setup package must be an object")
+            .remove("setupPackageDigest");
+        package["setupPackageDigest"] = serde_json::json!(
+            derive_protocol_digest("BGVPassiveSetupPackageDigest", &digest_input)
+                .expect("setup package digest")
+        );
     }
 
     #[test]
@@ -1585,6 +2451,27 @@ mod tests {
     }
 
     #[test]
+    fn passive_setup_rejects_non_canonical_roster_positions_and_digests() {
+        let mut duplicate_position_request = request();
+        duplicate_position_request["participants"][1]["rosterPosition"] = serde_json::json!(0);
+        assert!(generate_passive_setup_package_from_request(&duplicate_position_request).is_err());
+
+        let mut out_of_range_position_request = request();
+        out_of_range_position_request["participants"][2]["rosterPosition"] = serde_json::json!(3);
+        assert!(
+            generate_passive_setup_package_from_request(&out_of_range_position_request).is_err()
+        );
+
+        let mut uppercase_digest_request = request();
+        let uppercase_manifest_digest = uppercase_digest_request["manifestDigest"]
+            .as_str()
+            .expect("manifest digest")
+            .to_ascii_uppercase();
+        uppercase_digest_request["manifestDigest"] = serde_json::json!(uppercase_manifest_digest);
+        assert!(generate_passive_setup_package_from_request(&uppercase_digest_request).is_err());
+    }
+
+    #[test]
     fn passive_setup_verification_rejects_mutated_roots() {
         let mut package = generate_passive_setup_package_from_request(&request()).expect("setup");
         package["collectivePublicKey"]["collectivePublicKeyRoot"] =
@@ -1596,5 +2483,59 @@ mod tests {
             }))
             .is_err()
         );
+    }
+
+    #[test]
+    fn passive_setup_verification_rejects_rebound_internal_inconsistency() {
+        let mut package = generate_passive_setup_package_from_request(&request()).expect("setup");
+        package["collectivePublicKey"]["record"]["publicKeyShareRoots"][0] =
+            serde_json::json!("f".repeat(128));
+        rebind_setup_package_digest(&mut package);
+
+        assert!(
+            verify_passive_setup_package_from_request(&serde_json::json!({
+                "setupPackage": package,
+            }))
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn passive_setup_verification_rejects_nested_secret_material() {
+        let mut package = generate_passive_setup_package_from_request(&request()).expect("setup");
+        package["participants"][0]["globalSecretPolynomial"] = serde_json::json!("forbidden");
+        rebind_setup_package_digest(&mut package);
+
+        assert!(
+            verify_passive_setup_package_from_request(&serde_json::json!({
+                "setupPackage": package,
+            }))
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn centered_binomial_eta2_samples_match_certified_sampler() {
+        let seed_digest = "1".repeat(128);
+        let samples = sample_centered_binomial_eta2(&seed_digest, "trustee-1", "local-error");
+        for sample in samples {
+            let position = sample["position"].as_u64().expect("position") as usize;
+            let position_text = position.to_string();
+            let output = hash512(
+                "sealed-lattice-bgv-rns/sample-centered-binomial-eta2-v1",
+                &[
+                    seed_digest.as_bytes(),
+                    b"trustee-1",
+                    b"local-error",
+                    position_text.as_bytes(),
+                ],
+            );
+            let expected_value = i64::from(output[0] & 1) + i64::from((output[0] >> 1) & 1)
+                - i64::from((output[0] >> 2) & 1)
+                - i64::from((output[0] >> 3) & 1);
+
+            assert_eq!(sample["value"], expected_value);
+            assert!((-2..=2).contains(&expected_value));
+        }
     }
 }

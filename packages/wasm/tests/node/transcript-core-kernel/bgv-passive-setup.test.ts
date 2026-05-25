@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
     loadTranscriptCoreKernel,
     TranscriptCoreKernelCommandError,
+    type TranscriptCoreKernel,
 } from '../../../src/index';
 import type { BgvPassiveSetupPackage } from '../../../src/transcript-core-bridge/kernel-contracts';
 
@@ -38,6 +39,25 @@ const setupRequest = {
     ],
     setupSeed: 'm8-passive-setup-test-seed',
 } as const;
+
+const rebindSetupPackageDigest = (
+    kernel: TranscriptCoreKernel,
+    setupPackage: BgvPassiveSetupPackage,
+): BgvPassiveSetupPackage => {
+    const digestInput = structuredClone(setupPackage) as Record<
+        string,
+        unknown
+    >;
+    delete digestInput.setupPackageDigest;
+
+    return {
+        ...setupPackage,
+        setupPackageDigest: kernel.deriveProtocolDigest({
+            namespace: 'BGVPassiveSetupPackageDigest',
+            value: digestInput,
+        }),
+    };
+};
 
 describe('BGV passive M8 setup kernel commands', () => {
     it('describes the frozen passive setup object model', async () => {
@@ -182,6 +202,81 @@ describe('BGV passive M8 setup kernel commands', () => {
         expect(() =>
             kernel.verifyBgvPassiveSetup({
                 setupPackage: mutatedSetup,
+            }),
+        ).toThrow(TranscriptCoreKernelCommandError);
+    });
+
+    it('refuses non-canonical participants and setup digests', async () => {
+        const kernel = await loadTranscriptCoreKernel();
+
+        expect(() =>
+            kernel.generateBgvPassiveSetup({
+                ...setupRequest,
+                participants: [
+                    setupRequest.participants[0],
+                    {
+                        ...setupRequest.participants[1],
+                        rosterPosition: 0,
+                    },
+                    setupRequest.participants[2],
+                ],
+            }),
+        ).toThrow(TranscriptCoreKernelCommandError);
+        expect(() =>
+            kernel.generateBgvPassiveSetup({
+                ...setupRequest,
+                participants: [
+                    setupRequest.participants[0],
+                    setupRequest.participants[1],
+                    {
+                        ...setupRequest.participants[2],
+                        rosterPosition: 3,
+                    },
+                ],
+            }),
+        ).toThrow(TranscriptCoreKernelCommandError);
+        expect(() =>
+            kernel.generateBgvPassiveSetup({
+                ...setupRequest,
+                manifestDigest: setupRequest.manifestDigest.toUpperCase(),
+            }),
+        ).toThrow(TranscriptCoreKernelCommandError);
+    });
+
+    it('refuses internally inconsistent setup packages even when the top digest is rebound', async () => {
+        const kernel = await loadTranscriptCoreKernel();
+        const setup = kernel.generateBgvPassiveSetup(setupRequest);
+        const inconsistentCollectiveKey = structuredClone(setup);
+
+        (
+            inconsistentCollectiveKey.collectivePublicKey.record as {
+                publicKeyShareRoots: string[];
+            }
+        ).publicKeyShareRoots[0] = 'f'.repeat(128);
+
+        expect(() =>
+            kernel.verifyBgvPassiveSetup({
+                setupPackage: rebindSetupPackageDigest(
+                    kernel,
+                    inconsistentCollectiveKey,
+                ),
+            }),
+        ).toThrow(TranscriptCoreKernelCommandError);
+
+        const nestedSecretPackage = structuredClone(
+            setup,
+        ) as BgvPassiveSetupPackage & {
+            participants: Record<string, unknown>[];
+        };
+        nestedSecretPackage.participants[0].globalSecretPolynomial =
+            'forbidden';
+
+        expect(() =>
+            kernel.verifyBgvPassiveSetup({
+                setupPackage: rebindSetupPackageDigest(
+                    kernel,
+                    nestedSecretPackage,
+                ),
             }),
         ).toThrow(TranscriptCoreKernelCommandError);
     });
