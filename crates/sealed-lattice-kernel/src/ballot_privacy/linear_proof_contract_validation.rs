@@ -81,7 +81,7 @@ pub(crate) fn collect_supported_ballot_privacy_dimension_refusals(
             && dynamic_roster_profile_evidence.is_none()
     }) {
         refused_objects.push(structural_refusal(
-            "Dynamic ballot privacy proof statements require roster profile certificate or parameter certificate evidence for the frozen receiver count.",
+            "Dynamic ballot privacy proof statements require roster profile parameter certificate evidence for the frozen receiver count.",
             object_digest,
         ));
     }
@@ -770,8 +770,9 @@ mod tests {
         assert!(
             refused_objects
                 .iter()
-                .any(|refusal| string_field(refusal, "message")
-                    .is_some_and(|message| message.contains("roster profile certificate"))),
+                .any(|refusal| string_field(refusal, "message").is_some_and(
+                    |message| message.contains("roster profile parameter certificate")
+                )),
             "dynamic receiver count without evidence must be rejected: {refused_objects:?}"
         );
 

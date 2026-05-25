@@ -32,7 +32,13 @@ describe('Lattigo oracle boundary tooling', () => {
     it('fails clearly when pinned metadata or digests drift', async () => {
         const pinnedReference = await loadPinnedReference();
         const goModule = `module sealed-lattice-lattigo-oracle\n\ngo 1.25.0\n`;
-        const dockerfile = `FROM ${pinnedReference.containerBaseImage}@${pinnedReference.containerBaseImageDigest}\n`;
+        const dockerfile = [
+            `FROM ${pinnedReference.containerBaseImage}@${pinnedReference.containerBaseImageDigest}`,
+            `COPY ${pinnedReference.archivePath} /workspace/${pinnedReference.archivePath}`,
+            `RUN echo "${pinnedReference.archiveSha256}  /workspace/${pinnedReference.archivePath}" | sha256sum -c - && go mod download && go mod verify`,
+            'CMD ["go", "run", "-mod=readonly", "."]',
+            '',
+        ].join('\n');
 
         expect(() =>
             verifyPinnedReferenceMetadata(
@@ -61,6 +67,36 @@ describe('Lattigo oracle boundary tooling', () => {
                 dockerfile,
             ),
         ).toThrow(/must use Go 1\.25\.0/u);
+        expect(() =>
+            verifyPinnedReferenceMetadata(
+                pinnedReference,
+                goModule,
+                dockerfile.replace(
+                    pinnedReference.archiveSha256,
+                    '0'.repeat(64),
+                ),
+            ),
+        ).toThrow(/archive SHA-256/u);
+        expect(() =>
+            verifyPinnedReferenceMetadata(
+                pinnedReference,
+                goModule,
+                dockerfile.replace(
+                    `COPY ${pinnedReference.archivePath} /workspace/${pinnedReference.archivePath}`,
+                    [
+                        `COPY ${pinnedReference.archivePath} /workspace/${pinnedReference.archivePath}`,
+                        `COPY ${pinnedReference.localCheckoutPath} /workspace/${pinnedReference.localCheckoutPath}`,
+                    ].join('\n'),
+                ),
+            ),
+        ).toThrow(/mutable local checkout/u);
+        expect(() =>
+            verifyPinnedReferenceMetadata(
+                pinnedReference,
+                goModule,
+                dockerfile.replace(' && go mod verify', ''),
+            ),
+        ).toThrow(/go\.sum verification/u);
         expect(() =>
             assertPinnedDigest(
                 'oracle command',

@@ -10,6 +10,12 @@ const pinnedReferencePath = path.join(
     'reference-projects/lattigo/pinned-reference.json',
 );
 const oracleDirectoryPath = path.join(repoRoot, 'tools/lattigo-oracle');
+const oracleCommandInputRelativePaths = [
+    'main.go',
+    'go.mod',
+    'go.sum',
+    'internal/extract-pinned-archive/main.go',
+] as const;
 
 type PinnedReference = {
     readonly allowedUse: string;
@@ -40,6 +46,18 @@ const sha256File = async (filePath: string): Promise<string> => {
 
 const sha256Text = (text: string): string =>
     createHash('sha256').update(text).digest('hex');
+
+const sha256OracleCommandInputs = (
+    commandInputs: readonly {
+        readonly relativePath: string;
+        readonly source: string;
+    }[],
+): string =>
+    sha256Text(
+        commandInputs
+            .map(({ relativePath, source }) => `${relativePath}\n${source}`)
+            .join('\n'),
+    );
 
 export const loadPinnedReference = async (): Promise<PinnedReference> =>
     JSON.parse(await readFile(pinnedReferencePath, 'utf8')) as PinnedReference;
@@ -129,6 +147,31 @@ export const verifyPinnedReferenceMetadata = (
             `The Lattigo oracle Dockerfile must pin ${expectedBaseImageReference}.`,
         );
     }
+    const expectedArchiveCopyLine = `COPY ${pinnedReference.archivePath} /workspace/${pinnedReference.archivePath}`;
+    if (!dockerfile.includes(expectedArchiveCopyLine)) {
+        throw new Error(
+            'The Lattigo oracle Dockerfile must build from the pinned archive path.',
+        );
+    }
+    if (!dockerfile.includes(pinnedReference.archiveSha256)) {
+        throw new Error(
+            'The Lattigo oracle Dockerfile must verify the pinned archive SHA-256 digest.',
+        );
+    }
+    if (dockerfile.includes(`COPY ${pinnedReference.localCheckoutPath}`)) {
+        throw new Error(
+            'The Lattigo oracle Dockerfile must not copy the mutable local checkout as the build input.',
+        );
+    }
+    if (
+        !dockerfile.includes('go mod download') ||
+        !dockerfile.includes('go mod verify') ||
+        !dockerfile.includes('-mod=readonly')
+    ) {
+        throw new Error(
+            'The Lattigo oracle Dockerfile must use pinned module resolution with go.sum verification.',
+        );
+    }
 };
 
 export const verifyPinnedReference = async (): Promise<{
@@ -181,14 +224,27 @@ export const verifyPinnedReference = async (): Promise<{
         }
     }
 
-    const [mainSource, goModule, dockerfile] = await Promise.all([
-        readFile(path.join(oracleDirectoryPath, 'main.go'), 'utf8'),
-        readFile(path.join(oracleDirectoryPath, 'go.mod'), 'utf8'),
+    const [dockerfile, commandInputs] = await Promise.all([
         readFile(path.join(oracleDirectoryPath, 'Dockerfile'), 'utf8'),
+        Promise.all(
+            oracleCommandInputRelativePaths.map(async (relativePath) => ({
+                relativePath,
+                source: await readFile(
+                    path.join(oracleDirectoryPath, relativePath),
+                    'utf8',
+                ),
+            })),
+        ),
     ]);
+    const goModule = commandInputs.find(
+        ({ relativePath }) => relativePath === 'go.mod',
+    )?.source;
+    if (goModule === undefined) {
+        throw new Error('The Lattigo oracle go.mod command input is missing.');
+    }
 
     verifyPinnedReferenceMetadata(pinnedReference, goModule, dockerfile);
-    const commandDigest = sha256Text(`${mainSource}\n${goModule}`);
+    const commandDigest = sha256OracleCommandInputs(commandInputs);
     const dockerfileDigest = sha256Text(dockerfile);
     assertPinnedDigest(
         'oracle command',

@@ -1,5 +1,8 @@
 use crate::{
-    bgv::rns::{PolynomialDomain, RnsPolynomial},
+    bgv::{
+        profile::POLYNOMIAL_DEGREE,
+        rns::{PolynomialDomain, RnsPolynomial},
+    },
     encoding::{
         CanonicalError, CanonicalErrorCode, CanonicalReader, CanonicalResult, append_string,
         append_varuint,
@@ -39,6 +42,7 @@ impl BgvObjectKind {
     }
 }
 
+#[derive(Debug)]
 pub(crate) struct CanonicalBgvObject {
     pub(crate) object_kind: BgvObjectKind,
     pub(crate) components: Vec<RnsPolynomial>,
@@ -172,6 +176,12 @@ fn read_polynomial(reader: &mut CanonicalReader<'_>) -> CanonicalResult<RnsPolyn
             "coefficient count does not fit usize",
         )
     })?;
+    if coefficient_count != POLYNOMIAL_DEGREE {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "BGV-RNS object coefficient count must match the selected polynomial degree",
+        ));
+    }
     let domain = PolynomialDomain::from_str(&reader.read_string()?).ok_or_else(|| {
         CanonicalError::new(
             CanonicalErrorCode::InvalidEnum,
@@ -266,12 +276,15 @@ fn validate_component_count(
 #[cfg(test)]
 mod tests {
     use super::{
-        BgvObjectKind, canonical_bytes_hash, ciphertext_root, parse_bgv_object, plaintext_root,
-        serialize_bgv_object,
+        BgvObjectKind, CANONICAL_MAGIC, canonical_bytes_hash, ciphertext_root, parse_bgv_object,
+        plaintext_root, serialize_bgv_object,
     };
-    use crate::bgv::{
-        encoding::encode_batch_plaintext_slots,
-        profile::{DATA_PRIMES, POLYNOMIAL_DEGREE},
+    use crate::{
+        bgv::{
+            encoding::encode_batch_plaintext_slots,
+            profile::{DATA_PRIMES, POLYNOMIAL_DEGREE},
+        },
+        encoding::{CanonicalErrorCode, append_string, append_varuint},
     };
 
     #[test]
@@ -325,5 +338,27 @@ mod tests {
                 .expect("serialize");
         canonical_bytes.push(0);
         assert!(parse_bgv_object(&canonical_bytes).is_err());
+    }
+
+    #[test]
+    fn parser_rejects_wrong_coefficient_count_before_residue_allocation() {
+        let mut canonical_bytes = Vec::new();
+        append_string(&mut canonical_bytes, CANONICAL_MAGIC);
+        append_varuint(&mut canonical_bytes, 1);
+        append_string(&mut canonical_bytes, BgvObjectKind::Plaintext.as_str());
+        append_varuint(&mut canonical_bytes, 1);
+        append_string(&mut canonical_bytes, "untrusted-profile-digest");
+        append_string(&mut canonical_bytes, "untrusted-basis");
+        append_varuint(&mut canonical_bytes, 0);
+        append_varuint(&mut canonical_bytes, (POLYNOMIAL_DEGREE as u64) + 1);
+
+        let error =
+            parse_bgv_object(&canonical_bytes).expect_err("wrong count must fail immediately");
+
+        assert_eq!(error.code, CanonicalErrorCode::MalformedLength);
+        assert!(
+            error.message.contains("selected polynomial degree"),
+            "unexpected error: {error:?}"
+        );
     }
 }
