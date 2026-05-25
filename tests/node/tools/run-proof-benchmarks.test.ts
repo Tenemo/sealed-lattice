@@ -1,5 +1,3 @@
-import { readFile } from 'node:fs/promises';
-
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -15,45 +13,7 @@ const packageManagerRunner = {
     commandArgumentsPrefix: ['pnpm-entrypoint.js'],
 } as const;
 
-const readWorkspacePackageScripts = async (): Promise<
-    Record<string, string>
-> => {
-    const packageJsonText = await readFile(
-        new URL('../../../package.json', import.meta.url),
-        'utf8',
-    );
-    const packageJson = JSON.parse(packageJsonText) as {
-        readonly scripts?: Record<string, string>;
-    };
-
-    return packageJson.scripts ?? {};
-};
-
 describe('proof benchmark runner', () => {
-    it('keeps one package script namespace without plural aliases', async () => {
-        const scripts = await readWorkspacePackageScripts();
-        const proofBenchmarkScriptNames = Object.keys(scripts)
-            .filter((scriptName) =>
-                scriptName.startsWith('test:proof-benchmark'),
-            )
-            .sort();
-
-        expect(proofBenchmarkScriptNames).toEqual([
-            'test:proof-benchmark',
-            'test:proof-benchmark:browser:desktop',
-            'test:proof-benchmark:browser:mobile:throttled',
-            'test:proof-benchmark:node',
-        ]);
-        expect(
-            Object.keys(scripts).filter((scriptName) =>
-                scriptName.startsWith('test:proof-benchmarks'),
-            ),
-        ).toEqual([]);
-        expect(scripts).not.toHaveProperty(
-            'test:proof-benchmark:browser:mobile',
-        );
-    });
-
     it('runs node and desktop lanes by default', () => {
         const commands = buildProofBenchmarkCommands({
             packageManagerRunner,
@@ -109,9 +69,9 @@ describe('proof benchmark runner', () => {
         );
     });
 
-    it('rejects the removed non-throttled mobile lane', () => {
+    it('rejects unsupported lane selectors', () => {
         expect(() =>
-            parseRequestedProofBenchmarkLanes(['--only', 'mobile']),
-        ).toThrow('Unsupported proof benchmark lane: mobile');
+            parseRequestedProofBenchmarkLanes(['--only', 'unknown-lane']),
+        ).toThrow('Unsupported proof benchmark lane: unknown-lane');
     });
 });

@@ -363,7 +363,7 @@ export type ClaimBearingBallotPackageVerificationInput = Parameters<
     TranscriptCoreKernel['verifyClaimBearingBallotPackage']
 >[0];
 
-/** Input accepted by the packaged WASM aggregate derivation proof verifier. */
+/** Input accepted by the packaged WASM aggregate derivation component checker. */
 export type AggregateDerivationComponentVerificationInput = Parameters<
     TranscriptCoreKernel['verifyAggregateDerivationProof']
 >[0];
@@ -395,7 +395,7 @@ export const verifyClaimBearingBallotPackage = async (
     return kernel.verifyClaimBearingBallotPackage(input);
 };
 
-/** Verifies an M6 aggregate derivation component with the packaged WASM proof backend. */
+/** Checks an aggregate derivation component with the packaged WASM backend. */
 export const verifyAggregateDerivationComponent = async (
     input: AggregateDerivationComponentVerificationInput,
 ): Promise<BallotPrivacyKernelVerification> => {

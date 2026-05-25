@@ -1,4 +1,6 @@
 use super::*;
+
+const MAXIMUM_GAUSSIAN_UNARY_RUN_LENGTH: i64 = 1_048_576;
 pub(super) fn decode_gaussian_polynomial_vector(
     reader: &mut ProofBitReader,
     vector_length: usize,
@@ -18,6 +20,11 @@ pub(super) fn decode_gaussian_polynomial_vector(
             one_run_length = one_run_length
                 .checked_add(1)
                 .ok_or_else(|| invalid_proof("gaussian coefficient unary run length overflowed"))?;
+            if one_run_length > MAXIMUM_GAUSSIAN_UNARY_RUN_LENGTH {
+                return Err(invalid_proof(
+                    "gaussian coefficient unary run length exceeds the decoder cap",
+                ));
+            }
         }
         let low_bits = reader.read_unsigned_little_endian_bits(binary_tail_bit_length)?;
         let centered_low_bits = sign_extend_unsigned_value(low_bits, binary_tail_bit_length)?;
@@ -104,6 +111,14 @@ pub(super) fn encode_gaussian_polynomial_vector(
             };
             let one_run_length = usize::try_from(one_run_length)
                 .map_err(|_| invalid_proof("gaussian run length is negative"))?;
+            if one_run_length
+                > usize::try_from(MAXIMUM_GAUSSIAN_UNARY_RUN_LENGTH)
+                    .expect("gaussian run cap fits usize")
+            {
+                return Err(invalid_proof(
+                    "gaussian coefficient unary run length exceeds the encoder cap",
+                ));
+            }
             for _ in 0..one_run_length {
                 writer.write_bit(1)?;
             }

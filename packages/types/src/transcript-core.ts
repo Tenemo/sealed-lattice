@@ -2,7 +2,7 @@
 export type BaseClaimProfile = 'fullyVerified';
 
 /** High-level malicious security closure claimed by transcript-core fixtures. */
-export type MheSecurityClosure = 'developmentIntegration' | 'ActiveMalicious';
+export type MheSecurityClosure = 'developmentIntegration' | 'activeMalicious';
 
 /**
  * Alias retained for backward compatibility with consumers that read

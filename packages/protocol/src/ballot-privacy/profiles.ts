@@ -208,6 +208,8 @@ const createReceiverEncryptionProfile = (): ReceiverEncryptionProfile => {
         secretDistribution: 'CenteredBinomialEta2',
         errorDistribution: 'CenteredBinomialEta2',
         encryptionRandomnessDistribution: 'CenteredBinomialEta2',
+        parameterSecurityEvidenceStatus: 'ParameterCertificateMissing',
+        claimBoundary: 'ReceiverEncryptionParameterSecurityNotClosed',
         payloadBinding: {
             encryptsReceiverShareVector: true,
             encryptsShareCommitmentOpening: true,

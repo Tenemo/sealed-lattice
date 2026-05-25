@@ -593,7 +593,8 @@ describe.sequential(
                             unresolvedReason: null,
                         });
                         expect(verification.statusLabels).toEqual([
-                            'AggregateDerivationProofVerified',
+                            'AggregateDerivationRelationChecked',
+                            'AggregateDerivationProofClaimClosureMissing',
                         ]);
                         expect(
                             kernel.verifyAggregateDerivationProof({

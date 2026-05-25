@@ -155,7 +155,7 @@ impl LinearProofAes256CtrCursor {
 }
 
 fn increment_linear_proof_counter(counter_block: &mut [u8; 16]) {
-    for byte_index in (0..counter_block.len()).rev() {
+    for byte_index in (8..counter_block.len()).rev() {
         let (updated_byte, overflowed) = counter_block[byte_index].overflowing_add(1);
         counter_block[byte_index] = updated_byte;
         if !overflowed {

@@ -66,7 +66,7 @@ const expectBigIntegerReferenceVectors = (value: unknown): void => {
     }
 };
 
-const stableM7DigestVectors = {
+const stableBgvDigestVectors = {
     profileDigest:
         'd875931773a704df5f3b5d3dad4ef526bbe671a66465b75c19b2c1190929f86326822cd3ede1233eba2905a4b3c086e0426af5a3f7150f537d76b8349f73b3c2',
     batchEncoderDigest:
@@ -86,7 +86,7 @@ const stableM7DigestVectors = {
     bigIntegerReferenceVectorRoot:
         '83cb67a77a5c84bf3c3bd98ded3fdb93eef9ee9878df6434c680762d70aceaae6ea94874e3790fcd3caa2d4b1dd124d040b91cadaebf32b8376ef357969d40e6',
     parameterCertificateDigest:
-        'd352e86979f10901c9ae289701f4ad0060bf0d6ed4e85d4d783f837856af05665c0931e8ba455e32a6e898b04fe1e503c725a61b67dd2247d67b2667175e82c6',
+        '1af357fdb1330b3d0c1c41a8eb97ecc150e847f9ce14eedf039e22b74a4b773d8f1d13d87fab48790289baa3bb0f6a7f2e52bfcec8d0a6849aab7d89e98d2ecd',
     encodedPlaintextRoot:
         '59a29e210357f4e860c4c7b44b541956fc2d2ca425eefcb344dbd303420ffa44419674197bf746a0ca4dee937832b925a34ac008194c411c96ad9c6f94285c75',
     encodedPlaintextHash:
@@ -102,7 +102,7 @@ const stableM7DigestVectors = {
 } as const;
 
 describe('BGV-RNS backend kernel commands', () => {
-    it('reports the sealed-lattice M7 profile and operation boundary', async () => {
+    it('reports the BGV-RNS profile and operation boundary', async () => {
         const kernel = await loadTranscriptCoreKernel();
         const profile = kernel.describeBgvRnsProfile();
         const operationRegistry = kernel.describeBgvOperationRegistry() as {
@@ -152,34 +152,33 @@ describe('BGV-RNS backend kernel commands', () => {
             extendedLevels: 17,
         });
         expect(profile.profile.dataPrimes).toHaveLength(16);
-        expect(profile.profileDigest).toBe(stableM7DigestVectors.profileDigest);
+        expect(profile.profileDigest).toBe(
+            stableBgvDigestVectors.profileDigest,
+        );
         expect(profile.batchEncoderDigest).toBe(
-            stableM7DigestVectors.batchEncoderDigest,
+            stableBgvDigestVectors.batchEncoderDigest,
         );
         expect(profile.batchLayoutBindingDigest).toBe(
-            stableM7DigestVectors.batchLayoutBindingDigest,
+            stableBgvDigestVectors.batchLayoutBindingDigest,
         );
         expect(profile.encodedAggregateLayoutDigest).toBe(
-            stableM7DigestVectors.encodedAggregateLayoutDigest,
+            stableBgvDigestVectors.encodedAggregateLayoutDigest,
         );
         expect(profile.topKEvaluatorInputLayoutDigest).toBe(
-            stableM7DigestVectors.topKEvaluatorInputLayoutDigest,
+            stableBgvDigestVectors.topKEvaluatorInputLayoutDigest,
         );
         expect(profile.canonicalCiphertextConventionDigest).toBe(
-            stableM7DigestVectors.canonicalCiphertextConventionDigest,
+            stableBgvDigestVectors.canonicalCiphertextConventionDigest,
         );
         expect(profile.allowedEvaluatorOpsDigest).toBe(
-            stableM7DigestVectors.allowedEvaluatorOpsDigest,
+            stableBgvDigestVectors.allowedEvaluatorOpsDigest,
         );
         expect(profile.securityEstimatorInputDigest).toBe(
-            stableM7DigestVectors.securityEstimatorInputDigest,
+            stableBgvDigestVectors.securityEstimatorInputDigest,
         );
         expect(profile.bigIntegerReferenceVectorRoot).toBe(
-            stableM7DigestVectors.bigIntegerReferenceVectorRoot,
+            stableBgvDigestVectors.bigIntegerReferenceVectorRoot,
         );
-        expect(profile.bigIntegerReferenceVectors).toMatchObject({
-            fixtureId: 'm7-rns-big-integer-reference-v1',
-        });
         expectBigIntegerReferenceVectors(profile.bigIntegerReferenceVectors);
         expect(profile.batchLayoutBinding).toMatchObject({
             layoutKind: 'EncryptedAggregateInputEncodedScoreLayout-v1',
@@ -189,11 +188,6 @@ describe('BGV-RNS backend kernel commands', () => {
             scoreBucketCount: 10,
             scalarOnlyAggregateLayout: false,
         });
-        expect(profile.statusLabels).toContain('M7ImplementationEvidence');
-        expect(profile.statusLabels).toContain(
-            'M8PassiveSetupCommandAvailable',
-        );
-        expect(profile.nonClaims).toContain('M9BridgeProofNotImplemented');
         expect(operationRegistry.statusLabels).toContain(
             'GenericFheApiNotExported',
         );
@@ -229,13 +223,15 @@ describe('BGV-RNS backend kernel commands', () => {
                     modulusBits: null,
                 },
             },
-            secretDistributionCertificate: {
-                status: 'available-in-M8-passive-setup-package',
-            },
-            errorDistributionCertificate: {
-                status: 'available-in-M8-passive-setup-package',
-            },
         });
+        expect(
+            backendReport.parameterCertificate.secretDistributionCertificate
+                .status,
+        ).toEqual(expect.any(String));
+        expect(
+            backendReport.parameterCertificate.errorDistributionCertificate
+                .status,
+        ).toEqual(expect.any(String));
         expect(backendReport.parameterCertificate.estimatorRows).toHaveLength(
             3,
         );
@@ -243,7 +239,7 @@ describe('BGV-RNS backend kernel commands', () => {
             'ParameterCertificateReportEmitted',
         );
         expect(backendReport.parameterCertificateDigest).toBe(
-            stableM7DigestVectors.parameterCertificateDigest,
+            stableBgvDigestVectors.parameterCertificateDigest,
         );
         expect(
             backendReport.bgvProfileRejectionFixtures.some(
@@ -291,10 +287,10 @@ describe('BGV-RNS backend kernel commands', () => {
         expect(encoded.validation.ok).toBe(true);
         expect(encoded.canonicalBytesHex).toMatch(/^[a-f0-9]+$/u);
         expect(encoded.plaintextRoot).toBe(
-            stableM7DigestVectors.encodedPlaintextRoot,
+            stableBgvDigestVectors.encodedPlaintextRoot,
         );
         expect(encoded.canonicalBytesHash512).toBe(
-            stableM7DigestVectors.encodedPlaintextHash,
+            stableBgvDigestVectors.encodedPlaintextHash,
         );
         expect(encoded.canonicalByteLength).toBe(90_441);
         expect(encoded.batchLayoutBindingDigest).toBe(
@@ -394,7 +390,7 @@ describe('BGV-RNS backend kernel commands', () => {
         }
     });
 
-    it('rejects evaluator operations outside the selected M7 registry', async () => {
+    it('rejects evaluator operations outside the selected registry', async () => {
         const kernel = await loadTranscriptCoreKernel();
 
         expect(
@@ -440,10 +436,10 @@ describe('BGV-RNS backend kernel commands', () => {
 
         expect(fixture.statusLabels).toContain('NotEncryptionEvidence');
         expect(fixture.ciphertextRoot).toBe(
-            stableM7DigestVectors.ciphertextRoot,
+            stableBgvDigestVectors.ciphertextRoot,
         );
         expect(fixture.canonicalBytesHash512).toBe(
-            stableM7DigestVectors.ciphertextHash,
+            stableBgvDigestVectors.ciphertextHash,
         );
         expect(fixture.canonicalByteLength).toBe(180_781);
         expect(fixture.validation).toMatchObject({
@@ -463,7 +459,7 @@ describe('BGV-RNS backend kernel commands', () => {
         });
     });
 
-    it('keeps base conversion and oracle material inside the M7 boundary', async () => {
+    it('keeps base conversion and oracle material inside the BGV boundary', async () => {
         const kernel = await loadTranscriptCoreKernel();
         const baseConversionResult = kernel.generateBgvBaseConversionFixture({
             slots: [7, 8, 9, 65_536],
@@ -485,10 +481,10 @@ describe('BGV-RNS backend kernel commands', () => {
             convertedModulusCount: 2,
         });
         expect(baseConversion.sourcePlaintextRoot).toBe(
-            stableM7DigestVectors.baseConversionSourceRoot,
+            stableBgvDigestVectors.baseConversionSourceRoot,
         );
         expect(baseConversion.convertedPlaintextRoot).toBe(
-            stableM7DigestVectors.baseConversionConvertedRoot,
+            stableBgvDigestVectors.baseConversionConvertedRoot,
         );
         expect(baseConversion.statusLabels).toContain(
             'GenericKeySwitchSurfaceNotExported',

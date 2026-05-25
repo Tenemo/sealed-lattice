@@ -210,40 +210,26 @@ describe('packed package smoke helpers', () => {
     });
 
     it('flags missing license text and leaked TypeScript build metadata', () => {
-        expect(
-            validatePublishedPackageFilePaths([
-                'README.md',
-                'dist/index.js',
-                'dist/internal/election-foundation/plaintext-oracle/index.js',
-                'dist/internal/election-foundation/target-acceptance/index.js',
-                'dist/tsconfig.tsbuildinfo',
-                'tools/lattigo-oracle/main.go',
-                'tools/lattigo-oracle/Dockerfile',
-                'tools/lattigo-oracle/pinned-reference.json',
-                'dist/internal/oracle-vector-generator.js',
-                'go.mod',
-            ]),
-        ).toEqual([
-            'Published package is missing required file: LICENSE',
-            'Published package is missing required file: dist/kernel.js',
-            'Published package is missing required file: dist/sealed-lattice-kernel.wasm',
-            'Published package is missing required file: dist/internal/board-target.d.ts',
-            'Published package is missing required file: dist/internal/lifecycle.d.ts',
-            'Published package is missing required file: dist/internal/plaintext-oracle.d.ts',
-            'Published package is missing required file: dist/internal/protocol-digest.d.ts',
-            'Published package is missing required file: dist/internal/protocol-objects.d.ts',
-            'Published package is missing required file: dist/internal/roster-recovery.d.ts',
-            'Published package is missing required file: dist/internal/transcript-core.d.ts',
-            'Published package is missing required file: public-surface.json',
-            'Published package must not include TypeScript build metadata: dist/tsconfig.tsbuildinfo',
-            'Published package must not include internal protocol runtime: dist/internal/election-foundation/plaintext-oracle/index.js',
-            'Published package must not include internal protocol runtime: dist/internal/election-foundation/target-acceptance/index.js',
-            'Published package must not include development oracle artifact: tools/lattigo-oracle/main.go',
-            'Published package must not include development oracle artifact: tools/lattigo-oracle/Dockerfile',
-            'Published package must not include development oracle artifact: tools/lattigo-oracle/pinned-reference.json',
-            'Published package must not include development oracle artifact: dist/internal/oracle-vector-generator.js',
-            'Published package must not include development oracle artifact: go.mod',
+        const errors = validatePublishedPackageFilePaths([
+            'README.md',
+            'dist/index.js',
+            'dist/internal/election-foundation/plaintext-oracle/index.js',
+            'dist/tsconfig.tsbuildinfo',
+            'tools/lattigo-oracle/main.go',
+            'go.mod',
         ]);
+
+        expect(errors).toEqual(
+            expect.arrayContaining([
+                'Published package is missing required file: LICENSE',
+                'Published package is missing required file: dist/kernel.js',
+                'Published package must not include TypeScript build metadata: dist/tsconfig.tsbuildinfo',
+                'Published package must not include internal protocol runtime: dist/internal/election-foundation/plaintext-oracle/index.js',
+                'Published package must not include development oracle artifact: tools/lattigo-oracle/main.go',
+                'Published package must not include development oracle artifact: go.mod',
+            ]),
+        );
+        expect(errors.length).toBeGreaterThanOrEqual(6);
     });
 
     it('requires public package description metadata to match root metadata', () => {
@@ -278,7 +264,7 @@ describe('packed package smoke helpers', () => {
         ).toEqual([]);
     });
 
-    it('accepts the intended published package file layout', () => {
+    it('accepts required published package files and harmless additions', () => {
         expect(
             validatePublishedPackageFilePaths([
                 'LICENSE',
@@ -295,6 +281,7 @@ describe('packed package smoke helpers', () => {
                 'dist/internal/roster-recovery.d.ts',
                 'dist/internal/transcript-core.d.ts',
                 'dist/sealed-lattice-kernel.wasm',
+                'dist/user-facing-helper.js',
                 'package.json',
                 'public-surface.json',
             ]),

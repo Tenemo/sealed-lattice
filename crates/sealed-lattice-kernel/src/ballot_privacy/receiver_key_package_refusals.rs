@@ -110,6 +110,8 @@ pub(crate) fn collect_receiver_key_proof_root_evidence_refusals(
     let accepted_receiver_key_proof_count = object_map(evidence)
         .and_then(|object| object.get("acceptedReceiverKeyProofCount"))
         .and_then(Value::as_u64);
+    let accepted_receiver_key_proof_count_usize =
+        accepted_receiver_key_proof_count.and_then(|count| usize::try_from(count).ok());
     let statement_receiver_key_count = object_map(statement)
         .and_then(|object| object.get("receiverPublicKeys"))
         .and_then(Value::as_array)
@@ -127,6 +129,7 @@ pub(crate) fn collect_receiver_key_proof_root_evidence_refusals(
         || string_field(evidence, "receiverKeyProofRoot")
             .is_none_or(|digest| !is_protocol_digest(digest))
         || accepted_receiver_key_proof_count.is_none_or(|count| count == 0)
+        || accepted_receiver_key_proof_count_usize.is_none()
     {
         refused_objects.push(structural_refusal(
             "Receiver-key proof root evidence has an invalid canonical shape.",
@@ -151,8 +154,7 @@ pub(crate) fn collect_receiver_key_proof_root_evidence_refusals(
         || string_field(evidence, "receiverKeyProofRoot")
             != string_field(statement, "receiverKeyProofRoot")
         || evidence_receiver_key_references.map(Vec::len) != statement_receiver_key_count
-        || accepted_receiver_key_proof_count.map(|count| count as usize)
-            != statement_receiver_key_count
+        || accepted_receiver_key_proof_count_usize != statement_receiver_key_count
     {
         refused_objects.push(structural_refusal(
             "Receiver-key proof root evidence is not bound to the ballot proof statement receiver set.",

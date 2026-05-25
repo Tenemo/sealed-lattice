@@ -45,38 +45,29 @@ pub(crate) fn bgv_profile_rejection_from_error(operation: &str, error: &Canonica
 }
 
 fn rejection_reason_code(error: &CanonicalError) -> &'static str {
-    let message = error.message.as_str();
-    if message.contains("coefficient count") || message.contains("polynomial degree") {
-        "UnsupportedRingDimension"
-    } else if message.contains("basis")
-        || message.contains("modulus list")
-        || message.contains("residue limb")
-    {
-        "InvalidRnsBasis"
-    } else if message.contains("profile")
-        || message.contains("layout")
-        || message.contains("root")
-        || message.contains("expected")
-    {
-        "ProfileMismatch"
-    } else if message.contains("estimator") {
-        "MissingEstimatorRow"
-    } else if message.contains("noise") {
-        "InvalidNoiseCertificate"
-    } else if message.contains("parameter") {
-        "InvalidParameters"
-    } else if matches!(
-        error.code,
+    match error.code {
+        CanonicalErrorCode::ProfileComponentMismatch => "ProfileMismatch",
         CanonicalErrorCode::MalformedMagic
-            | CanonicalErrorCode::InvalidUtf8
-            | CanonicalErrorCode::InvalidEnum
-            | CanonicalErrorCode::MalformedLength
-            | CanonicalErrorCode::TrailingBytes
-            | CanonicalErrorCode::InvalidFixture
-    ) {
-        "InvalidCanonicalEncoding"
-    } else {
-        "InvalidParameters"
+        | CanonicalErrorCode::InvalidUtf8
+        | CanonicalErrorCode::InvalidEnum
+        | CanonicalErrorCode::MalformedLength
+        | CanonicalErrorCode::TrailingBytes
+        | CanonicalErrorCode::InvalidFixture
+        | CanonicalErrorCode::NonCanonicalVarUint => "InvalidCanonicalEncoding",
+        CanonicalErrorCode::InvalidChunkSize
+        | CanonicalErrorCode::InvalidHex
+        | CanonicalErrorCode::MalformedVarUint
+        | CanonicalErrorCode::MissingField
+        | CanonicalErrorCode::UnsupportedCanonicalEnvelopeVersion
+        | CanonicalErrorCode::UnsupportedObjectType
+        | CanonicalErrorCode::UnsupportedObjectVersion
+        | CanonicalErrorCode::UnknownBaseClaimProfile
+        | CanonicalErrorCode::UnknownField
+        | CanonicalErrorCode::UnknownMheSecurityClosure
+        | CanonicalErrorCode::UnknownProofProfile
+        | CanonicalErrorCode::DuplicateField
+        | CanonicalErrorCode::FieldOrder
+        | CanonicalErrorCode::FixtureMismatch => "InvalidParameters",
     }
 }
 
@@ -231,11 +222,43 @@ pub(crate) fn reject_if_oracle_boundary_fields_present(request: &Value) -> Canon
     Ok(())
 }
 
+pub(crate) fn reject_unexpected_bgv_request_fields(
+    request: &Value,
+    allowed_fields: &[&str],
+    operation: &str,
+) -> CanonicalResult<()> {
+    reject_if_oracle_boundary_fields_present(request)?;
+    let Some(request_object) = request.as_object() else {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            format!("{operation} request must be a JSON object"),
+        ));
+    };
+    for field_name in request_object.keys() {
+        if field_name == "command" {
+            continue;
+        }
+        if !allowed_fields
+            .iter()
+            .any(|allowed_field_name| allowed_field_name == field_name)
+        {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                format!(
+                    "{operation} request field {field_name} is not part of the accepted BGV request schema"
+                ),
+            ));
+        }
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         reject_if_oracle_boundary_fields_present, reject_reference_oracle_artifact,
-        validate_plaintext_hex,
+        reject_unexpected_bgv_request_fields, validate_plaintext_hex,
     };
     use crate::bgv::{
         encoding::encode_batch_plaintext_slots,
@@ -283,6 +306,33 @@ mod tests {
                 "artifactKind": "lattigo-vector"
             }))["acceptedAsProtocolEvidence"],
             false
+        );
+    }
+
+    #[test]
+    fn bgv_request_field_allowlist_rejects_future_oracle_fields() {
+        assert!(
+            reject_unexpected_bgv_request_fields(
+                &serde_json::json!({
+                    "command": "ValidateBgvPlaintextObject",
+                    "canonicalBytesHex": "00",
+                    "futureOracleTranscript": "abc"
+                }),
+                &["canonicalBytesHex"],
+                "validateBgvPlaintextObject"
+            )
+            .is_err()
+        );
+        assert!(
+            reject_unexpected_bgv_request_fields(
+                &serde_json::json!({
+                    "command": "ValidateBgvPlaintextObject",
+                    "canonicalBytesHex": "00"
+                }),
+                &["canonicalBytesHex"],
+                "validateBgvPlaintextObject"
+            )
+            .is_ok()
         );
     }
 }

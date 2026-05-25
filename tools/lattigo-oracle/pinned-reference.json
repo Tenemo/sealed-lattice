@@ -11,7 +11,7 @@
     "goToolchain": "go1.25.0",
     "containerBaseImage": "golang:1.25.0-bookworm",
     "containerBaseImageDigest": "sha256:81dc45d05a7444ead8c92a389621fafabc8e40f8fd1a19d7e5df14e61e98bc1a",
-    "oracleCommandDigest": "a61b8c5ed7ecd1c78027b213e8f3f523e6d076ffffe7799a667fd433f01bc060",
+    "oracleCommandDigest": "46432dbc21b07a479d34a4a4e9e68b734a3ea3f97718a30ad46ab3f9e43ec16c",
     "oracleDockerfileDigest": "1f5c4814e12063e4ebeb5a995cce076a785dc47ca5382680c0530643d32e0f71",
     "runtimeUse": "forbidden",
     "protocolEvidenceUse": "forbidden",

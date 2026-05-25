@@ -164,7 +164,7 @@ describe('election foundation public package API in Node', () => {
         const labels = deriveLifecycleLabels({
             lifecycleState: 'fullyVerified',
             thresholdProfile,
-            mheSecurityClosure: 'ActiveMalicious',
+            mheSecurityClosure: 'activeMalicious',
             localRosterAccepted: true,
             runtimeClaimGatePassed: true,
             bridgeBenchmarkReportPresent: true,

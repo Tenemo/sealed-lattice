@@ -90,7 +90,12 @@ impl BgvBasisKind {
     pub(crate) fn moduli_for_level(self, level: usize) -> Option<Vec<u64>> {
         let moduli = self.all_moduli();
         let required_count = match self {
-            Self::Special => 1,
+            Self::Special => {
+                if level != 0 {
+                    return None;
+                }
+                1
+            }
             Self::Data | Self::Extended => level.checked_add(1)?,
         };
         if required_count == 0 || required_count > moduli.len() {
@@ -284,6 +289,14 @@ pub(crate) fn root_parameters_for_modulus(modulus: u64) -> Option<RootParameters
         .find(|parameters| parameters.modulus == modulus)
 }
 
+pub(crate) fn data_prime_bit_length() -> u32 {
+    DATA_PRIMES
+        .iter()
+        .map(|modulus| u64::BITS - modulus.leading_zeros())
+        .max()
+        .unwrap_or(0)
+}
+
 pub(crate) fn selected_profile_value() -> Value {
     json!({
         "profileId": PROFILE_ID,
@@ -295,7 +308,7 @@ pub(crate) fn selected_profile_value() -> Value {
         "specialBasisId": SPECIAL_BASIS_ID,
         "dataPrimes": DATA_PRIMES,
         "specialPrime": SPECIAL_PRIME,
-        "dataPrimeBitLength": 47,
+        "dataPrimeBitLength": data_prime_bit_length(),
         "dataLevels": DATA_PRIMES.len(),
         "extendedLevels": DATA_PRIMES.len() + 1,
         "aggregateShareLayoutId": AGGREGATE_SHARE_LAYOUT_ID,
@@ -537,6 +550,21 @@ mod tests {
     };
     use crate::bgv::modular_arithmetic::is_prime_for_tests;
 
+    fn pow_mod(base: u64, mut exponent: u64, modulus: u64) -> u64 {
+        let mut result = 1_u128;
+        let modulus_wide = u128::from(modulus);
+        let mut base_wide = u128::from(base) % modulus_wide;
+        while exponent > 0 {
+            if exponent & 1 == 1 {
+                result = (result * base_wide) % modulus_wide;
+            }
+            base_wide = (base_wide * base_wide) % modulus_wide;
+            exponent >>= 1;
+        }
+
+        u64::try_from(result).expect("modular exponentiation result fits in u64")
+    }
+
     #[test]
     fn selected_moduli_are_ntt_ready_primes() {
         assert_eq!(POLYNOMIAL_DEGREE, 32_768);
@@ -547,6 +575,75 @@ mod tests {
             assert!(root_parameters_for_modulus(modulus).is_some());
         }
         assert!(root_parameters_for_modulus(PLAINTEXT_MODULUS).is_some());
+    }
+
+    #[test]
+    fn selected_root_parameters_have_negacyclic_orders_and_inverses() {
+        for parameters in super::ROOT_PARAMETERS {
+            assert_eq!(
+                pow_mod(
+                    parameters.negacyclic_root,
+                    POLYNOMIAL_DEGREE as u64,
+                    parameters.modulus
+                ),
+                parameters.modulus - 1,
+                "negacyclic root must have half-order -1 for modulus {}",
+                parameters.modulus
+            );
+            assert_eq!(
+                pow_mod(
+                    parameters.negacyclic_root,
+                    2 * POLYNOMIAL_DEGREE as u64,
+                    parameters.modulus
+                ),
+                1,
+                "negacyclic root must have full 2N order for modulus {}",
+                parameters.modulus
+            );
+            assert_eq!(
+                pow_mod(
+                    parameters.cyclic_root,
+                    POLYNOMIAL_DEGREE as u64,
+                    parameters.modulus
+                ),
+                1,
+                "cyclic root must have N order for modulus {}",
+                parameters.modulus
+            );
+            assert_ne!(
+                pow_mod(
+                    parameters.cyclic_root,
+                    (POLYNOMIAL_DEGREE / 2) as u64,
+                    parameters.modulus
+                ),
+                1,
+                "cyclic root must not have order N/2 for modulus {}",
+                parameters.modulus
+            );
+            assert_eq!(
+                (u128::from(parameters.negacyclic_root)
+                    * u128::from(parameters.inverse_negacyclic_root))
+                    % u128::from(parameters.modulus),
+                1,
+                "inverse negacyclic root mismatch for modulus {}",
+                parameters.modulus
+            );
+            assert_eq!(
+                (u128::from(parameters.cyclic_root) * u128::from(parameters.inverse_cyclic_root))
+                    % u128::from(parameters.modulus),
+                1,
+                "inverse cyclic root mismatch for modulus {}",
+                parameters.modulus
+            );
+            assert_eq!(
+                (u128::from(POLYNOMIAL_DEGREE as u64)
+                    * u128::from(parameters.inverse_polynomial_degree))
+                    % u128::from(parameters.modulus),
+                1,
+                "inverse degree mismatch for modulus {}",
+                parameters.modulus
+            );
+        }
     }
 
     #[test]
@@ -569,10 +666,12 @@ mod tests {
         );
         assert_eq!(
             BgvBasisKind::Special
-                .moduli_for_level(99)
-                .expect("special basis ignores levels"),
+                .moduli_for_level(0)
+                .expect("special basis level zero"),
             vec![SPECIAL_PRIME]
         );
+        assert!(BgvBasisKind::Special.moduli_for_level(1).is_none());
+        assert!(BgvBasisKind::Special.moduli_for_level(99).is_none());
     }
 
     #[test]

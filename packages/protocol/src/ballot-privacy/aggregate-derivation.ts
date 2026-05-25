@@ -8,17 +8,38 @@ import {
     type AggregateDerivationProofRecord,
     type AggregateDerivationProofVerificationInput,
     type AggregateDerivationStatement,
-    type AggregateDerivationVerification,
     type AggregateShareCommitment,
     type ClaimBearingBallotPackage,
     type ProtocolDigest,
-    type RefusalRecord,
     type ShareCommitment,
     type ShareCommitmentMessageBoundCert,
 } from '@sealed-lattice/types';
 
-import { createRefusal } from '../common/verification-helpers.js';
-
+import {
+    aggregateDerivationComponentId,
+    aggregateDerivationProofCoefficientModulus,
+    aggregateDerivationProofSystemRingDegree,
+    aggregateDerivationSourceRingDegree,
+    aggregateDerivationWitnessL2BoundSquared,
+} from './aggregate-derivation/constants.js';
+import {
+    deriveAggregateCommitmentBodyDigest,
+    deriveAggregateDerivationBallotSetDigest,
+    deriveAggregateDerivationComponentDigest,
+    deriveAggregateDerivationProofRecordDigest,
+    deriveAggregateDerivationProofRoot,
+    deriveAggregateDerivationStatementDigest,
+    deriveAggregateShareCommitmentDigest,
+    deriveAggregateSparseLinearStatementDigest,
+} from './aggregate-derivation/digests.js';
+import type {
+    AggregateDerivationProofBuildInput,
+    AggregateDerivationProofBuildOutput,
+    AggregateDerivationProofEncoding,
+    AggregateDerivationProofParameterSet,
+    AggregateDerivationProofStatement,
+    AggregateDerivationWitnessInput,
+} from './aggregate-derivation/types.js';
 import type {
     DensePolynomial,
     SparseMatrixEntry,
@@ -44,161 +65,25 @@ import {
     deriveBallotProofPublicRandomnessDigest,
     verifyClaimBearingBallotPackage,
 } from './objects.js';
-import {
-    createBallotPrivacyProfileSet,
-    verifyShareCommitmentMessageBoundCert,
-} from './profiles.js';
+import { createBallotPrivacyProfileSet } from './profiles.js';
 import {
     ballotPrivacyEncodedCoordinatesPerOption,
     ballotPrivacyFieldModulus,
     ballotPrivacyMaximumCanonicalFieldElement,
-    ballotPrivacyMaximumParticipantCount,
     ballotPrivacyMinimumSafeParticipantCount,
-    getBallotPrivacyEncodedShareVectorWidth,
     shareCommitmentModulus,
     shareCommitmentModulusDecimal,
     shareCommitmentModuleDegree,
     shareCommitmentModuleRank,
     shareCommitmentOpeningDimension,
 } from './protocol-parameters.js';
-import {
-    collectBallotPrivacyDimensionRefusals,
-    ballotPrivacyMinimumUnsafeParticipantCount,
-} from './supported-dimensions.js';
 
-type AggregateDerivationProofParameterSet = {
-    readonly coefficientModulus: string;
-    readonly expectedProofSizeBytes?: number;
-    readonly profileId: typeof aggregateDerivationProofParameterProfileId;
-    readonly proofSystemRingDegree: 64;
-    readonly relation: 'A*w + t = 0';
-    readonly ringDegree: 256;
-    readonly source: string;
-    readonly statementColumns: number;
-    readonly statementRows: number;
-    readonly witnessL2BoundSquared: number;
-};
-
-type AggregateDerivationProofEncoding = {
-    readonly challengeCoefficientBitLength: 5;
-    readonly challengeCoefficientModulus: 17;
-    readonly coefficientModulus: string;
-    readonly compressedCoefficientBitLength: 35;
-    readonly compressedCommitmentVectorLength: 18;
-    readonly euclideanResponseLog2StandardDeviation: 14;
-    readonly euclideanResponseVectorLength: 4;
-    readonly expectedProofSizeBytes?: number;
-    readonly fullSizeCoefficientBitLength: 47;
-    readonly hashMaskVectorLength: 2;
-    readonly hintVectorLength: 18;
-    readonly infinityResponseLog2StandardDeviation: 22;
-    readonly infinityResponseVectorLength: 4;
-    readonly profileId: typeof aggregateDerivationProofEncodingProfileId;
-    readonly randomnessResponseLog2StandardDeviation: 12;
-    readonly randomnessResponseVectorLength: 41;
-    readonly ringDegree: 64;
-    readonly shortResponseLog2StandardDeviation: 18;
-    readonly shortResponseVectorLength: number;
-    readonly source: string;
-    readonly targetCommitmentVectorLength: 12;
-};
-
-type AggregateDerivationProofStatement = {
-    readonly aggregateDerivationStatementDigest: ProtocolDigest;
-    readonly aggregateShareCommitmentDigest: ProtocolDigest;
-    readonly coefficientModulus: string;
-    readonly componentId: typeof aggregateDerivationComponentId;
-    readonly matrixCoefficientRepresentation: 'centeredSignedSourceModulus';
-    readonly objectType: 'AggregateDerivationSparseLinearProofStatement';
-    readonly objectVersion: 1;
-    readonly parameterProfileId: typeof aggregateDerivationProofParameterProfileId;
-    readonly proofStatementFormat: 'sparse-polynomial-matrix-linear-proof-v1';
-    readonly projectionCoverage: 'aggregate-derivation-full-encoded-layout';
-    readonly relation: 'A*w + t = 0';
-    readonly sourceRingDegree: 256;
-    readonly sparseStatementMatrixDigest: ProtocolDigest;
-    readonly sparseStatementMatrixEntries: readonly SparseMatrixEntry[];
-    readonly sparseStatementTermCount: string;
-    readonly statementColumns: number;
-    readonly statementDigest: ProtocolDigest;
-    readonly statementRows: number;
-    readonly targetCoefficientRepresentation: 'centeredSignedSourceModulus';
-    readonly targetVectorDigest: ProtocolDigest;
-    readonly targetVectorEntries: readonly SparseTargetVectorEntry[];
-    readonly targetVectorEntryCount: string;
-    readonly witnessL2BoundSquared: string;
-};
-
-export type AggregateDerivationWitnessInput = {
-    readonly aggregateIntegerShareVector: readonly number[];
-    readonly aggregateOpeningRandomness: readonly number[];
-};
-
-type AggregateDerivationProofBuildInput = {
-    readonly aggregateCommitment: AggregateShareCommitment;
-    readonly statement: AggregateDerivationStatement;
-    readonly witness: AggregateDerivationWitnessInput;
-};
-
-type AggregateDerivationProofBuildOutput = {
-    readonly proofEncoding: AggregateDerivationProofEncoding;
-    readonly proofInput: Omit<
-        AggregateDerivationProofVerificationInput,
-        'proofBytesHex'
-    >;
-    readonly proofParameterSet: AggregateDerivationProofParameterSet;
-    readonly proofStatement: AggregateDerivationProofStatement;
-    readonly secretState: {
-        readonly sourceWitnessCoefficients: readonly DensePolynomial[];
-    };
-};
-
-const aggregateDerivationComponentId =
-    'aggregate-derivation-component' as const;
-
-const aggregateDerivationSourceRingDegree = 256 as const;
-
-const aggregateDerivationProofSystemRingDegree = 64 as const;
-
-const aggregateDerivationProofCoefficientModulus = '70368744177829' as const;
-
-const aggregateDerivationWitnessL2BoundSquared = 3_000_000_000_000_000 as const;
-
-const protocolDigestPattern = /^[a-f0-9]{128}$/u;
-
-const lowercaseHexBytesPattern = /^(?:[a-f0-9]{2})+$/u;
-
-const forbiddenPublicWitnessFieldNames = new Set([
-    'aggregateIntegerShareVector',
-    'aggregateHistogram',
-    'aggregateOpeningRandomness',
-    'aggregateScore',
-    'aggregateScoreBits',
-    'aggregateShareVector',
-    'bridgeWitness',
-    'openingRandomness',
-    'plaintext',
-    'plaintextComparisonInputs',
-    'plaintextScoreBitInputs',
-    'proofWitness',
-    'quotient',
-    'rawAggregateWitness',
-    'receiverPlaintext',
-    'receiverSecretState',
-    'reducedFieldVector',
-    'secretState',
-    'sourceWitnessCoefficients',
-    'aggregateInputPlaintext',
-    'tPvss',
-    't_pvss',
-    'witness',
-]);
-
-const createAggregateRefusal = (
-    message: string,
-    objectDigest?: ProtocolDigest,
-): RefusalRecord =>
-    createRefusal('BallotPackageInvalid', message, objectDigest);
+export { verifyAggregateDerivationComponentStructure } from './aggregate-derivation/structure-verification.js';
+export {
+    aggregateWitnessFromReceiverPlaintext,
+    sumAggregateDerivationWitnesses,
+} from './aggregate-derivation/witnesses.js';
+export type { AggregateDerivationWitnessInput } from './aggregate-derivation/types.js';
 
 const zeroCommitmentPolynomialVector = (): readonly (readonly string[])[] =>
     Array.from({ length: shareCommitmentModuleRank }, () =>
@@ -238,104 +123,6 @@ const addCommitmentPolynomialVectors = (
         );
     });
 };
-
-const deriveAggregateCommitmentBodyDigest = (input: {
-    readonly commitmentPolynomialVector: readonly (readonly string[])[];
-    readonly shareCommitmentProfileDigest: ProtocolDigest;
-}): ProtocolDigest =>
-    deriveProtocolDigest('AggregateShareCommitmentDigest', {
-        commitmentPolynomialVector: input.commitmentPolynomialVector,
-        profileDigest: input.shareCommitmentProfileDigest,
-        purpose: 'aggregate-share-commitment-body-v1',
-    });
-
-const deriveAggregateShareCommitmentDigest = (
-    aggregateCommitment: Omit<
-        AggregateShareCommitment,
-        'aggregateShareCommitmentDigest'
-    >,
-): ProtocolDigest =>
-    deriveProtocolDigest('AggregateShareCommitmentDigest', aggregateCommitment);
-
-const deriveAggregateDerivationStatementDigest = (
-    statement: Omit<
-        AggregateDerivationStatement,
-        'aggregateDerivationStatementDigest'
-    >,
-): ProtocolDigest =>
-    deriveProtocolDigest('AggregateDerivationComponentDigest', {
-        purpose: 'aggregate-derivation-statement-v1',
-        statement,
-    });
-
-const deriveAggregateDerivationProofRecordDigest = (
-    proofRecord: Omit<
-        AggregateDerivationProofRecord,
-        'aggregateDerivationProofRecordDigest'
-    >,
-): ProtocolDigest =>
-    deriveProtocolDigest('AggregateDerivationComponentDigest', {
-        proofRecord,
-        purpose: 'aggregate-derivation-proof-record-v1',
-    });
-
-const deriveAggregateDerivationComponentDigest = (
-    component: Omit<
-        AggregateDerivationComponent,
-        'aggregateDerivationComponentDigest'
-    >,
-): ProtocolDigest =>
-    deriveProtocolDigest('AggregateDerivationComponentDigest', {
-        component,
-        purpose: 'aggregate-derivation-component-v1',
-    });
-
-const deriveAggregateSparseLinearStatementDigest = (
-    statementPayload: Omit<
-        AggregateDerivationProofStatement,
-        'statementDigest'
-    >,
-): ProtocolDigest =>
-    deriveProtocolDigest('ChallengeDomainDigest', {
-        payload: statementPayload,
-        purpose: 'aggregate-derivation-sparse-linear-proof-statement-v1',
-    });
-
-const deriveAggregateDerivationProofRoot = (input: {
-    readonly componentProofStatementDigest: ProtocolDigest;
-    readonly proofBytesDigest: ProtocolDigest;
-    readonly proofEncodingProfileDigest: ProtocolDigest;
-    readonly proofParameterSetDigest: ProtocolDigest;
-    readonly publicRandomnessDigest: ProtocolDigest;
-    readonly statementDigest: ProtocolDigest;
-}): ProtocolDigest =>
-    deriveProtocolDigest('ChallengeDomainDigest', {
-        ...input,
-        componentId: aggregateDerivationComponentId,
-        purpose: 'aggregate-derivation-proof-root-v1',
-    });
-
-const deriveAggregateDerivationBallotSetDigest = (input: {
-    readonly ballotPackageDigests: readonly ProtocolDigest[];
-    readonly closeRecordDigest: ProtocolDigest;
-    readonly manifestDigest: ProtocolDigest;
-    readonly pollSpecDigest: ProtocolDigest;
-    readonly postVotingClosedContextDigest: ProtocolDigest;
-    readonly rosterDigest: ProtocolDigest;
-    readonly thresholdProfileDigest: ProtocolDigest;
-    readonly votingClosedBoardHeadDigest: ProtocolDigest;
-}): ProtocolDigest =>
-    deriveProtocolDigest('BallotSetDigest', {
-        ballotPackageDigests: input.ballotPackageDigests,
-        closeRecordDigest: input.closeRecordDigest,
-        manifestDigest: input.manifestDigest,
-        pollSpecDigest: input.pollSpecDigest,
-        postVotingClosedContextDigest: input.postVotingClosedContextDigest,
-        purpose: 'm6-post-close-counted-m5-ballot-set-v1',
-        rosterDigest: input.rosterDigest,
-        thresholdProfileDigest: input.thresholdProfileDigest,
-        votingClosedBoardHeadDigest: input.votingClosedBoardHeadDigest,
-    });
 
 const packageReferenceForContributor = (input: {
     readonly ballotPackage: ClaimBearingBallotPackage;
@@ -517,31 +304,6 @@ const orderedBallotPackagesByDigest = (
             rightPackage.ballotPackageDigest,
         ),
     );
-
-const packageReferencesAreCanonical = (
-    packageReferences: readonly AggregateDerivationPackageReference[],
-): boolean => {
-    const seenPackageDigests = new Set<ProtocolDigest>();
-    let previousPackageDigest: ProtocolDigest | undefined;
-
-    for (const packageReference of packageReferences) {
-        if (seenPackageDigests.has(packageReference.ballotPackageDigest)) {
-            return false;
-        }
-        if (
-            previousPackageDigest !== undefined &&
-            previousPackageDigest.localeCompare(
-                packageReference.ballotPackageDigest,
-            ) > 0
-        ) {
-            return false;
-        }
-        previousPackageDigest = packageReference.ballotPackageDigest;
-        seenPackageDigests.add(packageReference.ballotPackageDigest);
-    }
-
-    return true;
-};
 
 export const buildAggregateDerivationStatement = (input: {
     readonly ballotPackages: readonly ClaimBearingBallotPackage[];
@@ -1235,355 +997,3 @@ export const createAggregateDerivationComponent = (input: {
             deriveAggregateDerivationComponentDigest(componentPayload),
     };
 };
-
-const collectForbiddenWitnessFieldRefusals = (
-    value: unknown,
-    objectDigest: ProtocolDigest | undefined,
-    path: string,
-): readonly RefusalRecord[] => {
-    if (Array.isArray(value)) {
-        return value.flatMap((item, itemIndex) =>
-            collectForbiddenWitnessFieldRefusals(
-                item,
-                objectDigest,
-                `${path}[${itemIndex}]`,
-            ),
-        );
-    }
-    if (typeof value !== 'object' || value === null) {
-        return [];
-    }
-
-    const refusedObjects: RefusalRecord[] = [];
-    for (const [fieldName, fieldValue] of Object.entries(value)) {
-        if (forbiddenPublicWitnessFieldNames.has(fieldName)) {
-            refusedObjects.push(
-                createAggregateRefusal(
-                    `Aggregate derivation public component must not expose witness field ${path}.${fieldName}.`,
-                    objectDigest,
-                ),
-            );
-            continue;
-        }
-        refusedObjects.push(
-            ...collectForbiddenWitnessFieldRefusals(
-                fieldValue,
-                objectDigest,
-                `${path}.${fieldName}`,
-            ),
-        );
-    }
-
-    return refusedObjects;
-};
-
-const collectAggregateStatementRefusals = (
-    statement: AggregateDerivationStatement,
-): readonly RefusalRecord[] => {
-    const refusedObjects: RefusalRecord[] = [];
-    const { aggregateDerivationStatementDigest, ...statementWithoutDigest } =
-        statement;
-    const expectedStatementDigest = deriveAggregateDerivationStatementDigest(
-        statementWithoutDigest,
-    );
-    refusedObjects.push(
-        ...collectBallotPrivacyDimensionRefusals({
-            objectDigest: aggregateDerivationStatementDigest,
-            optionCount: statement.optionCount,
-            participantCount: statement.participantCount,
-            shareVectorWidth: statement.shareVectorWidth,
-            unsafeSmallRosterAcknowledged:
-                statement.unsafeSmallRosterAcknowledged === true,
-        }),
-    );
-    const smallRosterAcknowledgementMatchesPolicy =
-        statement.participantCount < ballotPrivacyMinimumSafeParticipantCount
-            ? statement.unsafeSmallRosterAcknowledged === true
-            : statement.unsafeSmallRosterAcknowledged !== true;
-    if (
-        statement.objectType !== 'AggregateDerivationStatement' ||
-        statement.objectVersion !== 1 ||
-        statement.aggregateDerivationStatementDigest !==
-            expectedStatementDigest ||
-        statement.proofProfileId !== aggregateDerivationProofProfileId ||
-        statement.proofParameterProfileId !==
-            aggregateDerivationProofParameterProfileId ||
-        statement.proofEncodingProfileId !==
-            aggregateDerivationProofEncodingProfileId ||
-        statement.shareVectorWidth !==
-            getBallotPrivacyEncodedShareVectorWidth(statement.optionCount) ||
-        statement.participantCount < statement.contributorRosterPosition ||
-        statement.canonicalTurnout !== statement.packageReferences.length ||
-        !packageReferencesAreCanonical(statement.packageReferences) ||
-        !smallRosterAcknowledgementMatchesPolicy
-    ) {
-        refusedObjects.push(
-            createAggregateRefusal(
-                'Aggregate derivation statement digest or shape is invalid.',
-                aggregateDerivationStatementDigest,
-            ),
-        );
-    }
-    return refusedObjects;
-};
-
-const collectAggregateCommitmentRefusals = (input: {
-    readonly aggregateCommitment: AggregateShareCommitment;
-    readonly statement: AggregateDerivationStatement;
-}): readonly RefusalRecord[] => {
-    const refusedObjects: RefusalRecord[] = [];
-    const expectedBodyDigest = deriveAggregateCommitmentBodyDigest({
-        commitmentPolynomialVector:
-            input.aggregateCommitment.commitmentPolynomialVector,
-        shareCommitmentProfileDigest:
-            input.aggregateCommitment.shareCommitmentProfileDigest,
-    });
-    const {
-        aggregateShareCommitmentDigest,
-        ...aggregateCommitmentWithoutDigest
-    } = input.aggregateCommitment;
-    void aggregateShareCommitmentDigest;
-    const expectedCommitmentDigest = deriveAggregateShareCommitmentDigest(
-        aggregateCommitmentWithoutDigest,
-    );
-    const vectorShapeIsValid =
-        input.aggregateCommitment.commitmentPolynomialVector.length ===
-            shareCommitmentModuleRank &&
-        input.aggregateCommitment.commitmentPolynomialVector.every(
-            (polynomial) =>
-                polynomial.length === shareCommitmentModuleDegree &&
-                polynomial.every((entry) => {
-                    try {
-                        return (
-                            /^(?:0|[1-9][0-9]*)$/u.test(entry) &&
-                            BigInt(entry) < shareCommitmentModulus
-                        );
-                    } catch {
-                        return false;
-                    }
-                }),
-        );
-
-    if (
-        input.aggregateCommitment.objectType !== 'AggregateShareCommitment' ||
-        input.aggregateCommitment.objectVersion !== 1 ||
-        input.aggregateCommitment.aggregateShareCommitmentDigest !==
-            expectedCommitmentDigest ||
-        input.aggregateCommitment.commitmentBodyDigest !== expectedBodyDigest ||
-        input.aggregateCommitment.aggregateShareCommitmentDigest !==
-            input.statement.aggregateShareCommitmentDigest ||
-        input.aggregateCommitment.ballotSetDigest !==
-            input.statement.ballotSetDigest ||
-        input.aggregateCommitment.ceremonyId !== input.statement.ceremonyId ||
-        input.aggregateCommitment.manifestDigest !==
-            input.statement.manifestDigest ||
-        input.aggregateCommitment.rosterDigest !==
-            input.statement.rosterDigest ||
-        input.aggregateCommitment.pollSpecDigest !==
-            input.statement.pollSpecDigest ||
-        input.aggregateCommitment.contributorIdentity !==
-            input.statement.contributorIdentity ||
-        input.aggregateCommitment.contributorRosterPosition !==
-            input.statement.contributorRosterPosition ||
-        input.aggregateCommitment.shareCommitmentProfileDigest !==
-            input.statement.shareCommitmentProfileDigest ||
-        input.aggregateCommitment.shareVectorWidth !==
-            input.statement.shareVectorWidth ||
-        !vectorShapeIsValid
-    ) {
-        refusedObjects.push(
-            createAggregateRefusal(
-                'Aggregate share commitment digest, context, or polynomial shape is invalid.',
-                input.aggregateCommitment.aggregateShareCommitmentDigest,
-            ),
-        );
-    }
-
-    return refusedObjects;
-};
-
-const collectProofRecordRefusals = (
-    component: AggregateDerivationComponent,
-): readonly RefusalRecord[] => {
-    const refusedObjects: RefusalRecord[] = [];
-    const proofInput = component.proofInput;
-    const proofRecord = component.proofRecord;
-    const {
-        aggregateDerivationProofRecordDigest,
-        ...proofRecordWithoutDigest
-    } = proofRecord;
-    void aggregateDerivationProofRecordDigest;
-    const proofBytesDigest = lowercaseHexBytesPattern.test(
-        proofInput.proofBytesHex,
-    )
-        ? deriveProofBytesDigest({ proofBytesHex: proofInput.proofBytesHex })
-        : undefined;
-    const expectedProofRecordDigest =
-        deriveAggregateDerivationProofRecordDigest(proofRecordWithoutDigest);
-
-    if (
-        proofRecord.objectType !== 'AggregateDerivationProofRecord' ||
-        proofRecord.objectVersion !== 1 ||
-        proofRecord.aggregateDerivationProofRecordDigest !==
-            expectedProofRecordDigest ||
-        proofRecord.aggregateDerivationStatementDigest !==
-            component.statement.aggregateDerivationStatementDigest ||
-        proofRecord.aggregateShareCommitmentDigest !==
-            component.aggregateCommitment.aggregateShareCommitmentDigest ||
-        proofRecord.componentId !== aggregateDerivationComponentId ||
-        proofInput.componentId !== aggregateDerivationComponentId ||
-        proofInput.proofStatementFormat !==
-            'sparse-polynomial-matrix-linear-proof-v1' ||
-        proofInput.statementDigest !==
-            component.statement.aggregateDerivationStatementDigest ||
-        proofInput.componentProofStatementDigest !==
-            proofRecord.componentProofStatementDigest ||
-        proofBytesDigest === undefined ||
-        proofRecord.proofBytesDigest !== proofBytesDigest ||
-        proofRecord.proofSizeBytes !== proofInput.proofBytesHex.length / 2 ||
-        !protocolDigestPattern.test(proofRecord.proofRoot)
-    ) {
-        refusedObjects.push(
-            createAggregateRefusal(
-                'Aggregate derivation proof record or proof input is invalid.',
-                proofRecord.aggregateDerivationProofRecordDigest,
-            ),
-        );
-    }
-
-    return refusedObjects;
-};
-
-export const verifyAggregateDerivationComponentStructure = (
-    component: AggregateDerivationComponent,
-): AggregateDerivationVerification => {
-    const componentDigest = component.aggregateDerivationComponentDigest;
-    const certificateVerification = verifyShareCommitmentMessageBoundCert({
-        certificate: component.shareCommitmentMessageBoundCert,
-        expectedShareCommitmentProfileDigest:
-            component.statement.shareCommitmentProfileDigest,
-    });
-    const refusedObjects: RefusalRecord[] = [
-        ...collectForbiddenWitnessFieldRefusals(
-            component,
-            componentDigest,
-            'component',
-        ),
-        ...collectAggregateStatementRefusals(component.statement),
-        ...collectAggregateCommitmentRefusals({
-            aggregateCommitment: component.aggregateCommitment,
-            statement: component.statement,
-        }),
-        ...collectProofRecordRefusals(component),
-        ...certificateVerification.refusedObjects,
-    ];
-    if (
-        component.shareCommitmentMessageBoundCert.shareVectorWidth !==
-            component.statement.shareVectorWidth ||
-        component.shareCommitmentMessageBoundCert
-            .shareCommitmentMessageBoundCertDigest !==
-            component.statement.shareCommitmentMessageBoundCertDigest ||
-        component.shareCommitmentMessageBoundCert.maximumCanonicalTurnout <
-            component.statement.canonicalTurnout ||
-        component.shareCommitmentMessageBoundCert.maximumCanonicalTurnout >
-            ballotPrivacyMaximumParticipantCount
-    ) {
-        refusedObjects.push(
-            createAggregateRefusal(
-                'Aggregate derivation no-wraparound certificate is not bound to the statement.',
-                component.statement.shareCommitmentMessageBoundCertDigest,
-            ),
-        );
-    }
-
-    const { aggregateDerivationComponentDigest, ...componentWithoutDigest } =
-        component;
-    if (
-        aggregateDerivationComponentDigest !==
-        deriveAggregateDerivationComponentDigest(componentWithoutDigest)
-    ) {
-        refusedObjects.push(
-            createAggregateRefusal(
-                'Aggregate derivation component digest does not match its canonical payload.',
-                componentDigest,
-            ),
-        );
-    }
-
-    const unsafeSmallRosterStatusLabels =
-        component.statement.participantCount >=
-            ballotPrivacyMinimumUnsafeParticipantCount &&
-        component.statement.participantCount <
-            ballotPrivacyMinimumSafeParticipantCount
-            ? (['casualMicroRoster'] as const)
-            : [];
-    if (refusedObjects.length > 0) {
-        return {
-            ok: false,
-            acceptedDigests: [],
-            aggregateDerivationComponentDigest: componentDigest,
-            backendAvailable: false,
-            refusedObjects,
-            statusLabels: unsafeSmallRosterStatusLabels,
-            unresolvedReason: refusedObjects[0]?.code ?? 'BallotPackageInvalid',
-        };
-    }
-
-    return {
-        ok: true,
-        acceptedDigests: [
-            component.aggregateCommitment.aggregateShareCommitmentDigest,
-            component.proofRecord.aggregateDerivationProofRecordDigest,
-            componentDigest,
-        ],
-        aggregateDerivationComponentDigest: componentDigest,
-        backendAvailable: false,
-        refusedObjects: [],
-        statusLabels: ['pending', ...unsafeSmallRosterStatusLabels],
-        unresolvedReason: null,
-    };
-};
-
-export const sumAggregateDerivationWitnesses = (input: {
-    readonly witnesses: readonly AggregateDerivationWitnessInput[];
-}): AggregateDerivationWitnessInput => {
-    if (input.witnesses.length === 0) {
-        throw new RangeError('Aggregate derivation requires witness inputs.');
-    }
-    const shareVectorWidth =
-        input.witnesses[0].aggregateIntegerShareVector.length;
-
-    return {
-        aggregateIntegerShareVector: Array.from(
-            { length: shareVectorWidth },
-            (_unusedValue, coordinateIndex) =>
-                input.witnesses.reduce(
-                    (sum, witness) =>
-                        sum +
-                        (witness.aggregateIntegerShareVector[coordinateIndex] ??
-                            0),
-                    0,
-                ),
-        ),
-        aggregateOpeningRandomness: Array.from(
-            { length: shareCommitmentOpeningDimension },
-            (_unusedValue, openingCoordinateIndex) =>
-                input.witnesses.reduce(
-                    (sum, witness) =>
-                        sum +
-                        (witness.aggregateOpeningRandomness[
-                            openingCoordinateIndex
-                        ] ?? 0),
-                    0,
-                ),
-        ),
-    };
-};
-
-export const aggregateWitnessFromReceiverPlaintext = (input: {
-    readonly openingRandomness: readonly number[];
-    readonly receiverShareVector: readonly number[];
-}): AggregateDerivationWitnessInput => ({
-    aggregateIntegerShareVector: [...input.receiverShareVector],
-    aggregateOpeningRandomness: [...input.openingRandomness],
-});

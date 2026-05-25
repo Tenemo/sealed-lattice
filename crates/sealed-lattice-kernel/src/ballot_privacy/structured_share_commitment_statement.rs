@@ -193,9 +193,11 @@ pub(crate) fn parse_structured_share_commitment_statement(
                 "Structured share-commitment receiver row must be an object.",
             )
         })?;
-        if string_field(receiver_row, "receiverIdentity").is_none_or(str::is_empty) {
+        if string_field(receiver_row, "receiverIdentity")
+            .is_none_or(|identity| identity.is_empty() || !is_nfc_normalized(identity))
+        {
             return Err(ComponentProofBackendError::invalid(
-                "Structured share-commitment receiver row identity is missing.",
+                "Structured share-commitment receiver row identity is missing or noncanonical.",
             ));
         }
         if positive_roster_position(receiver_row, "receiverRosterPosition").is_none() {
@@ -429,6 +431,13 @@ pub(crate) fn structured_receiver_encryption_statement_as_sparse(
                 "Structured receiver-encryption receiver row must be an object.",
             )
         })?;
+        if string_field(receiver_row, "receiverIdentity")
+            .is_none_or(|identity| identity.is_empty() || !is_nfc_normalized(identity))
+        {
+            return Err(ComponentProofBackendError::invalid(
+                "Structured receiver-encryption receiver row identity is missing or noncanonical.",
+            ));
+        }
         let row_offset_within_statement = usize_object_field(
             receiver_row,
             "rowOffsetWithinStatement",
@@ -478,6 +487,11 @@ pub(crate) fn structured_receiver_encryption_statement_as_sparse(
         {
             return Err(ComponentProofBackendError::invalid(
                 "Structured receiver-encryption receiver rows exceed the statement shape.",
+            ));
+        }
+        if row_offset_within_statement != covered_row_count {
+            return Err(ComponentProofBackendError::invalid(
+                "Structured receiver-encryption receiver row offsets must be canonical and contiguous.",
             ));
         }
         covered_row_count = covered_row_count.checked_add(row_count).ok_or_else(|| {

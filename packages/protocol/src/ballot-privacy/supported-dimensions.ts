@@ -33,6 +33,9 @@ const optionCountIsInSupportedRange = (optionCount: number): boolean =>
     optionCount >= ballotPrivacyMinimumOptionCount &&
     optionCount <= ballotPrivacyMaximumOptionCount;
 
+const approvedDynamicRosterProfileCertificateDigests =
+    new Set<ProtocolDigest>();
+
 export const collectBallotPrivacyDimensionRefusals = (input: {
     readonly objectDigest?: ProtocolDigest;
     readonly optionCount: number;
@@ -134,7 +137,7 @@ export const collectBallotPrivacyDimensionRefusals = (input: {
             evidence.objectVersion !== 1 ||
             evidence.profileFamily !== 'BalancedDefault' ||
             evidence.receiverCoverageProfile !== 'AllFrozenRosterReceivers' ||
-            evidence.proofStatementShape !== 'M5EncodedScoreBallotProof-v1' ||
+            evidence.proofStatementShape !== 'EncodedScoreBallotProof-v1' ||
             evidence.frozenRosterSize !== input.participantCount ||
             evidence.optionCount !== input.optionCount ||
             evidence.thresholdProfileDigest !== input.thresholdProfileDigest ||
@@ -144,6 +147,19 @@ export const collectBallotPrivacyDimensionRefusals = (input: {
                 createRefusal(
                     'BallotPackageInvalid',
                     'Dynamic roster profile evidence is not bound to the ballot proof statement dimensions and threshold profile.',
+                    input.objectDigest,
+                ),
+            );
+        }
+        if (
+            !approvedDynamicRosterProfileCertificateDigests.has(
+                evidence.dynamicRosterProfileCertificateDigest,
+            )
+        ) {
+            refusedObjects.push(
+                createRefusal(
+                    'BallotPackageInvalid',
+                    'Dynamic roster profile evidence must reference an approved roster profile parameter certificate.',
                     input.objectDigest,
                 ),
             );

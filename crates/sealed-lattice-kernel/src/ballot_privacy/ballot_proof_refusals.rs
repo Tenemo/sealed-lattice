@@ -130,9 +130,9 @@ pub(crate) fn collect_ballot_proof_refusals(
     .iter()
     .filter(|field_present| **field_present)
     .count();
-    if proof_backend_metadata_field_count > 0 && proof_backend_metadata_field_count != 7 {
+    if proof_backend_metadata_field_count != 7 {
         refused_objects.push(structural_refusal(
-            "Ballot proof backend metadata must be complete when any backend proof field is present.",
+            "Ballot proof backend metadata must include all backend proof fields.",
             proof_record_digest,
         ));
     }
@@ -562,4 +562,48 @@ pub(crate) fn collect_claim_bearing_package_refusals(
     }
 
     refused_objects
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::collect_ballot_proof_refusals;
+
+    #[test]
+    fn ballot_proof_record_requires_complete_backend_metadata() {
+        let digest = "1".repeat(128);
+        let statement = json!({
+            "objectType": "BallotProofStatement",
+            "objectVersion": 1,
+            "ballotProofStatementDigest": digest,
+            "ballotProofProfileDigest": digest,
+            "optionCount": 1,
+            "shareVectorWidth": 13,
+            "receiverPublicKeys": [],
+            "receiverPayloads": [],
+            "shareCommitments": []
+        });
+        let ballot_proof = json!({
+            "objectType": "BallotProofRecord",
+            "objectVersion": 1,
+            "ballotProofRecordDigest": digest,
+            "ballotProofStatementDigest": digest,
+            "ballotProofProfileDigest": digest,
+            "challengeDigest": digest,
+            "proofBackend": "LocalLinearLatticeRelation",
+            "proofBytesDigest": digest,
+            "proofRoot": digest,
+            "proofSizeBytes": 1,
+            "relationStatementDigest": digest
+        });
+
+        let refusals = collect_ballot_proof_refusals(&statement, &ballot_proof, None, false, false);
+
+        assert!(refusals.iter().any(|refusal| {
+            refusal["message"]
+                .as_str()
+                .is_some_and(|message| message.contains("backend metadata"))
+        }));
+    }
 }

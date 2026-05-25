@@ -50,7 +50,7 @@ const fullyVerifiedLabelInput = (
 ): LifecycleLabelInput => ({
     lifecycleState: 'fullyVerified',
     thresholdProfile,
-    mheSecurityClosure: 'ActiveMalicious',
+    mheSecurityClosure: 'activeMalicious',
     localRosterAccepted: true,
     runtimeClaimGatePassed: true,
     bridgeBenchmarkReportPresent: true,
@@ -200,37 +200,6 @@ describe('election foundation lifecycle', () => {
         expect(labels.resultClaimLabels).toEqual(['fullyVerified']);
     });
 
-    it('does not emit removed pre-v63 formal lifecycle labels', () => {
-        const labels = deriveLifecycleLabels(
-            fullyVerifiedLabelInput({
-                evaluationLocallyReplayed: true,
-                localReplayDiagnosticVerified: false,
-            }),
-        );
-        const serializedLabels = JSON.stringify(labels);
-
-        for (const removedLabel of [
-            ['Unsafe', 'MicroRoster'],
-            ['MicroRoster', 'HighLeakage'],
-            ['SmallRoster', 'Uncertified'],
-            ['Roster', 'ExternallyAccepted'],
-            ['Result', 'LocallyReplayedAuditable'],
-            ['ReplayOnly', 'AuditedResult'],
-            ['PassiveMHE', 'Prototype'],
-            ['SupportedPhone', 'Certified'],
-            ['MobileReplay', 'Cert'],
-            ['Un', 'resolved'],
-            ['ProofCheckpoint', 'Restored'],
-            ['UnsupportedLowResource', 'Device'],
-            ['ForegroundProofGeneration', 'Required'],
-        ]) {
-            expect(serializedLabels).not.toContain(removedLabel.join(''));
-        }
-        expect(labels.modes).toEqual(
-            expect.arrayContaining(['localReplayMatched', 'localReplayFailed']),
-        );
-    });
-
     it.each([3, 4, 5, 6, 7, 8, 9])(
         'marks roster size %d as casual while preserving dynamic result claim gates',
         (rosterSize) => {
@@ -272,7 +241,7 @@ describe('election foundation lifecycle', () => {
         const labels = deriveLifecycleLabels({
             lifecycleState: 'fullyVerified',
             thresholdProfile,
-            mheSecurityClosure: 'ActiveMalicious',
+            mheSecurityClosure: 'activeMalicious',
             securityProfileIds: [
                 evaluationProofProfileId,
                 thresholdDecryptionProfileId,

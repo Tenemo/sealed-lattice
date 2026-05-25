@@ -164,7 +164,7 @@ describe('transcript-core kernel in Node', () => {
             fullyVerifiedDevelopmentIntegrationAnalysis.evaluationProofProfileId,
         ).toBe(evaluationProofProfileId);
         expect(fullyVerifiedActiveAnalysis.mheSecurityClosure).toBe(
-            'ActiveMalicious',
+            'activeMalicious',
         );
         expect(fullyVerifiedActiveAnalysis.evaluationProofProfileId).toBe(
             evaluationProofProfileId,

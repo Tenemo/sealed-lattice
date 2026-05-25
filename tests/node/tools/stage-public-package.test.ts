@@ -90,7 +90,7 @@ afterEach(async () => {
 });
 
 describe('public package staging', () => {
-    it('stages the package with the root README and without changing the SDK README', async () => {
+    it('stages public package files from the SDK package and root README', async () => {
         const projectRoot = await createTemporaryRoot();
         await writeFixtureProject(projectRoot);
         const destinationPath = path.join(projectRoot, 'staged-package');
@@ -103,14 +103,23 @@ describe('public package staging', () => {
             '# Root readme\n\nThis is the public package readme.\n',
         );
         await expect(
+            readFile(path.join(destinationPath, 'dist', 'index.js'), 'utf8'),
+        ).resolves.toBe('export {};\n');
+        await expect(
             readFile(
                 path.join(projectRoot, 'packages', 'sdk', 'README.md'),
                 'utf8',
             ),
         ).resolves.toBe('# SDK readme\n\nThis stays package-local.\n');
-        await expect(
-            readFile(path.join(destinationPath, 'dist', 'index.js'), 'utf8'),
-        ).resolves.toBe('export {};\n');
+    });
+
+    it('sanitizes staged package metadata', async () => {
+        const projectRoot = await createTemporaryRoot();
+        await writeFixtureProject(projectRoot);
+        const destinationPath = path.join(projectRoot, 'staged-package');
+
+        await stagePublicPackage({ destinationPath, projectRoot });
+
         await expect(
             readFile(path.join(destinationPath, 'package.json'), 'utf8').then(
                 (contents) => JSON.parse(contents) as Record<string, unknown>,

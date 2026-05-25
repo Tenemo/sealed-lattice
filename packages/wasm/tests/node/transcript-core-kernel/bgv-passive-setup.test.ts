@@ -132,6 +132,7 @@ describe('BGV passive M8 setup kernel commands', () => {
             expect.arrayContaining([
                 'BGVPassiveSetupPackageDigest',
                 'CollectiveSecretDistributionCertificateDigest',
+                'BGVPublicCommonRandomPolynomialRoot',
                 'EvaluationKeySizeProfileDigest',
                 'ThresholdShareVerificationKeyRoot',
             ]),

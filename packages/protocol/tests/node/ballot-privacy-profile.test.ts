@@ -314,4 +314,16 @@ describe('ballot privacy profile freeze', () => {
             ]),
         );
     });
+
+    it('keeps receiver encryption parameter security evidence marked incomplete', () => {
+        const profileSet = createBallotPrivacyProfileSet();
+
+        expect(
+            profileSet.receiverEncryptionProfile
+                .parameterSecurityEvidenceStatus,
+        ).toBe('ParameterCertificateMissing');
+        expect(profileSet.receiverEncryptionProfile.claimBoundary).toBe(
+            'ReceiverEncryptionParameterSecurityNotClosed',
+        );
+    });
 });

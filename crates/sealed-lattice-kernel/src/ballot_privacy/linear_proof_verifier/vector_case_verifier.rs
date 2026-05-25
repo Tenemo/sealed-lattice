@@ -1,5 +1,8 @@
 use super::vector_case::LinearProofVectorCase;
-use crate::ballot_privacy::{BALLOT_PRIVACY_PROOF_BACKEND_AVAILABLE, describe_proof_backend};
+use crate::ballot_privacy::{
+    BALLOT_PRIVACY_PROOF_BACKEND_AVAILABLE, describe_proof_backend,
+    linear_proof_parameters::linear_proof_claim_boundary_status_labels,
+};
 use crate::encoding::{CanonicalError, CanonicalErrorCode};
 use serde_json::{Value, json};
 pub fn verify_linear_proof_vector_case_value(vector_case: &Value) -> Value {
@@ -34,7 +37,7 @@ pub fn verify_linear_proof_vector_case_value(vector_case: &Value) -> Value {
         });
     }
 
-    let verified_status_labels = json!([
+    let mut verified_status_labels = vec![
         "LinearProofCanonicalBytesVerified",
         "LinearProofNormBoundsChecked",
         "AbdlopPublicParametersExpanded",
@@ -45,8 +48,11 @@ pub fn verify_linear_proof_vector_case_value(vector_case: &Value) -> Value {
         "TboxRelationBuildersChecked",
         "TboxResponseRelationBuildersChecked",
         "ManyQuadraticEquationsFolded",
-        "QuadraticChallengeRecomputed"
-    ]);
+        "QuadraticChallengeRecomputed",
+    ];
+    if let Some(proof_encoding) = parsed_case.proof_encoding.as_ref() {
+        verified_status_labels.extend(linear_proof_claim_boundary_status_labels(proof_encoding));
+    }
 
     if parsed_case.expected_outcome == "reject" {
         return json!({

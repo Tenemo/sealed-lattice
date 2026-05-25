@@ -73,7 +73,7 @@ impl MheSecurityClosure {
     pub fn label(self) -> &'static str {
         match self {
             Self::DevelopmentIntegration => "developmentIntegration",
-            Self::ActiveMalicious => "ActiveMalicious",
+            Self::ActiveMalicious => "activeMalicious",
         }
     }
 
@@ -103,10 +103,14 @@ impl TranscriptCoreProfile {
     }
 
     pub(super) fn seed_label(self) -> String {
+        let fixture_seed_mhe_label = match self.mhe_security_closure {
+            MheSecurityClosure::DevelopmentIntegration => "developmentIntegration",
+            MheSecurityClosure::ActiveMalicious => "ActiveMalicious",
+        };
         format!(
             "{}:{}",
             self.base_claim_profile.label(),
-            self.mhe_security_closure.label()
+            fixture_seed_mhe_label,
         )
     }
 }

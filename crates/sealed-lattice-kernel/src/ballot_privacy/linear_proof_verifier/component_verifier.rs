@@ -10,7 +10,9 @@ use crate::{
         describe_proof_backend,
         linear_proof_abdlop::validate_abdlop_linear_opening,
         linear_proof_norms::validate_linear_proof_norms,
-        linear_proof_parameters::{LinearProofEncoding, LinearProofParameterSet},
+        linear_proof_parameters::{
+            LinearProofEncoding, LinearProofParameterSet, linear_proof_claim_boundary_status_labels,
+        },
         linear_proof_public_parameters::derive_default_abdlop_public_parameters,
         linear_proof_statement::{
             LinearProofMatrixCoefficientRepresentation, LinearProofTargetCoefficientRepresentation,
@@ -762,7 +764,7 @@ pub(super) fn verify_sparse_linear_proof_components_inner(
         },
     )?;
 
-    Ok(json!([
+    let mut status_labels = vec![
         "LinearProofCanonicalBytesVerified",
         "LinearProofNormBoundsChecked",
         "AbdlopPublicParametersExpanded",
@@ -774,8 +776,13 @@ pub(super) fn verify_sparse_linear_proof_components_inner(
         "TboxRelationBuildersChecked",
         "TboxResponseRelationBuildersChecked",
         "ManyQuadraticEquationsFolded",
-        "QuadraticChallengeRecomputed"
-    ]))
+        "QuadraticChallengeRecomputed",
+    ];
+    status_labels.extend(linear_proof_claim_boundary_status_labels(
+        input.proof_encoding,
+    ));
+
+    Ok(json!(status_labels))
 }
 
 pub(super) fn verify_streamed_linear_proof_components_inner<Statement>(
@@ -860,7 +867,7 @@ where
         },
     )?;
 
-    Ok(json!([
+    let mut status_labels = vec![
         "LinearProofCanonicalBytesVerified",
         "LinearProofNormBoundsChecked",
         "AbdlopPublicParametersExpanded",
@@ -872,8 +879,13 @@ where
         "TboxRelationBuildersChecked",
         "TboxResponseRelationBuildersChecked",
         "ManyQuadraticEquationsFolded",
-        "QuadraticChallengeRecomputed"
-    ]))
+        "QuadraticChallengeRecomputed",
+    ];
+    status_labels.extend(linear_proof_claim_boundary_status_labels(
+        input.proof_encoding,
+    ));
+
+    Ok(json!(status_labels))
 }
 
 pub(super) fn validate_streamed_statement_shape<Statement>(

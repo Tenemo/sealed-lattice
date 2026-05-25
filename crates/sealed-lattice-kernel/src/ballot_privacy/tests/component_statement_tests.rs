@@ -485,6 +485,23 @@ fn structured_receiver_encryption_statement_lowers_public_module_lwe_rows() {
 }
 
 #[test]
+fn structured_receiver_encryption_statement_rejects_noncanonical_row_offsets() {
+    let mut statement = structured_receiver_encryption_statement_for_test(0);
+    statement["statementRows"] = json!(1281);
+    statement["receiverRows"][0]["rowOffsetWithinStatement"] = json!(1);
+
+    let error = match super::structured_receiver_encryption_statement_as_sparse(&statement) {
+        Ok(_) => panic!("receiver row offsets must be canonical and contiguous"),
+        Err(error) => error,
+    };
+
+    assert!(
+        error.message.contains("canonical and contiguous"),
+        "unexpected structured receiver row error: {error:?}"
+    );
+}
+
+#[test]
 fn component_linear_proof_bytes_verify_dense_and_sparse_public_statements() {
     let vectors: Value = serde_json::from_str(include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),

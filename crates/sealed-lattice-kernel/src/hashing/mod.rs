@@ -85,6 +85,7 @@ reserved_root_namespaces! {
     BGV_PASSIVE_SETUP_PACKAGE_DIGEST_NAMESPACE => "sealed-lattice-root/bgv-passive-setup-package-digest-v1",
     PARTICIPANT_BGV_SETUP_RECORD_DIGEST_NAMESPACE => "sealed-lattice-root/participant-bgv-setup-record-digest-v1",
     PUBLIC_KEY_SHARE_ROOT_NAMESPACE => "sealed-lattice-root/public-key-share-root-v1",
+    BGV_PUBLIC_COMMON_RANDOM_POLYNOMIAL_ROOT_NAMESPACE => "sealed-lattice-root/bgv-public-common-random-polynomial-root-v1",
     BGV_PUBLIC_KEY_ROOT_NAMESPACE => "sealed-lattice-root/bgv-public-key-root-v1",
     COLLECTIVE_PUBLIC_KEY_ROOT_NAMESPACE => "sealed-lattice-root/collective-public-key-root-v1",
     RELINEARIZATION_KEY_ROOT_NAMESPACE => "sealed-lattice-root/relinearization-key-root-v1",

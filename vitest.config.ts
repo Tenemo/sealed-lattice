@@ -37,10 +37,6 @@ const nodeProofInputHeavyTestIncludes = [
 const nodeRelationHeavyTestIncludes = [
     'packages/protocol/tests/node/ballot-privacy-relation-backend-lowering/**/*.test.ts',
 ] satisfies string[];
-const nodeHeavyTestIncludes = [
-    ...nodeProofInputHeavyTestIncludes,
-    ...nodeRelationHeavyTestIncludes,
-] satisfies string[];
 const nodeKernelAggregateTestIncludes = [
     'packages/wasm/tests/node/transcript-core-kernel/aggregate-derivation-proof.test.ts',
 ] satisfies string[];
@@ -54,6 +50,10 @@ const nodeKernelRemainingTestIncludes = [
     'packages/wasm/tests/node/canonical-error-codes-parity.test.ts',
     'packages/testkit/tests/node/transcript-core-fixtures.test.ts',
     'tests/node/digest-namespace-parity.test.ts',
+] satisfies string[];
+const nodeHeavyTestIncludes = [
+    ...nodeProofInputHeavyTestIncludes,
+    ...nodeRelationHeavyTestIncludes,
 ] satisfies string[];
 const nodeKernelHeavyTestIncludes = [
     ...nodeKernelAggregateTestIncludes,
@@ -350,16 +350,16 @@ export default defineConfig({
             {
                 resolve: repoRootResolve,
                 test: {
-                    name: 'node-proof-input-heavy',
-                    include: nodeProofInputHeavyTestIncludes,
+                    name: 'node-relation-heavy',
+                    include: nodeRelationHeavyTestIncludes,
                     ...nodeHeavyProject,
                 },
             },
             {
                 resolve: repoRootResolve,
                 test: {
-                    name: 'node-relation-heavy',
-                    include: nodeRelationHeavyTestIncludes,
+                    name: 'node-proof-input-heavy',
+                    include: nodeProofInputHeavyTestIncludes,
                     ...nodeHeavyProject,
                 },
             },
@@ -374,16 +374,16 @@ export default defineConfig({
             {
                 resolve: repoRootResolve,
                 test: {
-                    name: 'node-kernel-aggregate',
-                    include: nodeKernelAggregateTestIncludes,
+                    name: 'node-kernel-remaining',
+                    include: nodeKernelRemainingTestIncludes,
                     ...nodeKernelHeavyProject,
                 },
             },
             {
                 resolve: repoRootResolve,
                 test: {
-                    name: 'node-kernel-remaining',
-                    include: nodeKernelRemainingTestIncludes,
+                    name: 'node-kernel-aggregate',
+                    include: nodeKernelAggregateTestIncludes,
                     ...nodeKernelHeavyProject,
                 },
             },

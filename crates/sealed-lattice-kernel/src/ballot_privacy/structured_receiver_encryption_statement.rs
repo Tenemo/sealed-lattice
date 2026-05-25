@@ -104,6 +104,13 @@ pub(crate) fn parse_structured_receiver_encryption_statement(
                 "Structured receiver-encryption receiver row must be an object.",
             )
         })?;
+        if string_field(receiver_row, "receiverIdentity")
+            .is_none_or(|identity| identity.is_empty() || !is_nfc_normalized(identity))
+        {
+            return Err(ComponentProofBackendError::invalid(
+                "Structured receiver-encryption receiver row identity is missing or noncanonical.",
+            ));
+        }
         let row_offset_within_statement = usize_object_field(
             receiver_row,
             "rowOffsetWithinStatement",
@@ -145,6 +152,11 @@ pub(crate) fn parse_structured_receiver_encryption_statement(
         {
             return Err(ComponentProofBackendError::invalid(
                 "Structured receiver-encryption receiver rows exceed the statement shape.",
+            ));
+        }
+        if row_offset_within_statement != covered_row_count {
+            return Err(ComponentProofBackendError::invalid(
+                "Structured receiver-encryption receiver row offsets must be canonical and contiguous.",
             ));
         }
         covered_row_count = covered_row_count.checked_add(row_count).ok_or_else(|| {

@@ -384,7 +384,12 @@ fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult<Value> {
             let chunk_size = request
                 .get("chunkSize")
                 .and_then(Value::as_u64)
-                .unwrap_or(16);
+                .ok_or_else(|| {
+                    CanonicalError::new(
+                        CanonicalErrorCode::InvalidFixture,
+                        "chunkSize must be an integer",
+                    )
+                })?;
 
             analyze_canonical_object_hex(canonical_bytes_hex, chunk_size)
         }
@@ -845,6 +850,22 @@ mod tests {
             response["protocolDigest"],
             "423c71de65abadb5adc05d9b6b704252420bb738af888c62614c8afc53a2be808662585305e76738b23e4f20154f8779e3827c0c8f313455d84675924f4a2c83"
         );
+    }
+
+    #[test]
+    fn analyze_canonical_object_requires_explicit_chunk_size() {
+        let error = super::run_transcript_core_command_inner(
+            serde_json::json!({
+                "command": "AnalyzeCanonicalObject",
+                "canonicalBytesHex": ""
+            })
+            .to_string()
+            .as_bytes(),
+        )
+        .expect_err("missing chunk size should fail");
+
+        assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
+        assert_eq!(error.message, "chunkSize must be an integer");
     }
 
     #[test]

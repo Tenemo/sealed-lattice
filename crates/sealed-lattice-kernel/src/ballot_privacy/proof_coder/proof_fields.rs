@@ -510,7 +510,7 @@ impl<'proof> ProofBitReader<'proof> {
         &mut self,
         bit_count: usize,
     ) -> CanonicalResult<u64> {
-        if bit_count > 63 {
+        if bit_count == 0 || bit_count > 63 {
             return Err(invalid_proof(
                 "proof coder bit fields must fit in a positive signed word",
             ));
@@ -583,7 +583,7 @@ impl ProofBitWriter {
         value: u64,
         bit_count: usize,
     ) -> CanonicalResult<()> {
-        if bit_count > 63 {
+        if bit_count == 0 || bit_count > 63 {
             return Err(invalid_proof(
                 "proof coder bit fields must fit in a positive signed word",
             ));
@@ -837,4 +837,19 @@ pub(super) fn encode_hint_polynomial_vector(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ProofBitReader, ProofBitWriter};
+
+    #[test]
+    fn bit_fields_reject_zero_width() {
+        let mut writer = ProofBitWriter::new();
+        assert!(writer.write_unsigned_little_endian_bits(0, 0).is_err());
+
+        let bytes = [0_u8];
+        let mut reader = ProofBitReader::new(&bytes);
+        assert!(reader.read_unsigned_little_endian_bits(0).is_err());
+    }
 }

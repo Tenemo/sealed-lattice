@@ -8,7 +8,7 @@ export const cpadProfileId = 'KLLPS26-AsyncLagrangeTarget-CPAD-v1';
 /** Encrypted aggregate bridge profile required by accepted manifests. */
 export const encryptedAggregateBridgeProfileId = 'EncryptedAggregateBridge-v1';
 
-/** Passive BGV setup profile required by M8 trustee setup entries. */
+/** Passive BGV setup profile required by trustee setup entries. */
 export const bgvPassiveSetupProfileId =
     'sealed-lattice-bgv-rns-passive-full-roster-setup-v1';
 

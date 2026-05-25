@@ -188,7 +188,11 @@ func validateCanonicalFixture(fixture canonicalRnsFixture) error {
 		return fmt.Errorf("sealed-lattice canonical material fixture schema version is %d, expected 1", fixture.SchemaVersion)
 	}
 	if fixture.Source != "sealed-lattice-rust-wasm-canonical-rns-fixture" {
-		return fmt.Errorf("sealed-lattice canonical material fixture source is %q", fixture.Source)
+		return fmt.Errorf(
+			"sealed-lattice canonical material fixture source is %q, expected %q",
+			fixture.Source,
+			"sealed-lattice-rust-wasm-canonical-rns-fixture",
+		)
 	}
 	if fixture.PolynomialDegree != polynomialDegree {
 		return fmt.Errorf("sealed-lattice canonical material fixture polynomial degree is %d, expected %d", fixture.PolynomialDegree, polynomialDegree)

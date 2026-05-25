@@ -24,8 +24,17 @@ fn leak_bytes(bytes: Vec<u8>) -> *mut u8 {
 }
 
 unsafe fn transcript_core_command_output(pointer: *const u8, length: usize) -> Vec<u8> {
-    if length == 0 || pointer.is_null() {
-        return run_transcript_core_command(b"{}");
+    if length == 0 {
+        return encoding::encode_error(encoding::CanonicalError::new(
+            encoding::CanonicalErrorCode::InvalidFixture,
+            "transcript-core command input must not be empty",
+        ));
+    }
+    if pointer.is_null() {
+        return encoding::encode_error(encoding::CanonicalError::new(
+            encoding::CanonicalErrorCode::InvalidFixture,
+            "transcript-core command input pointer must not be null",
+        ));
     }
 
     let input = unsafe { slice::from_raw_parts(pointer, length) };
@@ -47,7 +56,7 @@ pub extern "C" fn sealed_lattice_allocate(length: usize) -> *mut u8 {
 /// `pointer` must either be null with `length == 0` or point to an allocation
 /// previously returned by `sealed_lattice_allocate` or
 /// `sealed_lattice_roundtrip` or `sealed_lattice_transcript_core_command_with_length`
-/// with the same `length`.
+/// with the exact same `length` that the allocation-producing function returned.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sealed_lattice_deallocate(pointer: *mut u8, length: usize) {
     if length == 0 || pointer.is_null() {
@@ -82,8 +91,9 @@ pub unsafe extern "C" fn sealed_lattice_roundtrip(pointer: *const u8, length: us
 
 /// # Safety
 ///
-/// `pointer` must either be null with `length == 0` or point to readable bytes
-/// for `length` elements in the WebAssembly module's linear memory.
+/// `pointer` must point to readable bytes for `length` elements in the
+/// WebAssembly module's linear memory. Null pointers and zero-length command
+/// inputs are rejected with a structured command error.
 /// `output_length_pointer` must be null or point to writable memory for one
 /// `usize` value in the WebAssembly module's linear memory.
 #[unsafe(no_mangle)]
@@ -158,6 +168,40 @@ mod tests {
         assert!(response_length > 0);
         unsafe {
             sealed_lattice_deallocate(response, response_length);
+        }
+    }
+
+    #[test]
+    fn transcript_core_command_ffi_rejects_empty_or_null_input() {
+        for (pointer, length, expected_message) in [
+            (
+                ptr::null(),
+                0,
+                "transcript-core command input must not be empty",
+            ),
+            (
+                ptr::null(),
+                8,
+                "transcript-core command input pointer must not be null",
+            ),
+        ] {
+            let mut response_length = 0_usize;
+            let response = unsafe {
+                sealed_lattice_transcript_core_command_with_length(
+                    pointer,
+                    length,
+                    &mut response_length,
+                )
+            };
+            assert!(!response.is_null());
+            let response_bytes = unsafe { slice::from_raw_parts(response, response_length) };
+            let response_value: serde_json::Value =
+                serde_json::from_slice(response_bytes).expect("response should be JSON");
+            assert_eq!(response_value["success"], false);
+            assert_eq!(response_value["error"]["message"], expected_message);
+            unsafe {
+                sealed_lattice_deallocate(response, response_length);
+            }
         }
     }
 }

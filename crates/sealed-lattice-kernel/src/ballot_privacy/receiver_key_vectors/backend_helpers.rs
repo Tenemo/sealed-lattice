@@ -370,6 +370,7 @@ pub(super) fn reject_forbidden_witness_keys(value: &Value) -> Result<(), String>
 
 pub(super) fn is_protocol_digest(value: &str) -> bool {
     value.len() == 128
+        && value.bytes().any(|byte| byte != b'0')
         && value
             .bytes()
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))

@@ -36,7 +36,7 @@
     "fixtureVersion": 1,
     "heSetupProofProfileId": "transcript-core-no-he-setup-proof-v1",
     "kind": "golden-transcript-core",
-    "mheSecurityClosure": "ActiveMalicious",
+    "mheSecurityClosure": "activeMalicious",
     "mheSecurityProfileId": "transcript-core-active-malicious-mhe-profile-v1",
     "objectType": "TranscriptCore",
     "objectVersion": 1

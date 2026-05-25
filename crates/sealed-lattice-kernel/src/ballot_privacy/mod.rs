@@ -145,10 +145,10 @@ pub(crate) use component_contracts::{
 };
 pub(crate) use component_linear_proof_verification::verify_component_proof_bundle_backend;
 pub(crate) use json_helpers::{
-    array_field, collect_receiver_reference_refusals, derive_digest, is_protocol_digest,
-    object_map, positive_roster_position, receiver_reference_key, required_json_field,
-    required_string_field, string_field, unsigned_decimal_string, value_without_field,
-    value_without_fields,
+    array_field, collect_receiver_reference_refusals, derive_digest, is_nfc_normalized,
+    is_protocol_digest, object_map, positive_roster_position, receiver_reference_key,
+    required_json_field, required_string_field, string_field, unsigned_decimal_string,
+    value_without_field, value_without_fields,
 };
 pub(crate) use linear_proof_binding_validation::{
     LinearProofBindingValidationInput, LinearProofBindingValidationMessages,

@@ -42,7 +42,7 @@ const createDynamicRosterProfileEvidence = (
         objectVersion: 1 as const,
         optionCount: input.optionCount,
         profileFamily: 'BalancedDefault' as const,
-        proofStatementShape: 'M5EncodedScoreBallotProof-v1' as const,
+        proofStatementShape: 'EncodedScoreBallotProof-v1' as const,
         receiverCoverageProfile: 'AllFrozenRosterReceivers' as const,
         thresholdProfileDigest: input.thresholdProfileDigest,
     };
@@ -720,7 +720,7 @@ describe('ballot privacy proof object boundary', () => {
         });
     });
 
-    it('requires dynamic roster profile evidence for non-benchmark receiver counts', () => {
+    it('requires approved dynamic roster profile evidence for non-benchmark receiver counts', () => {
         const { statement } = createStructurallyBoundObjects({
             participantCount: 16,
         });
@@ -757,17 +757,23 @@ describe('ballot privacy proof object boundary', () => {
             ),
         ).toBe(true);
 
-        expect(
-            verifyBallotProof({
-                ballotProof: proofRecord,
-                dynamicRosterProfileEvidence,
-                proofBytesHex,
-                statement,
-            }),
-        ).toMatchObject({
-            ok: false,
-            unresolvedReason: 'OperationUnavailable',
+        const selfAssertedEvidenceResult = verifyBallotProof({
+            ballotProof: proofRecord,
+            dynamicRosterProfileEvidence,
+            proofBytesHex,
+            statement,
         });
+        expect(selfAssertedEvidenceResult).toMatchObject({
+            ok: false,
+            unresolvedReason: 'BallotPackageInvalid',
+        });
+        expect(
+            selfAssertedEvidenceResult.refusedObjects.some((refusal) =>
+                refusal.message.includes(
+                    'approved roster profile parameter certificate',
+                ),
+            ),
+        ).toBe(true);
     });
 
     it.each(casualMicroRosterSizes)(

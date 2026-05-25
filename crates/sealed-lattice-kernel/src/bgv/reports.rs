@@ -11,7 +11,7 @@ use crate::{
             backend_profile_digest, ballot_score_encoding_profile_digest,
             ballot_share_layout_profile_digest, batch_encoder_digest, batch_layout_binding_digest,
             batch_layout_binding_value, canonical_ciphertext_convention_digest,
-            encoded_aggregate_layout_digest, layout_digest, profile_digest,
+            data_prime_bit_length, encoded_aggregate_layout_digest, layout_digest, profile_digest,
             security_estimator_input_digest, selected_profile_value,
             top_k_evaluator_input_layout_digest,
         },
@@ -105,8 +105,9 @@ pub(crate) fn operation_registry_report() -> CanonicalResult<Value> {
 
 pub(crate) fn backend_parameter_certificate_report() -> CanonicalResult<Value> {
     let profile_digest = profile_digest()?;
-    let q_data_bits = DATA_PRIMES.len() * 47;
-    let qp_public_bits = (DATA_PRIMES.len() + 1) * 47;
+    let data_prime_bits = usize::try_from(data_prime_bit_length()).unwrap_or(0);
+    let q_data_bits = DATA_PRIMES.len() * data_prime_bits;
+    let qp_public_bits = (DATA_PRIMES.len() + 1) * data_prime_bits;
     let parameter_certificate_value = json!({
         "parameterCertificateId": "m7-bgv-rns-backend-parameter-certificate-v1",
         "profileId": PROFILE_ID,
@@ -115,7 +116,7 @@ pub(crate) fn backend_parameter_certificate_report() -> CanonicalResult<Value> {
         "polynomialDegree": POLYNOMIAL_DEGREE,
         "plaintextModulus": PLAINTEXT_MODULUS,
         "dataPrimeCount": DATA_PRIMES.len(),
-        "dataPrimeBitLength": 47,
+        "dataPrimeBitLength": data_prime_bits,
         "specialPrimeCount": 1,
         "totalModulusBitsAtFullDataLevel": q_data_bits,
         "totalModulusBitsAtExtendedLevel": qp_public_bits,
@@ -219,7 +220,10 @@ pub(crate) fn backend_parameter_certificate_report() -> CanonicalResult<Value> {
 
     Ok(json!({
         "parameterCertificate": parameter_certificate_value,
-        "parameterCertificateDigest": derive_protocol_digest("HEParamDigest", &parameter_certificate_value)?,
+        "parameterCertificateDigest": derive_protocol_digest(
+            "BGVSetupParameterCertificateDigest",
+            &parameter_certificate_value,
+        )?,
         "bgvProfileRejectionFixtures": bgv_profile_rejection_fixtures(),
         "conventionDifferenceRegistry": convention_difference_registry(),
         "statusLabels": [
@@ -441,7 +445,7 @@ mod tests {
         );
         assert_eq!(
             backend_parameter_certificate_report().expect("backend report")["parameterCertificateDigest"],
-            "d352e86979f10901c9ae289701f4ad0060bf0d6ed4e85d4d783f837856af05665c0931e8ba455e32a6e898b04fe1e503c725a61b67dd2247d67b2667175e82c6"
+            "1af357fdb1330b3d0c1c41a8eb97ecc150e847f9ce14eedf039e22b74a4b773d8f1d13d87fab48790289baa3bb0f6a7f2e52bfcec8d0a6849aab7d89e98d2ecd"
         );
     }
 }

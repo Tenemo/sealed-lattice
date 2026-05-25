@@ -17,7 +17,7 @@ use super::linear_proof_profile_constants::{
 };
 
 const UPSTREAM_COMPATIBILITY_DEMO_LINEAR_PROOF_ENCODING_PROFILE_ID: &str =
-    concat!("la", "zer-demo-linear-proof-encoding-v1");
+    "lazer-demo-linear-proof-encoding-v1";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -251,13 +251,29 @@ pub(crate) fn linear_proof_profile_for_encoding(
             AGGREGATE_DERIVATION_COMPONENT_EXACT_NORM_BOUND_SQUARED,
         )?,
         _ => {
-            return Err(invalid_parameter(
+            return Err(unknown_proof_profile(
                 "proofEncoding.profileId is not a supported linear proof profile",
             ));
         }
     };
 
     validate_linear_proof_profile_invariants(proof_profile)
+}
+
+pub(crate) fn linear_proof_claim_boundary_status_labels(
+    proof_encoding: &LinearProofEncoding,
+) -> Vec<&'static str> {
+    match proof_encoding.profile_id.as_str() {
+        "full-encoded-score-ballot-linear-proof-encoding-v1"
+        | "payload-plaintext-field-linear-proof-encoding-v1"
+        | "receiver-encryption-linear-proof-encoding-v1"
+        | "share-commitment-linear-proof-encoding-v1"
+        | "aggregate-derivation-linear-proof-encoding-v1" => vec![
+            "LinearProofCompatibilityBoundsOnly",
+            "LinearProofStandaloneSoundnessEvidenceMissing",
+        ],
+        _ => Vec::new(),
+    }
 }
 
 fn profile_from_generated_constants(
@@ -585,20 +601,25 @@ fn invalid_parameter(message: impl Into<String>) -> CanonicalError {
     CanonicalError::new(CanonicalErrorCode::InvalidFixture, message)
 }
 
+fn unknown_proof_profile(message: impl Into<String>) -> CanonicalError {
+    CanonicalError::new(CanonicalErrorCode::UnknownProofProfile, message)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         demo_linear_parameter_contract, demo_linear_proof_encoding_contract,
         encoded_score_field_linear_parameter_contract,
-        encoded_score_field_linear_proof_encoding_contract, profile_from_generated_constants,
-        receiver_key_linear_parameter_contract, receiver_key_linear_proof_encoding_contract,
-        validate_linear_proof_profile_invariants,
+        encoded_score_field_linear_proof_encoding_contract, linear_proof_profile_for_encoding,
+        profile_from_generated_constants, receiver_key_linear_parameter_contract,
+        receiver_key_linear_proof_encoding_contract, validate_linear_proof_profile_invariants,
     };
     use crate::ballot_privacy::linear_proof_profile_constants::{
         DEMO_GENERATED_PROFILE, ENCODED_SCORE_FIELD_GENERATED_PARAMETER_CONTRACT,
         ENCODED_SCORE_FIELD_GENERATED_PROFILE, RECEIVER_KEY_GENERATED_PARAMETER_CONTRACT,
         RECEIVER_KEY_GENERATED_PROFILE,
     };
+    use crate::encoding::CanonicalErrorCode;
     use serde_json::json;
 
     #[test]
@@ -719,6 +740,17 @@ mod tests {
         assert_eq!(proof_encoding.compressed_coefficient_bit_length, 35);
         assert_eq!(proof_encoding.short_response_vector_length, 177);
         assert_eq!(proof_encoding.randomness_response_vector_length, 41);
+    }
+
+    #[test]
+    fn unknown_proof_encoding_profile_uses_specific_error_code() {
+        let mut proof_encoding = demo_linear_proof_encoding_contract();
+        proof_encoding.profile_id = "unknown-linear-proof-encoding-v1".to_string();
+
+        let error = linear_proof_profile_for_encoding(&proof_encoding)
+            .expect_err("unknown proof profile should fail");
+
+        assert_eq!(error.code, CanonicalErrorCode::UnknownProofProfile);
     }
 
     #[test]

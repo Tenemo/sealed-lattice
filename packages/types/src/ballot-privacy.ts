@@ -21,6 +21,8 @@ export type ReceiverEncryptionProfile = {
     readonly secretDistribution: 'CenteredBinomialEta2';
     readonly errorDistribution: 'CenteredBinomialEta2';
     readonly encryptionRandomnessDistribution: 'CenteredBinomialEta2';
+    readonly parameterSecurityEvidenceStatus: 'ParameterCertificateMissing';
+    readonly claimBoundary: 'ReceiverEncryptionParameterSecurityNotClosed';
     readonly payloadBinding: {
         readonly encryptsReceiverShareVector: true;
         readonly encryptsShareCommitmentOpening: true;
@@ -463,7 +465,7 @@ export type BallotProofRecord = {
     readonly publicRandomnessDigest?: ProtocolDigest;
 };
 
-/** Parameter certificate row evidence for one frozen dynamic M5 roster size. */
+/** Parameter certificate row evidence for one frozen dynamic roster size. */
 export type BallotPrivacyRosterProfileEvidence = {
     readonly objectType: 'BallotPrivacyRosterProfileEvidence';
     readonly objectVersion: 1;
@@ -474,7 +476,7 @@ export type BallotPrivacyRosterProfileEvidence = {
     readonly thresholdProfileDigest: ProtocolDigest;
     readonly dynamicRosterProfileCertificateDigest: ProtocolDigest;
     readonly receiverCoverageProfile: 'AllFrozenRosterReceivers';
-    readonly proofStatementShape: 'M5EncodedScoreBallotProof-v1';
+    readonly proofStatementShape: 'EncodedScoreBallotProof-v1';
 };
 
 /** Public ballot package shell containing the proof statement, proof record, and supplied verifier inputs. */
@@ -516,7 +518,7 @@ export type AggregateShareCommitment = {
     readonly commitmentBodyDigest: ProtocolDigest;
 };
 
-/** Public counted-ballot reference bound into an M6 aggregate derivation statement. */
+/** Public counted-ballot reference bound into an aggregate derivation statement. */
 export type AggregateDerivationPackageReference = {
     readonly ballotPackageDigest: ProtocolDigest;
     readonly ballotProofStatementDigest: ProtocolDigest;
@@ -525,7 +527,7 @@ export type AggregateDerivationPackageReference = {
     readonly shareCommitmentDigest: ProtocolDigest;
 };
 
-/** Public statement for the M6 aggregate derivation proof. */
+/** Public statement for the aggregate derivation proof. */
 export type AggregateDerivationStatement = {
     readonly objectType: 'AggregateDerivationStatement';
     readonly objectVersion: 1;
@@ -565,7 +567,7 @@ export type AggregateDerivationStatement = {
     readonly challengeDomainDigest: ProtocolDigest;
 };
 
-/** Public proof verifier input for the M6 aggregate derivation relation. */
+/** Public checker input for the aggregate derivation relation. */
 export type AggregateDerivationProofVerificationInput = {
     readonly componentId: 'aggregate-derivation-component';
     readonly componentProofStatementDigest: ProtocolDigest;
@@ -578,7 +580,7 @@ export type AggregateDerivationProofVerificationInput = {
     readonly statementDigest: ProtocolDigest;
 };
 
-/** Proof-byte-bearing public record for the M6 aggregate derivation component. */
+/** Proof-byte-bearing public record for the aggregate derivation component. */
 export type AggregateDerivationProofRecord = {
     readonly objectType: 'AggregateDerivationProofRecord';
     readonly objectVersion: 1;
@@ -596,7 +598,7 @@ export type AggregateDerivationProofRecord = {
     readonly publicRandomnessDigest: ProtocolDigest;
 };
 
-/** Public M6 aggregate derivation component. */
+/** Public aggregate derivation component. */
 export type AggregateDerivationComponent = {
     readonly objectType: 'AggregateDerivationComponent';
     readonly objectVersion: 1;
@@ -608,7 +610,7 @@ export type AggregateDerivationComponent = {
     readonly shareCommitmentMessageBoundCert: ShareCommitmentMessageBoundCert;
 };
 
-/** Structured result returned by M6 aggregate derivation component verification. */
+/** Structured result returned by aggregate derivation component checking. */
 export type AggregateDerivationVerification =
     StructuredProtocolVerificationResult & {
         readonly backendAvailable: boolean;

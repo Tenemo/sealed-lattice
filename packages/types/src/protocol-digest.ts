@@ -66,6 +66,7 @@ export const protocolDigestNamespaceValues = [
     'BGVPassiveSetupPackageDigest',
     'ParticipantBgvSetupRecordDigest',
     'PublicKeyShareRoot',
+    'BGVPublicCommonRandomPolynomialRoot',
     'BGVPublicKeyRoot',
     'CollectivePublicKeyRoot',
     'RelinearizationKeyRoot',

@@ -302,7 +302,7 @@ pub(super) fn compute_linear_proof_response_rotation_products(
             challenge_seed,
             u64::try_from(row_domain_separator)
                 .map_err(|_| invalid_tbox_relation("rotation row domain does not fit in u64"))?,
-        );
+        )?;
         for repetition_index in 0..TBOX_QUADRATIC_EVALUATION_REPETITIONS {
             let challenge =
                 i128::from(challenge_matrix[repetition_index][response_coordinate_index]);
@@ -683,8 +683,11 @@ pub(super) fn sample_linear_proof_binary_difference_values(
     value_count: usize,
     seed: &[u8; 32],
     domain_separator: u64,
-) -> Vec<i8> {
-    let byte_count = (2 * value_count).div_ceil(8);
+) -> CanonicalResult<Vec<i8>> {
+    let bit_count = value_count
+        .checked_mul(2)
+        .ok_or_else(|| invalid_tbox_relation("binary-difference bit count overflowed"))?;
+    let byte_count = bit_count.div_ceil(8);
     let random_bytes = super::linear_proof_rng::generate_linear_proof_aes256ctr_stream(
         seed,
         domain_separator,
@@ -692,16 +695,28 @@ pub(super) fn sample_linear_proof_binary_difference_values(
     );
     let mut values = vec![0_i8; value_count];
     for (value_index, value) in values.iter_mut().enumerate().take(value_count) {
-        let positive_bit = read_bit(&random_bytes, value_index);
-        let negative_bit = read_bit(&random_bytes, value_count + value_index);
+        let positive_bit = read_bit(&random_bytes, value_index)?;
+        let negative_bit = read_bit(
+            &random_bytes,
+            value_count
+                .checked_add(value_index)
+                .ok_or_else(|| invalid_tbox_relation("binary-difference bit index overflowed"))?,
+        )?;
         *value = positive_bit as i8 - negative_bit as i8;
     }
 
-    values
+    Ok(values)
 }
 
-pub(super) fn read_bit(bytes: &[u8], bit_index: usize) -> u8 {
-    (bytes[bit_index / 8] >> (bit_index % 8)) & 1
+pub(super) fn read_bit(bytes: &[u8], bit_index: usize) -> CanonicalResult<u8> {
+    let byte_index = bit_index / 8;
+    if byte_index >= bytes.len() {
+        return Err(invalid_tbox_relation(
+            "binary-difference bit index is outside the sampled bytes",
+        ));
+    }
+
+    Ok((bytes[byte_index] >> (bit_index % 8)) & 1)
 }
 
 pub(super) fn dot_signed_response_with_challenge(
@@ -835,4 +850,20 @@ pub(super) fn build_beta4_norm_equation(
     tbox_profile: TboxRelationProfile,
 ) -> CanonicalResult<LinearProofQuadraticEquation> {
     build_beta_norm_equation(true, tbox_profile)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{read_bit, sample_linear_proof_binary_difference_values};
+
+    #[test]
+    fn binary_difference_sampling_checks_bit_bounds() {
+        let seed = [7_u8; 32];
+        let values = sample_linear_proof_binary_difference_values(17, &seed, 3)
+            .expect("binary-difference samples");
+
+        assert_eq!(values.len(), 17);
+        assert!(values.iter().all(|value| (-1..=1).contains(value)));
+        assert!(read_bit(&[0], 8).is_err());
+    }
 }

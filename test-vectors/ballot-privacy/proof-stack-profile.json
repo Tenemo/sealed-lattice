@@ -12,7 +12,7 @@
     "ballotProofProfileId": "linear-lattice-ballot-privacy-proof-v1"
   },
   "profileDigests": {
-    "receiverEncryptionProfileDigest": "5de80d6b0eaf3d6e32c95a65985651732176fcf390195595dd76d64615ca03034b71d9757e5d70dc370cdeafeaa341cadeafa2ebe8c19d7fd2a74c5b163650b9",
+    "receiverEncryptionProfileDigest": "b4eb24f24283a8b16e94ed876107f273503630f80429ac3bdd51ad0222126fef14fbf896b453ac70312b7b07138771518f5806c27cb07724f4e8888a684c6d71",
     "shareCommitmentProfileDigest": "b9d5a90cc57d3f4716dc547f458279a63341b47e1ac8a5badd3a0db5a764d1a3e83297bd1253c1b9593f9a5f07e4e273dd3c668232c66e0fceefe30b0570948a",
     "scoreMembershipProfileDigest": "d2c6448460e46c81b849d8a2a7391830d0ffbe908fb0916a5a687a9f1bc9400c6d9af6bc668dcc98d081953a50059c00a3ed41c528fe0311cafac8ef1608b548",
     "ballotScoreEncodingProfileDigest": "d7d68c4149c276c1b3515c3299c2fb68b73ac8633e7cec36820523aa2dc4697e5f29e72f8065c784c68476ff0d9b153834d5981d64ae9e95ed37c399a4dd68d7",

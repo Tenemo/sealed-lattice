@@ -38,7 +38,7 @@ pub struct LinearProofPreflightTranscript {
 /// SHAKE128 over raw concatenated parts for the LaZer-compatible proof
 /// transcript, where all call sites have fixed boundaries or already encoded
 /// lengths. New diagnostic transcripts should use an explicit framed helper.
-pub fn shake128_32(parts: &[&[u8]]) -> [u8; 32] {
+pub(crate) fn shake128_32(parts: &[&[u8]]) -> [u8; 32] {
     let mut hasher = Shake128::default();
     for part in parts {
         hasher.update(part);
@@ -52,7 +52,7 @@ pub fn shake128_32(parts: &[&[u8]]) -> [u8; 32] {
 
 /// SHAKE128 over raw concatenated parts for fixed-boundary LaZer-compatible
 /// expansion. Do not use this helper for new variable-length transcripts.
-pub fn shake128_96(parts: &[&[u8]]) -> [u8; 96] {
+pub(crate) fn shake128_96(parts: &[&[u8]]) -> [u8; 96] {
     let mut hasher = Shake128::default();
     for part in parts {
         hasher.update(part);
@@ -64,7 +64,7 @@ pub fn shake128_96(parts: &[&[u8]]) -> [u8; 96] {
     output
 }
 
-pub fn shake128_32_hex(parts: &[&[u8]]) -> String {
+pub(crate) fn shake128_32_hex(parts: &[&[u8]]) -> String {
     to_hex(&shake128_32(parts))
 }
 

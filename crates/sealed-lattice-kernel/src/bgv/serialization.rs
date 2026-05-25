@@ -106,8 +106,8 @@ pub(crate) fn parse_bgv_object(bytes: &[u8]) -> CanonicalResult<CanonicalBgvObje
     }
     if serialize_bgv_object(object.object_kind, &object.components)? != bytes {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::FixtureMismatch,
-            "BGV canonical object does not reserialize byte-identically",
+            CanonicalErrorCode::InvalidFixture,
+            "BGV object is not canonical because it does not reserialize byte-identically",
         ));
     }
 

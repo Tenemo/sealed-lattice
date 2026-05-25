@@ -9,6 +9,7 @@ mod reports;
 mod rns;
 mod serialization;
 mod setup;
+mod setup_helpers;
 mod validation;
 
 #[cfg(test)]

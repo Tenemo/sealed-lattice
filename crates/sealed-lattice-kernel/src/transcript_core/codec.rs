@@ -264,8 +264,8 @@ pub fn parse_transcript_core_object(bytes: &[u8]) -> CanonicalResult<TranscriptC
 
     if serialize_transcript_core_object(&object) != bytes {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::FixtureMismatch,
-            "parsed object does not reserialize to identical bytes",
+            CanonicalErrorCode::InvalidFixture,
+            "parsed object is not canonical because it does not reserialize to identical bytes",
         ));
     }
 
