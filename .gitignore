@@ -27,17 +27,7 @@ docs/src/content/docs/api/reference/
 __pycache__/
 
 # Temporary files
-temp-preview-*.txt
 temp/
-temp.*
-temp-*
-temp_*
-tmp/
-tmp.*
-tmp-*
-.tmp-*
-.tmp_*
-.tmp.*
 
 # env
 .env

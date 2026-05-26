@@ -65,6 +65,7 @@ The package currently exposes helpers for:
 - transcript-core fixture verification through the bundled Rust/WASM kernel
 - receiver-key proof, ballot proof record, and claim-bearing ballot package verification
 - aggregate derivation component verification for post-close contribution evidence
+- internal encrypted-aggregate bridge object-model helpers and private Rust/WASM bridge-encryption generation plus full public-statement and proof-target contract digest evidence checking, explicit pending relation-gap status checks, sampled-relation diagnostic-only policy checks, same-witness target-contract guards with a bound shared-witness layout digest rejecting separate-subproof closure and public plaintext-root closure evidence, aggregate subproof summary binding across Rust/WASM and TypeScript pending-record assembly, pending bridge proof-record assembly, checked-proof-record contribution assembly, fail-closed bridge-encryption shell guards, and public SDK export guards for witness-clean contribution records, first-valid contribution selection, and aggregate-ready handoff records
 - explicit non-closure markers for receiver-encryption parameter-security evidence and aggregate-derivation claim closure
 
 Verification helpers return structured results with accepted digests, status labels, and refusal records where applicable. Reserved complete-protocol entry points fail closed with `OperationUnavailable` until the matching protocol layer exists.
@@ -78,6 +79,7 @@ Verification helpers return structured results with accepted digests, status lab
 - aggregation or tally evaluation APIs
 - standalone receiver-encryption parameter-security certification for the current Module-LWE profile
 - claim-strength aggregate-opening proof closure
+- claim-bearing encrypted aggregate bridge proof generation or verification
 - HE-bearing security certification; the private BGV profile remains pending final `Q_target` and Appendix A acceptance, and ML-KEM/ML-DSA transport/signature choices do not imply category-3 end-to-end security
 - production target-bound decryption or result release
 - production-readiness, audit, or certification claims

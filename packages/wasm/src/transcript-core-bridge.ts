@@ -11,6 +11,8 @@ export type {
     BallotPrivacyReceiverKeyProofGenerationPreparation,
     BallotPrivacyReceiverKeyProofGeneration,
     BallotPrivacyProofGeneration,
+    AggregateBridgeEncryptionGeneration,
+    AggregateBridgeEncryptionVerification,
     BgvBaseConversionFixture,
     BgvBatchPlaintextEncoding,
     BgvCiphertextConventionFixture,

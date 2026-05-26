@@ -42,5 +42,16 @@ export {
     verifyAggregateDerivationComponentStructure,
 } from './aggregate-derivation.js';
 export type { AggregateDerivationWitnessInput } from './aggregate-derivation.js';
+export {
+    createAggregateContributionFromBridgeProofRecord,
+    createAggregateReadyRecord,
+    deriveAggregateContributionDigest,
+    deriveBridgeProofProfileDigest,
+    deriveBridgeProofRecordDigest,
+    deriveBridgeProofStatementDigest,
+    deriveBridgeProofTargetContractDigest,
+    selectFirstValidAggregateContributions,
+    verifyAggregateContributionStructure,
+} from './aggregate-bridge.js';
 export { compileBallotPrivacyRelation } from './relation-compiler.js';
 export type { BallotPrivacyRelationCompilerInput } from './relation-compiler.js';

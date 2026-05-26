@@ -1,5 +1,16 @@
+import type {
+    InterpolationCoefficientReport,
+    LagrangeCoefficient,
+} from './plaintext-oracle.js';
 import type { ProtocolDigest } from './protocol-digest.js';
-import type { StructuredProtocolVerificationResult } from './protocol-objects.js';
+import type {
+    ProtocolSignatureEnvelope,
+    StructuredProtocolVerificationResult,
+} from './protocol-objects.js';
+import type {
+    ActionContext,
+    RecoveryEpochMapEntry,
+} from './roster-recovery.js';
 
 export type DecimalIntegerString = string;
 
@@ -616,6 +627,192 @@ export type AggregateDerivationVerification =
         readonly backendAvailable: boolean;
         readonly aggregateDerivationComponentDigest?: ProtocolDigest;
     };
+
+/** Proof record binding one contributor-local encrypted aggregate bridge statement. */
+export type BridgeProofRecord = {
+    readonly objectType: 'BridgeProofRecord';
+    readonly objectVersion: 1;
+    readonly bridgeProofRecordDigest: ProtocolDigest;
+    readonly bridgeProofProfileId: string;
+    readonly bridgeProofProfileDigest: ProtocolDigest;
+    readonly bridgeProofTargetContractDigest: ProtocolDigest;
+    readonly bgvEncryptionProofSubrelation:
+        | 'SealedLatticeBoundedEncryptionRelation'
+        | 'HwangPiopCandidate';
+    readonly proofBackend: 'SealedLatticeBridgeRelation';
+    readonly bridgeProofVerificationStatus:
+        | 'BridgeProofBackendPending'
+        | 'BridgeProofRelationChecked';
+    readonly aggregateDerivationComponentDigest: ProtocolDigest;
+    readonly aggregateShareCommitmentDigest: ProtocolDigest;
+    readonly shareCommitmentMessageBoundCertDigest: ProtocolDigest;
+    readonly encryptedAggregateBridgeDigest: ProtocolDigest;
+    readonly encryptedAggregateTargetBasisDataRoot: ProtocolDigest;
+    readonly encryptedAggregateShareCiphertextRoot: ProtocolDigest;
+    readonly encryptedAggregateReconstructionDigest: ProtocolDigest;
+    readonly bridgeWitnessPrivacyProfileDigest: ProtocolDigest;
+    readonly bgvBatchEncoderDigest: ProtocolDigest;
+    readonly bridgeLayoutDigest: ProtocolDigest;
+    readonly ballotScoreEncodingProfileDigest: ProtocolDigest;
+    readonly ballotShareLayoutProfileDigest: ProtocolDigest;
+    readonly aggregateInputEncodingProfileDigest: ProtocolDigest;
+    readonly encodedShareVectorLayoutDigest: ProtocolDigest;
+    readonly encodedAggregateLayoutDigest: ProtocolDigest;
+    readonly encryptedAggregateInputLayoutDigest: ProtocolDigest;
+    readonly topKEvaluatorInputLayoutDigest: ProtocolDigest;
+    readonly heParamDigest: ProtocolDigest;
+    readonly bgvProfileDigest: ProtocolDigest;
+    readonly rustBgvBackendProfileDigest: ProtocolDigest;
+    readonly canonicalCiphertextConventionDigest: ProtocolDigest;
+    readonly bgvPublicKeyRoot: ProtocolDigest;
+    readonly collectivePublicKeyRoot: ProtocolDigest;
+    readonly aggregateSelectionPolicyDigest: ProtocolDigest;
+    readonly postVotingClosedContextDigest: ProtocolDigest;
+    readonly ceremonyId: string;
+    readonly manifestDigest: ProtocolDigest;
+    readonly rosterDigest: ProtocolDigest;
+    readonly pollSpecDigest: ProtocolDigest;
+    readonly thresholdProfileDigest: ProtocolDigest;
+    readonly ballotSetDigest: ProtocolDigest;
+    readonly votingClosedBoardHeadDigest: ProtocolDigest;
+    readonly contributorIdentity: string;
+    readonly contributorRosterPosition: number;
+    readonly contributorRosterExternalAcceptanceDigest: ProtocolDigest;
+    readonly proofStatementDigest: ProtocolDigest;
+    readonly proofRoot: ProtocolDigest;
+    readonly proofBytesDigest: ProtocolDigest;
+    readonly proofEncodingProfileDigest: ProtocolDigest;
+    readonly proofParameterSetDigest: ProtocolDigest;
+    readonly proofSizeBytes: number;
+    readonly publicRandomnessDigest: ProtocolDigest;
+};
+
+/** Witness-clean public contribution that references M6 evidence and M9 proof roots. */
+export type AggregateContribution = {
+    readonly objectType: 'AggregateContribution';
+    readonly objectVersion: 1;
+    readonly aggregateContributionDigest: ProtocolDigest;
+    readonly ceremonyId: string;
+    readonly manifestDigest: ProtocolDigest;
+    readonly rosterDigest: ProtocolDigest;
+    readonly pollSpecDigest: ProtocolDigest;
+    readonly thresholdProfileDigest: ProtocolDigest;
+    readonly ballotSetDigest: ProtocolDigest;
+    readonly votingClosedBoardHeadDigest: ProtocolDigest;
+    readonly closeRecordDigest: ProtocolDigest;
+    readonly postVotingClosedContextDigest: ProtocolDigest;
+    readonly contributorIdentity: string;
+    readonly contributorRosterPosition: number;
+    readonly contributorRosterExternalAcceptanceDigest: ProtocolDigest;
+    readonly aggregateDerivationComponentDigest: ProtocolDigest;
+    readonly aggregateShareCommitmentDigest: ProtocolDigest;
+    readonly shareCommitmentMessageBoundCertDigest: ProtocolDigest;
+    readonly bridgeProofRecord: BridgeProofRecord;
+    readonly bridgeProofRecordDigest: ProtocolDigest;
+    readonly bridgeProofProfileDigest: ProtocolDigest;
+    readonly encryptedAggregateBridgeDigest: ProtocolDigest;
+    readonly encryptedAggregateTargetBasisDataRoot: ProtocolDigest;
+    readonly encryptedAggregateShareCiphertextRoot: ProtocolDigest;
+    readonly encryptedAggregateReconstructionDigest: ProtocolDigest;
+    readonly bridgeWitnessPrivacyProfileDigest: ProtocolDigest;
+    readonly bgvBatchEncoderDigest: ProtocolDigest;
+    readonly bridgeLayoutDigest: ProtocolDigest;
+    readonly ballotScoreEncodingProfileDigest: ProtocolDigest;
+    readonly ballotShareLayoutProfileDigest: ProtocolDigest;
+    readonly aggregateInputEncodingProfileDigest: ProtocolDigest;
+    readonly encodedShareVectorLayoutDigest: ProtocolDigest;
+    readonly encodedAggregateLayoutDigest: ProtocolDigest;
+    readonly encryptedAggregateInputLayoutDigest: ProtocolDigest;
+    readonly topKEvaluatorInputLayoutDigest: ProtocolDigest;
+    readonly heParamDigest: ProtocolDigest;
+    readonly bgvProfileDigest: ProtocolDigest;
+    readonly rustBgvBackendProfileDigest: ProtocolDigest;
+    readonly canonicalCiphertextConventionDigest: ProtocolDigest;
+    readonly bgvPublicKeyRoot: ProtocolDigest;
+    readonly collectivePublicKeyRoot: ProtocolDigest;
+    readonly aggregateSelectionPolicyDigest: ProtocolDigest;
+    readonly actionContext: ActionContext;
+    readonly boardSequence: number;
+    readonly boardPosition: number;
+    readonly recoveryEpoch: number;
+    readonly deviceEpoch: number;
+    readonly actionSequence: number;
+    readonly signature: ProtocolSignatureEnvelope;
+};
+
+/** Structured result returned by aggregate bridge contribution checking. */
+export type AggregateContributionVerification =
+    StructuredProtocolVerificationResult & {
+        readonly aggregateContributionDigest?: ProtocolDigest;
+        readonly bridgeProofRecordDigest?: ProtocolDigest;
+        readonly backendAvailable: boolean;
+    };
+
+/** Input used to select first-valid encrypted aggregate contributions. */
+export type AggregateContributionSelectionInput = {
+    readonly contributions: readonly AggregateContribution[];
+    readonly aggregateContributionQuorum: number;
+    readonly currentRecoveryEpochMap: Readonly<
+        Record<string, RecoveryEpochMapEntry>
+    >;
+    readonly expectedAggregateSelectionPolicyDigest: ProtocolDigest;
+    readonly requiredPostVotingClosedContextDigest: ProtocolDigest;
+};
+
+/** First-valid encrypted aggregate contribution selection result. */
+export type AggregateContributionSelection =
+    StructuredProtocolVerificationResult & {
+        readonly firstValidOrderDigest?: ProtocolDigest;
+        readonly orderedContributionDigests: readonly ProtocolDigest[];
+        readonly selectedContributions: readonly AggregateContribution[];
+    };
+
+/** M10 handoff record after enough bridge-bearing aggregate contributions exist. */
+export type AggregateReadyRecord = {
+    readonly objectType: 'AggregateReadyRecord';
+    readonly objectVersion: 1;
+    readonly aggregateReadyRecordDigest: ProtocolDigest;
+    readonly ceremonyId: string;
+    readonly manifestDigest: ProtocolDigest;
+    readonly rosterDigest: ProtocolDigest;
+    readonly pollSpecDigest: ProtocolDigest;
+    readonly thresholdProfileDigest: ProtocolDigest;
+    readonly ballotSetDigest: ProtocolDigest;
+    readonly votingClosedBoardHeadDigest: ProtocolDigest;
+    readonly postVotingClosedContextDigest: ProtocolDigest;
+    readonly aggregateSelectionPolicyDigest: ProtocolDigest;
+    readonly aggregateContributionQuorum: number;
+    readonly firstValidOrderDigest: ProtocolDigest;
+    readonly selectedAggregateContributionDigests: readonly ProtocolDigest[];
+    readonly selectedContributorIdentities: readonly string[];
+    readonly selectedContributorRosterPositions: readonly number[];
+    readonly selectedContributorInterpolationPoints: readonly number[];
+    readonly encryptedAggregateShareCiphertextRoots: readonly ProtocolDigest[];
+    readonly interpolationCoefficientReportDigest: ProtocolDigest;
+    readonly interpolationCoefficients: readonly LagrangeCoefficient[];
+    readonly centeredL1CoefficientSum: number;
+    readonly maxCenteredAbsCoefficient: number;
+    readonly encryptedAggregateBridgeDigest: ProtocolDigest;
+    readonly encryptedAggregateTargetBasisDataRoot: ProtocolDigest;
+    readonly encryptedAggregateReconstructionDigest: ProtocolDigest;
+    readonly encryptedAggregateReconstructionRoot: ProtocolDigest;
+    readonly bridgeWitnessPrivacyProfileDigest: ProtocolDigest;
+    readonly bgvBatchEncoderDigest: ProtocolDigest;
+    readonly bridgeLayoutDigest: ProtocolDigest;
+    readonly encryptedAggregateInputLayoutDigest: ProtocolDigest;
+    readonly topKEvaluatorInputLayoutDigest: ProtocolDigest;
+    readonly bgvProfileDigest: ProtocolDigest;
+    readonly collectivePublicKeyRoot: ProtocolDigest;
+};
+
+/** Input used to construct the aggregate-ready M10 handoff record. */
+export type AggregateReadyRecordBuildInput = {
+    readonly aggregateContributionQuorum: number;
+    readonly firstValidOrderDigest: ProtocolDigest;
+    readonly rosterSize: number;
+    readonly selectedContributions: readonly AggregateContribution[];
+    readonly suppliedInterpolationCoefficientReport?: InterpolationCoefficientReport;
+};
 
 /** Runtime status reported by the ballot privacy proof backend. */
 export type BallotPrivacyProofBackendStatus = {

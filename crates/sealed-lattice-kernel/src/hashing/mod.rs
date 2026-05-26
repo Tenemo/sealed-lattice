@@ -125,6 +125,7 @@ reserved_root_namespaces! {
     KLLPS_TARGET_DECRYPTION_PROFILE_DIGEST_NAMESPACE => "sealed-lattice-root/kllps-target-decryption-profile-digest-v1",
     TOP_K_DECRYPTION_SHARE_DIGEST_NAMESPACE => "sealed-lattice-root/top-k-decryption-share-digest-v1",
     VERIFIED_TOP_K_RESULT_DIGEST_NAMESPACE => "sealed-lattice-root/verified-top-k-result-digest-v1",
+    BRIDGE_PROOF_PROFILE_DIGEST_NAMESPACE => "sealed-lattice-root/bridge-proof-profile-digest-v1",
     BRIDGE_PROOF_RECORD_DIGEST_NAMESPACE => "sealed-lattice-root/bridge-proof-record-digest-v1",
     CANONICAL_CIPHERTEXT_CONVENTION_DIGEST_NAMESPACE => "sealed-lattice-root/canonical-ciphertext-convention-digest-v1",
     BGV_BATCH_ENCODER_DIGEST_NAMESPACE => "sealed-lattice-root/bgv-batch-encoder-digest-v1",

@@ -71,6 +71,7 @@ use self::{
 pub const MODULE_MARKER: &str = "ballot-privacy";
 pub const BALLOT_PRIVACY_PROOF_BACKEND_AVAILABLE: bool = true;
 
+mod aggregate_bridge_proof;
 mod aggregate_derivation_proof;
 mod backend_status;
 mod ballot_linear_verifier;
@@ -97,9 +98,15 @@ mod share_commitment_backend_helpers;
 mod structured_receiver_encryption_statement;
 mod structured_share_commitment_statement;
 
+pub(crate) use aggregate_bridge_proof::{
+    generate_aggregate_bridge_encryption_from_command_request,
+    verify_aggregate_bridge_encryption_from_command_request,
+};
 pub(crate) use aggregate_derivation_proof::{
+    check_aggregate_derivation_witness_relation,
     generate_aggregate_derivation_proof_from_command_request,
     verify_aggregate_derivation_proof_from_command_request,
+    verify_aggregate_derivation_relation_subproof_for_component,
 };
 pub(crate) use backend_status::{describe_proof_backend, structural_refusal, structural_rejection};
 pub(crate) use ballot_linear_verifier::{

@@ -5,6 +5,7 @@ import {
     type CapabilityDecision,
     type FirstValidOrderingInput,
     type FirstValidOrderingVerification,
+    type FutureProtocolOperationResult,
     type LifecycleLabelInput,
     type LifecycleLabels,
     type LifecycleTransition,
@@ -46,6 +47,8 @@ const evaluateActionCapability =
     publicApiRuntimeRecord.evaluateActionCapability as EvaluateActionCapability;
 const deriveValidatedFirstValidOrder =
     publicApiRuntimeRecord.deriveValidatedFirstValidOrder as DeriveValidatedFirstValidOrder;
+const verifyBridgeProof =
+    publicApiRuntimeRecord.verifyBridgeProof as () => FutureProtocolOperationResult;
 
 const requiredPublicFunctions = [
     [
@@ -128,6 +131,23 @@ describe('election foundation public package API in Node', () => {
         for (const publicKey of forbiddenPublicKeys) {
             expect(publicKey in publicApiRuntimeRecord).toBe(false);
         }
+    });
+
+    it('keeps the public bridge verifier fail-closed until M9 relation closure', () => {
+        expect(verifyBridgeProof()).toEqual({
+            acceptedDigests: [],
+            ok: false,
+            operation: 'verifyBridgeProof',
+            refusedObjects: [
+                {
+                    code: 'OperationUnavailable',
+                    message:
+                        'verifyBridgeProof is reserved for later protocol implementation and is not implemented in this package build.',
+                },
+            ],
+            statusLabels: [],
+            unresolvedReason: 'OperationUnavailable',
+        });
     });
 
     it('derives threshold, poll, lifecycle, label, and capability decisions', () => {

@@ -106,6 +106,7 @@ export const protocolDigestNamespaceValues = [
     'CPADProfileVerificationDigest',
     'ThresholdDecryptionProfileDigest',
     'KllpsTargetDecryptionProfileDigest',
+    'BridgeProofProfileDigest',
     'BridgeProofRecordDigest',
     'CanonicalCiphertextConventionDigest',
     'BGVBatchEncoderDigest',

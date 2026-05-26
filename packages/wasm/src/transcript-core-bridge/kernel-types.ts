@@ -354,6 +354,77 @@ export type BgvPassiveSetupVerification = {
     readonly statusLabels: readonly string[];
 };
 
+export type AggregateBridgeEncryptionGeneration = {
+    readonly ok: boolean;
+    readonly operation: 'generateAggregateBridgeEncryption';
+    readonly profileDigest: ProtocolDigest;
+    readonly rustBgvBackendProfileDigest: ProtocolDigest;
+    readonly canonicalCiphertextConventionDigest: ProtocolDigest;
+    readonly collectivePublicKeyRoot: ProtocolDigest;
+    readonly bgvPublicKeyRoot: ProtocolDigest;
+    readonly plaintextRoot: ProtocolDigest;
+    readonly ciphertextRoot: ProtocolDigest;
+    readonly encryptedAggregateShareCiphertextRoot: ProtocolDigest;
+    readonly aggregateRelationSubproofSizeBytes: number;
+    readonly aggregateRelationChallengeHex: string;
+    readonly aggregateRelationCommitmentDigest: ProtocolDigest;
+    readonly aggregateReducedCoordinateCount: number;
+    readonly aggregateQuotientCoordinateCount: number;
+    readonly aggregateDerivationComponentDigest: ProtocolDigest;
+    readonly aggregateDerivationStatementDigest: ProtocolDigest;
+    readonly bridgeProofProfileDigest: ProtocolDigest;
+    readonly bridgeProofStatementDigest: ProtocolDigest;
+    readonly bridgeProofTargetContractDigest: ProtocolDigest;
+    readonly bridgeProofBytesHex: string;
+    readonly bridgeProofBytesDigest: ProtocolDigest;
+    readonly bridgeProofRoot: ProtocolDigest;
+    readonly bridgeProofVerificationStatus: 'BridgeProofBackendPending';
+    readonly canonicalBytesHash512: string;
+    readonly canonicalByteLength: number;
+    readonly basisId: string;
+    readonly level: number;
+    readonly coefficientCount: number;
+    readonly suppliedSlotCount: number;
+    readonly slotCount: number;
+    readonly sampledPublicRelationChecks: readonly unknown[];
+    readonly sampledPublicRelationCheckPolicy: {
+        readonly acceptedForBridgeProofVerification: false;
+        readonly diagnosticOnly: true;
+        readonly fullBridgeProofRequired: true;
+        readonly objectType: 'M9BridgeSampledRelationCheckPolicy';
+        readonly objectVersion: 1;
+        readonly relationCheckSource: 'first-data-prime-diagnostic';
+        readonly sampledOnlyBridgeVerificationAccepted: false;
+        readonly sampledRelationCheckCount: number;
+    };
+    readonly privateMaterialDisclosure: Readonly<Record<string, boolean>>;
+    readonly statusLabels: readonly string[];
+    readonly canonicalBytesHex?: string;
+};
+
+export type AggregateBridgeEncryptionVerification = {
+    readonly ok: boolean;
+    readonly backendAvailable: boolean;
+    readonly operation: 'verifyAggregateBridgeEncryption';
+    readonly statusLabels: readonly string[];
+    readonly acceptedDigests: readonly ProtocolDigest[];
+    readonly refusedObjects: readonly unknown[];
+    readonly unresolvedReason: string | null;
+    readonly bridgeProofVerificationStatus: 'BridgeProofBackendPending';
+    readonly bridgeEvidenceVerificationStatus: 'BridgeProofEvidenceChecked';
+    readonly bridgeProofProfileDigest: ProtocolDigest;
+    readonly bridgeProofStatementDigest: ProtocolDigest;
+    readonly bridgeProofTargetContractDigest: ProtocolDigest;
+    readonly bridgeProofBytesDigest: ProtocolDigest;
+    readonly bridgeProofRoot: ProtocolDigest;
+    readonly encryptedAggregateShareCiphertextRoot: ProtocolDigest;
+    readonly aggregateRelationSubproofSizeBytes: number;
+    readonly aggregateRelationChallengeHex: string;
+    readonly aggregateRelationCommitmentDigest: ProtocolDigest;
+    readonly aggregateReducedCoordinateCount: number;
+    readonly aggregateQuotientCoordinateCount: number;
+};
+
 export type TranscriptCoreKernel = {
     readonly exportedFunctionNames: readonly string[];
     analyzeCanonicalObject(input: {
@@ -482,6 +553,24 @@ export type TranscriptCoreKernel = {
         readonly casualMicroRosterAcknowledged?: boolean;
         readonly unsafeSmallRosterAcknowledged?: boolean;
     }): BallotPrivacyKernelVerification;
+    generateAggregateBridgeEncryption(input: {
+        readonly aggregateSelectionPolicyDigest: ProtocolDigest;
+        readonly aggregateDerivationComponent: unknown;
+        readonly aggregateWitness: unknown;
+        readonly bridgeWitnessPrivacyProfileDigest: ProtocolDigest;
+        readonly heParamDigest: ProtocolDigest;
+        readonly setupPackage: unknown;
+        readonly proverRandomnessHex?: string;
+        readonly includeCanonicalBytesHex?: boolean;
+    }): AggregateBridgeEncryptionGeneration | BallotPrivacyKernelVerification;
+    verifyAggregateBridgeEncryption(input: {
+        readonly aggregateSelectionPolicyDigest: ProtocolDigest;
+        readonly aggregateDerivationComponent: unknown;
+        readonly bridgeEncryption: unknown;
+        readonly bridgeWitnessPrivacyProfileDigest: ProtocolDigest;
+        readonly heParamDigest: ProtocolDigest;
+        readonly setupPackage: unknown;
+    }): AggregateBridgeEncryptionVerification | BallotPrivacyKernelVerification;
     describeBgvRnsProfile(): BgvRnsProfileReport;
     describeBgvOperationRegistry(): unknown;
     generateBgvBackendReport(): unknown;
@@ -689,6 +778,26 @@ type TranscriptCoreKernelCommand =
           readonly countedBallotPackages?: readonly unknown[];
           readonly casualMicroRosterAcknowledged?: boolean;
           readonly unsafeSmallRosterAcknowledged?: boolean;
+      }
+    | {
+          readonly command: 'GenerateAggregateBridgeEncryption';
+          readonly aggregateSelectionPolicyDigest: ProtocolDigest;
+          readonly aggregateDerivationComponent: unknown;
+          readonly aggregateWitness: unknown;
+          readonly bridgeWitnessPrivacyProfileDigest: ProtocolDigest;
+          readonly heParamDigest: ProtocolDigest;
+          readonly setupPackage: unknown;
+          readonly proverRandomnessHex: string;
+          readonly includeCanonicalBytesHex?: boolean;
+      }
+    | {
+          readonly command: 'VerifyAggregateBridgeEncryption';
+          readonly aggregateSelectionPolicyDigest: ProtocolDigest;
+          readonly aggregateDerivationComponent: unknown;
+          readonly bridgeEncryption: unknown;
+          readonly bridgeWitnessPrivacyProfileDigest: ProtocolDigest;
+          readonly heParamDigest: ProtocolDigest;
+          readonly setupPackage: unknown;
       }
     | {
           readonly command: 'DescribeBgvRnsProfile';

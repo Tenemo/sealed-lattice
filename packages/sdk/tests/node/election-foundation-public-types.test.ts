@@ -42,6 +42,21 @@ type BlockedPvssBallotTypes = [
     publicTypes.TestAggregateShare,
 ];
 
+type BlockedM9BridgeTypes = [
+    // @ts-expect-error M9 bridge proof records remain internal until claim-bearing verification exists.
+    publicTypes.BridgeProofRecord,
+    // @ts-expect-error M9 aggregate contributions remain internal until claim-bearing verification exists.
+    publicTypes.AggregateContribution,
+    // @ts-expect-error M9 aggregate-ready handoff records remain internal until claim-bearing verification exists.
+    publicTypes.AggregateReadyRecord,
+    // @ts-expect-error M9 aggregate selection inputs remain internal until claim-bearing verification exists.
+    publicTypes.AggregateContributionSelectionInput,
+    // @ts-expect-error M9 aggregate selection outputs remain internal until claim-bearing verification exists.
+    publicTypes.AggregateContributionSelection,
+    // @ts-expect-error M9 aggregate-ready build inputs remain internal until claim-bearing verification exists.
+    publicTypes.AggregateReadyRecordBuildInput,
+];
+
 type PublicFoundationTypes = [
     publicTypes.BallotProofRecord,
     publicTypes.BallotProofStatement,
@@ -57,6 +72,7 @@ type PublicFoundationTypes = [
 type PublicTypeSurfaceProbe = {
     readonly blockedPlaintextOracleTypes: BlockedPlaintextOracleTypes;
     readonly blockedPvssBallotTypes: BlockedPvssBallotTypes;
+    readonly blockedM9BridgeTypes: BlockedM9BridgeTypes;
     readonly blockedTargetAcceptanceTypes: BlockedTargetAcceptanceTypes;
     readonly publicFoundationTypes: PublicFoundationTypes;
 };
@@ -82,6 +98,18 @@ describe('election foundation public type surface', () => {
         expect(publicFoundationTypeNames).toHaveLength(9);
         for (const publicTypeName of publicFoundationTypeNames) {
             expect(publicSurface.publicTypeExports).toContain(publicTypeName);
+        }
+        for (const bridgeTypeName of [
+            'AggregateContribution',
+            'AggregateContributionSelection',
+            'AggregateContributionSelectionInput',
+            'AggregateReadyRecord',
+            'AggregateReadyRecordBuildInput',
+            'BridgeProofRecord',
+        ]) {
+            expect(publicSurface.publicTypeExports).not.toContain(
+                bridgeTypeName,
+            );
         }
     });
 

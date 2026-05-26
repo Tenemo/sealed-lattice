@@ -9,8 +9,11 @@ import type { ProtocolDigest } from './protocol-digest.js';
 /** Canonical object type covered by protocol digest and verification helpers. */
 export type ProtocolObjectType =
     | 'ActionContext'
+    | 'AggregateContribution'
+    | 'AggregateReadyRecord'
     | 'BallotPackage'
     | 'BoardHead'
+    | 'BridgeProofRecord'
     | 'CastReceipt'
     | 'CloseRecord'
     | 'ElectionManifest'
@@ -33,6 +36,7 @@ export type ProtocolObjectType =
 
 /** Object type that is signed as a canonical signed root. */
 export type SignedObjectType =
+    | 'AggregateContribution'
     | 'BallotPackage'
     | 'BoardHead'
     | 'CastReceipt'

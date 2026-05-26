@@ -6,8 +6,8 @@ mod tests;
 mod validation;
 
 use relation_proof::{
-    VerifyAggregateRelationProofInput, generate_aggregate_relation_proof,
-    verify_aggregate_relation_proof,
+    AggregateRelationProofVerification, VerifyAggregateRelationProofInput,
+    generate_aggregate_relation_proof, verify_aggregate_relation_proof,
 };
 use validation::{
     collect_aggregate_component_refusals, collect_aggregate_counted_package_preflight_refusals,
@@ -313,4 +313,151 @@ pub(crate) fn verify_aggregate_derivation_proof_from_command_request(request: &V
         "refusedObjects": [],
         "unresolvedReason": Value::Null
     })
+}
+
+pub(crate) fn verify_aggregate_derivation_relation_subproof_for_component(
+    component: &Value,
+    proof_hex: &str,
+) -> crate::encoding::CanonicalResult<AggregateRelationProofVerification> {
+    let proof_input = required_json_field(component, "proofInput", "component")?;
+    let proof_statement = required_json_field(proof_input, "proofStatement", "proofInput")?;
+    let parameter_set_value = required_json_field(proof_input, "proofParameterSet", "proofInput")?;
+    let proof_encoding_value = required_json_field(proof_input, "proofEncoding", "proofInput")?;
+    let public_randomness_hex =
+        required_string_field(proof_input, "publicRandomnessHex", "proofInput")?;
+    serde_json::from_value::<LinearProofParameterSet>(parameter_set_value.clone()).map_err(
+        |error| {
+            invalid_preflight(format!(
+                "Aggregate derivation parameter set is malformed: {error}"
+            ))
+        },
+    )?;
+    serde_json::from_value::<LinearProofEncoding>(proof_encoding_value.clone()).map_err(
+        |error| {
+            invalid_preflight(format!(
+                "Aggregate derivation proof encoding is malformed: {error}"
+            ))
+        },
+    )?;
+    let parsed_sparse_statement = sparse_matrix_from_sparse_component_statement(proof_statement)
+        .map_err(|error| invalid_preflight(error.message))?;
+    let target_coefficient_representation: LinearProofTargetCoefficientRepresentation =
+        required_json_field(
+            proof_statement,
+            "targetCoefficientRepresentation",
+            "proofInput.proofStatement",
+        )
+        .and_then(|value| {
+            serde_json::from_value(value.clone()).map_err(|error| {
+                invalid_preflight(format!(
+                    "Aggregate derivation target coefficient representation is malformed: {error}"
+                ))
+            })
+        })?;
+    let matrix_coefficient_representation = matrix_coefficient_representation_from_statement(
+        proof_statement,
+        "proofInput.proofStatement",
+    )?;
+
+    verify_aggregate_relation_proof(VerifyAggregateRelationProofInput {
+        proof_statement,
+        public_randomness_hex,
+        proof_hex,
+        source_statement_matrix: &parsed_sparse_statement.source_statement_matrix,
+        target_vector_coefficients: &parsed_sparse_statement.target_vector_coefficients,
+        matrix_coefficient_representation,
+        target_coefficient_representation,
+    })
+}
+
+pub(crate) struct AggregateDerivationWitnessRelationCheck {
+    pub(crate) proof_hex: String,
+    pub(crate) proof_size_bytes: usize,
+    pub(crate) challenge_hex: String,
+    pub(crate) relation_commitment_digest: String,
+    pub(crate) reduced_field_vector: Vec<u64>,
+    pub(crate) quotient_vector: Vec<u64>,
+}
+
+pub(crate) fn check_aggregate_derivation_witness_relation(
+    proof_input: &Value,
+    aggregate_integer_share_vector: &[u64],
+    aggregate_opening_randomness: &[i64],
+    canonical_turnout: u64,
+    prover_randomness_hex: &str,
+) -> crate::encoding::CanonicalResult<AggregateDerivationWitnessRelationCheck> {
+    if aggregate_integer_share_vector.is_empty()
+        || aggregate_integer_share_vector.len() > AGGREGATE_DERIVATION_SOURCE_RING_DEGREE
+    {
+        return Err(invalid_preflight(
+            "M9 bridge aggregate witness share vector has an unsupported width",
+        ));
+    }
+    if aggregate_opening_randomness.len() != SHARE_COMMITMENT_OPENING_DIMENSION {
+        return Err(invalid_preflight(
+            "M9 bridge aggregate opening randomness has an invalid width",
+        ));
+    }
+    let maximum_aggregate_integer = canonical_turnout
+        .checked_mul(BALLOT_PRIVACY_FIELD_MODULUS - 1)
+        .ok_or_else(|| invalid_preflight("M9 bridge aggregate witness bound overflowed"))?;
+    let mut reduced_field_vector = Vec::with_capacity(aggregate_integer_share_vector.len());
+    let mut quotient_vector = Vec::with_capacity(aggregate_integer_share_vector.len());
+    for share_coordinate in aggregate_integer_share_vector {
+        if *share_coordinate > maximum_aggregate_integer {
+            return Err(invalid_preflight(
+                "M9 bridge aggregate witness exceeds the no-wraparound certificate bound",
+            ));
+        }
+        let reduced_coordinate = share_coordinate % BALLOT_PRIVACY_FIELD_MODULUS;
+        let quotient = (share_coordinate - reduced_coordinate) / BALLOT_PRIVACY_FIELD_MODULUS;
+        if quotient > canonical_turnout {
+            return Err(invalid_preflight(
+                "M9 bridge aggregate quotient exceeds the turnout bound",
+            ));
+        }
+        reduced_field_vector.push(reduced_coordinate);
+        quotient_vector.push(quotient);
+    }
+
+    let source_witness_coefficients = aggregate_integer_share_vector
+        .iter()
+        .map(|coefficient| constant_source_witness_polynomial(*coefficient as i64))
+        .chain(
+            aggregate_opening_randomness
+                .iter()
+                .map(|coefficient| constant_source_witness_polynomial(*coefficient)),
+        )
+        .chain(
+            reduced_field_vector
+                .iter()
+                .map(|coefficient| constant_source_witness_polynomial(*coefficient as i64)),
+        )
+        .chain(
+            quotient_vector
+                .iter()
+                .map(|coefficient| constant_source_witness_polynomial(*coefficient as i64)),
+        )
+        .collect::<Vec<_>>();
+    let secret_state = json!({
+        "sourceWitnessCoefficients": source_witness_coefficients,
+    });
+    let generation =
+        generate_aggregate_relation_proof(proof_input, &secret_state, prover_randomness_hex)?;
+
+    Ok(AggregateDerivationWitnessRelationCheck {
+        proof_hex: generation.proof_hex,
+        proof_size_bytes: generation.proof_size_bytes,
+        challenge_hex: generation.challenge_hex,
+        relation_commitment_digest: generation.relation_commitment_digest,
+        reduced_field_vector,
+        quotient_vector,
+    })
+}
+
+fn constant_source_witness_polynomial(coefficient: i64) -> Vec<i64> {
+    let mut polynomial = vec![0_i64; AGGREGATE_DERIVATION_SOURCE_RING_DEGREE];
+    polynomial[0] = coefficient;
+
+    polynomial
 }

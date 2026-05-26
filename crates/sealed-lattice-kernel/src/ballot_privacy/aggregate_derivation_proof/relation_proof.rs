@@ -7,6 +7,12 @@ pub(super) struct AggregateRelationProofGeneration {
     pub(super) relation_commitment_digest: String,
 }
 
+pub(crate) struct AggregateRelationProofVerification {
+    pub(crate) proof_size_bytes: usize,
+    pub(crate) challenge_hex: String,
+    pub(crate) relation_commitment_digest: String,
+}
+
 pub(super) struct VerifyAggregateRelationProofInput<'a> {
     pub(super) proof_statement: &'a Value,
     pub(super) public_randomness_hex: &'a str,
@@ -26,6 +32,7 @@ struct AggregateRelationProofCheck {
 
 struct ParsedAggregateRelationProof {
     checks: Vec<AggregateRelationProofCheck>,
+    proof_size_bytes: usize,
 }
 
 pub(super) fn generate_aggregate_relation_proof(
@@ -95,36 +102,19 @@ pub(super) fn generate_aggregate_relation_proof(
     let proof_value =
         aggregate_relation_proof_value(statement_digest, public_randomness_hex, &proof_checks);
     let proof_json = canonical_json(&proof_value)?;
-    let relation_commitment_vectors = proof_checks
-        .iter()
-        .map(|check| canonical_polynomial_vector_value(check.relation_commitment_vector.entries()))
-        .collect::<Vec<_>>();
-    let relation_commitment_digest = derive_digest(
-        "AggregateDerivationComponentDigest",
-        &json!({
-            "purpose": "aggregate-derivation-relation-commitment-v1",
-            "challengeRepetitionCount": AGGREGATE_DERIVATION_CHALLENGE_REPETITION_COUNT,
-            "challengeSoundnessBits": AGGREGATE_DERIVATION_CHALLENGE_SOUNDNESS_BITS,
-            "relationCommitmentVectors": relation_commitment_vectors
-        }),
-    )
-    .ok_or_else(|| invalid_preflight("aggregate relation commitment digest did not derive"))?;
+    let relation_commitment_digest = aggregate_relation_commitment_digest(&proof_checks)?;
 
     Ok(AggregateRelationProofGeneration {
         proof_hex: to_hex(proof_json.as_bytes()),
         proof_size_bytes: proof_json.len(),
-        challenge_hex: proof_checks
-            .iter()
-            .map(|check| format!("{:016x}", check.challenge))
-            .collect::<Vec<_>>()
-            .join(""),
+        challenge_hex: aggregate_relation_challenge_hex(&proof_checks),
         relation_commitment_digest,
     })
 }
 
 pub(super) fn verify_aggregate_relation_proof(
     input: VerifyAggregateRelationProofInput<'_>,
-) -> crate::encoding::CanonicalResult<()> {
+) -> crate::encoding::CanonicalResult<AggregateRelationProofVerification> {
     if input.matrix_coefficient_representation
         != LinearProofMatrixCoefficientRepresentation::CenteredSignedSourceModulus
         || input.target_coefficient_representation
@@ -176,7 +166,11 @@ pub(super) fn verify_aggregate_relation_proof(
         }
     }
 
-    Ok(())
+    Ok(AggregateRelationProofVerification {
+        proof_size_bytes: parsed_proof.proof_size_bytes,
+        challenge_hex: aggregate_relation_challenge_hex(&parsed_proof.checks),
+        relation_commitment_digest: aggregate_relation_commitment_digest(&parsed_proof.checks)?,
+    })
 }
 
 fn require_aggregate_relation_satisfied(
@@ -425,6 +419,34 @@ fn aggregate_relation_proof_value(
     })
 }
 
+fn aggregate_relation_challenge_hex(proof_checks: &[AggregateRelationProofCheck]) -> String {
+    proof_checks
+        .iter()
+        .map(|check| format!("{:016x}", check.challenge))
+        .collect::<Vec<_>>()
+        .join("")
+}
+
+fn aggregate_relation_commitment_digest(
+    proof_checks: &[AggregateRelationProofCheck],
+) -> crate::encoding::CanonicalResult<String> {
+    let relation_commitment_vectors = proof_checks
+        .iter()
+        .map(|check| canonical_polynomial_vector_value(check.relation_commitment_vector.entries()))
+        .collect::<Vec<_>>();
+
+    derive_digest(
+        "AggregateDerivationComponentDigest",
+        &json!({
+            "purpose": "aggregate-derivation-relation-commitment-v1",
+            "challengeRepetitionCount": AGGREGATE_DERIVATION_CHALLENGE_REPETITION_COUNT,
+            "challengeSoundnessBits": AGGREGATE_DERIVATION_CHALLENGE_SOUNDNESS_BITS,
+            "relationCommitmentVectors": relation_commitment_vectors
+        }),
+    )
+    .ok_or_else(|| invalid_preflight("aggregate relation commitment digest did not derive"))
+}
+
 fn canonical_polynomial_vector_value(entries: &[Vec<u64>]) -> Value {
     Value::Array(
         entries
@@ -542,7 +564,10 @@ fn parse_aggregate_relation_proof(
         })
         .collect::<crate::encoding::CanonicalResult<Vec<_>>>()?;
 
-    Ok(ParsedAggregateRelationProof { checks })
+    Ok(ParsedAggregateRelationProof {
+        checks,
+        proof_size_bytes: proof_bytes.len(),
+    })
 }
 
 fn parse_polynomial_vector_value(

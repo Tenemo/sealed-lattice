@@ -302,6 +302,46 @@ pub(crate) fn reject_bgv_reference_oracle_artifact_from_request(request: &Value)
     reject_reference_oracle_artifact(artifact)
 }
 
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn generate_m9_bridge_ciphertext_from_slots(
+    setup_package: &Value,
+    contributor_identity: &str,
+    aggregate_derivation_component_digest: &str,
+    aggregate_derivation_statement_digest: &str,
+    post_voting_closed_context_digest: &str,
+    reduced_aggregate_slots: &[u64],
+    prover_randomness_hex: &str,
+    include_canonical_bytes_hex: bool,
+) -> CanonicalResult<Value> {
+    crate::bgv::setup::generate_m9_bridge_ciphertext_from_slots(
+        setup_package,
+        contributor_identity,
+        aggregate_derivation_component_digest,
+        aggregate_derivation_statement_digest,
+        post_voting_closed_context_digest,
+        reduced_aggregate_slots,
+        prover_randomness_hex,
+        include_canonical_bytes_hex,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn verify_m9_bridge_ciphertext_public_bindings(
+    setup_package: &Value,
+    aggregate_derivation_component_digest: &str,
+    aggregate_derivation_statement_digest: &str,
+    post_voting_closed_context_digest: &str,
+    bridge_encryption: &Value,
+) -> CanonicalResult<()> {
+    crate::bgv::setup::verify_m9_bridge_ciphertext_public_bindings(
+        setup_package,
+        aggregate_derivation_component_digest,
+        aggregate_derivation_statement_digest,
+        post_voting_closed_context_digest,
+        bridge_encryption,
+    )
+}
+
 pub(crate) fn analyze_bgv_canonical_object_from_request(request: &Value) -> CanonicalResult<Value> {
     reject_unexpected_bgv_request_fields(
         request,

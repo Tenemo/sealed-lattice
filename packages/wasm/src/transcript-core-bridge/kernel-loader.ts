@@ -400,6 +400,37 @@ export const createTranscriptCoreKernelLoader = (
                         unsafeSmallRosterAcknowledged:
                             input.unsafeSmallRosterAcknowledged,
                     }),
+                generateAggregateBridgeEncryption: (input) =>
+                    executeCommand({
+                        command: 'GenerateAggregateBridgeEncryption',
+                        aggregateSelectionPolicyDigest:
+                            input.aggregateSelectionPolicyDigest,
+                        aggregateDerivationComponent:
+                            input.aggregateDerivationComponent,
+                        aggregateWitness: input.aggregateWitness,
+                        bridgeWitnessPrivacyProfileDigest:
+                            input.bridgeWitnessPrivacyProfileDigest,
+                        heParamDigest: input.heParamDigest,
+                        setupPackage: input.setupPackage,
+                        proverRandomnessHex: suppliedOrFreshRandomnessHex(
+                            input.proverRandomnessHex,
+                        ),
+                        includeCanonicalBytesHex:
+                            input.includeCanonicalBytesHex,
+                    }),
+                verifyAggregateBridgeEncryption: (input) =>
+                    executeCommand({
+                        command: 'VerifyAggregateBridgeEncryption',
+                        aggregateSelectionPolicyDigest:
+                            input.aggregateSelectionPolicyDigest,
+                        aggregateDerivationComponent:
+                            input.aggregateDerivationComponent,
+                        bridgeEncryption: input.bridgeEncryption,
+                        bridgeWitnessPrivacyProfileDigest:
+                            input.bridgeWitnessPrivacyProfileDigest,
+                        heParamDigest: input.heParamDigest,
+                        setupPackage: input.setupPackage,
+                    }),
                 describeBgvRnsProfile: (): BgvRnsProfileReport =>
                     executeCommand<BgvRnsProfileReport>({
                         command: 'DescribeBgvRnsProfile',
