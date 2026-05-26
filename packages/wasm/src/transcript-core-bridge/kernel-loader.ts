@@ -418,6 +418,23 @@ export const createTranscriptCoreKernelLoader = (
                         includeCanonicalBytesHex:
                             input.includeCanonicalBytesHex,
                     }),
+                evaluateAggregateBridgeRelation: (input) =>
+                    executeCommand({
+                        command: 'EvaluateAggregateBridgeRelation',
+                        aggregateSelectionPolicyDigest:
+                            input.aggregateSelectionPolicyDigest,
+                        aggregateDerivationComponent:
+                            input.aggregateDerivationComponent,
+                        aggregateWitness: input.aggregateWitness,
+                        bridgeEncryption: input.bridgeEncryption,
+                        bridgeWitnessPrivacyProfileDigest:
+                            input.bridgeWitnessPrivacyProfileDigest,
+                        heParamDigest: input.heParamDigest,
+                        setupPackage: input.setupPackage,
+                        proverRandomnessHex: suppliedOrFreshRandomnessHex(
+                            input.proverRandomnessHex,
+                        ),
+                    }),
                 verifyAggregateBridgeEncryption: (input) =>
                     executeCommand({
                         command: 'VerifyAggregateBridgeEncryption',

@@ -29,6 +29,8 @@ use crate::{
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
 };
 
+pub(crate) use crate::bgv::setup::M9BridgeCiphertextRelationTrace;
+
 pub(crate) fn describe_bgv_rns_profile() -> CanonicalResult<Value> {
     describe_profile_report()
 }
@@ -303,7 +305,7 @@ pub(crate) fn reject_bgv_reference_oracle_artifact_from_request(request: &Value)
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn generate_m9_bridge_ciphertext_from_slots(
+pub(crate) fn generate_m9_bridge_ciphertext_relation_trace_from_slots(
     setup_package: &Value,
     contributor_identity: &str,
     aggregate_derivation_component_digest: &str,
@@ -312,8 +314,8 @@ pub(crate) fn generate_m9_bridge_ciphertext_from_slots(
     reduced_aggregate_slots: &[u64],
     prover_randomness_hex: &str,
     include_canonical_bytes_hex: bool,
-) -> CanonicalResult<Value> {
-    crate::bgv::setup::generate_m9_bridge_ciphertext_from_slots(
+) -> CanonicalResult<M9BridgeCiphertextRelationTrace> {
+    crate::bgv::setup::generate_m9_bridge_ciphertext_relation_trace_from_slots(
         setup_package,
         contributor_identity,
         aggregate_derivation_component_digest,
@@ -339,6 +341,41 @@ pub(crate) fn verify_m9_bridge_ciphertext_public_bindings(
         aggregate_derivation_statement_digest,
         post_voting_closed_context_digest,
         bridge_encryption,
+    )
+}
+
+pub(crate) fn m9_bridge_batch_encoding_commitment_digest_from_responses(
+    reduced_slot_response: &[i128],
+    plaintext_coefficient_response: &[i128],
+) -> CanonicalResult<String> {
+    crate::bgv::setup::m9_bridge_batch_encoding_commitment_digest_from_responses(
+        reduced_slot_response,
+        plaintext_coefficient_response,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn m9_bridge_ciphertext_commitment_digest_from_responses(
+    setup_package: &Value,
+    contributor_identity: &str,
+    aggregate_derivation_statement_digest: &str,
+    bridge_encryption: &Value,
+    challenge_scalar: u64,
+    plaintext_coefficient_response: &[i128],
+    randomizer_response: &[i128],
+    perturbation_zero_response: &[i128],
+    perturbation_one_response: &[i128],
+) -> CanonicalResult<String> {
+    crate::bgv::setup::m9_bridge_ciphertext_commitment_digest_from_responses(
+        setup_package,
+        contributor_identity,
+        aggregate_derivation_statement_digest,
+        bridge_encryption,
+        challenge_scalar,
+        plaintext_coefficient_response,
+        randomizer_response,
+        perturbation_zero_response,
+        perturbation_one_response,
     )
 }
 

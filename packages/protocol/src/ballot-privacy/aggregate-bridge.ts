@@ -10,4 +10,5 @@ export {
     createAggregateReadyRecord,
     selectFirstValidAggregateContributions,
     verifyAggregateContributionStructure,
+    verifyAggregateReadyRecordStructure,
 } from './aggregate-bridge/structure-verification.js';

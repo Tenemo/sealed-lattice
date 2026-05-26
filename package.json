@@ -36,6 +36,7 @@
         "test:proof-benchmark:node": "tsx ./tools/ci/run-proof-benchmarks.ts --only node",
         "test:proof-benchmark:browser:desktop": "tsx ./tools/ci/run-proof-benchmarks.ts --only desktop",
         "test:proof-benchmark:browser:mobile:throttled": "tsx ./tools/ci/run-proof-benchmarks.ts --only mobile-throttled",
+        "test:encrypted-aggregate-bridge": "pnpm run build && tsx ./tools/ci/run-encrypted-aggregate-bridge-matrix.ts",
         "test": "pnpm run test:node && pnpm run test:browser",
         "coverage:node": "pnpm run build && vitest --project node --run --coverage",
         "coverage:badge": "pnpm run coverage:node && tsx ./tools/generate-coverage-badge.ts",

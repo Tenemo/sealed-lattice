@@ -52,6 +52,7 @@ export {
     deriveBridgeProofTargetContractDigest,
     selectFirstValidAggregateContributions,
     verifyAggregateContributionStructure,
+    verifyAggregateReadyRecordStructure,
 } from './aggregate-bridge.js';
 export { compileBallotPrivacyRelation } from './relation-compiler.js';
 export type { BallotPrivacyRelationCompilerInput } from './relation-compiler.js';

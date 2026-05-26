@@ -378,7 +378,7 @@ export type AggregateBridgeEncryptionGeneration = {
     readonly bridgeProofBytesHex: string;
     readonly bridgeProofBytesDigest: ProtocolDigest;
     readonly bridgeProofRoot: ProtocolDigest;
-    readonly bridgeProofVerificationStatus: 'BridgeProofBackendPending';
+    readonly bridgeProofVerificationStatus: 'BridgeProofRelationChecked';
     readonly canonicalBytesHash512: string;
     readonly canonicalByteLength: number;
     readonly basisId: string;
@@ -410,7 +410,9 @@ export type AggregateBridgeEncryptionVerification = {
     readonly acceptedDigests: readonly ProtocolDigest[];
     readonly refusedObjects: readonly unknown[];
     readonly unresolvedReason: string | null;
-    readonly bridgeProofVerificationStatus: 'BridgeProofBackendPending';
+    readonly bridgeProofVerificationStatus:
+        | 'BridgeProofBackendPending'
+        | 'BridgeProofRelationChecked';
     readonly bridgeEvidenceVerificationStatus: 'BridgeProofEvidenceChecked';
     readonly bridgeProofProfileDigest: ProtocolDigest;
     readonly bridgeProofStatementDigest: ProtocolDigest;
@@ -423,6 +425,31 @@ export type AggregateBridgeEncryptionVerification = {
     readonly aggregateRelationCommitmentDigest: ProtocolDigest;
     readonly aggregateReducedCoordinateCount: number;
     readonly aggregateQuotientCoordinateCount: number;
+    readonly sharedWitnessChallengeHex?: string | null;
+    readonly sharedResponseScalarCount?: number | null;
+};
+
+export type AggregateBridgeRelationEvaluation = {
+    readonly ok: boolean;
+    readonly operation: 'evaluateAggregateBridgeRelation';
+    readonly relationEvaluationStatus?: 'AggregateBridgePrivateRelationSatisfied';
+    readonly bridgeProofVerificationStatus?:
+        | 'BridgeProofBackendPending'
+        | 'BridgeProofRelationChecked';
+    readonly bridgeEvidenceVerificationStatus?: 'BridgeProofEvidenceChecked';
+    readonly publicArtifactWitnessCleanResult?: boolean;
+    readonly bridgeProofBackendStillRequired?: boolean;
+    readonly scopedBridgeRelationClosure?: boolean;
+    readonly participantCount?: number;
+    readonly optionCount?: number;
+    readonly claimTier?: string;
+    readonly shareVectorWidth?: number;
+    readonly aggregateReducedCoordinateCount?: number;
+    readonly aggregateQuotientCoordinateCount?: number;
+    readonly proofByteLength?: number;
+    readonly ciphertextShape?: unknown;
+    readonly acceptedDigests?: readonly ProtocolDigest[];
+    readonly statusLabels?: readonly string[];
 };
 
 export type TranscriptCoreKernel = {
@@ -563,6 +590,16 @@ export type TranscriptCoreKernel = {
         readonly proverRandomnessHex?: string;
         readonly includeCanonicalBytesHex?: boolean;
     }): AggregateBridgeEncryptionGeneration | BallotPrivacyKernelVerification;
+    evaluateAggregateBridgeRelation(input: {
+        readonly aggregateSelectionPolicyDigest: ProtocolDigest;
+        readonly aggregateDerivationComponent: unknown;
+        readonly aggregateWitness: unknown;
+        readonly bridgeEncryption: unknown;
+        readonly bridgeWitnessPrivacyProfileDigest: ProtocolDigest;
+        readonly heParamDigest: ProtocolDigest;
+        readonly setupPackage: unknown;
+        readonly proverRandomnessHex?: string;
+    }): AggregateBridgeRelationEvaluation | BallotPrivacyKernelVerification;
     verifyAggregateBridgeEncryption(input: {
         readonly aggregateSelectionPolicyDigest: ProtocolDigest;
         readonly aggregateDerivationComponent: unknown;
@@ -789,6 +826,17 @@ type TranscriptCoreKernelCommand =
           readonly setupPackage: unknown;
           readonly proverRandomnessHex: string;
           readonly includeCanonicalBytesHex?: boolean;
+      }
+    | {
+          readonly command: 'EvaluateAggregateBridgeRelation';
+          readonly aggregateSelectionPolicyDigest: ProtocolDigest;
+          readonly aggregateDerivationComponent: unknown;
+          readonly aggregateWitness: unknown;
+          readonly bridgeEncryption: unknown;
+          readonly bridgeWitnessPrivacyProfileDigest: ProtocolDigest;
+          readonly heParamDigest: ProtocolDigest;
+          readonly setupPackage: unknown;
+          readonly proverRandomnessHex: string;
       }
     | {
           readonly command: 'VerifyAggregateBridgeEncryption';

@@ -19,7 +19,7 @@ use sampling::{
 use crate::{
     bgv::{
         encoding::encode_batch_plaintext_slots,
-        modular_arithmetic::{add_mod, mul_mod},
+        modular_arithmetic::{add_mod, mul_mod, sub_mod},
         ntt::{forward_negacyclic_ntt, inverse_negacyclic_ntt},
         profile::{
             BACKEND_PROFILE_ID, BATCH_ENCODER_ID, BgvBasisKind, DATA_PRIMES, PLAINTEXT_MODULUS,
@@ -33,7 +33,7 @@ use crate::{
         rns::RnsPolynomial,
         serialization::{
             BgvObjectKind, canonical_bytes_hash, canonical_bytes_hex, ciphertext_root,
-            plaintext_root, serialize_bgv_object,
+            parse_bgv_object_hex, plaintext_root, serialize_bgv_object,
         },
         setup_helpers::{
             array_at_path, bool_at_path, compare_derived_digest, compare_digest_at_path,
@@ -309,8 +309,71 @@ pub(crate) fn verify_passive_setup_package_from_request(request: &Value) -> Cano
     }))
 }
 
+#[derive(Clone, Debug)]
+pub(crate) struct M9BridgeCiphertextRelationTrace {
+    pub(crate) public_artifact: Value,
+    pub(crate) supplied_plaintext_slots: Vec<u64>,
+    pub(crate) padded_plaintext_slots: Vec<u64>,
+    pub(crate) plaintext_coefficients_mod_plaintext: Vec<u64>,
+    pub(crate) encryption_randomness_coefficients: Vec<i64>,
+    pub(crate) encryption_error_zero_coefficients: Vec<i64>,
+    pub(crate) encryption_error_one_coefficients: Vec<i64>,
+}
+
+impl M9BridgeCiphertextRelationTrace {
+    fn validate_shape(&self, supplied_slot_count: usize) -> CanonicalResult<()> {
+        if self.supplied_plaintext_slots.len() != supplied_slot_count
+            || self.padded_plaintext_slots.len() != POLYNOMIAL_DEGREE
+            || self.plaintext_coefficients_mod_plaintext.len() != POLYNOMIAL_DEGREE
+            || self.encryption_randomness_coefficients.len() != POLYNOMIAL_DEGREE
+            || self.encryption_error_zero_coefficients.len() != POLYNOMIAL_DEGREE
+            || self.encryption_error_one_coefficients.len() != POLYNOMIAL_DEGREE
+        {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "M9 bridge ciphertext relation trace has inconsistent witness dimensions",
+            ));
+        }
+        if self
+            .supplied_plaintext_slots
+            .iter()
+            .chain(self.padded_plaintext_slots.iter())
+            .chain(self.plaintext_coefficients_mod_plaintext.iter())
+            .any(|coefficient| *coefficient >= PLAINTEXT_MODULUS)
+        {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "M9 bridge ciphertext relation trace contains a non-canonical plaintext coefficient",
+            ));
+        }
+        if self
+            .encryption_randomness_coefficients
+            .iter()
+            .any(|coefficient| !(-1..=1).contains(coefficient))
+        {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "M9 bridge ciphertext relation trace randomizer is outside the declared support",
+            ));
+        }
+        if self
+            .encryption_error_zero_coefficients
+            .iter()
+            .chain(self.encryption_error_one_coefficients.iter())
+            .any(|coefficient| !(-2..=2).contains(coefficient))
+        {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "M9 bridge ciphertext relation trace error coefficient is outside the declared support",
+            ));
+        }
+
+        Ok(())
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn generate_m9_bridge_ciphertext_from_slots(
+pub(crate) fn generate_m9_bridge_ciphertext_relation_trace_from_slots(
     setup_package: &Value,
     contributor_identity: &str,
     aggregate_derivation_component_digest: &str,
@@ -319,7 +382,7 @@ pub(crate) fn generate_m9_bridge_ciphertext_from_slots(
     reduced_aggregate_slots: &[u64],
     prover_randomness_hex: &str,
     include_canonical_bytes_hex: bool,
-) -> CanonicalResult<Value> {
+) -> CanonicalResult<M9BridgeCiphertextRelationTrace> {
     validation::validate_setup_package_shape(setup_package)?;
     validation::validate_setup_package_internal_bindings(setup_package)?;
 
@@ -526,7 +589,231 @@ pub(crate) fn generate_m9_bridge_ciphertext_from_slots(
         result["canonicalBytesHex"] = Value::String(canonical_bytes_hex(&canonical_bytes));
     }
 
-    Ok(result)
+    let trace = M9BridgeCiphertextRelationTrace {
+        public_artifact: result,
+        supplied_plaintext_slots: reduced_aggregate_slots.to_vec(),
+        padded_plaintext_slots: encoded.slots,
+        plaintext_coefficients_mod_plaintext: encoded.coefficients_mod_plaintext,
+        encryption_randomness_coefficients,
+        encryption_error_zero_coefficients,
+        encryption_error_one_coefficients,
+    };
+    trace.validate_shape(reduced_aggregate_slots.len())?;
+
+    Ok(trace)
+}
+
+pub(crate) fn m9_bridge_batch_encoding_commitment_digest_from_responses(
+    reduced_slot_response: &[i128],
+    plaintext_coefficient_response: &[i128],
+) -> CanonicalResult<String> {
+    if reduced_slot_response.len() > POLYNOMIAL_DEGREE
+        || plaintext_coefficient_response.len() != POLYNOMIAL_DEGREE
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "M9 bridge batch encoding proof response dimensions are invalid",
+        ));
+    }
+    let mut padded_slot_response = vec![0_u64; POLYNOMIAL_DEGREE];
+    for (slot_index, response) in reduced_slot_response.iter().enumerate() {
+        padded_slot_response[slot_index] =
+            signed_i128_to_modulus_residue(*response, PLAINTEXT_MODULUS);
+    }
+    let encoded_response_coefficients =
+        inverse_negacyclic_ntt(&padded_slot_response, PLAINTEXT_MODULUS)?;
+    let commitment_coefficients = encoded_response_coefficients
+        .iter()
+        .zip(plaintext_coefficient_response.iter())
+        .map(|(encoded_response_coefficient, plaintext_response)| {
+            let plaintext_response_residue =
+                signed_i128_to_modulus_residue(*plaintext_response, PLAINTEXT_MODULUS);
+            sub_mod(
+                *encoded_response_coefficient,
+                plaintext_response_residue,
+                PLAINTEXT_MODULUS,
+            )
+        })
+        .collect::<CanonicalResult<Vec<_>>>()?;
+
+    derive_protocol_digest(
+        "BridgeProofRecordDigest",
+        &json!({
+            "purpose": "m9-bridge-batch-encoding-commitment-v1",
+            "commitmentCoefficients": commitment_coefficients
+                .iter()
+                .map(|coefficient| coefficient.to_string())
+                .collect::<Vec<_>>(),
+        }),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn m9_bridge_ciphertext_commitment_digest_from_responses(
+    setup_package: &Value,
+    contributor_identity: &str,
+    aggregate_derivation_statement_digest: &str,
+    bridge_encryption: &Value,
+    challenge_scalar: u64,
+    plaintext_coefficient_response: &[i128],
+    randomizer_response: &[i128],
+    perturbation_zero_response: &[i128],
+    perturbation_one_response: &[i128],
+) -> CanonicalResult<String> {
+    validation::validate_setup_package_shape(setup_package)?;
+    validation::validate_setup_package_internal_bindings(setup_package)?;
+    if plaintext_coefficient_response.len() != POLYNOMIAL_DEGREE
+        || randomizer_response.len() != POLYNOMIAL_DEGREE
+        || perturbation_zero_response.len() != POLYNOMIAL_DEGREE
+        || perturbation_one_response.len() != POLYNOMIAL_DEGREE
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "M9 bridge ciphertext proof response dimensions are invalid",
+        ));
+    }
+    let canonical_bytes_hex = string_at_path(bridge_encryption, &["canonicalBytesHex"])?;
+    let ciphertext = parse_bgv_object_hex(canonical_bytes_hex)?;
+    if ciphertext.object_kind != BgvObjectKind::Ciphertext || ciphertext.components.len() != 2 {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "M9 bridge proof response verifier requires a two-component ciphertext",
+        ));
+    }
+    for component in &ciphertext.components {
+        component.validate()?;
+        if component.basis_id != BgvBasisKind::Data.basis_id()
+            || component.level != DATA_PRIMES.len() - 1
+            || component.moduli != DATA_PRIMES
+            || component.residues_by_modulus.len() != DATA_PRIMES.len()
+        {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::ProfileComponentMismatch,
+                "M9 bridge proof ciphertext must cover the full data basis",
+            ));
+        }
+    }
+
+    let setup_seed_digest = string_at_path(setup_package, &["setupInputs", "setupSeedDigest"])?;
+    let public_sample_label = format!(
+        "m9-bridge-encryption-public-sample:{aggregate_derivation_statement_digest}:{contributor_identity}"
+    );
+    let challenge_scalar_i128 = i128::from(challenge_scalar);
+    let mut component_zero_residues_by_modulus = Vec::with_capacity(DATA_PRIMES.len());
+    let mut component_one_residues_by_modulus = Vec::with_capacity(DATA_PRIMES.len());
+
+    for (modulus_index, modulus) in DATA_PRIMES.iter().copied().enumerate() {
+        let public_key_coefficients = dense_public_residues(
+            setup_seed_digest,
+            "development-collective-public-key-coefficients",
+            modulus,
+        );
+        let public_sample_coefficients =
+            dense_public_residues(setup_seed_digest, &public_sample_label, modulus);
+        let randomizer_residues = randomizer_response
+            .iter()
+            .map(|coefficient| signed_i128_to_modulus_residue(*coefficient, modulus))
+            .collect::<Vec<_>>();
+        let perturbation_zero_residues = perturbation_zero_response
+            .iter()
+            .map(|coefficient| signed_i128_to_modulus_residue(*coefficient, modulus))
+            .collect::<Vec<_>>();
+        let perturbation_one_residues = perturbation_one_response
+            .iter()
+            .map(|coefficient| signed_i128_to_modulus_residue(*coefficient, modulus))
+            .collect::<Vec<_>>();
+        let plaintext_response_residues = plaintext_coefficient_response
+            .iter()
+            .map(|coefficient| signed_i128_to_modulus_residue(*coefficient, modulus))
+            .collect::<Vec<_>>();
+        let public_key_product =
+            negacyclic_product_mod(&public_key_coefficients, &randomizer_residues, modulus)?;
+        let public_sample_product =
+            negacyclic_product_mod(&public_sample_coefficients, &randomizer_residues, modulus)?;
+        let challenge_residue = signed_i128_to_modulus_residue(challenge_scalar_i128, modulus);
+        let ciphertext_component_zero = ciphertext.components[0]
+            .residues_by_modulus
+            .get(modulus_index)
+            .ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::MalformedLength,
+                    "M9 bridge proof ciphertext component zero is missing a data limb",
+                )
+            })?;
+        let ciphertext_component_one = ciphertext.components[1]
+            .residues_by_modulus
+            .get(modulus_index)
+            .ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::MalformedLength,
+                    "M9 bridge proof ciphertext component one is missing a data limb",
+                )
+            })?;
+
+        let commitment_zero = public_key_product
+            .iter()
+            .zip(perturbation_zero_residues.iter())
+            .zip(plaintext_response_residues.iter())
+            .zip(ciphertext_component_zero.iter())
+            .map(
+                |(((product, perturbation), plaintext_response), ciphertext_coefficient)| {
+                    let response_sum = add_mod(
+                        add_mod(*product, *perturbation, modulus)?,
+                        *plaintext_response,
+                        modulus,
+                    )?;
+                    let scaled_ciphertext =
+                        mul_mod(challenge_residue, *ciphertext_coefficient, modulus)?;
+                    sub_mod(response_sum, scaled_ciphertext, modulus)
+                },
+            )
+            .collect::<CanonicalResult<Vec<_>>>()?;
+        let commitment_one = public_sample_product
+            .iter()
+            .zip(perturbation_one_residues.iter())
+            .zip(ciphertext_component_one.iter())
+            .map(|((product, perturbation), ciphertext_coefficient)| {
+                let response_sum = add_mod(*product, *perturbation, modulus)?;
+                let scaled_ciphertext =
+                    mul_mod(challenge_residue, *ciphertext_coefficient, modulus)?;
+                sub_mod(response_sum, scaled_ciphertext, modulus)
+            })
+            .collect::<CanonicalResult<Vec<_>>>()?;
+
+        component_zero_residues_by_modulus.push(commitment_zero);
+        component_one_residues_by_modulus.push(commitment_one);
+    }
+
+    let layout_digest = layout_digest()?;
+    let component_zero = RnsPolynomial::coefficient_domain(
+        BgvBasisKind::Data,
+        DATA_PRIMES.len() - 1,
+        layout_digest.clone(),
+        component_zero_residues_by_modulus,
+    )?;
+    let component_one = RnsPolynomial::coefficient_domain(
+        BgvBasisKind::Data,
+        DATA_PRIMES.len() - 1,
+        layout_digest,
+        component_one_residues_by_modulus,
+    )?;
+    let commitment_bytes =
+        serialize_bgv_object(BgvObjectKind::Ciphertext, &[component_zero, component_one])?;
+
+    derive_protocol_digest(
+        "BridgeProofRecordDigest",
+        &json!({
+            "purpose": "m9-bridge-bgv-ciphertext-commitment-v1",
+            "commitmentRoot": ciphertext_root(&commitment_bytes),
+            "commitmentCanonicalBytesHash512": canonical_bytes_hash(&commitment_bytes),
+        }),
+    )
+}
+
+fn signed_i128_to_modulus_residue(value: i128, modulus: u64) -> u64 {
+    let residue = value.rem_euclid(i128::from(modulus));
+
+    u64::try_from(residue).expect("non-negative i128 residue below a u64 modulus fits u64")
 }
 
 #[allow(clippy::too_many_arguments)]

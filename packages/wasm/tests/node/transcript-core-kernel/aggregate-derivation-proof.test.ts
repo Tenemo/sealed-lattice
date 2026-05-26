@@ -847,7 +847,7 @@ describe.sequential(
 
                         expect(bridgeEncryption).toMatchObject({
                             bridgeProofVerificationStatus:
-                                'BridgeProofBackendPending',
+                                'BridgeProofRelationChecked',
                             ok: true,
                             operation: 'generateAggregateBridgeEncryption',
                         });
@@ -856,7 +856,7 @@ describe.sequential(
                             'M9BridgeCiphertextGenerated',
                             'CollectivePublicKeyRootBound',
                             'CoefficientDomainCanonical',
-                            'BridgeProofBackendStillRequired',
+                            'BridgeProofRelationChecked',
                         ]);
                         expect(
                             String(
@@ -902,6 +902,20 @@ describe.sequential(
                             bridgeEncryption.bridgeProofTargetContractDigest,
                         );
                         expect(bridgeProofPayload).toMatchObject({
+                            objectType:
+                                'SealedLatticeAggregateBridgeRelationProof',
+                            bridgeSharedWitnessProof: {
+                                objectType: 'AggregateBridgeSharedWitnessProof',
+                                proofModel:
+                                    'fiat-shamir-linear-shared-response-v1',
+                                relationCheckCount: 1,
+                                responseEncoding:
+                                    'signed-i128-little-endian-hex-v1',
+                                sameHiddenAggregateCoordinatesLinked: true,
+                            },
+                            singleContributionBridgeRelationChecked: true,
+                        });
+                        expect(bridgeProofPayload).toMatchObject({
                             aggregateQuotientCoordinateCount: 220,
                             aggregateReducedCoordinateCount: 220,
                             aggregateRelationChallengeHex: expect.any(
@@ -946,7 +960,7 @@ describe.sequential(
                                 naiveLinearExpansionBackendStatus:
                                     'InfeasibleForClaimBearingM9',
                                 plaintextRootProofBindingStatus:
-                                    'PlaintextRootProofBindingPending',
+                                    'PlaintextRootProofBindingChecked',
                                 proofFriendlyPlaintextBindingRequired: true,
                                 publicPlaintextRootAcceptedAsClosureEvidence: false,
                                 sameWitnessLinkageModel:
@@ -974,14 +988,14 @@ describe.sequential(
                                     plaintextCoefficientColumnRole:
                                         'bgv-batch-encoding-and-bgv-encryption-message',
                                     plaintextCoefficientCount: 32_768,
-                                    plaintextEncodingQuotientCount: 32_768,
+                                    plaintextEncodingQuotientCount: 0,
                                     plaintextEncodingRelationRowCount: 32_768,
                                     sameWitnessLinkageModel:
                                         'SingleTranscriptSharedWitnessOrExplicitSameWitnessLinkRequired',
                                     separateSubproofsAcceptedForClosure: false,
                                     sharedReducedCoordinateColumnRole:
                                         'aggregate-reduction-and-bgv-plaintext-slot',
-                                    sharedResponseScalarCount: 164_564,
+                                    sharedResponseScalarCount: 131_796,
                                 },
                                 sharedWitnessLayoutDigest: expect.any(
                                     String,
@@ -1036,13 +1050,14 @@ describe.sequential(
                             bridgeEvidenceVerificationStatus:
                                 'BridgeProofEvidenceChecked',
                             bridgeProofVerificationStatus:
-                                'BridgeProofBackendPending',
+                                'BridgeProofRelationChecked',
                             ok: true,
                             operation: 'verifyAggregateBridgeEncryption',
                         });
                         expect(bridgeVerification.statusLabels).toEqual([
                             'BridgeProofEvidenceChecked',
-                            'BridgeProofBackendStillRequired',
+                            'BridgeProofRelationChecked',
+                            'M9SingleContributionBridgeRelationChecked',
                             'FinalBridgeTheoremPending',
                         ]);
                         expect(String(bridgeVerification.bridgeProofRoot)).toBe(
@@ -1074,7 +1089,7 @@ describe.sequential(
                             bridgeProofTargetContractDigest:
                                 bridgeEncryption.bridgeProofTargetContractDigest,
                             bridgeProofVerificationStatus:
-                                'BridgeProofBackendPending',
+                                'BridgeProofRelationChecked',
                             encryptedAggregateShareCiphertextRoot:
                                 bridgeEncryption.encryptedAggregateShareCiphertextRoot,
                             proofRoot: bridgeVerification.bridgeProofRoot,
@@ -1240,7 +1255,7 @@ describe.sequential(
                         expectBridgeVerificationRejected({
                             ...bridgeEncryption,
                             bridgeProofVerificationStatus:
-                                'BridgeProofRelationChecked',
+                                'BridgeProofBackendPending',
                         });
                         expectBridgeVerificationRejected({
                             ...bridgeEncryption,

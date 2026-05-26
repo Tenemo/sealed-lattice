@@ -316,6 +316,7 @@ enum TranscriptCoreCommand {
     GenerateAggregateDerivationProof,
     VerifyAggregateDerivationProof,
     GenerateAggregateBridgeEncryption,
+    EvaluateAggregateBridgeRelation,
     VerifyAggregateBridgeEncryption,
     DescribeBgvRnsProfile,
     DescribeBgvOperationRegistry,
@@ -507,6 +508,7 @@ fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult<Value> {
         | TranscriptCoreCommand::GenerateAggregateDerivationProof
         | TranscriptCoreCommand::VerifyAggregateDerivationProof
         | TranscriptCoreCommand::GenerateAggregateBridgeEncryption
+        | TranscriptCoreCommand::EvaluateAggregateBridgeRelation
         | TranscriptCoreCommand::VerifyAggregateBridgeEncryption => {
             run_ballot_privacy_command(command, &request)
         }
@@ -622,6 +624,9 @@ fn run_ballot_privacy_command(
             crate::ballot_privacy::generate_aggregate_bridge_encryption_from_command_request(
                 request,
             ),
+        ),
+        TranscriptCoreCommand::EvaluateAggregateBridgeRelation => Ok(
+            crate::ballot_privacy::evaluate_aggregate_bridge_relation_from_command_request(request),
         ),
         TranscriptCoreCommand::VerifyAggregateBridgeEncryption => Ok(
             crate::ballot_privacy::verify_aggregate_bridge_encryption_from_command_request(request),

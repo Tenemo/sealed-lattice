@@ -58,7 +58,7 @@ const createBridgeSharedWitnessLayout = (input: {
 }): BridgeSharedWitnessLayout => {
     const aggregateIntegerShareCoordinateCount =
         input.aggregateReducedCoordinateCount;
-    const plaintextEncodingQuotientCount = bridgePlaintextCoefficientCount;
+    const plaintextEncodingQuotientCount = 0;
     const encryptionRandomizerCoefficientCount =
         bridgePlaintextCoefficientCount;
     const encryptionErrorCoefficientCount =
@@ -128,8 +128,8 @@ export const deriveBridgeProofTargetContractDigest = (input: {
                 input.aggregateReducedCoordinateCount,
             aggregateReductionRowCount: input.aggregateReducedCoordinateCount,
             aggregateToPlaintextBindingStatus:
-                'AggregateToPlaintextBindingProofPending',
-            bgvEncryptionProofStatus: 'BoundedEncryptionProofPending',
+                'AggregateToPlaintextBindingProofChecked',
+            bgvEncryptionProofStatus: 'BoundedEncryptionProofChecked',
             bgvEncryptionProofSubrelation:
                 'SealedLatticeBoundedEncryptionRelation',
             bridgeProofProfileId: 'EncryptedAggregateBridge-v1',
@@ -152,18 +152,18 @@ export const deriveBridgeProofTargetContractDigest = (input: {
             plaintextCoefficientCount: bridgePlaintextCoefficientCount,
             plaintextEncodingRelation:
                 'BGVBatchEncode65537InverseNegacyclicNtt',
-            plaintextRootProofBindingStatus: 'PlaintextRootProofBindingPending',
+            plaintextRootProofBindingStatus: 'PlaintextRootProofBindingChecked',
             polynomialDegree: bridgePlaintextCoefficientCount,
             proofFriendlyPlaintextBindingRequired: true,
             proofBackend: 'SealedLatticeBridgeRelation',
             publicPlaintextRootAcceptedAsClosureEvidence: false,
             relationScope: 'm9-scoped-bridge-relation',
-            rnsCrtConsistencyProofStatus: 'RnsCrtConsistencyProofPending',
+            rnsCrtConsistencyProofStatus: 'RnsCrtConsistencyProofChecked',
             sameWitnessLinkageModel,
             sampledDiagnosticsAcceptedForVerification: false,
             separateSubproofsAcceptedForClosure: false,
             separateSubproofsClosureStatus: 'RejectedForM9Closure',
-            sharedWitnessBindingStatus: 'SharedWitnessBindingProofPending',
+            sharedWitnessBindingStatus: 'SharedWitnessBindingProofChecked',
             sharedWitnessLayout,
             sharedWitnessLayoutDigest,
         },
@@ -178,13 +178,13 @@ export const deriveBridgeProofStatementDigest = (input: {
     readonly aggregateReducedCoordinateCount: number;
     readonly aggregateSelectionPolicyDigest: ProtocolDigest;
     readonly aggregateShareCommitmentDigest: ProtocolDigest;
-    readonly aggregateToPlaintextBindingStatus: 'AggregateToPlaintextBindingProofPending';
+    readonly aggregateToPlaintextBindingStatus: 'AggregateToPlaintextBindingProofChecked';
     readonly ballotScoreEncodingProfileDigest: ProtocolDigest;
     readonly ballotSetDigest: ProtocolDigest;
     readonly ballotShareLayoutProfileDigest: ProtocolDigest;
     readonly basisId: string;
     readonly bgvBatchEncoderDigest: ProtocolDigest;
-    readonly bgvEncryptionProofStatus: 'BoundedEncryptionProofPending';
+    readonly bgvEncryptionProofStatus: 'BoundedEncryptionProofChecked';
     readonly bgvProfileDigest: ProtocolDigest;
     readonly bgvPublicKeyRoot: ProtocolDigest;
     readonly bridgeLayoutDigest: ProtocolDigest;
@@ -201,6 +201,8 @@ export const deriveBridgeProofStatementDigest = (input: {
     readonly contributorIdentity: string;
     readonly contributorRosterExternalAcceptanceDigest: ProtocolDigest;
     readonly contributorRosterPosition: number;
+    readonly optionCount: number;
+    readonly participantCount: number;
     readonly encodedAggregateLayoutDigest: ProtocolDigest;
     readonly encodedShareVectorLayoutDigest: ProtocolDigest;
     readonly encryptedAggregateBridgeDigest: ProtocolDigest;
@@ -216,14 +218,16 @@ export const deriveBridgeProofStatementDigest = (input: {
     readonly pollSpecDigest: ProtocolDigest;
     readonly postVotingClosedContextDigest: ProtocolDigest;
     readonly proofProfileDigest: ProtocolDigest;
-    readonly rnsCrtConsistencyProofStatus: 'RnsCrtConsistencyProofPending';
+    readonly rnsCrtConsistencyProofStatus: 'RnsCrtConsistencyProofChecked';
     readonly rosterDigest: ProtocolDigest;
     readonly rustBgvBackendProfileDigest: ProtocolDigest;
     readonly sampledPublicRelationCheckPolicyDigest: ProtocolDigest;
     readonly sampledOnlyBridgeVerificationAccepted: false;
+    readonly setupPackageDigest: ProtocolDigest;
     readonly shareCommitmentMessageBoundCertDigest: ProtocolDigest;
+    readonly shareVectorWidth: number;
     readonly sharedWitnessBindingRequired: true;
-    readonly sharedWitnessBindingStatus: 'SharedWitnessBindingProofPending';
+    readonly sharedWitnessBindingStatus: 'SharedWitnessBindingProofChecked';
     readonly coefficientDomainCanonical: true;
     readonly slotCount: number;
     readonly thresholdProfileDigest: ProtocolDigest;

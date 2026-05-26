@@ -39,9 +39,11 @@ import {
 } from './digests.js';
 
 export type BridgeSetupEvidence = {
+    readonly setupPackageDigest: ProtocolDigest;
     readonly setupInputs: {
         readonly ceremonyId: string;
         readonly manifestDigest: ProtocolDigest;
+        readonly participantCount: number;
         readonly rosterDigest: ProtocolDigest;
         readonly thresholdProfileDigest: ProtocolDigest;
     };
@@ -68,7 +70,7 @@ export type BridgeEncryptionEvidence = {
     readonly bridgeProofRoot: ProtocolDigest;
     readonly bridgeProofStatementDigest: ProtocolDigest;
     readonly bridgeProofTargetContractDigest: ProtocolDigest;
-    readonly bridgeProofVerificationStatus: 'BridgeProofBackendPending';
+    readonly bridgeProofVerificationStatus: 'BridgeProofRelationChecked';
     readonly canonicalByteLength: number;
     readonly canonicalBytesHash512: string;
     readonly canonicalCiphertextConventionDigest: ProtocolDigest;
@@ -106,7 +108,7 @@ export type BridgeEvidenceVerification = {
     readonly bridgeProofRoot: ProtocolDigest;
     readonly bridgeProofStatementDigest: ProtocolDigest;
     readonly bridgeProofTargetContractDigest: ProtocolDigest;
-    readonly bridgeProofVerificationStatus: 'BridgeProofBackendPending';
+    readonly bridgeProofVerificationStatus: 'BridgeProofRelationChecked';
     readonly encryptedAggregateShareCiphertextRoot: ProtocolDigest;
     readonly ok: true;
 };
@@ -164,6 +166,7 @@ const bridgeDigestFieldNames = [
     'rosterDigest',
     'pollSpecDigest',
     'thresholdProfileDigest',
+    'setupPackageDigest',
     'ballotSetDigest',
     'votingClosedBoardHeadDigest',
     'contributorRosterExternalAcceptanceDigest',
@@ -208,10 +211,37 @@ const contributionDigestFieldNames = [
     'rosterDigest',
     'pollSpecDigest',
     'thresholdProfileDigest',
+    'setupPackageDigest',
     'ballotSetDigest',
     'votingClosedBoardHeadDigest',
     'closeRecordDigest',
     'contributorRosterExternalAcceptanceDigest',
+] as const;
+
+const aggregateReadyDigestFieldNames = [
+    'aggregateReadyRecordDigest',
+    'manifestDigest',
+    'rosterDigest',
+    'pollSpecDigest',
+    'thresholdProfileDigest',
+    'ballotSetDigest',
+    'votingClosedBoardHeadDigest',
+    'postVotingClosedContextDigest',
+    'aggregateSelectionPolicyDigest',
+    'firstValidOrderDigest',
+    'interpolationCoefficientReportDigest',
+    'encryptedAggregateBridgeDigest',
+    'encryptedAggregateTargetBasisDataRoot',
+    'encryptedAggregateReconstructionDigest',
+    'encryptedAggregateReconstructionRoot',
+    'bridgeWitnessPrivacyProfileDigest',
+    'bgvBatchEncoderDigest',
+    'bridgeLayoutDigest',
+    'encryptedAggregateInputLayoutDigest',
+    'topKEvaluatorInputLayoutDigest',
+    'bgvProfileDigest',
+    'setupPackageDigest',
+    'collectivePublicKeyRoot',
 ] as const;
 
 const collectForbiddenWitnessFieldRefusals = (
@@ -487,7 +517,7 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
                 aggregateDerivationComponent.aggregateCommitment
                     .aggregateShareCommitmentDigest,
             aggregateToPlaintextBindingStatus:
-                'AggregateToPlaintextBindingProofPending',
+                'AggregateToPlaintextBindingProofChecked',
             ballotScoreEncodingProfileDigest: requireProtocolDigestField(
                 profileBindings,
                 'ballotScoreEncodingProfileDigest',
@@ -505,7 +535,7 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
                 'batchEncoderDigest',
                 'setupPackage.profileBindings',
             ),
-            bgvEncryptionProofStatus: 'BoundedEncryptionProofPending',
+            bgvEncryptionProofStatus: 'BoundedEncryptionProofChecked',
             bgvProfileDigest: profileDigest,
             bgvPublicKeyRoot:
                 input.setupPackage.collectivePublicKey.bgvPublicKeyRoot,
@@ -531,6 +561,8 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
             contributorRosterExternalAcceptanceDigest:
                 statement.contributorRosterExternalAcceptanceDigest,
             contributorRosterPosition: statement.contributorRosterPosition,
+            optionCount: statement.optionCount,
+            participantCount: statement.participantCount,
             encodedAggregateLayoutDigest: requireProtocolDigestField(
                 profileBindings,
                 'encodedAggregateLayoutDigest',
@@ -569,15 +601,20 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
             postVotingClosedContextDigest:
                 statement.postVotingClosedContextDigest,
             proofProfileDigest: bridgeProofProfileDigest,
-            rnsCrtConsistencyProofStatus: 'RnsCrtConsistencyProofPending',
+            rnsCrtConsistencyProofStatus: 'RnsCrtConsistencyProofChecked',
             rosterDigest: statement.rosterDigest,
             rustBgvBackendProfileDigest,
             sampledPublicRelationCheckPolicyDigest,
             sampledOnlyBridgeVerificationAccepted: false,
+            setupPackageDigest: requireProtocolDigest(
+                input.setupPackage.setupPackageDigest,
+                'setup package digest',
+            ),
             shareCommitmentMessageBoundCertDigest:
                 statement.shareCommitmentMessageBoundCertDigest,
+            shareVectorWidth: statement.shareVectorWidth,
             sharedWitnessBindingRequired: true,
-            sharedWitnessBindingStatus: 'SharedWitnessBindingProofPending',
+            sharedWitnessBindingStatus: 'SharedWitnessBindingProofChecked',
             slotCount: bridgeEncryptionEvidence.slotCount,
             thresholdProfileDigest: statement.thresholdProfileDigest,
             topKEvaluatorInputLayoutDigest: requireProtocolDigestField(
@@ -596,8 +633,8 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
     );
     requireMatchingValue(
         bridgeEncryptionEvidence.bridgeProofVerificationStatus,
-        'BridgeProofBackendPending',
-        'pending bridge proof status',
+        'BridgeProofRelationChecked',
+        'checked bridge proof status',
     );
     requireMatchingValue(
         input.bridgeEvidenceVerification.bridgeEvidenceVerificationStatus,
@@ -693,6 +730,11 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
         input.setupPackage.setupInputs.thresholdProfileDigest,
         statement.thresholdProfileDigest,
         'threshold profile digest',
+    );
+    requireMatchingSafeInteger(
+        input.setupPackage.setupInputs.participantCount,
+        statement.participantCount,
+        'setup participant count',
     );
     requireMatchingValue(
         bridgeEncryptionEvidence.collectivePublicKeyRoot,
@@ -800,7 +842,7 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
     );
     requireMatchingValue(
         input.bridgeEvidenceVerification.bridgeProofVerificationStatus,
-        'BridgeProofBackendPending',
+        'BridgeProofRelationChecked',
         'verification bridge proof status',
     );
 
@@ -875,7 +917,7 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
         bridgeProofProfileDigest,
         bridgeProofProfileId: encryptedAggregateBridgeProfileId,
         bridgeProofTargetContractDigest,
-        bridgeProofVerificationStatus: 'BridgeProofBackendPending',
+        bridgeProofVerificationStatus: 'BridgeProofRelationChecked',
         bridgeWitnessPrivacyProfileDigest: requireProtocolDigest(
             input.bridgeWitnessPrivacyProfileDigest,
             'bridge witness privacy profile digest',
@@ -922,6 +964,8 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
         objectVersion: 1,
         pollSpecDigest: statement.pollSpecDigest,
         postVotingClosedContextDigest: statement.postVotingClosedContextDigest,
+        participantCount: statement.participantCount,
+        optionCount: statement.optionCount,
         proofBackend: 'SealedLatticeBridgeRelation',
         proofBytesDigest: bridgeEncryptionEvidence.bridgeProofBytesDigest,
         proofEncodingProfileDigest,
@@ -934,8 +978,13 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
         publicRandomnessDigest,
         rosterDigest: statement.rosterDigest,
         rustBgvBackendProfileDigest,
+        setupPackageDigest: requireProtocolDigest(
+            input.setupPackage.setupPackageDigest,
+            'setup package digest',
+        ),
         shareCommitmentMessageBoundCertDigest:
             statement.shareCommitmentMessageBoundCertDigest,
+        shareVectorWidth: statement.shareVectorWidth,
         thresholdProfileDigest: statement.thresholdProfileDigest,
         topKEvaluatorInputLayoutDigest: requireProtocolDigestField(
             profileBindings,
@@ -1013,6 +1062,10 @@ const bridgeProofPublicFieldsMatchContribution = (
         proofRecord.pollSpecDigest === contribution.pollSpecDigest &&
         proofRecord.thresholdProfileDigest ===
             contribution.thresholdProfileDigest &&
+        proofRecord.setupPackageDigest === contribution.setupPackageDigest &&
+        proofRecord.participantCount === contribution.participantCount &&
+        proofRecord.optionCount === contribution.optionCount &&
+        proofRecord.shareVectorWidth === contribution.shareVectorWidth &&
         proofRecord.ballotSetDigest === contribution.ballotSetDigest &&
         proofRecord.votingClosedBoardHeadDigest ===
             contribution.votingClosedBoardHeadDigest &&
@@ -1092,12 +1145,18 @@ const collectBridgeProofRecordRefusals = (
     if (
         !Number.isSafeInteger(proofRecord.contributorRosterPosition) ||
         proofRecord.contributorRosterPosition <= 0 ||
+        !Number.isSafeInteger(proofRecord.participantCount) ||
+        proofRecord.participantCount <= 0 ||
+        !Number.isSafeInteger(proofRecord.optionCount) ||
+        proofRecord.optionCount <= 0 ||
+        !Number.isSafeInteger(proofRecord.shareVectorWidth) ||
+        proofRecord.shareVectorWidth !== proofRecord.optionCount * 11 ||
         !Number.isSafeInteger(proofRecord.proofSizeBytes) ||
         proofRecord.proofSizeBytes < 0
     ) {
         refusedObjects.push(
             createAggregateRefusal(
-                'Bridge proof record contributor position and proof size must be canonical non-negative integers.',
+                'Bridge proof record contributor position, variant dimensions, and proof size must be canonical.',
                 proofRecord.bridgeProofRecordDigest,
             ),
         );
@@ -1203,6 +1262,12 @@ export function verifyAggregateContributionStructure(
         !actionContextMatchesContribution(contribution) ||
         !Number.isSafeInteger(contribution.contributorRosterPosition) ||
         contribution.contributorRosterPosition <= 0 ||
+        !Number.isSafeInteger(contribution.participantCount) ||
+        contribution.participantCount <= 0 ||
+        !Number.isSafeInteger(contribution.optionCount) ||
+        contribution.optionCount <= 0 ||
+        !Number.isSafeInteger(contribution.shareVectorWidth) ||
+        contribution.shareVectorWidth !== contribution.optionCount * 11 ||
         !Number.isSafeInteger(contribution.boardSequence) ||
         contribution.boardSequence < 0 ||
         !Number.isSafeInteger(contribution.boardPosition) ||
@@ -1342,14 +1407,18 @@ export const createAggregateContributionFromBridgeProofRecord = (
         manifestDigest: proofRecord.manifestDigest,
         objectType: 'AggregateContribution',
         objectVersion: 1,
+        optionCount: proofRecord.optionCount,
+        participantCount: proofRecord.participantCount,
         pollSpecDigest: proofRecord.pollSpecDigest,
         postVotingClosedContextDigest:
             proofRecord.postVotingClosedContextDigest,
         recoveryEpoch: input.actionContext.recoveryEpoch,
         rosterDigest: proofRecord.rosterDigest,
         rustBgvBackendProfileDigest: proofRecord.rustBgvBackendProfileDigest,
+        setupPackageDigest: proofRecord.setupPackageDigest,
         shareCommitmentMessageBoundCertDigest:
             proofRecord.shareCommitmentMessageBoundCertDigest,
+        shareVectorWidth: proofRecord.shareVectorWidth,
         signature: input.signature,
         thresholdProfileDigest: proofRecord.thresholdProfileDigest,
         topKEvaluatorInputLayoutDigest:
@@ -1577,6 +1646,10 @@ const requireSameSelectedContext = (
         'rosterDigest',
         'pollSpecDigest',
         'thresholdProfileDigest',
+        'setupPackageDigest',
+        'participantCount',
+        'optionCount',
+        'shareVectorWidth',
         'ballotSetDigest',
         'votingClosedBoardHeadDigest',
         'postVotingClosedContextDigest',
@@ -1715,9 +1788,11 @@ export const createAggregateReadyRecord = (
             interpolationCoefficientReport.maxCenteredAbsCoefficient,
         objectType: 'AggregateReadyRecord',
         objectVersion: 1,
+        optionCount: firstContribution.optionCount,
         pollSpecDigest: firstContribution.pollSpecDigest,
         postVotingClosedContextDigest:
             firstContribution.postVotingClosedContextDigest,
+        rosterSize: input.rosterSize,
         rosterDigest: firstContribution.rosterDigest,
         selectedAggregateContributionDigests,
         selectedContributorIdentities: input.selectedContributions.map(
@@ -1726,6 +1801,8 @@ export const createAggregateReadyRecord = (
         selectedContributorInterpolationPoints:
             interpolationCoefficientReport.contributorRosterPositions,
         selectedContributorRosterPositions,
+        setupPackageDigest: firstContribution.setupPackageDigest,
+        shareVectorWidth: firstContribution.shareVectorWidth,
         thresholdProfileDigest: firstContribution.thresholdProfileDigest,
         topKEvaluatorInputLayoutDigest:
             firstContribution.topKEvaluatorInputLayoutDigest,
@@ -1737,5 +1814,145 @@ export const createAggregateReadyRecord = (
         ...recordPayload,
         aggregateReadyRecordDigest:
             deriveAggregateReadyRecordDigest(recordPayload),
+    };
+};
+
+export const verifyAggregateReadyRecordStructure = (
+    record: AggregateReadyRecord,
+): {
+    readonly acceptedDigests: readonly ProtocolDigest[];
+    readonly aggregateReadyRecordDigest?: ProtocolDigest;
+    readonly ok: boolean;
+    readonly refusedObjects: readonly RefusalRecord[];
+    readonly statusLabels: readonly string[];
+    readonly unresolvedReason: string | null;
+} => {
+    const recordDigest = record.aggregateReadyRecordDigest;
+    const { aggregateReadyRecordDigest, ...recordWithoutDigest } = record;
+    void aggregateReadyRecordDigest;
+    const expectedRecordDigest =
+        deriveAggregateReadyRecordDigest(recordWithoutDigest);
+    const refusedObjects: RefusalRecord[] = [
+        ...collectForbiddenWitnessFieldRefusals(
+            record,
+            recordDigest,
+            'aggregateReadyRecord',
+        ),
+        ...collectDigestShapeRefusals(
+            record as unknown as Record<string, unknown>,
+            aggregateReadyDigestFieldNames,
+            recordDigest,
+        ),
+    ];
+    const recomputedInterpolationReport = deriveInterpolationCoefficientReport({
+        contributorRosterPositions: record.selectedContributorRosterPositions,
+        rosterSize: record.rosterSize,
+        threshold: record.aggregateContributionQuorum,
+    });
+    const recomputedReconstructionRoot =
+        deriveEncryptedAggregateReconstructionRoot({
+            aggregateSelectionPolicyDigest:
+                record.aggregateSelectionPolicyDigest,
+            encryptedAggregateReconstructionDigest:
+                record.encryptedAggregateReconstructionDigest,
+            encryptedAggregateShareCiphertextRoots:
+                record.encryptedAggregateShareCiphertextRoots,
+            firstValidOrderDigest: record.firstValidOrderDigest,
+            interpolationCoefficientReportDigest:
+                recomputedInterpolationReport.reportDigest,
+            selectedAggregateContributionDigests:
+                record.selectedAggregateContributionDigests,
+        });
+    const selectedLengths = [
+        record.selectedAggregateContributionDigests.length,
+        record.selectedContributorIdentities.length,
+        record.selectedContributorRosterPositions.length,
+        record.selectedContributorInterpolationPoints.length,
+        record.encryptedAggregateShareCiphertextRoots.length,
+        record.interpolationCoefficients.length,
+    ];
+    const arraysMatchQuorum = selectedLengths.every(
+        (length) => length === record.aggregateContributionQuorum,
+    );
+    const allSelectedDigestsAreCanonical = [
+        ...record.selectedAggregateContributionDigests,
+        ...record.encryptedAggregateShareCiphertextRoots,
+    ].every((digestValue) => protocolDigestPattern.test(digestValue));
+
+    if (
+        record.objectType !== 'AggregateReadyRecord' ||
+        record.objectVersion !== 1 ||
+        record.aggregateReadyRecordDigest !== expectedRecordDigest ||
+        !Number.isSafeInteger(record.rosterSize) ||
+        record.rosterSize < 3 ||
+        record.rosterSize > 20 ||
+        !Number.isSafeInteger(record.optionCount) ||
+        record.optionCount < 2 ||
+        record.optionCount > 20 ||
+        !Number.isSafeInteger(record.shareVectorWidth) ||
+        record.shareVectorWidth !== record.optionCount * 11 ||
+        !Number.isSafeInteger(record.aggregateContributionQuorum) ||
+        record.aggregateContributionQuorum <= 0 ||
+        record.aggregateContributionQuorum > record.rosterSize ||
+        !arraysMatchQuorum ||
+        !allSelectedDigestsAreCanonical ||
+        record.selectedContributorInterpolationPoints.some(
+            (position, positionIndex) =>
+                position !==
+                record.selectedContributorRosterPositions[positionIndex],
+        ) ||
+        record.interpolationCoefficientReportDigest !==
+            recomputedInterpolationReport.reportDigest ||
+        record.centeredL1CoefficientSum !==
+            recomputedInterpolationReport.centeredL1CoefficientSum ||
+        record.maxCenteredAbsCoefficient !==
+            recomputedInterpolationReport.maxCenteredAbsCoefficient ||
+        !interpolationReportsMatch(
+            {
+                centeredL1CoefficientSum: record.centeredL1CoefficientSum,
+                coefficients: record.interpolationCoefficients,
+                contributorRosterPositions:
+                    record.selectedContributorRosterPositions,
+                maxCenteredAbsCoefficient: record.maxCenteredAbsCoefficient,
+                reportDigest: record.interpolationCoefficientReportDigest,
+                rosterSize: record.rosterSize,
+                threshold: record.aggregateContributionQuorum,
+            },
+            recomputedInterpolationReport,
+        ) ||
+        record.encryptedAggregateReconstructionRoot !==
+            recomputedReconstructionRoot
+    ) {
+        refusedObjects.push(
+            createAggregateRefusal(
+                'Aggregate-ready record digest, variant dimensions, interpolation coefficients, or reconstruction root is invalid.',
+                recordDigest,
+            ),
+        );
+    }
+
+    if (refusedObjects.length > 0) {
+        return {
+            acceptedDigests: [],
+            aggregateReadyRecordDigest: recordDigest,
+            ok: false,
+            refusedObjects,
+            statusLabels: [],
+            unresolvedReason:
+                refusedObjects[0]?.code ?? 'AggregateReadyRecordInvalid',
+        };
+    }
+
+    return {
+        acceptedDigests: [
+            record.aggregateReadyRecordDigest,
+            record.encryptedAggregateReconstructionRoot,
+            record.interpolationCoefficientReportDigest,
+        ],
+        aggregateReadyRecordDigest: recordDigest,
+        ok: true,
+        refusedObjects: [],
+        statusLabels: ['AggregateReadyRecordVerified'],
+        unresolvedReason: null,
     };
 };

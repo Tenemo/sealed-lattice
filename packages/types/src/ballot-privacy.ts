@@ -673,6 +673,10 @@ export type BridgeProofRecord = {
     readonly rosterDigest: ProtocolDigest;
     readonly pollSpecDigest: ProtocolDigest;
     readonly thresholdProfileDigest: ProtocolDigest;
+    readonly setupPackageDigest: ProtocolDigest;
+    readonly participantCount: number;
+    readonly optionCount: number;
+    readonly shareVectorWidth: number;
     readonly ballotSetDigest: ProtocolDigest;
     readonly votingClosedBoardHeadDigest: ProtocolDigest;
     readonly contributorIdentity: string;
@@ -697,6 +701,10 @@ export type AggregateContribution = {
     readonly rosterDigest: ProtocolDigest;
     readonly pollSpecDigest: ProtocolDigest;
     readonly thresholdProfileDigest: ProtocolDigest;
+    readonly setupPackageDigest: ProtocolDigest;
+    readonly participantCount: number;
+    readonly optionCount: number;
+    readonly shareVectorWidth: number;
     readonly ballotSetDigest: ProtocolDigest;
     readonly votingClosedBoardHeadDigest: ProtocolDigest;
     readonly closeRecordDigest: ProtocolDigest;
@@ -777,6 +785,10 @@ export type AggregateReadyRecord = {
     readonly rosterDigest: ProtocolDigest;
     readonly pollSpecDigest: ProtocolDigest;
     readonly thresholdProfileDigest: ProtocolDigest;
+    readonly setupPackageDigest: ProtocolDigest;
+    readonly rosterSize: number;
+    readonly optionCount: number;
+    readonly shareVectorWidth: number;
     readonly ballotSetDigest: ProtocolDigest;
     readonly votingClosedBoardHeadDigest: ProtocolDigest;
     readonly postVotingClosedContextDigest: ProtocolDigest;

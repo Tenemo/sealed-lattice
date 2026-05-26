@@ -89,13 +89,17 @@ const baseFields = {
     ),
     heParamDigest: digest('he-param'),
     manifestDigest: digest('manifest'),
+    optionCount: 20,
+    participantCount: 20,
     pollSpecDigest: digest('poll-spec'),
     postVotingClosedContextDigest: digest('post-voting-closed-context'),
     rosterDigest: digest('roster'),
     rustBgvBackendProfileDigest: digest('rust-bgv-backend-profile'),
+    setupPackageDigest: digest('setup-package'),
     shareCommitmentMessageBoundCertDigest: digest(
         'share-commitment-message-bound-cert',
     ),
+    shareVectorWidth: 220,
     thresholdProfileDigest: digest('threshold-profile'),
     topKEvaluatorInputLayoutDigest: digest('top-k-evaluator-input-layout'),
     votingClosedBoardHeadDigest: digest('voting-closed-board-head'),
@@ -232,7 +236,7 @@ const createAggregateContributionFixture = (
             baseFields.aggregateSelectionPolicyDigest,
         aggregateShareCommitmentDigest,
         aggregateToPlaintextBindingStatus:
-            'AggregateToPlaintextBindingProofPending',
+            'AggregateToPlaintextBindingProofChecked',
         ballotScoreEncodingProfileDigest:
             baseFields.ballotScoreEncodingProfileDigest,
         ballotSetDigest: baseFields.ballotSetDigest,
@@ -240,7 +244,7 @@ const createAggregateContributionFixture = (
             baseFields.ballotShareLayoutProfileDigest,
         basisId: 'sealed-lattice-bgv-rns-data-basis-v1',
         bgvBatchEncoderDigest: baseFields.bgvBatchEncoderDigest,
-        bgvEncryptionProofStatus: 'BoundedEncryptionProofPending',
+        bgvEncryptionProofStatus: 'BoundedEncryptionProofChecked',
         bgvProfileDigest: baseFields.bgvProfileDigest,
         bgvPublicKeyRoot: baseFields.bgvPublicKeyRoot,
         bridgeLayoutDigest: baseFields.encryptedAggregateInputLayoutDigest,
@@ -260,6 +264,8 @@ const createAggregateContributionFixture = (
         contributorIdentity,
         contributorRosterExternalAcceptanceDigest,
         contributorRosterPosition: input.rosterPosition,
+        optionCount: baseFields.optionCount,
+        participantCount: baseFields.participantCount,
         encodedAggregateLayoutDigest: baseFields.encodedAggregateLayoutDigest,
         encodedShareVectorLayoutDigest:
             baseFields.encodedShareVectorLayoutDigest,
@@ -280,15 +286,17 @@ const createAggregateContributionFixture = (
         pollSpecDigest: baseFields.pollSpecDigest,
         postVotingClosedContextDigest,
         proofProfileDigest: bridgeProofProfileDigest,
-        rnsCrtConsistencyProofStatus: 'RnsCrtConsistencyProofPending',
+        rnsCrtConsistencyProofStatus: 'RnsCrtConsistencyProofChecked',
         rosterDigest: baseFields.rosterDigest,
         rustBgvBackendProfileDigest: baseFields.rustBgvBackendProfileDigest,
         sampledPublicRelationCheckPolicyDigest,
         sampledOnlyBridgeVerificationAccepted: false,
+        setupPackageDigest: baseFields.setupPackageDigest,
         shareCommitmentMessageBoundCertDigest:
             baseFields.shareCommitmentMessageBoundCertDigest,
+        shareVectorWidth: baseFields.shareVectorWidth,
         sharedWitnessBindingRequired: true,
-        sharedWitnessBindingStatus: 'SharedWitnessBindingProofPending',
+        sharedWitnessBindingStatus: 'SharedWitnessBindingProofChecked',
         slotCount: 32_768,
         thresholdProfileDigest: baseFields.thresholdProfileDigest,
         topKEvaluatorInputLayoutDigest:
@@ -500,9 +508,11 @@ const createSetupEvidenceFixture =
             topKEvaluatorInputLayoutDigest:
                 baseFields.topKEvaluatorInputLayoutDigest,
         },
+        setupPackageDigest: baseFields.setupPackageDigest,
         setupInputs: {
             ceremonyId: baseFields.ceremonyId,
             manifestDigest: baseFields.manifestDigest,
+            participantCount: baseFields.participantCount,
             rosterDigest: baseFields.rosterDigest,
             thresholdProfileDigest: baseFields.thresholdProfileDigest,
         },
@@ -523,7 +533,7 @@ const recoveryMapFor = (
     );
 
 describe('encrypted aggregate bridge objects', () => {
-    it('creates pending bridge proof records from checked kernel bridge evidence', () => {
+    it('creates checked bridge proof records from checked kernel bridge evidence', () => {
         const contributorIdentity = 'trustee-1';
         const contributorRosterExternalAcceptanceDigest =
             digest('acceptance-1');
@@ -572,7 +582,7 @@ describe('encrypted aggregate bridge objects', () => {
                 baseFields.aggregateSelectionPolicyDigest,
             aggregateShareCommitmentDigest,
             aggregateToPlaintextBindingStatus:
-                'AggregateToPlaintextBindingProofPending',
+                'AggregateToPlaintextBindingProofChecked',
             ballotScoreEncodingProfileDigest:
                 baseFields.ballotScoreEncodingProfileDigest,
             ballotSetDigest: baseFields.ballotSetDigest,
@@ -580,7 +590,7 @@ describe('encrypted aggregate bridge objects', () => {
                 baseFields.ballotShareLayoutProfileDigest,
             basisId: 'sealed-lattice-bgv-rns-data-basis-v1',
             bgvBatchEncoderDigest: baseFields.bgvBatchEncoderDigest,
-            bgvEncryptionProofStatus: 'BoundedEncryptionProofPending',
+            bgvEncryptionProofStatus: 'BoundedEncryptionProofChecked',
             bgvProfileDigest: baseFields.bgvProfileDigest,
             bgvPublicKeyRoot: baseFields.bgvPublicKeyRoot,
             bridgeLayoutDigest: baseFields.encryptedAggregateInputLayoutDigest,
@@ -602,6 +612,9 @@ describe('encrypted aggregate bridge objects', () => {
             contributorIdentity,
             contributorRosterExternalAcceptanceDigest,
             contributorRosterPosition: 1,
+            optionCount: aggregateDerivationComponent.statement.optionCount,
+            participantCount:
+                aggregateDerivationComponent.statement.participantCount,
             encodedAggregateLayoutDigest:
                 baseFields.encodedAggregateLayoutDigest,
             encodedShareVectorLayoutDigest:
@@ -625,15 +638,18 @@ describe('encrypted aggregate bridge objects', () => {
             postVotingClosedContextDigest:
                 baseFields.postVotingClosedContextDigest,
             proofProfileDigest: bridgeProofProfileDigest,
-            rnsCrtConsistencyProofStatus: 'RnsCrtConsistencyProofPending',
+            rnsCrtConsistencyProofStatus: 'RnsCrtConsistencyProofChecked',
             rosterDigest: baseFields.rosterDigest,
             rustBgvBackendProfileDigest: baseFields.rustBgvBackendProfileDigest,
             sampledPublicRelationCheckPolicyDigest,
             sampledOnlyBridgeVerificationAccepted: false,
+            setupPackageDigest: baseFields.setupPackageDigest,
             shareCommitmentMessageBoundCertDigest:
                 baseFields.shareCommitmentMessageBoundCertDigest,
+            shareVectorWidth:
+                aggregateDerivationComponent.statement.shareVectorWidth,
             sharedWitnessBindingRequired: true,
-            sharedWitnessBindingStatus: 'SharedWitnessBindingProofPending',
+            sharedWitnessBindingStatus: 'SharedWitnessBindingProofChecked',
             slotCount: 32_768,
             thresholdProfileDigest: baseFields.thresholdProfileDigest,
             topKEvaluatorInputLayoutDigest:
@@ -669,7 +685,7 @@ describe('encrypted aggregate bridge objects', () => {
                 bridgeProofStatementDigest,
                 bridgeProofTargetContractDigest,
                 bridgeProofVerificationStatus:
-                    'BridgeProofBackendPending' as const,
+                    'BridgeProofRelationChecked' as const,
                 canonicalByteLength,
                 canonicalBytesHash512,
                 canonicalCiphertextConventionDigest:
@@ -704,7 +720,7 @@ describe('encrypted aggregate bridge objects', () => {
                 bridgeProofStatementDigest,
                 bridgeProofTargetContractDigest,
                 bridgeProofVerificationStatus:
-                    'BridgeProofBackendPending' as const,
+                    'BridgeProofRelationChecked' as const,
                 encryptedAggregateShareCiphertextRoot,
                 ok: true as const,
             };
@@ -725,7 +741,7 @@ describe('encrypted aggregate bridge objects', () => {
         expect(bridgeProofRecord).toMatchObject({
             aggregateDerivationComponentDigest,
             aggregateShareCommitmentDigest,
-            bridgeProofVerificationStatus: 'BridgeProofBackendPending',
+            bridgeProofVerificationStatus: 'BridgeProofRelationChecked',
             encryptedAggregateShareCiphertextRoot,
             proofSizeBytes: 1,
             proofStatementDigest: bridgeProofStatementDigest,
@@ -740,9 +756,9 @@ describe('encrypted aggregate bridge objects', () => {
                 }),
             ),
         ).toMatchObject({
-            backendAvailable: false,
+            backendAvailable: true,
             ok: true,
-            unresolvedReason: 'OperationUnavailable',
+            unresolvedReason: null,
         });
         expect(() =>
             createPendingBridgeProofRecordFromBridgeEvidence({

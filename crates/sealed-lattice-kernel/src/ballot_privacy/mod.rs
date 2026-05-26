@@ -99,6 +99,7 @@ mod structured_receiver_encryption_statement;
 mod structured_share_commitment_statement;
 
 pub(crate) use aggregate_bridge_proof::{
+    evaluate_aggregate_bridge_relation_from_command_request,
     generate_aggregate_bridge_encryption_from_command_request,
     verify_aggregate_bridge_encryption_from_command_request,
 };

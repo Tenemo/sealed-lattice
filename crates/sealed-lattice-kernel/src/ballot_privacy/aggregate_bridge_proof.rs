@@ -3,15 +3,21 @@ use serde_json::{Map, Value, json};
 use crate::{
     bgv::profile::{DATA_PRIMES, POLYNOMIAL_DEGREE},
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
-    hashing::{canonical_json, derive_protocol_digest, to_hex},
+    hashing::{canonical_json, derive_protocol_digest, hash512, to_hex},
     transcript_core::decode_hex,
 };
 
-use super::protocol_constants::BALLOT_PRIVACY_FIELD_MODULUS;
+use super::protocol_constants::{
+    BALLOT_PRIVACY_ENCODED_COORDINATES_PER_OPTION, BALLOT_PRIVACY_FIELD_MODULUS,
+    BALLOT_PRIVACY_MANDATORY_RECEIVER_COUNT, BALLOT_PRIVACY_MAXIMUM_OPTION_COUNT,
+    BALLOT_PRIVACY_MINIMUM_OPTION_COUNT, BALLOT_PRIVACY_MINIMUM_SAFE_PARTICIPANT_COUNT,
+    BALLOT_PRIVACY_MINIMUM_UNSAFE_PARTICIPANT_COUNT,
+};
 use super::{
-    SHARE_COMMITMENT_MODULE_RANK, SHARE_COMMITMENT_OPENING_DIMENSION,
+    PolynomialVector, SHARE_COMMITMENT_MODULE_RANK, SHARE_COMMITMENT_OPENING_DIMENSION,
     check_aggregate_derivation_witness_relation, is_protocol_digest, required_json_field,
-    required_string_field, string_field, structural_refusal, structural_rejection,
+    required_string_field, sparse_matrix_from_sparse_component_statement, string_field,
+    structural_refusal, structural_rejection,
     verify_aggregate_derivation_relation_subproof_for_component,
 };
 
@@ -24,13 +30,20 @@ const AGGREGATE_TO_PLAINTEXT_BINDING_PENDING_STATUS: &str =
     "AggregateToPlaintextBindingProofPending";
 const BGV_ENCRYPTION_PROOF_PENDING_STATUS: &str = "BoundedEncryptionProofPending";
 const RNS_CRT_CONSISTENCY_PROOF_PENDING_STATUS: &str = "RnsCrtConsistencyProofPending";
+const BRIDGE_PROOF_CHECKED_STATUS: &str = "BridgeProofRelationChecked";
+const SHARED_WITNESS_BINDING_CHECKED_STATUS: &str = "SharedWitnessBindingProofChecked";
+const AGGREGATE_TO_PLAINTEXT_BINDING_CHECKED_STATUS: &str =
+    "AggregateToPlaintextBindingProofChecked";
+const BGV_ENCRYPTION_PROOF_CHECKED_STATUS: &str = "BoundedEncryptionProofChecked";
+const RNS_CRT_CONSISTENCY_PROOF_CHECKED_STATUS: &str = "RnsCrtConsistencyProofChecked";
 const HWANG_PIOP_DEFERRED_STATUS: &str = "DeferredUntilSealedLatticeBgvRnsCompatibilityFreeze";
 const PLAINTEXT_ENCODING_RELATION: &str = "BGVBatchEncode65537InverseNegacyclicNtt";
 const NAIVE_LINEAR_EXPANSION_BACKEND_STATUS: &str = "InfeasibleForClaimBearingM9";
 const SAME_WITNESS_LINKAGE_MODEL: &str =
     "SingleTranscriptSharedWitnessOrExplicitSameWitnessLinkRequired";
 const SEPARATE_SUBPROOFS_CLOSURE_STATUS: &str = "RejectedForM9Closure";
-const PLAINTEXT_ROOT_PROOF_BINDING_PENDING_STATUS: &str = "PlaintextRootProofBindingPending";
+const PLAINTEXT_ROOT_PROOF_BINDING_CHECKED_STATUS: &str = "PlaintextRootProofBindingChecked";
+const BRIDGE_SHARED_WITNESS_CHECK_COUNT: usize = 1;
 
 pub(crate) fn generate_aggregate_bridge_encryption_from_command_request(request: &Value) -> Value {
     match generate_aggregate_bridge_encryption(request) {
@@ -47,6 +60,16 @@ pub(crate) fn verify_aggregate_bridge_encryption_from_command_request(request: &
         Ok(value) => value,
         Err(error) => structural_rejection(
             "verifyAggregateBridgeEncryption",
+            vec![structural_refusal(error.message, None)],
+        ),
+    }
+}
+
+pub(crate) fn evaluate_aggregate_bridge_relation_from_command_request(request: &Value) -> Value {
+    match evaluate_aggregate_bridge_relation(request) {
+        Ok(value) => value,
+        Err(error) => structural_rejection(
+            "evaluateAggregateBridgeRelation",
             vec![structural_refusal(error.message, None)],
         ),
     }
@@ -118,19 +141,15 @@ fn generate_aggregate_bridge_encryption(request: &Value) -> CanonicalResult<Valu
         "canonicalTurnout",
         "aggregateDerivationComponent.statement",
     )?;
-    let share_vector_width = read_usize_object_field(
-        statement,
-        "shareVectorWidth",
-        "aggregateDerivationComponent.statement",
-    )?;
+    let dimensions = bridge_variant_dimensions(statement)?;
     let aggregate_integer_share_vector =
         read_u64_array(witness, "aggregateIntegerShareVector", "aggregateWitness")?;
     let aggregate_opening_randomness =
         read_i64_array(witness, "aggregateOpeningRandomness", "aggregateWitness")?;
-    if aggregate_integer_share_vector.len() != share_vector_width {
+    if aggregate_integer_share_vector.len() != dimensions.share_vector_width {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
-            "M9 bridge aggregate witness width does not match the accepted M6 statement",
+            "M9 bridge aggregate witness width does not match the accepted variant shareVectorWidth",
         ));
     }
     if string_field(proof_input, "statementDigest") != Some(statement_digest) {
@@ -147,7 +166,7 @@ fn generate_aggregate_bridge_encryption(request: &Value) -> CanonicalResult<Valu
         canonical_turnout,
         prover_randomness_hex,
     )?;
-    let mut encryption = crate::bgv::commands::generate_m9_bridge_ciphertext_from_slots(
+    let trace = crate::bgv::commands::generate_m9_bridge_ciphertext_relation_trace_from_slots(
         setup_package,
         contributor_identity,
         component_digest,
@@ -157,6 +176,7 @@ fn generate_aggregate_bridge_encryption(request: &Value) -> CanonicalResult<Valu
         prover_randomness_hex,
         include_canonical_bytes_hex,
     )?;
+    let mut encryption = trace.public_artifact.clone();
     let bridge_proof_profile_digest = bridge_proof_profile_digest()?;
     let bridge_proof_statement = build_bridge_proof_statement(
         component,
@@ -173,15 +193,29 @@ fn generate_aggregate_bridge_encryption(request: &Value) -> CanonicalResult<Valu
         "bridgeProofTargetContractDigest",
         "bridgeProofStatement",
     )?;
-    let bridge_relation_gap_status = bridge_relation_gap_status_value();
+    let shared_witness_proof =
+        generate_bridge_shared_witness_proof(BridgeSharedWitnessProverInput {
+            setup_package,
+            bridge_encryption: &encryption,
+            proof_input,
+            bridge_proof_statement_digest: &bridge_proof_statement_digest,
+            contributor_identity,
+            aggregate_derivation_statement_digest: statement_digest,
+            aggregate_integer_share_vector: &aggregate_integer_share_vector,
+            aggregate_opening_randomness: &aggregate_opening_randomness,
+            aggregate_reduced_coordinates: &witness_relation_check.reduced_field_vector,
+            aggregate_quotient_vector: &witness_relation_check.quotient_vector,
+            trace: &trace,
+            prover_randomness_hex,
+        })?;
     let proof_value = json!({
-        "objectType": "SealedLatticeAggregateBridgeEncryptionEvidence",
+        "objectType": "SealedLatticeAggregateBridgeRelationProof",
         "objectVersion": 1,
         "profileId": BRIDGE_PROOF_PROFILE_ID,
         "bridgeProofProfileDigest": bridge_proof_profile_digest,
         "proofBackend": BRIDGE_PROOF_BACKEND,
         "bgvEncryptionProofSubrelation": BGV_ENCRYPTION_PROOF_SUBRELATION,
-        "bridgeRelationGapStatus": bridge_relation_gap_status,
+        "bridgeSharedWitnessProof": shared_witness_proof,
         "bridgeProofStatement": bridge_proof_statement,
         "bridgeProofStatementDigest": bridge_proof_statement_digest,
         "bridgeProofTargetContractDigest": bridge_proof_target_contract_digest,
@@ -215,6 +249,7 @@ fn generate_aggregate_bridge_encryption(request: &Value) -> CanonicalResult<Valu
             "noiseMaterialExported": false
         },
         "relationScope": "m9-scoped-bridge-relation",
+        "singleContributionBridgeRelationChecked": true,
         "scopedBridgeRelationClosure": false,
         "finalBridgeTheoremClosure": false
     });
@@ -299,10 +334,1071 @@ fn generate_aggregate_bridge_encryption(request: &Value) -> CanonicalResult<Valu
     );
     object.insert(
         "bridgeProofVerificationStatus".to_string(),
-        Value::String(BRIDGE_PROOF_PENDING_STATUS.to_string()),
+        Value::String(BRIDGE_PROOF_CHECKED_STATUS.to_string()),
+    );
+    object.insert(
+        "statusLabels".to_string(),
+        json!([
+            "M9BridgePlaintextAssembled",
+            "M9BridgeCiphertextGenerated",
+            "CollectivePublicKeyRootBound",
+            "CoefficientDomainCanonical",
+            "BridgeProofRelationChecked"
+        ]),
     );
 
     Ok(encryption)
+}
+
+fn evaluate_aggregate_bridge_relation(request: &Value) -> CanonicalResult<Value> {
+    let component = required_json_field(
+        request,
+        "aggregateDerivationComponent",
+        "evaluateAggregateBridgeRelation",
+    )?;
+    let setup_package =
+        required_json_field(request, "setupPackage", "evaluateAggregateBridgeRelation")?;
+    let witness = required_json_field(
+        request,
+        "aggregateWitness",
+        "evaluateAggregateBridgeRelation",
+    )?;
+    let bridge_encryption = required_json_field(
+        request,
+        "bridgeEncryption",
+        "evaluateAggregateBridgeRelation",
+    )?;
+    validate_bridge_encryption_public_shell(bridge_encryption)?;
+    required_string_field(bridge_encryption, "canonicalBytesHex", "bridgeEncryption")?;
+
+    let prover_randomness_hex = required_string_field(
+        request,
+        "proverRandomnessHex",
+        "evaluateAggregateBridgeRelation",
+    )?;
+    validate_hex_field(prover_randomness_hex, "proverRandomnessHex")?;
+    let aggregate_selection_policy_digest = required_protocol_digest_field(
+        request,
+        "aggregateSelectionPolicyDigest",
+        "evaluateAggregateBridgeRelation",
+    )?;
+    let bridge_witness_privacy_profile_digest = required_protocol_digest_field(
+        request,
+        "bridgeWitnessPrivacyProfileDigest",
+        "evaluateAggregateBridgeRelation",
+    )?;
+    let he_param_digest = required_protocol_digest_field(
+        request,
+        "heParamDigest",
+        "evaluateAggregateBridgeRelation",
+    )?;
+
+    reject_forbidden_public_bridge_fields(component, "aggregateDerivationComponent")?;
+    reject_forbidden_public_bridge_fields(setup_package, "setupPackage")?;
+
+    let statement = required_json_field(component, "statement", "aggregateDerivationComponent")?;
+    let dimensions = bridge_variant_dimensions(statement)?;
+    let aggregate_integer_share_vector =
+        read_u64_array(witness, "aggregateIntegerShareVector", "aggregateWitness")?;
+    let aggregate_opening_randomness =
+        read_i64_array(witness, "aggregateOpeningRandomness", "aggregateWitness")?;
+    if aggregate_integer_share_vector.len() != dimensions.share_vector_width {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "M9 bridge private evaluator aggregate witness width does not match the variant shareVectorWidth",
+        ));
+    }
+    if aggregate_opening_randomness.len() != SHARE_COMMITMENT_OPENING_DIMENSION {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "M9 bridge private evaluator aggregate opening randomness width is invalid",
+        ));
+    }
+
+    let expected_bridge_encryption = generate_aggregate_bridge_encryption(&json!({
+        "aggregateDerivationComponent": component,
+        "setupPackage": setup_package,
+        "aggregateWitness": witness,
+        "proverRandomnessHex": prover_randomness_hex,
+        "aggregateSelectionPolicyDigest": aggregate_selection_policy_digest,
+        "bridgeWitnessPrivacyProfileDigest": bridge_witness_privacy_profile_digest,
+        "heParamDigest": he_param_digest,
+        "includeCanonicalBytesHex": true,
+    }))?;
+    compare_bridge_relation_public_artifacts(
+        bridge_encryption,
+        &expected_bridge_encryption,
+        "bridgeEncryption",
+    )?;
+
+    let public_verification = verify_aggregate_bridge_encryption(&json!({
+        "aggregateDerivationComponent": component,
+        "setupPackage": setup_package,
+        "bridgeEncryption": bridge_encryption,
+        "aggregateSelectionPolicyDigest": aggregate_selection_policy_digest,
+        "bridgeWitnessPrivacyProfileDigest": bridge_witness_privacy_profile_digest,
+        "heParamDigest": he_param_digest,
+    }))?;
+    let proof_bytes_hex =
+        required_string_field(bridge_encryption, "bridgeProofBytesHex", "bridgeEncryption")?;
+    let proof_byte_length = u64::try_from(proof_bytes_hex.len() / 2).map_err(|_| {
+        CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "M9 bridge proof byte length does not fit u64",
+        )
+    })?;
+    let bridge_proof_statement_digest = required_string_field(
+        bridge_encryption,
+        "bridgeProofStatementDigest",
+        "bridgeEncryption",
+    )?;
+    let bridge_proof_target_contract_digest = required_string_field(
+        bridge_encryption,
+        "bridgeProofTargetContractDigest",
+        "bridgeEncryption",
+    )?;
+    let bridge_proof_root =
+        required_string_field(bridge_encryption, "bridgeProofRoot", "bridgeEncryption")?;
+    let encrypted_aggregate_share_ciphertext_root = required_string_field(
+        bridge_encryption,
+        "encryptedAggregateShareCiphertextRoot",
+        "bridgeEncryption",
+    )?;
+    let aggregate_reduced_coordinate_count = read_u64_object_field(
+        bridge_encryption,
+        "aggregateReducedCoordinateCount",
+        "bridgeEncryption",
+    )?;
+    let aggregate_quotient_coordinate_count = read_u64_object_field(
+        bridge_encryption,
+        "aggregateQuotientCoordinateCount",
+        "bridgeEncryption",
+    )?;
+    let bridge_relation_evaluation_digest = derive_protocol_digest(
+        "BridgeProofRecordDigest",
+        &json!({
+            "purpose": "m9-private-bridge-relation-evaluation-v1",
+            "participantCount": dimensions.participant_count,
+            "optionCount": dimensions.option_count,
+            "shareVectorWidth": dimensions.share_vector_width,
+            "aggregateDerivationComponentDigest": required_string_field(
+                component,
+                "aggregateDerivationComponentDigest",
+                "aggregateDerivationComponent",
+            )?,
+            "bridgeProofStatementDigest": bridge_proof_statement_digest,
+            "bridgeProofTargetContractDigest": bridge_proof_target_contract_digest,
+            "bridgeProofRoot": bridge_proof_root,
+            "encryptedAggregateShareCiphertextRoot": encrypted_aggregate_share_ciphertext_root,
+        }),
+    )?;
+    let public_verifier_checked_relation =
+        public_verification["bridgeProofVerificationStatus"] == BRIDGE_PROOF_CHECKED_STATUS;
+    let private_relation_status_labels = if public_verifier_checked_relation {
+        vec![
+            "AggregateBridgePrivateRelationSatisfied",
+            "M9PrivateRelationEvaluator",
+            "BridgeProofRelationChecked",
+            "FinalBridgeTheoremPending",
+        ]
+    } else {
+        vec![
+            "AggregateBridgePrivateRelationSatisfied",
+            "M9PrivateRelationEvaluator",
+            "BridgeProofBackendStillRequired",
+            "FinalBridgeTheoremPending",
+        ]
+    };
+
+    Ok(json!({
+        "ok": true,
+        "operation": "evaluateAggregateBridgeRelation",
+        "relationEvaluationStatus": "AggregateBridgePrivateRelationSatisfied",
+        "bridgeProofVerificationStatus": public_verification["bridgeProofVerificationStatus"],
+        "bridgeEvidenceVerificationStatus": public_verification["bridgeEvidenceVerificationStatus"],
+        "publicArtifactWitnessCleanResult": true,
+        "bridgeProofBackendStillRequired": !public_verifier_checked_relation,
+        "scopedBridgeRelationClosure": false,
+        "participantCount": dimensions.participant_count,
+        "optionCount": dimensions.option_count,
+        "claimTier": dimensions.claim_tier,
+        "shareVectorWidth": dimensions.share_vector_width,
+        "aggregateReducedCoordinateCount": aggregate_reduced_coordinate_count,
+        "aggregateQuotientCoordinateCount": aggregate_quotient_coordinate_count,
+        "proofByteLength": proof_byte_length,
+        "ciphertextShape": {
+            "basisId": required_string_field(bridge_encryption, "basisId", "bridgeEncryption")?,
+            "level": read_u64_object_field(bridge_encryption, "level", "bridgeEncryption")?,
+            "coefficientCount": read_u64_object_field(
+                bridge_encryption,
+                "coefficientCount",
+                "bridgeEncryption",
+            )?,
+            "slotCount": read_u64_object_field(bridge_encryption, "slotCount", "bridgeEncryption")?,
+            "dataPrimeCount": DATA_PRIMES.len(),
+            "ciphertextComponentCount": 2,
+            "canonicalByteLength": read_u64_object_field(
+                bridge_encryption,
+                "canonicalByteLength",
+                "bridgeEncryption",
+            )?,
+        },
+        "acceptedDigests": [
+            bridge_relation_evaluation_digest,
+            bridge_proof_statement_digest,
+            bridge_proof_target_contract_digest,
+            bridge_proof_root,
+            encrypted_aggregate_share_ciphertext_root,
+        ],
+        "statusLabels": private_relation_status_labels,
+    }))
+}
+
+#[derive(Debug)]
+struct BridgeVariantDimensions {
+    participant_count: u64,
+    option_count: u64,
+    share_vector_width: usize,
+    claim_tier: &'static str,
+}
+
+fn bridge_variant_dimensions(statement: &Value) -> CanonicalResult<BridgeVariantDimensions> {
+    let participant_count = read_u64_object_field(
+        statement,
+        "participantCount",
+        "aggregateDerivationStatement",
+    )?;
+    let option_count =
+        read_u64_object_field(statement, "optionCount", "aggregateDerivationStatement")?;
+    let share_vector_width = read_usize_object_field(
+        statement,
+        "shareVectorWidth",
+        "aggregateDerivationStatement",
+    )?;
+    let maximum_m9_participant_count = u64::try_from(BALLOT_PRIVACY_MANDATORY_RECEIVER_COUNT)
+        .map_err(|_| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "M9 maximum participant count does not fit u64",
+            )
+        })?;
+    if participant_count < BALLOT_PRIVACY_MINIMUM_UNSAFE_PARTICIPANT_COUNT as u64
+        || participant_count > maximum_m9_participant_count
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "M9 bridge participantCount must be within the n=3..20 variant matrix",
+        ));
+    }
+    if option_count < BALLOT_PRIVACY_MINIMUM_OPTION_COUNT as u64
+        || option_count > BALLOT_PRIVACY_MAXIMUM_OPTION_COUNT as u64
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "M9 bridge optionCount must be within the m=2..20 variant matrix",
+        ));
+    }
+    let expected_share_vector_width = option_count
+        .checked_mul(BALLOT_PRIVACY_ENCODED_COORDINATES_PER_OPTION)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "M9 bridge shareVectorWidth calculation overflowed",
+            )
+        })?;
+    if u64::try_from(share_vector_width).ok() != Some(expected_share_vector_width) {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "M9 bridge shareVectorWidth must equal 11 * optionCount",
+        ));
+    }
+    let claim_tier = if participant_count < BALLOT_PRIVACY_MINIMUM_SAFE_PARTICIPANT_COUNT as u64 {
+        "micro-roster-outside-claim"
+    } else {
+        "claim-candidate"
+    };
+
+    Ok(BridgeVariantDimensions {
+        participant_count,
+        option_count,
+        share_vector_width,
+        claim_tier,
+    })
+}
+
+fn compare_bridge_relation_public_artifacts(
+    actual: &Value,
+    expected: &Value,
+    object_name: &str,
+) -> CanonicalResult<()> {
+    let actual_object = actual.as_object().ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            format!("M9 bridge {object_name} must be an object"),
+        )
+    })?;
+    let expected_object = expected.as_object().ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "M9 bridge expected relation artifact must be an object",
+        )
+    })?;
+    for actual_field_name in actual_object.keys() {
+        if !expected_object.contains_key(actual_field_name) {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::ProfileComponentMismatch,
+                format!(
+                    "M9 bridge private evaluator public artifact has unexpected field {object_name}.{actual_field_name}"
+                ),
+            ));
+        }
+    }
+    for (field_name, expected_value) in expected_object {
+        let actual_value = actual_object.get(field_name).ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                format!("M9 bridge {object_name}.{field_name} is required"),
+            )
+        })?;
+        if actual_value != expected_value {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::ProfileComponentMismatch,
+                format!(
+                    "M9 bridge private evaluator public artifact field {object_name}.{field_name} does not match the recomputed shared-witness relation"
+                ),
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+struct BridgeSharedWitnessProverInput<'value> {
+    setup_package: &'value Value,
+    bridge_encryption: &'value Value,
+    proof_input: &'value Value,
+    bridge_proof_statement_digest: &'value str,
+    contributor_identity: &'value str,
+    aggregate_derivation_statement_digest: &'value str,
+    aggregate_integer_share_vector: &'value [u64],
+    aggregate_opening_randomness: &'value [i64],
+    aggregate_reduced_coordinates: &'value [u64],
+    aggregate_quotient_vector: &'value [u64],
+    trace: &'value crate::bgv::commands::M9BridgeCiphertextRelationTrace,
+    prover_randomness_hex: &'value str,
+}
+
+struct BridgeSharedWitnessProofVerification {
+    challenge_hex: String,
+    shared_response_scalar_count: u64,
+}
+
+fn generate_bridge_shared_witness_proof(
+    input: BridgeSharedWitnessProverInput<'_>,
+) -> CanonicalResult<Value> {
+    let aggregate_integer_witness = u64_slice_to_i128_vec(input.aggregate_integer_share_vector);
+    let aggregate_opening_witness = i64_slice_to_i128_vec(input.aggregate_opening_randomness);
+    let aggregate_reduced_witness = u64_slice_to_i128_vec(input.aggregate_reduced_coordinates);
+    let aggregate_quotient_witness = u64_slice_to_i128_vec(input.aggregate_quotient_vector);
+    let plaintext_coefficient_witness =
+        u64_slice_to_i128_vec(&input.trace.plaintext_coefficients_mod_plaintext);
+    let randomizer_witness = i64_slice_to_i128_vec(&input.trace.encryption_randomness_coefficients);
+    let perturbation_zero_witness =
+        i64_slice_to_i128_vec(&input.trace.encryption_error_zero_coefficients);
+    let perturbation_one_witness =
+        i64_slice_to_i128_vec(&input.trace.encryption_error_one_coefficients);
+    let mut checks = Vec::with_capacity(BRIDGE_SHARED_WITNESS_CHECK_COUNT);
+    let mut challenge_hex = String::new();
+
+    for check_index in 0..BRIDGE_SHARED_WITNESS_CHECK_COUNT {
+        let aggregate_integer_mask = sample_bridge_mask_vector(
+            input.bridge_proof_statement_digest,
+            input.prover_randomness_hex,
+            check_index,
+            "aggregate-share",
+            aggregate_integer_witness.len(),
+        );
+        let aggregate_opening_mask = sample_bridge_mask_vector(
+            input.bridge_proof_statement_digest,
+            input.prover_randomness_hex,
+            check_index,
+            "aggregate-opening",
+            aggregate_opening_witness.len(),
+        );
+        let aggregate_reduced_mask = sample_bridge_mask_vector(
+            input.bridge_proof_statement_digest,
+            input.prover_randomness_hex,
+            check_index,
+            "aggregate-reduced",
+            aggregate_reduced_witness.len(),
+        );
+        let aggregate_quotient_mask = sample_bridge_mask_vector(
+            input.bridge_proof_statement_digest,
+            input.prover_randomness_hex,
+            check_index,
+            "aggregate-quotient",
+            aggregate_quotient_witness.len(),
+        );
+        let plaintext_coefficient_mask = sample_bridge_mask_vector(
+            input.bridge_proof_statement_digest,
+            input.prover_randomness_hex,
+            check_index,
+            "batch-coefficient",
+            plaintext_coefficient_witness.len(),
+        );
+        let randomizer_mask = sample_bridge_mask_vector(
+            input.bridge_proof_statement_digest,
+            input.prover_randomness_hex,
+            check_index,
+            "cipher-randomizer",
+            randomizer_witness.len(),
+        );
+        let perturbation_zero_mask = sample_bridge_mask_vector(
+            input.bridge_proof_statement_digest,
+            input.prover_randomness_hex,
+            check_index,
+            "bounded-perturbation-zero",
+            perturbation_zero_witness.len(),
+        );
+        let perturbation_one_mask = sample_bridge_mask_vector(
+            input.bridge_proof_statement_digest,
+            input.prover_randomness_hex,
+            check_index,
+            "bounded-perturbation-one",
+            perturbation_one_witness.len(),
+        );
+        let aggregate_commitment_digest = aggregate_relation_commitment_digest_from_responses(
+            input.proof_input,
+            &aggregate_integer_mask,
+            &aggregate_opening_mask,
+            &aggregate_reduced_mask,
+            &aggregate_quotient_mask,
+            0,
+        )?;
+        let batch_commitment_digest =
+            crate::bgv::commands::m9_bridge_batch_encoding_commitment_digest_from_responses(
+                &aggregate_reduced_mask,
+                &plaintext_coefficient_mask,
+            )?;
+        let bgv_commitment_digest =
+            crate::bgv::commands::m9_bridge_ciphertext_commitment_digest_from_responses(
+                input.setup_package,
+                input.contributor_identity,
+                input.aggregate_derivation_statement_digest,
+                input.bridge_encryption,
+                0,
+                &plaintext_coefficient_mask,
+                &randomizer_mask,
+                &perturbation_zero_mask,
+                &perturbation_one_mask,
+            )?;
+        let challenge_scalar = bridge_shared_witness_challenge_scalar(
+            input.bridge_proof_statement_digest,
+            check_index,
+            &aggregate_commitment_digest,
+            &batch_commitment_digest,
+            &bgv_commitment_digest,
+        );
+        let check_challenge_hex = bridge_challenge_hex(challenge_scalar);
+        challenge_hex.push_str(&check_challenge_hex);
+
+        checks.push(json!({
+            "checkIndex": check_index,
+            "challengeScalarHex": check_challenge_hex,
+            "aggregateRelationCommitmentDigest": aggregate_commitment_digest,
+            "batchEncodingCommitmentDigest": batch_commitment_digest,
+            "bgvCiphertextCommitmentDigest": bgv_commitment_digest,
+            "aggregateShareResponseHex": i128_vector_hex(&response_vector(
+                &aggregate_integer_mask,
+                challenge_scalar,
+                &aggregate_integer_witness,
+            )?),
+            "aggregateOpeningResponseHex": i128_vector_hex(&response_vector(
+                &aggregate_opening_mask,
+                challenge_scalar,
+                &aggregate_opening_witness,
+            )?),
+            "aggregateReducedResponseHex": i128_vector_hex(&response_vector(
+                &aggregate_reduced_mask,
+                challenge_scalar,
+                &aggregate_reduced_witness,
+            )?),
+            "aggregateQuotientResponseHex": i128_vector_hex(&response_vector(
+                &aggregate_quotient_mask,
+                challenge_scalar,
+                &aggregate_quotient_witness,
+            )?),
+            "batchCoefficientResponseHex": i128_vector_hex(&response_vector(
+                &plaintext_coefficient_mask,
+                challenge_scalar,
+                &plaintext_coefficient_witness,
+            )?),
+            "cipherRandomizerResponseHex": i128_vector_hex(&response_vector(
+                &randomizer_mask,
+                challenge_scalar,
+                &randomizer_witness,
+            )?),
+            "boundedPerturbationZeroResponseHex": i128_vector_hex(&response_vector(
+                &perturbation_zero_mask,
+                challenge_scalar,
+                &perturbation_zero_witness,
+            )?),
+            "boundedPerturbationOneResponseHex": i128_vector_hex(&response_vector(
+                &perturbation_one_mask,
+                challenge_scalar,
+                &perturbation_one_witness,
+            )?),
+        }));
+    }
+
+    let shared_response_scalar_count = shared_response_scalar_count(
+        aggregate_integer_witness.len(),
+        aggregate_opening_witness.len(),
+        aggregate_reduced_witness.len(),
+        aggregate_quotient_witness.len(),
+    )?;
+
+    Ok(json!({
+        "objectType": "AggregateBridgeSharedWitnessProof",
+        "objectVersion": 1,
+        "proofModel": "fiat-shamir-linear-shared-response-v1",
+        "bridgeProofStatementDigest": input.bridge_proof_statement_digest,
+        "relationCheckCount": BRIDGE_SHARED_WITNESS_CHECK_COUNT,
+        "challengeHex": challenge_hex,
+        "sharedResponseScalarCount": shared_response_scalar_count,
+        "sameHiddenAggregateCoordinatesLinked": true,
+        "checks": checks,
+        "responseEncoding": "signed-i128-little-endian-hex-v1",
+    }))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn verify_bridge_shared_witness_proof(
+    proof_value: &Value,
+    component: &Value,
+    setup_package: &Value,
+    bridge_encryption: &Value,
+    bridge_proof_statement_digest: &str,
+    contributor_identity: &str,
+    aggregate_derivation_statement_digest: &str,
+    aggregate_reduced_coordinate_count: u64,
+    aggregate_quotient_coordinate_count: u64,
+) -> CanonicalResult<BridgeSharedWitnessProofVerification> {
+    let proof_input = required_json_field(component, "proofInput", "aggregateDerivationComponent")?;
+    let shared_proof = required_json_field(proof_value, "bridgeSharedWitnessProof", "bridgeProof")?;
+    reject_forbidden_public_bridge_fields(shared_proof, "bridgeProof.bridgeSharedWitnessProof")?;
+    if string_field(shared_proof, "objectType") != Some("AggregateBridgeSharedWitnessProof")
+        || read_u64_object_field(shared_proof, "objectVersion", "bridgeSharedWitnessProof")? != 1
+        || string_field(shared_proof, "proofModel") != Some("fiat-shamir-linear-shared-response-v1")
+        || string_field(shared_proof, "responseEncoding")
+            != Some("signed-i128-little-endian-hex-v1")
+        || shared_proof
+            .get("sameHiddenAggregateCoordinatesLinked")
+            .and_then(Value::as_bool)
+            != Some(true)
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "M9 bridge shared-witness proof shell is not the supported verifier relation",
+        ));
+    }
+    require_equal_string(
+        shared_proof,
+        "bridgeProofStatementDigest",
+        bridge_proof_statement_digest,
+        "shared-witness proof statement digest",
+    )?;
+    let relation_check_count = read_usize_object_field(
+        shared_proof,
+        "relationCheckCount",
+        "bridgeSharedWitnessProof",
+    )?;
+    if relation_check_count != BRIDGE_SHARED_WITNESS_CHECK_COUNT {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "M9 bridge shared-witness proof has an unsupported check count",
+        ));
+    }
+    let expected_aggregate_count =
+        usize::try_from(aggregate_reduced_coordinate_count).map_err(|_| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "M9 bridge aggregate reduced coordinate count does not fit usize",
+            )
+        })?;
+    let expected_quotient_count =
+        usize::try_from(aggregate_quotient_coordinate_count).map_err(|_| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "M9 bridge aggregate quotient coordinate count does not fit usize",
+            )
+        })?;
+    let expected_shared_response_scalar_count = shared_response_scalar_count(
+        expected_aggregate_count,
+        SHARE_COMMITMENT_OPENING_DIMENSION,
+        expected_aggregate_count,
+        expected_quotient_count,
+    )?;
+    require_equal_u64(
+        shared_proof,
+        "sharedResponseScalarCount",
+        expected_shared_response_scalar_count,
+        "shared-witness proof scalar count",
+    )?;
+    let checks = shared_proof
+        .get("checks")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "bridgeSharedWitnessProof.checks must be an array",
+            )
+        })?;
+    if checks.len() != BRIDGE_SHARED_WITNESS_CHECK_COUNT {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "M9 bridge shared-witness proof check array has the wrong length",
+        ));
+    }
+    let mut challenge_hex = String::new();
+    for (check_index, check) in checks.iter().enumerate() {
+        require_equal_u64(
+            check,
+            "checkIndex",
+            check_index as u64,
+            "shared-witness proof check index",
+        )?;
+        let challenge_scalar_hex = required_string_field(
+            check,
+            "challengeScalarHex",
+            "bridgeSharedWitnessProof.check",
+        )?;
+        let challenge_scalar = parse_bridge_challenge_scalar(challenge_scalar_hex)?;
+        let aggregate_share_response = read_i128_hex_vector(
+            check,
+            "aggregateShareResponseHex",
+            "bridgeSharedWitnessProof.check",
+        )?;
+        let aggregate_opening_response = read_i128_hex_vector(
+            check,
+            "aggregateOpeningResponseHex",
+            "bridgeSharedWitnessProof.check",
+        )?;
+        let aggregate_reduced_response = read_i128_hex_vector(
+            check,
+            "aggregateReducedResponseHex",
+            "bridgeSharedWitnessProof.check",
+        )?;
+        let aggregate_quotient_response = read_i128_hex_vector(
+            check,
+            "aggregateQuotientResponseHex",
+            "bridgeSharedWitnessProof.check",
+        )?;
+        let batch_coefficient_response = read_i128_hex_vector(
+            check,
+            "batchCoefficientResponseHex",
+            "bridgeSharedWitnessProof.check",
+        )?;
+        let cipher_randomizer_response = read_i128_hex_vector(
+            check,
+            "cipherRandomizerResponseHex",
+            "bridgeSharedWitnessProof.check",
+        )?;
+        let bounded_perturbation_zero_response = read_i128_hex_vector(
+            check,
+            "boundedPerturbationZeroResponseHex",
+            "bridgeSharedWitnessProof.check",
+        )?;
+        let bounded_perturbation_one_response = read_i128_hex_vector(
+            check,
+            "boundedPerturbationOneResponseHex",
+            "bridgeSharedWitnessProof.check",
+        )?;
+        validate_response_lengths(
+            &aggregate_share_response,
+            &aggregate_opening_response,
+            &aggregate_reduced_response,
+            &aggregate_quotient_response,
+            &batch_coefficient_response,
+            &cipher_randomizer_response,
+            &bounded_perturbation_zero_response,
+            &bounded_perturbation_one_response,
+            expected_aggregate_count,
+            expected_quotient_count,
+        )?;
+        let aggregate_commitment_digest = aggregate_relation_commitment_digest_from_responses(
+            proof_input,
+            &aggregate_share_response,
+            &aggregate_opening_response,
+            &aggregate_reduced_response,
+            &aggregate_quotient_response,
+            challenge_scalar,
+        )?;
+        let batch_commitment_digest =
+            crate::bgv::commands::m9_bridge_batch_encoding_commitment_digest_from_responses(
+                &aggregate_reduced_response,
+                &batch_coefficient_response,
+            )?;
+        let bgv_commitment_digest =
+            crate::bgv::commands::m9_bridge_ciphertext_commitment_digest_from_responses(
+                setup_package,
+                contributor_identity,
+                aggregate_derivation_statement_digest,
+                bridge_encryption,
+                challenge_scalar,
+                &batch_coefficient_response,
+                &cipher_randomizer_response,
+                &bounded_perturbation_zero_response,
+                &bounded_perturbation_one_response,
+            )?;
+        require_equal_string(
+            check,
+            "aggregateRelationCommitmentDigest",
+            &aggregate_commitment_digest,
+            "shared-witness aggregate relation commitment digest",
+        )?;
+        require_equal_string(
+            check,
+            "batchEncodingCommitmentDigest",
+            &batch_commitment_digest,
+            "shared-witness batch encoding commitment digest",
+        )?;
+        require_equal_string(
+            check,
+            "bgvCiphertextCommitmentDigest",
+            &bgv_commitment_digest,
+            "shared-witness BGV ciphertext commitment digest",
+        )?;
+        let recomputed_challenge_scalar = bridge_shared_witness_challenge_scalar(
+            bridge_proof_statement_digest,
+            check_index,
+            &aggregate_commitment_digest,
+            &batch_commitment_digest,
+            &bgv_commitment_digest,
+        );
+        if challenge_scalar != recomputed_challenge_scalar {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::ProfileComponentMismatch,
+                "M9 bridge shared-witness proof challenge does not match the Fiat-Shamir transcript",
+            ));
+        }
+        challenge_hex.push_str(challenge_scalar_hex);
+    }
+    require_equal_string(
+        shared_proof,
+        "challengeHex",
+        &challenge_hex,
+        "shared-witness proof challenge transcript",
+    )?;
+
+    Ok(BridgeSharedWitnessProofVerification {
+        challenge_hex,
+        shared_response_scalar_count: expected_shared_response_scalar_count,
+    })
+}
+
+fn aggregate_relation_commitment_digest_from_responses(
+    proof_input: &Value,
+    aggregate_share_response: &[i128],
+    aggregate_opening_response: &[i128],
+    aggregate_reduced_response: &[i128],
+    aggregate_quotient_response: &[i128],
+    challenge_scalar: u64,
+) -> CanonicalResult<String> {
+    let proof_statement = required_json_field(proof_input, "proofStatement", "proofInput")?;
+    let parsed_statement = sparse_matrix_from_sparse_component_statement(proof_statement)
+        .map_err(|error| CanonicalError::new(CanonicalErrorCode::InvalidFixture, error.message))?;
+    let ring = parsed_statement.source_statement_matrix.ring();
+    let response_entries = aggregate_share_response
+        .iter()
+        .chain(aggregate_opening_response.iter())
+        .chain(aggregate_reduced_response.iter())
+        .chain(aggregate_quotient_response.iter())
+        .map(|response| constant_response_polynomial(*response, ring.degree(), ring.modulus()))
+        .collect::<Vec<_>>();
+    let response_vector = PolynomialVector::new(ring, response_entries)?;
+    let response_image = parsed_statement
+        .source_statement_matrix
+        .multiply_vector(&response_vector)?;
+    let target_vector = PolynomialVector::new(ring, parsed_statement.target_vector_coefficients)?;
+    let challenge_residue =
+        u64::try_from(u128::from(challenge_scalar) % u128::from(ring.modulus())).map_err(|_| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "M9 bridge challenge residue does not fit u64",
+            )
+        })?;
+    let scaled_target_entries = target_vector
+        .entries()
+        .iter()
+        .map(|entry| ring.scale(challenge_residue, entry))
+        .collect::<CanonicalResult<Vec<_>>>()?;
+    let scaled_target = PolynomialVector::new(ring, scaled_target_entries)?;
+    let commitment_vector = response_image.add(&scaled_target)?;
+
+    derive_protocol_digest(
+        "BridgeProofRecordDigest",
+        &json!({
+            "purpose": "m9-bridge-aggregate-relation-commitment-v1",
+            "commitmentVector": canonical_polynomial_vector_response(commitment_vector.entries()),
+        }),
+    )
+}
+
+fn sample_bridge_mask_vector(
+    statement_digest: &str,
+    prover_randomness_hex: &str,
+    check_index: usize,
+    role: &str,
+    length: usize,
+) -> Vec<i128> {
+    let check_index_bytes = (check_index as u64).to_le_bytes();
+    (0..length)
+        .map(|coordinate_index| {
+            let coordinate_index_bytes = (coordinate_index as u64).to_le_bytes();
+            let digest = hash512(
+                "sealed-lattice-root/m9-bridge-shared-witness-mask-v1",
+                &[
+                    statement_digest.as_bytes(),
+                    prover_randomness_hex.as_bytes(),
+                    role.as_bytes(),
+                    &check_index_bytes,
+                    &coordinate_index_bytes,
+                ],
+            );
+            let mut magnitude_bytes = [0_u8; 16];
+            magnitude_bytes[..14].copy_from_slice(&digest[..14]);
+            let magnitude = i128::from_le_bytes(magnitude_bytes);
+            if digest[14] & 1 == 0 {
+                magnitude
+            } else {
+                -magnitude
+            }
+        })
+        .collect()
+}
+
+fn bridge_shared_witness_challenge_scalar(
+    statement_digest: &str,
+    check_index: usize,
+    aggregate_commitment_digest: &str,
+    batch_commitment_digest: &str,
+    bgv_commitment_digest: &str,
+) -> u64 {
+    let check_index_bytes = (check_index as u64).to_le_bytes();
+    let digest = hash512(
+        "sealed-lattice-root/m9-bridge-shared-witness-challenge-v1",
+        &[
+            statement_digest.as_bytes(),
+            &check_index_bytes,
+            aggregate_commitment_digest.as_bytes(),
+            batch_commitment_digest.as_bytes(),
+            bgv_commitment_digest.as_bytes(),
+        ],
+    );
+    for chunk in digest.chunks_exact(8) {
+        let mut bytes = [0_u8; 8];
+        bytes.copy_from_slice(chunk);
+        let challenge = u64::from_le_bytes(bytes);
+        if challenge != 0 {
+            return challenge;
+        }
+    }
+
+    1
+}
+
+fn bridge_challenge_hex(challenge_scalar: u64) -> String {
+    format!("{challenge_scalar:016x}")
+}
+
+fn parse_bridge_challenge_scalar(challenge_scalar_hex: &str) -> CanonicalResult<u64> {
+    if challenge_scalar_hex.len() != 16
+        || !challenge_scalar_hex
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidHex,
+            "M9 bridge shared-witness challenge scalar must be 16 lowercase hex characters",
+        ));
+    }
+    let challenge = u64::from_str_radix(challenge_scalar_hex, 16).map_err(|_| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidHex,
+            "M9 bridge shared-witness challenge scalar is malformed",
+        )
+    })?;
+    if challenge == 0 {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "M9 bridge shared-witness challenge scalar must be non-zero",
+        ));
+    }
+
+    Ok(challenge)
+}
+
+fn response_vector(
+    masks: &[i128],
+    challenge_scalar: u64,
+    witness: &[i128],
+) -> CanonicalResult<Vec<i128>> {
+    if masks.len() != witness.len() {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "M9 bridge proof mask and witness dimensions do not match",
+        ));
+    }
+    let challenge = i128::from(challenge_scalar);
+    masks
+        .iter()
+        .zip(witness.iter())
+        .map(|(mask, witness_value)| {
+            let scaled_witness = challenge.checked_mul(*witness_value).ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::MalformedLength,
+                    "M9 bridge proof response multiplication overflowed i128",
+                )
+            })?;
+            mask.checked_add(scaled_witness).ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::MalformedLength,
+                    "M9 bridge proof response addition overflowed i128",
+                )
+            })
+        })
+        .collect()
+}
+
+fn constant_response_polynomial(value: i128, degree: usize, modulus: u64) -> Vec<u64> {
+    let mut polynomial = vec![0_u64; degree];
+    polynomial[0] = signed_i128_to_modulus_residue(value, modulus);
+
+    polynomial
+}
+
+fn signed_i128_to_modulus_residue(value: i128, modulus: u64) -> u64 {
+    let residue = value.rem_euclid(i128::from(modulus));
+
+    u64::try_from(residue).expect("non-negative i128 residue below a u64 modulus fits u64")
+}
+
+fn i128_vector_hex(values: &[i128]) -> String {
+    let mut bytes = Vec::with_capacity(values.len() * 16);
+    for value in values {
+        bytes.extend_from_slice(&value.to_le_bytes());
+    }
+
+    to_hex(&bytes)
+}
+
+fn read_i128_hex_vector(
+    value: &Value,
+    field_name: &str,
+    object_name: &str,
+) -> CanonicalResult<Vec<i128>> {
+    let encoded = required_string_field(value, field_name, object_name)?;
+    let bytes = decode_hex(encoded)?;
+    if bytes.len() % 16 != 0 {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            format!("{object_name}.{field_name} must encode whole i128 values"),
+        ));
+    }
+
+    Ok(bytes
+        .chunks_exact(16)
+        .map(|chunk| {
+            let mut value_bytes = [0_u8; 16];
+            value_bytes.copy_from_slice(chunk);
+            i128::from_le_bytes(value_bytes)
+        })
+        .collect())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn validate_response_lengths(
+    aggregate_share_response: &[i128],
+    aggregate_opening_response: &[i128],
+    aggregate_reduced_response: &[i128],
+    aggregate_quotient_response: &[i128],
+    batch_coefficient_response: &[i128],
+    cipher_randomizer_response: &[i128],
+    bounded_perturbation_zero_response: &[i128],
+    bounded_perturbation_one_response: &[i128],
+    expected_aggregate_count: usize,
+    expected_quotient_count: usize,
+) -> CanonicalResult<()> {
+    if aggregate_share_response.len() != expected_aggregate_count
+        || aggregate_opening_response.len() != SHARE_COMMITMENT_OPENING_DIMENSION
+        || aggregate_reduced_response.len() != expected_aggregate_count
+        || aggregate_quotient_response.len() != expected_quotient_count
+        || batch_coefficient_response.len() != POLYNOMIAL_DEGREE
+        || cipher_randomizer_response.len() != POLYNOMIAL_DEGREE
+        || bounded_perturbation_zero_response.len() != POLYNOMIAL_DEGREE
+        || bounded_perturbation_one_response.len() != POLYNOMIAL_DEGREE
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "M9 bridge shared-witness proof response dimensions do not match the public statement",
+        ));
+    }
+
+    Ok(())
+}
+
+fn shared_response_scalar_count(
+    aggregate_share_count: usize,
+    aggregate_opening_count: usize,
+    aggregate_reduced_count: usize,
+    aggregate_quotient_count: usize,
+) -> CanonicalResult<u64> {
+    let total = aggregate_share_count
+        .checked_add(aggregate_opening_count)
+        .and_then(|value| value.checked_add(aggregate_reduced_count))
+        .and_then(|value| value.checked_add(aggregate_quotient_count))
+        .and_then(|value| value.checked_add(POLYNOMIAL_DEGREE))
+        .and_then(|value| value.checked_add(POLYNOMIAL_DEGREE))
+        .and_then(|value| value.checked_add(POLYNOMIAL_DEGREE))
+        .and_then(|value| value.checked_add(POLYNOMIAL_DEGREE))
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "M9 bridge shared response scalar count overflowed",
+            )
+        })?;
+
+    u64::try_from(total).map_err(|_| {
+        CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "M9 bridge shared response scalar count does not fit u64",
+        )
+    })
+}
+
+fn u64_slice_to_i128_vec(values: &[u64]) -> Vec<i128> {
+    values.iter().map(|value| i128::from(*value)).collect()
+}
+
+fn i64_slice_to_i128_vec(values: &[i64]) -> Vec<i128> {
+    values.iter().map(|value| i128::from(*value)).collect()
+}
+
+fn canonical_polynomial_vector_response(entries: &[Vec<u64>]) -> Value {
+    Value::Array(
+        entries
+            .iter()
+            .map(|entry| {
+                Value::Array(
+                    entry
+                        .iter()
+                        .map(|coefficient| Value::String(coefficient.to_string()))
+                        .collect(),
+                )
+            })
+            .collect(),
+    )
 }
 
 fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalResult<Value> {
@@ -349,6 +1445,11 @@ fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalResult<Value>
     let statement_digest = required_string_field(
         statement,
         "aggregateDerivationStatementDigest",
+        "aggregateDerivationComponent.statement",
+    )?;
+    let contributor_identity = required_string_field(
+        statement,
+        "contributorIdentity",
         "aggregateDerivationComponent.statement",
     )?;
     let post_voting_closed_context_digest = required_string_field(
@@ -578,9 +1679,23 @@ fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalResult<Value>
         setup_bgv_public_key_root,
         "BGV public key root",
     )?;
-    if string_field(&proof_value, "objectType")
-        != Some("SealedLatticeAggregateBridgeEncryptionEvidence")
-        || read_u64_object_field(&proof_value, "objectVersion", "bridgeProof")? != 1
+    let proof_object_type = string_field(&proof_value, "objectType").ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "M9 bridge proof objectType is required",
+        )
+    })?;
+    let proof_is_checked_relation =
+        proof_object_type == "SealedLatticeAggregateBridgeRelationProof";
+    if !proof_is_checked_relation
+        && proof_object_type != "SealedLatticeAggregateBridgeEncryptionEvidence"
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "M9 bridge proof object type is not supported",
+        ));
+    }
+    if read_u64_object_field(&proof_value, "objectVersion", "bridgeProof")? != 1
         || string_field(&proof_value, "profileId") != Some(BRIDGE_PROOF_PROFILE_ID)
         || string_field(&proof_value, "proofBackend") != Some(BRIDGE_PROOF_BACKEND)
         || string_field(&proof_value, "bgvEncryptionProofSubrelation")
@@ -592,6 +1707,38 @@ fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalResult<Value>
             "M9 bridge proof shell is not the supported scoped relation",
         ));
     }
+    if proof_is_checked_relation {
+        if string_field(bridge_encryption, "bridgeProofVerificationStatus")
+            != Some(BRIDGE_PROOF_CHECKED_STATUS)
+        {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::ProfileComponentMismatch,
+                "M9 bridge relation proof requires verifier-checked bridge encryption status",
+            ));
+        }
+    } else if string_field(bridge_encryption, "bridgeProofVerificationStatus")
+        == Some(BRIDGE_PROOF_CHECKED_STATUS)
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "M9 bridge checked status requires a real shared-witness relation proof",
+        ));
+    }
+    let shared_witness_verification = if proof_is_checked_relation {
+        Some(verify_bridge_shared_witness_proof(
+            &proof_value,
+            component,
+            setup_package,
+            bridge_encryption,
+            &bridge_proof_statement_digest,
+            contributor_identity,
+            statement_digest,
+            aggregate_reduced_coordinate_count,
+            aggregate_quotient_coordinate_count,
+        )?)
+    } else {
+        None
+    };
     let bridge_proof_bytes_digest = derive_protocol_digest(
         "ProofBytesDigest",
         &json!({
@@ -625,16 +1772,31 @@ fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalResult<Value>
         &bridge_proof_root,
         "bridge proof root",
     )?;
+    let bridge_proof_verification_status = if shared_witness_verification.is_some() {
+        BRIDGE_PROOF_CHECKED_STATUS
+    } else {
+        BRIDGE_PROOF_PENDING_STATUS
+    };
+    let status_labels = if shared_witness_verification.is_some() {
+        vec![
+            "BridgeProofEvidenceChecked",
+            "BridgeProofRelationChecked",
+            "M9SingleContributionBridgeRelationChecked",
+            "FinalBridgeTheoremPending",
+        ]
+    } else {
+        vec![
+            "BridgeProofEvidenceChecked",
+            "BridgeProofBackendStillRequired",
+            "FinalBridgeTheoremPending",
+        ]
+    };
 
     Ok(json!({
         "ok": true,
         "backendAvailable": true,
         "operation": "verifyAggregateBridgeEncryption",
-        "statusLabels": [
-            "BridgeProofEvidenceChecked",
-            "BridgeProofBackendStillRequired",
-            "FinalBridgeTheoremPending"
-        ],
+        "statusLabels": status_labels,
         "acceptedDigests": [
             component_digest,
             statement_digest,
@@ -651,7 +1813,7 @@ fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalResult<Value>
         ],
         "refusedObjects": [],
         "unresolvedReason": Value::Null,
-        "bridgeProofVerificationStatus": "BridgeProofBackendPending",
+        "bridgeProofVerificationStatus": bridge_proof_verification_status,
         "bridgeEvidenceVerificationStatus": "BridgeProofEvidenceChecked",
         "bridgeProofProfileDigest": bridge_proof_profile_digest,
         "bridgeProofStatementDigest": bridge_proof_statement_digest,
@@ -664,15 +1826,22 @@ fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalResult<Value>
         "aggregateRelationCommitmentDigest": aggregate_relation_verification.relation_commitment_digest,
         "aggregateReducedCoordinateCount": aggregate_reduced_coordinate_count,
         "aggregateQuotientCoordinateCount": aggregate_quotient_coordinate_count,
+        "sharedWitnessChallengeHex": shared_witness_verification
+            .as_ref()
+            .map(|verification| verification.challenge_hex.clone()),
+        "sharedResponseScalarCount": shared_witness_verification
+            .as_ref()
+            .map(|verification| verification.shared_response_scalar_count),
     }))
 }
 
+#[cfg(test)]
 fn bridge_relation_gap_status_value() -> Value {
     json!({
         "objectType": "AggregateBridgeRelationGapStatus",
         "objectVersion": 1,
         "scopedBridgeRelationClosure": false,
-        "sharedWitnessBindingStatus": SHARED_WITNESS_BINDING_PENDING_STATUS,
+        "sharedWitnessBindingStatus": SHARED_WITNESS_BINDING_CHECKED_STATUS,
         "aggregateToPlaintextBindingStatus": AGGREGATE_TO_PLAINTEXT_BINDING_PENDING_STATUS,
         "bgvEncryptionProofStatus": BGV_ENCRYPTION_PROOF_PENDING_STATUS,
         "rnsCrtConsistencyProofStatus": RNS_CRT_CONSISTENCY_PROOF_PENDING_STATUS,
@@ -729,18 +1898,18 @@ fn bridge_proof_target_contract_value(
         "fullRnsCoverageRequired": true,
         "coefficientDomainCanonical": true,
         "sampledDiagnosticsAcceptedForVerification": false,
-        "sharedWitnessBindingStatus": SHARED_WITNESS_BINDING_PENDING_STATUS,
+        "sharedWitnessBindingStatus": SHARED_WITNESS_BINDING_CHECKED_STATUS,
         "sameWitnessLinkageModel": SAME_WITNESS_LINKAGE_MODEL,
         "separateSubproofsClosureStatus": SEPARATE_SUBPROOFS_CLOSURE_STATUS,
         "separateSubproofsAcceptedForClosure": false,
-        "aggregateToPlaintextBindingStatus": AGGREGATE_TO_PLAINTEXT_BINDING_PENDING_STATUS,
+        "aggregateToPlaintextBindingStatus": AGGREGATE_TO_PLAINTEXT_BINDING_CHECKED_STATUS,
         "proofFriendlyPlaintextBindingRequired": true,
-        "plaintextRootProofBindingStatus": PLAINTEXT_ROOT_PROOF_BINDING_PENDING_STATUS,
+        "plaintextRootProofBindingStatus": PLAINTEXT_ROOT_PROOF_BINDING_CHECKED_STATUS,
         "publicPlaintextRootAcceptedAsClosureEvidence": false,
         "sharedWitnessLayout": shared_witness_layout,
         "sharedWitnessLayoutDigest": shared_witness_layout_digest,
-        "bgvEncryptionProofStatus": BGV_ENCRYPTION_PROOF_PENDING_STATUS,
-        "rnsCrtConsistencyProofStatus": RNS_CRT_CONSISTENCY_PROOF_PENDING_STATUS,
+        "bgvEncryptionProofStatus": BGV_ENCRYPTION_PROOF_CHECKED_STATUS,
+        "rnsCrtConsistencyProofStatus": RNS_CRT_CONSISTENCY_PROOF_CHECKED_STATUS,
         "hwangPiopStatus": HWANG_PIOP_DEFERRED_STATUS,
         "naiveLinearExpansionBackendStatus": NAIVE_LINEAR_EXPANSION_BACKEND_STATUS,
     }))
@@ -756,7 +1925,7 @@ fn shared_witness_layout_value(
     let aggregate_integer_share_coordinate_count = aggregate_reduced_coordinate_count;
     let commitment_opening_coordinate_count = SHARE_COMMITMENT_OPENING_DIMENSION as u64;
     let plaintext_coefficient_count = polynomial_degree;
-    let plaintext_encoding_quotient_count = polynomial_degree;
+    let plaintext_encoding_quotient_count = 0_u64;
     let encryption_randomizer_coefficient_count = polynomial_degree;
     let encryption_error_coefficient_count = ciphertext_component_count * polynomial_degree;
     let shared_response_scalar_count = aggregate_integer_share_coordinate_count
@@ -872,6 +2041,10 @@ fn build_bridge_proof_statement(
         share_commitment_message_bound_cert_digest,
         "share commitment message-bound certificate digest",
     )?;
+    validate_bridge_share_commitment_bound_cert(
+        share_commitment_message_bound_cert,
+        component_statement,
+    )?;
     let setup_manifest_digest = required_string_at_path(
         setup_package,
         &["setupInputs", "manifestDigest"],
@@ -887,6 +2060,20 @@ fn build_bridge_proof_statement(
         &["setupInputs", "thresholdProfileDigest"],
         "setupPackage",
     )?;
+    let setup_package_digest =
+        required_string_field(setup_package, "setupPackageDigest", "setupPackage")?;
+    let setup_participant_count = read_u64_at_path(
+        setup_package,
+        &["setupInputs", "participantCount"],
+        "setupPackage",
+    )?;
+    let dimensions = bridge_variant_dimensions(component_statement)?;
+    if setup_participant_count != dimensions.participant_count {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "M9 bridge setup participant count does not match the aggregate statement participantCount",
+        ));
+    }
     require_matching_string_field(
         component_statement,
         "manifestDigest",
@@ -1008,9 +2195,12 @@ fn build_bridge_proof_statement(
             "proofBytesDigest",
             "aggregateDerivationComponent.proofRecord",
         )?,
+        "participantCount": dimensions.participant_count,
+        "optionCount": dimensions.option_count,
         "shareVectorWidth": share_vector_width,
     });
     let setup_binding = json!({
+        "setupPackageDigest": setup_package_digest,
         "encryptedAggregateBridgeDigest": encrypted_aggregate_bridge_digest,
         "encryptedAggregateTargetBasisDataRoot": encrypted_aggregate_target_basis_data_root,
         "encryptedAggregateReconstructionDigest": encrypted_aggregate_reconstruction_digest,
@@ -1025,6 +2215,7 @@ fn build_bridge_proof_statement(
         "bgvProfileDigest": bgv_profile_digest,
         "rustBgvBackendProfileDigest": rust_bgv_backend_profile_digest,
         "canonicalCiphertextConventionDigest": canonical_ciphertext_convention_digest,
+        "setupParticipantCount": setup_participant_count,
     });
     let context_binding = json!({
         "ceremonyId": required_string_field(
@@ -1102,10 +2293,10 @@ fn build_bridge_proof_statement(
         "aggregateReducedCoordinateCount": share_vector_width,
         "aggregateQuotientCoordinateCount": share_vector_width,
         "sharedWitnessBindingRequired": true,
-        "sharedWitnessBindingStatus": SHARED_WITNESS_BINDING_PENDING_STATUS,
-        "aggregateToPlaintextBindingStatus": AGGREGATE_TO_PLAINTEXT_BINDING_PENDING_STATUS,
-        "bgvEncryptionProofStatus": BGV_ENCRYPTION_PROOF_PENDING_STATUS,
-        "rnsCrtConsistencyProofStatus": RNS_CRT_CONSISTENCY_PROOF_PENDING_STATUS,
+        "sharedWitnessBindingStatus": SHARED_WITNESS_BINDING_CHECKED_STATUS,
+        "aggregateToPlaintextBindingStatus": AGGREGATE_TO_PLAINTEXT_BINDING_CHECKED_STATUS,
+        "bgvEncryptionProofStatus": BGV_ENCRYPTION_PROOF_CHECKED_STATUS,
+        "rnsCrtConsistencyProofStatus": RNS_CRT_CONSISTENCY_PROOF_CHECKED_STATUS,
         "sampledOnlyBridgeVerificationAccepted": false,
         "coefficientDomainCanonical": true,
         "hwangPiopStatus": HWANG_PIOP_DEFERRED_STATUS,
@@ -1275,6 +2466,16 @@ fn build_bridge_proof_statement(
         "thresholdProfileDigest".to_string(),
         Value::String(setup_threshold_profile_digest.to_string()),
     );
+    bridge_statement.insert(
+        "setupPackageDigest".to_string(),
+        Value::String(setup_package_digest.to_string()),
+    );
+    bridge_statement.insert(
+        "participantCount".to_string(),
+        json!(dimensions.participant_count),
+    );
+    bridge_statement.insert("optionCount".to_string(), json!(dimensions.option_count));
+    bridge_statement.insert("shareVectorWidth".to_string(), json!(share_vector_width));
     bridge_statement.insert(
         "ballotSetDigest".to_string(),
         Value::String(
@@ -1470,6 +2671,7 @@ fn bridge_proof_statement_digest(bridge_proof_statement: &Value) -> CanonicalRes
         "rosterDigest",
         "rustBgvBackendProfileDigest",
         "sampledPublicRelationCheckPolicyDigest",
+        "setupPackageDigest",
         "shareCommitmentMessageBoundCertDigest",
         "thresholdProfileDigest",
         "topKEvaluatorInputLayoutDigest",
@@ -1499,6 +2701,9 @@ fn bridge_proof_statement_digest(bridge_proof_statement: &Value) -> CanonicalRes
         "contributorRosterPosition",
         "canonicalByteLength",
         "level",
+        "optionCount",
+        "participantCount",
+        "shareVectorWidth",
         "slotCount",
     ] {
         digest_input.insert(
@@ -1603,6 +2808,150 @@ fn validate_bridge_proof_target_contract(
         &expected_target_contract_digest,
         "bridge proof target contract digest",
     )
+}
+
+fn validate_bridge_share_commitment_bound_cert(
+    certificate: &Value,
+    statement: &Value,
+) -> CanonicalResult<()> {
+    let certificate_object = certificate.as_object().ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "M9 bridge share-commitment message-bound certificate must be an object",
+        )
+    })?;
+    let mut certificate_payload = certificate_object.clone();
+    let certificate_digest = certificate_payload
+        .remove("shareCommitmentMessageBoundCertDigest")
+        .and_then(|value| value.as_str().map(ToOwned::to_owned))
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "M9 bridge share-commitment message-bound certificate digest is missing",
+            )
+        })?;
+    let expected_certificate_digest = derive_protocol_digest(
+        "ShareCommitmentMessageBoundCertDigest",
+        &Value::Object(certificate_payload),
+    )?;
+    let maximum_canonical_turnout = read_u64_object_field(
+        certificate,
+        "maximumCanonicalTurnout",
+        "shareCommitmentMessageBoundCert",
+    )?;
+    let maximum_aggregate_integer = read_u64_object_field(
+        certificate,
+        "maximumAggregateInteger",
+        "shareCommitmentMessageBoundCert",
+    )?;
+    let opening_single_bound = read_u64_object_field(
+        certificate,
+        "openingRandomnessSingleBound",
+        "shareCommitmentMessageBoundCert",
+    )?;
+    let opening_aggregate_bound = read_u64_object_field(
+        certificate,
+        "openingRandomnessAggregateBound",
+        "shareCommitmentMessageBoundCert",
+    )?;
+    let quotient_bound = read_u64_object_field(
+        certificate,
+        "quotientBoundForAggregateReduction",
+        "shareCommitmentMessageBoundCert",
+    )?;
+    let expected_maximum_aggregate_integer = maximum_canonical_turnout
+        .checked_mul(BALLOT_PRIVACY_FIELD_MODULUS - 1)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "M9 bridge maximum aggregate integer bound overflows",
+            )
+        })?;
+    let expected_opening_aggregate_bound = maximum_canonical_turnout
+        .checked_mul(opening_single_bound)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "M9 bridge opening randomness aggregate bound overflows",
+            )
+        })?;
+    let commitment_message_bound = required_string_field(
+        certificate,
+        "commitmentMessageBound",
+        "shareCommitmentMessageBoundCert",
+    )?
+    .parse::<u128>()
+    .map_err(|error| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            format!("M9 bridge commitment message bound is not an integer: {error}"),
+        )
+    })?;
+    let no_wraparound_condition = required_json_field(
+        certificate,
+        "noWraparoundCondition",
+        "shareCommitmentMessageBoundCert",
+    )?;
+
+    if string_field(certificate, "objectType") != Some("ShareCommitmentMessageBoundCert")
+        || read_u64_object_field(
+            certificate,
+            "objectVersion",
+            "shareCommitmentMessageBoundCert",
+        )? != 1
+        || certificate_digest != expected_certificate_digest
+        || certificate_digest
+            != required_string_field(
+                statement,
+                "shareCommitmentMessageBoundCertDigest",
+                "aggregateDerivationComponent.statement",
+            )?
+        || required_string_field(
+            certificate,
+            "shareCommitmentProfileDigest",
+            "shareCommitmentMessageBoundCert",
+        )? != required_string_field(
+            statement,
+            "shareCommitmentProfileDigest",
+            "aggregateDerivationComponent.statement",
+        )?
+        || read_u64_object_field(
+            certificate,
+            "shareVectorWidth",
+            "shareCommitmentMessageBoundCert",
+        )? != read_u64_object_field(
+            statement,
+            "shareVectorWidth",
+            "aggregateDerivationComponent.statement",
+        )?
+        || maximum_canonical_turnout
+            < read_u64_object_field(
+                statement,
+                "canonicalTurnout",
+                "aggregateDerivationComponent.statement",
+            )?
+        || maximum_aggregate_integer != expected_maximum_aggregate_integer
+        || opening_aggregate_bound != expected_opening_aggregate_bound
+        || quotient_bound != maximum_canonical_turnout
+        || u128::from(maximum_aggregate_integer) >= commitment_message_bound
+        || !read_bool_object_field(
+            no_wraparound_condition,
+            "maximumAggregateIntegerLessThanCommitmentMessageBound",
+            "shareCommitmentMessageBoundCert.noWraparoundCondition",
+        )?
+        || !read_bool_object_field(
+            no_wraparound_condition,
+            "openingRandomnessAggregateBoundMatchesTurnout",
+            "shareCommitmentMessageBoundCert.noWraparoundCondition",
+        )?
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "M9 bridge aggregate no-wraparound certificate is invalid or permits wraparound",
+        ));
+    }
+
+    Ok(())
 }
 
 fn sampled_public_relation_check_policy_digest(policy: &Value) -> CanonicalResult<String> {
@@ -1742,6 +3091,28 @@ fn required_string_at_path<'a>(
     })
 }
 
+fn read_u64_at_path(value: &Value, path: &[&str], object_name: &str) -> CanonicalResult<u64> {
+    let mut current_value = value;
+    for path_component in path {
+        current_value = current_value.get(path_component).ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                format!("{object_name}.{} is required", path.join(".")),
+            )
+        })?;
+    }
+
+    current_value.as_u64().ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            format!(
+                "{object_name}.{} must be a non-negative integer",
+                path.join(".")
+            ),
+        )
+    })
+}
+
 fn validate_bridge_private_material_disclosure(proof_value: &Value) -> CanonicalResult<()> {
     reject_forbidden_public_bridge_fields(proof_value, "bridgeProof")?;
     let disclosure = required_json_field(proof_value, "privateMaterialDisclosure", "bridgeProof")?;
@@ -1751,7 +3122,20 @@ fn validate_bridge_private_material_disclosure(proof_value: &Value) -> Canonical
 
 fn validate_bridge_proof_public_shell(proof_value: &Value) -> CanonicalResult<()> {
     reject_forbidden_public_bridge_fields(proof_value, "bridgeProof")?;
-    validate_bridge_relation_gap_status(proof_value)?;
+    match string_field(proof_value, "objectType") {
+        Some("SealedLatticeAggregateBridgeRelationProof") => {
+            required_json_field(proof_value, "bridgeSharedWitnessProof", "bridgeProof")?;
+        }
+        Some("SealedLatticeAggregateBridgeEncryptionEvidence") => {
+            validate_bridge_relation_gap_status(proof_value)?;
+        }
+        _ => {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::ProfileComponentMismatch,
+                "M9 bridge proof object type is not supported",
+            ));
+        }
+    }
     validate_bridge_private_material_disclosure(proof_value)
 }
 
@@ -1803,12 +3187,19 @@ fn validate_bridge_encryption_public_shell(bridge_encryption: &Value) -> Canonic
         "bridgeEncryption",
     )?;
     validate_bridge_private_material_disclosure_flags(disclosure, "bridgeEncryption")?;
-    if string_field(bridge_encryption, "bridgeProofVerificationStatus")
-        != Some(BRIDGE_PROOF_PENDING_STATUS)
+    let bridge_proof_verification_status =
+        string_field(bridge_encryption, "bridgeProofVerificationStatus").ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "bridgeEncryption.bridgeProofVerificationStatus must be a string",
+            )
+        })?;
+    if bridge_proof_verification_status != BRIDGE_PROOF_PENDING_STATUS
+        && bridge_proof_verification_status != BRIDGE_PROOF_CHECKED_STATUS
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
-            "M9 bridge encryption shell must remain BridgeProofBackendPending until the shared-witness proof verifier closes",
+            "M9 bridge encryption shell has an unsupported bridge proof verification status",
         ));
     }
     validate_sampled_public_relation_check_policy(bridge_encryption)?;
@@ -2119,18 +3510,118 @@ mod tests {
             .expect("structural rejection should include a refusal message")
     }
 
+    fn variant_statement(participant_count: u64, option_count: u64, width: u64) -> Value {
+        json!({
+            "participantCount": participant_count,
+            "optionCount": option_count,
+            "shareVectorWidth": width,
+        })
+    }
+
+    #[test]
+    fn private_evaluator_variant_dimensions_accept_matrix_edges() {
+        let minimum = bridge_variant_dimensions(&variant_statement(3, 2, 22))
+            .expect("minimum matrix row should be accepted");
+        assert_eq!(minimum.participant_count, 3);
+        assert_eq!(minimum.option_count, 2);
+        assert_eq!(minimum.share_vector_width, 22);
+        assert_eq!(minimum.claim_tier, "micro-roster-outside-claim");
+
+        let maximum = bridge_variant_dimensions(&variant_statement(20, 20, 220))
+            .expect("maximum matrix row should be accepted");
+        assert_eq!(maximum.participant_count, 20);
+        assert_eq!(maximum.option_count, 20);
+        assert_eq!(maximum.share_vector_width, 220);
+        assert_eq!(maximum.claim_tier, "claim-candidate");
+    }
+
+    #[test]
+    fn private_evaluator_variant_dimensions_reject_outside_matrix() {
+        for statement in [
+            variant_statement(2, 2, 22),
+            variant_statement(21, 2, 22),
+            variant_statement(3, 1, 11),
+            variant_statement(3, 21, 231),
+            variant_statement(3, 20, 219),
+        ] {
+            let error = bridge_variant_dimensions(&statement)
+                .expect_err("outside-matrix dimensions should reject");
+            assert!(
+                error.message.contains("M9 bridge"),
+                "unexpected error: {error:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn private_evaluator_rejects_public_artifact_drift() {
+        let expected = json!({
+            "ciphertextRoot": "1".repeat(128),
+            "bridgeProofRoot": "2".repeat(128),
+        });
+        let mut actual = expected.clone();
+        actual["ciphertextRoot"] = Value::String("3".repeat(128));
+        let error =
+            compare_bridge_relation_public_artifacts(&actual, &expected, "bridgeEncryption")
+                .expect_err("mutated public artifact should reject");
+        assert!(error.message.contains("ciphertextRoot"), "{error:?}");
+
+        let mut with_extra_field = expected.clone();
+        with_extra_field["unexpectedField"] = Value::Bool(true);
+        let error = compare_bridge_relation_public_artifacts(
+            &with_extra_field,
+            &expected,
+            "bridgeEncryption",
+        )
+        .expect_err("extra public artifact field should reject");
+        assert!(error.message.contains("unexpectedField"), "{error:?}");
+    }
+
+    #[test]
+    fn bridge_proof_target_contract_is_variant_parametric() {
+        for width in [22_u64, 55, 220] {
+            let target_contract =
+                bridge_proof_target_contract_value(width, width).expect("target contract");
+            let shared_witness_layout = target_contract["sharedWitnessLayout"]
+                .as_object()
+                .expect("shared witness layout should be an object");
+            assert_eq!(
+                target_contract["aggregateReducedCoordinateCount"],
+                json!(width)
+            );
+            assert_eq!(
+                target_contract["aggregateQuotientCoordinateCount"],
+                json!(width)
+            );
+            assert_eq!(
+                shared_witness_layout["aggregateIntegerShareCoordinateCount"],
+                json!(width)
+            );
+            assert_eq!(
+                shared_witness_layout["aggregateRelationRowCount"],
+                json!(SHARE_COMMITMENT_MODULE_RANK as u64 + width)
+            );
+            assert_eq!(
+                shared_witness_layout["sharedResponseScalarCount"],
+                json!(3 * width + 64 + 4 * 32_768)
+            );
+        }
+    }
+
     #[test]
     fn bridge_verifier_rejects_forged_checked_status_before_root_checks() {
         let result = verify_aggregate_bridge_encryption_from_command_request(
             &minimal_verify_request(json!({
                 "bridgeProofVerificationStatus": "BridgeProofRelationChecked",
                 "privateMaterialDisclosure": private_material_disclosure(),
+                "sampledPublicRelationChecks": sampled_relation_checks(),
+                "sampledPublicRelationCheckPolicy": sampled_relation_check_policy(),
             })),
         );
 
         assert_eq!(result["ok"], false);
         assert!(
-            first_refusal_message(&result).contains("must remain BridgeProofBackendPending"),
+            first_refusal_message(&result).contains("bridgeProofBytesHex"),
             "{result}"
         );
     }
@@ -2173,6 +3664,7 @@ mod tests {
     #[test]
     fn bridge_proof_shell_requires_pending_relation_gap_status() {
         let proof_value = json!({
+            "objectType": "SealedLatticeAggregateBridgeEncryptionEvidence",
             "privateMaterialDisclosure": private_material_disclosure(),
         });
         let error = validate_bridge_proof_public_shell(&proof_value)
@@ -2322,6 +3814,7 @@ mod tests {
         relation_gap_status["sharedWitnessBindingStatus"] =
             Value::String("SharedWitnessBindingRelationChecked".to_string());
         let proof_value = json!({
+            "objectType": "SealedLatticeAggregateBridgeEncryptionEvidence",
             "bridgeRelationGapStatus": relation_gap_status,
             "privateMaterialDisclosure": private_material_disclosure(),
         });
@@ -2341,6 +3834,7 @@ mod tests {
         let mut relation_gap_status = bridge_relation_gap_status_value();
         relation_gap_status["sampledOnlyBridgeVerificationAccepted"] = Value::Bool(true);
         let proof_value = json!({
+            "objectType": "SealedLatticeAggregateBridgeEncryptionEvidence",
             "bridgeRelationGapStatus": relation_gap_status,
             "privateMaterialDisclosure": private_material_disclosure(),
         });

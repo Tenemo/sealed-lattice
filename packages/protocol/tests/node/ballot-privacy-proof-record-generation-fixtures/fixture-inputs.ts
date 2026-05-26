@@ -37,7 +37,10 @@ import {
     shareCommitmentOpeningDimension,
 } from '../../../src/ballot-privacy/protocol-parameters';
 import { type BallotPrivacyRelationBackendPublicContext } from '../../../src/ballot-privacy/relation-backend-lowering';
-import { deriveThresholdProfile } from '../../../src/lifecycle/thresholds';
+import {
+    deriveThresholdProfile,
+    deriveThresholdProfileDigest,
+} from '../../../src/lifecycle/thresholds';
 
 const digest = (label: string): string =>
     deriveProtocolDigest('ChallengeDomainDigest', {
@@ -228,6 +231,10 @@ const deterministicReceiverPayloadCiphertextForTest = (input: {
 
 const minimumCasualMicroRosterSize = 3;
 const maximumCasualMicroRosterSize = 9;
+const minimumVariantRosterSize = 3;
+const maximumVariantRosterSize = 20;
+const minimumVariantOptionCount = 2;
+const maximumVariantOptionCount = 20;
 
 const casualMicroRosterRelationInput = (
     rosterSize = minimumCasualMicroRosterSize,
@@ -278,41 +285,95 @@ const casualMicroRosterRelationInput = (
 
 export const mandatoryProfileRelationInput =
     (): BallotPrivacyRelationCompilerInput => {
-        const optionCount = 20;
-        const pvssThreshold = 7;
-        const normalizedScores = Array.from(
-            { length: optionCount },
-            (_unusedValue, optionIndex) => (optionIndex % 10) + 1,
-        );
-        const encodedShareVector =
-            encodedShareVectorForScores(normalizedScores);
-        const encodedCoordinateShamirCoefficients = encodedShareVector.map(
-            () =>
-                Array.from(
-                    { length: pvssThreshold - 1 },
-                    () => 0,
-                ) as readonly number[],
-        );
-
-        return {
-            encodedCoordinateShamirCoefficients,
-            normalizedScores,
-            optionCount,
-            pvssThreshold,
-            receivers: Array.from(
-                { length: optionCount },
-                (_unusedValue, receiverIndex) => ({
-                    receiverIdentity: `receiver-${receiverIndex + 1}`,
-                    receiverRosterPosition: receiverIndex + 1,
-                    receiverShareVector: encodedShareVector,
-                }),
-            ),
-            rosterSize: optionCount,
-            scoreOneHotWitnesses: normalizedScores.map((score) =>
-                oneHotScore(score),
-            ),
-        };
+        return variantRelationInput({ optionCount: 20, rosterSize: 20 });
     };
+
+const variantRelationInput = (input: {
+    readonly optionCount: number;
+    readonly rosterSize: number;
+}): BallotPrivacyRelationCompilerInput => {
+    if (
+        !Number.isSafeInteger(input.rosterSize) ||
+        input.rosterSize < minimumVariantRosterSize ||
+        input.rosterSize > maximumVariantRosterSize
+    ) {
+        throw new RangeError(
+            'M9 variant fixtures require roster size 3 to 20.',
+        );
+    }
+    if (
+        !Number.isSafeInteger(input.optionCount) ||
+        input.optionCount < minimumVariantOptionCount ||
+        input.optionCount > maximumVariantOptionCount
+    ) {
+        throw new RangeError(
+            'M9 variant fixtures require option count 2 to 20.',
+        );
+    }
+
+    const thresholdProfile = deriveThresholdProfile({
+        casualMicroRosterAcknowledged:
+            input.rosterSize < minimumCasualMicroRosterSize ||
+            input.rosterSize <= maximumCasualMicroRosterSize,
+        rosterSize: input.rosterSize,
+    });
+    const normalizedScores = Array.from(
+        { length: input.optionCount },
+        (_unusedValue, optionIndex) => (optionIndex % 10) + 1,
+    );
+    const encodedShareVector = encodedShareVectorForScores(normalizedScores);
+    const encodedCoordinateShamirCoefficients = encodedShareVector.map(
+        () =>
+            Array.from(
+                { length: thresholdProfile.pvssThreshold - 1 },
+                () => 0,
+            ) as readonly number[],
+    );
+
+    return {
+        encodedCoordinateShamirCoefficients,
+        normalizedScores,
+        optionCount: input.optionCount,
+        pvssThreshold: thresholdProfile.pvssThreshold,
+        receivers: Array.from(
+            { length: input.rosterSize },
+            (_unusedValue, receiverIndex) => ({
+                receiverIdentity: `receiver-${receiverIndex + 1}`,
+                receiverRosterPosition: receiverIndex + 1,
+                receiverShareVector: encodedShareVector,
+            }),
+        ),
+        rosterSize: input.rosterSize,
+        scoreOneHotWitnesses: normalizedScores.map((score) =>
+            oneHotScore(score),
+        ),
+    };
+};
+
+const thresholdProfileDigestForRelationInput = (input: {
+    readonly publicContext: BallotPrivacyRelationBackendPublicContext;
+    readonly relationInput: BallotPrivacyRelationCompilerInput;
+}): string => {
+    const isMicroRoster =
+        input.relationInput.rosterSize <= maximumCasualMicroRosterSize;
+    const thresholdProfile = deriveThresholdProfile({
+        casualMicroRosterAcknowledged: isMicroRoster,
+        rosterSize: input.relationInput.rosterSize,
+    });
+
+    return deriveThresholdProfileDigest({
+        maxRosterSize: maximumVariantRosterSize,
+        minRosterSize: minimumVariantRosterSize,
+        pollSpecDigest: input.publicContext.pollSpecDigest,
+        rosterDigest: input.publicContext.rosterDigest,
+        rosterPolicy: 'OpenLinkPublicRoster',
+        smallRosterPolicy: isMicroRoster
+            ? 'AllowMicroRoster'
+            : 'ForbidMicroRoster',
+        thresholdProfile,
+        thresholdProfileFamily: 'BalancedDefault',
+    });
+};
 
 const publicContextAndProjectionWitness = (
     relationInput: BallotPrivacyRelationCompilerInput,
@@ -654,7 +715,10 @@ const ballotProofStatement = (input: {
                 shareCommitmentDigest: shareCommitment.shareCommitmentDigest,
             }),
         ),
-        thresholdProfileDigest: digest('threshold-profile'),
+        thresholdProfileDigest: thresholdProfileDigestForRelationInput({
+            publicContext: input.publicContext,
+            relationInput: input.relationInput,
+        }),
         tiePolicyDigest: digest('tie-policy'),
         topOptionCount: input.topOptionCount,
         voterIdentityDigest: digest('voter-1'),
@@ -680,6 +744,7 @@ const ballotProofStatement = (input: {
 
 export {
     casualMicroRosterRelationInput,
+    variantRelationInput,
     publicContextAndProjectionWitness,
     claimBearingReceiverPayloadShells,
     claimBearingShareCommitmentShells,

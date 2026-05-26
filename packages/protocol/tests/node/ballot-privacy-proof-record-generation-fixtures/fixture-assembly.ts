@@ -1,5 +1,6 @@
 import type { BallotProofStatement } from '@sealed-lattice/types';
 
+import ballotFieldLinearProofBackendVectorsJson from '../../../../../test-vectors/ballot-privacy/ballot-field-linear-proof-vectors.json';
 import {
     buildBallotProofComponentBundleStatement,
     buildBallotProofComponentLinearProofProjection,
@@ -36,9 +37,8 @@ import {
     mandatoryProfileRelationInput,
     publicContextAndProjectionWitness,
     receiverKeyProofRootEvidence,
+    variantRelationInput,
 } from './fixture-inputs.js';
-
-import ballotFieldLinearProofBackendVectorsJson from '#test-vectors/ballot-privacy/ballot-field-linear-proof-vectors.json';
 
 const createProofEncoding = (input: {
     readonly profileId: string;
@@ -470,6 +470,17 @@ export const createMandatoryProfileBallotProofRecordGenerationFixture =
             relationInput: mandatoryProfileRelationInput(),
             topOptionCount: 20,
         });
+
+export const createVariantBallotProofRecordGenerationFixture = (input: {
+    readonly optionCount: number;
+    readonly rosterSize: number;
+}): BallotProofRecordGenerationFixture =>
+    createBallotProofRecordGenerationFixtureWithOptions({
+        casualMicroRosterAcknowledged: input.rosterSize < 10 ? true : undefined,
+        relationInput: variantRelationInput(input),
+        topOptionCount: input.optionCount,
+        unsafeSmallRosterAcknowledged: input.rosterSize < 10 ? true : undefined,
+    });
 
 export const createMandatoryProfileBallotProofRecordBenchmarkFixture =
     (): BallotProofRecordGenerationFixture =>
