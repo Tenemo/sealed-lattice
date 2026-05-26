@@ -65,7 +65,7 @@ The package currently exposes helpers for:
 - transcript-core fixture verification through the bundled Rust/WASM kernel
 - receiver-key proof, ballot proof record, and claim-bearing ballot package verification
 - aggregate derivation component verification for post-close contribution evidence
-- internal encrypted-aggregate bridge object-model helpers, private Rust/WASM bridge-encryption generation, a non-exported private Rust relation evaluator for the `n=3..20`, `m=2..20` matrix domain, and a private Rust/WASM same-witness bridge proof backend for the mandatory `n=20`, `m=20` prototype row. The verifier emits `BridgeProofRelationChecked` only after checking the shared M6 aggregate relation, mod-65537 reduction, BGV batch encoding, full data-basis BGV ciphertext equation, context bindings, witness-clean disclosure flags, and diagnostic-only sampled-check policy. Internal TypeScript bridge records, checked aggregate contributions, first-valid selection, and aggregate-ready handoff helpers remain private package internals.
+- internal encrypted-aggregate bridge object-model helpers, private Rust/WASM bridge-encryption generation, a non-exported private Rust relation evaluator for the `n=3..20`, `m=2..20` matrix domain, and a private Rust/WASM same-witness bridge proof backend for representative rows `3:2`, `3:20`, `4:2`, `9:20`, `10:2`, `10:20`, `16:2`, `16:20`, `20:2`, and `20:20`. The verifier emits `BridgeProofRelationChecked` only after checking the shared M6 aggregate relation, mod-65537 reduction, BGV batch encoding, full data-basis BGV ciphertext equation, context bindings, witness-clean disclosure flags, and diagnostic-only sampled-check policy. Internal TypeScript bridge records, checked aggregate contributions, first-valid selection, aggregate-ready handoff helpers, and representative matrix artifacts remain private package internals.
 - explicit non-closure markers for receiver-encryption parameter-security evidence and aggregate-derivation claim closure
 
 Verification helpers return structured results with accepted digests, status labels, and refusal records where applicable. Reserved complete-protocol entry points fail closed with `OperationUnavailable` until the matching protocol layer exists.
@@ -79,7 +79,7 @@ Verification helpers return structured results with accepted digests, status lab
 - aggregation or tally evaluation APIs
 - standalone receiver-encryption parameter-security certification for the current Module-LWE profile
 - claim-strength aggregate-opening proof closure
-- full M9 encrypted aggregate bridge closure across the required `n=3..20`, `m=2..20` variant matrix; only the mandatory `n=20`, `m=20` prototype row currently has a real private Rust/WASM shared-witness bridge verifier path
+- full M9 encrypted aggregate bridge closure across the required `n=3..20`, `m=2..20` variant matrix; representative e2e rows pass the real private Rust/WASM shared-witness bridge verifier path, but the full 342-row matrix remains pending
 - HE-bearing security certification; the private BGV profile remains pending final `Q_target` and Appendix A acceptance, and ML-KEM/ML-DSA transport/signature choices do not imply category-3 end-to-end security
 - production target-bound decryption or result release
 - production-readiness, audit, or certification claims

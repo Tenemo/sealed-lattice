@@ -54,7 +54,12 @@ type TranscriptCoreKernel = Awaited<
     ReturnType<typeof loadTranscriptCoreKernel>
 >;
 
-type MatrixMode = 'full' | 'prototype' | 'axes' | 'sentinels';
+type MatrixMode =
+    | 'axes'
+    | 'full'
+    | 'prototype'
+    | 'representative'
+    | 'sentinels';
 
 type Variant = {
     readonly optionCount: number;
@@ -222,6 +227,9 @@ const matrixMode = (): MatrixMode => {
     if (process.argv.includes('--axes')) {
         return 'axes';
     }
+    if (process.argv.includes('--representative')) {
+        return 'representative';
+    }
     if (process.argv.includes('--sentinels')) {
         return 'sentinels';
     }
@@ -245,7 +253,7 @@ const variantsForMode = (mode: MatrixMode): readonly Variant[] => {
                 variant.rosterSize === 20 || variant.optionCount === 20,
         );
     }
-    if (mode === 'sentinels') {
+    if (mode === 'representative' || mode === 'sentinels') {
         return variants.filter((variant) =>
             sentinelVariants.has(variantKey(variant)),
         );
@@ -263,7 +271,7 @@ const requestedWorkerCount = (): number => {
         throw new Error(`Invalid M9 worker count: ${rawWorkerCount}`);
     }
 
-    return Math.min(workerCount, 10);
+    return Math.min(workerCount, 40);
 };
 
 const claimTierForRosterSize = (rosterSize: number): string =>
@@ -1726,47 +1734,251 @@ const writeArtifact = async (
     await writeFile(path.join(outputDirectory, fileName), content, 'utf8');
 };
 
+const failedVariantResult = (
+    variant: Variant,
+    failureReason: unknown,
+): VariantBuildResult => {
+    const row = failedRow(variant, failureReason);
+
+    return {
+        aggregateReadyRow: row,
+        benchmarkRow: null,
+        negativeChecks: [],
+        privateRelationRow: row,
+        proofRow: row,
+    };
+};
+
+const runWorkerRow = async (): Promise<boolean> => {
+    const workerRowKey = argumentValue('--worker-row');
+    if (workerRowKey === null) {
+        return false;
+    }
+
+    const variant = parseVariantKey(workerRowKey);
+    const kernel = await loadTranscriptCoreKernel();
+    const result = (() => {
+        try {
+            return buildVariant({ kernel, variant });
+        } catch (error) {
+            return failedVariantResult(variant, error);
+        }
+    })();
+    console.log(`${workerOutputPrefix}${canonicalJson(result)}`);
+
+    return true;
+};
+
+const runVariantInChildProcess = async (
+    variant: Variant,
+): Promise<VariantBuildResult> =>
+    new Promise((resolve) => {
+        const packageManagerCli = process.env.npm_execpath;
+        const scriptPath = path.resolve(
+            process.cwd(),
+            'tools',
+            'ci',
+            'run-encrypted-aggregate-bridge-matrix.ts',
+        );
+        const workerArguments =
+            packageManagerCli === undefined || packageManagerCli.length === 0
+                ? [
+                      path.resolve(
+                          process.cwd(),
+                          'node_modules',
+                          'tsx',
+                          'dist',
+                          'cli.mjs',
+                      ),
+                      scriptPath,
+                      '--worker-row',
+                      variantKey(variant),
+                  ]
+                : [
+                      packageManagerCli,
+                      'exec',
+                      'tsx',
+                      scriptPath,
+                      '--worker-row',
+                      variantKey(variant),
+                  ];
+        const childProcess = spawn(process.execPath, workerArguments, {
+            cwd: process.cwd(),
+            env: {
+                ...process.env,
+                SEALED_LATTICE_M9_WORKERS: '1',
+            },
+            stdio: ['ignore', 'pipe', 'pipe'],
+        });
+        let standardOutput = '';
+        let standardError = '';
+        childProcess.stdout.setEncoding('utf8');
+        childProcess.stderr.setEncoding('utf8');
+        childProcess.stdout.on('data', (chunk: string) => {
+            standardOutput += chunk;
+        });
+        childProcess.stderr.on('data', (chunk: string) => {
+            standardError += chunk;
+            process.stderr.write(chunk);
+        });
+        childProcess.on('error', (error) => {
+            resolve(failedVariantResult(variant, error));
+        });
+        childProcess.on('close', (exitCode) => {
+            const resultLine = standardOutput
+                .split(/\r?\n/u)
+                .find((line) => line.startsWith(workerOutputPrefix));
+            if (resultLine === undefined) {
+                resolve(
+                    failedVariantResult(
+                        variant,
+                        `M9 worker exited with code ${String(exitCode)} without row output. ${standardError.slice(-2000)}`,
+                    ),
+                );
+
+                return;
+            }
+
+            try {
+                resolve(
+                    JSON.parse(
+                        resultLine.slice(workerOutputPrefix.length),
+                    ) as VariantBuildResult,
+                );
+            } catch (error) {
+                resolve(failedVariantResult(variant, error));
+            }
+        });
+    });
+
+const runSequentialVariantBuilds = async (
+    variants: readonly Variant[],
+): Promise<readonly IndexedVariantBuildResult[]> => {
+    const kernel = await loadTranscriptCoreKernel();
+    const results: IndexedVariantBuildResult[] = [];
+    for (const [variantIndex, variant] of variants.entries()) {
+        console.log(
+            `Encrypted aggregate bridge row started: n=${variant.rosterSize}, m=${variant.optionCount}`,
+        );
+        const result = (() => {
+            try {
+                return buildVariant({ kernel, variant });
+            } catch (error) {
+                return failedVariantResult(variant, error);
+            }
+        })();
+        results.push({ ...result, variantIndex });
+        console.log(
+            `Encrypted aggregate bridge row finished: n=${variant.rosterSize}, m=${variant.optionCount}`,
+        );
+    }
+
+    return results;
+};
+
+const runParallelVariantBuilds = async (input: {
+    readonly variants: readonly Variant[];
+    readonly workerCount: number;
+}): Promise<readonly IndexedVariantBuildResult[]> => {
+    const results: IndexedVariantBuildResult[] = [];
+    let nextVariantIndex = 0;
+    const workerSlotCount = Math.min(input.workerCount, input.variants.length);
+    await Promise.all(
+        Array.from(
+            { length: workerSlotCount },
+            async (_unused, workerIndex) => {
+                while (true) {
+                    const variantIndex = nextVariantIndex;
+                    nextVariantIndex += 1;
+                    const variant = input.variants[variantIndex];
+                    if (variant === undefined) {
+                        break;
+                    }
+                    console.log(
+                        `Encrypted aggregate bridge row started: n=${variant.rosterSize}, m=${variant.optionCount}, worker=${workerIndex + 1}`,
+                    );
+                    const result = await runVariantInChildProcess(variant);
+                    results.push({ ...result, variantIndex });
+                    console.log(
+                        `Encrypted aggregate bridge row finished: n=${variant.rosterSize}, m=${variant.optionCount}, worker=${workerIndex + 1}, status=${result.proofRow.status}`,
+                    );
+                }
+            },
+        ),
+    );
+
+    return [...results].sort(
+        (left, right) => left.variantIndex - right.variantIndex,
+    );
+};
+
+const appendVariantResult = (input: {
+    readonly aggregateReadyRows: MatrixRow[];
+    readonly benchmarkRows: MatrixRow[];
+    readonly negativeChecks: NegativeCheck[];
+    readonly privateRows: MatrixRow[];
+    readonly proofRows: MatrixRow[];
+    readonly result: VariantBuildResult;
+}): void => {
+    input.privateRows.push(input.result.privateRelationRow);
+    input.proofRows.push(input.result.proofRow);
+    input.aggregateReadyRows.push(input.result.aggregateReadyRow);
+    input.negativeChecks.push(...input.result.negativeChecks);
+    if (input.result.benchmarkRow !== null) {
+        input.benchmarkRows.push(input.result.benchmarkRow);
+    }
+};
+
 const main = async (): Promise<void> => {
+    if (await runWorkerRow()) {
+        return;
+    }
+
     const mode = matrixMode();
     const variants = variantsForMode(mode);
+    const workerCount = requestedWorkerCount();
     await mkdir(outputDirectory, { recursive: true });
-    const kernel = await loadTranscriptCoreKernel();
     const privateRows: MatrixRow[] = [];
     const proofRows: MatrixRow[] = [];
     const aggregateReadyRows: MatrixRow[] = [];
     const benchmarkRows: MatrixRow[] = [];
     const negativeChecks: NegativeCheck[] = [];
-
-    for (const variant of variants) {
-        console.log(
-            `Encrypted aggregate bridge row started: n=${variant.rosterSize}, m=${variant.optionCount}`,
-        );
-        try {
-            const result = buildVariant({ kernel, variant });
-            privateRows.push(result.privateRelationRow);
-            proofRows.push(result.proofRow);
-            aggregateReadyRows.push(result.aggregateReadyRow);
-            negativeChecks.push(...result.negativeChecks);
-            if (result.benchmarkRow !== null) {
-                benchmarkRows.push(result.benchmarkRow);
-            }
-        } catch (error) {
-            const row = failedRow(variant, error);
-            privateRows.push(row);
-            proofRows.push(row);
-            aggregateReadyRows.push(row);
-        }
-        console.log(
-            `Encrypted aggregate bridge row finished: n=${variant.rosterSize}, m=${variant.optionCount}`,
-        );
+    const variantResults =
+        workerCount <= 1
+            ? await runSequentialVariantBuilds(variants)
+            : await runParallelVariantBuilds({ variants, workerCount });
+    for (const result of variantResults) {
+        appendVariantResult({
+            aggregateReadyRows,
+            benchmarkRows,
+            negativeChecks,
+            privateRows,
+            proofRows,
+            result,
+        });
     }
     const slowestRow = [...proofRows]
         .filter((row) => row.status === 'passed')
         .sort((left, right) => right.proverTime - left.proverTime)[0];
-    const finalBenchmarkRows =
-        slowestRow === undefined || benchmarkRows.includes(slowestRow)
-            ? benchmarkRows
-            : [...benchmarkRows, slowestRow];
+    const benchmarkRowsByVariant = new Map(
+        benchmarkRows.map((row) => [
+            variantKey({
+                optionCount: row.optionCount,
+                rosterSize: row.rosterSize,
+            }),
+            row,
+        ]),
+    );
+    if (slowestRow !== undefined) {
+        benchmarkRowsByVariant.set(
+            variantKey({
+                optionCount: slowestRow.optionCount,
+                rosterSize: slowestRow.rosterSize,
+            }),
+            slowestRow,
+        );
+    }
+    const finalBenchmarkRows = [...benchmarkRowsByVariant.values()];
     const allRowsPassed =
         proofRows.every((row) => row.status === 'passed') &&
         aggregateReadyRows.every((row) => row.status === 'passed') &&

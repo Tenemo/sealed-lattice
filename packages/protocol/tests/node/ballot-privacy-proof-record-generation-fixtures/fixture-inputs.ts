@@ -283,11 +283,6 @@ const casualMicroRosterRelationInput = (
     };
 };
 
-export const mandatoryProfileRelationInput =
-    (): BallotPrivacyRelationCompilerInput => {
-        return variantRelationInput({ optionCount: 20, rosterSize: 20 });
-    };
-
 const variantRelationInput = (input: {
     readonly optionCount: number;
     readonly rosterSize: number;
@@ -349,6 +344,11 @@ const variantRelationInput = (input: {
         ),
     };
 };
+
+export const mandatoryProfileRelationInput =
+    (): BallotPrivacyRelationCompilerInput => {
+        return variantRelationInput({ optionCount: 20, rosterSize: 20 });
+    };
 
 const thresholdProfileDigestForRelationInput = (input: {
     readonly publicContext: BallotPrivacyRelationBackendPublicContext;
