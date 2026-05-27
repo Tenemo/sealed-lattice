@@ -468,16 +468,6 @@ fn public_rlwe_samples_by_basis(participant_count: usize, rotation_key_count: us
     })
 }
 
-fn data_basis_modulus_bits() -> usize {
-    DATA_PRIMES.len()
-        * usize::try_from(data_prime_bit_length()).expect("data prime bit length fits usize")
-}
-
-fn extended_basis_modulus_bits() -> usize {
-    (DATA_PRIMES.len() + 1)
-        * usize::try_from(data_prime_bit_length()).expect("data prime bit length fits usize")
-}
-
 fn evaluation_key_size_certificate(rotation_key_count: usize) -> Value {
     let residue_byte_count = 8_usize;
     let polynomial_byte_estimate_data = POLYNOMIAL_DEGREE * DATA_PRIMES.len() * residue_byte_count;

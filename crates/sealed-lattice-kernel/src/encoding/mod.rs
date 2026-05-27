@@ -291,8 +291,7 @@ pub fn run_transcript_core_command(input: &[u8]) -> Vec<u8> {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(tag = "command")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TranscriptCoreCommand {
     ListCanonicalErrorCodes,
     ListReservedRootNamespaces,
@@ -337,12 +336,78 @@ enum TranscriptCoreCommand {
 }
 
 fn parse_transcript_core_command(command_name: &str) -> CanonicalResult<TranscriptCoreCommand> {
-    serde_json::from_value(json!({ "command": command_name })).map_err(|_| {
-        CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            format!("unsupported command: {command_name}"),
-        )
-    })
+    let command = match command_name {
+        "ListCanonicalErrorCodes" => TranscriptCoreCommand::ListCanonicalErrorCodes,
+        "ListReservedRootNamespaces" => TranscriptCoreCommand::ListReservedRootNamespaces,
+        "AnalyzeCanonicalObject" => TranscriptCoreCommand::AnalyzeCanonicalObject,
+        "ComputeChunkRoot" => TranscriptCoreCommand::ComputeChunkRoot,
+        "HashRaw" => TranscriptCoreCommand::HashRaw,
+        "DeriveProtocolDigest" => TranscriptCoreCommand::DeriveProtocolDigest,
+        "InterpolateShamirConstantTerm" => TranscriptCoreCommand::InterpolateShamirConstantTerm,
+        "EvaluatePlaintextComparison" => TranscriptCoreCommand::EvaluatePlaintextComparison,
+        "VerifyFixture" => TranscriptCoreCommand::VerifyFixture,
+        "DescribeBallotPrivacyProofBackend" => {
+            TranscriptCoreCommand::DescribeBallotPrivacyProofBackend
+        }
+        "VerifyBallotPrivacyLinearProofVector" => {
+            TranscriptCoreCommand::VerifyBallotPrivacyLinearProofVector
+        }
+        "VerifyBallotPrivacyEncodedRelationVector" => {
+            TranscriptCoreCommand::VerifyBallotPrivacyEncodedRelationVector
+        }
+        "VerifyBallotPrivacyReceiverKeyVector" => {
+            TranscriptCoreCommand::VerifyBallotPrivacyReceiverKeyVector
+        }
+        "VerifyReceiverKeyProof" => TranscriptCoreCommand::VerifyReceiverKeyProof,
+        "PrepareReceiverKeyProofGeneration" => {
+            TranscriptCoreCommand::PrepareReceiverKeyProofGeneration
+        }
+        "GenerateReceiverKeyProof" => TranscriptCoreCommand::GenerateReceiverKeyProof,
+        "GenerateBallotProof" => TranscriptCoreCommand::GenerateBallotProof,
+        "GenerateBallotComponentProof" => TranscriptCoreCommand::GenerateBallotComponentProof,
+        "GenerateBallotProofRecord" => TranscriptCoreCommand::GenerateBallotProofRecord,
+        "VerifyBallotProof" => TranscriptCoreCommand::VerifyBallotProof,
+        "VerifyClaimBearingBallotPackage" => TranscriptCoreCommand::VerifyClaimBearingBallotPackage,
+        "GenerateAggregateDerivationProof" => {
+            TranscriptCoreCommand::GenerateAggregateDerivationProof
+        }
+        "VerifyAggregateDerivationProof" => TranscriptCoreCommand::VerifyAggregateDerivationProof,
+        "GenerateAggregateBridgeEncryption" => {
+            TranscriptCoreCommand::GenerateAggregateBridgeEncryption
+        }
+        "EvaluateAggregateBridgeRelation" => TranscriptCoreCommand::EvaluateAggregateBridgeRelation,
+        "VerifyAggregateBridgeEncryption" => TranscriptCoreCommand::VerifyAggregateBridgeEncryption,
+        "DescribeBgvRnsProfile" => TranscriptCoreCommand::DescribeBgvRnsProfile,
+        "DescribeBgvOperationRegistry" => TranscriptCoreCommand::DescribeBgvOperationRegistry,
+        "ValidateBgvEvaluatorOperation" => TranscriptCoreCommand::ValidateBgvEvaluatorOperation,
+        "GenerateBgvBackendReport" => TranscriptCoreCommand::GenerateBgvBackendReport,
+        "DescribeBgvPassiveSetupObjectModel" => {
+            TranscriptCoreCommand::DescribeBgvPassiveSetupObjectModel
+        }
+        "GenerateBgvPassiveSetup" => TranscriptCoreCommand::GenerateBgvPassiveSetup,
+        "VerifyBgvPassiveSetup" => TranscriptCoreCommand::VerifyBgvPassiveSetup,
+        "EncodeBgvBatchPlaintext" => TranscriptCoreCommand::EncodeBgvBatchPlaintext,
+        "ValidateBgvPlaintextObject" => TranscriptCoreCommand::ValidateBgvPlaintextObject,
+        "ValidateBgvCiphertextObject" => TranscriptCoreCommand::ValidateBgvCiphertextObject,
+        "GenerateBgvCiphertextConventionFixture" => {
+            TranscriptCoreCommand::GenerateBgvCiphertextConventionFixture
+        }
+        "GenerateBgvBaseConversionFixture" => {
+            TranscriptCoreCommand::GenerateBgvBaseConversionFixture
+        }
+        "AnalyzeBgvCanonicalObject" => TranscriptCoreCommand::AnalyzeBgvCanonicalObject,
+        "RejectBgvReferenceOracleArtifact" => {
+            TranscriptCoreCommand::RejectBgvReferenceOracleArtifact
+        }
+        _ => {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                format!("unsupported command: {command_name}"),
+            ));
+        }
+    };
+
+    Ok(command)
 }
 
 fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult<Value> {
@@ -651,7 +716,10 @@ fn run_ballot_privacy_command(
         TranscriptCoreCommand::VerifyAggregateBridgeEncryption => Ok(
             crate::ballot_privacy::verify_aggregate_bridge_encryption_from_command_request(request),
         ),
-        _ => unreachable!("non-ballot command dispatched to ballot privacy handler"),
+        _ => Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "non-ballot command dispatched to ballot privacy handler",
+        )),
     }
 }
 
@@ -722,7 +790,10 @@ fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> Canonical
         TranscriptCoreCommand::RejectBgvReferenceOracleArtifact => {
             Ok(crate::bgv::commands::reject_bgv_reference_oracle_artifact_from_request(request))
         }
-        _ => unreachable!("non-BGV command dispatched to BGV handler"),
+        _ => Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "non-BGV command dispatched to BGV handler",
+        )),
     }
 }
 

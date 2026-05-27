@@ -34,9 +34,9 @@ use crate::{
             allowed_operation_registry_digest, backend_profile_digest,
             ballot_score_encoding_profile_digest, ballot_share_layout_profile_digest,
             batch_encoder_digest, batch_layout_binding_digest,
-            canonical_ciphertext_convention_digest, data_prime_bit_length,
-            encoded_aggregate_layout_digest, layout_digest, profile_digest,
-            security_estimator_input_digest, top_k_evaluator_input_layout_digest,
+            canonical_ciphertext_convention_digest, data_basis_modulus_bits,
+            encoded_aggregate_layout_digest, extended_basis_modulus_bits, layout_digest,
+            profile_digest, security_estimator_input_digest, top_k_evaluator_input_layout_digest,
         },
         rns::RnsPolynomial,
         serialization::{

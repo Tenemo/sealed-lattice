@@ -1,6 +1,7 @@
 use serde_json::{Map, Value, json};
 
 use crate::{
+    ballot_privacy::component::ParsedSparseComponentProofStatement,
     bgv::profile::{DATA_PRIMES, POLYNOMIAL_DEGREE},
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
     hashing::{canonical_json, derive_protocol_digest, hash512, to_hex},
@@ -50,6 +51,7 @@ const SHARED_WITNESS_CHALLENGE_BITS_PER_CHECK: u64 = 64;
 const BRIDGE_SHARED_WITNESS_CHECK_COUNT: usize = 2;
 const BRIDGE_SHARED_WITNESS_SOUNDNESS_BITS: u64 =
     SHARED_WITNESS_CHALLENGE_BITS_PER_CHECK * BRIDGE_SHARED_WITNESS_CHECK_COUNT as u64;
+const BRIDGE_BGV_CIPHERTEXT_COMPONENT_COUNT: u64 = 2;
 
 mod dimensions;
 mod evaluation;

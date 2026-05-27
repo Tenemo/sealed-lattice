@@ -24,6 +24,11 @@ pub(super) struct BridgeSharedWitnessProofVerification {
     pub(super) shared_response_scalar_count: u64,
 }
 
+struct BridgeAggregateRelationCommitmentContext {
+    parsed_statement: ParsedSparseComponentProofStatement,
+    target_vector: PolynomialVector,
+}
+
 pub(super) fn generate_bridge_shared_witness_proof(
     input: BridgeSharedWitnessProverInput<'_>,
 ) -> CanonicalResult<Value> {
@@ -38,6 +43,8 @@ pub(super) fn generate_bridge_shared_witness_proof(
         i64_slice_to_i128_vec(&input.trace.encryption_error_zero_coefficients);
     let perturbation_one_witness =
         i64_slice_to_i128_vec(&input.trace.encryption_error_one_coefficients);
+    let aggregate_relation_context =
+        bridge_aggregate_relation_commitment_context(input.proof_input)?;
     let mut checks = Vec::with_capacity(BRIDGE_SHARED_WITNESS_CHECK_COUNT);
     let mut challenge_hex = String::new();
 
@@ -99,7 +106,7 @@ pub(super) fn generate_bridge_shared_witness_proof(
             perturbation_one_witness.len(),
         );
         let aggregate_commitment_digest = aggregate_relation_commitment_digest_from_responses(
-            input.proof_input,
+            &aggregate_relation_context,
             &aggregate_integer_mask,
             &aggregate_opening_mask,
             &aggregate_reduced_mask,
@@ -291,6 +298,7 @@ pub(super) fn verify_bridge_shared_witness_proof(
             "M9 bridge shared-witness proof check array has the wrong length",
         ));
     }
+    let aggregate_relation_context = bridge_aggregate_relation_commitment_context(proof_input)?;
     let mut challenge_hex = String::new();
     for (check_index, check) in checks.iter().enumerate() {
         require_equal_u64(
@@ -358,7 +366,7 @@ pub(super) fn verify_bridge_shared_witness_proof(
             expected_quotient_count,
         )?;
         let aggregate_commitment_digest = aggregate_relation_commitment_digest_from_responses(
-            proof_input,
+            &aggregate_relation_context,
             &aggregate_share_response,
             &aggregate_opening_response,
             &aggregate_reduced_response,
@@ -428,18 +436,31 @@ pub(super) fn verify_bridge_shared_witness_proof(
     })
 }
 
-fn aggregate_relation_commitment_digest_from_responses(
+fn bridge_aggregate_relation_commitment_context(
     proof_input: &Value,
+) -> CanonicalResult<BridgeAggregateRelationCommitmentContext> {
+    let proof_statement = required_json_field(proof_input, "proofStatement", "proofInput")?;
+    let parsed_statement = sparse_matrix_from_sparse_component_statement(proof_statement)
+        .map_err(|error| CanonicalError::new(CanonicalErrorCode::InvalidFixture, error.message))?;
+    let ring = parsed_statement.source_statement_matrix.ring();
+    let target_vector =
+        PolynomialVector::new(ring, parsed_statement.target_vector_coefficients.clone())?;
+
+    Ok(BridgeAggregateRelationCommitmentContext {
+        parsed_statement,
+        target_vector,
+    })
+}
+
+fn aggregate_relation_commitment_digest_from_responses(
+    context: &BridgeAggregateRelationCommitmentContext,
     aggregate_share_response: &[i128],
     aggregate_opening_response: &[i128],
     aggregate_reduced_response: &[i128],
     aggregate_quotient_response: &[i128],
     challenge_scalar: u64,
 ) -> CanonicalResult<String> {
-    let proof_statement = required_json_field(proof_input, "proofStatement", "proofInput")?;
-    let parsed_statement = sparse_matrix_from_sparse_component_statement(proof_statement)
-        .map_err(|error| CanonicalError::new(CanonicalErrorCode::InvalidFixture, error.message))?;
-    let ring = parsed_statement.source_statement_matrix.ring();
+    let ring = context.parsed_statement.source_statement_matrix.ring();
     let response_entries = aggregate_share_response
         .iter()
         .chain(aggregate_opening_response.iter())
@@ -448,10 +469,10 @@ fn aggregate_relation_commitment_digest_from_responses(
         .map(|response| constant_response_polynomial(*response, ring.degree(), ring.modulus()))
         .collect::<Vec<_>>();
     let response_vector = PolynomialVector::new(ring, response_entries)?;
-    let response_image = parsed_statement
+    let response_image = context
+        .parsed_statement
         .source_statement_matrix
         .multiply_vector(&response_vector)?;
-    let target_vector = PolynomialVector::new(ring, parsed_statement.target_vector_coefficients)?;
     let challenge_residue =
         u64::try_from(u128::from(challenge_scalar) % u128::from(ring.modulus())).map_err(|_| {
             CanonicalError::new(
@@ -459,7 +480,8 @@ fn aggregate_relation_commitment_digest_from_responses(
                 "M9 bridge challenge residue does not fit u64",
             )
         })?;
-    let scaled_target_entries = target_vector
+    let scaled_target_entries = context
+        .target_vector
         .entries()
         .iter()
         .map(|entry| ring.scale(challenge_residue, entry))
@@ -483,30 +505,50 @@ fn sample_bridge_mask_vector(
     role: &str,
     length: usize,
 ) -> Vec<i128> {
+    const MASK_COORDINATES_PER_DIGEST: usize = 4;
+    const MASK_BYTES_PER_COORDINATE: usize = 15;
+    const MASK_MAGNITUDE_BYTES_PER_COORDINATE: usize = 14;
+
     let check_index_bytes = (check_index as u64).to_le_bytes();
-    (0..length)
-        .map(|coordinate_index| {
-            let coordinate_index_bytes = (coordinate_index as u64).to_le_bytes();
-            let digest = hash512(
-                "sealed-lattice-root/aggregate-bridge-shared-witness-mask-v1",
-                &[
-                    statement_digest.as_bytes(),
-                    prover_randomness_hex.as_bytes(),
-                    role.as_bytes(),
-                    &check_index_bytes,
-                    &coordinate_index_bytes,
-                ],
-            );
+    let mut masks = Vec::with_capacity(length);
+    let mut block_index = 0_u64;
+
+    while masks.len() < length {
+        let block_index_bytes = block_index.to_le_bytes();
+        let digest = hash512(
+            "sealed-lattice-root/aggregate-bridge-shared-witness-mask-v1",
+            &[
+                statement_digest.as_bytes(),
+                prover_randomness_hex.as_bytes(),
+                role.as_bytes(),
+                &check_index_bytes,
+                &block_index_bytes,
+            ],
+        );
+        for lane_index in 0..MASK_COORDINATES_PER_DIGEST {
+            if masks.len() == length {
+                break;
+            }
+            let lane_start = lane_index * MASK_BYTES_PER_COORDINATE;
+            let lane_end = lane_start + MASK_BYTES_PER_COORDINATE;
+            let lane = &digest[lane_start..lane_end];
             let mut magnitude_bytes = [0_u8; 16];
-            magnitude_bytes[..14].copy_from_slice(&digest[..14]);
+            magnitude_bytes[..MASK_MAGNITUDE_BYTES_PER_COORDINATE]
+                .copy_from_slice(&lane[..MASK_MAGNITUDE_BYTES_PER_COORDINATE]);
             let magnitude = i128::from_le_bytes(magnitude_bytes);
-            if digest[14] & 1 == 0 {
+            let mask = if lane[MASK_MAGNITUDE_BYTES_PER_COORDINATE] & 1 == 0 {
                 magnitude
             } else {
                 -magnitude
-            }
-        })
-        .collect()
+            };
+            masks.push(mask);
+        }
+        block_index = block_index
+            .checked_add(1)
+            .expect("bridge mask block index overflowed");
+    }
+
+    masks
 }
 
 fn bridge_shared_witness_challenge_scalar(
@@ -527,16 +569,44 @@ fn bridge_shared_witness_challenge_scalar(
             bgv_commitment_digest.as_bytes(),
         ],
     );
+    if let Some(challenge) = first_nonzero_u64_chunk(&digest) {
+        return challenge;
+    }
+
+    let mut retry_index = 1_u64;
+    loop {
+        let retry_index_bytes = retry_index.to_le_bytes();
+        let retry_digest = hash512(
+            "sealed-lattice-root/aggregate-bridge-shared-witness-challenge-retry-v1",
+            &[
+                statement_digest.as_bytes(),
+                &check_index_bytes,
+                aggregate_commitment_digest.as_bytes(),
+                batch_commitment_digest.as_bytes(),
+                bgv_commitment_digest.as_bytes(),
+                &retry_index_bytes,
+            ],
+        );
+        if let Some(challenge) = first_nonzero_u64_chunk(&retry_digest) {
+            return challenge;
+        }
+        retry_index = retry_index
+            .checked_add(1)
+            .expect("bridge challenge retry index overflowed");
+    }
+}
+
+fn first_nonzero_u64_chunk(digest: &[u8]) -> Option<u64> {
     for chunk in digest.chunks_exact(8) {
         let mut bytes = [0_u8; 8];
         bytes.copy_from_slice(chunk);
         let challenge = u64::from_le_bytes(bytes);
         if challenge != 0 {
-            return challenge;
+            return Some(challenge);
         }
     }
 
-    1
+    None
 }
 
 fn bridge_challenge_hex(challenge_scalar: u64) -> String {
@@ -730,4 +800,80 @@ fn canonical_polynomial_vector_response(entries: &[Vec<u64>]) -> Value {
             })
             .collect(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{first_nonzero_u64_chunk, sample_bridge_mask_vector};
+    use crate::hashing::hash512;
+
+    fn mask_from_digest_lane(digest: &[u8], lane_index: usize) -> i128 {
+        let lane_start = lane_index * 15;
+        let lane = &digest[lane_start..lane_start + 15];
+        let mut magnitude_bytes = [0_u8; 16];
+        magnitude_bytes[..14].copy_from_slice(&lane[..14]);
+        let magnitude = i128::from_le_bytes(magnitude_bytes);
+        if lane[14] & 1 == 0 {
+            magnitude
+        } else {
+            -magnitude
+        }
+    }
+
+    #[test]
+    fn bridge_mask_sampler_consumes_four_coordinates_per_digest() {
+        let statement_digest = "statement-digest";
+        let prover_randomness_hex = "001122";
+        let role = "aggregate-share";
+        let check_index_bytes = 3_u64.to_le_bytes();
+        let first_block_index_bytes = 0_u64.to_le_bytes();
+        let second_block_index_bytes = 1_u64.to_le_bytes();
+        let first_digest = hash512(
+            "sealed-lattice-root/aggregate-bridge-shared-witness-mask-v1",
+            &[
+                statement_digest.as_bytes(),
+                prover_randomness_hex.as_bytes(),
+                role.as_bytes(),
+                &check_index_bytes,
+                &first_block_index_bytes,
+            ],
+        );
+        let second_digest = hash512(
+            "sealed-lattice-root/aggregate-bridge-shared-witness-mask-v1",
+            &[
+                statement_digest.as_bytes(),
+                prover_randomness_hex.as_bytes(),
+                role.as_bytes(),
+                &check_index_bytes,
+                &second_block_index_bytes,
+            ],
+        );
+
+        let masks = sample_bridge_mask_vector(statement_digest, prover_randomness_hex, 3, role, 5);
+
+        assert_eq!(
+            masks,
+            vec![
+                mask_from_digest_lane(&first_digest, 0),
+                mask_from_digest_lane(&first_digest, 1),
+                mask_from_digest_lane(&first_digest, 2),
+                mask_from_digest_lane(&first_digest, 3),
+                mask_from_digest_lane(&second_digest, 0),
+            ]
+        );
+        assert_ne!(
+            masks,
+            sample_bridge_mask_vector(statement_digest, prover_randomness_hex, 4, role, 5)
+        );
+    }
+
+    #[test]
+    fn bridge_challenge_scanner_returns_first_nonzero_chunk() {
+        let mut digest = [0_u8; 64];
+        digest[16..24].copy_from_slice(&37_u64.to_le_bytes());
+        digest[24..32].copy_from_slice(&41_u64.to_le_bytes());
+
+        assert_eq!(first_nonzero_u64_chunk(&digest), Some(37));
+        assert_eq!(first_nonzero_u64_chunk(&[0_u8; 64]), None);
+    }
 }

@@ -208,7 +208,7 @@ pub(super) fn evaluate_aggregate_bridge_relation(request: &Value) -> CanonicalRe
             )?,
             "slotCount": read_u64_object_field(bridge_encryption, "slotCount", "bridgeEncryption")?,
             "dataPrimeCount": DATA_PRIMES.len(),
-            "ciphertextComponentCount": 2,
+            "ciphertextComponentCount": BRIDGE_BGV_CIPHERTEXT_COMPONENT_COUNT,
             "canonicalByteLength": read_u64_object_field(
                 bridge_encryption,
                 "canonicalByteLength",

@@ -38,21 +38,15 @@ pub enum BaseClaimProfile {
 
 impl BaseClaimProfile {
     pub fn code(self) -> u64 {
-        match self {
-            Self::FullyVerified => 2,
-        }
+        2
     }
 
     pub fn label(self) -> &'static str {
-        match self {
-            Self::FullyVerified => "fullyVerified",
-        }
+        "fullyVerified"
     }
 
     pub fn expected_profile_id(self) -> &'static str {
-        match self {
-            Self::FullyVerified => FULLY_VERIFIED_PROFILE_ID,
-        }
+        FULLY_VERIFIED_PROFILE_ID
     }
 }
 

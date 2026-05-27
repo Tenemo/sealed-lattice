@@ -292,9 +292,30 @@ pub(crate) fn root_parameters_for_modulus(modulus: u64) -> Option<RootParameters
 pub(crate) fn data_prime_bit_length() -> u32 {
     DATA_PRIMES
         .iter()
-        .map(|modulus| u64::BITS - modulus.leading_zeros())
+        .map(|modulus| modulus_bit_length(*modulus))
         .max()
         .unwrap_or(0)
+}
+
+pub(crate) fn modulus_bit_length(modulus: u64) -> u32 {
+    u64::BITS - modulus.leading_zeros()
+}
+
+pub(crate) fn moduli_bit_length_sum(moduli: impl IntoIterator<Item = u64>) -> usize {
+    moduli
+        .into_iter()
+        .map(|modulus| {
+            usize::try_from(modulus_bit_length(modulus)).expect("modulus bit length fits usize")
+        })
+        .sum()
+}
+
+pub(crate) fn data_basis_modulus_bits() -> usize {
+    moduli_bit_length_sum(DATA_PRIMES)
+}
+
+pub(crate) fn extended_basis_modulus_bits() -> usize {
+    moduli_bit_length_sum(DATA_PRIMES.into_iter().chain([SPECIAL_PRIME]))
 }
 
 pub(crate) fn selected_profile_value() -> Value {
@@ -544,9 +565,10 @@ mod tests {
         aggregate_input_encoding_profile_digest, allowed_operation_registry_digest,
         ballot_score_encoding_profile_digest, ballot_share_layout_profile_digest,
         batch_encoder_digest, batch_layout_binding_digest, batch_layout_binding_value,
-        canonical_ciphertext_convention_digest, encoded_aggregate_layout_digest, layout_digest,
-        profile_digest, root_parameters_for_modulus, security_estimator_input_digest,
-        top_k_evaluator_input_layout_digest,
+        canonical_ciphertext_convention_digest, data_basis_modulus_bits,
+        encoded_aggregate_layout_digest, extended_basis_modulus_bits, layout_digest,
+        moduli_bit_length_sum, profile_digest, root_parameters_for_modulus,
+        security_estimator_input_digest, top_k_evaluator_input_layout_digest,
     };
     use crate::bgv::modular_arithmetic::is_prime_for_tests;
 
@@ -672,6 +694,27 @@ mod tests {
         );
         assert!(BgvBasisKind::Special.moduli_for_level(1).is_none());
         assert!(BgvBasisKind::Special.moduli_for_level(99).is_none());
+    }
+
+    #[test]
+    fn modulus_bit_accounting_sums_actual_modulus_widths() {
+        assert_eq!(moduli_bit_length_sum([0, 1, 255, 256]), 18);
+        assert_eq!(
+            data_basis_modulus_bits(),
+            DATA_PRIMES
+                .iter()
+                .map(
+                    |modulus| usize::try_from(u64::BITS - modulus.leading_zeros())
+                        .expect("bit length fits usize")
+                )
+                .sum::<usize>()
+        );
+        assert_eq!(
+            extended_basis_modulus_bits(),
+            data_basis_modulus_bits()
+                + usize::try_from(u64::BITS - SPECIAL_PRIME.leading_zeros())
+                    .expect("bit length fits usize")
+        );
     }
 
     #[test]

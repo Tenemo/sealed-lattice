@@ -66,6 +66,30 @@ fn command_rejects_unknown_command_with_stable_message() {
 }
 
 #[test]
+fn category_dispatchers_reject_wrong_command_families() {
+    let request = serde_json::json!({});
+    let ballot_error = super::run_ballot_privacy_command(
+        super::TranscriptCoreCommand::DescribeBgvRnsProfile,
+        &request,
+    )
+    .expect_err("BGV command must not dispatch through ballot privacy");
+    let bgv_error =
+        super::run_bgv_command(super::TranscriptCoreCommand::GenerateBallotProof, &request)
+            .expect_err("ballot command must not dispatch through BGV");
+
+    assert_eq!(ballot_error.code, CanonicalErrorCode::InvalidFixture);
+    assert_eq!(
+        ballot_error.message,
+        "non-ballot command dispatched to ballot privacy handler"
+    );
+    assert_eq!(bgv_error.code, CanonicalErrorCode::InvalidFixture);
+    assert_eq!(
+        bgv_error.message,
+        "non-BGV command dispatched to BGV handler"
+    );
+}
+
+#[test]
 fn command_derives_protocol_digest_with_kernel_canonical_json() {
     let response = super::run_transcript_core_command_inner(
         serde_json::json!({

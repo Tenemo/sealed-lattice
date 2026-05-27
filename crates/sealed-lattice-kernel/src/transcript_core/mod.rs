@@ -50,7 +50,9 @@ mod tests {
         parse_transcript_core_object, serialize_transcript_core_object,
     };
     use crate::encoding::{CanonicalErrorCode, append_varuint};
-    use crate::transcript_core::types::FIELD_TAGS;
+    use crate::transcript_core::types::{
+        BaseClaimProfile, FIELD_TAGS, MheSecurityClosure, TranscriptCoreProfile,
+    };
 
     #[test]
     fn canonical_object_round_trips_byte_identically() {
@@ -130,6 +132,20 @@ mod tests {
             combined,
             DeterministicFixtureRng::new("different-seed").next_bytes(83),
         );
+    }
+
+    #[test]
+    fn fixture_seed_label_preserves_historical_active_malicious_token() {
+        let profile = TranscriptCoreProfile::new(
+            BaseClaimProfile::FullyVerified,
+            MheSecurityClosure::ActiveMalicious,
+        );
+
+        assert_eq!(
+            MheSecurityClosure::ActiveMalicious.label(),
+            "activeMalicious"
+        );
+        assert_eq!(profile.seed_label(), "fullyVerified:ActiveMalicious");
     }
 
     #[test]

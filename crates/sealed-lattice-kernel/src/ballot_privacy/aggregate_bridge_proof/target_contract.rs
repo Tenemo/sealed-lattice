@@ -7,7 +7,8 @@ pub(super) fn bridge_proof_target_contract_value(
 ) -> CanonicalResult<Value> {
     let polynomial_degree = POLYNOMIAL_DEGREE as u64;
     let data_prime_count = DATA_PRIMES.len() as u64;
-    let ciphertext_component_count = 2_u64;
+    let ciphertext_component_count = BRIDGE_BGV_CIPHERTEXT_COMPONENT_COUNT;
+    let aggregate_reduction_row_count = aggregate_reduced_coordinate_count;
     let shared_witness_layout = shared_witness_layout_value(
         aggregate_reduced_coordinate_count,
         aggregate_quotient_coordinate_count,
@@ -24,7 +25,7 @@ pub(super) fn bridge_proof_target_contract_value(
         "aggregateReducedCoordinateCount": aggregate_reduced_coordinate_count,
         "aggregateQuotientCoordinateCount": aggregate_quotient_coordinate_count,
         "commitmentOpeningCoordinateCount": SHARE_COMMITMENT_OPENING_DIMENSION,
-        "aggregateReductionRowCount": aggregate_reduced_coordinate_count,
+        "aggregateReductionRowCount": aggregate_reduction_row_count,
         "fieldReductionModulus": BALLOT_PRIVACY_FIELD_MODULUS,
         "plaintextEncodingRelation": PLAINTEXT_ENCODING_RELATION,
         "plaintextCoefficientCount": polynomial_degree,
@@ -66,7 +67,7 @@ fn shared_witness_layout_value(
 ) -> Value {
     let polynomial_degree = POLYNOMIAL_DEGREE as u64;
     let data_prime_count = DATA_PRIMES.len() as u64;
-    let ciphertext_component_count = 2_u64;
+    let ciphertext_component_count = BRIDGE_BGV_CIPHERTEXT_COMPONENT_COUNT;
     let aggregate_integer_share_coordinate_count = aggregate_reduced_coordinate_count;
     let commitment_opening_coordinate_count = SHARE_COMMITMENT_OPENING_DIMENSION as u64;
     let plaintext_coefficient_count = polynomial_degree;

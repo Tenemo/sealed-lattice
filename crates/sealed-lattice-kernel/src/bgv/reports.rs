@@ -11,7 +11,8 @@ use crate::{
             backend_profile_digest, ballot_score_encoding_profile_digest,
             ballot_share_layout_profile_digest, batch_encoder_digest, batch_layout_binding_digest,
             batch_layout_binding_value, canonical_ciphertext_convention_digest,
-            data_prime_bit_length, encoded_aggregate_layout_digest, layout_digest, profile_digest,
+            data_basis_modulus_bits, data_prime_bit_length, encoded_aggregate_layout_digest,
+            extended_basis_modulus_bits, layout_digest, profile_digest,
             security_estimator_input_digest, selected_profile_value,
             top_k_evaluator_input_layout_digest,
         },
@@ -106,8 +107,8 @@ pub(crate) fn operation_registry_report() -> CanonicalResult<Value> {
 pub(crate) fn backend_parameter_certificate_report() -> CanonicalResult<Value> {
     let profile_digest = profile_digest()?;
     let data_prime_bits = usize::try_from(data_prime_bit_length()).unwrap_or(0);
-    let q_data_bits = DATA_PRIMES.len() * data_prime_bits;
-    let qp_public_bits = (DATA_PRIMES.len() + 1) * data_prime_bits;
+    let q_data_bits = data_basis_modulus_bits();
+    let qp_public_bits = extended_basis_modulus_bits();
     let parameter_certificate_value = json!({
         "parameterCertificateId": "m7-bgv-rns-backend-parameter-certificate-v1",
         "profileId": PROFILE_ID,
