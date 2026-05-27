@@ -20,6 +20,7 @@ import {
     isProtocolDigestString,
     signedObjectRootByteLength,
     uniqueStrings,
+    verificationExceptionMessage,
 } from '../common/verification-helpers.js';
 
 import {
@@ -636,7 +637,7 @@ export const verifyTargetFinality = (
 ): TargetFinalityVerification => {
     try {
         return verifyTargetFinalityUnchecked(input);
-    } catch {
+    } catch (error) {
         return {
             ok: false,
             statusLabels: [],
@@ -644,7 +645,10 @@ export const verifyTargetFinality = (
             refusedObjects: [
                 createRefusal(
                     'TargetFinalityPolicyMismatch',
-                    'Target finality evidence could not be canonicalized or validated.',
+                    verificationExceptionMessage(
+                        'Target finality evidence could not be canonicalized or validated.',
+                        error,
+                    ),
                     undefined,
                     'TargetFinalityRecord',
                 ),

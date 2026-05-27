@@ -22,6 +22,7 @@ const mlDsa65SecretKeyByteLength = ml_dsa65.lengths.secretKey!;
 const mlDsa65SignatureByteLength = ml_dsa65.lengths.signature!;
 
 export type SignatureExpectation = {
+    readonly allowUnboundVerification?: boolean;
     readonly objectType?: SignedObjectType;
     readonly objectVersion?: number;
     readonly signerRole?: SignerRole;
@@ -416,6 +417,29 @@ const validateExpectation = (
     expectation: SignatureExpectation,
 ): SignatureVerificationResult | undefined => {
     const { signedRoot } = signature;
+    const hasBoundRoot =
+        expectation.objectRoot !== undefined ||
+        expectation.chunkMerkleRoot !== undefined;
+    const requiredBindingMissing =
+        expectation.objectType === undefined ||
+        expectation.objectVersion === undefined ||
+        expectation.signerRole === undefined ||
+        expectation.signerIdentity === undefined ||
+        expectation.ceremonyId === undefined ||
+        expectation.publicKeyDigest === undefined ||
+        expectation.contextDigest === undefined ||
+        !hasBoundRoot;
+
+    if (
+        expectation.allowUnboundVerification !== true &&
+        requiredBindingMissing
+    ) {
+        return emptySignatureVerificationResult(
+            'InvalidSignedRoot',
+            'Signature verification requires explicit expected object, signer, context, key, and root bindings.',
+            signature.signatureDigest,
+        );
+    }
 
     if (
         expectation.objectType !== undefined &&

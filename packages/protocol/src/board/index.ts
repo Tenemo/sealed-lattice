@@ -17,6 +17,7 @@ import {
     isNonNegativeInteger,
     signedObjectRootByteLength,
     uniqueStrings,
+    verificationExceptionMessage,
 } from '../common/verification-helpers.js';
 
 import {
@@ -714,7 +715,7 @@ export const verifyBoardConsistency = (
 ): BoardConsistencyVerification => {
     try {
         return verifyBoardConsistencyUnchecked(input);
-    } catch {
+    } catch (error) {
         return {
             ok: false,
             statusLabels: [],
@@ -722,7 +723,10 @@ export const verifyBoardConsistency = (
             refusedObjects: [
                 createRefusal(
                     'BoardConsistencyFailure',
-                    'Board evidence could not be canonicalized or validated.',
+                    verificationExceptionMessage(
+                        'Board evidence could not be canonicalized or validated.',
+                        error,
+                    ),
                 ),
             ],
             verifiedHeadDigests: [],

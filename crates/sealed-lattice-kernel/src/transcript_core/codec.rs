@@ -4,16 +4,18 @@ use super::rng::DeterministicFixtureRng;
 use super::types::{
     ACTIVE_MALICIOUS_MHE_PROFILE_ID, BaseClaimProfile, DEVELOPMENT_INTEGRATION_PROFILE_ID,
     ENVELOPE_VERSION, FIELD_CHECKPOINTS, FIELD_PAYLOAD, FIELD_SEQUENCE, FIELD_STATUS, FIELD_TAGS,
-    FIELD_TITLE, FULLY_VERIFIED_PROFILE_ID, MAGIC, MANDATORY_EVALUATION_PROOF_PROFILE_ID,
-    MheSecurityClosure, NO_DECRYPTION_PROOF_PROFILE_ID, NO_HE_SETUP_PROOF_PROFILE_ID,
-    REQUIRED_FIELDS, TRANSCRIPT_CORE_OBJECT_TYPE, TRANSCRIPT_CORE_OBJECT_VERSION,
-    TranscriptCoreAnalysis, TranscriptCoreObject, TranscriptCoreProfile, TranscriptCoreStatus,
+    FIELD_TITLE, MAGIC, MANDATORY_EVALUATION_PROOF_PROFILE_ID, MheSecurityClosure,
+    NO_DECRYPTION_PROOF_PROFILE_ID, NO_HE_SETUP_PROOF_PROFILE_ID, REQUIRED_FIELDS,
+    TRANSCRIPT_CORE_OBJECT_TYPE, TRANSCRIPT_CORE_OBJECT_VERSION, TranscriptCoreAnalysis,
+    TranscriptCoreObject, TranscriptCoreProfile, TranscriptCoreStatus,
 };
 use crate::encoding::{
     CanonicalError, CanonicalErrorCode, CanonicalReader, CanonicalResult, append_bytes,
     append_string, append_varuint,
 };
 use crate::hashing::{chunk_root, object_root, to_hex};
+
+const MAX_TRANSCRIPT_CORE_CANONICAL_BYTE_LENGTH: usize = 16 * 1024 * 1024;
 
 pub fn encode_hex(bytes: &[u8]) -> String {
     to_hex(bytes)
@@ -276,6 +278,12 @@ pub fn analyze_canonical_object(
     bytes: &[u8],
     chunk_size: u64,
 ) -> CanonicalResult<TranscriptCoreAnalysis> {
+    if bytes.len() > MAX_TRANSCRIPT_CORE_CANONICAL_BYTE_LENGTH {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "canonicalBytesHex exceeds the supported transcript-core object byte limit",
+        ));
+    }
     let chunk_size_usize = usize::try_from(chunk_size).map_err(|_| {
         CanonicalError::new(
             CanonicalErrorCode::InvalidChunkSize,
@@ -311,6 +319,12 @@ pub fn analyze_canonical_object_hex(
     canonical_bytes_hex: &str,
     chunk_size: u64,
 ) -> CanonicalResult<Value> {
+    if canonical_bytes_hex.len() / 2 > MAX_TRANSCRIPT_CORE_CANONICAL_BYTE_LENGTH {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "canonicalBytesHex exceeds the supported transcript-core object byte limit",
+        ));
+    }
     let bytes = decode_hex(canonical_bytes_hex)?;
 
     analyze_canonical_object(&bytes, chunk_size)?.to_json_value()
@@ -357,16 +371,9 @@ fn validate_profiles(
     decryption_proof_profile_id: &str,
 ) -> CanonicalResult<()> {
     if base_claim_profile_id != base_claim_profile.expected_profile_id() {
-        let allowed = [FULLY_VERIFIED_PROFILE_ID];
-        if !allowed.contains(&base_claim_profile_id) {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::UnknownProofProfile,
-                "base claim profile ID is not supported",
-            ));
-        }
         return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
-            "base claim profile ID does not match base claim profile",
+            CanonicalErrorCode::UnknownProofProfile,
+            "base claim profile ID is not supported",
         ));
     }
     if mhe_security_profile_id != mhe_security_closure.expected_profile_id() {

@@ -88,6 +88,7 @@ export const protocolDigestNamespaceValues = [
     'AggregateReadyRecordDigest',
     'AggregateSelectionPolicyDigest',
     'PostVotingClosedContextDigest',
+    'M8EvaluatorBindingContextDigest',
     'EvaluationContextDigest',
     'TopKEvaluationRecordDigest',
     'TargetProposalDigest',

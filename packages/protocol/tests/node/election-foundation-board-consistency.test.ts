@@ -568,15 +568,25 @@ describe('board consistency', () => {
         const expectFailClosed = (
             verifier: () => {
                 readonly ok: boolean;
-                readonly refusedObjects: readonly { readonly code: string }[];
+                readonly refusedObjects: readonly {
+                    readonly code: string;
+                    readonly message?: string;
+                }[];
             },
             expectedCode: string,
-        ): void => {
+        ): {
+            readonly ok: boolean;
+            readonly refusedObjects: readonly {
+                readonly code: string;
+                readonly message?: string;
+            }[];
+        } => {
             let result:
                 | {
                       readonly ok: boolean;
                       readonly refusedObjects: readonly {
                           readonly code: string;
+                          readonly message?: string;
                       }[];
                   }
                 | undefined;
@@ -590,10 +600,15 @@ describe('board consistency', () => {
                     expect.objectContaining({ code: expectedCode }),
                 ]),
             );
+            if (result === undefined) {
+                throw new Error('Verifier did not return a result.');
+            }
+
+            return result;
         };
 
         delete malformedBoardHead.previousHeadDigest;
-        expectFailClosed(
+        const malformedBoardResult = expectFailClosed(
             () =>
                 verifyBoardConsistency(
                     createBoardEvidence([
@@ -601,6 +616,9 @@ describe('board consistency', () => {
                     ]),
                 ),
             'BoardConsistencyFailure',
+        );
+        expect(malformedBoardResult.refusedObjects[0]?.message).toContain(
+            'Diagnostic:',
         );
         expectFailClosed(
             () => verifySignedObjectSignature(malformedSignature),

@@ -28,6 +28,7 @@ __pycache__/
 
 # Temporary files
 temp/
+temp.txt
 
 # env
 .env

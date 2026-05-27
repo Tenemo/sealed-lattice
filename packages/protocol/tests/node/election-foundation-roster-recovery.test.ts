@@ -46,6 +46,23 @@ describe('roster and manifest shells', () => {
         );
     });
 
+    it('rejects roster identities that collide after Unicode normalization', () => {
+        const registrations = [
+            createRegistrationEntry('Cafe\u0301', 1, 0),
+            createRegistrationEntry('Caf\u00e9', 1, 1),
+            createRegistrationEntry('participant-3', 1, 2),
+        ];
+        const input = createRosterManifestTranscriptInput(registrations);
+        const result = verifyRosterManifestTranscript(input);
+
+        expect(result.ok).toBe(false);
+        expect(result.refusedObjects).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({ code: 'DuplicateRegistration' }),
+            ]),
+        );
+    });
+
     it('requires object signatures rather than transport authentication for manifests', () => {
         const input = createRosterManifestTranscriptInput([
             createRegistrationEntry('participant-1', 1, 0),

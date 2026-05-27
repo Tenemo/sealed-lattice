@@ -33,6 +33,8 @@ const transcriptCoreKernelUrl = new URL(
     '../dist/sealed-lattice-kernel.wasm',
     import.meta.url,
 );
+const packagedTranscriptCoreKernelNormalizedSha256Hex =
+    'ea74bd2971b21105399bdd5446aa18a0b97986439fa4e92fc91a8bf233ea8bed';
 
 export {
     canonicalErrorCodes,
@@ -64,7 +66,8 @@ export type {
 
 export const loadTranscriptCoreKernel: () => Promise<TranscriptCoreKernel> =
     createTranscriptCoreKernelLoader(transcriptCoreKernelUrl, {
-        allowUnpinnedKernel: true,
+        expectedKernelSha256Hex:
+            packagedTranscriptCoreKernelNormalizedSha256Hex,
     });
 
 export const verifyTranscriptCoreFixture = async (

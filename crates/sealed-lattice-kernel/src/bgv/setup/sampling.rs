@@ -93,11 +93,10 @@ pub(super) fn sample_centered_binomial_eta2(
                     position_text.as_bytes(),
                 ],
             );
-            let low_weight = i64::from(output[0] & 1) + i64::from((output[0] >> 1) & 1);
-            let high_weight = i64::from((output[0] >> 2) & 1) + i64::from((output[0] >> 3) & 1);
+            let value = centered_binomial_eta2_from_bits(output[0]);
             json!({
                 "position": position,
-                "value": low_weight - high_weight,
+                "value": value,
             })
         })
         .collect()
@@ -137,23 +136,42 @@ pub(super) fn dense_centered_binomial_coefficients(
     identity: &str,
     label: &str,
 ) -> Vec<i64> {
-    (0..POLYNOMIAL_DEGREE)
-        .map(|position| {
-            let position_text = position.to_string();
-            let output = hash512(
-                "sealed-lattice-bgv-rns/sample-centered-binomial-eta2-v1",
-                &[
-                    seed_digest.as_bytes(),
-                    identity.as_bytes(),
-                    label.as_bytes(),
-                    position_text.as_bytes(),
-                ],
-            );
-            let low_weight = i64::from(output[0] & 1) + i64::from((output[0] >> 1) & 1);
-            let high_weight = i64::from((output[0] >> 2) & 1) + i64::from((output[0] >> 3) & 1);
-            low_weight - high_weight
-        })
-        .collect()
+    let mut coefficients = Vec::with_capacity(POLYNOMIAL_DEGREE);
+    let mut block_index = 0_u64;
+    while coefficients.len() < POLYNOMIAL_DEGREE {
+        let block_index_text = block_index.to_string();
+        let output = hash512(
+            "sealed-lattice-bgv-rns/sample-centered-binomial-eta2-dense-v1",
+            &[
+                seed_digest.as_bytes(),
+                identity.as_bytes(),
+                label.as_bytes(),
+                block_index_text.as_bytes(),
+            ],
+        );
+        for byte in output {
+            coefficients.push(centered_binomial_eta2_from_bits(byte));
+            if coefficients.len() == POLYNOMIAL_DEGREE {
+                break;
+            }
+            coefficients.push(centered_binomial_eta2_from_bits(byte >> 4));
+            if coefficients.len() == POLYNOMIAL_DEGREE {
+                break;
+            }
+        }
+        block_index = block_index
+            .checked_add(1)
+            .expect("centered binomial block index overflowed");
+    }
+
+    coefficients
+}
+
+fn centered_binomial_eta2_from_bits(bits: u8) -> i64 {
+    let low_weight = i64::from(bits & 1) + i64::from((bits >> 1) & 1);
+    let high_weight = i64::from((bits >> 2) & 1) + i64::from((bits >> 3) & 1);
+
+    low_weight - high_weight
 }
 
 pub(super) fn signed_to_modulus_residue(value: i64, modulus: u64) -> u64 {

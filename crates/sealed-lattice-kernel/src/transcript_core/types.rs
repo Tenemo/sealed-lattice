@@ -103,6 +103,8 @@ impl TranscriptCoreProfile {
     }
 
     pub(super) fn seed_label(self) -> String {
+        // Keep this historical fixture seed token capitalized because existing
+        // deterministic transcript fixture bytes were generated with it.
         let fixture_seed_mhe_label = match self.mhe_security_closure {
             MheSecurityClosure::DevelopmentIntegration => "developmentIntegration",
             MheSecurityClosure::ActiveMalicious => "ActiveMalicious",

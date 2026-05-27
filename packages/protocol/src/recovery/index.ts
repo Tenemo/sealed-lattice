@@ -22,6 +22,7 @@ import {
     defaultSignedRootContextDigest,
     isNonNegativeInteger,
     signedObjectRootByteLength,
+    verificationExceptionMessage,
 } from '../common/verification-helpers.js';
 
 export const deriveActionContextDigest = (
@@ -199,7 +200,7 @@ export const isActionCurrentForRecoveryEpoch = (
 ): ActionCurrentForRecoveryEpochResult => {
     try {
         return isActionCurrentForRecoveryEpochUnchecked(input);
-    } catch {
+    } catch (error) {
         return {
             ok: false,
             statusLabels: [],
@@ -207,7 +208,10 @@ export const isActionCurrentForRecoveryEpoch = (
             refusedObjects: [
                 createRefusal(
                     'InvalidSignedRoot',
-                    'Action recovery context could not be canonicalized or validated.',
+                    verificationExceptionMessage(
+                        'Action recovery context could not be canonicalized or validated.',
+                        error,
+                    ),
                     undefined,
                     'ActionContext',
                 ),
@@ -461,7 +465,7 @@ export const verifyRecoveryEpochUpdate = (
 ): RecoveryEpochVerification => {
     try {
         return verifyRecoveryEpochUpdateUnchecked(input);
-    } catch {
+    } catch (error) {
         return {
             ok: false,
             statusLabels: [],
@@ -469,7 +473,10 @@ export const verifyRecoveryEpochUpdate = (
             refusedObjects: [
                 createRefusal(
                     'RecoveryUpdateInvalid',
-                    'Recovery epoch update evidence could not be canonicalized or validated.',
+                    verificationExceptionMessage(
+                        'Recovery epoch update evidence could not be canonicalized or validated.',
+                        error,
+                    ),
                     undefined,
                     'RecoveryEpochUpdate',
                 ),

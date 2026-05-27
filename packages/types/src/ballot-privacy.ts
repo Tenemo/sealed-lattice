@@ -637,6 +637,7 @@ export type BridgeProofRecord = {
     readonly bridgeProofProfileDigest: ProtocolDigest;
     readonly bridgeProofTargetContractDigest: ProtocolDigest;
     readonly bgvEncryptionProofSubrelation:
+        | 'SealedLatticeDevelopmentCiphertextEquationRelation'
         | 'SealedLatticeBoundedEncryptionRelation'
         | 'HwangPiopCandidate';
     readonly proofBackend: 'SealedLatticeBridgeRelation';
@@ -648,6 +649,7 @@ export type BridgeProofRecord = {
     readonly shareCommitmentMessageBoundCertDigest: ProtocolDigest;
     readonly encryptedAggregateBridgeDigest: ProtocolDigest;
     readonly encryptedAggregateTargetBasisDataRoot: ProtocolDigest;
+    readonly encryptedAggregateInputRoot: ProtocolDigest;
     readonly encryptedAggregateShareCiphertextRoot: ProtocolDigest;
     readonly encryptedAggregateReconstructionDigest: ProtocolDigest;
     readonly bridgeWitnessPrivacyProfileDigest: ProtocolDigest;
@@ -679,6 +681,7 @@ export type BridgeProofRecord = {
     readonly shareVectorWidth: number;
     readonly ballotSetDigest: ProtocolDigest;
     readonly votingClosedBoardHeadDigest: ProtocolDigest;
+    readonly contributorActionContextDigest: ProtocolDigest;
     readonly contributorIdentity: string;
     readonly contributorRosterPosition: number;
     readonly contributorRosterExternalAcceptanceDigest: ProtocolDigest;
@@ -720,6 +723,7 @@ export type AggregateContribution = {
     readonly bridgeProofProfileDigest: ProtocolDigest;
     readonly encryptedAggregateBridgeDigest: ProtocolDigest;
     readonly encryptedAggregateTargetBasisDataRoot: ProtocolDigest;
+    readonly encryptedAggregateInputRoot: ProtocolDigest;
     readonly encryptedAggregateShareCiphertextRoot: ProtocolDigest;
     readonly encryptedAggregateReconstructionDigest: ProtocolDigest;
     readonly bridgeWitnessPrivacyProfileDigest: ProtocolDigest;

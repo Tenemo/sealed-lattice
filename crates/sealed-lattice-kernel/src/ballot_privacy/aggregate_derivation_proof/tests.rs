@@ -1,8 +1,9 @@
 use super::relation_proof::{aggregate_relation_challenge_scalar, reduce_unbiased_u64};
 use super::{
     AGGREGATE_DERIVATION_CHALLENGE_REPETITION_COUNT, AGGREGATE_DERIVATION_CHALLENGE_SOUNDNESS_BITS,
-    AGGREGATE_DERIVATION_PROOF_MODULUS,
+    AGGREGATE_DERIVATION_PROOF_MODULUS, constant_u64_source_witness_polynomial,
 };
+use crate::encoding::CanonicalErrorCode;
 
 #[test]
 fn aggregate_derivation_unbiased_reduction_rejects_overhang_samples() {
@@ -45,4 +46,18 @@ fn aggregate_derivation_repeats_field_challenges_to_reach_target_soundness() {
 
     assert!((1..AGGREGATE_DERIVATION_PROOF_MODULUS).contains(&first_challenge));
     assert!((1..AGGREGATE_DERIVATION_PROOF_MODULUS).contains(&second_challenge));
+}
+
+#[test]
+fn aggregate_derivation_bridge_witness_rejects_signed_encoding_overflow() {
+    let error =
+        constant_u64_source_witness_polynomial(i64::MAX as u64 + 1, "integer share coordinate")
+            .expect_err("oversized unsigned witness coordinate must be rejected");
+
+    assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
+    assert!(
+        error
+            .message
+            .contains("exceeds signed proof encoding range")
+    );
 }

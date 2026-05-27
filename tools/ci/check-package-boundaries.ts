@@ -3,26 +3,11 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import {
-    ScriptKind,
-    ScriptTarget,
-    SyntaxKind,
-    createSourceFile,
-    forEachChild,
-    isCallExpression,
-    isExportDeclaration,
-    isImportDeclaration,
-    isImportTypeNode,
-    isLiteralTypeNode,
-    isStringLiteral,
-    type Node,
-    type StringLiteral,
-} from 'typescript';
-
-import {
     collectFiles,
     isWithinDirectory,
     toPosixPath,
 } from '../internal/files.js';
+import { extractModuleSpecifiers } from '../internal/module-specifiers.js';
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const packagesRoot = path.resolve(repoRoot, 'packages');
@@ -88,67 +73,8 @@ export const collectInternalDependencies = (
         .sort();
 };
 
-const collectImportSpecifierLiterals = (
-    sourceText: string,
-): readonly StringLiteral[] => {
-    const sourceFile = createSourceFile(
-        'package-boundary-source.tsx',
-        sourceText,
-        ScriptTarget.Latest,
-        true,
-        ScriptKind.TSX,
-    );
-    const specifiers: StringLiteral[] = [];
-
-    const visit = (node: Node): void => {
-        if (
-            isImportDeclaration(node) &&
-            isStringLiteral(node.moduleSpecifier)
-        ) {
-            specifiers.push(node.moduleSpecifier);
-        } else if (
-            isExportDeclaration(node) &&
-            node.moduleSpecifier !== undefined &&
-            isStringLiteral(node.moduleSpecifier)
-        ) {
-            specifiers.push(node.moduleSpecifier);
-        } else if (
-            isCallExpression(node) &&
-            node.expression.kind === SyntaxKind.ImportKeyword
-        ) {
-            const [moduleSpecifier] = node.arguments;
-            if (
-                moduleSpecifier !== undefined &&
-                isStringLiteral(moduleSpecifier)
-            ) {
-                specifiers.push(moduleSpecifier);
-            }
-        } else if (isImportTypeNode(node)) {
-            const importTypeArgument = node.argument;
-            if (
-                isLiteralTypeNode(importTypeArgument) &&
-                isStringLiteral(importTypeArgument.literal)
-            ) {
-                specifiers.push(importTypeArgument.literal);
-            }
-        }
-
-        forEachChild(node, visit);
-    };
-
-    visit(sourceFile);
-
-    return specifiers;
-};
-
 export const extractImportSpecifiers = (sourceText: string): string[] => {
-    const specifiers = new Set<string>();
-
-    for (const moduleSpecifier of collectImportSpecifierLiterals(sourceText)) {
-        specifiers.add(moduleSpecifier.text);
-    }
-
-    return [...specifiers];
+    return extractModuleSpecifiers(sourceText, 'package-boundary-source.tsx');
 };
 
 export const validateDeclaredInternalDependencies = (

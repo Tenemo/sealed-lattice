@@ -19,6 +19,7 @@ import {
     defaultSignedRootContextDigest,
     isNonNegativeInteger,
     signedObjectRootByteLength,
+    verificationExceptionMessage,
 } from '../common/verification-helpers.js';
 
 export const deriveCastReceiptDigest = (
@@ -208,7 +209,7 @@ export const verifyCastReceiptShell = (
 ): CastReceiptVerification => {
     try {
         return verifyCastReceiptShellUnchecked(input);
-    } catch {
+    } catch (error) {
         return {
             ok: false,
             statusLabels: [],
@@ -216,7 +217,10 @@ export const verifyCastReceiptShell = (
             refusedObjects: [
                 createRefusal(
                     'CastReceiptInvalid',
-                    'Cast receipt evidence could not be canonicalized or validated.',
+                    verificationExceptionMessage(
+                        'Cast receipt evidence could not be canonicalized or validated.',
+                        error,
+                    ),
                 ),
             ],
         };
@@ -440,7 +444,7 @@ export const verifyCloseRecordShell = (
 ): CloseRecordVerification => {
     try {
         return verifyCloseRecordShellUnchecked(input);
-    } catch {
+    } catch (error) {
         return {
             ok: false,
             statusLabels: [],
@@ -448,7 +452,10 @@ export const verifyCloseRecordShell = (
             refusedObjects: [
                 createRefusal(
                     'CloseRecordInvalid',
-                    'Close record evidence could not be canonicalized or validated.',
+                    verificationExceptionMessage(
+                        'Close record evidence could not be canonicalized or validated.',
+                        error,
+                    ),
                 ),
             ],
         };

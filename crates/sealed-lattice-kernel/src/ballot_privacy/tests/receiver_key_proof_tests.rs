@@ -4,7 +4,7 @@ use super::proof_record_generation_tests::{
 };
 use super::*;
 use crate::ballot_privacy::{
-    linear_proof_parameters::{
+    linear_proof::parameters::{
         receiver_key_linear_parameter_contract, receiver_key_linear_proof_encoding_contract,
     },
     polynomial_ring::PolynomialRing,

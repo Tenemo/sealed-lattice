@@ -1,5 +1,7 @@
 use std::collections::BTreeSet;
 
+use crate::encoding::CanonicalResult;
+
 mod relation_proof;
 #[cfg(test)]
 mod tests;
@@ -30,6 +32,7 @@ const AGGREGATE_DERIVATION_WITNESS_L2_BOUND_SQUARED: u128 = 3_000_000_000_000_00
 const AGGREGATE_DERIVATION_PROOF_MODULUS: u64 = 70_368_744_177_829;
 const AGGREGATE_DERIVATION_CHALLENGE_REPETITION_COUNT: usize = 3;
 const AGGREGATE_DERIVATION_CHALLENGE_SOUNDNESS_BITS: u64 = 138;
+const MAX_AGGREGATE_DERIVATION_RELATION_PROOF_BYTES: usize = 64 * 1024 * 1024;
 
 pub(crate) fn generate_aggregate_derivation_proof_from_command_request(request: &Value) -> Value {
     let proof_input =
@@ -420,25 +423,33 @@ pub(crate) fn check_aggregate_derivation_witness_relation(
         quotient_vector.push(quotient);
     }
 
-    let source_witness_coefficients = aggregate_integer_share_vector
-        .iter()
-        .map(|coefficient| constant_source_witness_polynomial(*coefficient as i64))
-        .chain(
-            aggregate_opening_randomness
-                .iter()
-                .map(|coefficient| constant_source_witness_polynomial(*coefficient)),
-        )
-        .chain(
-            reduced_field_vector
-                .iter()
-                .map(|coefficient| constant_source_witness_polynomial(*coefficient as i64)),
-        )
-        .chain(
-            quotient_vector
-                .iter()
-                .map(|coefficient| constant_source_witness_polynomial(*coefficient as i64)),
-        )
-        .collect::<Vec<_>>();
+    let mut source_witness_coefficients = Vec::with_capacity(
+        aggregate_integer_share_vector.len()
+            + aggregate_opening_randomness.len()
+            + reduced_field_vector.len()
+            + quotient_vector.len(),
+    );
+    for share_coordinate in aggregate_integer_share_vector {
+        source_witness_coefficients.push(constant_u64_source_witness_polynomial(
+            *share_coordinate,
+            "integer share coordinate",
+        )?);
+    }
+    for opening_coordinate in aggregate_opening_randomness {
+        source_witness_coefficients.push(constant_source_witness_polynomial(*opening_coordinate));
+    }
+    for reduced_coordinate in &reduced_field_vector {
+        source_witness_coefficients.push(constant_u64_source_witness_polynomial(
+            *reduced_coordinate,
+            "reduced field coordinate",
+        )?);
+    }
+    for quotient_coordinate in &quotient_vector {
+        source_witness_coefficients.push(constant_u64_source_witness_polynomial(
+            *quotient_coordinate,
+            "quotient coordinate",
+        )?);
+    }
     let secret_state = json!({
         "sourceWitnessCoefficients": source_witness_coefficients,
     });
@@ -460,4 +471,17 @@ fn constant_source_witness_polynomial(coefficient: i64) -> Vec<i64> {
     polynomial[0] = coefficient;
 
     polynomial
+}
+
+fn constant_u64_source_witness_polynomial(
+    coefficient: u64,
+    description: &str,
+) -> CanonicalResult<Vec<i64>> {
+    let signed_coefficient = i64::try_from(coefficient).map_err(|_| {
+        invalid_preflight(format!(
+            "Bridge aggregate derivation witness {description} exceeds signed proof encoding range",
+        ))
+    })?;
+
+    Ok(constant_source_witness_polynomial(signed_coefficient))
 }

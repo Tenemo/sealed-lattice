@@ -5,6 +5,23 @@ use crate::{
     hashing::derive_protocol_digest,
 };
 
+const COMMON_FORBIDDEN_SETUP_SECRET_FIELD_NAMES: &[&str] = &[
+    "secretShares",
+    "rawSecretShares",
+    "globalSecret",
+    "globalSecretPolynomial",
+    "fullSecretPolynomial",
+    "trustedDealerSecret",
+    "trustedDealerSecretHex",
+    "centralizedSecret",
+    "rawKeySwitchSecret",
+    "rawDecryptionSecret",
+];
+const REQUEST_ONLY_FORBIDDEN_SETUP_SECRET_FIELD_NAMES: &[&str] =
+    &["centralizedSecretReconstruction"];
+const PACKAGE_SECRET_FLAG_FIELD_NAMES: &[&str] =
+    &["centralizedSecretReconstruction", "rawSecretShareExported"];
+
 pub(super) fn reject_forbidden_setup_fields(request: &Value) -> CanonicalResult<()> {
     for field_name in forbidden_setup_field_names() {
         if request.get(field_name).is_some() {
@@ -21,19 +38,11 @@ pub(super) fn reject_forbidden_setup_fields(request: &Value) -> CanonicalResult<
 }
 
 pub(super) fn forbidden_setup_field_names() -> Vec<&'static str> {
-    vec![
-        "secretShares",
-        "rawSecretShares",
-        "globalSecret",
-        "globalSecretPolynomial",
-        "fullSecretPolynomial",
-        "trustedDealerSecret",
-        "trustedDealerSecretHex",
-        "centralizedSecret",
-        "centralizedSecretReconstruction",
-        "rawKeySwitchSecret",
-        "rawDecryptionSecret",
-    ]
+    COMMON_FORBIDDEN_SETUP_SECRET_FIELD_NAMES
+        .iter()
+        .chain(REQUEST_ONLY_FORBIDDEN_SETUP_SECRET_FIELD_NAMES)
+        .copied()
+        .collect()
 }
 
 pub(super) fn read_non_empty_string<'a>(
@@ -287,19 +296,11 @@ pub(super) fn compare_derived_digest(
 }
 
 fn is_forbidden_setup_package_secret_field(field_name: &str) -> bool {
-    matches!(
-        field_name,
-        "secretShares"
-            | "rawSecretShares"
-            | "globalSecret"
-            | "globalSecretPolynomial"
-            | "fullSecretPolynomial"
-            | "trustedDealerSecret"
-            | "trustedDealerSecretHex"
-            | "centralizedSecret"
-            | "rawKeySwitchSecret"
-            | "rawDecryptionSecret"
-    )
+    COMMON_FORBIDDEN_SETUP_SECRET_FIELD_NAMES.contains(&field_name)
+}
+
+fn is_setup_package_secret_flag_field(field_name: &str) -> bool {
+    PACKAGE_SECRET_FLAG_FIELD_NAMES.contains(&field_name)
 }
 
 pub(super) fn reject_forbidden_setup_package_secret_fields(value: &Value) -> CanonicalResult<()> {
@@ -319,8 +320,7 @@ pub(super) fn reject_forbidden_setup_package_secret_fields(value: &Value) -> Can
                         ),
                     ));
                 }
-                if (field_name == "centralizedSecretReconstruction"
-                    || field_name == "rawSecretShareExported")
+                if is_setup_package_secret_flag_field(field_name)
                     && field_value.as_bool() != Some(false)
                 {
                     return Err(CanonicalError::new(

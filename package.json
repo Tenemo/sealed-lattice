@@ -18,7 +18,7 @@
         "tsc": "tsc --build --pretty false",
         "vectors": "tsx ./tools/ci/verify-test-vectors.ts",
         "vectors:generate": "tsx ./tools/ci/verify-test-vectors.ts --generate",
-        "check:static": "pnpm run lint && pnpm run tsc && cargo fmt --check -p sealed-lattice-kernel && cargo clippy --workspace --all-targets --all-features -- -D warnings && cargo test --workspace && tsx ./tools/ci/check-package-boundaries.ts && pnpm run vectors && knip",
+        "check:static": "pnpm run lint && pnpm run tsc && cargo fmt --check -p sealed-lattice-kernel && cargo clippy --workspace --all-targets --all-features -- -D warnings && cargo test --workspace && tsx ./tools/ci/check-package-boundaries.ts && tsx ./tools/ci/verify-public-surface.ts && pnpm run vectors && knip",
         "check": "pnpm run build && pnpm run check:static",
         "build": "tsx ./tools/run-turbo.ts build",
         "test:node:fast": "pnpm run build && tsx ./tools/ci/run-node-tests.ts --only fast",

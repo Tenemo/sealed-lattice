@@ -3,7 +3,7 @@ use sha3::{
     Shake256,
     digest::{ExtendableOutput, Update, XofReader},
 };
-use std::cmp::Ordering;
+use std::{cmp::Ordering, collections::BTreeSet};
 use unicode_normalization::UnicodeNormalization;
 
 use crate::encoding::{
@@ -13,6 +13,8 @@ use crate::encoding::{
 #[cfg(test)]
 pub const MODULE_MARKER: &str = "hashing";
 pub const HASH512_PREIMAGE_PREFIX: &[u8] = b"sealed.vote/v1/hash512";
+const MAX_CANONICAL_JSON_DEPTH: usize = 512;
+const MAX_CHUNK_ROOT_LEAF_COUNT: usize = 1_048_576;
 
 macro_rules! reserved_root_namespaces {
     ($( $constant_name:ident => $namespace:literal, )+) => {
@@ -107,6 +109,7 @@ reserved_root_namespaces! {
     AGGREGATE_READY_RECORD_DIGEST_NAMESPACE => "sealed-lattice-root/aggregate-ready-record-digest-v1",
     AGGREGATE_SELECTION_POLICY_DIGEST_NAMESPACE => "sealed-lattice-root/aggregate-selection-policy-digest-v1",
     POST_VOTING_CLOSED_CONTEXT_DIGEST_NAMESPACE => "sealed-lattice-root/post-voting-closed-context-digest-v1",
+    M8_EVALUATOR_BINDING_CONTEXT_DIGEST_NAMESPACE => "sealed-lattice-root/m8-evaluator-binding-context-digest-v1",
     EVALUATION_CONTEXT_DIGEST_NAMESPACE => "sealed-lattice-root/evaluation-context-digest-v1",
     TOP_K_EVALUATION_RECORD_DIGEST_NAMESPACE => "sealed-lattice-root/top-k-evaluation-record-digest-v1",
     TARGET_PROPOSAL_DIGEST_NAMESPACE => "sealed-lattice-root/target-proposal-digest-v1",
@@ -292,19 +295,36 @@ fn serialize_json_number(value: &serde_json::Number) -> CanonicalResult<String> 
     ))
 }
 
-pub fn canonical_json(value: &Value) -> CanonicalResult<String> {
+fn next_canonical_json_depth(depth: usize) -> CanonicalResult<usize> {
+    depth.checked_add(1).ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "canonical JSON nesting depth overflowed",
+        )
+    })
+}
+
+fn canonical_json_with_depth(value: &Value, depth: usize) -> CanonicalResult<String> {
+    if depth > MAX_CANONICAL_JSON_DEPTH {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "canonical JSON nesting depth exceeds the supported limit",
+        ));
+    }
+
     match value {
         Value::Null => Ok("null".to_string()),
         Value::Bool(boolean) => Ok(boolean.to_string()),
         Value::Number(number) => serialize_json_number(number),
         Value::String(string) => serialize_json_string(&normalize_json_string(string)),
         Value::Array(items) => {
+            let child_depth = next_canonical_json_depth(depth)?;
             let mut output = String::from("[");
             for (item_index, item) in items.iter().enumerate() {
                 if item_index > 0 {
                     output.push(',');
                 }
-                output.push_str(&canonical_json(item)?);
+                output.push_str(&canonical_json_with_depth(item, child_depth)?);
             }
             output.push(']');
 
@@ -312,18 +332,20 @@ pub fn canonical_json(value: &Value) -> CanonicalResult<String> {
         }
         Value::Object(map) => {
             let mut entries = Vec::<(String, String)>::with_capacity(map.len());
+            let mut normalized_keys = BTreeSet::<String>::new();
+            let child_depth = next_canonical_json_depth(depth)?;
             for (key, entry_value) in map {
                 let normalized_key = normalize_json_string(key);
-                if entries
-                    .iter()
-                    .any(|(existing_key, _)| existing_key == &normalized_key)
-                {
+                if !normalized_keys.insert(normalized_key.clone()) {
                     return Err(CanonicalError::new(
                         CanonicalErrorCode::DuplicateField,
                         "canonical JSON object keys collide after normalization",
                     ));
                 }
-                entries.push((normalized_key, canonical_json(entry_value)?));
+                entries.push((
+                    normalized_key,
+                    canonical_json_with_depth(entry_value, child_depth)?,
+                ));
             }
             entries.sort_by(|left, right| compare_utf16(&left.0, &right.0));
 
@@ -341,6 +363,10 @@ pub fn canonical_json(value: &Value) -> CanonicalResult<String> {
             Ok(output)
         }
     }
+}
+
+pub fn canonical_json(value: &Value) -> CanonicalResult<String> {
+    canonical_json_with_depth(value, 0)
 }
 
 fn is_pascal_case_namespace(namespace: &str) -> bool {
@@ -440,6 +466,17 @@ pub fn chunk_root(input: &[u8], chunk_size: usize) -> CanonicalResult<String> {
             "chunk size must be greater than zero",
         ));
     }
+    let leaf_count = if input.is_empty() {
+        1
+    } else {
+        input.len().div_ceil(chunk_size)
+    };
+    if leaf_count > MAX_CHUNK_ROOT_LEAF_COUNT {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidChunkSize,
+            "chunk root input and chunk size produce too many Merkle leaves",
+        ));
+    }
 
     let mut leaves: Vec<[u8; 64]> = input
         .chunks(chunk_size)
@@ -483,10 +520,11 @@ mod tests {
     use std::collections::BTreeSet;
 
     use super::{
-        POLL_SPEC_DIGEST_NAMESPACE, RESERVED_ROOT_NAMESPACES, canonical_json, canonical_root,
-        chunk_root, derive_protocol_digest, hash512, hash512_hex, namespace_root,
-        resolve_protocol_digest_domain,
+        MAX_CANONICAL_JSON_DEPTH, POLL_SPEC_DIGEST_NAMESPACE, RESERVED_ROOT_NAMESPACES,
+        canonical_json, canonical_root, chunk_root, derive_protocol_digest, hash512, hash512_hex,
+        namespace_root, resolve_protocol_digest_domain,
     };
+    use crate::encoding::CanonicalErrorCode;
 
     #[test]
     fn hash512_outputs_sixty_four_bytes() {
@@ -513,6 +551,33 @@ mod tests {
 
         assert_eq!(canonical, "{\"a\":{\"z\":true},\"b\":[2,1]}");
         assert!(canonical_json(&serde_json::json!({ "fraction": 1.5 })).is_err());
+    }
+
+    #[test]
+    fn canonical_json_rejects_normalized_duplicate_object_keys() {
+        let value = serde_json::Value::Object(
+            [
+                ("e\u{301}".to_string(), serde_json::json!(1)),
+                ("\u{e9}".to_string(), serde_json::json!(2)),
+            ]
+            .into_iter()
+            .collect(),
+        );
+        let error = canonical_json(&value).expect_err("normalized duplicate keys should reject");
+
+        assert_eq!(error.code, CanonicalErrorCode::DuplicateField);
+    }
+
+    #[test]
+    fn canonical_json_rejects_excessive_nesting_depth() {
+        let mut value = serde_json::Value::Null;
+        for _ in 0..=MAX_CANONICAL_JSON_DEPTH {
+            value = serde_json::json!([value]);
+        }
+        let error = canonical_json(&value).expect_err("excessive nesting should reject");
+
+        assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
+        assert!(error.message.contains("nesting depth"));
     }
 
     #[test]

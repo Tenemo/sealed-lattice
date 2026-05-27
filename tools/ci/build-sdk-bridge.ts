@@ -12,24 +12,13 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
     DiagnosticCategory,
     ModuleKind,
-    ScriptKind,
     ScriptTarget,
-    SyntaxKind,
-    createSourceFile,
     formatDiagnosticsWithColorAndContext,
-    forEachChild,
-    isCallExpression,
-    isExportDeclaration,
-    isImportDeclaration,
-    isImportTypeNode,
-    isLiteralTypeNode,
-    isStringLiteral,
     transpileModule,
-    type Node,
-    type StringLiteral,
 } from 'typescript';
 
 import { collectFiles } from '../internal/files.js';
+import { rewriteModuleSpecifiers } from '../internal/module-specifiers.js';
 
 import publicSurface from '#packages/sdk/public-surface.json' with { type: 'json' };
 
@@ -268,119 +257,6 @@ export const buildSdkCryptoRuntime = async (): Promise<void> => {
             await writeFile(outputPath, outputText, 'utf8');
         }),
     );
-};
-
-type ModuleSpecifierRewrite = (specifier: string) => string | undefined;
-
-type ModuleSpecifierReplacement = {
-    readonly end: number;
-    readonly start: number;
-    readonly text: string;
-};
-
-const quoteModuleSpecifier = (specifier: string, quote: string): string => {
-    const escapedSpecifier = specifier
-        .replace(/\\/g, '\\\\')
-        .split(quote)
-        .join(`\\${quote}`);
-
-    return `${quote}${escapedSpecifier}${quote}`;
-};
-
-const collectModuleSpecifierLiterals = (
-    sourceText: string,
-    sourcePath: string,
-): {
-    readonly literals: readonly StringLiteral[];
-    readonly sourceFile: ReturnType<typeof createSourceFile>;
-} => {
-    const sourceFile = createSourceFile(
-        sourcePath,
-        sourceText,
-        ScriptTarget.Latest,
-        true,
-        ScriptKind.TSX,
-    );
-    const literals: StringLiteral[] = [];
-
-    const visit = (node: Node): void => {
-        if (
-            isImportDeclaration(node) &&
-            isStringLiteral(node.moduleSpecifier)
-        ) {
-            literals.push(node.moduleSpecifier);
-        } else if (
-            isExportDeclaration(node) &&
-            node.moduleSpecifier !== undefined &&
-            isStringLiteral(node.moduleSpecifier)
-        ) {
-            literals.push(node.moduleSpecifier);
-        } else if (
-            isCallExpression(node) &&
-            node.expression.kind === SyntaxKind.ImportKeyword
-        ) {
-            const [moduleSpecifier] = node.arguments;
-            if (
-                moduleSpecifier !== undefined &&
-                isStringLiteral(moduleSpecifier)
-            ) {
-                literals.push(moduleSpecifier);
-            }
-        } else if (isImportTypeNode(node)) {
-            const importTypeArgument = node.argument;
-            if (
-                isLiteralTypeNode(importTypeArgument) &&
-                isStringLiteral(importTypeArgument.literal)
-            ) {
-                literals.push(importTypeArgument.literal);
-            }
-        }
-
-        forEachChild(node, visit);
-    };
-
-    visit(sourceFile);
-
-    return { literals, sourceFile };
-};
-
-const rewriteModuleSpecifiers = (
-    sourcePath: string,
-    sourceText: string,
-    rewriteSpecifier: ModuleSpecifierRewrite,
-): string => {
-    const { literals, sourceFile } = collectModuleSpecifierLiterals(
-        sourceText,
-        sourcePath,
-    );
-    const replacements: ModuleSpecifierReplacement[] = [];
-
-    for (const literal of literals) {
-        const rewrittenSpecifier = rewriteSpecifier(literal.text);
-        if (
-            rewrittenSpecifier === undefined ||
-            rewrittenSpecifier === literal.text
-        ) {
-            continue;
-        }
-
-        const start = literal.getStart(sourceFile);
-        const end = literal.end;
-        const quote = sourceText[start];
-        replacements.push({
-            start,
-            end,
-            text: quoteModuleSpecifier(rewrittenSpecifier, quote),
-        });
-    }
-
-    return replacements
-        .sort((left, right) => right.start - left.start)
-        .reduce(
-            (rewrittenText, replacement) =>
-                `${rewrittenText.slice(0, replacement.start)}${replacement.text}${rewrittenText.slice(replacement.end)}`,
-            sourceText,
-        );
 };
 
 export const computeRelativeTypesSpecifier = (

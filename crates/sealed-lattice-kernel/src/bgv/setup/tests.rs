@@ -1,7 +1,7 @@
 use super::sampling::reduce_unbiased_u64;
 use super::validation::validate_setup_package_shape;
 use super::{
-    DATA_PRIMES, PASSIVE_SETUP_PROFILE_ID, POLYNOMIAL_DEGREE,
+    DATA_PRIMES, PASSIVE_SETUP_PROFILE_ID, POLYNOMIAL_DEGREE, dense_centered_binomial_coefficients,
     generate_passive_setup_package_from_request, sample_centered_binomial_eta2,
     sample_public_residues, sample_small_distribution, verify_passive_setup_package_from_request,
 };
@@ -397,6 +397,7 @@ fn passive_setup_verification_rejects_rebound_binding_mutations() {
 fn passive_setup_verification_rejects_evaluator_binding_mutations() {
     let package = generate_passive_setup_package_from_request(&request()).expect("setup");
     for field_name in [
+        "evaluatorBindingContextDigest",
         "encryptedAggregateBridgeDigest",
         "encryptedAggregateTargetBasisDataRoot",
         "encryptedAggregateReconstructionDigest",
@@ -610,4 +611,44 @@ fn centered_binomial_eta2_samples_match_certified_sampler() {
         assert_eq!(sample["value"], expected_value);
         assert!((-2..=2).contains(&expected_value));
     }
+}
+
+#[test]
+fn dense_centered_binomial_eta2_sampler_consumes_full_hash_blocks() {
+    let seed_digest = "1".repeat(128);
+    let coefficients =
+        dense_centered_binomial_coefficients(&seed_digest, "trustee-1", "fixture-error");
+    let first_block = hash512(
+        "sealed-lattice-bgv-rns/sample-centered-binomial-eta2-dense-v1",
+        &[seed_digest.as_bytes(), b"trustee-1", b"fixture-error", b"0"],
+    );
+    let second_block = hash512(
+        "sealed-lattice-bgv-rns/sample-centered-binomial-eta2-dense-v1",
+        &[seed_digest.as_bytes(), b"trustee-1", b"fixture-error", b"1"],
+    );
+
+    assert_eq!(coefficients.len(), POLYNOMIAL_DEGREE);
+    assert!(coefficients.iter().all(|value| (-2..=2).contains(value)));
+    assert_eq!(
+        coefficients[0],
+        centered_binomial_eta2_value_from_byte(first_block[0])
+    );
+    assert_eq!(
+        coefficients[1],
+        centered_binomial_eta2_value_from_byte(first_block[0] >> 4)
+    );
+    assert_eq!(
+        coefficients[127],
+        centered_binomial_eta2_value_from_byte(first_block[63] >> 4)
+    );
+    assert_eq!(
+        coefficients[128],
+        centered_binomial_eta2_value_from_byte(second_block[0])
+    );
+}
+
+fn centered_binomial_eta2_value_from_byte(byte: u8) -> i64 {
+    i64::from(byte & 1) + i64::from((byte >> 1) & 1)
+        - i64::from((byte >> 2) & 1)
+        - i64::from((byte >> 3) & 1)
 }

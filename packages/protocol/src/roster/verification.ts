@@ -46,6 +46,9 @@ const findConflictingRawManifest = (
     );
 };
 
+const normalizeIdentityForComparison = (identity: string): string =>
+    identity.normalize('NFC');
+
 const verifyRosterManifestTranscriptUnchecked = (
     input: RosterManifestTranscriptInput,
 ): RosterManifestTranscriptVerification => {
@@ -91,11 +94,14 @@ const verifyRosterManifestTranscriptUnchecked = (
             }),
         );
 
-        if (seenParticipantIdentities.has(entry.participantIdentity)) {
+        const normalizedParticipantIdentity = normalizeIdentityForComparison(
+            entry.participantIdentity,
+        );
+        if (seenParticipantIdentities.has(normalizedParticipantIdentity)) {
             refusedObjects.push(
                 createRefusal(
                     'DuplicateRegistration',
-                    'Roster freeze rejects duplicate participant registrations.',
+                    'Roster freeze rejects duplicate participant registrations after Unicode NFC normalization.',
                     entry.registrationEntryDigest,
                     'RegistrationEntry',
                 ),
@@ -103,16 +109,16 @@ const verifyRosterManifestTranscriptUnchecked = (
             continue;
         }
 
-        seenParticipantIdentities.add(entry.participantIdentity);
+        seenParticipantIdentities.add(normalizedParticipantIdentity);
         participantPublicKeys.set(
-            entry.participantIdentity,
+            normalizedParticipantIdentity,
             entry.signingPublicKeyDigest,
         );
-        participantIdentities.push(entry.participantIdentity);
+        participantIdentities.push(normalizedParticipantIdentity);
     }
 
     const organizerPublicKeyDigest = participantPublicKeys.get(
-        input.organizerIdentity,
+        normalizeIdentityForComparison(input.organizerIdentity),
     );
     if (organizerPublicKeyDigest === undefined) {
         refusedObjects.push(
@@ -132,22 +138,25 @@ const verifyRosterManifestTranscriptUnchecked = (
 
     const receiverIdentities = new Set<string>();
     for (const entry of input.receiverKeyRegistrations) {
-        if (receiverIdentities.has(entry.participantIdentity)) {
+        const normalizedReceiverIdentity = normalizeIdentityForComparison(
+            entry.participantIdentity,
+        );
+        if (receiverIdentities.has(normalizedReceiverIdentity)) {
             refusedObjects.push(
                 createRefusal(
                     'DuplicateReceiverKeyRegistration',
-                    'Roster freeze rejects duplicate receiver-key registrations.',
+                    'Roster freeze rejects duplicate receiver-key registrations after Unicode NFC normalization.',
                     entry.receiverKeyRegistrationDigest,
                     'ReceiverKeyRegistration',
                 ),
             );
         }
-        receiverIdentities.add(entry.participantIdentity);
+        receiverIdentities.add(normalizedReceiverIdentity);
         refusedObjects.push(
             ...verifyReceiverKeyRegistration(
                 input,
                 entry,
-                participantPublicKeys.get(entry.participantIdentity),
+                participantPublicKeys.get(normalizedReceiverIdentity),
             ),
         );
         refusedObjects.push(
@@ -165,22 +174,25 @@ const verifyRosterManifestTranscriptUnchecked = (
 
     const trusteeIdentities = new Set<string>();
     for (const entry of input.trusteeSetupEntries) {
-        if (trusteeIdentities.has(entry.trusteeIdentity)) {
+        const normalizedTrusteeIdentity = normalizeIdentityForComparison(
+            entry.trusteeIdentity,
+        );
+        if (trusteeIdentities.has(normalizedTrusteeIdentity)) {
             refusedObjects.push(
                 createRefusal(
                     'DuplicateTrusteeSetupEntry',
-                    'Roster freeze rejects duplicate trustee setup entries.',
+                    'Roster freeze rejects duplicate trustee setup entries after Unicode NFC normalization.',
                     entry.trusteeSetupEntryDigest,
                     'TrusteeSetupEntry',
                 ),
             );
         }
-        trusteeIdentities.add(entry.trusteeIdentity);
+        trusteeIdentities.add(normalizedTrusteeIdentity);
         refusedObjects.push(
             ...verifyTrusteeSetupEntry(
                 input,
                 entry,
-                participantPublicKeys.get(entry.trusteeIdentity),
+                participantPublicKeys.get(normalizedTrusteeIdentity),
             ),
         );
         refusedObjects.push(

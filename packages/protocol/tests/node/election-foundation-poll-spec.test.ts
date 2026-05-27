@@ -202,17 +202,28 @@ describe('election foundation poll-spec validation', () => {
         );
     });
 
-    it('rejects empty and duplicate option labels by exact comparison', () => {
+    it('rejects empty and duplicate option labels after Unicode normalization', () => {
         expectErrorCodes(
             createValidPollSpecInput({
-                options: ['Alpha', '', 'Alpha', 'Alpha '],
+                options: [
+                    'Alpha',
+                    '',
+                    'Alpha',
+                    'Alpha ',
+                    'Cafe\u0301',
+                    'Caf\u00e9',
+                ],
                 topOptionCount: 1,
             }),
-            ['EmptyOptionLabel', 'DuplicateOptionLabel'],
+            [
+                'EmptyOptionLabel',
+                'DuplicateOptionLabel',
+                'DuplicateOptionLabel',
+            ],
         );
     });
 
-    it('accepts labels that differ only by trailing whitespace under exact comparison', () => {
+    it('accepts labels that differ only by trailing whitespace after normalization', () => {
         const validation = validatePollSpec(
             createValidPollSpecInput({
                 options: ['Alpha', 'Alpha '],

@@ -29,7 +29,6 @@ import {
 import {
     aggregateDerivationComponentId,
     createAggregateRefusal,
-    forbiddenPublicWitnessFieldNames,
     lowercaseHexBytesPattern,
     protocolDigestPattern,
 } from './constants.js';
@@ -40,6 +39,7 @@ import {
     deriveAggregateDerivationStatementDigest,
     deriveAggregateShareCommitmentDigest,
 } from './digests.js';
+import { collectForbiddenWitnessFieldRefusals as collectBoundedForbiddenWitnessFieldRefusals } from './witness-field-refusals.js';
 
 const packageReferencesAreCanonical = (
     packageReferences: readonly AggregateDerivationPackageReference[],
@@ -70,42 +70,10 @@ const collectForbiddenWitnessFieldRefusals = (
     value: unknown,
     objectDigest: ProtocolDigest | undefined,
     path: string,
-): readonly RefusalRecord[] => {
-    if (Array.isArray(value)) {
-        return value.flatMap((item, itemIndex) =>
-            collectForbiddenWitnessFieldRefusals(
-                item,
-                objectDigest,
-                `${path}[${itemIndex}]`,
-            ),
-        );
-    }
-    if (typeof value !== 'object' || value === null) {
-        return [];
-    }
-
-    const refusedObjects: RefusalRecord[] = [];
-    for (const [fieldName, fieldValue] of Object.entries(value)) {
-        if (forbiddenPublicWitnessFieldNames.has(fieldName)) {
-            refusedObjects.push(
-                createAggregateRefusal(
-                    `Aggregate derivation public component must not expose witness field ${path}.${fieldName}.`,
-                    objectDigest,
-                ),
-            );
-            continue;
-        }
-        refusedObjects.push(
-            ...collectForbiddenWitnessFieldRefusals(
-                fieldValue,
-                objectDigest,
-                `${path}.${fieldName}`,
-            ),
-        );
-    }
-
-    return refusedObjects;
-};
+): readonly RefusalRecord[] =>
+    collectBoundedForbiddenWitnessFieldRefusals(value, objectDigest, path, {
+        publicObjectDescription: 'Aggregate derivation public component',
+    });
 
 const collectAggregateStatementRefusals = (
     statement: AggregateDerivationStatement,
@@ -328,9 +296,24 @@ export const verifyAggregateDerivationComponentStructure = (
 
     const { aggregateDerivationComponentDigest, ...componentWithoutDigest } =
         component;
+    let expectedComponentDigest: ProtocolDigest | undefined;
+    try {
+        expectedComponentDigest = deriveAggregateDerivationComponentDigest(
+            componentWithoutDigest,
+        );
+    } catch (error) {
+        refusedObjects.push(
+            createAggregateRefusal(
+                `Aggregate derivation component digest could not be canonicalized: ${
+                    error instanceof Error ? error.message : String(error)
+                }.`,
+                componentDigest,
+            ),
+        );
+    }
     if (
-        aggregateDerivationComponentDigest !==
-        deriveAggregateDerivationComponentDigest(componentWithoutDigest)
+        expectedComponentDigest === undefined ||
+        aggregateDerivationComponentDigest !== expectedComponentDigest
     ) {
         refusedObjects.push(
             createAggregateRefusal(

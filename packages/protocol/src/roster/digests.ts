@@ -78,7 +78,7 @@ export const deriveRosterDigest = (
         'RosterDigest',
         entries
             .map((entry) => ({
-                participantIdentity: entry.participantIdentity,
+                participantIdentity: entry.participantIdentity.normalize('NFC'),
                 registrationEntryDigest: entry.registrationEntryDigest,
                 signingPublicKeyDigest: entry.signingPublicKeyDigest,
             }))

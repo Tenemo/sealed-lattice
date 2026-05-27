@@ -42,7 +42,7 @@ fn assert_roster_position(value: u64) -> CanonicalResult<u64> {
     }
     if value > MAXIMUM_SUPPORTED_ROSTER_SIZE {
         return Err(invalid_ring_input(
-            "roster interpolation points must be in 1..50",
+            "roster interpolation points must be in 1..=50",
         ));
     }
 
@@ -170,7 +170,7 @@ pub fn evaluate_plaintext_comparison(
     roster_size: u64,
 ) -> CanonicalResult<PlaintextComparison> {
     if roster_size == 0 || roster_size > MAXIMUM_SUPPORTED_ROSTER_SIZE {
-        return Err(invalid_ring_input("roster size must be in 1..50"));
+        return Err(invalid_ring_input("roster size must be in 1..=50"));
     }
     let maximum_total_score = roster_size * MAXIMUM_TOTAL_SCORE_FACTOR;
     if left_total_score > maximum_total_score || right_total_score > maximum_total_score {

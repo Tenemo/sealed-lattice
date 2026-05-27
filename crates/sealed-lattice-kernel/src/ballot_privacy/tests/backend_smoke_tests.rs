@@ -1,8 +1,8 @@
 use crate::ballot_privacy::{
-    linear_proof_parameters::{
+    linear_proof::parameters::{
         LinearProofParameterSet, encoded_score_field_linear_proof_encoding_contract,
     },
-    linear_proof_profile_constants::{
+    linear_proof::profile_constants::{
         GENERATED_FIELD_COMPONENT_EXACT_NORM_BOUND_SQUARED,
         GENERATED_SHARE_COMMITMENT_COMPONENT_EXACT_NORM_BOUND_SQUARED,
     },

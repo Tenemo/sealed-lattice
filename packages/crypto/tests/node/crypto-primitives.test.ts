@@ -231,6 +231,33 @@ describe('crypto primitive boundary', () => {
         );
     });
 
+    it('requires explicit signature expectation bindings unless unbound verification is requested', () => {
+        const profile = createMlDsaSignatureProfileFixture();
+        const keyPair = createMlDsaKeyPairFixture('crypto-test-boundary');
+        const signedRoot = createSignedRoot();
+        const signature = createProtocolSignatureFixture({
+            profile,
+            publicKeyBytesHex: keyPair.publicKeyBytesHex,
+            publicKeyDigest: keyPair.publicKeyDigest,
+            secretKeyBytesHex: keyPair.secretKeyBytesHex,
+            signedRoot,
+        });
+
+        expect(verifySignedObjectSignature(signature)).toMatchObject({
+            ok: false,
+            refusedObjects: [
+                expect.objectContaining({ code: 'InvalidSignedRoot' }),
+            ],
+        });
+        expect(
+            verifySignedObjectSignature(signature, {
+                allowUnboundVerification: true,
+            }),
+        ).toMatchObject({
+            ok: true,
+        });
+    });
+
     it('rejects unsigned signature metadata and non-canonical hex encodings', () => {
         const profile = createMlDsaSignatureProfileFixture();
         const keyPair = createMlDsaKeyPairFixture('crypto-test-metadata');

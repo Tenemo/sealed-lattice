@@ -172,16 +172,18 @@ export const validatePollSpec = (input: unknown): PollSpecValidation => {
             });
             return;
         }
-        if (optionLabels.has(optionLabel)) {
+        const normalizedOptionLabel = optionLabel.normalize('NFC');
+        if (optionLabels.has(normalizedOptionLabel)) {
             addError(errors, {
                 code: 'DuplicateOptionLabel',
                 field: `options[${optionIndex}]`,
-                message: 'option labels must be unique by exact comparison.',
+                message:
+                    'option labels must be unique after Unicode NFC normalization.',
             });
         }
 
-        optionLabels.add(optionLabel);
-        normalizedOptions.push(optionLabel);
+        optionLabels.add(normalizedOptionLabel);
+        normalizedOptions.push(normalizedOptionLabel);
     });
 
     if (

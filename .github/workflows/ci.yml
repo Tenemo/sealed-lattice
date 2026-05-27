@@ -6,6 +6,9 @@ on:
             - master
     pull_request:
 
+permissions:
+    contents: read
+
 env:
     FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     SEALED_LATTICE_TURBO_CACHE: "local:,remote:"
@@ -16,8 +19,8 @@ jobs:
         runs-on: ubuntu-latest
         timeout-minutes: 20
         steps:
-            - uses: actions/checkout@v6.0.2
-            - uses: dtolnay/rust-toolchain@1.90.0
+            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+            - uses: dtolnay/rust-toolchain@b18f7037bce1ea84c086f4d5e9493f853c0ce412
               with:
                   components: clippy, rustfmt
                   targets: wasm32-unknown-unknown
@@ -31,8 +34,8 @@ jobs:
         runs-on: ubuntu-latest
         timeout-minutes: 20
         steps:
-            - uses: actions/checkout@v6.0.2
-            - uses: dtolnay/rust-toolchain@1.90.0
+            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+            - uses: dtolnay/rust-toolchain@b18f7037bce1ea84c086f4d5e9493f853c0ce412
               with:
                   components: clippy, rustfmt
                   targets: wasm32-unknown-unknown
@@ -44,9 +47,9 @@ jobs:
         runs-on: ubuntu-latest
         timeout-minutes: 25
         steps:
-            - uses: actions/checkout@v6.0.2
+            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
             - uses: ./.github/actions/bootstrap-pnpm
-            - uses: dtolnay/rust-toolchain@1.90.0
+            - uses: dtolnay/rust-toolchain@b18f7037bce1ea84c086f4d5e9493f853c0ce412
               with:
                   components: clippy, rustfmt
                   targets: wasm32-unknown-unknown
@@ -58,9 +61,9 @@ jobs:
         runs-on: ubuntu-latest
         timeout-minutes: 15
         steps:
-            - uses: actions/checkout@v6.0.2
+            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
             - uses: ./.github/actions/bootstrap-pnpm
-            - uses: dtolnay/rust-toolchain@1.90.0
+            - uses: dtolnay/rust-toolchain@b18f7037bce1ea84c086f4d5e9493f853c0ce412
               with:
                   components: clippy, rustfmt
                   targets: wasm32-unknown-unknown
@@ -72,9 +75,9 @@ jobs:
         runs-on: ubuntu-latest
         timeout-minutes: 20
         steps:
-            - uses: actions/checkout@v6.0.2
+            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
             - uses: ./.github/actions/bootstrap-pnpm
-            - uses: dtolnay/rust-toolchain@1.90.0
+            - uses: dtolnay/rust-toolchain@b18f7037bce1ea84c086f4d5e9493f853c0ce412
               with:
                   components: clippy, rustfmt
                   targets: wasm32-unknown-unknown
@@ -86,9 +89,9 @@ jobs:
         runs-on: ubuntu-latest
         timeout-minutes: 30
         steps:
-            - uses: actions/checkout@v6.0.2
+            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
             - uses: ./.github/actions/bootstrap-pnpm
-            - uses: dtolnay/rust-toolchain@1.90.0
+            - uses: dtolnay/rust-toolchain@b18f7037bce1ea84c086f4d5e9493f853c0ce412
               with:
                   components: clippy, rustfmt
                   targets: wasm32-unknown-unknown
@@ -100,9 +103,9 @@ jobs:
         runs-on: ubuntu-latest
         timeout-minutes: 25
         steps:
-            - uses: actions/checkout@v6.0.2
+            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
             - uses: ./.github/actions/bootstrap-pnpm
-            - uses: dtolnay/rust-toolchain@1.90.0
+            - uses: dtolnay/rust-toolchain@b18f7037bce1ea84c086f4d5e9493f853c0ce412
               with:
                   components: clippy, rustfmt
                   targets: wasm32-unknown-unknown
@@ -114,9 +117,9 @@ jobs:
         runs-on: ubuntu-latest
         timeout-minutes: 60
         steps:
-            - uses: actions/checkout@v6.0.2
+            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
             - uses: ./.github/actions/bootstrap-pnpm
-            - uses: dtolnay/rust-toolchain@1.90.0
+            - uses: dtolnay/rust-toolchain@b18f7037bce1ea84c086f4d5e9493f853c0ce412
               with:
                   components: clippy, rustfmt
                   targets: wasm32-unknown-unknown
@@ -152,9 +155,9 @@ jobs:
         runs-on: ubuntu-latest
         timeout-minutes: 25
         steps:
-            - uses: actions/checkout@v6.0.2
+            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
             - uses: ./.github/actions/bootstrap-pnpm
-            - uses: dtolnay/rust-toolchain@1.90.0
+            - uses: dtolnay/rust-toolchain@b18f7037bce1ea84c086f4d5e9493f853c0ce412
               with:
                   components: clippy, rustfmt
                   targets: wasm32-unknown-unknown
@@ -166,9 +169,9 @@ jobs:
         runs-on: macos-latest
         timeout-minutes: 45
         steps:
-            - uses: actions/checkout@v6.0.2
+            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
             - uses: ./.github/actions/bootstrap-pnpm
-            - uses: dtolnay/rust-toolchain@1.90.0
+            - uses: dtolnay/rust-toolchain@b18f7037bce1ea84c086f4d5e9493f853c0ce412
               with:
                   components: clippy, rustfmt
                   targets: wasm32-unknown-unknown
@@ -182,9 +185,9 @@ jobs:
         runs-on: ubuntu-latest
         timeout-minutes: 25
         steps:
-            - uses: actions/checkout@v6.0.2
+            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
             - uses: ./.github/actions/bootstrap-pnpm
-            - uses: dtolnay/rust-toolchain@1.90.0
+            - uses: dtolnay/rust-toolchain@b18f7037bce1ea84c086f4d5e9493f853c0ce412
               with:
                   components: clippy, rustfmt
                   targets: wasm32-unknown-unknown
@@ -198,9 +201,9 @@ jobs:
         runs-on: ubuntu-latest
         timeout-minutes: 60
         steps:
-            - uses: actions/checkout@v6.0.2
+            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
             - uses: ./.github/actions/bootstrap-pnpm
-            - uses: dtolnay/rust-toolchain@1.90.0
+            - uses: dtolnay/rust-toolchain@b18f7037bce1ea84c086f4d5e9493f853c0ce412
               with:
                   components: clippy, rustfmt
                   targets: wasm32-unknown-unknown

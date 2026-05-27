@@ -1,0 +1,329 @@
+use super::*;
+
+pub(in crate::ballot_privacy::aggregate_derivation_proof) fn collect_aggregate_component_refusals(
+    component: &Value,
+) -> Vec<Value> {
+    let object_digest = string_field(component, "aggregateDerivationComponentDigest");
+    let mut refused_objects =
+        collect_forbidden_witness_field_refusals(component, object_digest, "component");
+    let Some(statement) = component.get("statement") else {
+        refused_objects.push(structural_refusal(
+            "Aggregate derivation component must include statement.",
+            object_digest,
+        ));
+
+        return refused_objects;
+    };
+    let Some(aggregate_commitment) = component.get("aggregateCommitment") else {
+        refused_objects.push(structural_refusal(
+            "Aggregate derivation component must include aggregateCommitment.",
+            object_digest,
+        ));
+
+        return refused_objects;
+    };
+    let Some(certificate) = component.get("shareCommitmentMessageBoundCert") else {
+        refused_objects.push(structural_refusal(
+            "Aggregate derivation component must include a no-wraparound certificate.",
+            object_digest,
+        ));
+
+        return refused_objects;
+    };
+
+    refused_objects.extend(collect_aggregate_statement_refusals(
+        statement,
+        object_digest,
+    ));
+    refused_objects.extend(collect_aggregate_commitment_refusals(
+        aggregate_commitment,
+        statement,
+        object_digest,
+    ));
+    refused_objects.extend(collect_aggregate_certificate_refusals(
+        certificate,
+        statement,
+        object_digest,
+    ));
+
+    refused_objects
+}
+
+fn collect_aggregate_statement_refusals(
+    statement: &Value,
+    object_digest: Option<&str>,
+) -> Vec<Value> {
+    let mut refused_objects = Vec::new();
+    let statement_digest = string_field(statement, "aggregateDerivationStatementDigest");
+    let expected_statement_digest =
+        value_without_field(statement, "aggregateDerivationStatementDigest").and_then(
+            |statement_payload| {
+                derive_digest(
+                    "AggregateDerivationComponentDigest",
+                    &json!({
+                        "purpose": "aggregate-derivation-statement-v1",
+                        "statement": statement_payload
+                    }),
+                )
+            },
+        );
+    let option_count = u64_object_field(statement, "optionCount").unwrap_or(0);
+    let participant_count = usize_object_field(statement, "participantCount").unwrap_or(0);
+    let unsafe_small_roster_acknowledged = statement
+        .get("unsafeSmallRosterAcknowledged")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let small_roster_acknowledgement_matches_policy =
+        if participant_count < BALLOT_PRIVACY_MINIMUM_SAFE_PARTICIPANT_COUNT {
+            unsafe_small_roster_acknowledged
+        } else {
+            !unsafe_small_roster_acknowledged
+        };
+    let share_vector_width = usize_object_field(statement, "shareVectorWidth").unwrap_or(0);
+    let expected_width = option_count.checked_mul(BALLOT_PRIVACY_ENCODED_COORDINATES_PER_OPTION);
+    let package_references = array_field(statement, "packageReferences");
+
+    if string_field(statement, "objectType") != Some("AggregateDerivationStatement")
+        || u64_object_field(statement, "objectVersion") != Some(1)
+        || statement_digest.is_none()
+        || expected_statement_digest.as_deref() != statement_digest
+        || string_field(statement, "proofProfileId") != Some("aggregate-derivation-linear-proof-v1")
+        || string_field(statement, "proofParameterProfileId")
+            != Some(AGGREGATE_DERIVATION_PARAMETER_PROFILE_ID)
+        || string_field(statement, "proofEncodingProfileId")
+            != Some(AGGREGATE_DERIVATION_PROOF_ENCODING_PROFILE_ID)
+        || option_count < BALLOT_PRIVACY_MINIMUM_OPTION_COUNT as u64
+        || option_count > BALLOT_PRIVACY_MAXIMUM_OPTION_COUNT as u64
+        || expected_width.and_then(|width| usize::try_from(width).ok()) != Some(share_vector_width)
+        || !(BALLOT_PRIVACY_MINIMUM_UNSAFE_PARTICIPANT_COUNT
+            ..=BALLOT_PRIVACY_MAXIMUM_PARTICIPANT_COUNT)
+            .contains(&participant_count)
+        || package_references.is_none_or(|references| !package_references_are_canonical(references))
+        || !small_roster_acknowledgement_matches_policy
+    {
+        refused_objects.push(structural_refusal(
+            "Aggregate derivation statement digest, profile, or dimension policy is invalid.",
+            object_digest,
+        ));
+    }
+    refused_objects
+}
+
+fn package_references_are_canonical(package_references: &[Value]) -> bool {
+    let mut seen_package_digests = BTreeSet::new();
+    let mut previous_package_digest: Option<&str> = None;
+
+    for package_reference in package_references {
+        let Some(package_digest) = string_field(package_reference, "ballotPackageDigest") else {
+            return false;
+        };
+        if previous_package_digest.is_some_and(|previous| previous > package_digest) {
+            return false;
+        }
+        if !seen_package_digests.insert(package_digest) {
+            return false;
+        }
+        previous_package_digest = Some(package_digest);
+    }
+
+    true
+}
+
+fn collect_aggregate_commitment_refusals(
+    aggregate_commitment: &Value,
+    statement: &Value,
+    object_digest: Option<&str>,
+) -> Vec<Value> {
+    let mut refused_objects = Vec::new();
+    let commitment_digest = string_field(aggregate_commitment, "aggregateShareCommitmentDigest");
+    let expected_commitment_digest =
+        value_without_field(aggregate_commitment, "aggregateShareCommitmentDigest").and_then(
+            |commitment_payload| {
+                derive_digest("AggregateShareCommitmentDigest", &commitment_payload)
+            },
+        );
+    let commitment_polynomial_vector =
+        array_field(aggregate_commitment, "commitmentPolynomialVector");
+    let vector_shape_is_valid = commitment_polynomial_vector.is_some_and(|vector| {
+        vector.len() == SHARE_COMMITMENT_MODULE_RANK
+            && vector.iter().all(|polynomial| {
+                polynomial.as_array().is_some_and(|coefficients| {
+                    coefficients.len() == SHARE_COMMITMENT_MODULE_DEGREE
+                        && coefficients.iter().all(|coefficient| {
+                            integer_value(coefficient)
+                                .is_some_and(|coefficient| coefficient < SHARE_COMMITMENT_MODULUS)
+                        })
+                })
+            })
+    });
+
+    if string_field(aggregate_commitment, "objectType") != Some("AggregateShareCommitment")
+        || u64_object_field(aggregate_commitment, "objectVersion") != Some(1)
+        || commitment_digest.is_none()
+        || expected_commitment_digest.as_deref() != commitment_digest
+        || commitment_digest != string_field(statement, "aggregateShareCommitmentDigest")
+        || string_field(aggregate_commitment, "ballotSetDigest")
+            != string_field(statement, "ballotSetDigest")
+        || string_field(aggregate_commitment, "ceremonyId") != string_field(statement, "ceremonyId")
+        || string_field(aggregate_commitment, "manifestDigest")
+            != string_field(statement, "manifestDigest")
+        || string_field(aggregate_commitment, "rosterDigest")
+            != string_field(statement, "rosterDigest")
+        || string_field(aggregate_commitment, "pollSpecDigest")
+            != string_field(statement, "pollSpecDigest")
+        || string_field(aggregate_commitment, "contributorIdentity")
+            != string_field(statement, "contributorIdentity")
+        || usize_object_field(aggregate_commitment, "contributorRosterPosition")
+            != usize_object_field(statement, "contributorRosterPosition")
+        || string_field(aggregate_commitment, "shareCommitmentProfileDigest")
+            != string_field(statement, "shareCommitmentProfileDigest")
+        || usize_object_field(aggregate_commitment, "shareVectorWidth")
+            != usize_object_field(statement, "shareVectorWidth")
+        || !vector_shape_is_valid
+    {
+        refused_objects.push(structural_refusal(
+            "Aggregate share commitment digest, context, or polynomial shape is invalid.",
+            object_digest,
+        ));
+    }
+
+    refused_objects
+}
+
+fn collect_aggregate_certificate_refusals(
+    certificate: &Value,
+    statement: &Value,
+    object_digest: Option<&str>,
+) -> Vec<Value> {
+    let mut refused_objects = Vec::new();
+    let certificate_digest = string_field(certificate, "shareCommitmentMessageBoundCertDigest");
+    let expected_certificate_digest =
+        value_without_field(certificate, "shareCommitmentMessageBoundCertDigest").and_then(
+            |certificate_payload| {
+                derive_digest(
+                    "ShareCommitmentMessageBoundCertDigest",
+                    &certificate_payload,
+                )
+            },
+        );
+    let maximum_canonical_turnout = u64_object_field(certificate, "maximumCanonicalTurnout");
+    let maximum_aggregate_integer = u64_object_field(certificate, "maximumAggregateInteger");
+    let opening_single_bound = u64_object_field(certificate, "openingRandomnessSingleBound");
+    let opening_aggregate_bound = u64_object_field(certificate, "openingRandomnessAggregateBound");
+    let quotient_bound = u64_object_field(certificate, "quotientBoundForAggregateReduction");
+    let expected_maximum_aggregate_integer = maximum_canonical_turnout
+        .and_then(|turnout| turnout.checked_mul(BALLOT_PRIVACY_FIELD_MODULUS - 1));
+    let expected_opening_aggregate_bound = maximum_canonical_turnout
+        .zip(opening_single_bound)
+        .and_then(|(turnout, bound)| turnout.checked_mul(bound));
+    let commitment_message_bound_allows_no_wrap =
+        string_field(certificate, "commitmentMessageBound")
+            .and_then(|bound| bound.parse::<u128>().ok())
+            .zip(maximum_aggregate_integer.map(u128::from))
+            .is_some_and(|(bound, maximum)| maximum < bound);
+    let no_wrap_flags = certificate
+        .get("noWraparoundCondition")
+        .and_then(object_map);
+
+    if string_field(certificate, "objectType") != Some("ShareCommitmentMessageBoundCert")
+        || u64_object_field(certificate, "objectVersion") != Some(1)
+        || certificate_digest.is_none()
+        || expected_certificate_digest.as_deref() != certificate_digest
+        || certificate_digest != string_field(statement, "shareCommitmentMessageBoundCertDigest")
+        || string_field(certificate, "shareCommitmentProfileDigest")
+            != string_field(statement, "shareCommitmentProfileDigest")
+        || usize_object_field(certificate, "shareVectorWidth")
+            != usize_object_field(statement, "shareVectorWidth")
+        || maximum_canonical_turnout
+            .zip(u64_object_field(statement, "canonicalTurnout"))
+            .is_none_or(|(maximum_turnout, actual_turnout)| maximum_turnout < actual_turnout)
+        || maximum_aggregate_integer != expected_maximum_aggregate_integer
+        || opening_aggregate_bound != expected_opening_aggregate_bound
+        || quotient_bound != maximum_canonical_turnout
+        || !commitment_message_bound_allows_no_wrap
+        || no_wrap_flags
+            .and_then(|flags| flags.get("maximumAggregateIntegerLessThanCommitmentMessageBound"))
+            .and_then(Value::as_bool)
+            != Some(true)
+        || no_wrap_flags
+            .and_then(|flags| flags.get("openingRandomnessAggregateBoundMatchesTurnout"))
+            .and_then(Value::as_bool)
+            != Some(true)
+    {
+        refused_objects.push(structural_refusal(
+            "Aggregate derivation no-wraparound certificate is invalid or permits wraparound.",
+            object_digest,
+        ));
+    }
+
+    refused_objects
+}
+
+fn collect_forbidden_witness_field_refusals(
+    value: &Value,
+    object_digest: Option<&str>,
+    path: &str,
+) -> Vec<Value> {
+    let mut refused_objects = Vec::new();
+    match value {
+        Value::Array(array) => {
+            for (item_index, item) in array.iter().enumerate() {
+                refused_objects.extend(collect_forbidden_witness_field_refusals(
+                    item,
+                    object_digest,
+                    &format!("{path}[{item_index}]"),
+                ));
+            }
+        }
+        Value::Object(object) => {
+            for (field_name, field_value) in object {
+                if forbidden_public_witness_field(field_name) {
+                    refused_objects.push(structural_refusal(
+                        format!(
+                            "Aggregate derivation public component must not expose witness field {path}.{field_name}."
+                        ),
+                        object_digest,
+                    ));
+                } else {
+                    refused_objects.extend(collect_forbidden_witness_field_refusals(
+                        field_value,
+                        object_digest,
+                        &format!("{path}.{field_name}"),
+                    ));
+                }
+            }
+        }
+        _ => {}
+    }
+
+    refused_objects
+}
+
+fn forbidden_public_witness_field(field_name: &str) -> bool {
+    matches!(
+        field_name,
+        "aggregateIntegerShareVector"
+            | "aggregateHistogram"
+            | "aggregateOpeningRandomness"
+            | "aggregateScore"
+            | "aggregateScoreBits"
+            | "aggregateShareVector"
+            | "bridgeWitness"
+            | "openingRandomness"
+            | "plaintext"
+            | "plaintextComparisonInputs"
+            | "plaintextScoreBitInputs"
+            | "proofWitness"
+            | "quotient"
+            | "rawAggregateWitness"
+            | "receiverPlaintext"
+            | "receiverSecretState"
+            | "reducedFieldVector"
+            | "secretState"
+            | "sourceWitnessCoefficients"
+            | "aggregateInputPlaintext"
+            | "tPvss"
+            | "t_pvss"
+            | "witness"
+    )
+}

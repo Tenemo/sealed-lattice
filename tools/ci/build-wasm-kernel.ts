@@ -28,8 +28,29 @@ const sdkKernelLoaderFilePath = path.resolve(
     'dist',
     'kernel.js',
 );
-const sdkKernelDigestAssignmentPattern =
-    /const packagedTranscriptCoreKernelNormalizedSha256Hex =\s*(?:undefined|'[a-f0-9]{64}');/u;
+const wasmKernelOutputFilePath = path.resolve(
+    repoRoot,
+    'packages',
+    'wasm',
+    'dist',
+    'sealed-lattice-kernel.wasm',
+);
+const wasmKernelSourceLoaderFilePath = path.resolve(
+    repoRoot,
+    'packages',
+    'wasm',
+    'src',
+    'index.ts',
+);
+const wasmKernelDistLoaderFilePath = path.resolve(
+    repoRoot,
+    'packages',
+    'wasm',
+    'dist',
+    'index.js',
+);
+const kernelDigestAssignmentPattern =
+    /const packagedTranscriptCoreKernelNormalizedSha256Hex(?:\s*:\s*string\s*\|\s*undefined)?\s*=\s*(?:undefined|'[a-f0-9]{64}');/u;
 const sha256HexPattern = /^[a-f0-9]{64}$/u;
 
 export const resolveOutputFilePath = (
@@ -138,7 +159,7 @@ const hashFileSha256Hex = async (filePath: string): Promise<string> => {
         .digest('hex');
 };
 
-export const pinSdkKernelDigestInLoaderSource = (
+export const pinKernelDigestInLoaderSource = (
     sourceText: string,
     sha256Hex: string,
 ): string => {
@@ -148,15 +169,23 @@ export const pinSdkKernelDigestInLoaderSource = (
         );
     }
 
-    const replacement = `const packagedTranscriptCoreKernelNormalizedSha256Hex = '${sha256Hex}';`;
+    const replacement = [
+        'const packagedTranscriptCoreKernelNormalizedSha256Hex =',
+        `    '${sha256Hex}';`,
+    ].join('\n');
+    let assignmentFound = false;
     const pinnedSourceText = sourceText.replace(
-        sdkKernelDigestAssignmentPattern,
-        replacement,
+        kernelDigestAssignmentPattern,
+        () => {
+            assignmentFound = true;
+
+            return replacement;
+        },
     );
 
-    if (pinnedSourceText === sourceText) {
+    if (!assignmentFound) {
         throw new Error(
-            'Cannot pin the transcript-core kernel digest because packages/sdk/dist/kernel.js does not contain the expected digest assignment.',
+            'Cannot pin the transcript-core kernel digest because the loader file does not contain the expected digest assignment.',
         );
     }
 
@@ -174,9 +203,30 @@ const pinSdkKernelDigestIfNeeded = async (
     const sourceText = await readFile(sdkKernelLoaderFilePath, 'utf8');
     await writeFile(
         sdkKernelLoaderFilePath,
-        pinSdkKernelDigestInLoaderSource(sourceText, sha256Hex),
+        pinKernelDigestInLoaderSource(sourceText, sha256Hex),
         'utf8',
     );
+};
+
+const pinInternalWasmKernelDigestIfNeeded = async (
+    outputFilePath: string,
+    sha256Hex: string,
+): Promise<void> => {
+    if (path.resolve(outputFilePath) !== wasmKernelOutputFilePath) {
+        return;
+    }
+
+    for (const loaderFilePath of [
+        wasmKernelSourceLoaderFilePath,
+        wasmKernelDistLoaderFilePath,
+    ]) {
+        const sourceText = await readFile(loaderFilePath, 'utf8');
+        await writeFile(
+            loaderFilePath,
+            pinKernelDigestInLoaderSource(sourceText, sha256Hex),
+            'utf8',
+        );
+    }
 };
 
 export const buildWasmKernel = async (): Promise<void> => {
@@ -188,6 +238,7 @@ export const buildWasmKernel = async (): Promise<void> => {
     await copyFile(resolveSourceFilePath(), outputFilePath);
     const sha256Hex = await hashFileSha256Hex(outputFilePath);
     await pinSdkKernelDigestIfNeeded(outputFilePath, sha256Hex);
+    await pinInternalWasmKernelDigestIfNeeded(outputFilePath, sha256Hex);
 
     console.log(
         `transcript-core kernel copied to ${path.relative(repoRoot, outputFilePath)} (${sha256Hex})`,

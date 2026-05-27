@@ -1,5 +1,5 @@
 use super::*;
-use crate::ballot_privacy::linear_proof_profile_constants::{
+use crate::ballot_privacy::linear_proof::profile_constants::{
     DEMO_GENERATED_PARAMETER_CONTRACT, DEMO_GENERATED_PROFILE,
 };
 

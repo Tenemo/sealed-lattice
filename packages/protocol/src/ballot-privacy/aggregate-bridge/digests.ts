@@ -6,8 +6,17 @@ import type {
     ProtocolDigest,
 } from '@sealed-lattice/types';
 
+type AggregateContributionUnsignedPayload = Omit<
+    AggregateContribution,
+    'aggregateContributionDigest' | 'signature'
+>;
+
+type AggregateContributionDigestInput = AggregateContributionUnsignedPayload &
+    Partial<Pick<AggregateContribution, 'signature'>>;
+
 export const deriveBridgeProofProfileDigest = (input: {
     readonly bgvEncryptionProofSubrelation:
+        | 'SealedLatticeDevelopmentCiphertextEquationRelation'
         | 'SealedLatticeBoundedEncryptionRelation'
         | 'HwangPiopCandidate';
     readonly bridgeProofProfileId: string;
@@ -17,7 +26,7 @@ export const deriveBridgeProofProfileDigest = (input: {
         bgvEncryptionProofSubrelation: input.bgvEncryptionProofSubrelation,
         bridgeProofProfileId: input.bridgeProofProfileId,
         proofBackend: input.proofBackend,
-        purpose: 'm9-bridge-proof-profile-v1',
+        purpose: 'sealed-lattice-aggregate-bridge-proof-profile-v1',
     });
 
 const bridgePlaintextCoefficientCount = 32_768;
@@ -28,6 +37,10 @@ const shareCommitmentOpeningCoordinateCount = 64;
 const ballotPrivacyFieldModulus = 65_537;
 const sameWitnessLinkageModel =
     'SingleTranscriptSharedWitnessOrExplicitSameWitnessLinkRequired';
+const bridgeSharedWitnessCheckCount = 2;
+const bridgeSharedWitnessChallengeBitsPerCheck = 64;
+const bridgeSharedWitnessSoundnessBits =
+    bridgeSharedWitnessCheckCount * bridgeSharedWitnessChallengeBitsPerCheck;
 
 type BridgeSharedWitnessLayout = {
     readonly aggregateIntegerShareCoordinateCount: number;
@@ -109,7 +122,7 @@ const deriveBridgeSharedWitnessLayoutDigest = (
 ): ProtocolDigest =>
     deriveProtocolDigest('BridgeProofRecordDigest', {
         layout,
-        purpose: 'm9-bridge-shared-witness-layout-v1',
+        purpose: 'sealed-lattice-aggregate-bridge-shared-witness-layout-v1',
     });
 
 export const deriveBridgeProofTargetContractDigest = (input: {
@@ -129,9 +142,11 @@ export const deriveBridgeProofTargetContractDigest = (input: {
             aggregateReductionRowCount: input.aggregateReducedCoordinateCount,
             aggregateToPlaintextBindingStatus:
                 'AggregateToPlaintextBindingProofChecked',
-            bgvEncryptionProofStatus: 'BoundedEncryptionProofChecked',
+            bgvEncryptionProofStatus: 'BgvCiphertextEquationChecked',
             bgvEncryptionProofSubrelation:
-                'SealedLatticeBoundedEncryptionRelation',
+                'SealedLatticeDevelopmentCiphertextEquationRelation',
+            bgvRandomnessBoundProofStatus: 'BgvRandomnessBoundProofMissing',
+            bridgeClaimClosureStatus: 'BridgeProofClaimClosureMissing',
             bridgeProofProfileId: 'EncryptedAggregateBridge-v1',
             ciphertextCoefficientEquationCount:
                 bridgeDataPrimeCount *
@@ -146,7 +161,8 @@ export const deriveBridgeProofTargetContractDigest = (input: {
             fullRnsCoverageRequired: true,
             hwangPiopStatus:
                 'DeferredUntilSealedLatticeBgvRnsCompatibilityFreeze',
-            naiveLinearExpansionBackendStatus: 'InfeasibleForClaimBearingM9',
+            naiveLinearExpansionBackendStatus:
+                'InfeasibleForEncryptedAggregateBridgeClaim',
             objectType: 'AggregateBridgeProofTargetContract',
             objectVersion: 1,
             plaintextCoefficientCount: bridgePlaintextCoefficientCount,
@@ -157,17 +173,24 @@ export const deriveBridgeProofTargetContractDigest = (input: {
             proofFriendlyPlaintextBindingRequired: true,
             proofBackend: 'SealedLatticeBridgeRelation',
             publicPlaintextRootAcceptedAsClosureEvidence: false,
-            relationScope: 'm9-scoped-bridge-relation',
-            rnsCrtConsistencyProofStatus: 'RnsCrtConsistencyProofChecked',
+            relationScope: 'sealed-lattice-aggregate-bridge-relation',
+            rnsCrtConsistencyProofStatus: 'RnsCrtConsistencyRelationChecked',
             sameWitnessLinkageModel,
             sampledDiagnosticsAcceptedForVerification: false,
             separateSubproofsAcceptedForClosure: false,
-            separateSubproofsClosureStatus: 'RejectedForM9Closure',
-            sharedWitnessBindingStatus: 'SharedWitnessBindingProofChecked',
+            separateSubproofsClosureStatus:
+                'RejectedForAggregateBridgeClaimClosure',
+            sharedWitnessBindingStatus: 'SharedWitnessBindingRelationChecked',
+            sharedWitnessChallengeBitsPerCheck:
+                bridgeSharedWitnessChallengeBitsPerCheck,
+            sharedWitnessCheckCount: bridgeSharedWitnessCheckCount,
             sharedWitnessLayout,
             sharedWitnessLayoutDigest,
+            sharedWitnessSoundnessBits: bridgeSharedWitnessSoundnessBits,
+            sharedWitnessZeroKnowledgeStatus:
+                'SharedWitnessZeroKnowledgeProofMissing',
         },
-        purpose: 'm9-bridge-proof-target-contract-v1',
+        purpose: 'sealed-lattice-aggregate-bridge-proof-target-contract-v1',
     });
 };
 
@@ -184,9 +207,11 @@ export const deriveBridgeProofStatementDigest = (input: {
     readonly ballotShareLayoutProfileDigest: ProtocolDigest;
     readonly basisId: string;
     readonly bgvBatchEncoderDigest: ProtocolDigest;
-    readonly bgvEncryptionProofStatus: 'BoundedEncryptionProofChecked';
+    readonly bgvEncryptionProofStatus: 'BgvCiphertextEquationChecked';
     readonly bgvProfileDigest: ProtocolDigest;
     readonly bgvPublicKeyRoot: ProtocolDigest;
+    readonly bgvRandomnessBoundProofStatus: 'BgvRandomnessBoundProofMissing';
+    readonly bridgeClaimClosureStatus: 'BridgeProofClaimClosureMissing';
     readonly bridgeLayoutDigest: ProtocolDigest;
     readonly bridgeProofTargetContractDigest: ProtocolDigest;
     readonly bridgeWitnessPrivacyProfileDigest: ProtocolDigest;
@@ -207,6 +232,7 @@ export const deriveBridgeProofStatementDigest = (input: {
     readonly encodedShareVectorLayoutDigest: ProtocolDigest;
     readonly encryptedAggregateBridgeDigest: ProtocolDigest;
     readonly encryptedAggregateInputLayoutDigest: ProtocolDigest;
+    readonly encryptedAggregateInputRoot: ProtocolDigest;
     readonly encryptedAggregateReconstructionDigest: ProtocolDigest;
     readonly encryptedAggregateShareCiphertextRoot: ProtocolDigest;
     readonly encryptedAggregateTargetBasisDataRoot: ProtocolDigest;
@@ -218,7 +244,7 @@ export const deriveBridgeProofStatementDigest = (input: {
     readonly pollSpecDigest: ProtocolDigest;
     readonly postVotingClosedContextDigest: ProtocolDigest;
     readonly proofProfileDigest: ProtocolDigest;
-    readonly rnsCrtConsistencyProofStatus: 'RnsCrtConsistencyProofChecked';
+    readonly rnsCrtConsistencyProofStatus: 'RnsCrtConsistencyRelationChecked';
     readonly rosterDigest: ProtocolDigest;
     readonly rustBgvBackendProfileDigest: ProtocolDigest;
     readonly sampledPublicRelationCheckPolicyDigest: ProtocolDigest;
@@ -227,7 +253,11 @@ export const deriveBridgeProofStatementDigest = (input: {
     readonly shareCommitmentMessageBoundCertDigest: ProtocolDigest;
     readonly shareVectorWidth: number;
     readonly sharedWitnessBindingRequired: true;
-    readonly sharedWitnessBindingStatus: 'SharedWitnessBindingProofChecked';
+    readonly sharedWitnessBindingStatus: 'SharedWitnessBindingRelationChecked';
+    readonly sharedWitnessChallengeBitsPerCheck: 64;
+    readonly sharedWitnessCheckCount: 2;
+    readonly sharedWitnessSoundnessBits: 128;
+    readonly sharedWitnessZeroKnowledgeStatus: 'SharedWitnessZeroKnowledgeProofMissing';
     readonly coefficientDomainCanonical: true;
     readonly slotCount: number;
     readonly thresholdProfileDigest: ProtocolDigest;
@@ -236,7 +266,7 @@ export const deriveBridgeProofStatementDigest = (input: {
 }): ProtocolDigest =>
     deriveProtocolDigest('BridgeProofRecordDigest', {
         ...input,
-        purpose: 'm9-bridge-proof-statement-v1',
+        purpose: 'sealed-lattice-aggregate-bridge-proof-statement-v1',
     });
 
 export const deriveBridgeProofRecordDigest = (
@@ -244,15 +274,31 @@ export const deriveBridgeProofRecordDigest = (
 ): ProtocolDigest =>
     deriveProtocolDigest('BridgeProofRecordDigest', {
         proofRecord,
-        purpose: 'm9-bridge-proof-record-v1',
+        purpose: 'sealed-lattice-aggregate-bridge-proof-record-v1',
     });
 
 export const deriveAggregateContributionDigest = (
-    contribution: Omit<AggregateContribution, 'aggregateContributionDigest'>,
-): ProtocolDigest =>
-    deriveProtocolDigest('AggregateContributionDigest', {
-        contribution,
-        purpose: 'm9-aggregate-contribution-v1',
+    contribution: AggregateContributionDigestInput,
+): ProtocolDigest => {
+    const { signature, ...unsignedContribution } = contribution;
+    void signature;
+
+    return deriveProtocolDigest('AggregateContributionDigest', {
+        contribution: unsignedContribution,
+        purpose: 'sealed-lattice-aggregate-contribution-v1',
+    });
+};
+
+export const deriveSelectedAggregateContributionOrderDigest = (input: {
+    readonly requiredPostVotingClosedContextDigest: ProtocolDigest;
+    readonly selectedAggregateContributionDigests: readonly ProtocolDigest[];
+    readonly selectionPolicyDigest: ProtocolDigest;
+}): ProtocolDigest =>
+    deriveProtocolDigest('FirstValidOrderDigest', {
+        orderedObjectDigests: input.selectedAggregateContributionDigests,
+        purpose: 'sealed-lattice-selected-aggregate-contribution-order-v1',
+        requiredContextDigest: input.requiredPostVotingClosedContextDigest,
+        selectionPolicyDigest: input.selectionPolicyDigest,
     });
 
 export const deriveEncryptedAggregateReconstructionRoot = (input: {
@@ -265,13 +311,13 @@ export const deriveEncryptedAggregateReconstructionRoot = (input: {
 }): ProtocolDigest =>
     deriveProtocolDigest('EncryptedAggregateReconstructionDigest', {
         ...input,
-        purpose: 'm9-aggregate-ready-reconstruction-root-v1',
+        purpose: 'sealed-lattice-aggregate-ready-reconstruction-root-v1',
     });
 
 export const deriveAggregateReadyRecordDigest = (
     record: Omit<AggregateReadyRecord, 'aggregateReadyRecordDigest'>,
 ): ProtocolDigest =>
     deriveProtocolDigest('AggregateReadyRecordDigest', {
-        purpose: 'm9-aggregate-ready-record-v1',
+        purpose: 'sealed-lattice-aggregate-ready-record-v1',
         record,
     });

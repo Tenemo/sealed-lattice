@@ -11,6 +11,7 @@ import {
     createRefusal,
     isNonNegativeInteger,
     uniqueStrings,
+    verificationExceptionMessage,
 } from '../common/verification-helpers.js';
 
 const defaultMaxPerIdentity = 1;
@@ -275,7 +276,7 @@ export const deriveValidatedFirstValidOrder = (
 ): FirstValidOrderingVerification => {
     try {
         return deriveValidatedFirstValidOrderUnchecked(input);
-    } catch {
+    } catch (error) {
         return {
             ok: false,
             statusLabels: [],
@@ -283,7 +284,10 @@ export const deriveValidatedFirstValidOrder = (
             refusedObjects: [
                 createRefusal(
                     'FirstValidPolicyMismatch',
-                    'First-valid ordering input could not be canonicalized or validated.',
+                    verificationExceptionMessage(
+                        'First-valid ordering input could not be canonicalized or validated.',
+                        error,
+                    ),
                 ),
             ],
             orderedObjects: [],

@@ -21,9 +21,14 @@ export const componentProverRandomnessHexes = (
     componentProofInputs: readonly unknown[],
     suppliedRandomnessHexes: Readonly<Record<string, string>> | undefined,
 ): Readonly<Record<string, string>> => {
-    const randomnessHexes: Record<string, string> = {
-        ...(suppliedRandomnessHexes ?? {}),
-    };
+    const randomnessHexes: Record<string, string> = Object.create(
+        null,
+    ) as Record<string, string>;
+    for (const [componentId, randomnessHex] of Object.entries(
+        suppliedRandomnessHexes ?? {},
+    )) {
+        randomnessHexes[componentId] = randomnessHex;
+    }
 
     for (const componentProofInput of componentProofInputs) {
         if (

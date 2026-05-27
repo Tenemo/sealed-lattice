@@ -471,6 +471,11 @@ fn parse_aggregate_relation_proof(
     expected_rows: usize,
     expected_columns: usize,
 ) -> crate::encoding::CanonicalResult<ParsedAggregateRelationProof> {
+    if proof_hex.len() / 2 > MAX_AGGREGATE_DERIVATION_RELATION_PROOF_BYTES {
+        return Err(invalid_preflight(
+            "aggregate derivation proof bytes exceed the supported byte limit",
+        ));
+    }
     let proof_bytes = decode_hex(proof_hex)?;
     let proof_json = std::str::from_utf8(&proof_bytes)
         .map_err(|_| invalid_preflight("aggregate derivation proof bytes are not UTF-8 JSON"))?;

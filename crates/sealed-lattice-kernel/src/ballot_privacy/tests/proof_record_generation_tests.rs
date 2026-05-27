@@ -1,7 +1,7 @@
 use super::*;
 use crate::ballot_privacy::{
-    linear_proof_parameters::encoded_score_field_linear_proof_encoding_contract,
-    linear_proof_profile_constants::{
+    linear_proof::parameters::encoded_score_field_linear_proof_encoding_contract,
+    linear_proof::profile_constants::{
         GENERATED_FIELD_COMPONENT_EXACT_NORM_BOUND_SQUARED,
         GENERATED_SHARE_COMMITMENT_COMPONENT_EXACT_NORM_BOUND_SQUARED,
     },
@@ -493,11 +493,11 @@ fn ballot_proof_record_generation_emits_bound_component_bundle() {
             json!(component_bundle_statement_digest),
         );
     let relation_binding_digest =
-        super::linear_proof_contract_validation::derive_full_relation_binding_digest(
+        super::linear_proof::contract_validation::derive_full_relation_binding_digest(
             &component_bundle_statement,
         )
         .expect("relation binding digest should derive");
-    let binding_scalar = super::linear_proof_contract_validation::binding_scalar_from_digest(
+    let binding_scalar = super::linear_proof::contract_validation::binding_scalar_from_digest(
         &relation_binding_digest,
     )
     .expect("binding scalar should derive");

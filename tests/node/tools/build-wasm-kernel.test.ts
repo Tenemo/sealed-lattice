@@ -3,7 +3,7 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import {
-    pinSdkKernelDigestInLoaderSource,
+    pinKernelDigestInLoaderSource,
     resolveOutputFilePath,
 } from '#tools/ci/build-wasm-kernel';
 
@@ -42,8 +42,11 @@ describe('WASM kernel build helpers', () => {
         ].join('\n');
         const digest = 'a'.repeat(64);
 
-        expect(pinSdkKernelDigestInLoaderSource(sourceText, digest)).toContain(
-            `const packagedTranscriptCoreKernelNormalizedSha256Hex = '${digest}';`,
+        expect(pinKernelDigestInLoaderSource(sourceText, digest)).toContain(
+            [
+                'const packagedTranscriptCoreKernelNormalizedSha256Hex =',
+                `    '${digest}';`,
+            ].join('\n'),
         );
     });
 
@@ -52,19 +55,28 @@ describe('WASM kernel build helpers', () => {
         const newDigest = 'c'.repeat(64);
         const sourceText = `const packagedTranscriptCoreKernelNormalizedSha256Hex = '${oldDigest}';`;
 
-        expect(pinSdkKernelDigestInLoaderSource(sourceText, newDigest)).toBe(
-            `const packagedTranscriptCoreKernelNormalizedSha256Hex = '${newDigest}';`,
+        expect(pinKernelDigestInLoaderSource(sourceText, newDigest)).toBe(
+            [
+                'const packagedTranscriptCoreKernelNormalizedSha256Hex =',
+                `    '${newDigest}';`,
+            ].join('\n'),
+        );
+        expect(pinKernelDigestInLoaderSource(sourceText, oldDigest)).toBe(
+            [
+                'const packagedTranscriptCoreKernelNormalizedSha256Hex =',
+                `    '${oldDigest}';`,
+            ].join('\n'),
         );
         expect(() =>
-            pinSdkKernelDigestInLoaderSource(
+            pinKernelDigestInLoaderSource(
                 'const unrelated = undefined;',
                 newDigest,
             ),
         ).toThrow(
-            'Cannot pin the transcript-core kernel digest because packages/sdk/dist/kernel.js does not contain the expected digest assignment.',
+            'Cannot pin the transcript-core kernel digest because the loader file does not contain the expected digest assignment.',
         );
         expect(() =>
-            pinSdkKernelDigestInLoaderSource(sourceText, 'not-a-digest'),
+            pinKernelDigestInLoaderSource(sourceText, 'not-a-digest'),
         ).toThrow('Cannot pin an invalid transcript-core kernel digest');
     });
 });
