@@ -15,6 +15,7 @@ import {
     createAggregateDerivationComponent,
     sumAggregateDerivationWitnesses,
 } from '#packages/protocol/src/ballot-privacy/index';
+import { verifyBridgeProof as verifyPublicSdkBridgeProof } from '#packages/sdk/dist/index.js';
 
 type AggregateComponentContext = {
     readonly component: ReturnType<typeof createAggregateDerivationComponent>;
@@ -48,7 +49,7 @@ export const registerAggregateBridgeEncryptionTest = (
         async () => {
             await runAggregateTestStep(
                 'Generate M9 bridge encryption evidence',
-                () => {
+                async () => {
                     const { component, kernel, statement, witness } =
                         getAggregateComponentContext();
                     const setupPackage = kernel.generateBgvPassiveSetup({
@@ -123,8 +124,8 @@ export const registerAggregateBridgeEncryptionTest = (
                         'CoefficientDomainCanonical',
                         'BridgeProofRelationChecked',
                         'BridgeProofImplementationEvidenceOnly',
-                        'SharedWitnessZeroKnowledgeProofMissing',
-                        'BgvRandomnessBoundProofMissing',
+                        'SharedWitnessZeroKnowledgeResponseDistributionChecked',
+                        'BgvRandomnessErrorSupportPolynomialChecked',
                         'BridgeProofClaimClosureMissing',
                         'RepresentativeBridgeMatrixRowEvidence',
                     ]);
@@ -180,14 +181,65 @@ export const registerAggregateBridgeEncryptionTest = (
                         objectType: 'SealedLatticeAggregateBridgeRelationProof',
                         bridgeSharedWitnessProof: {
                             objectType: 'AggregateBridgeSharedWitnessProof',
-                            proofModel: 'fiat-shamir-linear-shared-response-v1',
+                            proofModel:
+                                'fiat-shamir-linear-shared-response-rejection-sampled-v1',
                             relationCheckCount: 2,
+                            maskAbsoluteBoundExclusive:
+                                '1766847064778384329583297500742918515827483896875618958121606201292619776',
+                            responseAbsoluteBoundExclusive:
+                                '1766847064778384329583297500742918515822291600017084130493075704963399680',
+                            responseBoundModel:
+                                'uniform-240-bit-mask-common-output-rejection-sampled-v1',
+                            responseBoundStatus:
+                                'SharedWitnessResponseDistributionBoundsChecked',
+                            responseDistributionStatus:
+                                'SharedWitnessResponseDistributionRejectionSampled',
                             responseEncoding:
-                                'signed-i128-little-endian-hex-v1',
+                                'signed-i256-little-endian-hex-v1',
+                            responseShiftBoundExclusive:
+                                '5192296858534827628530496329220096',
                             sameHiddenAggregateCoordinatesLinked: true,
+                        },
+                        bgvRandomnessBoundProofStatusEvidence: {
+                            bgvRandomnessBoundProofStatus:
+                                'BgvRandomnessErrorSupportPolynomialChecked',
+                            bridgeClaimClosureAccepted: false,
+                            objectType:
+                                'AggregateBridgeBgvRandomnessBoundProofStatus',
+                            proofModel:
+                                'fiat-shamir-same-response-support-polynomial-v1',
+                            sameSharedWitnessResponseTranscript: true,
+                            statusModel:
+                                'development-bgv-randomness-bound-proof-status-v1',
+                            verifierBoundednessProofChecked: true,
+                        },
+                        sharedWitnessZeroKnowledgeStatusEvidence: {
+                            bridgeClaimClosureAccepted: false,
+                            objectType:
+                                'AggregateBridgeSharedWitnessZeroKnowledgeStatus',
+                            sharedWitnessZeroKnowledgeStatus:
+                                'SharedWitnessZeroKnowledgeResponseDistributionChecked',
+                            simulatorProofChecked: true,
+                            statusModel:
+                                'shared-witness-zero-knowledge-response-distribution-status-v1',
                         },
                         singleContributionBridgeRelationChecked: true,
                     });
+                    expect(
+                        String(
+                            bridgeProofPayload.bridgeSharedWitnessProofDigest,
+                        ),
+                    ).toHaveLength(128);
+                    expect(
+                        String(
+                            bridgeProofPayload.bgvRandomnessBoundProofStatusDigest,
+                        ),
+                    ).toHaveLength(128);
+                    expect(
+                        String(
+                            bridgeProofPayload.sharedWitnessZeroKnowledgeStatusDigest,
+                        ),
+                    ).toHaveLength(128);
                     expect(bridgeProofPayload).toMatchObject({
                         aggregateQuotientCoordinateCount: 220,
                         aggregateReducedCoordinateCount: 220,
@@ -239,9 +291,9 @@ export const registerAggregateBridgeEncryptionTest = (
                             sharedWitnessCheckCount: 2,
                             sharedWitnessSoundnessBits: 128,
                             sharedWitnessZeroKnowledgeStatus:
-                                'SharedWitnessZeroKnowledgeProofMissing',
+                                'SharedWitnessZeroKnowledgeResponseDistributionChecked',
                             bgvRandomnessBoundProofStatus:
-                                'BgvRandomnessBoundProofMissing',
+                                'BgvRandomnessErrorSupportPolynomialChecked',
                             bridgeClaimClosureStatus:
                                 'BridgeProofClaimClosureMissing',
                             sameWitnessLinkageModel:
@@ -339,8 +391,8 @@ export const registerAggregateBridgeEncryptionTest = (
                         'BridgeProofRelationChecked',
                         'M9SingleContributionBridgeRelationChecked',
                         'BridgeProofImplementationEvidenceOnly',
-                        'SharedWitnessZeroKnowledgeProofMissing',
-                        'BgvRandomnessBoundProofMissing',
+                        'SharedWitnessZeroKnowledgeResponseDistributionChecked',
+                        'BgvRandomnessErrorSupportPolynomialChecked',
                         'BridgeProofClaimClosureMissing',
                         'FinalBridgeTheoremPending',
                         'RepresentativeBridgeMatrixRowEvidence',
@@ -357,12 +409,158 @@ export const registerAggregateBridgeEncryptionTest = (
                     );
                     expect(
                         String(
+                            bridgeVerification.bridgeSharedWitnessProofDigest,
+                        ),
+                    ).toBe(
+                        String(
+                            bridgeProofPayload.bridgeSharedWitnessProofDigest,
+                        ),
+                    );
+                    expect(
+                        String(
+                            bridgeVerification.bgvRandomnessBoundProofStatusDigest,
+                        ),
+                    ).toBe(
+                        String(
+                            bridgeProofPayload.bgvRandomnessBoundProofStatusDigest,
+                        ),
+                    );
+                    expect(
+                        String(
+                            bridgeVerification.sharedWitnessZeroKnowledgeStatusDigest,
+                        ),
+                    ).toBe(
+                        String(
+                            bridgeProofPayload.sharedWitnessZeroKnowledgeStatusDigest,
+                        ),
+                    );
+                    expect(
+                        String(
                             bridgeVerification.bridgeProofTargetContractDigest,
                         ),
                     ).toBe(
                         String(
                             bridgeEncryption.bridgeProofTargetContractDigest,
                         ),
+                    );
+                    const publicSdkBridgeVerification =
+                        await verifyPublicSdkBridgeProof({
+                            aggregateDerivationComponent: component,
+                            aggregateSelectionPolicyDigest,
+                            bridgeEncryption,
+                            bridgeWitnessPrivacyProfileDigest,
+                            heParamDigest,
+                            setupPackage,
+                        });
+                    expect(publicSdkBridgeVerification).toMatchObject({
+                        bridgeClaimClosureVerified: false,
+                        bridgeProofVerificationStatus:
+                            'BridgeProofRelationChecked',
+                        ok: true,
+                        operation: 'verifyAggregateBridgeEncryption',
+                    });
+                    expect(publicSdkBridgeVerification.statusLabels).toEqual(
+                        bridgeVerification.statusLabels,
+                    );
+
+                    type PublicSdkBridgeVerificationInput = Parameters<
+                        typeof verifyPublicSdkBridgeProof
+                    >[0];
+                    const expectPublicSdkBridgeVerificationRejected = async (
+                        mutation: Partial<PublicSdkBridgeVerificationInput>,
+                        expectedMessagePattern: RegExp,
+                    ): Promise<Record<string, unknown>> => {
+                        const verification = await verifyPublicSdkBridgeProof({
+                            aggregateDerivationComponent:
+                                mutation.aggregateDerivationComponent ??
+                                component,
+                            aggregateSelectionPolicyDigest:
+                                mutation.aggregateSelectionPolicyDigest ??
+                                aggregateSelectionPolicyDigest,
+                            bridgeEncryption:
+                                mutation.bridgeEncryption ?? bridgeEncryption,
+                            bridgeWitnessPrivacyProfileDigest:
+                                mutation.bridgeWitnessPrivacyProfileDigest ??
+                                bridgeWitnessPrivacyProfileDigest,
+                            heParamDigest:
+                                mutation.heParamDigest ?? heParamDigest,
+                            setupPackage: mutation.setupPackage ?? setupPackage,
+                        });
+
+                        expect(verification).toMatchObject({
+                            ok: false,
+                            operation: 'verifyAggregateBridgeEncryption',
+                        });
+                        expect(verification.refusedObjects).toEqual(
+                            expect.arrayContaining([
+                                expect.objectContaining({
+                                    code: 'BallotPackageInvalid',
+                                    message: expect.stringMatching(
+                                        expectedMessagePattern,
+                                    ) as string,
+                                }),
+                            ]),
+                        );
+                        expect(verification).not.toMatchObject({
+                            bridgeClaimClosureVerified: true,
+                        });
+
+                        return verification as Record<string, unknown>;
+                    };
+
+                    const publicSdkSampledOnlyVerification =
+                        await expectPublicSdkBridgeVerificationRejected(
+                            {
+                                bridgeEncryption: {
+                                    ...bridgeEncryption,
+                                    bridgeProofVerificationStatus:
+                                        'BridgeProofBackendPending',
+                                },
+                            },
+                            /verifier-checked bridge encryption status/iu,
+                        );
+                    expect(
+                        publicSdkSampledOnlyVerification.refusedObjects,
+                    ).toEqual(
+                        expect.arrayContaining([
+                            expect.objectContaining({
+                                message:
+                                    'M9 bridge relation proof requires verifier-checked bridge encryption status',
+                            }),
+                        ]),
+                    );
+                    await expectPublicSdkBridgeVerificationRejected(
+                        {
+                            aggregateSelectionPolicyDigest:
+                                deriveProtocolDigest(
+                                    'AggregateSelectionPolicyDigest',
+                                    {
+                                        purpose:
+                                            'm9-kernel-bridge-test-public-sdk-wrong-selection-policy',
+                                        statementDigest:
+                                            statement.aggregateDerivationStatementDigest,
+                                    },
+                                ),
+                        },
+                        /selection policy|proof statement|statement digest/iu,
+                    );
+                    await expectPublicSdkBridgeVerificationRejected(
+                        {
+                            bridgeEncryption: {
+                                ...bridgeEncryption,
+                                bridgeProofBytesDigest: '0'.repeat(128),
+                            },
+                        },
+                        /proof bytes digest|proof root|digest/iu,
+                    );
+                    await expectPublicSdkBridgeVerificationRejected(
+                        {
+                            bridgeEncryption: {
+                                ...bridgeEncryption,
+                                bridgeProofBytesHex: '00',
+                            },
+                        },
+                        /proof bytes|JSON|canonical|malformed/iu,
                     );
                     const pendingBridgeProofRecord =
                         createPendingBridgeProofRecordFromBridgeEvidence({
@@ -412,6 +610,93 @@ export const registerAggregateBridgeEncryptionTest = (
 
                         return `${hex.slice(0, -1)}${replacement}`;
                     };
+                    const refreshBridgeProofPayloadDerivedDigests = (
+                        proofPayload: Record<string, unknown>,
+                    ): void => {
+                        if (
+                            typeof proofPayload.bridgeSharedWitnessProof ===
+                                'object' &&
+                            proofPayload.bridgeSharedWitnessProof !== null
+                        ) {
+                            proofPayload.bridgeSharedWitnessProofDigest =
+                                deriveProtocolDigest(
+                                    'BridgeProofRecordDigest',
+                                    {
+                                        bridgeSharedWitnessProof:
+                                            proofPayload.bridgeSharedWitnessProof,
+                                        purpose:
+                                            'sealed-lattice-aggregate-bridge-shared-witness-proof-digest-v1',
+                                    },
+                                );
+                        }
+                        if (
+                            typeof proofPayload.bridgeSharedWitnessProofDigest ===
+                            'string'
+                        ) {
+                            if (
+                                typeof proofPayload.sharedWitnessZeroKnowledgeStatusEvidence ===
+                                    'object' &&
+                                proofPayload.sharedWitnessZeroKnowledgeStatusEvidence !==
+                                    null
+                            ) {
+                                (
+                                    proofPayload.sharedWitnessZeroKnowledgeStatusEvidence as Record<
+                                        string,
+                                        unknown
+                                    >
+                                ).bridgeSharedWitnessProofDigest =
+                                    proofPayload.bridgeSharedWitnessProofDigest;
+                            }
+                            if (
+                                typeof proofPayload.bgvRandomnessBoundProofStatusEvidence ===
+                                    'object' &&
+                                proofPayload.bgvRandomnessBoundProofStatusEvidence !==
+                                    null
+                            ) {
+                                (
+                                    proofPayload.bgvRandomnessBoundProofStatusEvidence as Record<
+                                        string,
+                                        unknown
+                                    >
+                                ).bridgeSharedWitnessProofDigest =
+                                    proofPayload.bridgeSharedWitnessProofDigest;
+                            }
+                        }
+                        if (
+                            typeof proofPayload.sharedWitnessZeroKnowledgeStatusEvidence ===
+                                'object' &&
+                            proofPayload.sharedWitnessZeroKnowledgeStatusEvidence !==
+                                null
+                        ) {
+                            proofPayload.sharedWitnessZeroKnowledgeStatusDigest =
+                                deriveProtocolDigest(
+                                    'BridgeProofRecordDigest',
+                                    {
+                                        purpose:
+                                            'sealed-lattice-aggregate-bridge-shared-witness-zero-knowledge-status-v1',
+                                        sharedWitnessZeroKnowledgeStatusEvidence:
+                                            proofPayload.sharedWitnessZeroKnowledgeStatusEvidence,
+                                    },
+                                );
+                        }
+                        if (
+                            typeof proofPayload.bgvRandomnessBoundProofStatusEvidence ===
+                                'object' &&
+                            proofPayload.bgvRandomnessBoundProofStatusEvidence !==
+                                null
+                        ) {
+                            proofPayload.bgvRandomnessBoundProofStatusDigest =
+                                deriveProtocolDigest(
+                                    'BridgeProofRecordDigest',
+                                    {
+                                        bgvRandomnessBoundProofStatusEvidence:
+                                            proofPayload.bgvRandomnessBoundProofStatusEvidence,
+                                        purpose:
+                                            'sealed-lattice-aggregate-bridge-bgv-randomness-bound-status-v1',
+                                    },
+                                );
+                        }
+                    };
                     const bridgeEncryptionWithUpdatedProofPayload = (
                         proofOverrides: Record<string, unknown>,
                         bridgeOverrides: Record<string, unknown>,
@@ -427,6 +712,7 @@ export const registerAggregateBridgeEncryptionTest = (
                             ) as Record<string, unknown>),
                             ...proofOverrides,
                         };
+                        refreshBridgeProofPayloadDerivedDigests(proofPayload);
                         const bridgePayload = {
                             ...bridgeEncryption,
                             ...bridgeOverrides,
@@ -460,6 +746,27 @@ export const registerAggregateBridgeEncryptionTest = (
                                     bridgePayload.collectivePublicKeyRoot,
                                 encryptedAggregateShareCiphertextRoot:
                                     bridgePayload.encryptedAggregateShareCiphertextRoot,
+                                ...(typeof proofPayload.bridgeSharedWitnessProofDigest ===
+                                'string'
+                                    ? {
+                                          bridgeSharedWitnessProofDigest:
+                                              proofPayload.bridgeSharedWitnessProofDigest,
+                                      }
+                                    : {}),
+                                ...(typeof proofPayload.sharedWitnessZeroKnowledgeStatusDigest ===
+                                'string'
+                                    ? {
+                                          sharedWitnessZeroKnowledgeStatusDigest:
+                                              proofPayload.sharedWitnessZeroKnowledgeStatusDigest,
+                                      }
+                                    : {}),
+                                ...(typeof proofPayload.bgvRandomnessBoundProofStatusDigest ===
+                                'string'
+                                    ? {
+                                          bgvRandomnessBoundProofStatusDigest:
+                                              proofPayload.bgvRandomnessBoundProofStatusDigest,
+                                      }
+                                    : {}),
                                 proofBytesDigest: bridgeProofBytesDigest,
                                 purpose:
                                     'sealed-lattice-aggregate-bridge-encryption-proof-root-v1',
@@ -470,6 +777,27 @@ export const registerAggregateBridgeEncryptionTest = (
                             ...bridgePayload,
                             bridgeProofBytesDigest,
                             bridgeProofBytesHex,
+                            ...(typeof proofPayload.bridgeSharedWitnessProofDigest ===
+                            'string'
+                                ? {
+                                      bridgeSharedWitnessProofDigest:
+                                          proofPayload.bridgeSharedWitnessProofDigest,
+                                  }
+                                : {}),
+                            ...(typeof proofPayload.sharedWitnessZeroKnowledgeStatusDigest ===
+                            'string'
+                                ? {
+                                      sharedWitnessZeroKnowledgeStatusDigest:
+                                          proofPayload.sharedWitnessZeroKnowledgeStatusDigest,
+                                  }
+                                : {}),
+                            ...(typeof proofPayload.bgvRandomnessBoundProofStatusDigest ===
+                            'string'
+                                ? {
+                                      bgvRandomnessBoundProofStatusDigest:
+                                          proofPayload.bgvRandomnessBoundProofStatusDigest,
+                                  }
+                                : {}),
                             bridgeProofRoot,
                         };
                     };

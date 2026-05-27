@@ -1,3 +1,4 @@
+use num_bigint::BigInt;
 use serde_json::{Value, json};
 
 use crate::{
@@ -345,8 +346,8 @@ pub(crate) fn verify_m9_bridge_ciphertext_public_bindings(
 }
 
 pub(crate) fn m9_bridge_batch_encoding_commitment_digest_from_responses(
-    reduced_slot_response: &[i128],
-    plaintext_coefficient_response: &[i128],
+    reduced_slot_response: &[BigInt],
+    plaintext_coefficient_response: &[BigInt],
 ) -> CanonicalResult<String> {
     crate::bgv::setup::m9_bridge_batch_encoding_commitment_digest_from_responses(
         reduced_slot_response,
@@ -361,10 +362,10 @@ pub(crate) fn m9_bridge_ciphertext_commitment_digest_from_responses(
     aggregate_derivation_statement_digest: &str,
     bridge_encryption: &Value,
     challenge_scalar: u64,
-    plaintext_coefficient_response: &[i128],
-    randomizer_response: &[i128],
-    perturbation_zero_response: &[i128],
-    perturbation_one_response: &[i128],
+    plaintext_coefficient_response: &[BigInt],
+    randomizer_response: &[BigInt],
+    perturbation_zero_response: &[BigInt],
+    perturbation_one_response: &[BigInt],
 ) -> CanonicalResult<String> {
     crate::bgv::setup::m9_bridge_ciphertext_commitment_digest_from_responses(
         setup_package,

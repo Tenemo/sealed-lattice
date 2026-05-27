@@ -37,8 +37,10 @@ const AGGREGATE_TO_PLAINTEXT_BINDING_CHECKED_STATUS: &str =
     "AggregateToPlaintextBindingProofChecked";
 const BGV_ENCRYPTION_PROOF_CHECKED_STATUS: &str = "BgvCiphertextEquationChecked";
 const RNS_CRT_CONSISTENCY_PROOF_CHECKED_STATUS: &str = "RnsCrtConsistencyRelationChecked";
-const SHARED_WITNESS_ZERO_KNOWLEDGE_STATUS: &str = "SharedWitnessZeroKnowledgeProofMissing";
-const BGV_RANDOMNESS_BOUND_PROOF_STATUS: &str = "BgvRandomnessBoundProofMissing";
+const SHARED_WITNESS_ZERO_KNOWLEDGE_STATUS: &str =
+    "SharedWitnessZeroKnowledgeResponseDistributionChecked";
+const BGV_RANDOMNESS_BOUND_PROOF_MISSING_STATUS: &str = "BgvRandomnessBoundProofMissing";
+const BGV_RANDOMNESS_BOUND_PROOF_STATUS: &str = "BgvRandomnessErrorSupportPolynomialChecked";
 const BRIDGE_CLAIM_CLOSURE_STATUS: &str = "BridgeProofClaimClosureMissing";
 const HWANG_PIOP_DEFERRED_STATUS: &str = "DeferredUntilSealedLatticeBgvRnsCompatibilityFreeze";
 const PLAINTEXT_ENCODING_RELATION: &str = "BGVBatchEncode65537InverseNegacyclicNtt";
@@ -53,6 +55,7 @@ const BRIDGE_SHARED_WITNESS_SOUNDNESS_BITS: u64 =
     SHARED_WITNESS_CHALLENGE_BITS_PER_CHECK * BRIDGE_SHARED_WITNESS_CHECK_COUNT as u64;
 const BRIDGE_BGV_CIPHERTEXT_COMPONENT_COUNT: u64 = 2;
 
+mod boundedness;
 mod dimensions;
 mod evaluation;
 mod generation;

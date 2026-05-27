@@ -152,6 +152,8 @@
     "BoardConsistencyInput",
     "BoardConsistencyVerification",
     "BoardEntryMerklePathStep",
+    "BridgeProofVerification",
+    "BridgeProofVerificationInput",
     "CanonicalError",
     "CanonicalErrorCode",
     "CanonicalSignedRootObject",

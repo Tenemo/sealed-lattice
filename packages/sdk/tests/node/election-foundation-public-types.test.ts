@@ -61,6 +61,8 @@ type PublicFoundationTypes = [
     publicTypes.BallotProofRecord,
     publicTypes.BallotProofStatement,
     publicTypes.BoardConsistencyInput,
+    publicTypes.BridgeProofVerification,
+    publicTypes.BridgeProofVerificationInput,
     publicTypes.ClaimBearingBallotPackage,
     publicTypes.PollSpecInput,
     publicTypes.ReceiverKeyProof,
@@ -85,6 +87,8 @@ const publicFoundationTypeNames = [
     'BallotProofRecord',
     'BallotProofStatement',
     'BoardConsistencyInput',
+    'BridgeProofVerification',
+    'BridgeProofVerificationInput',
     'ClaimBearingBallotPackage',
     'PollSpecInput',
     'ReceiverKeyProof',
@@ -95,7 +99,7 @@ const publicFoundationTypeNames = [
 
 describe('election foundation public type surface', () => {
     it('keeps safe election foundation types available', () => {
-        expect(publicFoundationTypeNames).toHaveLength(9);
+        expect(publicFoundationTypeNames).toHaveLength(11);
         for (const publicTypeName of publicFoundationTypeNames) {
             expect(publicSurface.publicTypeExports).toContain(publicTypeName);
         }

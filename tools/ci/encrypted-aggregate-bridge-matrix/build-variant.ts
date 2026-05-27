@@ -15,6 +15,7 @@ import {
     measure,
     publicArtifactIsWitnessClean,
     roundedMilliseconds,
+    focusedSubsetVariants,
     sentinelVariants,
     variantKey,
     type TranscriptCoreKernel,
@@ -229,7 +230,8 @@ export const buildVariant = (input: {
             trusteeAggregateThreshold,
             variant: input.variant,
         }),
-        ...(sentinelVariants.has(variantKey(input.variant))
+        ...(sentinelVariants.has(variantKey(input.variant)) ||
+        focusedSubsetVariants.has(variantKey(input.variant))
             ? runSentinelNegativeChecks({
                   aggregateSelectionPolicyDigest,
                   bridgeWitnessPrivacyProfileDigest,

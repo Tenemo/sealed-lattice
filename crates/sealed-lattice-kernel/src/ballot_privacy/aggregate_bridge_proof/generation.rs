@@ -1,7 +1,12 @@
 use super::*;
 use super::{
+    boundedness::{bridge_bgv_randomness_bound_status, bridge_bgv_randomness_bound_status_digest},
     dimensions::bridge_variant_dimensions,
-    shared_witness::{BridgeSharedWitnessProverInput, generate_bridge_shared_witness_proof},
+    shared_witness::{
+        BridgeSharedWitnessProverInput, bridge_shared_witness_proof_digest,
+        bridge_shared_witness_zero_knowledge_status,
+        bridge_shared_witness_zero_knowledge_status_digest, generate_bridge_shared_witness_proof,
+    },
     statement::{
         bridge_proof_profile_digest, bridge_proof_statement_digest, build_bridge_proof_statement,
     },
@@ -129,7 +134,7 @@ pub(super) fn generate_aggregate_bridge_encryption(request: &Value) -> Canonical
         })?
         .insert(
             "encryptedAggregateInputRoot".to_string(),
-            Value::String(encrypted_aggregate_share_ciphertext_root),
+            Value::String(encrypted_aggregate_share_ciphertext_root.clone()),
         );
     let bridge_proof_profile_digest = bridge_proof_profile_digest()?;
     let bridge_proof_statement = build_bridge_proof_statement(
@@ -162,6 +167,22 @@ pub(super) fn generate_aggregate_bridge_encryption(request: &Value) -> Canonical
             trace: &trace,
             prover_randomness_hex,
         })?;
+    let shared_witness_proof_digest = bridge_shared_witness_proof_digest(&shared_witness_proof)?;
+    let shared_witness_zero_knowledge_status = bridge_shared_witness_zero_knowledge_status(
+        &bridge_proof_statement_digest,
+        &shared_witness_proof_digest,
+    );
+    let shared_witness_zero_knowledge_status_digest =
+        bridge_shared_witness_zero_knowledge_status_digest(&shared_witness_zero_knowledge_status)?;
+    let bgv_randomness_bound_proof_status = bridge_bgv_randomness_bound_status(
+        &bridge_proof_statement_digest,
+        &shared_witness_proof_digest,
+        &encrypted_aggregate_share_ciphertext_root,
+        required_string_field(&encryption, "collectivePublicKeyRoot", "bridgeEncryption")?,
+        required_string_field(&encryption, "bgvPublicKeyRoot", "bridgeEncryption")?,
+    );
+    let bgv_randomness_bound_proof_status_digest =
+        bridge_bgv_randomness_bound_status_digest(&bgv_randomness_bound_proof_status)?;
     let proof_value = json!({
         "objectType": "SealedLatticeAggregateBridgeRelationProof",
         "objectVersion": 1,
@@ -170,6 +191,11 @@ pub(super) fn generate_aggregate_bridge_encryption(request: &Value) -> Canonical
         "proofBackend": BRIDGE_PROOF_BACKEND,
         "bgvEncryptionProofSubrelation": BGV_ENCRYPTION_PROOF_SUBRELATION,
         "bridgeSharedWitnessProof": shared_witness_proof,
+        "bridgeSharedWitnessProofDigest": shared_witness_proof_digest,
+        "sharedWitnessZeroKnowledgeStatusEvidence": shared_witness_zero_knowledge_status,
+        "sharedWitnessZeroKnowledgeStatusDigest": shared_witness_zero_knowledge_status_digest,
+        "bgvRandomnessBoundProofStatusEvidence": bgv_randomness_bound_proof_status,
+        "bgvRandomnessBoundProofStatusDigest": bgv_randomness_bound_proof_status_digest,
         "bridgeProofStatement": bridge_proof_statement,
         "bridgeProofStatementDigest": bridge_proof_statement_digest,
         "bridgeProofTargetContractDigest": bridge_proof_target_contract_digest,
@@ -228,6 +254,9 @@ pub(super) fn generate_aggregate_bridge_encryption(request: &Value) -> Canonical
             "aggregateDerivationStatementDigest": statement_digest,
             "bridgeProofProfileDigest": proof_value["bridgeProofProfileDigest"],
             "bridgeProofStatementDigest": proof_value["bridgeProofStatementDigest"],
+            "bridgeSharedWitnessProofDigest": proof_value["bridgeSharedWitnessProofDigest"],
+            "sharedWitnessZeroKnowledgeStatusDigest": proof_value["sharedWitnessZeroKnowledgeStatusDigest"],
+            "bgvRandomnessBoundProofStatusDigest": proof_value["bgvRandomnessBoundProofStatusDigest"],
             "proofBytesDigest": proof_bytes_digest,
             "encryptedAggregateShareCiphertextRoot": encryption["encryptedAggregateShareCiphertextRoot"],
             "collectivePublicKeyRoot": encryption["collectivePublicKeyRoot"],
@@ -270,6 +299,18 @@ pub(super) fn generate_aggregate_bridge_encryption(request: &Value) -> Canonical
         Value::String(proof_bytes_digest),
     );
     object.insert("bridgeProofRoot".to_string(), Value::String(proof_root));
+    object.insert(
+        "bridgeSharedWitnessProofDigest".to_string(),
+        proof_value["bridgeSharedWitnessProofDigest"].clone(),
+    );
+    object.insert(
+        "sharedWitnessZeroKnowledgeStatusDigest".to_string(),
+        proof_value["sharedWitnessZeroKnowledgeStatusDigest"].clone(),
+    );
+    object.insert(
+        "bgvRandomnessBoundProofStatusDigest".to_string(),
+        proof_value["bgvRandomnessBoundProofStatusDigest"].clone(),
+    );
     object.insert(
         "encryptedAggregateInputRoot".to_string(),
         proof_value["encryptedAggregateInputRoot"].clone(),
@@ -314,8 +355,8 @@ pub(super) fn generate_aggregate_bridge_encryption(request: &Value) -> Canonical
         "CoefficientDomainCanonical",
         "BridgeProofRelationChecked",
         "BridgeProofImplementationEvidenceOnly",
-        "SharedWitnessZeroKnowledgeProofMissing",
-        "BgvRandomnessBoundProofMissing",
+        SHARED_WITNESS_ZERO_KNOWLEDGE_STATUS,
+        BGV_RANDOMNESS_BOUND_PROOF_STATUS,
         "BridgeProofClaimClosureMissing",
     ];
     status_labels.push(match dimensions.evidence_tier {

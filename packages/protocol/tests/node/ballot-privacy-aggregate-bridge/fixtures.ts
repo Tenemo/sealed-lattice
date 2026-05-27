@@ -240,7 +240,8 @@ export const createAggregateContributionFixture = (
         bgvEncryptionProofStatus: 'BgvCiphertextEquationChecked',
         bgvProfileDigest: baseFields.bgvProfileDigest,
         bgvPublicKeyRoot: baseFields.bgvPublicKeyRoot,
-        bgvRandomnessBoundProofStatus: 'BgvRandomnessBoundProofMissing',
+        bgvRandomnessBoundProofStatus:
+            'BgvRandomnessErrorSupportPolynomialChecked',
         bridgeClaimClosureStatus: 'BridgeProofClaimClosureMissing',
         bridgeLayoutDigest: baseFields.encryptedAggregateInputLayoutDigest,
         bridgeProofTargetContractDigest,
@@ -297,7 +298,7 @@ export const createAggregateContributionFixture = (
         sharedWitnessCheckCount: 2,
         sharedWitnessSoundnessBits: 128,
         sharedWitnessZeroKnowledgeStatus:
-            'SharedWitnessZeroKnowledgeProofMissing',
+            'SharedWitnessZeroKnowledgeResponseDistributionChecked',
         slotCount: 32_768,
         thresholdProfileDigest: baseFields.thresholdProfileDigest,
         topKEvaluatorInputLayoutDigest:

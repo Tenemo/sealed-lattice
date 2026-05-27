@@ -145,7 +145,8 @@ export const deriveBridgeProofTargetContractDigest = (input: {
             bgvEncryptionProofStatus: 'BgvCiphertextEquationChecked',
             bgvEncryptionProofSubrelation:
                 'SealedLatticeDevelopmentCiphertextEquationRelation',
-            bgvRandomnessBoundProofStatus: 'BgvRandomnessBoundProofMissing',
+            bgvRandomnessBoundProofStatus:
+                'BgvRandomnessErrorSupportPolynomialChecked',
             bridgeClaimClosureStatus: 'BridgeProofClaimClosureMissing',
             bridgeProofProfileId: 'EncryptedAggregateBridge-v1',
             ciphertextCoefficientEquationCount:
@@ -188,7 +189,7 @@ export const deriveBridgeProofTargetContractDigest = (input: {
             sharedWitnessLayoutDigest,
             sharedWitnessSoundnessBits: bridgeSharedWitnessSoundnessBits,
             sharedWitnessZeroKnowledgeStatus:
-                'SharedWitnessZeroKnowledgeProofMissing',
+                'SharedWitnessZeroKnowledgeResponseDistributionChecked',
         },
         purpose: 'sealed-lattice-aggregate-bridge-proof-target-contract-v1',
     });
@@ -210,7 +211,7 @@ export const deriveBridgeProofStatementDigest = (input: {
     readonly bgvEncryptionProofStatus: 'BgvCiphertextEquationChecked';
     readonly bgvProfileDigest: ProtocolDigest;
     readonly bgvPublicKeyRoot: ProtocolDigest;
-    readonly bgvRandomnessBoundProofStatus: 'BgvRandomnessBoundProofMissing';
+    readonly bgvRandomnessBoundProofStatus: 'BgvRandomnessErrorSupportPolynomialChecked';
     readonly bridgeClaimClosureStatus: 'BridgeProofClaimClosureMissing';
     readonly bridgeLayoutDigest: ProtocolDigest;
     readonly bridgeProofTargetContractDigest: ProtocolDigest;
@@ -257,7 +258,7 @@ export const deriveBridgeProofStatementDigest = (input: {
     readonly sharedWitnessChallengeBitsPerCheck: 64;
     readonly sharedWitnessCheckCount: 2;
     readonly sharedWitnessSoundnessBits: 128;
-    readonly sharedWitnessZeroKnowledgeStatus: 'SharedWitnessZeroKnowledgeProofMissing';
+    readonly sharedWitnessZeroKnowledgeStatus: 'SharedWitnessZeroKnowledgeResponseDistributionChecked';
     readonly coefficientDomainCanonical: true;
     readonly slotCount: number;
     readonly thresholdProfileDigest: ProtocolDigest;

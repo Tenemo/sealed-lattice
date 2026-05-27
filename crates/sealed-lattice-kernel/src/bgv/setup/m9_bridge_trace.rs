@@ -1,5 +1,7 @@
 use super::validation;
 use super::*;
+use num_bigint::BigInt;
+use num_traits::ToPrimitive;
 
 #[derive(Clone, Debug)]
 pub(crate) struct M9BridgeCiphertextRelationTrace {
@@ -298,8 +300,8 @@ pub(crate) fn generate_m9_bridge_ciphertext_relation_trace_from_slots(
 }
 
 pub(crate) fn m9_bridge_batch_encoding_commitment_digest_from_responses(
-    reduced_slot_response: &[i128],
-    plaintext_coefficient_response: &[i128],
+    reduced_slot_response: &[BigInt],
+    plaintext_coefficient_response: &[BigInt],
 ) -> CanonicalResult<String> {
     if reduced_slot_response.len() > POLYNOMIAL_DEGREE
         || plaintext_coefficient_response.len() != POLYNOMIAL_DEGREE
@@ -312,7 +314,7 @@ pub(crate) fn m9_bridge_batch_encoding_commitment_digest_from_responses(
     let mut padded_slot_response = vec![0_u64; POLYNOMIAL_DEGREE];
     for (slot_index, response) in reduced_slot_response.iter().enumerate() {
         padded_slot_response[slot_index] =
-            signed_i128_to_modulus_residue(*response, PLAINTEXT_MODULUS);
+            signed_bigint_to_modulus_residue(response, PLAINTEXT_MODULUS);
     }
     let encoded_response_coefficients =
         inverse_negacyclic_ntt(&padded_slot_response, PLAINTEXT_MODULUS)?;
@@ -321,7 +323,7 @@ pub(crate) fn m9_bridge_batch_encoding_commitment_digest_from_responses(
         .zip(plaintext_coefficient_response.iter())
         .map(|(encoded_response_coefficient, plaintext_response)| {
             let plaintext_response_residue =
-                signed_i128_to_modulus_residue(*plaintext_response, PLAINTEXT_MODULUS);
+                signed_bigint_to_modulus_residue(plaintext_response, PLAINTEXT_MODULUS);
             sub_mod(
                 *encoded_response_coefficient,
                 plaintext_response_residue,
@@ -349,10 +351,10 @@ pub(crate) fn m9_bridge_ciphertext_commitment_digest_from_responses(
     aggregate_derivation_statement_digest: &str,
     bridge_encryption: &Value,
     challenge_scalar: u64,
-    plaintext_coefficient_response: &[i128],
-    randomizer_response: &[i128],
-    perturbation_zero_response: &[i128],
-    perturbation_one_response: &[i128],
+    plaintext_coefficient_response: &[BigInt],
+    randomizer_response: &[BigInt],
+    perturbation_zero_response: &[BigInt],
+    perturbation_one_response: &[BigInt],
 ) -> CanonicalResult<String> {
     validation::validate_setup_package_shape(setup_package)?;
     validation::validate_setup_package_internal_bindings(setup_package)?;
@@ -392,7 +394,7 @@ pub(crate) fn m9_bridge_ciphertext_commitment_digest_from_responses(
     let public_sample_label = format!(
         "aggregate-bridge-encryption-public-sample:{aggregate_derivation_statement_digest}:{contributor_identity}"
     );
-    let challenge_scalar_i128 = i128::from(challenge_scalar);
+    let challenge_scalar_bigint = BigInt::from(challenge_scalar);
     let mut component_zero_residues_by_modulus = Vec::with_capacity(DATA_PRIMES.len());
     let mut component_one_residues_by_modulus = Vec::with_capacity(DATA_PRIMES.len());
 
@@ -406,25 +408,25 @@ pub(crate) fn m9_bridge_ciphertext_commitment_digest_from_responses(
             dense_public_residues(setup_seed_digest, &public_sample_label, modulus);
         let randomizer_residues = randomizer_response
             .iter()
-            .map(|coefficient| signed_i128_to_modulus_residue(*coefficient, modulus))
+            .map(|coefficient| signed_bigint_to_modulus_residue(coefficient, modulus))
             .collect::<Vec<_>>();
         let perturbation_zero_residues = perturbation_zero_response
             .iter()
-            .map(|coefficient| signed_i128_to_modulus_residue(*coefficient, modulus))
+            .map(|coefficient| signed_bigint_to_modulus_residue(coefficient, modulus))
             .collect::<Vec<_>>();
         let perturbation_one_residues = perturbation_one_response
             .iter()
-            .map(|coefficient| signed_i128_to_modulus_residue(*coefficient, modulus))
+            .map(|coefficient| signed_bigint_to_modulus_residue(coefficient, modulus))
             .collect::<Vec<_>>();
         let plaintext_response_residues = plaintext_coefficient_response
             .iter()
-            .map(|coefficient| signed_i128_to_modulus_residue(*coefficient, modulus))
+            .map(|coefficient| signed_bigint_to_modulus_residue(coefficient, modulus))
             .collect::<Vec<_>>();
         let public_key_product =
             negacyclic_product_mod(&public_key_coefficients, &randomizer_residues, modulus)?;
         let public_sample_product =
             negacyclic_product_mod(&public_sample_coefficients, &randomizer_residues, modulus)?;
-        let challenge_residue = signed_i128_to_modulus_residue(challenge_scalar_i128, modulus);
+        let challenge_residue = signed_bigint_to_modulus_residue(&challenge_scalar_bigint, modulus);
         let ciphertext_component_zero = ciphertext.components[0]
             .residues_by_modulus
             .get(modulus_index)
@@ -504,10 +506,13 @@ pub(crate) fn m9_bridge_ciphertext_commitment_digest_from_responses(
     )
 }
 
-fn signed_i128_to_modulus_residue(value: i128, modulus: u64) -> u64 {
-    let residue = value.rem_euclid(i128::from(modulus));
+fn signed_bigint_to_modulus_residue(value: &BigInt, modulus: u64) -> u64 {
+    let modulus = BigInt::from(modulus);
+    let residue = ((value % &modulus) + &modulus) % &modulus;
 
-    u64::try_from(residue).expect("non-negative i128 residue below a u64 modulus fits u64")
+    residue
+        .to_u64()
+        .expect("non-negative BigInt residue below a u64 modulus fits u64")
 }
 
 #[allow(clippy::too_many_arguments)]

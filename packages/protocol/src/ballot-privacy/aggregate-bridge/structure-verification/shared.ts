@@ -43,6 +43,9 @@ export type BridgeEncryptionEvidence = {
     readonly bridgeProofBytesHex: string;
     readonly bridgeProofProfileDigest: ProtocolDigest;
     readonly bridgeProofRoot: ProtocolDigest;
+    readonly bridgeSharedWitnessProofDigest: ProtocolDigest;
+    readonly sharedWitnessZeroKnowledgeStatusDigest: ProtocolDigest;
+    readonly bgvRandomnessBoundProofStatusDigest: ProtocolDigest;
     readonly bridgeProofStatementDigest: ProtocolDigest;
     readonly bridgeProofTargetContractDigest: ProtocolDigest;
     readonly bridgeProofVerificationStatus: 'BridgeProofRelationChecked';
@@ -87,6 +90,9 @@ export type BridgeEvidenceVerification = {
     readonly bridgeProofBytesDigest: ProtocolDigest;
     readonly bridgeProofProfileDigest: ProtocolDigest;
     readonly bridgeProofRoot: ProtocolDigest;
+    readonly bridgeSharedWitnessProofDigest: ProtocolDigest;
+    readonly sharedWitnessZeroKnowledgeStatusDigest: ProtocolDigest;
+    readonly bgvRandomnessBoundProofStatusDigest: ProtocolDigest;
     readonly bridgeProofStatementDigest: ProtocolDigest;
     readonly bridgeProofTargetContractDigest: ProtocolDigest;
     readonly bridgeProofVerificationStatus: 'BridgeProofRelationChecked';

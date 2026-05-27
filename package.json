@@ -39,6 +39,8 @@
         "test:encrypted-aggregate-bridge": "pnpm run build && tsx ./tools/ci/run-encrypted-aggregate-bridge-matrix.ts",
         "test:encrypted-aggregate-bridge:parallel": "pnpm run build && tsx ./tools/ci/run-encrypted-aggregate-bridge-matrix.ts --workers 10",
         "test:encrypted-aggregate-bridge:representative": "pnpm run build && tsx ./tools/ci/run-encrypted-aggregate-bridge-matrix.ts --representative --workers 10",
+        "test:encrypted-aggregate-bridge:focused": "pnpm run build && tsx ./tools/ci/run-encrypted-aggregate-bridge-matrix.ts --focused --workers 8",
+        "test:encrypted-aggregate-bridge:shape": "pnpm run build && tsx ./tools/ci/run-encrypted-aggregate-bridge-matrix.ts --shape",
         "test": "pnpm run test:node && pnpm run test:browser",
         "coverage:node": "pnpm run build && vitest --project node --run --coverage",
         "coverage:badge": "pnpm run coverage:node && tsx ./tools/generate-coverage-badge.ts",

@@ -1,3 +1,5 @@
+import { readFile } from 'node:fs/promises';
+
 import {
     cpadProfileId,
     targetBoundShareSelectionProfileId,
@@ -5,7 +7,6 @@ import {
     type CapabilityDecision,
     type FirstValidOrderingInput,
     type FirstValidOrderingVerification,
-    type FutureProtocolOperationResult,
     type LifecycleLabelInput,
     type LifecycleLabels,
     type LifecycleTransition,
@@ -33,6 +34,9 @@ type EvaluateActionCapability = (
 type DeriveValidatedFirstValidOrder = (
     input: FirstValidOrderingInput,
 ) => FirstValidOrderingVerification;
+type VerifyBridgeProof = (
+    input: Record<string, unknown>,
+) => Promise<Record<string, unknown>>;
 
 const publicApiRuntimeRecord = publicApiRuntime as Record<string, unknown>;
 const deriveThresholdProfile =
@@ -48,7 +52,7 @@ const evaluateActionCapability =
 const deriveValidatedFirstValidOrder =
     publicApiRuntimeRecord.deriveValidatedFirstValidOrder as DeriveValidatedFirstValidOrder;
 const verifyBridgeProof =
-    publicApiRuntimeRecord.verifyBridgeProof as () => FutureProtocolOperationResult;
+    publicApiRuntimeRecord.verifyBridgeProof as VerifyBridgeProof;
 
 const requiredPublicFunctions = [
     [
@@ -111,6 +115,7 @@ const requiredPublicFunctions = [
 
 const allowedRuntimeExports = [...publicSurface.runtimeExports].sort();
 const forbiddenPublicKeys = publicSurface.forbiddenRuntimeExports;
+const lowerHexSha256Pattern = /^[a-f0-9]{64}$/u;
 
 describe('election foundation public package API in Node', () => {
     it('exposes only the safe runtime functions and keeps forbidden operations absent', () => {
@@ -133,21 +138,49 @@ describe('election foundation public package API in Node', () => {
         }
     });
 
-    it('keeps the public bridge verifier fail-closed until M9 relation closure', () => {
-        expect(verifyBridgeProof()).toEqual({
+    it('exposes the public bridge verifier without upgrading claim closure', async () => {
+        const verification = await verifyBridgeProof({
+            aggregateDerivationComponent: {},
+            aggregateSelectionPolicyDigest: 'not-a-digest',
+            bridgeEncryption: {},
+            bridgeWitnessPrivacyProfileDigest: 'not-a-digest',
+            heParamDigest: 'not-a-digest',
+            setupPackage: {},
+        });
+
+        expect(verification).toMatchObject({
             acceptedDigests: [],
             ok: false,
-            operation: 'verifyBridgeProof',
-            refusedObjects: [
-                {
-                    code: 'OperationUnavailable',
-                    message:
-                        'verifyBridgeProof is reserved for later protocol implementation and is not implemented in this package build.',
-                },
-            ],
+            operation: 'verifyAggregateBridgeEncryption',
             statusLabels: [],
-            unresolvedReason: 'OperationUnavailable',
+            unresolvedReason: expect.any(String) as string,
         });
+        expect(verification.refusedObjects).toEqual([
+            expect.objectContaining({
+                code: 'BallotPackageInvalid',
+                message:
+                    'bridgeEncryption.privateMaterialDisclosure is required',
+            }),
+        ]);
+        expect(verification).not.toMatchObject({
+            bridgeClaimClosureVerified: true,
+        });
+    });
+
+    it('keeps the packaged bridge verifier kernel pinned', async () => {
+        const kernelLoaderSource = await readFile(
+            new URL('../../dist/kernel.js', import.meta.url),
+            'utf8',
+        );
+        const digestMatch =
+            /packagedTranscriptCoreKernelNormalizedSha256Hex\s*=\s*'(?<digest>[a-f0-9]{64})'/u.exec(
+                kernelLoaderSource,
+            );
+
+        expect(digestMatch?.groups?.digest).toMatch(lowerHexSha256Pattern);
+        expect(kernelLoaderSource).not.toContain(
+            'packagedTranscriptCoreKernelNormalizedSha256Hex =\n    undefined',
+        );
     });
 
     it('derives threshold, poll, lifecycle, label, and capability decisions', () => {

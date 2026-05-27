@@ -147,6 +147,32 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
             aggregateQuotientCoordinateCount: statement.shareVectorWidth,
             aggregateReducedCoordinateCount: statement.shareVectorWidth,
         });
+    const bridgeSharedWitnessProofDigest = requireProtocolDigest(
+        bridgeEncryptionEvidence.bridgeSharedWitnessProofDigest,
+        'shared-witness proof digest',
+    );
+    const verifiedBridgeSharedWitnessProofDigest = requireProtocolDigest(
+        input.bridgeEvidenceVerification.bridgeSharedWitnessProofDigest,
+        'verified shared-witness proof digest',
+    );
+    const sharedWitnessZeroKnowledgeStatusDigest = requireProtocolDigest(
+        bridgeEncryptionEvidence.sharedWitnessZeroKnowledgeStatusDigest,
+        'shared-witness zero-knowledge status digest',
+    );
+    const verifiedSharedWitnessZeroKnowledgeStatusDigest =
+        requireProtocolDigest(
+            input.bridgeEvidenceVerification
+                .sharedWitnessZeroKnowledgeStatusDigest,
+            'verified shared-witness zero-knowledge status digest',
+        );
+    const bgvRandomnessBoundProofStatusDigest = requireProtocolDigest(
+        bridgeEncryptionEvidence.bgvRandomnessBoundProofStatusDigest,
+        'BGV randomness-bound status digest',
+    );
+    const verifiedBgvRandomnessBoundProofStatusDigest = requireProtocolDigest(
+        input.bridgeEvidenceVerification.bgvRandomnessBoundProofStatusDigest,
+        'verified BGV randomness-bound status digest',
+    );
     const encryptedAggregateInputRoot = requireProtocolDigest(
         bridgeEncryptionEvidence.encryptedAggregateInputRoot,
         'encrypted aggregate input root',
@@ -197,7 +223,8 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
             bgvProfileDigest: profileDigest,
             bgvPublicKeyRoot:
                 input.setupPackage.collectivePublicKey.bgvPublicKeyRoot,
-            bgvRandomnessBoundProofStatus: 'BgvRandomnessBoundProofMissing',
+            bgvRandomnessBoundProofStatus:
+                'BgvRandomnessErrorSupportPolynomialChecked',
             bridgeClaimClosureStatus: 'BridgeProofClaimClosureMissing',
             bridgeLayoutDigest: encryptedAggregateInputLayoutDigest,
             bridgeProofTargetContractDigest,
@@ -280,7 +307,7 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
             sharedWitnessCheckCount: 2,
             sharedWitnessSoundnessBits: 128,
             sharedWitnessZeroKnowledgeStatus:
-                'SharedWitnessZeroKnowledgeProofMissing',
+                'SharedWitnessZeroKnowledgeResponseDistributionChecked',
             slotCount: bridgeEncryptionEvidence.slotCount,
             thresholdProfileDigest: statement.thresholdProfileDigest,
             topKEvaluatorInputLayoutDigest: requireProtocolDigestField(
@@ -452,6 +479,21 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
             'bridge proof root',
             bridgeEncryptionEvidence.bridgeProofRoot,
             input.bridgeEvidenceVerification.bridgeProofRoot,
+        ],
+        [
+            'shared-witness proof digest',
+            bridgeSharedWitnessProofDigest,
+            verifiedBridgeSharedWitnessProofDigest,
+        ],
+        [
+            'shared-witness zero-knowledge status digest',
+            sharedWitnessZeroKnowledgeStatusDigest,
+            verifiedSharedWitnessZeroKnowledgeStatusDigest,
+        ],
+        [
+            'BGV randomness-bound status digest',
+            bgvRandomnessBoundProofStatusDigest,
+            verifiedBgvRandomnessBoundProofStatusDigest,
         ],
         [
             'encrypted aggregate-share ciphertext root',

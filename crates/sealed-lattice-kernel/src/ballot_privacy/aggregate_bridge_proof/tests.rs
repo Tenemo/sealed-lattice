@@ -8,6 +8,8 @@ use super::{
     },
     validation::validate_bridge_proof_public_shell,
 };
+use num_bigint::BigInt;
+use num_traits::One;
 
 fn bridge_relation_gap_status_value() -> Value {
     json!({
@@ -18,7 +20,7 @@ fn bridge_relation_gap_status_value() -> Value {
         "sharedWitnessZeroKnowledgeStatus": SHARED_WITNESS_ZERO_KNOWLEDGE_STATUS,
         "aggregateToPlaintextBindingStatus": AGGREGATE_TO_PLAINTEXT_BINDING_PENDING_STATUS,
         "bgvEncryptionProofStatus": BGV_ENCRYPTION_PROOF_PENDING_STATUS,
-        "bgvRandomnessBoundProofStatus": BGV_RANDOMNESS_BOUND_PROOF_STATUS,
+        "bgvRandomnessBoundProofStatus": BGV_RANDOMNESS_BOUND_PROOF_MISSING_STATUS,
         "rnsCrtConsistencyProofStatus": RNS_CRT_CONSISTENCY_PROOF_PENDING_STATUS,
         "bridgeClaimClosureStatus": BRIDGE_CLAIM_CLOSURE_STATUS,
         "sampledOnlyBridgeVerificationAccepted": false,
@@ -174,11 +176,31 @@ fn bridge_proof_target_contract_is_variant_parametric() {
         assert_eq!(target_contract["sharedWitnessSoundnessBits"], json!(128));
         assert_eq!(
             target_contract["sharedWitnessZeroKnowledgeStatus"],
-            json!("SharedWitnessZeroKnowledgeProofMissing")
+            json!(SHARED_WITNESS_ZERO_KNOWLEDGE_STATUS)
         );
         assert_eq!(
             target_contract["bgvRandomnessBoundProofStatus"],
-            json!("BgvRandomnessBoundProofMissing")
+            json!(BGV_RANDOMNESS_BOUND_PROOF_STATUS)
+        );
+    }
+}
+
+#[test]
+fn bridge_shared_witness_response_bound_rejects_out_of_range_response() {
+    let response_bound = (BigInt::one() << 240_u32) - (BigInt::one() << 112_u32);
+    let in_range = &response_bound - BigInt::one();
+    shared_witness::validate_response_vector_bounds(
+        "test",
+        &[BigInt::from(0_u8), in_range.clone(), -&in_range],
+    )
+    .expect("in-range responses should be accepted");
+
+    for response in [response_bound.clone(), -response_bound] {
+        let error = shared_witness::validate_response_vector_bounds("test", &[response])
+            .expect_err("out-of-range response should reject");
+        assert!(
+            error.message.contains("response exceeds"),
+            "unexpected error: {error:?}"
         );
     }
 }
@@ -407,6 +429,24 @@ fn bridge_proof_shell_rejects_sampled_only_acceptance() {
         error
             .message
             .contains("relation gap status must remain pending"),
+        "{error:?}"
+    );
+}
+
+#[test]
+fn bridge_proof_shell_rejects_unsupported_bgv_boundedness_proof_bytes() {
+    let proof_value = json!({
+        "objectType": "SealedLatticeAggregateBridgeRelationProof",
+        "bridgeSharedWitnessProof": {},
+        "bgvRandomnessBoundProofBytesHex": "00",
+        "privateMaterialDisclosure": private_material_disclosure(),
+    });
+    let error = validate_bridge_proof_public_shell(&proof_value).expect_err(
+        "unsupported BGV boundedness proof bytes should reject while the proof is missing",
+    );
+
+    assert!(
+        error.message.contains("bgvRandomnessBoundProofBytesHex"),
         "{error:?}"
     );
 }

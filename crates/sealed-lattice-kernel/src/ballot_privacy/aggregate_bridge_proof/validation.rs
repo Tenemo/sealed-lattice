@@ -187,9 +187,63 @@ pub(super) fn validate_bridge_proof_public_shell(proof_value: &Value) -> Canonic
     reject_forbidden_public_bridge_fields(proof_value, "bridgeProof")?;
     match string_field(proof_value, "objectType") {
         Some("SealedLatticeAggregateBridgeRelationProof") => {
+            reject_unexpected_bridge_proof_fields(
+                proof_value,
+                "bridgeProof",
+                &[
+                    "aggregateDerivationComponentDigest",
+                    "aggregateDerivationStatementDigest",
+                    "aggregateQuotientCoordinateCount",
+                    "aggregateReducedCoordinateCount",
+                    "aggregateRelationChallengeHex",
+                    "aggregateRelationCommitmentDigest",
+                    "aggregateRelationSubproofHex",
+                    "aggregateRelationSubproofSizeBytes",
+                    "bgvEncryptionProofSubrelation",
+                    "bgvPublicKeyRoot",
+                    "bgvRandomnessBoundProofStatusDigest",
+                    "bgvRandomnessBoundProofStatusEvidence",
+                    "bridgeClaimClosureVerified",
+                    "bridgeClaimVerificationStatus",
+                    "bridgeProofProfileDigest",
+                    "bridgeProofStatement",
+                    "bridgeProofStatementDigest",
+                    "bridgeProofTargetContractDigest",
+                    "bridgeSharedWitnessProof",
+                    "bridgeSharedWitnessProofDigest",
+                    "bridgeVariantEvidenceStatus",
+                    "ciphertextRoot",
+                    "collectivePublicKeyRoot",
+                    "encryptedAggregateInputRoot",
+                    "encryptedAggregateShareCiphertextRoot",
+                    "finalBridgeTheoremClosure",
+                    "objectType",
+                    "objectVersion",
+                    "plaintextRoot",
+                    "postVotingClosedContextDigest",
+                    "privateMaterialDisclosure",
+                    "profileId",
+                    "proofBackend",
+                    "proverRandomnessPublicDigest",
+                    "relationScope",
+                    "scopedBridgeRelationClosure",
+                    "sharedWitnessZeroKnowledgeStatusDigest",
+                    "sharedWitnessZeroKnowledgeStatusEvidence",
+                    "singleContributionBridgeRelationChecked",
+                ],
+            )?;
             required_json_field(proof_value, "bridgeSharedWitnessProof", "bridgeProof")?;
         }
         Some("SealedLatticeAggregateBridgeEncryptionEvidence") => {
+            reject_unexpected_bridge_proof_fields(
+                proof_value,
+                "bridgeProof",
+                &[
+                    "bridgeRelationGapStatus",
+                    "objectType",
+                    "privateMaterialDisclosure",
+                ],
+            )?;
             validate_bridge_relation_gap_status(proof_value)?;
         }
         _ => {
@@ -200,6 +254,29 @@ pub(super) fn validate_bridge_proof_public_shell(proof_value: &Value) -> Canonic
         }
     }
     validate_bridge_private_material_disclosure(proof_value)
+}
+
+fn reject_unexpected_bridge_proof_fields(
+    value: &Value,
+    path: &str,
+    allowed_fields: &[&str],
+) -> CanonicalResult<()> {
+    let object = value.as_object().ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            format!("{path} must be an object"),
+        )
+    })?;
+    for field_name in object.keys() {
+        if !allowed_fields.contains(&field_name.as_str()) {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::ProfileComponentMismatch,
+                format!("M9 bridge proof object contains unsupported field {path}.{field_name}"),
+            ));
+        }
+    }
+
+    Ok(())
 }
 
 pub(super) fn validate_bridge_relation_gap_status(proof_value: &Value) -> CanonicalResult<()> {
@@ -228,7 +305,7 @@ pub(super) fn validate_bridge_relation_gap_status(proof_value: &Value) -> Canoni
         || string_field(relation_gap_status, "bgvEncryptionProofStatus")
             != Some(BGV_ENCRYPTION_PROOF_PENDING_STATUS)
         || string_field(relation_gap_status, "bgvRandomnessBoundProofStatus")
-            != Some(BGV_RANDOMNESS_BOUND_PROOF_STATUS)
+            != Some(BGV_RANDOMNESS_BOUND_PROOF_MISSING_STATUS)
         || string_field(relation_gap_status, "rnsCrtConsistencyProofStatus")
             != Some(RNS_CRT_CONSISTENCY_PROOF_PENDING_STATUS)
         || string_field(relation_gap_status, "bridgeClaimClosureStatus")

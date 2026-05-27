@@ -8,6 +8,7 @@ import {
     variantKey,
     type MatrixRow,
     type NegativeCheck,
+    type ShapeConfigRow,
     type Variant,
     type VariantBuildResult,
 } from './shared.js';
@@ -94,6 +95,33 @@ export const negativeMarkdown = (checks: readonly NegativeCheck[]): string => {
                 check.check,
                 check.expectedFailureObserved ? 'yes' : 'no',
                 check.failureReason ?? '',
+            ].join(' | '),
+        ),
+    ];
+
+    return `${lines.join('\n')}\n`;
+};
+
+export const shapeConfigMarkdown = (
+    rows: readonly ShapeConfigRow[],
+): string => {
+    const lines = [
+        '# Encrypted aggregate bridge shape/config matrix',
+        '',
+        '| n | m | claim tier | t_pvss | selected | shareVectorWidth | target contract digest | statement digest | status | failure reason |',
+        '| -: | -: | - | -: | -: | -: | - | - | - | - |',
+        ...rows.map((row) =>
+            [
+                row.rosterSize,
+                row.optionCount,
+                row.claimTier,
+                row.trusteeAggregateThreshold,
+                row.selectedContributionCount,
+                row.shareVectorWidth,
+                row.bridgeProofTargetContractDigest,
+                row.bridgeProofStatementDigest,
+                row.status,
+                row.failureReason ?? '',
             ].join(' | '),
         ),
     ];

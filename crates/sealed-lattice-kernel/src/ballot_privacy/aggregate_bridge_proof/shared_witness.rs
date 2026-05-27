@@ -1,8 +1,14 @@
+use super::boundedness::{
+    BridgeBgvRandomnessBoundCommitmentInput, bridge_bgv_randomness_bound_commitment,
+    bridge_bgv_randomness_bound_commitment_digest, validate_bridge_bgv_randomness_bound_commitment,
+};
 use super::validation::{
     read_u64_object_field, read_usize_object_field, reject_forbidden_public_bridge_fields,
     require_equal_string, require_equal_u64,
 };
 use super::*;
+use num_bigint::{BigInt, Sign};
+use num_traits::{One, Signed, ToPrimitive};
 
 pub(super) struct BridgeSharedWitnessProverInput<'value> {
     pub(super) setup_package: &'value Value,
@@ -29,164 +35,238 @@ struct BridgeAggregateRelationCommitmentContext {
     target_vector: PolynomialVector,
 }
 
+const BRIDGE_SHARED_WITNESS_PROOF_MODEL: &str =
+    "fiat-shamir-linear-shared-response-rejection-sampled-v1";
+const BRIDGE_SHARED_WITNESS_RESPONSE_ENCODING: &str = "signed-i256-little-endian-hex-v1";
+const BRIDGE_SHARED_WITNESS_RESPONSE_BOUND_MODEL: &str =
+    "uniform-240-bit-mask-common-output-rejection-sampled-v1";
+const BRIDGE_SHARED_WITNESS_RESPONSE_BOUND_STATUS: &str =
+    "SharedWitnessResponseDistributionBoundsChecked";
+const BRIDGE_SHARED_WITNESS_RESPONSE_DISTRIBUTION_STATUS: &str =
+    "SharedWitnessResponseDistributionRejectionSampled";
+const BRIDGE_SHARED_WITNESS_MASK_BIT_LENGTH: usize = 240;
+const BRIDGE_SHARED_WITNESS_RESPONSE_REJECTION_SLACK_BIT_LENGTH: usize = 112;
+const BRIDGE_SHARED_WITNESS_MASK_RANDOM_BIT_LENGTH: usize =
+    BRIDGE_SHARED_WITNESS_MASK_BIT_LENGTH + 1;
+const BRIDGE_SHARED_WITNESS_RESPONSE_BYTE_LENGTH: usize = 32;
+const BRIDGE_SHARED_WITNESS_MASK_BYTES_PER_COORDINATE: usize = 31;
+const BRIDGE_SHARED_WITNESS_MASK_COORDINATES_PER_DIGEST: usize = 2;
+const BRIDGE_SHARED_WITNESS_REJECTION_ATTEMPT_LIMIT: usize = 64;
+
 pub(super) fn generate_bridge_shared_witness_proof(
     input: BridgeSharedWitnessProverInput<'_>,
 ) -> CanonicalResult<Value> {
-    let aggregate_integer_witness = u64_slice_to_i128_vec(input.aggregate_integer_share_vector);
-    let aggregate_opening_witness = i64_slice_to_i128_vec(input.aggregate_opening_randomness);
-    let aggregate_reduced_witness = u64_slice_to_i128_vec(input.aggregate_reduced_coordinates);
-    let aggregate_quotient_witness = u64_slice_to_i128_vec(input.aggregate_quotient_vector);
+    let aggregate_integer_witness = u64_slice_to_bigint_vec(input.aggregate_integer_share_vector);
+    let aggregate_opening_witness = i64_slice_to_bigint_vec(input.aggregate_opening_randomness);
+    let aggregate_reduced_witness = u64_slice_to_bigint_vec(input.aggregate_reduced_coordinates);
+    let aggregate_quotient_witness = u64_slice_to_bigint_vec(input.aggregate_quotient_vector);
     let plaintext_coefficient_witness =
-        u64_slice_to_i128_vec(&input.trace.plaintext_coefficients_mod_plaintext);
-    let randomizer_witness = i64_slice_to_i128_vec(&input.trace.encryption_randomness_coefficients);
+        u64_slice_to_bigint_vec(&input.trace.plaintext_coefficients_mod_plaintext);
+    let randomizer_witness =
+        i64_slice_to_bigint_vec(&input.trace.encryption_randomness_coefficients);
     let perturbation_zero_witness =
-        i64_slice_to_i128_vec(&input.trace.encryption_error_zero_coefficients);
+        i64_slice_to_bigint_vec(&input.trace.encryption_error_zero_coefficients);
     let perturbation_one_witness =
-        i64_slice_to_i128_vec(&input.trace.encryption_error_one_coefficients);
+        i64_slice_to_bigint_vec(&input.trace.encryption_error_one_coefficients);
     let aggregate_relation_context =
         bridge_aggregate_relation_commitment_context(input.proof_input)?;
     let mut checks = Vec::with_capacity(BRIDGE_SHARED_WITNESS_CHECK_COUNT);
     let mut challenge_hex = String::new();
 
     for check_index in 0..BRIDGE_SHARED_WITNESS_CHECK_COUNT {
-        let aggregate_integer_mask = sample_bridge_mask_vector(
-            input.bridge_proof_statement_digest,
-            input.prover_randomness_hex,
-            check_index,
-            "aggregate-share",
-            aggregate_integer_witness.len(),
-        );
-        let aggregate_opening_mask = sample_bridge_mask_vector(
-            input.bridge_proof_statement_digest,
-            input.prover_randomness_hex,
-            check_index,
-            "aggregate-opening",
-            aggregate_opening_witness.len(),
-        );
-        let aggregate_reduced_mask = sample_bridge_mask_vector(
-            input.bridge_proof_statement_digest,
-            input.prover_randomness_hex,
-            check_index,
-            "aggregate-reduced",
-            aggregate_reduced_witness.len(),
-        );
-        let aggregate_quotient_mask = sample_bridge_mask_vector(
-            input.bridge_proof_statement_digest,
-            input.prover_randomness_hex,
-            check_index,
-            "aggregate-quotient",
-            aggregate_quotient_witness.len(),
-        );
-        let plaintext_coefficient_mask = sample_bridge_mask_vector(
-            input.bridge_proof_statement_digest,
-            input.prover_randomness_hex,
-            check_index,
-            "batch-coefficient",
-            plaintext_coefficient_witness.len(),
-        );
-        let randomizer_mask = sample_bridge_mask_vector(
-            input.bridge_proof_statement_digest,
-            input.prover_randomness_hex,
-            check_index,
-            "cipher-randomizer",
-            randomizer_witness.len(),
-        );
-        let perturbation_zero_mask = sample_bridge_mask_vector(
-            input.bridge_proof_statement_digest,
-            input.prover_randomness_hex,
-            check_index,
-            "bounded-perturbation-zero",
-            perturbation_zero_witness.len(),
-        );
-        let perturbation_one_mask = sample_bridge_mask_vector(
-            input.bridge_proof_statement_digest,
-            input.prover_randomness_hex,
-            check_index,
-            "bounded-perturbation-one",
-            perturbation_one_witness.len(),
-        );
-        let aggregate_commitment_digest = aggregate_relation_commitment_digest_from_responses(
-            &aggregate_relation_context,
-            &aggregate_integer_mask,
-            &aggregate_opening_mask,
-            &aggregate_reduced_mask,
-            &aggregate_quotient_mask,
-            0,
-        )?;
-        let batch_commitment_digest =
-            crate::bgv::commands::m9_bridge_batch_encoding_commitment_digest_from_responses(
+        let mut accepted_check = None;
+        for rejection_attempt_index in 0..BRIDGE_SHARED_WITNESS_REJECTION_ATTEMPT_LIMIT {
+            let aggregate_integer_mask = sample_bridge_mask_vector(
+                input.bridge_proof_statement_digest,
+                input.prover_randomness_hex,
+                check_index,
+                rejection_attempt_index,
+                "aggregate-share",
+                aggregate_integer_witness.len(),
+            );
+            let aggregate_opening_mask = sample_bridge_mask_vector(
+                input.bridge_proof_statement_digest,
+                input.prover_randomness_hex,
+                check_index,
+                rejection_attempt_index,
+                "aggregate-opening",
+                aggregate_opening_witness.len(),
+            );
+            let aggregate_reduced_mask = sample_bridge_mask_vector(
+                input.bridge_proof_statement_digest,
+                input.prover_randomness_hex,
+                check_index,
+                rejection_attempt_index,
+                "aggregate-reduced",
+                aggregate_reduced_witness.len(),
+            );
+            let aggregate_quotient_mask = sample_bridge_mask_vector(
+                input.bridge_proof_statement_digest,
+                input.prover_randomness_hex,
+                check_index,
+                rejection_attempt_index,
+                "aggregate-quotient",
+                aggregate_quotient_witness.len(),
+            );
+            let plaintext_coefficient_mask = sample_bridge_mask_vector(
+                input.bridge_proof_statement_digest,
+                input.prover_randomness_hex,
+                check_index,
+                rejection_attempt_index,
+                "batch-coefficient",
+                plaintext_coefficient_witness.len(),
+            );
+            let randomizer_mask = sample_bridge_mask_vector(
+                input.bridge_proof_statement_digest,
+                input.prover_randomness_hex,
+                check_index,
+                rejection_attempt_index,
+                "cipher-randomizer",
+                randomizer_witness.len(),
+            );
+            let perturbation_zero_mask = sample_bridge_mask_vector(
+                input.bridge_proof_statement_digest,
+                input.prover_randomness_hex,
+                check_index,
+                rejection_attempt_index,
+                "bounded-perturbation-zero",
+                perturbation_zero_witness.len(),
+            );
+            let perturbation_one_mask = sample_bridge_mask_vector(
+                input.bridge_proof_statement_digest,
+                input.prover_randomness_hex,
+                check_index,
+                rejection_attempt_index,
+                "bounded-perturbation-one",
+                perturbation_one_witness.len(),
+            );
+            let aggregate_commitment_digest = aggregate_relation_commitment_digest_from_responses(
+                &aggregate_relation_context,
+                &aggregate_integer_mask,
+                &aggregate_opening_mask,
                 &aggregate_reduced_mask,
-                &plaintext_coefficient_mask,
-            )?;
-        let bgv_commitment_digest =
-            crate::bgv::commands::m9_bridge_ciphertext_commitment_digest_from_responses(
-                input.setup_package,
-                input.contributor_identity,
-                input.aggregate_derivation_statement_digest,
-                input.bridge_encryption,
+                &aggregate_quotient_mask,
                 0,
-                &plaintext_coefficient_mask,
-                &randomizer_mask,
-                &perturbation_zero_mask,
-                &perturbation_one_mask,
             )?;
-        let challenge_scalar = bridge_shared_witness_challenge_scalar(
-            input.bridge_proof_statement_digest,
-            check_index,
-            &aggregate_commitment_digest,
-            &batch_commitment_digest,
-            &bgv_commitment_digest,
-        );
-        let check_challenge_hex = bridge_challenge_hex(challenge_scalar);
-        challenge_hex.push_str(&check_challenge_hex);
-
-        checks.push(json!({
-            "checkIndex": check_index,
-            "challengeScalarHex": check_challenge_hex,
-            "aggregateRelationCommitmentDigest": aggregate_commitment_digest,
-            "batchEncodingCommitmentDigest": batch_commitment_digest,
-            "bgvCiphertextCommitmentDigest": bgv_commitment_digest,
-            "aggregateShareResponseHex": i128_vector_hex(&response_vector(
+            let batch_commitment_digest =
+                crate::bgv::commands::m9_bridge_batch_encoding_commitment_digest_from_responses(
+                    &aggregate_reduced_mask,
+                    &plaintext_coefficient_mask,
+                )?;
+            let bgv_commitment_digest =
+                crate::bgv::commands::m9_bridge_ciphertext_commitment_digest_from_responses(
+                    input.setup_package,
+                    input.contributor_identity,
+                    input.aggregate_derivation_statement_digest,
+                    input.bridge_encryption,
+                    0,
+                    &plaintext_coefficient_mask,
+                    &randomizer_mask,
+                    &perturbation_zero_mask,
+                    &perturbation_one_mask,
+                )?;
+            let bgv_randomness_bound_commitment =
+                bridge_bgv_randomness_bound_commitment(BridgeBgvRandomnessBoundCommitmentInput {
+                    bridge_proof_statement_digest: input.bridge_proof_statement_digest,
+                    check_index,
+                    randomizer_masks: &randomizer_mask,
+                    randomizer_witness: &randomizer_witness,
+                    perturbation_zero_masks: &perturbation_zero_mask,
+                    perturbation_zero_witness: &perturbation_zero_witness,
+                    perturbation_one_masks: &perturbation_one_mask,
+                    perturbation_one_witness: &perturbation_one_witness,
+                })?;
+            let bgv_randomness_bound_commitment_digest =
+                bridge_bgv_randomness_bound_commitment_digest(&bgv_randomness_bound_commitment)?;
+            let challenge_scalar = bridge_shared_witness_challenge_scalar(
+                input.bridge_proof_statement_digest,
+                check_index,
+                &aggregate_commitment_digest,
+                &batch_commitment_digest,
+                &bgv_commitment_digest,
+                &bgv_randomness_bound_commitment_digest,
+            );
+            let aggregate_share_response = response_vector(
                 &aggregate_integer_mask,
                 challenge_scalar,
                 &aggregate_integer_witness,
-            )?),
-            "aggregateOpeningResponseHex": i128_vector_hex(&response_vector(
+            )?;
+            let aggregate_opening_response = response_vector(
                 &aggregate_opening_mask,
                 challenge_scalar,
                 &aggregate_opening_witness,
-            )?),
-            "aggregateReducedResponseHex": i128_vector_hex(&response_vector(
+            )?;
+            let aggregate_reduced_response = response_vector(
                 &aggregate_reduced_mask,
                 challenge_scalar,
                 &aggregate_reduced_witness,
-            )?),
-            "aggregateQuotientResponseHex": i128_vector_hex(&response_vector(
+            )?;
+            let aggregate_quotient_response = response_vector(
                 &aggregate_quotient_mask,
                 challenge_scalar,
                 &aggregate_quotient_witness,
-            )?),
-            "batchCoefficientResponseHex": i128_vector_hex(&response_vector(
+            )?;
+            let batch_coefficient_response = response_vector(
                 &plaintext_coefficient_mask,
                 challenge_scalar,
                 &plaintext_coefficient_witness,
-            )?),
-            "cipherRandomizerResponseHex": i128_vector_hex(&response_vector(
-                &randomizer_mask,
-                challenge_scalar,
-                &randomizer_witness,
-            )?),
-            "boundedPerturbationZeroResponseHex": i128_vector_hex(&response_vector(
+            )?;
+            let cipher_randomizer_response =
+                response_vector(&randomizer_mask, challenge_scalar, &randomizer_witness)?;
+            let bounded_perturbation_zero_response = response_vector(
                 &perturbation_zero_mask,
                 challenge_scalar,
                 &perturbation_zero_witness,
-            )?),
-            "boundedPerturbationOneResponseHex": i128_vector_hex(&response_vector(
+            )?;
+            let bounded_perturbation_one_response = response_vector(
                 &perturbation_one_mask,
                 challenge_scalar,
                 &perturbation_one_witness,
-            )?),
-        }));
+            )?;
+            if validate_all_response_vector_bounds(
+                &aggregate_share_response,
+                &aggregate_opening_response,
+                &aggregate_reduced_response,
+                &aggregate_quotient_response,
+                &batch_coefficient_response,
+                &cipher_randomizer_response,
+                &bounded_perturbation_zero_response,
+                &bounded_perturbation_one_response,
+            )
+            .is_err()
+            {
+                continue;
+            }
+            let check_challenge_hex = bridge_challenge_hex(challenge_scalar);
+            let check = json!({
+                "checkIndex": check_index,
+                "rejectionAttemptIndex": rejection_attempt_index,
+                "challengeScalarHex": check_challenge_hex,
+                "aggregateRelationCommitmentDigest": aggregate_commitment_digest,
+                "batchEncodingCommitmentDigest": batch_commitment_digest,
+                "bgvCiphertextCommitmentDigest": bgv_commitment_digest,
+                "bgvRandomnessBoundCommitment": bgv_randomness_bound_commitment,
+                "bgvRandomnessBoundCommitmentDigest": bgv_randomness_bound_commitment_digest,
+                "aggregateShareResponseHex": signed_i256_vector_hex(&aggregate_share_response)?,
+                "aggregateOpeningResponseHex": signed_i256_vector_hex(&aggregate_opening_response)?,
+                "aggregateReducedResponseHex": signed_i256_vector_hex(&aggregate_reduced_response)?,
+                "aggregateQuotientResponseHex": signed_i256_vector_hex(&aggregate_quotient_response)?,
+                "batchCoefficientResponseHex": signed_i256_vector_hex(&batch_coefficient_response)?,
+                "cipherRandomizerResponseHex": signed_i256_vector_hex(&cipher_randomizer_response)?,
+                "boundedPerturbationZeroResponseHex": signed_i256_vector_hex(&bounded_perturbation_zero_response)?,
+                "boundedPerturbationOneResponseHex": signed_i256_vector_hex(&bounded_perturbation_one_response)?,
+            });
+            challenge_hex.push_str(&check_challenge_hex);
+            accepted_check = Some(check);
+            break;
+        }
+        let check = accepted_check.ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "M9 bridge shared-witness rejection sampler did not find an in-bound response transcript",
+            )
+        })?;
+        checks.push(check);
     }
 
     let shared_response_scalar_count = shared_response_scalar_count(
@@ -199,15 +279,104 @@ pub(super) fn generate_bridge_shared_witness_proof(
     Ok(json!({
         "objectType": "AggregateBridgeSharedWitnessProof",
         "objectVersion": 1,
-        "proofModel": "fiat-shamir-linear-shared-response-v1",
+        "proofModel": BRIDGE_SHARED_WITNESS_PROOF_MODEL,
         "bridgeProofStatementDigest": input.bridge_proof_statement_digest,
         "relationCheckCount": BRIDGE_SHARED_WITNESS_CHECK_COUNT,
         "challengeHex": challenge_hex,
         "sharedResponseScalarCount": shared_response_scalar_count,
         "sameHiddenAggregateCoordinatesLinked": true,
+        "responseBoundModel": BRIDGE_SHARED_WITNESS_RESPONSE_BOUND_MODEL,
+        "maskAbsoluteBoundExclusive": bridge_shared_witness_mask_absolute_bound_exclusive_decimal(),
+        "responseAbsoluteBoundExclusive": bridge_shared_witness_response_absolute_bound_exclusive_decimal(),
+        "responseShiftBoundExclusive": bridge_shared_witness_response_shift_bound_exclusive_decimal(),
+        "responseBoundStatus": BRIDGE_SHARED_WITNESS_RESPONSE_BOUND_STATUS,
+        "responseDistributionStatus": BRIDGE_SHARED_WITNESS_RESPONSE_DISTRIBUTION_STATUS,
+        "rejectionAttemptLimit": BRIDGE_SHARED_WITNESS_REJECTION_ATTEMPT_LIMIT,
         "checks": checks,
-        "responseEncoding": "signed-i128-little-endian-hex-v1",
+        "responseEncoding": BRIDGE_SHARED_WITNESS_RESPONSE_ENCODING,
     }))
+}
+
+pub(super) fn bridge_shared_witness_proof_digest(
+    shared_witness_proof: &Value,
+) -> CanonicalResult<String> {
+    derive_protocol_digest(
+        "BridgeProofRecordDigest",
+        &json!({
+            "purpose": "sealed-lattice-aggregate-bridge-shared-witness-proof-digest-v1",
+            "bridgeSharedWitnessProof": shared_witness_proof,
+        }),
+    )
+}
+
+pub(super) fn bridge_shared_witness_zero_knowledge_status(
+    bridge_proof_statement_digest: &str,
+    shared_witness_proof_digest: &str,
+) -> Value {
+    json!({
+        "objectType": "AggregateBridgeSharedWitnessZeroKnowledgeStatus",
+        "objectVersion": 1,
+        "statusModel": "shared-witness-zero-knowledge-response-distribution-status-v1",
+        "bridgeProofStatementDigest": bridge_proof_statement_digest,
+        "bridgeSharedWitnessProofDigest": shared_witness_proof_digest,
+        "responseBoundModel": BRIDGE_SHARED_WITNESS_RESPONSE_BOUND_MODEL,
+        "maskAbsoluteBoundExclusive": bridge_shared_witness_mask_absolute_bound_exclusive_decimal(),
+        "responseAbsoluteBoundExclusive": bridge_shared_witness_response_absolute_bound_exclusive_decimal(),
+        "responseShiftBoundExclusive": bridge_shared_witness_response_shift_bound_exclusive_decimal(),
+        "responseBoundStatus": BRIDGE_SHARED_WITNESS_RESPONSE_BOUND_STATUS,
+        "responseDistributionStatus": BRIDGE_SHARED_WITNESS_RESPONSE_DISTRIBUTION_STATUS,
+        "sharedWitnessZeroKnowledgeStatus": SHARED_WITNESS_ZERO_KNOWLEDGE_STATUS,
+        "simulatorProofChecked": true,
+        "bridgeClaimClosureAccepted": false,
+    })
+}
+
+pub(super) fn bridge_shared_witness_zero_knowledge_status_digest(
+    status_evidence: &Value,
+) -> CanonicalResult<String> {
+    derive_protocol_digest(
+        "BridgeProofRecordDigest",
+        &json!({
+            "purpose": "sealed-lattice-aggregate-bridge-shared-witness-zero-knowledge-status-v1",
+            "sharedWitnessZeroKnowledgeStatusEvidence": status_evidence,
+        }),
+    )
+}
+
+pub(super) fn validate_bridge_shared_witness_zero_knowledge_status(
+    proof_value: &Value,
+    bridge_proof_statement_digest: &str,
+    shared_witness_proof_digest: &str,
+) -> CanonicalResult<String> {
+    let status_evidence = required_json_field(
+        proof_value,
+        "sharedWitnessZeroKnowledgeStatusEvidence",
+        "bridgeProof",
+    )?;
+    reject_forbidden_public_bridge_fields(
+        status_evidence,
+        "bridgeProof.sharedWitnessZeroKnowledgeStatusEvidence",
+    )?;
+    let expected_status = bridge_shared_witness_zero_knowledge_status(
+        bridge_proof_statement_digest,
+        shared_witness_proof_digest,
+    );
+    if status_evidence != &expected_status {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "M9 bridge shared-witness zero-knowledge status evidence does not match the proof-bound public inputs",
+        ));
+    }
+
+    let status_digest = bridge_shared_witness_zero_knowledge_status_digest(status_evidence)?;
+    require_equal_string(
+        proof_value,
+        "sharedWitnessZeroKnowledgeStatusDigest",
+        &status_digest,
+        "shared-witness zero-knowledge status digest",
+    )?;
+
+    Ok(status_digest)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -227,9 +396,15 @@ pub(super) fn verify_bridge_shared_witness_proof(
     reject_forbidden_public_bridge_fields(shared_proof, "bridgeProof.bridgeSharedWitnessProof")?;
     if string_field(shared_proof, "objectType") != Some("AggregateBridgeSharedWitnessProof")
         || read_u64_object_field(shared_proof, "objectVersion", "bridgeSharedWitnessProof")? != 1
-        || string_field(shared_proof, "proofModel") != Some("fiat-shamir-linear-shared-response-v1")
+        || string_field(shared_proof, "proofModel") != Some(BRIDGE_SHARED_WITNESS_PROOF_MODEL)
         || string_field(shared_proof, "responseEncoding")
-            != Some("signed-i128-little-endian-hex-v1")
+            != Some(BRIDGE_SHARED_WITNESS_RESPONSE_ENCODING)
+        || string_field(shared_proof, "responseBoundModel")
+            != Some(BRIDGE_SHARED_WITNESS_RESPONSE_BOUND_MODEL)
+        || string_field(shared_proof, "responseBoundStatus")
+            != Some(BRIDGE_SHARED_WITNESS_RESPONSE_BOUND_STATUS)
+        || string_field(shared_proof, "responseDistributionStatus")
+            != Some(BRIDGE_SHARED_WITNESS_RESPONSE_DISTRIBUTION_STATUS)
         || shared_proof
             .get("sameHiddenAggregateCoordinatesLinked")
             .and_then(Value::as_bool)
@@ -245,6 +420,30 @@ pub(super) fn verify_bridge_shared_witness_proof(
         "bridgeProofStatementDigest",
         bridge_proof_statement_digest,
         "shared-witness proof statement digest",
+    )?;
+    require_equal_string(
+        shared_proof,
+        "maskAbsoluteBoundExclusive",
+        &bridge_shared_witness_mask_absolute_bound_exclusive_decimal(),
+        "shared-witness mask absolute bound",
+    )?;
+    require_equal_string(
+        shared_proof,
+        "responseAbsoluteBoundExclusive",
+        &bridge_shared_witness_response_absolute_bound_exclusive_decimal(),
+        "shared-witness response absolute bound",
+    )?;
+    require_equal_string(
+        shared_proof,
+        "responseShiftBoundExclusive",
+        &bridge_shared_witness_response_shift_bound_exclusive_decimal(),
+        "shared-witness response shift bound",
+    )?;
+    require_equal_u64(
+        shared_proof,
+        "rejectionAttemptLimit",
+        BRIDGE_SHARED_WITNESS_REJECTION_ATTEMPT_LIMIT as u64,
+        "shared-witness rejection attempt limit",
     )?;
     let relation_check_count = read_usize_object_field(
         shared_proof,
@@ -307,48 +506,59 @@ pub(super) fn verify_bridge_shared_witness_proof(
             check_index as u64,
             "shared-witness proof check index",
         )?;
+        let rejection_attempt_index = read_usize_object_field(
+            check,
+            "rejectionAttemptIndex",
+            "bridgeSharedWitnessProof.check",
+        )?;
+        if rejection_attempt_index >= BRIDGE_SHARED_WITNESS_REJECTION_ATTEMPT_LIMIT {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::ProfileComponentMismatch,
+                "M9 bridge shared-witness rejection attempt index is outside the supported range",
+            ));
+        }
         let challenge_scalar_hex = required_string_field(
             check,
             "challengeScalarHex",
             "bridgeSharedWitnessProof.check",
         )?;
         let challenge_scalar = parse_bridge_challenge_scalar(challenge_scalar_hex)?;
-        let aggregate_share_response = read_i128_hex_vector(
+        let aggregate_share_response = read_signed_i256_hex_vector(
             check,
             "aggregateShareResponseHex",
             "bridgeSharedWitnessProof.check",
         )?;
-        let aggregate_opening_response = read_i128_hex_vector(
+        let aggregate_opening_response = read_signed_i256_hex_vector(
             check,
             "aggregateOpeningResponseHex",
             "bridgeSharedWitnessProof.check",
         )?;
-        let aggregate_reduced_response = read_i128_hex_vector(
+        let aggregate_reduced_response = read_signed_i256_hex_vector(
             check,
             "aggregateReducedResponseHex",
             "bridgeSharedWitnessProof.check",
         )?;
-        let aggregate_quotient_response = read_i128_hex_vector(
+        let aggregate_quotient_response = read_signed_i256_hex_vector(
             check,
             "aggregateQuotientResponseHex",
             "bridgeSharedWitnessProof.check",
         )?;
-        let batch_coefficient_response = read_i128_hex_vector(
+        let batch_coefficient_response = read_signed_i256_hex_vector(
             check,
             "batchCoefficientResponseHex",
             "bridgeSharedWitnessProof.check",
         )?;
-        let cipher_randomizer_response = read_i128_hex_vector(
+        let cipher_randomizer_response = read_signed_i256_hex_vector(
             check,
             "cipherRandomizerResponseHex",
             "bridgeSharedWitnessProof.check",
         )?;
-        let bounded_perturbation_zero_response = read_i128_hex_vector(
+        let bounded_perturbation_zero_response = read_signed_i256_hex_vector(
             check,
             "boundedPerturbationZeroResponseHex",
             "bridgeSharedWitnessProof.check",
         )?;
-        let bounded_perturbation_one_response = read_i128_hex_vector(
+        let bounded_perturbation_one_response = read_signed_i256_hex_vector(
             check,
             "boundedPerturbationOneResponseHex",
             "bridgeSharedWitnessProof.check",
@@ -365,6 +575,24 @@ pub(super) fn verify_bridge_shared_witness_proof(
             expected_aggregate_count,
             expected_quotient_count,
         )?;
+        for (role, responses) in [
+            ("aggregate share", aggregate_share_response.as_slice()),
+            ("aggregate opening", aggregate_opening_response.as_slice()),
+            ("aggregate reduced", aggregate_reduced_response.as_slice()),
+            ("aggregate quotient", aggregate_quotient_response.as_slice()),
+            ("batch coefficient", batch_coefficient_response.as_slice()),
+            ("cipher randomizer", cipher_randomizer_response.as_slice()),
+            (
+                "bounded perturbation zero",
+                bounded_perturbation_zero_response.as_slice(),
+            ),
+            (
+                "bounded perturbation one",
+                bounded_perturbation_one_response.as_slice(),
+            ),
+        ] {
+            validate_response_vector_bounds(role, responses)?;
+        }
         let aggregate_commitment_digest = aggregate_relation_commitment_digest_from_responses(
             &aggregate_relation_context,
             &aggregate_share_response,
@@ -386,6 +614,16 @@ pub(super) fn verify_bridge_shared_witness_proof(
                 bridge_encryption,
                 challenge_scalar,
                 &batch_coefficient_response,
+                &cipher_randomizer_response,
+                &bounded_perturbation_zero_response,
+                &bounded_perturbation_one_response,
+            )?;
+        let bgv_randomness_bound_commitment_digest =
+            validate_bridge_bgv_randomness_bound_commitment(
+                check,
+                bridge_proof_statement_digest,
+                check_index,
+                challenge_scalar,
                 &cipher_randomizer_response,
                 &bounded_perturbation_zero_response,
                 &bounded_perturbation_one_response,
@@ -414,6 +652,7 @@ pub(super) fn verify_bridge_shared_witness_proof(
             &aggregate_commitment_digest,
             &batch_commitment_digest,
             &bgv_commitment_digest,
+            &bgv_randomness_bound_commitment_digest,
         );
         if challenge_scalar != recomputed_challenge_scalar {
             return Err(CanonicalError::new(
@@ -454,10 +693,10 @@ fn bridge_aggregate_relation_commitment_context(
 
 fn aggregate_relation_commitment_digest_from_responses(
     context: &BridgeAggregateRelationCommitmentContext,
-    aggregate_share_response: &[i128],
-    aggregate_opening_response: &[i128],
-    aggregate_reduced_response: &[i128],
-    aggregate_quotient_response: &[i128],
+    aggregate_share_response: &[BigInt],
+    aggregate_opening_response: &[BigInt],
+    aggregate_reduced_response: &[BigInt],
+    aggregate_quotient_response: &[BigInt],
     challenge_scalar: u64,
 ) -> CanonicalResult<String> {
     let ring = context.parsed_statement.source_statement_matrix.ring();
@@ -466,7 +705,7 @@ fn aggregate_relation_commitment_digest_from_responses(
         .chain(aggregate_opening_response.iter())
         .chain(aggregate_reduced_response.iter())
         .chain(aggregate_quotient_response.iter())
-        .map(|response| constant_response_polynomial(*response, ring.degree(), ring.modulus()))
+        .map(|response| constant_response_polynomial(response, ring.degree(), ring.modulus()))
         .collect::<Vec<_>>();
     let response_vector = PolynomialVector::new(ring, response_entries)?;
     let response_image = context
@@ -502,46 +741,36 @@ fn sample_bridge_mask_vector(
     statement_digest: &str,
     prover_randomness_hex: &str,
     check_index: usize,
+    rejection_attempt_index: usize,
     role: &str,
     length: usize,
-) -> Vec<i128> {
-    const MASK_COORDINATES_PER_DIGEST: usize = 4;
-    const MASK_BYTES_PER_COORDINATE: usize = 15;
-    const MASK_MAGNITUDE_BYTES_PER_COORDINATE: usize = 14;
-
+) -> Vec<BigInt> {
     let check_index_bytes = (check_index as u64).to_le_bytes();
+    let rejection_attempt_index_bytes = (rejection_attempt_index as u64).to_le_bytes();
     let mut masks = Vec::with_capacity(length);
     let mut block_index = 0_u64;
 
     while masks.len() < length {
         let block_index_bytes = block_index.to_le_bytes();
         let digest = hash512(
-            "sealed-lattice-root/aggregate-bridge-shared-witness-mask-v1",
+            "sealed-lattice-root/aggregate-bridge-shared-witness-mask-rejection-sampled-v1",
             &[
                 statement_digest.as_bytes(),
                 prover_randomness_hex.as_bytes(),
                 role.as_bytes(),
                 &check_index_bytes,
+                &rejection_attempt_index_bytes,
                 &block_index_bytes,
             ],
         );
-        for lane_index in 0..MASK_COORDINATES_PER_DIGEST {
+        for lane_index in 0..BRIDGE_SHARED_WITNESS_MASK_COORDINATES_PER_DIGEST {
             if masks.len() == length {
                 break;
             }
-            let lane_start = lane_index * MASK_BYTES_PER_COORDINATE;
-            let lane_end = lane_start + MASK_BYTES_PER_COORDINATE;
+            let lane_start = lane_index * BRIDGE_SHARED_WITNESS_MASK_BYTES_PER_COORDINATE;
+            let lane_end = lane_start + BRIDGE_SHARED_WITNESS_MASK_BYTES_PER_COORDINATE;
             let lane = &digest[lane_start..lane_end];
-            let mut magnitude_bytes = [0_u8; 16];
-            magnitude_bytes[..MASK_MAGNITUDE_BYTES_PER_COORDINATE]
-                .copy_from_slice(&lane[..MASK_MAGNITUDE_BYTES_PER_COORDINATE]);
-            let magnitude = i128::from_le_bytes(magnitude_bytes);
-            let mask = if lane[MASK_MAGNITUDE_BYTES_PER_COORDINATE] & 1 == 0 {
-                magnitude
-            } else {
-                -magnitude
-            };
-            masks.push(mask);
+            masks.push(mask_from_uniform_lane(lane));
         }
         block_index = block_index
             .checked_add(1)
@@ -551,12 +780,29 @@ fn sample_bridge_mask_vector(
     masks
 }
 
+fn mask_from_uniform_lane(lane: &[u8]) -> BigInt {
+    debug_assert_eq!(lane.len(), BRIDGE_SHARED_WITNESS_MASK_BYTES_PER_COORDINATE);
+    let mut coordinate_bytes = lane.to_vec();
+    let top_byte_index = coordinate_bytes
+        .len()
+        .checked_sub(1)
+        .expect("bridge mask lane must not be empty");
+    let retained_high_bits = BRIDGE_SHARED_WITNESS_MASK_RANDOM_BIT_LENGTH % 8;
+    if retained_high_bits != 0 {
+        let high_bit_mask = (1_u8 << retained_high_bits) - 1;
+        coordinate_bytes[top_byte_index] &= high_bit_mask;
+    }
+    BigInt::from_bytes_le(Sign::Plus, &coordinate_bytes)
+        - bridge_shared_witness_mask_absolute_bound_exclusive()
+}
+
 fn bridge_shared_witness_challenge_scalar(
     statement_digest: &str,
     check_index: usize,
     aggregate_commitment_digest: &str,
     batch_commitment_digest: &str,
     bgv_commitment_digest: &str,
+    bgv_randomness_bound_commitment_digest: &str,
 ) -> u64 {
     let check_index_bytes = (check_index as u64).to_le_bytes();
     let digest = hash512(
@@ -567,6 +813,7 @@ fn bridge_shared_witness_challenge_scalar(
             aggregate_commitment_digest.as_bytes(),
             batch_commitment_digest.as_bytes(),
             bgv_commitment_digest.as_bytes(),
+            bgv_randomness_bound_commitment_digest.as_bytes(),
         ],
     );
     if let Some(challenge) = first_nonzero_u64_chunk(&digest) {
@@ -584,6 +831,7 @@ fn bridge_shared_witness_challenge_scalar(
                 aggregate_commitment_digest.as_bytes(),
                 batch_commitment_digest.as_bytes(),
                 bgv_commitment_digest.as_bytes(),
+                bgv_randomness_bound_commitment_digest.as_bytes(),
                 &retry_index_bytes,
             ],
         );
@@ -641,93 +889,109 @@ fn parse_bridge_challenge_scalar(challenge_scalar_hex: &str) -> CanonicalResult<
 }
 
 fn response_vector(
-    masks: &[i128],
+    masks: &[BigInt],
     challenge_scalar: u64,
-    witness: &[i128],
-) -> CanonicalResult<Vec<i128>> {
+    witness: &[BigInt],
+) -> CanonicalResult<Vec<BigInt>> {
     if masks.len() != witness.len() {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
             "M9 bridge proof mask and witness dimensions do not match",
         ));
     }
-    let challenge = i128::from(challenge_scalar);
+    let challenge = BigInt::from(challenge_scalar);
+    let shift_bound = bridge_shared_witness_response_shift_bound_exclusive();
     masks
         .iter()
         .zip(witness.iter())
         .map(|(mask, witness_value)| {
-            let scaled_witness = challenge.checked_mul(*witness_value).ok_or_else(|| {
-                CanonicalError::new(
-                    CanonicalErrorCode::MalformedLength,
-                    "M9 bridge proof response multiplication overflowed i128",
-                )
-            })?;
-            mask.checked_add(scaled_witness).ok_or_else(|| {
-                CanonicalError::new(
-                    CanonicalErrorCode::MalformedLength,
-                    "M9 bridge proof response addition overflowed i128",
-                )
-            })
+            let scaled_witness = &challenge * witness_value;
+            if scaled_witness.abs() >= shift_bound {
+                return Err(CanonicalError::new(
+                    CanonicalErrorCode::ProfileComponentMismatch,
+                    "M9 bridge proof witness shift exceeds the supported response-distribution slack",
+                ));
+            }
+            Ok(mask + scaled_witness)
         })
         .collect()
 }
 
-fn constant_response_polynomial(value: i128, degree: usize, modulus: u64) -> Vec<u64> {
+fn constant_response_polynomial(value: &BigInt, degree: usize, modulus: u64) -> Vec<u64> {
     let mut polynomial = vec![0_u64; degree];
-    polynomial[0] = signed_i128_to_modulus_residue(value, modulus);
+    polynomial[0] = signed_bigint_to_modulus_residue(value, modulus);
 
     polynomial
 }
 
-fn signed_i128_to_modulus_residue(value: i128, modulus: u64) -> u64 {
-    let residue = value.rem_euclid(i128::from(modulus));
+pub(crate) fn signed_bigint_to_modulus_residue(value: &BigInt, modulus: u64) -> u64 {
+    let modulus = BigInt::from(modulus);
+    let residue = ((value % &modulus) + &modulus) % &modulus;
 
-    u64::try_from(residue).expect("non-negative i128 residue below a u64 modulus fits u64")
+    residue
+        .to_u64()
+        .expect("non-negative BigInt residue below a u64 modulus fits u64")
 }
 
-fn i128_vector_hex(values: &[i128]) -> String {
-    let mut bytes = Vec::with_capacity(values.len() * 16);
+fn signed_i256_vector_hex(values: &[BigInt]) -> CanonicalResult<String> {
+    let mut bytes = Vec::with_capacity(values.len() * BRIDGE_SHARED_WITNESS_RESPONSE_BYTE_LENGTH);
     for value in values {
-        bytes.extend_from_slice(&value.to_le_bytes());
+        let sign_extension = if value.sign() == Sign::Minus {
+            0xff_u8
+        } else {
+            0_u8
+        };
+        let value_bytes = value.to_signed_bytes_le();
+        if value_bytes.len() > BRIDGE_SHARED_WITNESS_RESPONSE_BYTE_LENGTH {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "M9 bridge shared-witness response does not fit signed i256 encoding",
+            ));
+        }
+        let mut fixed_bytes = [sign_extension; BRIDGE_SHARED_WITNESS_RESPONSE_BYTE_LENGTH];
+        fixed_bytes[..value_bytes.len()].copy_from_slice(&value_bytes);
+        if BigInt::from_signed_bytes_le(&fixed_bytes) != *value {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "M9 bridge shared-witness response is not representable as canonical signed i256",
+            ));
+        }
+        bytes.extend_from_slice(&fixed_bytes);
     }
 
-    to_hex(&bytes)
+    Ok(to_hex(&bytes))
 }
 
-fn read_i128_hex_vector(
+fn read_signed_i256_hex_vector(
     value: &Value,
     field_name: &str,
     object_name: &str,
-) -> CanonicalResult<Vec<i128>> {
+) -> CanonicalResult<Vec<BigInt>> {
     let encoded = required_string_field(value, field_name, object_name)?;
     let bytes = decode_hex(encoded)?;
-    if bytes.len() % 16 != 0 {
+    if bytes.len() % BRIDGE_SHARED_WITNESS_RESPONSE_BYTE_LENGTH != 0 {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
-            format!("{object_name}.{field_name} must encode whole i128 values"),
+            format!("{object_name}.{field_name} must encode whole signed i256 values"),
         ));
     }
 
     Ok(bytes
-        .chunks_exact(16)
-        .map(|chunk| {
-            let mut value_bytes = [0_u8; 16];
-            value_bytes.copy_from_slice(chunk);
-            i128::from_le_bytes(value_bytes)
-        })
+        .chunks_exact(BRIDGE_SHARED_WITNESS_RESPONSE_BYTE_LENGTH)
+        .map(BigInt::from_signed_bytes_le)
         .collect())
 }
 
 #[allow(clippy::too_many_arguments)]
 fn validate_response_lengths(
-    aggregate_share_response: &[i128],
-    aggregate_opening_response: &[i128],
-    aggregate_reduced_response: &[i128],
-    aggregate_quotient_response: &[i128],
-    batch_coefficient_response: &[i128],
-    cipher_randomizer_response: &[i128],
-    bounded_perturbation_zero_response: &[i128],
-    bounded_perturbation_one_response: &[i128],
+    aggregate_share_response: &[BigInt],
+    aggregate_opening_response: &[BigInt],
+    aggregate_reduced_response: &[BigInt],
+    aggregate_quotient_response: &[BigInt],
+    batch_coefficient_response: &[BigInt],
+    cipher_randomizer_response: &[BigInt],
+    bounded_perturbation_zero_response: &[BigInt],
+    bounded_perturbation_one_response: &[BigInt],
     expected_aggregate_count: usize,
     expected_quotient_count: usize,
 ) -> CanonicalResult<()> {
@@ -747,6 +1011,92 @@ fn validate_response_lengths(
     }
 
     Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn validate_all_response_vector_bounds(
+    aggregate_share_response: &[BigInt],
+    aggregate_opening_response: &[BigInt],
+    aggregate_reduced_response: &[BigInt],
+    aggregate_quotient_response: &[BigInt],
+    batch_coefficient_response: &[BigInt],
+    cipher_randomizer_response: &[BigInt],
+    bounded_perturbation_zero_response: &[BigInt],
+    bounded_perturbation_one_response: &[BigInt],
+) -> CanonicalResult<()> {
+    for (role, responses) in [
+        ("aggregate share", aggregate_share_response),
+        ("aggregate opening", aggregate_opening_response),
+        ("aggregate reduced", aggregate_reduced_response),
+        ("aggregate quotient", aggregate_quotient_response),
+        ("batch coefficient", batch_coefficient_response),
+        ("cipher randomizer", cipher_randomizer_response),
+        (
+            "bounded perturbation zero",
+            bounded_perturbation_zero_response,
+        ),
+        (
+            "bounded perturbation one",
+            bounded_perturbation_one_response,
+        ),
+    ] {
+        validate_response_vector_bounds(role, responses)?;
+    }
+
+    Ok(())
+}
+
+pub(super) fn validate_response_vector_bounds(
+    role: &str,
+    responses: &[BigInt],
+) -> CanonicalResult<()> {
+    let response_bound = bridge_shared_witness_response_absolute_bound_exclusive();
+    if responses
+        .iter()
+        .any(|response| response.abs() >= response_bound)
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            format!(
+                "M9 bridge shared-witness {role} response exceeds the supported response bound"
+            ),
+        ));
+    }
+
+    Ok(())
+}
+
+fn bridge_shared_witness_mask_absolute_bound_exclusive() -> BigInt {
+    BigInt::one() << BRIDGE_SHARED_WITNESS_MASK_BIT_LENGTH
+}
+
+fn bridge_shared_witness_response_shift_bound_exclusive() -> BigInt {
+    BigInt::one() << BRIDGE_SHARED_WITNESS_RESPONSE_REJECTION_SLACK_BIT_LENGTH
+}
+
+fn bridge_shared_witness_response_absolute_bound_exclusive() -> BigInt {
+    bridge_shared_witness_mask_absolute_bound_exclusive()
+        - bridge_shared_witness_response_shift_bound_exclusive()
+}
+
+fn bridge_shared_witness_mask_absolute_bound_exclusive_decimal() -> String {
+    bridge_shared_witness_mask_absolute_bound_exclusive().to_string()
+}
+
+fn bridge_shared_witness_response_shift_bound_exclusive_decimal() -> String {
+    bridge_shared_witness_response_shift_bound_exclusive().to_string()
+}
+
+fn bridge_shared_witness_response_absolute_bound_exclusive_decimal() -> String {
+    bridge_shared_witness_response_absolute_bound_exclusive().to_string()
+}
+
+fn u64_slice_to_bigint_vec(values: &[u64]) -> Vec<BigInt> {
+    values.iter().map(|value| BigInt::from(*value)).collect()
+}
+
+fn i64_slice_to_bigint_vec(values: &[i64]) -> Vec<BigInt> {
+    values.iter().map(|value| BigInt::from(*value)).collect()
 }
 
 fn shared_response_scalar_count(
@@ -778,14 +1128,6 @@ fn shared_response_scalar_count(
     })
 }
 
-fn u64_slice_to_i128_vec(values: &[u64]) -> Vec<i128> {
-    values.iter().map(|value| i128::from(*value)).collect()
-}
-
-fn i64_slice_to_i128_vec(values: &[i64]) -> Vec<i128> {
-    values.iter().map(|value| i128::from(*value)).collect()
-}
-
 fn canonical_polynomial_vector_response(entries: &[Vec<u64>]) -> Value {
     Value::Array(
         entries
@@ -804,66 +1146,119 @@ fn canonical_polynomial_vector_response(entries: &[Vec<u64>]) -> Value {
 
 #[cfg(test)]
 mod tests {
-    use super::{first_nonzero_u64_chunk, sample_bridge_mask_vector};
+    use super::{
+        BRIDGE_SHARED_WITNESS_MASK_BYTES_PER_COORDINATE, first_nonzero_u64_chunk,
+        mask_from_uniform_lane, read_signed_i256_hex_vector, sample_bridge_mask_vector,
+        signed_i256_vector_hex,
+    };
     use crate::hashing::hash512;
+    use num_bigint::BigInt;
+    use num_traits::One;
+    use serde_json::json;
 
-    fn mask_from_digest_lane(digest: &[u8], lane_index: usize) -> i128 {
-        let lane_start = lane_index * 15;
-        let lane = &digest[lane_start..lane_start + 15];
-        let mut magnitude_bytes = [0_u8; 16];
-        magnitude_bytes[..14].copy_from_slice(&lane[..14]);
-        let magnitude = i128::from_le_bytes(magnitude_bytes);
-        if lane[14] & 1 == 0 {
-            magnitude
-        } else {
-            -magnitude
-        }
+    fn mask_from_digest_lane(digest: &[u8], lane_index: usize) -> BigInt {
+        let lane_start = lane_index * BRIDGE_SHARED_WITNESS_MASK_BYTES_PER_COORDINATE;
+        let lane_end = lane_start + BRIDGE_SHARED_WITNESS_MASK_BYTES_PER_COORDINATE;
+        mask_from_uniform_lane(&digest[lane_start..lane_end])
     }
 
     #[test]
-    fn bridge_mask_sampler_consumes_four_coordinates_per_digest() {
+    fn bridge_mask_sampler_consumes_two_wide_coordinates_per_digest() {
         let statement_digest = "statement-digest";
         let prover_randomness_hex = "001122";
         let role = "aggregate-share";
         let check_index_bytes = 3_u64.to_le_bytes();
+        let rejection_attempt_index_bytes = 2_u64.to_le_bytes();
         let first_block_index_bytes = 0_u64.to_le_bytes();
         let second_block_index_bytes = 1_u64.to_le_bytes();
+        let third_block_index_bytes = 2_u64.to_le_bytes();
         let first_digest = hash512(
-            "sealed-lattice-root/aggregate-bridge-shared-witness-mask-v1",
+            "sealed-lattice-root/aggregate-bridge-shared-witness-mask-rejection-sampled-v1",
             &[
                 statement_digest.as_bytes(),
                 prover_randomness_hex.as_bytes(),
                 role.as_bytes(),
                 &check_index_bytes,
+                &rejection_attempt_index_bytes,
                 &first_block_index_bytes,
             ],
         );
         let second_digest = hash512(
-            "sealed-lattice-root/aggregate-bridge-shared-witness-mask-v1",
+            "sealed-lattice-root/aggregate-bridge-shared-witness-mask-rejection-sampled-v1",
             &[
                 statement_digest.as_bytes(),
                 prover_randomness_hex.as_bytes(),
                 role.as_bytes(),
                 &check_index_bytes,
+                &rejection_attempt_index_bytes,
                 &second_block_index_bytes,
             ],
         );
+        let third_digest = hash512(
+            "sealed-lattice-root/aggregate-bridge-shared-witness-mask-rejection-sampled-v1",
+            &[
+                statement_digest.as_bytes(),
+                prover_randomness_hex.as_bytes(),
+                role.as_bytes(),
+                &check_index_bytes,
+                &rejection_attempt_index_bytes,
+                &third_block_index_bytes,
+            ],
+        );
 
-        let masks = sample_bridge_mask_vector(statement_digest, prover_randomness_hex, 3, role, 5);
+        let masks =
+            sample_bridge_mask_vector(statement_digest, prover_randomness_hex, 3, 2, role, 5);
 
         assert_eq!(
             masks,
             vec![
                 mask_from_digest_lane(&first_digest, 0),
                 mask_from_digest_lane(&first_digest, 1),
-                mask_from_digest_lane(&first_digest, 2),
-                mask_from_digest_lane(&first_digest, 3),
                 mask_from_digest_lane(&second_digest, 0),
+                mask_from_digest_lane(&second_digest, 1),
+                mask_from_digest_lane(&third_digest, 0),
             ]
         );
         assert_ne!(
             masks,
-            sample_bridge_mask_vector(statement_digest, prover_randomness_hex, 4, role, 5)
+            sample_bridge_mask_vector(statement_digest, prover_randomness_hex, 4, 2, role, 5)
+        );
+        assert_ne!(
+            masks,
+            sample_bridge_mask_vector(statement_digest, prover_randomness_hex, 3, 3, role, 5)
+        );
+    }
+
+    #[test]
+    fn signed_i256_response_encoding_round_trips_wide_values() {
+        let values = vec![
+            -(BigInt::one() << 239_u32) + 1,
+            BigInt::from(-1_i8),
+            BigInt::from(0_u8),
+            (BigInt::one() << 239_u32) - 1,
+        ];
+        let encoded = signed_i256_vector_hex(&values).expect("wide values fit signed i256");
+        assert_eq!(encoded.len(), values.len() * 64);
+
+        let decoded = read_signed_i256_hex_vector(
+            &json!({ "responses": encoded }),
+            "responses",
+            "testObject",
+        )
+        .expect("encoded i256 values decode");
+
+        assert_eq!(decoded, values);
+    }
+
+    #[test]
+    fn signed_i256_response_encoding_rejects_values_outside_i256() {
+        let values = vec![BigInt::one() << 255_u32];
+        let error = signed_i256_vector_hex(&values).expect_err("2^255 does not fit signed i256");
+
+        assert!(
+            error.message.contains("signed i256"),
+            "unexpected error: {}",
+            error.message
         );
     }
 

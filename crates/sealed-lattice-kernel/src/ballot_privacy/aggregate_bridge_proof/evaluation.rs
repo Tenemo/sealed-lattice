@@ -160,8 +160,8 @@ pub(super) fn evaluate_aggregate_bridge_relation(request: &Value) -> CanonicalRe
             "M9PrivateRelationEvaluator",
             "BridgeProofRelationChecked",
             "BridgeProofImplementationEvidenceOnly",
-            "SharedWitnessZeroKnowledgeProofMissing",
-            "BgvRandomnessBoundProofMissing",
+            SHARED_WITNESS_ZERO_KNOWLEDGE_STATUS,
+            BGV_RANDOMNESS_BOUND_PROOF_STATUS,
             "BridgeProofClaimClosureMissing",
             "FinalBridgeTheoremPending",
         ]

@@ -52,6 +52,7 @@ import type {
     TargetFinalityVerificationInput,
 } from '@sealed-lattice/types';
 import type {
+    AggregateBridgeEncryptionVerification,
     BallotPrivacyKernelVerification,
     BallotPrivacyProofBackendStatus,
     TranscriptCoreKernel,
@@ -259,9 +260,24 @@ const unavailableFutureProtocolOperation = (
 export const verifyTranscript = (): FutureProtocolOperationResult =>
     unavailableFutureProtocolOperation('verifyTranscript');
 
-/** Reserved bridge-proof verification entry point for the future aggregate path. */
-export const verifyBridgeProof = (): FutureProtocolOperationResult =>
-    unavailableFutureProtocolOperation('verifyBridgeProof');
+/** Input accepted by the packaged WASM aggregate bridge verifier. */
+export type BridgeProofVerificationInput = Parameters<
+    TranscriptCoreKernel['verifyAggregateBridgeEncryption']
+>[0];
+
+/** Verification result returned by the packaged WASM aggregate bridge verifier. */
+export type BridgeProofVerification =
+    | AggregateBridgeEncryptionVerification
+    | BallotPrivacyKernelVerification;
+
+/** Verifies encrypted aggregate bridge proof evidence with the packaged WASM backend. */
+export const verifyBridgeProof = async (
+    input: BridgeProofVerificationInput,
+): Promise<BridgeProofVerification> => {
+    const kernel = await loadTranscriptCoreKernel();
+
+    return kernel.verifyAggregateBridgeEncryption(input);
+};
 
 /** Reserved one-shot decryption-share policy verifier for the future target path. */
 export const verifyOneShotSharePolicy = (): FutureProtocolOperationResult =>

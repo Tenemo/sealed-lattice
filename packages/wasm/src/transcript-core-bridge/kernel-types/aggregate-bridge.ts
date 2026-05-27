@@ -25,6 +25,9 @@ export type AggregateBridgeEncryptionGeneration = {
     readonly bridgeProofBytesHex: string;
     readonly bridgeProofBytesDigest: ProtocolDigest;
     readonly bridgeProofRoot: ProtocolDigest;
+    readonly bridgeSharedWitnessProofDigest: ProtocolDigest;
+    readonly sharedWitnessZeroKnowledgeStatusDigest: ProtocolDigest;
+    readonly bgvRandomnessBoundProofStatusDigest: ProtocolDigest;
     readonly bridgeProofVerificationStatus: 'BridgeProofRelationChecked';
     readonly bridgeClaimClosureVerified: false;
     readonly bridgeClaimVerificationStatus: 'BridgeProofClaimClosureMissing';
@@ -76,6 +79,9 @@ export type AggregateBridgeEncryptionVerification = {
     readonly bridgeProofTargetContractDigest: ProtocolDigest;
     readonly bridgeProofBytesDigest: ProtocolDigest;
     readonly bridgeProofRoot: ProtocolDigest;
+    readonly bridgeSharedWitnessProofDigest?: ProtocolDigest | null;
+    readonly sharedWitnessZeroKnowledgeStatusDigest?: ProtocolDigest | null;
+    readonly bgvRandomnessBoundProofStatusDigest?: ProtocolDigest | null;
     readonly encryptedAggregateInputRoot: ProtocolDigest;
     readonly encryptedAggregateShareCiphertextRoot: ProtocolDigest;
     readonly aggregateRelationSubproofSizeBytes: number;

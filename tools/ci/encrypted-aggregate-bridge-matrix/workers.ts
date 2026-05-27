@@ -16,6 +16,12 @@ import {
 import { canonicalJson } from '#packages/crypto/src/index';
 import { loadTranscriptCoreKernel } from '#packages/wasm/src/index';
 
+const variantBuildResultPassed = (result: VariantBuildResult): boolean =>
+    result.proofRow.status === 'passed' &&
+    result.aggregateReadyRow.status === 'passed' &&
+    result.privateRelationRow.status === 'passed' &&
+    result.negativeChecks.every((check) => check.expectedFailureObserved);
+
 export const runWorkerRow = async (): Promise<boolean> => {
     const workerRowKey = argumentValue('--worker-row');
     if (workerRowKey === null) {
@@ -32,6 +38,9 @@ export const runWorkerRow = async (): Promise<boolean> => {
         }
     })();
     console.log(`${workerOutputPrefix}${canonicalJson(result)}`);
+    if (!variantBuildResultPassed(result)) {
+        process.exitCode = 1;
+    }
 
     return true;
 };

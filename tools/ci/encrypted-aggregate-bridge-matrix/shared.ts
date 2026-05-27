@@ -16,9 +16,11 @@ export type TranscriptCoreKernel = Awaited<
 
 export type MatrixMode =
     | 'axes'
+    | 'focused'
     | 'full'
     | 'prototype'
     | 'representative'
+    | 'shape'
     | 'sentinels';
 
 export type Variant = {
@@ -52,6 +54,22 @@ export type NegativeCheck = {
     readonly optionCount: number;
     readonly rosterSize: number;
     readonly suite: 'cheap' | 'sentinel';
+};
+
+export type ShapeConfigRow = {
+    readonly aggregateInputLayoutDigest: ProtocolDigest;
+    readonly bridgeProofStatementDigest: ProtocolDigest;
+    readonly bridgeProofTargetContractDigest: ProtocolDigest;
+    readonly claimTier: string;
+    readonly failureReason: string | null;
+    readonly optionCount: number;
+    readonly rosterSize: number;
+    readonly selectedContributionCount: number;
+    readonly shareVectorWidth: number;
+    readonly statementDimensionDigest: ProtocolDigest;
+    readonly status: 'passed' | 'failed';
+    readonly thresholdProfileHash: ProtocolDigest;
+    readonly trusteeAggregateThreshold: number;
 };
 
 export type ContributionBuild = {
@@ -140,12 +158,29 @@ export const sentinelVariants = new Set([
     '20:20',
 ]);
 
+export const focusedSubsetVariantKeys = [
+    '3:2',
+    '3:10',
+    '9:20',
+    '9:2',
+    '10:2',
+    '10:20',
+    '20:20',
+    '20:10',
+] as const;
+
+export const focusedSubsetVariants = new Set<string>([
+    ...focusedSubsetVariantKeys,
+]);
+
+export const focusedSubsetWorkerCount = focusedSubsetVariantKeys.length;
+
 export const benchmarkVariantKeys = new Set([
     '20:20',
-    '20:2',
+    '20:10',
     '3:2',
-    '3:20',
-    '10:20',
+    '3:10',
+    '9:20',
 ]);
 
 export const lowerHexDigest = (label: string): ProtocolDigest =>
@@ -177,6 +212,9 @@ export const parseVariantKey = (key: string): Variant => {
     return { optionCount, rosterSize };
 };
 
+export const focusedSubsetVariantRows: readonly Variant[] =
+    focusedSubsetVariantKeys.map(parseVariantKey);
+
 export const argumentValue = (name: string): string | null => {
     const argumentIndex = process.argv.indexOf(name);
     if (argumentIndex < 0) {
@@ -193,6 +231,12 @@ export const argumentValue = (name: string): string | null => {
 export const matrixMode = (): MatrixMode => {
     if (process.argv.includes('--prototype')) {
         return 'prototype';
+    }
+    if (process.argv.includes('--shape')) {
+        return 'shape';
+    }
+    if (process.argv.includes('--focused')) {
+        return 'focused';
     }
     if (process.argv.includes('--axes')) {
         return 'axes';
@@ -217,11 +261,17 @@ export const variantsForMode = (mode: MatrixMode): readonly Variant[] => {
             rosterSize: rosterIndex + 3,
         })),
     ).flat();
+    if (mode === 'shape') {
+        return variants;
+    }
     if (mode === 'axes') {
         return variants.filter(
             (variant) =>
                 variant.rosterSize === 20 || variant.optionCount === 20,
         );
+    }
+    if (mode === 'focused') {
+        return focusedSubsetVariantRows;
     }
     if (mode === 'representative' || mode === 'sentinels') {
         return variants.filter((variant) =>
@@ -232,10 +282,13 @@ export const variantsForMode = (mode: MatrixMode): readonly Variant[] => {
     return variants;
 };
 
-export const requestedWorkerCount = (): number => {
+export const requestedWorkerCount = (mode: MatrixMode): number => {
     const argumentWorkerCount = argumentValue('--workers');
     const environmentWorkerCount = process.env.SEALED_LATTICE_M9_WORKERS;
-    const rawWorkerCount = argumentWorkerCount ?? environmentWorkerCount ?? '1';
+    const defaultWorkerCount =
+        mode === 'focused' ? String(focusedSubsetWorkerCount) : '1';
+    const rawWorkerCount =
+        argumentWorkerCount ?? environmentWorkerCount ?? defaultWorkerCount;
     const workerCount = Number(rawWorkerCount);
     if (!Number.isInteger(workerCount) || workerCount < 1) {
         throw new Error(`Invalid M9 worker count: ${rawWorkerCount}`);

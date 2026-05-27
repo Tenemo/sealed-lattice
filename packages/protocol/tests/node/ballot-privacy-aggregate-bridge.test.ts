@@ -15,6 +15,7 @@ import {
     createPendingBridgeProofRecordFromBridgeEvidence,
     type PendingBridgeProofRecordFromEvidenceInput,
 } from '../../src/ballot-privacy/aggregate-bridge/structure-verification.js';
+import { forbiddenPublicWitnessFieldNames } from '../../src/ballot-privacy/aggregate-derivation/constants.js';
 import {
     createAggregateContributionFromBridgeProofRecord,
     createAggregateReadyRecord,
@@ -99,7 +100,8 @@ describe('encrypted aggregate bridge objects', () => {
             bgvEncryptionProofStatus: 'BgvCiphertextEquationChecked',
             bgvProfileDigest: baseFields.bgvProfileDigest,
             bgvPublicKeyRoot: baseFields.bgvPublicKeyRoot,
-            bgvRandomnessBoundProofStatus: 'BgvRandomnessBoundProofMissing',
+            bgvRandomnessBoundProofStatus:
+                'BgvRandomnessErrorSupportPolynomialChecked',
             bridgeClaimClosureStatus: 'BridgeProofClaimClosureMissing',
             bridgeLayoutDigest: baseFields.encryptedAggregateInputLayoutDigest,
             bridgeProofTargetContractDigest,
@@ -163,7 +165,7 @@ describe('encrypted aggregate bridge objects', () => {
             sharedWitnessCheckCount: 2,
             sharedWitnessSoundnessBits: 128,
             sharedWitnessZeroKnowledgeStatus:
-                'SharedWitnessZeroKnowledgeProofMissing',
+                'SharedWitnessZeroKnowledgeResponseDistributionChecked',
             slotCount: 32_768,
             thresholdProfileDigest: baseFields.thresholdProfileDigest,
             topKEvaluatorInputLayoutDigest:
@@ -178,6 +180,15 @@ describe('encrypted aggregate bridge objects', () => {
         const bridgeProofBytesDigest = digest('bridge-proof-bytes-1');
         const bridgeProofBytesHex = 'ab'.repeat(512);
         const bridgeProofRoot = digest('bridge-proof-root-1');
+        const bridgeSharedWitnessProofDigest = digest(
+            'bridge-shared-witness-proof-1',
+        );
+        const sharedWitnessZeroKnowledgeStatusDigest = digest(
+            'bridge-shared-witness-zk-status-1',
+        );
+        const bgvRandomnessBoundProofStatusDigest = digest(
+            'bridge-bgv-randomness-bound-status-1',
+        );
         const bridgeEncryptionEvidence: PendingBridgeProofRecordFromEvidenceInput['bridgeEncryptionEvidence'] =
             {
                 aggregateDerivationComponentDigest,
@@ -197,10 +208,13 @@ describe('encrypted aggregate bridge objects', () => {
                 bridgeProofBytesHex,
                 bridgeProofProfileDigest,
                 bridgeProofRoot,
+                bridgeSharedWitnessProofDigest,
                 bridgeProofStatementDigest,
                 bridgeProofTargetContractDigest,
                 bridgeProofVerificationStatus:
                     'BridgeProofRelationChecked' as const,
+                sharedWitnessZeroKnowledgeStatusDigest,
+                bgvRandomnessBoundProofStatusDigest,
                 canonicalByteLength,
                 canonicalBytesHash512,
                 canonicalCiphertextConventionDigest:
@@ -234,10 +248,13 @@ describe('encrypted aggregate bridge objects', () => {
                 bridgeProofBytesDigest,
                 bridgeProofProfileDigest,
                 bridgeProofRoot,
+                bridgeSharedWitnessProofDigest,
                 bridgeProofStatementDigest,
                 bridgeProofTargetContractDigest,
                 bridgeProofVerificationStatus:
                     'BridgeProofRelationChecked' as const,
+                sharedWitnessZeroKnowledgeStatusDigest,
+                bgvRandomnessBoundProofStatusDigest,
                 encryptedAggregateInputRoot:
                     encryptedAggregateShareCiphertextRoot,
                 encryptedAggregateShareCiphertextRoot,
@@ -679,6 +696,28 @@ describe('encrypted aggregate bridge objects', () => {
         const contribution = createAggregateContributionFixture({
             rosterPosition: 1,
         });
+        for (const forbiddenFieldName of forbiddenPublicWitnessFieldNames) {
+            const leakyContribution = {
+                ...contribution,
+                bridgeProofRecord: {
+                    ...contribution.bridgeProofRecord,
+                    [forbiddenFieldName]: ['leaked witness material'],
+                },
+            };
+
+            const verification = verifyAggregateContributionStructure(
+                leakyContribution as AggregateContribution,
+            );
+
+            expect(verification.ok, forbiddenFieldName).toBe(false);
+            expect(
+                verification.refusedObjects.some((refusal) =>
+                    refusal.message.includes(forbiddenFieldName),
+                ),
+                forbiddenFieldName,
+            ).toBe(true);
+        }
+
         const cyclicContainer: Record<string, unknown> = {};
         cyclicContainer.self = cyclicContainer;
         const leakyContribution = {

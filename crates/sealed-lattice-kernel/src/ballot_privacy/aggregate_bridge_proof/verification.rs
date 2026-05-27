@@ -1,7 +1,11 @@
 use super::*;
 use super::{
+    boundedness::validate_bridge_bgv_randomness_bound_status,
     dimensions::bridge_variant_dimensions,
-    shared_witness::verify_bridge_shared_witness_proof,
+    shared_witness::{
+        bridge_shared_witness_proof_digest, validate_bridge_shared_witness_zero_knowledge_status,
+        verify_bridge_shared_witness_proof,
+    },
     statement::{
         bridge_proof_profile_digest, bridge_proof_statement_digest, build_bridge_proof_statement,
     },
@@ -337,6 +341,45 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
             "M9 bridge checked status requires a real shared-witness relation proof",
         ));
     }
+    let shared_witness_proof_digest = if proof_is_checked_relation {
+        let shared_witness_proof =
+            required_json_field(&proof_value, "bridgeSharedWitnessProof", "bridgeProof")?;
+        let digest = bridge_shared_witness_proof_digest(shared_witness_proof)?;
+        require_equal_string(
+            &proof_value,
+            "bridgeSharedWitnessProofDigest",
+            &digest,
+            "shared-witness proof digest",
+        )?;
+        Some(digest)
+    } else {
+        None
+    };
+    let bgv_randomness_bound_proof_status_digest = if proof_is_checked_relation {
+        Some(validate_bridge_bgv_randomness_bound_status(
+            &proof_value,
+            &bridge_proof_statement_digest,
+            shared_witness_proof_digest.as_deref().ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::InvalidFixture,
+                    "M9 bridge checked relation requires a shared-witness proof digest",
+                )
+            })?,
+            bridge_encryption,
+        )?)
+    } else {
+        None
+    };
+    let shared_witness_zero_knowledge_status_digest =
+        if let Some(shared_witness_proof_digest) = &shared_witness_proof_digest {
+            Some(validate_bridge_shared_witness_zero_knowledge_status(
+                &proof_value,
+                &bridge_proof_statement_digest,
+                shared_witness_proof_digest,
+            )?)
+        } else {
+            None
+        };
     let shared_witness_verification = if proof_is_checked_relation {
         Some(verify_bridge_shared_witness_proof(
             &proof_value,
@@ -359,9 +402,7 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
             "proofBytesHex": bridge_proof_bytes_hex,
         }),
     )?;
-    let bridge_proof_root = derive_protocol_digest(
-        "BridgeProofRecordDigest",
-        &json!({
+    let mut proof_root_payload = json!({
             "purpose": "sealed-lattice-aggregate-bridge-encryption-proof-root-v1",
             "aggregateDerivationComponentDigest": component_digest,
             "aggregateDerivationStatementDigest": statement_digest,
@@ -371,8 +412,32 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
             "encryptedAggregateShareCiphertextRoot": bridge_encryption["encryptedAggregateShareCiphertextRoot"],
             "collectivePublicKeyRoot": bridge_encryption["collectivePublicKeyRoot"],
             "bgvPublicKeyRoot": bridge_encryption["bgvPublicKeyRoot"],
-        }),
-    )?;
+    });
+    let proof_root_payload_object = proof_root_payload.as_object_mut().ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "M9 bridge proof root payload must be an object",
+        )
+    })?;
+    if let Some(digest) = &shared_witness_proof_digest {
+        proof_root_payload_object.insert(
+            "bridgeSharedWitnessProofDigest".to_string(),
+            Value::String(digest.clone()),
+        );
+    }
+    if let Some(digest) = &shared_witness_zero_knowledge_status_digest {
+        proof_root_payload_object.insert(
+            "sharedWitnessZeroKnowledgeStatusDigest".to_string(),
+            Value::String(digest.clone()),
+        );
+    }
+    if let Some(digest) = &bgv_randomness_bound_proof_status_digest {
+        proof_root_payload_object.insert(
+            "bgvRandomnessBoundProofStatusDigest".to_string(),
+            Value::String(digest.clone()),
+        );
+    }
+    let bridge_proof_root = derive_protocol_digest("BridgeProofRecordDigest", &proof_root_payload)?;
     require_equal_string(
         bridge_encryption,
         "bridgeProofBytesDigest",
@@ -385,6 +450,30 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
         &bridge_proof_root,
         "bridge proof root",
     )?;
+    if let Some(digest) = &shared_witness_proof_digest {
+        require_equal_string(
+            bridge_encryption,
+            "bridgeSharedWitnessProofDigest",
+            digest,
+            "shared-witness proof digest",
+        )?;
+    }
+    if let Some(digest) = &shared_witness_zero_knowledge_status_digest {
+        require_equal_string(
+            bridge_encryption,
+            "sharedWitnessZeroKnowledgeStatusDigest",
+            digest,
+            "shared-witness zero-knowledge status digest",
+        )?;
+    }
+    if let Some(digest) = &bgv_randomness_bound_proof_status_digest {
+        require_equal_string(
+            bridge_encryption,
+            "bgvRandomnessBoundProofStatusDigest",
+            digest,
+            "BGV randomness-bound status digest",
+        )?;
+    }
     let bridge_proof_verification_status = if shared_witness_verification.is_some() {
         BRIDGE_PROOF_CHECKED_STATUS
     } else {
@@ -396,8 +485,8 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
             "BridgeProofRelationChecked",
             "M9SingleContributionBridgeRelationChecked",
             "BridgeProofImplementationEvidenceOnly",
-            "SharedWitnessZeroKnowledgeProofMissing",
-            "BgvRandomnessBoundProofMissing",
+            SHARED_WITNESS_ZERO_KNOWLEDGE_STATUS,
+            BGV_RANDOMNESS_BOUND_PROOF_STATUS,
             "BridgeProofClaimClosureMissing",
             "FinalBridgeTheoremPending",
         ]
@@ -412,26 +501,37 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
         "representative-row-evidence" => "RepresentativeBridgeMatrixRowEvidence",
         _ => "FullBridgeMatrixRowEvidenceMissing",
     });
+    let encrypted_aggregate_share_ciphertext_root = required_string_field(
+        bridge_encryption,
+        "encryptedAggregateShareCiphertextRoot",
+        "bridgeEncryption",
+    )?;
+    let mut accepted_digests = vec![
+        Value::String(component_digest.to_string()),
+        Value::String(statement_digest.to_string()),
+        Value::String(bridge_proof_profile_digest.clone()),
+        Value::String(bridge_proof_statement_digest.clone()),
+        Value::String(bridge_proof_target_contract_digest.to_string()),
+        Value::String(bridge_proof_bytes_digest.clone()),
+        Value::String(bridge_proof_root.clone()),
+        Value::String(encrypted_aggregate_share_ciphertext_root.to_string()),
+    ];
+    if let Some(digest) = &shared_witness_proof_digest {
+        accepted_digests.push(Value::String(digest.clone()));
+    }
+    if let Some(digest) = &shared_witness_zero_knowledge_status_digest {
+        accepted_digests.push(Value::String(digest.clone()));
+    }
+    if let Some(digest) = &bgv_randomness_bound_proof_status_digest {
+        accepted_digests.push(Value::String(digest.clone()));
+    }
 
     Ok(json!({
         "ok": true,
         "backendAvailable": true,
         "operation": "verifyAggregateBridgeEncryption",
         "statusLabels": status_labels,
-        "acceptedDigests": [
-            component_digest,
-            statement_digest,
-            bridge_proof_profile_digest,
-            bridge_proof_statement_digest,
-            bridge_proof_target_contract_digest,
-            bridge_proof_bytes_digest,
-            bridge_proof_root,
-            required_string_field(
-                bridge_encryption,
-                "encryptedAggregateShareCiphertextRoot",
-                "bridgeEncryption",
-            )?
-        ],
+        "acceptedDigests": accepted_digests,
         "refusedObjects": [],
         "unresolvedReason": Value::Null,
         "bridgeProofVerificationStatus": bridge_proof_verification_status,
@@ -444,6 +544,9 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
         "bridgeProofTargetContractDigest": bridge_proof_target_contract_digest,
         "bridgeProofBytesDigest": bridge_proof_bytes_digest,
         "bridgeProofRoot": bridge_proof_root,
+        "bridgeSharedWitnessProofDigest": shared_witness_proof_digest,
+        "sharedWitnessZeroKnowledgeStatusDigest": shared_witness_zero_knowledge_status_digest,
+        "bgvRandomnessBoundProofStatusDigest": bgv_randomness_bound_proof_status_digest,
         "encryptedAggregateInputRoot": bridge_encryption["encryptedAggregateInputRoot"],
         "encryptedAggregateShareCiphertextRoot": bridge_encryption["encryptedAggregateShareCiphertextRoot"],
         "aggregateRelationSubproofSizeBytes": aggregate_relation_verification.proof_size_bytes,
