@@ -258,6 +258,15 @@ const config = [
             '@typescript-eslint/no-unsafe-argument': OFF,
         },
     },
+    {
+        files: ['**/*.cjs'],
+        rules: {
+            '@typescript-eslint/no-require-imports': OFF,
+            '@typescript-eslint/no-unsafe-assignment': OFF,
+            '@typescript-eslint/no-unsafe-call': OFF,
+            '@typescript-eslint/no-unsafe-member-access': OFF,
+        },
+    },
 ];
 
 export default config;

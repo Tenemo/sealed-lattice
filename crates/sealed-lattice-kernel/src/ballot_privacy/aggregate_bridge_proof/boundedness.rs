@@ -365,6 +365,7 @@ fn support_expansion_commitment_for_role(
 ) -> CanonicalResult<Vec<u64>> {
     let coefficient_count = support_kind.expansion_coefficient_count();
     let mut commitments = vec![0_u64; coefficient_count];
+    let modulus_bigint = BigInt::from(modulus);
     let weight_seed = support_weight_seed(
         bridge_proof_statement_digest,
         check_index,
@@ -374,8 +375,8 @@ fn support_expansion_commitment_for_role(
     );
     let mut weight = 1_u64;
     for (coefficient_index, (mask, witness_value)) in masks.iter().zip(witness.iter()).enumerate() {
-        let mask_residue = bigint_to_modulus_residue(mask, modulus);
-        let witness_residue = bigint_to_modulus_residue(witness_value, modulus);
+        let mask_residue = bigint_to_modulus_residue(mask, &modulus_bigint);
+        let witness_residue = bigint_to_modulus_residue(witness_value, &modulus_bigint);
         let expansion =
             support_expansion_coefficients(support_kind, mask_residue, witness_residue, modulus)?;
         for (commitment, expansion_coefficient) in commitments.iter_mut().zip(expansion.iter()) {
@@ -410,6 +411,7 @@ fn validate_support_polynomial_for_role(
         ));
     }
     let challenge_residue = challenge_scalar % modulus;
+    let modulus_bigint = BigInt::from(modulus);
     let mut expected_weighted_support_sum = 0_u64;
     let weight_seed = support_weight_seed(
         bridge_proof_statement_digest,
@@ -420,7 +422,7 @@ fn validate_support_polynomial_for_role(
     );
     let mut weight = 1_u64;
     for (coefficient_index, response) in responses.iter().enumerate() {
-        let response_residue = bigint_to_modulus_residue(response, modulus);
+        let response_residue = bigint_to_modulus_residue(response, &modulus_bigint);
         let support_value =
             support_polynomial_value(support_kind, response_residue, challenge_residue, modulus);
         expected_weighted_support_sum = add_mod_u64(
@@ -729,9 +731,8 @@ fn next_support_weight(
     Ok(next_weight)
 }
 
-fn bigint_to_modulus_residue(value: &BigInt, modulus: u64) -> u64 {
-    let modulus_bigint = BigInt::from(modulus);
-    let residue = ((value % &modulus_bigint) + &modulus_bigint) % &modulus_bigint;
+fn bigint_to_modulus_residue(value: &BigInt, modulus_bigint: &BigInt) -> u64 {
+    let residue = ((value % modulus_bigint) + modulus_bigint) % modulus_bigint;
     residue
         .to_u64()
         .expect("non-negative BigInt residue below a u64 modulus fits u64")
@@ -764,12 +765,14 @@ mod tests {
     #[test]
     fn randomizer_support_expansion_matches_challenged_response() {
         let modulus = support_moduli()[0];
+        let modulus_bigint = BigInt::from(modulus);
         for mask in [-7_i64, -1, 0, 3, 19] {
             for witness in [-1_i64, 0, 1] {
                 for challenge in [1_u64, 17, u64::MAX] {
-                    let mask_residue = bigint_to_modulus_residue(&BigInt::from(mask), modulus);
+                    let mask_residue =
+                        bigint_to_modulus_residue(&BigInt::from(mask), &modulus_bigint);
                     let witness_residue =
-                        bigint_to_modulus_residue(&BigInt::from(witness), modulus);
+                        bigint_to_modulus_residue(&BigInt::from(witness), &modulus_bigint);
                     let challenge_residue = challenge % modulus;
                     let response = add_mod_u64(
                         mask_residue,
@@ -811,12 +814,14 @@ mod tests {
     #[test]
     fn error_support_expansion_matches_challenged_response() {
         let modulus = support_moduli()[1];
+        let modulus_bigint = BigInt::from(modulus);
         for mask in [-11_i64, -2, 0, 5, 23] {
             for witness in [-2_i64, -1, 0, 1, 2] {
                 for challenge in [1_u64, 29, u64::MAX] {
-                    let mask_residue = bigint_to_modulus_residue(&BigInt::from(mask), modulus);
+                    let mask_residue =
+                        bigint_to_modulus_residue(&BigInt::from(mask), &modulus_bigint);
                     let witness_residue =
-                        bigint_to_modulus_residue(&BigInt::from(witness), modulus);
+                        bigint_to_modulus_residue(&BigInt::from(witness), &modulus_bigint);
                     let challenge_residue = challenge % modulus;
                     let response = add_mod_u64(
                         mask_residue,

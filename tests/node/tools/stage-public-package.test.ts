@@ -5,7 +5,6 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
-    parseStagePublicPackageArguments,
     sanitizePublicPackageJson,
     stagePublicPackage,
 } from '#tools/ci/stage-public-package.mjs';
@@ -73,7 +72,7 @@ const writeFixtureProject = async (projectRoot: string): Promise<void> => {
     );
     await writeFile(
         path.join(publicPackageDirectory, 'public-surface.json'),
-        '{"runtimeExports":[]}\n',
+        '{"schemaVersion":2,"forbiddenRuntimeExports":[],"vendoredProtocolRuntimeModules":[],"vendoredProtocolRuntimeEntryExports":[]}\n',
         'utf8',
     );
     await writeFile(
@@ -186,12 +185,18 @@ describe('public package staging', () => {
         ).rejects.toThrow('Root package.json must define package description.');
     });
 
-    it('rejects missing and empty staging destinations', () => {
-        expect(() => parseStagePublicPackageArguments([])).toThrow(
-            'Public package staging requires --out',
-        );
-        expect(() => parseStagePublicPackageArguments(['--out'])).toThrow(
-            'Public package staging requires --out',
+    it('rejects empty staging destinations', async () => {
+        let thrownError: unknown;
+
+        try {
+            await stagePublicPackage({ destinationPath: '' });
+        } catch (error) {
+            thrownError = error;
+        }
+
+        expect(thrownError).toBeInstanceOf(Error);
+        expect((thrownError as Error).message).toBe(
+            'Public package staging requires a destination path.',
         );
     });
 

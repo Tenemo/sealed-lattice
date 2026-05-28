@@ -3,7 +3,7 @@
   "entries": [
     {
       "path": "ballot-privacy/ballot-field-linear-proof-vectors.json",
-      "sha256": "5ec55aa926c83824e614075af63e10762ac7e65d9aaf71c8dcc9a55c469cad43"
+      "sha256": "1a9d1b67b5669b6706c4ad350b9600e351df0484c251bf7b1948662c68534f8d"
     },
     {
       "path": "ballot-privacy/encoded-ballot-linear-relation-vectors.json",
@@ -11,7 +11,7 @@
     },
     {
       "path": "ballot-privacy/proof-backend-linear-vectors.json",
-      "sha256": "a87cd1ebcf0121f5ab550989ad7fe2beccc2da3d5519c09afb16aef52037ba70"
+      "sha256": "d03eb345e866595fce3b11778c902b738251a8da996733fac63dde82b01d6fda"
     },
     {
       "path": "ballot-privacy/proof-stack-profile.json",
@@ -19,11 +19,11 @@
     },
     {
       "path": "ballot-privacy/README.md",
-      "sha256": "2e9485a0816d91a146b46a241e156da3629882b63ee044c4e4b3038adeab734a"
+      "sha256": "bd6869ead21e13247831aacfa77506a676253128984c83cbfc0e3b65c342b540"
     },
     {
       "path": "ballot-privacy/receiver-key-linear-proof-vectors.json",
-      "sha256": "56f16b991dc1641c17ade57d20174829175b8e5e002bf4905851b2c25c790aca"
+      "sha256": "7f22b3b8d54146ba4f7feb35b287b39bc4a6e1533bc3b16ed925483552780944"
     },
     {
       "path": "ballot-privacy/receiver-key-proof-vectors.json",

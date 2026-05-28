@@ -1,38 +1,38 @@
 {
-  "extends": "./tsconfig.base.json",
-  "compilerOptions": {
-    "composite": true,
-    "noEmit": true
-  },
-  "include": [
-    "packages/*/tests/**/*.ts",
-    "tools/**/*.ts",
-    "tools/**/*.mts",
-    "tools/**/*.mjs",
-    "typedoc/**/*.ts",
-    "tests/**/*.ts",
-    "vitest.config.ts",
-    "eslint.config.js",
-    "typedoc.config.mjs"
-  ],
-  "references": [
-    {
-      "path": "./packages/sdk"
+    "extends": "./tsconfig.base.json",
+    "compilerOptions": {
+        "composite": true,
+        "noEmit": true
     },
-    {
-      "path": "./packages/types"
-    },
-    {
-      "path": "./packages/protocol"
-    },
-    {
-      "path": "./packages/crypto"
-    },
-    {
-      "path": "./packages/wasm"
-    },
-    {
-      "path": "./packages/testkit"
-    }
-  ]
+    "include": [
+        "packages/*/tests/**/*.ts",
+        "tools/**/*.ts",
+        "tools/**/*.cjs",
+        "tools/**/*.mts",
+        "tools/**/*.mjs",
+        "docs/typedoc/**/*.ts",
+        "tests/**/*.ts",
+        "vitest.config.ts",
+        "eslint.config.js",
+        ".dependency-cruiser.cjs",
+        "lighthouserc.cjs",
+        "typedoc.config.mjs"
+    ],
+    "references": [
+        {
+            "path": "./packages/sdk"
+        },
+        {
+            "path": "./packages/types"
+        },
+        {
+            "path": "./packages/protocol"
+        },
+        {
+            "path": "./packages/crypto"
+        },
+        {
+            "path": "./packages/wasm"
+        }
+    ]
 }

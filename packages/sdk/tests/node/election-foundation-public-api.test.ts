@@ -113,19 +113,16 @@ const requiredPublicFunctions = [
     ],
 ] as const;
 
-const allowedRuntimeExports = [...publicSurface.runtimeExports].sort();
+const expectedRuntimeExports = requiredPublicFunctions.map(
+    ([publicFunctionName]) => publicFunctionName,
+);
 const forbiddenPublicKeys = publicSurface.forbiddenRuntimeExports;
 const lowerHexSha256Pattern = /^[a-f0-9]{64}$/u;
 
 describe('election foundation public package API in Node', () => {
     it('exposes only the safe runtime functions and keeps forbidden operations absent', () => {
-        expect(
-            requiredPublicFunctions.map(
-                ([publicFunctionName]) => publicFunctionName,
-            ),
-        ).toEqual(publicSurface.runtimeExports);
         expect(Object.keys(publicApiRuntimeRecord).sort()).toEqual(
-            allowedRuntimeExports,
+            expectedRuntimeExports,
         );
         for (const [
             publicFunctionName,

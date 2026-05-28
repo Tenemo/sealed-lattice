@@ -31,16 +31,12 @@ const nodeProofBenchmarkTestIncludes = [
 const browserProofBenchmarkTestIncludes = [
     'packages/wasm/tests/browser/ballot-privacy-proof-benchmarks.browser.benchmark.ts',
 ] satisfies string[];
-const nodeProofInputHeavyTestIncludes = [
+const nodeProtocolTestIncludes = [
     'packages/protocol/tests/node/ballot-privacy-proof-record-generation-input.test.ts',
-] satisfies string[];
-const nodeRelationHeavyTestIncludes = [
     'packages/protocol/tests/node/ballot-privacy-relation-backend-lowering/**/*.test.ts',
 ] satisfies string[];
-const nodeKernelAggregateTestIncludes = [
+const nodeKernelTestIncludes = [
     'packages/wasm/tests/node/transcript-core-kernel/aggregate-derivation-proof.test.ts',
-] satisfies string[];
-const nodeKernelRemainingTestIncludes = [
     'packages/wasm/tests/node/transcript-core-kernel/ballot-proof-generation.test.ts',
     'packages/wasm/tests/node/transcript-core-kernel/ballot-proof-rejection.test.ts',
     'packages/wasm/tests/node/transcript-core-kernel/component-bundle-rejection.test.ts',
@@ -48,18 +44,8 @@ const nodeKernelRemainingTestIncludes = [
     'packages/wasm/tests/node/transcript-core-kernel/kernel-memory-and-loader.test.ts',
     'packages/wasm/tests/node/transcript-core-kernel/receiver-key-proofs.test.ts',
     'packages/wasm/tests/node/canonical-error-codes-parity.test.ts',
-    'packages/testkit/tests/node/transcript-core-fixtures.test.ts',
     'tests/node/digest-namespace-parity.test.ts',
 ] satisfies string[];
-const nodeHeavyTestIncludes = [
-    ...nodeProofInputHeavyTestIncludes,
-    ...nodeRelationHeavyTestIncludes,
-] satisfies string[];
-const nodeKernelHeavyTestIncludes = [
-    ...nodeKernelAggregateTestIncludes,
-    ...nodeKernelRemainingTestIncludes,
-] satisfies string[];
-
 const nodeProject = {
     environment: 'node',
     testTimeout: nodeTestTimeoutMs,
@@ -68,11 +54,12 @@ const nodeProject = {
 
 const nodeKernelHeavyProject = {
     environment: 'node',
+    fileParallelism: false,
     testTimeout: nodeKernelHeavyTestTimeoutMs,
     hookTimeout: nodeHookTimeoutMs,
 } as const;
 
-const nodeHeavyProject = {
+const nodeProtocolProject = {
     environment: 'node',
     testTimeout: nodeKernelHeavyTestTimeoutMs,
     hookTimeout: nodeHookTimeoutMs,
@@ -80,7 +67,6 @@ const nodeHeavyProject = {
 
 const nodeProofBenchmarkProject = {
     environment: 'node',
-    fileParallelism: false,
     testTimeout: proofBenchmarkTestTimeoutMs,
     hookTimeout: nodeHookTimeoutMs,
 } as const;
@@ -204,15 +190,6 @@ const repoRootAliases = [
         replacement: resolveFromRepoRoot('packages', 'wasm', 'src', 'index.ts'),
     },
     {
-        find: '@sealed-lattice/testkit',
-        replacement: resolveFromRepoRoot(
-            'packages',
-            'testkit',
-            'src',
-            'index.ts',
-        ),
-    },
-    {
         find: /^#packages\/(.*)$/,
         replacement: `${resolveAliasDirectoryFromRepoRoot('packages')}$1`,
     },
@@ -332,8 +309,8 @@ export default defineConfig({
                     name: 'node',
                     include: nodeTestIncludes,
                     exclude: [
-                        ...nodeHeavyTestIncludes,
-                        ...nodeKernelHeavyTestIncludes,
+                        ...nodeProtocolTestIncludes,
+                        ...nodeKernelTestIncludes,
                         ...nodeProofBenchmarkTestIncludes,
                     ],
                     ...nodeProject,
@@ -342,48 +319,16 @@ export default defineConfig({
             {
                 resolve: repoRootResolve,
                 test: {
-                    name: 'node-heavy',
-                    include: nodeHeavyTestIncludes,
-                    ...nodeHeavyProject,
+                    name: 'node-protocol',
+                    include: nodeProtocolTestIncludes,
+                    ...nodeProtocolProject,
                 },
             },
             {
                 resolve: repoRootResolve,
                 test: {
-                    name: 'node-relation-heavy',
-                    include: nodeRelationHeavyTestIncludes,
-                    ...nodeHeavyProject,
-                },
-            },
-            {
-                resolve: repoRootResolve,
-                test: {
-                    name: 'node-proof-input-heavy',
-                    include: nodeProofInputHeavyTestIncludes,
-                    ...nodeHeavyProject,
-                },
-            },
-            {
-                resolve: repoRootResolve,
-                test: {
-                    name: 'node-kernel-heavy',
-                    include: nodeKernelHeavyTestIncludes,
-                    ...nodeKernelHeavyProject,
-                },
-            },
-            {
-                resolve: repoRootResolve,
-                test: {
-                    name: 'node-kernel-remaining',
-                    include: nodeKernelRemainingTestIncludes,
-                    ...nodeKernelHeavyProject,
-                },
-            },
-            {
-                resolve: repoRootResolve,
-                test: {
-                    name: 'node-kernel-aggregate',
-                    include: nodeKernelAggregateTestIncludes,
+                    name: 'node-kernel',
+                    include: nodeKernelTestIncludes,
                     ...nodeKernelHeavyProject,
                 },
             },

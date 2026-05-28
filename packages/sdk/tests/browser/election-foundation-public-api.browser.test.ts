@@ -42,13 +42,41 @@ const deriveValidatedFirstValidOrder =
     publicApiRuntimeRecord.deriveValidatedFirstValidOrder as DeriveValidatedFirstValidOrder;
 const verifyBoardConsistency =
     publicApiRuntimeRecord.verifyBoardConsistency as VerifyBoardConsistency;
+const expectedRuntimeExports = [
+    'deriveFrozenRosterProfile',
+    'deriveLifecycleLabels',
+    'derivePollSpecDigest',
+    'deriveThresholdProfile',
+    'deriveThresholdProfileDigest',
+    'deriveValidatedFirstValidOrder',
+    'evaluateActionCapability',
+    'isActionCurrentForRecoveryEpoch',
+    'isValidLifecycleTransition',
+    'validatePollSpec',
+    'verifyAggregateDerivationComponent',
+    'verifyBallotProof',
+    'verifyBoardConsistency',
+    'verifyBridgeProof',
+    'verifyCastReceiptShell',
+    'verifyClaimBearingBallotPackage',
+    'verifyCloseRecordShell',
+    'verifyFirstValidPolicy',
+    'verifyOneShotSharePolicy',
+    'verifyReceiverKeyProof',
+    'verifyRecoveryEpochUpdate',
+    'verifyRosterExternalAcceptance',
+    'verifyRosterManifestTranscript',
+    'verifyTargetFinality',
+    'verifyTranscript',
+    'verifyTranscriptCoreFixture',
+] as const;
 
 describe('election foundation public package API in browsers', () => {
     it('exposes callable safe runtime functions and keeps obvious raw APIs absent', () => {
-        expect(Object.keys(publicApiRuntimeRecord).sort()).toEqual(
-            [...publicSurface.runtimeExports].sort(),
-        );
-        for (const publicFunctionName of publicSurface.runtimeExports) {
+        expect(Object.keys(publicApiRuntimeRecord).sort()).toEqual([
+            ...expectedRuntimeExports,
+        ]);
+        for (const publicFunctionName of expectedRuntimeExports) {
             expect(
                 typeof publicApiRuntimeRecord[publicFunctionName],
                 publicFunctionName,

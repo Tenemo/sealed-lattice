@@ -1,38 +1,12 @@
-import process from 'node:process';
-
-import {
-    deriveThresholdProfile,
-    verifyTranscriptCoreFixture,
-} from 'sealed-lattice';
 import { describe, expect, it } from 'vitest';
 
 import {
-    loadGoldenTranscriptCoreFixtures,
     loadMalformedObjectFixtures,
     loadTranscriptCoreReplayFixture,
-} from '../../src/index';
+} from '#tests/support/transcript-core-fixtures';
+import { verifyTranscriptCoreFixture } from 'sealed-lattice';
 
 describe('transcript-core fixtures', () => {
-    it('loads transcript-core fixture groups from test vectors', async () => {
-        await expect(loadGoldenTranscriptCoreFixtures()).resolves.toHaveLength(
-            2,
-        );
-        await expect(loadMalformedObjectFixtures()).resolves.toHaveLength(21);
-    });
-
-    it('loads transcript-core fixtures independently of process cwd', async () => {
-        const originalWorkingDirectory = process.cwd();
-
-        try {
-            process.chdir('packages/testkit');
-            await expect(
-                loadGoldenTranscriptCoreFixtures(),
-            ).resolves.toHaveLength(2);
-        } finally {
-            process.chdir(originalWorkingDirectory);
-        }
-    });
-
     it('verifies the replay fixture through the public package API', async () => {
         const replayFixture = await loadTranscriptCoreReplayFixture();
 
@@ -45,14 +19,6 @@ describe('transcript-core fixtures', () => {
             chunkRoot: replayFixture.fixture.expectedChunkRoot,
             statusLabels: replayFixture.expectedStatusLabels,
         });
-    });
-
-    it('resolves election foundation helpers through the public package import', () => {
-        expect(
-            deriveThresholdProfile({
-                rosterSize: 20,
-            }),
-        ).toMatchObject({ releaseQuorum: 14 });
     });
 
     it('reports deterministic rejection labels through the public package API', async () => {

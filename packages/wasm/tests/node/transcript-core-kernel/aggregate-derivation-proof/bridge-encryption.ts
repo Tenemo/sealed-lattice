@@ -43,6 +43,10 @@ export const registerAggregateBridgeEncryptionTest = (
         getAggregateComponentContext,
         runAggregateTestStep,
     } = input;
+    const runBridgeTestStep = <T>(
+        name: string,
+        action: () => T | Promise<T>,
+    ): Promise<T> => runAggregateTestStep(`M9 bridge: ${name}`, action);
 
     it(
         'generates M9 bridge encryption evidence without public witness material',
@@ -52,22 +56,26 @@ export const registerAggregateBridgeEncryptionTest = (
                 async () => {
                     const { component, kernel, statement, witness } =
                         getAggregateComponentContext();
-                    const setupPackage = kernel.generateBgvPassiveSetup({
-                        ceremonyId: statement.ceremonyId,
-                        manifestDigest: statement.manifestDigest,
-                        participants: Array.from(
-                            { length: statement.participantCount },
-                            (_unusedValue, participantIndex) => ({
-                                boardPosition: participantIndex + 3,
-                                rosterPosition: participantIndex,
-                                trusteeIdentity: `receiver-${participantIndex}`,
+                    const setupPackage = await runBridgeTestStep(
+                        'generate BGV passive setup',
+                        () =>
+                            kernel.generateBgvPassiveSetup({
+                                ceremonyId: statement.ceremonyId,
+                                manifestDigest: statement.manifestDigest,
+                                participants: Array.from(
+                                    { length: statement.participantCount },
+                                    (_unusedValue, participantIndex) => ({
+                                        boardPosition: participantIndex + 3,
+                                        rosterPosition: participantIndex,
+                                        trusteeIdentity: `receiver-${participantIndex}`,
+                                    }),
+                                ),
+                                rosterDigest: statement.rosterDigest,
+                                setupSeed: 'm9-bridge-test-seed',
+                                thresholdProfileDigest:
+                                    statement.thresholdProfileDigest,
                             }),
-                        ),
-                        rosterDigest: statement.rosterDigest,
-                        setupSeed: 'm9-bridge-test-seed',
-                        thresholdProfileDigest:
-                            statement.thresholdProfileDigest,
-                    });
+                    );
                     const aggregateSelectionPolicyDigest = deriveProtocolDigest(
                         'AggregateSelectionPolicyDigest',
                         {
@@ -94,17 +102,20 @@ export const registerAggregateBridgeEncryptionTest = (
                                 statement.aggregateDerivationStatementDigest,
                         },
                     );
-                    const bridgeEncryption =
-                        kernel.generateAggregateBridgeEncryption({
-                            aggregateSelectionPolicyDigest,
-                            aggregateDerivationComponent: component,
-                            aggregateWitness: witness,
-                            bridgeWitnessPrivacyProfileDigest,
-                            heParamDigest,
-                            includeCanonicalBytesHex: true,
-                            proverRandomnessHex: '77'.repeat(32),
-                            setupPackage,
-                        }) as Record<string, unknown>;
+                    const bridgeEncryption = await runBridgeTestStep(
+                        'generate bridge encryption proof',
+                        () =>
+                            kernel.generateAggregateBridgeEncryption({
+                                aggregateSelectionPolicyDigest,
+                                aggregateDerivationComponent: component,
+                                aggregateWitness: witness,
+                                bridgeWitnessPrivacyProfileDigest,
+                                heParamDigest,
+                                includeCanonicalBytesHex: true,
+                                proverRandomnessHex: '77'.repeat(32),
+                                setupPackage,
+                            }) as Record<string, unknown>,
+                    );
                     if (bridgeEncryption.ok !== true) {
                         throw new Error(
                             `Bridge encryption generation failed: ${JSON.stringify(bridgeEncryption)}`,
@@ -368,15 +379,18 @@ export const registerAggregateBridgeEncryptionTest = (
                         ok: true,
                         objectKind: 'ciphertext',
                     });
-                    const bridgeVerification =
-                        kernel.verifyAggregateBridgeEncryption({
-                            aggregateSelectionPolicyDigest,
-                            aggregateDerivationComponent: component,
-                            bridgeEncryption,
-                            bridgeWitnessPrivacyProfileDigest,
-                            heParamDigest,
-                            setupPackage,
-                        }) as Record<string, unknown>;
+                    const bridgeVerification = await runBridgeTestStep(
+                        'verify bridge evidence through the kernel',
+                        () =>
+                            kernel.verifyAggregateBridgeEncryption({
+                                aggregateSelectionPolicyDigest,
+                                aggregateDerivationComponent: component,
+                                bridgeEncryption,
+                                bridgeWitnessPrivacyProfileDigest,
+                                heParamDigest,
+                                setupPackage,
+                            }) as Record<string, unknown>,
+                    );
                     expect(bridgeVerification).toMatchObject({
                         backendAvailable: true,
                         bridgeEvidenceVerificationStatus:
@@ -443,15 +457,18 @@ export const registerAggregateBridgeEncryptionTest = (
                             bridgeEncryption.bridgeProofTargetContractDigest,
                         ),
                     );
-                    const publicSdkBridgeVerification =
-                        await verifyPublicSdkBridgeProof({
-                            aggregateDerivationComponent: component,
-                            aggregateSelectionPolicyDigest,
-                            bridgeEncryption,
-                            bridgeWitnessPrivacyProfileDigest,
-                            heParamDigest,
-                            setupPackage,
-                        });
+                    const publicSdkBridgeVerification = await runBridgeTestStep(
+                        'verify bridge evidence through the public SDK',
+                        () =>
+                            verifyPublicSdkBridgeProof({
+                                aggregateDerivationComponent: component,
+                                aggregateSelectionPolicyDigest,
+                                bridgeEncryption,
+                                bridgeWitnessPrivacyProfileDigest,
+                                heParamDigest,
+                                setupPackage,
+                            }),
+                    );
                     expect(publicSdkBridgeVerification).toMatchObject({
                         bridgeClaimClosureVerified: false,
                         bridgeProofVerificationStatus:
@@ -508,84 +525,96 @@ export const registerAggregateBridgeEncryptionTest = (
                         return verification as Record<string, unknown>;
                     };
 
-                    const publicSdkSampledOnlyVerification =
-                        await expectPublicSdkBridgeVerificationRejected(
-                            {
-                                bridgeEncryption: {
-                                    ...bridgeEncryption,
-                                    bridgeProofVerificationStatus:
-                                        'BridgeProofBackendPending',
-                                },
-                            },
-                            /verifier-checked bridge encryption status/iu,
-                        );
-                    expect(
-                        publicSdkSampledOnlyVerification.refusedObjects,
-                    ).toEqual(
-                        expect.arrayContaining([
-                            expect.objectContaining({
-                                message:
-                                    'M9 bridge relation proof requires verifier-checked bridge encryption status',
-                            }),
-                        ]),
-                    );
-                    await expectPublicSdkBridgeVerificationRejected(
-                        {
-                            aggregateSelectionPolicyDigest:
-                                deriveProtocolDigest(
-                                    'AggregateSelectionPolicyDigest',
+                    await runBridgeTestStep(
+                        'run public SDK bridge rejection checks',
+                        async () => {
+                            const publicSdkSampledOnlyVerification =
+                                await expectPublicSdkBridgeVerificationRejected(
                                     {
-                                        purpose:
-                                            'm9-kernel-bridge-test-public-sdk-wrong-selection-policy',
-                                        statementDigest:
-                                            statement.aggregateDerivationStatementDigest,
+                                        bridgeEncryption: {
+                                            ...bridgeEncryption,
+                                            bridgeProofVerificationStatus:
+                                                'BridgeProofBackendPending',
+                                        },
                                     },
-                                ),
+                                    /verifier-checked bridge encryption status/iu,
+                                );
+                            expect(
+                                publicSdkSampledOnlyVerification.refusedObjects,
+                            ).toEqual(
+                                expect.arrayContaining([
+                                    expect.objectContaining({
+                                        message:
+                                            'M9 bridge relation proof requires verifier-checked bridge encryption status',
+                                    }),
+                                ]),
+                            );
+                            await expectPublicSdkBridgeVerificationRejected(
+                                {
+                                    aggregateSelectionPolicyDigest:
+                                        deriveProtocolDigest(
+                                            'AggregateSelectionPolicyDigest',
+                                            {
+                                                purpose:
+                                                    'm9-kernel-bridge-test-public-sdk-wrong-selection-policy',
+                                                statementDigest:
+                                                    statement.aggregateDerivationStatementDigest,
+                                            },
+                                        ),
+                                },
+                                /selection policy|proof statement|statement digest/iu,
+                            );
+                            await expectPublicSdkBridgeVerificationRejected(
+                                {
+                                    bridgeEncryption: {
+                                        ...bridgeEncryption,
+                                        bridgeProofBytesDigest: '0'.repeat(128),
+                                    },
+                                },
+                                /proof bytes digest|proof root|digest/iu,
+                            );
+                            await expectPublicSdkBridgeVerificationRejected(
+                                {
+                                    bridgeEncryption: {
+                                        ...bridgeEncryption,
+                                        bridgeProofBytesHex: '00',
+                                    },
+                                },
+                                /proof bytes|JSON|canonical|malformed/iu,
+                            );
                         },
-                        /selection policy|proof statement|statement digest/iu,
                     );
-                    await expectPublicSdkBridgeVerificationRejected(
-                        {
-                            bridgeEncryption: {
-                                ...bridgeEncryption,
-                                bridgeProofBytesDigest: '0'.repeat(128),
-                            },
+                    await runBridgeTestStep(
+                        'build pending bridge proof record',
+                        () => {
+                            const pendingBridgeProofRecord =
+                                createPendingBridgeProofRecordFromBridgeEvidence(
+                                    {
+                                        aggregateDerivationComponent: component,
+                                        aggregateSelectionPolicyDigest,
+                                        bridgeEncryptionEvidence:
+                                            bridgeEncryption as PendingBridgeProofRecordFromEvidenceInput['bridgeEncryptionEvidence'],
+                                        bridgeEvidenceVerification:
+                                            bridgeVerification as PendingBridgeProofRecordFromEvidenceInput['bridgeEvidenceVerification'],
+                                        bridgeWitnessPrivacyProfileDigest,
+                                        heParamDigest,
+                                        setupPackage:
+                                            setupPackage as PendingBridgeProofRecordFromEvidenceInput['setupPackage'],
+                                    },
+                                );
+                            expect(pendingBridgeProofRecord).toMatchObject({
+                                bridgeProofTargetContractDigest:
+                                    bridgeEncryption.bridgeProofTargetContractDigest,
+                                bridgeProofVerificationStatus:
+                                    'BridgeProofRelationChecked',
+                                encryptedAggregateShareCiphertextRoot:
+                                    bridgeEncryption.encryptedAggregateShareCiphertextRoot,
+                                proofRoot: bridgeVerification.bridgeProofRoot,
+                                proofStatementDigest:
+                                    bridgeVerification.bridgeProofStatementDigest,
+                            });
                         },
-                        /proof bytes digest|proof root|digest/iu,
                     );
-                    await expectPublicSdkBridgeVerificationRejected(
-                        {
-                            bridgeEncryption: {
-                                ...bridgeEncryption,
-                                bridgeProofBytesHex: '00',
-                            },
-                        },
-                        /proof bytes|JSON|canonical|malformed/iu,
-                    );
-                    const pendingBridgeProofRecord =
-                        createPendingBridgeProofRecordFromBridgeEvidence({
-                            aggregateDerivationComponent: component,
-                            aggregateSelectionPolicyDigest,
-                            bridgeEncryptionEvidence:
-                                bridgeEncryption as PendingBridgeProofRecordFromEvidenceInput['bridgeEncryptionEvidence'],
-                            bridgeEvidenceVerification:
-                                bridgeVerification as PendingBridgeProofRecordFromEvidenceInput['bridgeEvidenceVerification'],
-                            bridgeWitnessPrivacyProfileDigest,
-                            heParamDigest,
-                            setupPackage:
-                                setupPackage as PendingBridgeProofRecordFromEvidenceInput['setupPackage'],
-                        });
-                    expect(pendingBridgeProofRecord).toMatchObject({
-                        bridgeProofTargetContractDigest:
-                            bridgeEncryption.bridgeProofTargetContractDigest,
-                        bridgeProofVerificationStatus:
-                            'BridgeProofRelationChecked',
-                        encryptedAggregateShareCiphertextRoot:
-                            bridgeEncryption.encryptedAggregateShareCiphertextRoot,
-                        proofRoot: bridgeVerification.bridgeProofRoot,
-                        proofStatementDigest:
-                            bridgeVerification.bridgeProofStatementDigest,
-                    });
 
                     const expectBridgeVerificationRejected = (
                         mutatedBridgeEncryption: Record<string, unknown>,
@@ -801,232 +830,257 @@ export const registerAggregateBridgeEncryptionTest = (
                             bridgeProofRoot,
                         };
                     };
-                    expect(
-                        kernel.verifyAggregateBridgeEncryption({
-                            aggregateSelectionPolicyDigest:
-                                deriveProtocolDigest(
-                                    'AggregateSelectionPolicyDigest',
-                                    {
-                                        purpose:
-                                            'm9-kernel-bridge-test-wrong-selection-policy',
-                                        statementDigest:
-                                            statement.aggregateDerivationStatementDigest,
-                                    },
-                                ),
-                            aggregateDerivationComponent: component,
-                            bridgeEncryption,
-                            bridgeWitnessPrivacyProfileDigest,
-                            heParamDigest,
-                            setupPackage,
-                        }),
-                    ).toMatchObject({
-                        ok: false,
-                        operation: 'verifyAggregateBridgeEncryption',
-                    });
-                    expect(
-                        kernel.verifyAggregateBridgeEncryption({
-                            aggregateSelectionPolicyDigest,
-                            aggregateDerivationComponent: component,
-                            bridgeEncryption,
-                            bridgeWitnessPrivacyProfileDigest:
-                                deriveProtocolDigest(
-                                    'BridgeWitnessPrivacyProfileDigest',
-                                    {
-                                        purpose:
-                                            'm9-kernel-bridge-test-wrong-witness-privacy',
-                                        statementDigest:
-                                            statement.aggregateDerivationStatementDigest,
-                                    },
-                                ),
-                            heParamDigest,
-                            setupPackage,
-                        }),
-                    ).toMatchObject({
-                        ok: false,
-                        operation: 'verifyAggregateBridgeEncryption',
-                    });
-                    expect(
-                        kernel.verifyAggregateBridgeEncryption({
-                            aggregateSelectionPolicyDigest,
-                            aggregateDerivationComponent: component,
-                            bridgeEncryption,
-                            bridgeWitnessPrivacyProfileDigest,
-                            heParamDigest: deriveProtocolDigest(
-                                'HEParamDigest',
-                                {
-                                    purpose:
-                                        'm9-kernel-bridge-test-wrong-he-param',
-                                    statementDigest:
-                                        statement.aggregateDerivationStatementDigest,
-                                },
-                            ),
-                            setupPackage,
-                        }),
-                    ).toMatchObject({
-                        ok: false,
-                        operation: 'verifyAggregateBridgeEncryption',
-                    });
-                    expectBridgeVerificationRejected({
-                        ...bridgeEncryption,
-                        bgvPlaintext: [1, 2, 3],
-                    });
-                    expectBridgeVerificationRejected({
-                        ...bridgeEncryption,
-                        bridgeProofVerificationStatus:
-                            'BridgeProofBackendPending',
-                    });
-                    expectBridgeVerificationRejected({
-                        ...bridgeEncryption,
-                        privateMaterialDisclosure: {
-                            ...(bridgeEncryption.privateMaterialDisclosure as Record<
-                                string,
-                                unknown
-                            >),
-                            encryptionRandomizerMaterialExported: true,
-                        },
-                    });
-                    expectBridgeVerificationRejected({
-                        ...bridgeEncryption,
-                        bridgeProofBytesDigest: '0'.repeat(128),
-                    });
-                    expectBridgeVerificationRejected({
-                        ...bridgeEncryption,
-                        bridgeProofStatementDigest: '0'.repeat(128),
-                    });
-                    expectBridgeVerificationRejected({
-                        ...bridgeEncryption,
-                        bridgeProofTargetContractDigest: '0'.repeat(128),
-                    });
-                    expectBridgeVerificationRejected({
-                        ...bridgeEncryption,
-                        bridgeProofBytesHex: replaceLastHexDigit(
-                            bridgeEncryption.bridgeProofBytesHex,
-                        ),
-                    });
-                    expectBridgeVerificationRejected({
-                        ...bridgeEncryption,
-                        canonicalBytesHex: replaceLastHexDigit(
-                            bridgeEncryption.canonicalBytesHex,
-                        ),
-                    });
-                    expectBridgeVerificationRejected({
-                        ...bridgeEncryption,
-                        collectivePublicKeyRoot: '0'.repeat(128),
-                    });
-                    expectBridgeVerificationRejected({
-                        ...bridgeEncryption,
-                        profileDigest: '0'.repeat(128),
-                    });
-                    expectBridgeVerificationRejected(
-                        bridgeEncryptionWithUpdatedProofPayload(
-                            {
-                                plaintextRoot: '0'.repeat(128),
-                            },
-                            {
-                                plaintextRoot: '0'.repeat(128),
-                            },
-                        ),
-                    );
-                    expectBridgeVerificationRejected(
-                        bridgeEncryptionWithUpdatedProofPayload(
-                            {
-                                bridgeProofStatementDigest: '0'.repeat(128),
-                            },
-                            {
-                                bridgeProofStatementDigest: '0'.repeat(128),
-                            },
-                        ),
-                    );
-                    expectBridgeVerificationRejected(
-                        bridgeEncryptionWithUpdatedProofPayload(
-                            {
-                                bridgeProofStatement: {
-                                    ...(bridgeProofPayload.bridgeProofStatement as Record<
+                    await runBridgeTestStep(
+                        'run cheap bridge verifier rejection checks',
+                        () => {
+                            expect(
+                                kernel.verifyAggregateBridgeEncryption({
+                                    aggregateSelectionPolicyDigest:
+                                        deriveProtocolDigest(
+                                            'AggregateSelectionPolicyDigest',
+                                            {
+                                                purpose:
+                                                    'm9-kernel-bridge-test-wrong-selection-policy',
+                                                statementDigest:
+                                                    statement.aggregateDerivationStatementDigest,
+                                            },
+                                        ),
+                                    aggregateDerivationComponent: component,
+                                    bridgeEncryption,
+                                    bridgeWitnessPrivacyProfileDigest,
+                                    heParamDigest,
+                                    setupPackage,
+                                }),
+                            ).toMatchObject({
+                                ok: false,
+                                operation: 'verifyAggregateBridgeEncryption',
+                            });
+                            expect(
+                                kernel.verifyAggregateBridgeEncryption({
+                                    aggregateSelectionPolicyDigest,
+                                    aggregateDerivationComponent: component,
+                                    bridgeEncryption,
+                                    bridgeWitnessPrivacyProfileDigest:
+                                        deriveProtocolDigest(
+                                            'BridgeWitnessPrivacyProfileDigest',
+                                            {
+                                                purpose:
+                                                    'm9-kernel-bridge-test-wrong-witness-privacy',
+                                                statementDigest:
+                                                    statement.aggregateDerivationStatementDigest,
+                                            },
+                                        ),
+                                    heParamDigest,
+                                    setupPackage,
+                                }),
+                            ).toMatchObject({
+                                ok: false,
+                                operation: 'verifyAggregateBridgeEncryption',
+                            });
+                            expect(
+                                kernel.verifyAggregateBridgeEncryption({
+                                    aggregateSelectionPolicyDigest,
+                                    aggregateDerivationComponent: component,
+                                    bridgeEncryption,
+                                    bridgeWitnessPrivacyProfileDigest,
+                                    heParamDigest: deriveProtocolDigest(
+                                        'HEParamDigest',
+                                        {
+                                            purpose:
+                                                'm9-kernel-bridge-test-wrong-he-param',
+                                            statementDigest:
+                                                statement.aggregateDerivationStatementDigest,
+                                        },
+                                    ),
+                                    setupPackage,
+                                }),
+                            ).toMatchObject({
+                                ok: false,
+                                operation: 'verifyAggregateBridgeEncryption',
+                            });
+                            expectBridgeVerificationRejected({
+                                ...bridgeEncryption,
+                                bgvPlaintext: [1, 2, 3],
+                            });
+                            expectBridgeVerificationRejected({
+                                ...bridgeEncryption,
+                                bridgeProofVerificationStatus:
+                                    'BridgeProofBackendPending',
+                            });
+                            expectBridgeVerificationRejected({
+                                ...bridgeEncryption,
+                                privateMaterialDisclosure: {
+                                    ...(bridgeEncryption.privateMaterialDisclosure as Record<
                                         string,
                                         unknown
                                     >),
-                                    postVotingClosedContextDigest: '0'.repeat(
-                                        128,
-                                    ),
+                                    encryptionRandomizerMaterialExported: true,
                                 },
-                            },
-                            {},
-                        ),
-                    );
-                    expectBridgeVerificationRejected(
-                        bridgeEncryptionWithUpdatedProofPayload(
-                            {
-                                bridgeProofStatement: {
-                                    ...bridgeProofStatement,
-                                    bridgeProofTargetContract: {
-                                        ...bridgeProofTargetContract,
-                                        sampledDiagnosticsAcceptedForVerification: true,
-                                    },
-                                },
-                            },
-                            {},
-                        ),
-                    );
-                    expectBridgeVerificationRejected(
-                        bridgeEncryptionWithUpdatedProofPayload(
-                            {
-                                aggregateRelationChallengeHex: '0'.repeat(48),
-                            },
-                            {},
-                        ),
-                    );
-                    expectBridgeVerificationRejected(
-                        bridgeEncryptionWithUpdatedProofPayload(
-                            {
-                                aggregateRelationCommitmentDigest: '0'.repeat(
+                            });
+                            expectBridgeVerificationRejected({
+                                ...bridgeEncryption,
+                                bridgeProofBytesDigest: '0'.repeat(128),
+                            });
+                            expectBridgeVerificationRejected({
+                                ...bridgeEncryption,
+                                bridgeProofStatementDigest: '0'.repeat(128),
+                            });
+                            expectBridgeVerificationRejected({
+                                ...bridgeEncryption,
+                                bridgeProofTargetContractDigest: '0'.repeat(
                                     128,
                                 ),
-                            },
-                            {},
-                        ),
+                            });
+                            expectBridgeVerificationRejected({
+                                ...bridgeEncryption,
+                                bridgeProofBytesHex: replaceLastHexDigit(
+                                    bridgeEncryption.bridgeProofBytesHex,
+                                ),
+                            });
+                        },
                     );
-                    expectBridgeVerificationRejected(
-                        bridgeEncryptionWithUpdatedProofPayload(
-                            {
-                                aggregateRelationSubproofSizeBytes: 1,
-                            },
-                            {},
-                        ),
+                    await runBridgeTestStep(
+                        'run ciphertext and setup bridge rejection checks',
+                        () => {
+                            expectBridgeVerificationRejected({
+                                ...bridgeEncryption,
+                                canonicalBytesHex: replaceLastHexDigit(
+                                    bridgeEncryption.canonicalBytesHex,
+                                ),
+                            });
+                            expectBridgeVerificationRejected({
+                                ...bridgeEncryption,
+                                collectivePublicKeyRoot: '0'.repeat(128),
+                            });
+                            expectBridgeVerificationRejected({
+                                ...bridgeEncryption,
+                                profileDigest: '0'.repeat(128),
+                            });
+                            expectBridgeVerificationRejected(
+                                bridgeEncryptionWithUpdatedProofPayload(
+                                    {
+                                        plaintextRoot: '0'.repeat(128),
+                                    },
+                                    {
+                                        plaintextRoot: '0'.repeat(128),
+                                    },
+                                ),
+                            );
+                        },
                     );
-                    expectBridgeVerificationRejected(
-                        bridgeEncryptionWithUpdatedProofPayload(
-                            {
-                                aggregateReducedCoordinateCount: 219,
-                            },
-                            {},
-                        ),
+                    await runBridgeTestStep(
+                        'run bridge proof payload mutation checks',
+                        () => {
+                            expectBridgeVerificationRejected(
+                                bridgeEncryptionWithUpdatedProofPayload(
+                                    {
+                                        bridgeProofStatementDigest: '0'.repeat(
+                                            128,
+                                        ),
+                                    },
+                                    {
+                                        bridgeProofStatementDigest: '0'.repeat(
+                                            128,
+                                        ),
+                                    },
+                                ),
+                            );
+                            expectBridgeVerificationRejected(
+                                bridgeEncryptionWithUpdatedProofPayload(
+                                    {
+                                        bridgeProofStatement: {
+                                            ...(bridgeProofPayload.bridgeProofStatement as Record<
+                                                string,
+                                                unknown
+                                            >),
+                                            postVotingClosedContextDigest:
+                                                '0'.repeat(128),
+                                        },
+                                    },
+                                    {},
+                                ),
+                            );
+                            expectBridgeVerificationRejected(
+                                bridgeEncryptionWithUpdatedProofPayload(
+                                    {
+                                        bridgeProofStatement: {
+                                            ...bridgeProofStatement,
+                                            bridgeProofTargetContract: {
+                                                ...bridgeProofTargetContract,
+                                                sampledDiagnosticsAcceptedForVerification: true,
+                                            },
+                                        },
+                                    },
+                                    {},
+                                ),
+                            );
+                            expectBridgeVerificationRejected(
+                                bridgeEncryptionWithUpdatedProofPayload(
+                                    {
+                                        aggregateRelationChallengeHex:
+                                            '0'.repeat(48),
+                                    },
+                                    {},
+                                ),
+                            );
+                            expectBridgeVerificationRejected(
+                                bridgeEncryptionWithUpdatedProofPayload(
+                                    {
+                                        aggregateRelationCommitmentDigest:
+                                            '0'.repeat(128),
+                                    },
+                                    {},
+                                ),
+                            );
+                            expectBridgeVerificationRejected(
+                                bridgeEncryptionWithUpdatedProofPayload(
+                                    {
+                                        aggregateRelationSubproofSizeBytes: 1,
+                                    },
+                                    {},
+                                ),
+                            );
+                            expectBridgeVerificationRejected(
+                                bridgeEncryptionWithUpdatedProofPayload(
+                                    {
+                                        aggregateReducedCoordinateCount: 219,
+                                    },
+                                    {},
+                                ),
+                            );
+                        },
                     );
 
-                    const wrongWitness = {
-                        ...witness,
-                        aggregateIntegerShareVector:
-                            witness.aggregateIntegerShareVector.map(
-                                (coordinate, coordinateIndex) =>
-                                    coordinateIndex === 0
-                                        ? coordinate + 1
-                                        : coordinate,
-                            ),
-                    };
-                    expect(
-                        kernel.generateAggregateBridgeEncryption({
-                            aggregateSelectionPolicyDigest,
-                            aggregateDerivationComponent: component,
-                            aggregateWitness: wrongWitness,
-                            bridgeWitnessPrivacyProfileDigest,
-                            heParamDigest,
-                            proverRandomnessHex: '77'.repeat(32),
-                            setupPackage,
-                        }),
-                    ).toMatchObject({
-                        ok: false,
-                        operation: 'generateAggregateBridgeEncryption',
-                        unresolvedReason: 'BallotPackageInvalid',
-                    });
+                    await runBridgeTestStep(
+                        'reject wrong bridge witness',
+                        () => {
+                            const wrongWitness = {
+                                ...witness,
+                                aggregateIntegerShareVector:
+                                    witness.aggregateIntegerShareVector.map(
+                                        (coordinate, coordinateIndex) =>
+                                            coordinateIndex === 0
+                                                ? coordinate + 1
+                                                : coordinate,
+                                    ),
+                            };
+                            expect(
+                                kernel.generateAggregateBridgeEncryption({
+                                    aggregateSelectionPolicyDigest,
+                                    aggregateDerivationComponent: component,
+                                    aggregateWitness: wrongWitness,
+                                    bridgeWitnessPrivacyProfileDigest,
+                                    heParamDigest,
+                                    proverRandomnessHex: '77'.repeat(32),
+                                    setupPackage,
+                                }),
+                            ).toMatchObject({
+                                ok: false,
+                                operation: 'generateAggregateBridgeEncryption',
+                                unresolvedReason: 'BallotPackageInvalid',
+                            });
+                        },
+                    );
                 },
             );
         },

@@ -1,6 +1,5 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync } from 'node:fs';
 import {
     copyFile,
     mkdtemp,
@@ -15,6 +14,14 @@ import path, { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
+    resolvePackageManagerEntryPoint,
+    resolvePackageManagerRunnerFromArguments,
+    runPackageManager,
+    runPackageManagerAndCaptureOutput,
+    type PackageManager,
+    type PackageManagerRunner,
+} from './run-command.js';
+import {
     getRootPackageJsonPath,
     getRootReadmePath,
     stagePublicPackage,
@@ -22,31 +29,22 @@ import {
 
 import { normalizeTranscriptCoreKernelBytesForDigest } from '#packages/wasm/src/transcript-core-bridge.js';
 
-const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
-
-export type PackageManager = 'npm' | 'pnpm';
-
-type PackageManagerRunner = {
-    command: string;
-    commandArgsPrefix: readonly string[];
-    kind: PackageManager;
-};
-
-type SpawnCommand = {
-    args: readonly string[];
-    command: string;
-    description: string;
-};
-
 type PackedFileMetadata = {
-    path: string;
+    readonly path: string;
 };
 
 type PackDryRunMetadataEntry = {
-    files: readonly PackedFileMetadata[];
+    readonly files: readonly PackedFileMetadata[];
 };
 
-const supportedPackageManagers = new Set<PackageManager>(['npm', 'pnpm']);
+const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
+const publintCliPath = path.resolve(
+    repoRoot,
+    'node_modules',
+    'publint',
+    'src',
+    'cli.js',
+);
 const forbiddenPublishedRuntimePathFragments = [
     'dist/internal/election-foundation/plaintext-oracle/',
     'dist/internal/election-foundation/target-acceptance/',
@@ -88,256 +86,33 @@ const forbiddenPublishedOracleFileNames = new Set([
 const publishedKernelDigestPattern =
     /const packagedTranscriptCoreKernelNormalizedSha256Hex\s*=\s*(?<digest>undefined|'[a-f0-9]{64}');/u;
 
-export const getPublicPackageDirectory = (
-    projectRoot: string = repoRoot,
-): string => path.resolve(projectRoot, 'packages', 'sdk');
-
-export const parsePackageManagerOverride = (
-    commandLineArguments: readonly string[],
-): PackageManager | undefined => {
-    const packageManagerIndex =
-        commandLineArguments.indexOf('--package-manager');
-    if (packageManagerIndex === -1) {
-        return undefined;
-    }
-
-    const packageManager = commandLineArguments[packageManagerIndex + 1];
-    if (packageManager === undefined) {
-        throw new Error('--package-manager requires a value');
-    }
-    if (!supportedPackageManagers.has(packageManager as PackageManager)) {
-        throw new Error(
-            `Unsupported package manager override: ${packageManager}`,
-        );
-    }
-
-    return packageManager as PackageManager;
-};
-
-export const detectPackageManager = (
-    packageManagerEntryPointPath: string,
-): PackageManager => {
-    const normalizedEntryPointPath = packageManagerEntryPointPath.toLowerCase();
-    if (normalizedEntryPointPath.includes('pnpm')) {
-        return 'pnpm';
-    }
-    if (normalizedEntryPointPath.includes('npm')) {
-        return 'npm';
-    }
-
-    throw new Error(
-        `Unsupported package manager entry point: ${packageManagerEntryPointPath}`,
-    );
-};
-
-export const buildPackageManagerEntryPointCandidates = (
-    packageManager: PackageManager,
-    pathEnvironment: string = process.env.PATH ?? '',
-    nodeExecutablePath: string = process.execPath,
-): readonly string[] => {
-    const nodeDirectoryPath = path.dirname(nodeExecutablePath);
-    const pathDirectoryPaths = pathEnvironment
-        .split(path.delimiter)
-        .filter((directoryPath) => directoryPath.length > 0);
-    const baseDirectoryPaths = [nodeDirectoryPath, ...pathDirectoryPaths];
-    const relativeEntryPointPaths =
-        packageManager === 'npm'
-            ? [
-                  path.join('node_modules', 'npm', 'bin', 'npm-cli.js'),
-                  path.join(
-                      '..',
-                      'lib',
-                      'node_modules',
-                      'npm',
-                      'bin',
-                      'npm-cli.js',
-                  ),
-              ]
-            : [
-                  path.join('node_modules', 'corepack', 'dist', 'pnpm.js'),
-                  path.join('node_modules', 'pnpm', 'bin', 'pnpm.cjs'),
-                  path.join(
-                      '..',
-                      'lib',
-                      'node_modules',
-                      'pnpm',
-                      'bin',
-                      'pnpm.cjs',
-                  ),
-              ];
-
-    return baseDirectoryPaths.flatMap((baseDirectoryPath) =>
-        relativeEntryPointPaths.map((relativeEntryPointPath) =>
-            path.resolve(baseDirectoryPath, relativeEntryPointPath),
-        ),
-    );
-};
-
-export const resolvePackageManagerEntryPoint = (
-    packageManager: PackageManager,
-    packageManagerEntryPointPath = process.env.npm_execpath,
-    pathEnvironment: string = process.env.PATH ?? '',
-    nodeExecutablePath: string = process.execPath,
-    pathExists: (candidatePath: string) => boolean = existsSync,
-): string => {
-    if (packageManagerEntryPointPath !== undefined) {
-        try {
-            if (
-                detectPackageManager(packageManagerEntryPointPath) ===
-                packageManager
-            ) {
-                return packageManagerEntryPointPath;
-            }
-        } catch {
-            // Keep searching for a real Node entry point below.
-        }
-    }
-
-    const entryPointPath = buildPackageManagerEntryPointCandidates(
-        packageManager,
-        pathEnvironment,
-        nodeExecutablePath,
-    ).find(pathExists);
-
-    if (entryPointPath === undefined) {
-        throw new Error(
-            `Cannot find a Node entry point for ${packageManager}. Avoid shell shims and run through npm_execpath or a Node-installed package-manager CLI.`,
-        );
-    }
-
-    return entryPointPath;
-};
-
-export const resolvePackageManagerRunner = (
-    commandLineArguments: readonly string[],
-    packageManagerEntryPointPath = process.env.npm_execpath,
-    pathEnvironment: string = process.env.PATH ?? '',
-    nodeExecutablePath: string = process.execPath,
-    pathExists: (candidatePath: string) => boolean = existsSync,
-): PackageManagerRunner => {
-    const packageManagerOverride =
-        parsePackageManagerOverride(commandLineArguments);
-    if (packageManagerOverride !== undefined) {
-        return {
-            command: nodeExecutablePath,
-            commandArgsPrefix: [
-                resolvePackageManagerEntryPoint(
-                    packageManagerOverride,
-                    packageManagerEntryPointPath,
-                    pathEnvironment,
-                    nodeExecutablePath,
-                    pathExists,
-                ),
-            ],
-            kind: packageManagerOverride,
-        };
-    }
-
-    if (packageManagerEntryPointPath === undefined) {
-        throw new Error(
-            'npm_execpath is required to run package manager commands when --package-manager is not provided',
-        );
-    }
-
-    return {
-        command: nodeExecutablePath,
-        commandArgsPrefix: [packageManagerEntryPointPath],
-        kind: detectPackageManager(packageManagerEntryPointPath),
-    };
-};
-
-export const createPackArguments = (
-    packDirectory: string,
-): readonly string[] => ['pack', '--pack-destination', packDirectory];
-
-export const createDryRunPackArguments = (): readonly string[] => [
+const createDryRunPackArguments = (): readonly string[] => [
     'pack',
     '--dry-run',
     '--json',
     '--ignore-scripts',
 ];
 
-export const createInstallArguments = (
+const createPackArguments = (packDirectory: string): readonly string[] => [
+    'pack',
+    '--pack-destination',
+    packDirectory,
+];
+
+const createInstallArguments = (
     packageManager: PackageManager,
     tarballPath: string,
-): readonly string[] => {
-    return packageManager === 'npm'
+): readonly string[] =>
+    packageManager === 'npm'
         ? ['install', '--ignore-scripts', '--silent', tarballPath]
         : ['add', '--ignore-scripts', '--silent', tarballPath];
-};
-
-export const createPackageManagerSpawnCommand = (
-    runner: PackageManagerRunner,
-    commandArguments: readonly string[],
-): SpawnCommand => {
-    const commandArgs = [...runner.commandArgsPrefix, ...commandArguments];
-    const description = [runner.command, ...commandArgs].join(' ');
-
-    return {
-        command: runner.command,
-        args: commandArgs,
-        description,
-    };
-};
-
-const runPackageManagerAndCaptureOutput = (
-    runner: PackageManagerRunner,
-    commandArguments: readonly string[],
-    cwd: string,
-): string => {
-    const spawnCommand = createPackageManagerSpawnCommand(
-        runner,
-        commandArguments,
-    );
-    const result = spawnSync(spawnCommand.command, spawnCommand.args, {
-        cwd,
-        env: process.env,
-        encoding: 'utf8',
-        maxBuffer: 100 * 1024 * 1024,
-    });
-
-    if (result.error !== undefined) {
-        throw new Error(
-            `Failed to start command: ${spawnCommand.description}: ${result.error.message}`,
-        );
-    }
-    if (result.signal !== null) {
-        throw new Error(
-            `Command terminated by signal ${result.signal}: ${spawnCommand.description}`,
-        );
-    }
-    if (result.status !== 0) {
-        const stdout = result.stdout?.trim();
-        const stderr = result.stderr?.trim();
-        const formattedOutput =
-            stdout !== '' || stderr !== ''
-                ? `\n${[stdout, stderr].filter(Boolean).join('\n')}`
-                : '';
-
-        throw new Error(
-            `Command exited with status ${result.status ?? 'null'}: ${spawnCommand.description}${formattedOutput}`,
-        );
-    }
-
-    return result.stdout ?? '';
-};
-
-const runPackageManager = (
-    runner: PackageManagerRunner,
-    commandArguments: readonly string[],
-    cwd: string,
-): void => {
-    runPackageManagerAndCaptureOutput(runner, commandArguments, cwd);
-};
 
 const isPackedFileMetadata = (value: unknown): value is PackedFileMetadata => {
     if (typeof value !== 'object' || value === null) {
         return false;
     }
 
-    const packedFileMetadata = value as { path?: unknown };
-
-    return typeof packedFileMetadata.path === 'string';
+    return typeof (value as { readonly path?: unknown }).path === 'string';
 };
 
 const isPackDryRunMetadataEntry = (
@@ -347,13 +122,11 @@ const isPackDryRunMetadataEntry = (
         return false;
     }
 
-    const packDryRunMetadataEntry = value as {
-        files?: unknown;
-    };
+    const metadataEntry = value as { readonly files?: unknown };
 
     return (
-        Array.isArray(packDryRunMetadataEntry.files) &&
-        packDryRunMetadataEntry.files.every(isPackedFileMetadata)
+        Array.isArray(metadataEntry.files) &&
+        metadataEntry.files.every(isPackedFileMetadata)
     );
 };
 
@@ -368,9 +141,8 @@ export const parsePackDryRunFilePaths = (
         );
     }
 
-    const parsedMetadataEntries = parsedMetadata as readonly unknown[];
-    const metadataEntry = parsedMetadataEntries[0];
-
+    const metadataEntries: readonly unknown[] = parsedMetadata;
+    const metadataEntry = metadataEntries[0];
     if (!isPackDryRunMetadataEntry(metadataEntry)) {
         throw new Error(
             'npm pack --dry-run --json returned an unexpected shape',
@@ -395,39 +167,37 @@ export const validatePublishedPackageFilePaths = (
         }
     }
 
-    const typeScriptBuildInfoPaths = publishedPackageFilePaths.filter(
-        (filePath) => filePath.endsWith('.tsbuildinfo'),
-    );
-    for (const typeScriptBuildInfoPath of typeScriptBuildInfoPaths) {
-        failures.push(
-            `Published package must not include TypeScript build metadata: ${typeScriptBuildInfoPath}`,
-        );
-    }
     for (const publishedPackageFilePath of publishedPackageFilePaths) {
-        for (const forbiddenPathFragment of forbiddenPublishedRuntimePathFragments) {
-            if (publishedPackageFilePath.includes(forbiddenPathFragment)) {
-                failures.push(
-                    `Published package must not include internal protocol runtime: ${publishedPackageFilePath}`,
-                );
-            }
+        if (publishedPackageFilePath.endsWith('.tsbuildinfo')) {
+            failures.push(
+                `Published package must not include TypeScript build metadata: ${publishedPackageFilePath}`,
+            );
         }
         if (
-            forbiddenPublishedTestVectorPathFragments.some(
-                (forbiddenPathFragment) =>
-                    publishedPackageFilePath.includes(forbiddenPathFragment),
+            forbiddenPublishedRuntimePathFragments.some((fragment) =>
+                publishedPackageFilePath.includes(fragment),
+            )
+        ) {
+            failures.push(
+                `Published package must not include internal protocol runtime: ${publishedPackageFilePath}`,
+            );
+        }
+        if (
+            forbiddenPublishedTestVectorPathFragments.some((fragment) =>
+                publishedPackageFilePath.includes(fragment),
             )
         ) {
             failures.push(
                 `Published package must not include repository test vectors: ${publishedPackageFilePath}`,
             );
         }
+
         const publishedPackageBaseName = path.basename(
             publishedPackageFilePath,
         );
         if (
-            forbiddenPublishedOraclePathFragments.some(
-                (forbiddenPathFragment) =>
-                    publishedPackageFilePath.includes(forbiddenPathFragment),
+            forbiddenPublishedOraclePathFragments.some((fragment) =>
+                publishedPackageFilePath.includes(fragment),
             ) ||
             forbiddenPublishedOracleFileNames.has(publishedPackageBaseName) ||
             publishedPackageFilePath.endsWith('.go')
@@ -502,13 +272,72 @@ export const validatePublishedKernelIntegrity = (
     return [];
 };
 
+const runPublint = (packageDirectory: string): void => {
+    const commandArguments = [
+        publintCliPath,
+        'run',
+        packageDirectory,
+        '--pack',
+        'false',
+        '--strict',
+    ];
+    const result = spawnSync(process.execPath, commandArguments, {
+        cwd: repoRoot,
+        env: process.env,
+        encoding: 'utf8',
+        maxBuffer: 100 * 1024 * 1024,
+    });
+
+    if (result.error !== undefined) {
+        throw new Error(`Failed to start publint: ${result.error.message}`);
+    }
+    if (result.signal !== null) {
+        throw new Error(`publint terminated by signal ${result.signal}`);
+    }
+    if (result.status !== 0) {
+        throw new Error(
+            `publint failed:\n${[result.stdout, result.stderr]
+                .filter(Boolean)
+                .join('\n')}`,
+        );
+    }
+};
+
+const runSmokeEntryPoint = (consumerDirectory: string): void => {
+    const commandArguments = ['smoke.mjs'];
+    const result = spawnSync(process.execPath, commandArguments, {
+        cwd: consumerDirectory,
+        env: process.env,
+        encoding: 'utf8',
+        maxBuffer: 100 * 1024 * 1024,
+    });
+
+    if (result.error !== undefined) {
+        throw new Error(
+            `Failed to start smoke entry point: ${result.error.message}`,
+        );
+    }
+    if (result.signal !== null) {
+        throw new Error(
+            `Smoke entry point terminated by signal ${result.signal}`,
+        );
+    }
+    if (result.status !== 0) {
+        throw new Error(
+            `Smoke entry point failed:\n${[result.stdout, result.stderr]
+                .filter(Boolean)
+                .join('\n')}`,
+        );
+    }
+};
+
 const main = async (): Promise<void> => {
-    const packageManagerRunner = resolvePackageManagerRunner(
+    const packageManagerRunner = resolvePackageManagerRunnerFromArguments(
         process.argv.slice(2),
     );
     const npmPackRunner: PackageManagerRunner = {
         command: process.execPath,
-        commandArgsPrefix: [resolvePackageManagerEntryPoint('npm')],
+        commandArgumentsPrefix: [resolvePackageManagerEntryPoint('npm')],
         kind: 'npm',
     };
     const tempRoot = await mkdtemp(join(tmpdir(), 'sealed-lattice-packed-'));
@@ -547,14 +376,17 @@ const main = async (): Promise<void> => {
                 'Root package.json must define package description.',
             );
         }
-        const packageMetadataValidationFailures =
-            validatePublishedPackageMetadata(
-                publishedPackageJson,
-                rootPackageJson.description,
-            );
-        if (packageMetadataValidationFailures.length > 0) {
-            throw new Error(packageMetadataValidationFailures.join('\n'));
+
+        const metadataFailures = validatePublishedPackageMetadata(
+            publishedPackageJson,
+            rootPackageJson.description,
+        );
+        if (metadataFailures.length > 0) {
+            throw new Error(metadataFailures.join('\n'));
         }
+
+        runPublint(packageDirectory);
+
         const publishedPackageFilePaths = parsePackDryRunFilePaths(
             runPackageManagerAndCaptureOutput(
                 npmPackRunner,
@@ -562,19 +394,21 @@ const main = async (): Promise<void> => {
                 packageDirectory,
             ),
         );
-        const publishedPackageValidationFailures =
-            validatePublishedPackageFilePaths(publishedPackageFilePaths);
-        if (publishedPackageValidationFailures.length > 0) {
-            throw new Error(publishedPackageValidationFailures.join('\n'));
+        const pathFailures = validatePublishedPackageFilePaths(
+            publishedPackageFilePaths,
+        );
+        if (pathFailures.length > 0) {
+            throw new Error(pathFailures.join('\n'));
         }
-        const packageKernelIntegrityFailures = validatePublishedKernelIntegrity(
+
+        const kernelIntegrityFailures = validatePublishedKernelIntegrity(
             await readFile(join(packageDirectory, 'dist', 'kernel.js'), 'utf8'),
             await readFile(
                 join(packageDirectory, 'dist', 'sealed-lattice-kernel.wasm'),
             ),
         );
-        if (packageKernelIntegrityFailures.length > 0) {
-            throw new Error(packageKernelIntegrityFailures.join('\n'));
+        if (kernelIntegrityFailures.length > 0) {
+            throw new Error(kernelIntegrityFailures.join('\n'));
         }
 
         runPackageManager(
@@ -596,7 +430,7 @@ const main = async (): Promise<void> => {
 
         await writeFile(
             join(consumerDirectory, 'package.json'),
-            JSON.stringify(
+            `${JSON.stringify(
                 {
                     name: 'sealed-lattice-smoke-consumer',
                     private: true,
@@ -604,7 +438,7 @@ const main = async (): Promise<void> => {
                 },
                 null,
                 2,
-            ),
+            )}\n`,
             'utf8',
         );
         await copyFile(
@@ -617,37 +451,7 @@ const main = async (): Promise<void> => {
             createInstallArguments(packageManagerRunner.kind, tarballPath),
             consumerDirectory,
         );
-
-        const commandArgs = ['smoke.mjs'];
-        const commandDescription = [process.execPath, ...commandArgs].join(' ');
-        const result = spawnSync(process.execPath, commandArgs, {
-            cwd: consumerDirectory,
-            env: process.env,
-            encoding: 'utf8',
-            maxBuffer: 100 * 1024 * 1024,
-        });
-        if (result.error !== undefined) {
-            throw new Error(
-                `Failed to start smoke entry point: ${commandDescription}: ${result.error.message}`,
-            );
-        }
-        if (result.signal !== null) {
-            throw new Error(
-                `Smoke entry point terminated by signal ${result.signal}: ${commandDescription}`,
-            );
-        }
-        if (result.status !== 0) {
-            const stdout = result.stdout?.trim();
-            const stderr = result.stderr?.trim();
-            const formattedOutput =
-                stdout !== '' || stderr !== ''
-                    ? `\n${[stdout, stderr].filter(Boolean).join('\n')}`
-                    : '';
-
-            throw new Error(
-                `Smoke entry point exited with status ${result.status ?? 'null'}: ${commandDescription}${formattedOutput}`,
-            );
-        }
+        runSmokeEntryPoint(consumerDirectory);
 
         console.log(
             `Packed package smoke test passed with ${packageManagerRunner.kind}.`,

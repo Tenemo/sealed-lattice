@@ -51,6 +51,70 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
         required_string_field(bridge_encryption, "canonicalBytesHex", "bridgeEncryption")?;
     let proof_value = parse_bridge_proof_value(bridge_proof_bytes_hex)?;
     validate_bridge_proof_public_shell(&proof_value)?;
+    let bridge_proof_bytes_digest = derive_protocol_digest(
+        "ProofBytesDigest",
+        &json!({
+            "purpose": "sealed-lattice-aggregate-bridge-encryption-proof-bytes-v1",
+            "proofBytesHex": bridge_proof_bytes_hex,
+        }),
+    )?;
+    require_equal_string(
+        bridge_encryption,
+        "bridgeProofBytesDigest",
+        &bridge_proof_bytes_digest,
+        "bridge proof bytes digest",
+    )?;
+    let proof_object_type = string_field(&proof_value, "objectType").ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "M9 bridge proof objectType is required",
+        )
+    })?;
+    let proof_is_checked_relation =
+        proof_object_type == "SealedLatticeAggregateBridgeRelationProof";
+    if !proof_is_checked_relation
+        && proof_object_type != "SealedLatticeAggregateBridgeEncryptionEvidence"
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "M9 bridge proof object type is not supported",
+        ));
+    }
+    if proof_is_checked_relation {
+        if string_field(bridge_encryption, "bridgeProofVerificationStatus")
+            != Some(BRIDGE_PROOF_CHECKED_STATUS)
+        {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::ProfileComponentMismatch,
+                "M9 bridge relation proof requires verifier-checked bridge encryption status",
+            ));
+        }
+        for (field_name, label) in [
+            ("bridgeProofProfileDigest", "bridge proof profile digest"),
+            (
+                "bridgeProofStatementDigest",
+                "bridge proof statement digest",
+            ),
+            (
+                "bridgeProofTargetContractDigest",
+                "bridge proof target contract digest",
+            ),
+        ] {
+            require_equal_string(
+                bridge_encryption,
+                field_name,
+                required_string_field(&proof_value, field_name, "bridgeProof")?,
+                label,
+            )?;
+        }
+    } else if string_field(bridge_encryption, "bridgeProofVerificationStatus")
+        == Some(BRIDGE_PROOF_CHECKED_STATUS)
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "M9 bridge checked status requires a real shared-witness relation proof",
+        ));
+    }
     let component_digest = required_string_field(
         component,
         "aggregateDerivationComponentDigest",
@@ -295,22 +359,6 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
         setup_bgv_public_key_root,
         "BGV public key root",
     )?;
-    let proof_object_type = string_field(&proof_value, "objectType").ok_or_else(|| {
-        CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "M9 bridge proof objectType is required",
-        )
-    })?;
-    let proof_is_checked_relation =
-        proof_object_type == "SealedLatticeAggregateBridgeRelationProof";
-    if !proof_is_checked_relation
-        && proof_object_type != "SealedLatticeAggregateBridgeEncryptionEvidence"
-    {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
-            "M9 bridge proof object type is not supported",
-        ));
-    }
     if read_u64_object_field(&proof_value, "objectVersion", "bridgeProof")? != 1
         || string_field(&proof_value, "profileId") != Some(BRIDGE_PROOF_PROFILE_ID)
         || string_field(&proof_value, "proofBackend") != Some(BRIDGE_PROOF_BACKEND)
@@ -322,23 +370,6 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
             "M9 bridge proof shell is not the supported scoped relation",
-        ));
-    }
-    if proof_is_checked_relation {
-        if string_field(bridge_encryption, "bridgeProofVerificationStatus")
-            != Some(BRIDGE_PROOF_CHECKED_STATUS)
-        {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
-                "M9 bridge relation proof requires verifier-checked bridge encryption status",
-            ));
-        }
-    } else if string_field(bridge_encryption, "bridgeProofVerificationStatus")
-        == Some(BRIDGE_PROOF_CHECKED_STATUS)
-    {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
-            "M9 bridge checked status requires a real shared-witness relation proof",
         ));
     }
     let shared_witness_proof_digest = if proof_is_checked_relation {
@@ -395,13 +426,6 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
     } else {
         None
     };
-    let bridge_proof_bytes_digest = derive_protocol_digest(
-        "ProofBytesDigest",
-        &json!({
-            "purpose": "sealed-lattice-aggregate-bridge-encryption-proof-bytes-v1",
-            "proofBytesHex": bridge_proof_bytes_hex,
-        }),
-    )?;
     let mut proof_root_payload = json!({
             "purpose": "sealed-lattice-aggregate-bridge-encryption-proof-root-v1",
             "aggregateDerivationComponentDigest": component_digest,
@@ -438,12 +462,6 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
         );
     }
     let bridge_proof_root = derive_protocol_digest("BridgeProofRecordDigest", &proof_root_payload)?;
-    require_equal_string(
-        bridge_encryption,
-        "bridgeProofBytesDigest",
-        &bridge_proof_bytes_digest,
-        "bridge proof bytes digest",
-    )?;
     require_equal_string(
         bridge_encryption,
         "bridgeProofRoot",

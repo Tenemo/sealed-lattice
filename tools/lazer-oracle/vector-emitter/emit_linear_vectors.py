@@ -444,7 +444,7 @@ def emit_vectors(repo_root: Path, lazer_root: Path, out_path: Path) -> None:
         "upstreamCommitHash": run_command(["git", "rev-parse", "HEAD"], cwd=lazer_root),
         "dockerfileSha256": sha256_file(repo_root / "tools" / "lazer-oracle" / "Dockerfile"),
         "oracleDriverSha256": sha256_file(
-            repo_root / "tools" / "lazer-oracle" / "generate-linear-vectors.ts"
+            repo_root / "tools" / "lazer-oracle" / "generate-vectors.ts"
         ),
         "oracleRunnerSha256": sha256_file(
             repo_root / "tools" / "lazer-oracle" / "run_oracle.py"
@@ -453,8 +453,8 @@ def emit_vectors(repo_root: Path, lazer_root: Path, out_path: Path) -> None:
         "pythonVersion": platform.python_version(),
         "sageVersion": sage_version,
         "compilerVersion": run_command(["gcc", "--version"]).splitlines()[0],
-        "buildCommand": "tsx tools/lazer-oracle/generate-linear-vectors.ts",
-        "testCommand": "python3 tools/lazer-oracle/run_oracle.py followed by python3 tools/lazer-oracle/vector-emitter/emit_linear_vectors.py inside Docker",
+        "buildCommand": "tsx tools/lazer-oracle/generate-vectors.ts --profile demo-linear",
+        "testCommand": "python3 tools/lazer-oracle/run_oracle.py --profile demo-linear followed by python3 tools/lazer-oracle/vector-emitter/emit_linear_vectors.py inside Docker",
         "parameterGenerationCommand": "cd temp/lazer/scripts && sage lin-codegen.sage ../python/demo/demo_params.py > ../python/demo/demo_params.h",
         "licenseNote": "LaZer is used only as an offline vector oracle; no upstream C library is shipped in sealed-lattice.",
     }

@@ -23,7 +23,6 @@ import {
 } from './encrypted-aggregate-bridge-matrix/shared.js';
 import {
     runParallelVariantBuilds,
-    runSequentialVariantBuilds,
     runWorkerRow,
 } from './encrypted-aggregate-bridge-matrix/workers.js';
 
@@ -36,7 +35,6 @@ const main = async (): Promise<void> => {
 
     const mode = matrixMode();
     const variants = variantsForMode(mode);
-    const workerCount = requestedWorkerCount(mode);
     await mkdir(outputDirectory, { recursive: true });
     await writeArtifact(
         'aggregate-bridge-negative-suite-inventory.json',
@@ -46,8 +44,9 @@ const main = async (): Promise<void> => {
         'aggregate-bridge-negative-suite-inventory.md',
         negativeInventoryMarkdown(),
     );
-    if (mode === 'shape') {
-        const shapeRows = buildShapeConfigRows(variants);
+
+    if (mode === 'full') {
+        const shapeRows = buildShapeConfigRows(variantsForMode('full'));
         const shapeRowsPassed = shapeRows.every(
             (row) => row.status === 'passed',
         );
@@ -66,19 +65,21 @@ const main = async (): Promise<void> => {
         );
         if (!shapeRowsPassed) {
             process.exitCode = 1;
-        }
 
-        return;
+            return;
+        }
     }
+
+    const workerCount = requestedWorkerCount(mode);
     const privateRows: MatrixRow[] = [];
     const proofRows: MatrixRow[] = [];
     const aggregateReadyRows: MatrixRow[] = [];
     const benchmarkRows: MatrixRow[] = [];
     const negativeChecks: NegativeCheck[] = [];
-    const variantResults =
-        workerCount <= 1
-            ? await runSequentialVariantBuilds(variants)
-            : await runParallelVariantBuilds({ variants, workerCount });
+    const variantResults = await runParallelVariantBuilds({
+        variants,
+        workerCount,
+    });
     for (const result of variantResults) {
         appendVariantResult({
             aggregateReadyRows,
@@ -128,20 +129,12 @@ const main = async (): Promise<void> => {
         bgvRandomnessBoundProofVerified,
         bridgeClaimClosureVerified: false,
         fullM9MatrixDeferred: mode !== 'full',
-        m9FocusedSubsetComplete:
-            mode === 'focused' &&
-            allRowsPassed &&
-            allNegativesPassed &&
-            sharedWitnessZeroKnowledgeProofVerified &&
-            bgvRandomnessBoundProofVerified,
         sharedWitnessZeroKnowledgeProofVerified,
     };
     const closureLedger = {
         labels: {
             aggregateBridgeAggregateReadyFullMatrixLocalEvidence:
                 allRowsPassed && mode === 'full',
-            aggregateBridgeFocusedSubsetImplementationEvidence:
-                allRowsPassed && allNegativesPassed && mode === 'focused',
             aggregateBridgePrivateRelationFullMatrixLocalEvidence:
                 allRowsPassed && mode === 'full',
             aggregateBridgeProofFullMatrixLocalEvidence:
@@ -229,14 +222,12 @@ const main = async (): Promise<void> => {
             `Rows passed: ${allRowsPassed ? 'yes' : 'no'}`,
             `Negative checks passed: ${allNegativesPassed ? 'yes' : 'no'}`,
             `aggregateBridgeRepresentative20x20ProofRowLocalEvidence: ${closureLedger.labels.aggregateBridgeRepresentative20x20ProofRowLocalEvidence ? 'true' : 'false'}`,
-            `aggregateBridgeFocusedSubsetImplementationEvidence: ${closureLedger.labels.aggregateBridgeFocusedSubsetImplementationEvidence ? 'true' : 'false'}`,
             `aggregateBridgePrivateRelationFullMatrixLocalEvidence: ${closureLedger.labels.aggregateBridgePrivateRelationFullMatrixLocalEvidence ? 'true' : 'false'}`,
             `aggregateBridgeProofFullMatrixLocalEvidence: ${closureLedger.labels.aggregateBridgeProofFullMatrixLocalEvidence ? 'true' : 'false'}`,
             `aggregateBridgeAggregateReadyFullMatrixLocalEvidence: ${closureLedger.labels.aggregateBridgeAggregateReadyFullMatrixLocalEvidence ? 'true' : 'false'}`,
             `aggregateBridgeScopedRelationFullMatrixLocalEvidence: ${closureLedger.labels.aggregateBridgeScopedRelationFullMatrixLocalEvidence ? 'true' : 'false'}`,
             `sharedWitnessZeroKnowledgeProofVerified: ${proofCoreStatus.sharedWitnessZeroKnowledgeProofVerified ? 'true' : 'false'}`,
             `bgvRandomnessBoundProofVerified: ${proofCoreStatus.bgvRandomnessBoundProofVerified ? 'true' : 'false'}`,
-            `M9 focused subset complete: ${proofCoreStatus.m9FocusedSubsetComplete ? 'true' : 'false'}`,
             `M9 full matrix deferred: ${proofCoreStatus.fullM9MatrixDeferred ? 'true' : 'false'}`,
             `bridgeClaimClosureVerified: ${proofCoreStatus.bridgeClaimClosureVerified ? 'true' : 'false'}`,
             '',

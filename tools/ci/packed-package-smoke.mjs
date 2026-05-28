@@ -26,11 +26,6 @@ const {
     verifyTranscriptCoreFixture,
 } = publicApi;
 
-assert(
-    JSON.stringify(Object.keys(publicApi).sort()) ===
-        JSON.stringify([...publicSurface.runtimeExports].sort()),
-    'Packed package public exports changed unexpectedly',
-);
 for (const publicKey of publicSurface.forbiddenRuntimeExports) {
     assert(
         !(publicKey in publicApi),

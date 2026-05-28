@@ -27,11 +27,6 @@ import { fileURLToPath } from 'node:url';
  * @property {string} readmePath
  */
 
-/**
- * @typedef {object} StagePublicPackageArguments
- * @property {string} destinationPath
- */
-
 /** @type {string} */
 export const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 
@@ -124,7 +119,7 @@ export const stagePublicPackage = async (input) => {
     const { destinationPath, projectRoot = repoRoot } = input;
 
     if (typeof destinationPath !== 'string' || destinationPath.length === 0) {
-        throw new Error('Public package staging requires --out');
+        throw new Error('Public package staging requires a destination path.');
     }
 
     const publicPackageDirectory = getPublicPackageDirectory(projectRoot);
@@ -167,37 +162,3 @@ export const stagePublicPackage = async (input) => {
         readmePath: path.join(resolvedDestinationPath, 'README.md'),
     };
 };
-
-/**
- * @param {string[]} commandLineArguments
- * @returns {StagePublicPackageArguments}
- */
-export const parseStagePublicPackageArguments = (commandLineArguments) => {
-    const outputIndex = commandLineArguments.indexOf('--out');
-    if (outputIndex === -1) {
-        throw new Error('Public package staging requires --out');
-    }
-
-    const destinationPath = commandLineArguments[outputIndex + 1];
-    if (destinationPath === undefined || destinationPath.length === 0) {
-        throw new Error('Public package staging requires --out');
-    }
-
-    return { destinationPath };
-};
-
-/**
- * @returns {Promise<void>}
- */
-const main = async () => {
-    const { destinationPath } = parseStagePublicPackageArguments(
-        process.argv.slice(2),
-    );
-    const { packageDirectory } = await stagePublicPackage({ destinationPath });
-
-    console.log(packageDirectory);
-};
-
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
-    void main();
-}

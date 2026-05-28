@@ -12,13 +12,13 @@ describe('module specifier helpers', () => {
             import 'sealed-lattice';
             import { loadKernel } from "@sealed-lattice/wasm";
             export { verifyBallotProof } from '@sealed-lattice/protocol';
-            const loaded = await import('@sealed-lattice/testkit');
+            const loaded = await import('@sealed-lattice/crypto');
             type TranscriptKernel = import("@sealed-lattice/types").TranscriptKernel;
         `;
 
         expect(extractModuleSpecifiers(sourceText).sort()).toEqual([
+            '@sealed-lattice/crypto',
             '@sealed-lattice/protocol',
-            '@sealed-lattice/testkit',
             '@sealed-lattice/types',
             '@sealed-lattice/wasm',
             'sealed-lattice',

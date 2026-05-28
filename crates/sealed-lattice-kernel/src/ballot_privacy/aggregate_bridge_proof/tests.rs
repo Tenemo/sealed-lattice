@@ -75,6 +75,31 @@ fn sampled_relation_check_policy() -> Value {
     })
 }
 
+fn minimal_checked_relation_proof_bytes_hex() -> String {
+    let proof_value = json!({
+        "objectType": "SealedLatticeAggregateBridgeRelationProof",
+        "bridgeSharedWitnessProof": {},
+        "privateMaterialDisclosure": private_material_disclosure(),
+    });
+
+    to_hex(
+        canonical_json(&proof_value)
+            .expect("minimal proof value should serialize")
+            .as_bytes(),
+    )
+}
+
+fn bridge_proof_bytes_digest(proof_bytes_hex: &str) -> String {
+    derive_protocol_digest(
+        "ProofBytesDigest",
+        &json!({
+            "purpose": "sealed-lattice-aggregate-bridge-encryption-proof-bytes-v1",
+            "proofBytesHex": proof_bytes_hex,
+        }),
+    )
+    .expect("proof bytes digest should derive")
+}
+
 fn first_refusal_message(value: &Value) -> &str {
     value["refusedObjects"][0]["message"]
         .as_str()
@@ -218,6 +243,48 @@ fn bridge_verifier_rejects_forged_checked_status_before_root_checks() {
     assert_eq!(result["ok"], false);
     assert!(
         first_refusal_message(&result).contains("bridgeProofBytesHex"),
+        "{result}"
+    );
+}
+
+#[test]
+fn bridge_verifier_rejects_proof_bytes_digest_before_setup_checks() {
+    let proof_bytes_hex = minimal_checked_relation_proof_bytes_hex();
+    let result =
+        verify_aggregate_bridge_encryption_from_command_request(&minimal_verify_request(json!({
+            "bridgeProofBytesDigest": "0".repeat(128),
+            "bridgeProofBytesHex": proof_bytes_hex,
+            "bridgeProofVerificationStatus": BRIDGE_PROOF_CHECKED_STATUS,
+            "canonicalBytesHex": "00",
+            "privateMaterialDisclosure": private_material_disclosure(),
+            "sampledPublicRelationChecks": sampled_relation_checks(),
+            "sampledPublicRelationCheckPolicy": sampled_relation_check_policy(),
+        })));
+
+    assert_eq!(result["ok"], false);
+    assert!(
+        first_refusal_message(&result).contains("bridge proof bytes digest"),
+        "{result}"
+    );
+}
+
+#[test]
+fn bridge_verifier_rejects_pending_status_before_setup_checks() {
+    let proof_bytes_hex = minimal_checked_relation_proof_bytes_hex();
+    let result =
+        verify_aggregate_bridge_encryption_from_command_request(&minimal_verify_request(json!({
+            "bridgeProofBytesDigest": bridge_proof_bytes_digest(&proof_bytes_hex),
+            "bridgeProofBytesHex": proof_bytes_hex,
+            "bridgeProofVerificationStatus": BRIDGE_PROOF_PENDING_STATUS,
+            "canonicalBytesHex": "00",
+            "privateMaterialDisclosure": private_material_disclosure(),
+            "sampledPublicRelationChecks": sampled_relation_checks(),
+            "sampledPublicRelationCheckPolicy": sampled_relation_check_policy(),
+        })));
+
+    assert_eq!(result["ok"], false);
+    assert!(
+        first_refusal_message(&result).contains("verifier-checked bridge encryption status"),
         "{result}"
     );
 }

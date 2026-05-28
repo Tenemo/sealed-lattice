@@ -1,3 +1,6 @@
+// Requires Docker. Verifies the pinned Lattigo reference metadata, archive,
+// Dockerfile, and oracle command digests, then builds and runs the pinned
+// development-only Docker oracle against the committed canonical RNS fixtures.
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
@@ -438,18 +441,14 @@ const main = async (): Promise<void> => {
             {
                 ok: true,
                 ...report,
-                dockerOracleRun:
-                    process.env.SEALED_LATTICE_RUN_LATTIGO_DOCKER_ORACLE ===
-                    '1',
+                dockerOracleRun: true,
             },
             null,
             2,
         ),
     );
 
-    if (process.env.SEALED_LATTICE_RUN_LATTIGO_DOCKER_ORACLE === '1') {
-        await runDockerOracle();
-    }
+    await runDockerOracle();
 };
 
 const scriptEntryPoint = process.argv[1];

@@ -1,6 +1,5 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { deriveProtocolDigest } from "#packages/crypto/src/digests.js";
 import {
@@ -13,11 +12,6 @@ import type { BallotPrivacyRelationBackendPublicContext } from "#packages/protoc
 import type { BallotPrivacyRelationCompilerInput } from "#packages/protocol/src/ballot-privacy/relation-compiler.js";
 import type { ProtocolDigest } from "#packages/types/src/index.js";
 
-const repoRoot = fileURLToPath(new URL("../../", import.meta.url));
-const defaultOutputPath = path.resolve(
-    repoRoot,
-    "temp/lazer/python/demo/ballot_field_input.json",
-);
 const parameterProfileId = "encoded-score-field-linear-compatibility-v1";
 const sourceRingDegree = 64;
 const witnessL2BoundSquared = "65536";
@@ -186,20 +180,6 @@ const publicContextForRoster = (
     };
 };
 
-const parseOutputPath = (commandLineArguments: readonly string[]): string => {
-    const outputFlagIndex = commandLineArguments.indexOf("--out");
-    if (outputFlagIndex === -1) {
-        return defaultOutputPath;
-    }
-
-    const outputPath = commandLineArguments[outputFlagIndex + 1];
-    if (outputPath === undefined || outputPath.length === 0) {
-        throw new Error("--out requires a non-empty output path.");
-    }
-
-    return path.resolve(outputPath);
-};
-
 export const generateBallotFieldLinearProofOracleInput = async (
     outputPath: string,
 ): Promise<void> => {
@@ -252,17 +232,3 @@ export const generateBallotFieldLinearProofOracleInput = async (
     await mkdir(path.dirname(outputPath), { recursive: true });
     await writeFile(outputPath, `${JSON.stringify(output)}\n`);
 };
-
-const main = async (): Promise<void> => {
-    await generateBallotFieldLinearProofOracleInput(
-        parseOutputPath(process.argv.slice(2)),
-    );
-};
-
-const scriptEntryPoint = process.argv[1];
-if (
-    scriptEntryPoint !== undefined &&
-    import.meta.url === pathToFileURL(scriptEntryPoint).href
-) {
-    await main();
-}

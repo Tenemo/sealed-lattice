@@ -14,7 +14,7 @@ export const apiNavigationPath = `${apiReferenceRoot}/navigation.json`;
 export const publicApiReferenceEntries: readonly PublicApiReferenceEntry[] = [
     {
         moduleName: rootModuleName,
-        entryPoint: `typedoc/entry-points/${rootModuleName}.ts`,
+        entryPoint: `docs/typedoc/entry-points/${rootModuleName}.ts`,
         apiReferencePagePath: `${apiReferenceRoot}/${rootModuleName}.md`,
     },
 ];

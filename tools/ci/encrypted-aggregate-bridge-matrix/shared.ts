@@ -14,14 +14,7 @@ export type TranscriptCoreKernel = Awaited<
     ReturnType<typeof loadTranscriptCoreKernel>
 >;
 
-export type MatrixMode =
-    | 'axes'
-    | 'focused'
-    | 'full'
-    | 'prototype'
-    | 'representative'
-    | 'shape'
-    | 'sentinels';
+export type MatrixMode = 'full' | 'representative';
 
 export type Variant = {
     readonly optionCount: number;
@@ -158,23 +151,6 @@ export const sentinelVariants = new Set([
     '20:20',
 ]);
 
-export const focusedSubsetVariantKeys = [
-    '3:2',
-    '3:10',
-    '9:20',
-    '9:2',
-    '10:2',
-    '10:20',
-    '20:20',
-    '20:10',
-] as const;
-
-export const focusedSubsetVariants = new Set<string>([
-    ...focusedSubsetVariantKeys,
-]);
-
-export const focusedSubsetWorkerCount = focusedSubsetVariantKeys.length;
-
 export const benchmarkVariantKeys = new Set([
     '20:20',
     '20:10',
@@ -212,9 +188,6 @@ export const parseVariantKey = (key: string): Variant => {
     return { optionCount, rosterSize };
 };
 
-export const focusedSubsetVariantRows: readonly Variant[] =
-    focusedSubsetVariantKeys.map(parseVariantKey);
-
 export const argumentValue = (name: string): string | null => {
     const argumentIndex = process.argv.indexOf(name);
     if (argumentIndex < 0) {
@@ -229,51 +202,28 @@ export const argumentValue = (name: string): string | null => {
 };
 
 export const matrixMode = (): MatrixMode => {
-    if (process.argv.includes('--prototype')) {
-        return 'prototype';
-    }
-    if (process.argv.includes('--shape')) {
-        return 'shape';
-    }
-    if (process.argv.includes('--focused')) {
-        return 'focused';
-    }
-    if (process.argv.includes('--axes')) {
-        return 'axes';
+    for (const removedArgument of ['--prototype', '--axes', '--workers']) {
+        if (process.argv.includes(removedArgument)) {
+            throw new Error(
+                `Unsupported encrypted aggregate bridge matrix argument: ${removedArgument}`,
+            );
+        }
     }
     if (process.argv.includes('--representative')) {
         return 'representative';
-    }
-    if (process.argv.includes('--sentinels')) {
-        return 'sentinels';
     }
 
     return 'full';
 };
 
 export const variantsForMode = (mode: MatrixMode): readonly Variant[] => {
-    if (mode === 'prototype') {
-        return [{ optionCount: 20, rosterSize: 20 }];
-    }
     const variants = Array.from({ length: 18 }, (_unusedRoster, rosterIndex) =>
         Array.from({ length: 19 }, (_unusedOption, optionIndex) => ({
             optionCount: optionIndex + 2,
             rosterSize: rosterIndex + 3,
         })),
     ).flat();
-    if (mode === 'shape') {
-        return variants;
-    }
-    if (mode === 'axes') {
-        return variants.filter(
-            (variant) =>
-                variant.rosterSize === 20 || variant.optionCount === 20,
-        );
-    }
-    if (mode === 'focused') {
-        return focusedSubsetVariantRows;
-    }
-    if (mode === 'representative' || mode === 'sentinels') {
+    if (mode === 'representative') {
         return variants.filter((variant) =>
             sentinelVariants.has(variantKey(variant)),
         );
@@ -282,19 +232,13 @@ export const variantsForMode = (mode: MatrixMode): readonly Variant[] => {
     return variants;
 };
 
-export const requestedWorkerCount = (mode: MatrixMode): number => {
-    const argumentWorkerCount = argumentValue('--workers');
-    const environmentWorkerCount = process.env.SEALED_LATTICE_M9_WORKERS;
-    const defaultWorkerCount =
-        mode === 'focused' ? String(focusedSubsetWorkerCount) : '1';
-    const rawWorkerCount =
-        argumentWorkerCount ?? environmentWorkerCount ?? defaultWorkerCount;
-    const workerCount = Number(rawWorkerCount);
-    if (!Number.isInteger(workerCount) || workerCount < 1) {
-        throw new Error(`Invalid M9 worker count: ${rawWorkerCount}`);
-    }
+const fullMatrixMinimumWorkerCount = 16;
+const representativeMatrixMinimumWorkerCount = sentinelVariants.size;
 
-    return Math.min(workerCount, 40);
+export const requestedWorkerCount = (mode: MatrixMode): number => {
+    return mode === 'representative'
+        ? representativeMatrixMinimumWorkerCount
+        : fullMatrixMinimumWorkerCount;
 };
 
 export const claimTierForRosterSize = (rosterSize: number): string =>

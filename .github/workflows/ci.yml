@@ -9,10 +9,6 @@ on:
 permissions:
     contents: read
 
-env:
-    FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-    SEALED_LATTICE_TURBO_CACHE: "local:,remote:"
-
 jobs:
     rust:
         name: rust
@@ -49,12 +45,7 @@ jobs:
         steps:
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
             - uses: ./.github/actions/bootstrap-pnpm
-            - uses: dtolnay/rust-toolchain@b18f7037bce1ea84c086f4d5e9493f853c0ce412
-              with:
-                  components: clippy, rustfmt
-                  targets: wasm32-unknown-unknown
-            - uses: Swatinem/rust-cache@aa7c1c80a07a27a84c0aa76d0cef0aad3830e330
-            - run: pnpm run check
+            - run: pnpm run check:static
 
     node-fast:
         name: node fast
@@ -70,50 +61,8 @@ jobs:
             - uses: Swatinem/rust-cache@aa7c1c80a07a27a84c0aa76d0cef0aad3830e330
             - run: pnpm run test:node:fast
 
-    node-relation-heavy:
-        name: node relation heavy
-        runs-on: ubuntu-latest
-        timeout-minutes: 20
-        steps:
-            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
-            - uses: ./.github/actions/bootstrap-pnpm
-            - uses: dtolnay/rust-toolchain@b18f7037bce1ea84c086f4d5e9493f853c0ce412
-              with:
-                  components: clippy, rustfmt
-                  targets: wasm32-unknown-unknown
-            - uses: Swatinem/rust-cache@aa7c1c80a07a27a84c0aa76d0cef0aad3830e330
-            - run: pnpm run test:node:relation-heavy
-
-    node-proof-input-heavy:
-        name: node proof input heavy
-        runs-on: ubuntu-latest
-        timeout-minutes: 30
-        steps:
-            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
-            - uses: ./.github/actions/bootstrap-pnpm
-            - uses: dtolnay/rust-toolchain@b18f7037bce1ea84c086f4d5e9493f853c0ce412
-              with:
-                  components: clippy, rustfmt
-                  targets: wasm32-unknown-unknown
-            - uses: Swatinem/rust-cache@aa7c1c80a07a27a84c0aa76d0cef0aad3830e330
-            - run: pnpm run test:node:proof-input-heavy
-
-    node-kernel-remaining:
-        name: node kernel remaining
-        runs-on: ubuntu-latest
-        timeout-minutes: 25
-        steps:
-            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
-            - uses: ./.github/actions/bootstrap-pnpm
-            - uses: dtolnay/rust-toolchain@b18f7037bce1ea84c086f4d5e9493f853c0ce412
-              with:
-                  components: clippy, rustfmt
-                  targets: wasm32-unknown-unknown
-            - uses: Swatinem/rust-cache@aa7c1c80a07a27a84c0aa76d0cef0aad3830e330
-            - run: pnpm run test:node:kernel-remaining
-
-    node-kernel-aggregate:
-        name: node kernel aggregate
+    node-protocol:
+        name: node protocol
         runs-on: ubuntu-latest
         timeout-minutes: 60
         steps:
@@ -124,31 +73,52 @@ jobs:
                   components: clippy, rustfmt
                   targets: wasm32-unknown-unknown
             - uses: Swatinem/rust-cache@aa7c1c80a07a27a84c0aa76d0cef0aad3830e330
-            - run: pnpm run test:node:kernel-aggregate
+            - run: pnpm run test:node:protocol
+
+    node-kernel:
+        name: node kernel
+        runs-on: ubuntu-latest
+        timeout-minutes: 90
+        steps:
+            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+            - uses: ./.github/actions/bootstrap-pnpm
+            - uses: dtolnay/rust-toolchain@b18f7037bce1ea84c086f4d5e9493f853c0ce412
+              with:
+                  components: clippy, rustfmt
+                  targets: wasm32-unknown-unknown
+            - uses: Swatinem/rust-cache@aa7c1c80a07a27a84c0aa76d0cef0aad3830e330
+            - run: pnpm run test:node:kernel
 
     verify:
         name: verify
         runs-on: ubuntu-latest
         timeout-minutes: 5
         needs:
+            - rust
+            - wasm
             - verify-static
             - node-fast
-            - node-relation-heavy
-            - node-proof-input-heavy
-            - node-kernel-remaining
-            - node-kernel-aggregate
+            - node-protocol
+            - node-kernel
         if: ${{ always() }}
         steps:
-            - name: Check split verify jobs
-              env:
-                  NEEDS_JSON: ${{ toJSON(needs) }}
-              run: >-
-                  node -e "const needs = JSON.parse(process.env.NEEDS_JSON);
-                  const failed = Object.entries(needs).filter(([, job]) =>
-                  job.result !== 'success'); if (failed.length > 0) {
-                  console.error(failed.map(([name, job]) => name + ': ' +
-                  job.result).join('\n')); process.exit(1); }
-                  console.log('Split verify jobs passed.');"
+            - name: Check verify jobs
+              run: |
+                  node --input-type=module <<'NODE'
+                  const needs = ${{ toJSON(needs) }};
+                  const failed = Object.entries(needs).filter(
+                    ([, job]) => job.result !== 'success',
+                  );
+                  if (failed.length > 0) {
+                    console.error(
+                      failed
+                        .map(([name, job]) => `${name}: ${job.result}`)
+                        .join('\n'),
+                    );
+                    process.exit(1);
+                  }
+                  console.log('Verify jobs passed.');
+                  NODE
 
     coverage:
         name: coverage
@@ -211,7 +181,6 @@ jobs:
             - run: pnpm run build
             - run: pnpm exec playwright install --with-deps chromium
             - run: pnpm run verify:docs
-            - run: pnpm run smoke:pack
             - run: pnpm run smoke:pack:npm
             - run: |
                   PUBLIC_PACKAGE_DIR="$(mktemp -d)"

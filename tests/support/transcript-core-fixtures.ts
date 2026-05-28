@@ -3,13 +3,12 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import type {
-    GoldenTranscriptCoreFixture,
     MalformedObjectFixture,
     TranscriptCoreReplayFixture,
-} from '@sealed-lattice/types';
+} from '#packages/types/src/index';
 
 const testVectorsRootDirectoryPath = fileURLToPath(
-    new URL('../../../test-vectors/', import.meta.url),
+    new URL('../../test-vectors/', import.meta.url),
 );
 
 const loadJsonFixture = async <Fixture>(
@@ -23,14 +22,6 @@ const loadJsonFixture = async <Fixture>(
 
     return JSON.parse(fixtureContents) as Fixture;
 };
-
-export const loadGoldenTranscriptCoreFixtures = async (): Promise<
-    readonly GoldenTranscriptCoreFixture[]
-> =>
-    loadJsonFixture<readonly GoldenTranscriptCoreFixture[]>(
-        'transcript-core',
-        'golden-transcript-core.json',
-    );
 
 export const loadMalformedObjectFixtures = async (): Promise<
     readonly MalformedObjectFixture[]

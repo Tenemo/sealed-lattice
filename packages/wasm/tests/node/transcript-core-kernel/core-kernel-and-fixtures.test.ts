@@ -1,4 +1,4 @@
-// This file is one focused part of the split test suite.
+// This file is one targeted part of the split test suite.
 import { evaluationProofProfileId } from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 

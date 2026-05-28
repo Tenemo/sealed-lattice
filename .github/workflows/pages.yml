@@ -15,10 +15,6 @@ concurrency:
     group: pages
     cancel-in-progress: true
 
-env:
-    FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-    SEALED_LATTICE_TURBO_CACHE: "local:,remote:"
-
 jobs:
     build:
         runs-on: ubuntu-latest

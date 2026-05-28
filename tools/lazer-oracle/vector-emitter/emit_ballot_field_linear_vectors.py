@@ -479,7 +479,7 @@ def emit_vectors(repo_root: Path, lazer_root: Path, input_path: Path, out_path: 
             repo_root / "tools" / "lazer-oracle" / "Dockerfile"
         ),
         "oracleDriverSha256": sha256_file(
-            repo_root / "tools" / "lazer-oracle" / "generate-ballot-field-linear-vectors.ts"
+            repo_root / "tools" / "lazer-oracle" / "generate-vectors.ts"
         ),
         "oracleInputGeneratorSha256": sha256_file(
             repo_root
@@ -488,7 +488,7 @@ def emit_vectors(repo_root: Path, lazer_root: Path, input_path: Path, out_path: 
             / "generate-ballot-field-linear-proof-input.mts"
         ),
         "oracleRunnerSha256": sha256_file(
-            repo_root / "tools" / "lazer-oracle" / "run_ballot_field_oracle.py"
+            repo_root / "tools" / "lazer-oracle" / "run_oracle.py"
         ),
         "ballotFieldParameterSourceSha256": sha256_file(
             repo_root / "tools" / "lazer-oracle" / "ballot-field-linear-params.py"
@@ -500,7 +500,7 @@ def emit_vectors(repo_root: Path, lazer_root: Path, input_path: Path, out_path: 
         "pythonVersion": platform.python_version(),
         "sageVersion": sage_version,
         "compilerVersion": run_command(["gcc", "--version"]).splitlines()[0],
-        "buildCommand": "tsx tools/lazer-oracle/generate-ballot-field-linear-vectors.ts",
+        "buildCommand": "tsx tools/lazer-oracle/generate-vectors.ts --profile ballot-field-linear",
         "parameterGenerationCommand": "docker run sagemath/sagemath:latest sage lin-codegen.sage tools/lazer-oracle/ballot-field-linear-params.py",
         "profileWarning": "This vector proves only the compiler-emitted encoded-score field-row projection; share commitment, receiver payload, and receiver-key digest-expanded rows remain outside this proof vector.",
         "licenseNote": "LaZer is used only as an offline vector oracle; no upstream C library is shipped in sealed-lattice.",

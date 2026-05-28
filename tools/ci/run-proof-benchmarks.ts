@@ -3,7 +3,8 @@ import { pathToFileURL } from 'node:url';
 import {
     createPackageManagerCommand,
     resolvePackageManagerRunner,
-    runCommands,
+    runCommand,
+    runCommandsInParallel,
     type CommandInvocation,
     type PackageManagerRunner,
 } from './run-command.js';
@@ -21,41 +22,25 @@ const proofBenchmarkProjectByLane = {
     node: 'node-proof-benchmark',
 } as const;
 
-const mobileThrottleEnvironmentVariableName =
-    'VITE_SEALED_LATTICE_ENABLE_THROTTLED_MOBILE_BENCHMARK';
-
-const fullPowerBenchmarkEnvironment = (): NodeJS.ProcessEnv => {
-    const environment = { ...process.env };
-    delete environment[mobileThrottleEnvironmentVariableName];
-
-    return environment;
-};
-
 export const parseRequestedProofBenchmarkLanes = (
     commandLineArguments: readonly string[],
 ): readonly ProofBenchmarkLane[] => {
-    const lanes: ProofBenchmarkLane[] = [];
-
-    for (let argumentIndex = 0; argumentIndex < commandLineArguments.length; ) {
-        const argument = commandLineArguments[argumentIndex];
-        if (argument !== '--only') {
-            throw new Error(`Unknown proof benchmark argument: ${argument}`);
-        }
-
-        const lane = commandLineArguments[argumentIndex + 1];
-        if (
-            lane !== 'desktop' &&
-            lane !== 'mobile-throttled' &&
-            lane !== 'node'
-        ) {
-            throw new Error(`Unsupported proof benchmark lane: ${lane}`);
-        }
-
-        lanes.push(lane);
-        argumentIndex += 2;
+    if (commandLineArguments.length === 0) {
+        return defaultProofBenchmarkLanes;
+    }
+    if (
+        commandLineArguments.length !== 2 ||
+        commandLineArguments[0] !== '--only'
+    ) {
+        throw new Error('Usage: run-proof-benchmarks.ts [--only lane].');
     }
 
-    return lanes.length === 0 ? defaultProofBenchmarkLanes : lanes;
+    const lane = commandLineArguments[1];
+    if (lane !== 'desktop' && lane !== 'mobile-throttled' && lane !== 'node') {
+        throw new Error(`Unsupported proof benchmark lane: ${lane}`);
+    }
+
+    return [lane];
 };
 
 export const buildProofBenchmarkCommands = (
@@ -70,10 +55,8 @@ export const buildProofBenchmarkCommands = (
     const buildCommand = (
         description: string,
         commandArguments: readonly string[],
-        env: NodeJS.ProcessEnv = process.env,
     ): CommandInvocation =>
         createPackageManagerCommand(description, commandArguments, {
-            env,
             packageManagerRunner,
         });
 
@@ -91,19 +74,29 @@ export const buildProofBenchmarkCommands = (
                     proofBenchmarkProjectByLane[lane],
                     '--run',
                 ],
-                lane === 'mobile-throttled'
-                    ? {
-                          ...process.env,
-                          [mobileThrottleEnvironmentVariableName]: '1',
-                      }
-                    : fullPowerBenchmarkEnvironment(),
             ),
         ),
     ];
 };
 
-const main = (): void => {
-    process.exitCode = runCommands(
+export const runProofBenchmarkCommands = async (
+    invocations: readonly CommandInvocation[],
+): Promise<number> => {
+    const [buildCommand, ...benchmarkCommands] = invocations;
+    if (buildCommand === undefined) {
+        return 0;
+    }
+
+    const buildExitCode = runCommand(buildCommand);
+    if (buildExitCode !== 0) {
+        return buildExitCode;
+    }
+
+    return runCommandsInParallel(benchmarkCommands);
+};
+
+const main = async (): Promise<void> => {
+    process.exitCode = await runProofBenchmarkCommands(
         buildProofBenchmarkCommands({
             lanes: parseRequestedProofBenchmarkLanes(process.argv.slice(2)),
         }),
@@ -116,5 +109,5 @@ const isMainModule =
     import.meta.url === pathToFileURL(scriptEntryPoint).href;
 
 if (isMainModule) {
-    main();
+    void main();
 }

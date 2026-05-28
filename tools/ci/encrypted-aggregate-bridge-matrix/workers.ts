@@ -80,10 +80,7 @@ const runVariantInChildProcess = async (
                   ];
         const childProcess = spawn(process.execPath, workerArguments, {
             cwd: process.cwd(),
-            env: {
-                ...process.env,
-                SEALED_LATTICE_M9_WORKERS: '1',
-            },
+            env: process.env,
             stdio: ['ignore', 'pipe', 'pipe'],
         });
         let standardOutput = '';
@@ -126,31 +123,6 @@ const runVariantInChildProcess = async (
             }
         });
     });
-
-export const runSequentialVariantBuilds = async (
-    variants: readonly Variant[],
-): Promise<readonly IndexedVariantBuildResult[]> => {
-    const kernel = await loadTranscriptCoreKernel();
-    const results: IndexedVariantBuildResult[] = [];
-    for (const [variantIndex, variant] of variants.entries()) {
-        console.log(
-            `Encrypted aggregate bridge row started: n=${variant.rosterSize}, m=${variant.optionCount}`,
-        );
-        const result = (() => {
-            try {
-                return buildVariant({ kernel, variant });
-            } catch (error) {
-                return failedVariantResult(variant, error);
-            }
-        })();
-        results.push({ ...result, variantIndex });
-        console.log(
-            `Encrypted aggregate bridge row finished: n=${variant.rosterSize}, m=${variant.optionCount}`,
-        );
-    }
-
-    return results;
-};
 
 export const runParallelVariantBuilds = async (input: {
     readonly variants: readonly Variant[];

@@ -36,7 +36,7 @@ export const defaultRequiredCoverageEntryPaths = [
     'packages/protocol/src/ballot-privacy/objects.ts',
     'packages/sdk/src/index.ts',
     'packages/wasm/src/transcript-core-bridge.ts',
-    'tools/ci/check-package-boundaries.ts',
+    'tools/ci/verify-public-package-policy.ts',
     'tools/ci/stage-public-package.mjs',
 ] as const;
 

@@ -1,8 +1,8 @@
 import { readFileSync } from 'node:fs';
 
-import { typeDocEntryPoints } from './typedoc/public-api-reference';
+import { typeDocEntryPoints } from './docs/typedoc/public-api-reference';
 
-const generatedReferenceIntroPath = 'typedoc/generated-reference-intro.md';
+const generatedReferenceIntroPath = 'docs/typedoc/generated-reference-intro.md';
 const generatedReferenceIntro = readFileSync(
     generatedReferenceIntroPath,
     'utf8',
@@ -21,11 +21,11 @@ const config = {
     entryPoints: typeDocEntryPoints,
     entryPointStrategy: 'resolve',
     alwaysCreateEntryPointModule: true,
-    tsconfig: 'typedoc/tsconfig.json',
+    tsconfig: 'docs/typedoc/tsconfig.json',
     plugin: ['typedoc-plugin-markdown'],
     out: 'docs/src/content/docs/api/reference',
     router: 'module',
-    readme: 'typedoc/generated-reference-intro.md',
+    readme: 'docs/typedoc/generated-reference-intro.md',
     entryFileName: 'index.md',
     navigationJson: 'docs/src/content/docs/api/reference/navigation.json',
     cleanOutputDir: true,
@@ -37,8 +37,13 @@ const config = {
     excludeProtected: true,
     excludeInternal: true,
     validation: {
+        invalidLink: true,
+        invalidPath: true,
+        notDocumented: true,
         notExported: false,
+        rewrittenLink: true,
     },
+    treatValidationWarningsAsErrors: true,
     classPropertiesFormat: 'table',
     interfacePropertiesFormat: 'table',
     indexFormat: 'table',

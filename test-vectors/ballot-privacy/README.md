@@ -17,9 +17,9 @@ Use the specific generator scripts to refresh individual vector families:
 ```bash
 pnpm exec tsx --tsconfig tsconfig.base.json tools/ballot-privacy-vectors/generate-encoded-relation-vectors.mts
 pnpm exec tsx --tsconfig tsconfig.base.json tools/ballot-privacy-vectors/generate-receiver-key-proof-vectors.mts
-pnpm exec tsx tools/lazer-oracle/generate-linear-vectors.ts
-pnpm exec tsx tools/lazer-oracle/generate-receiver-key-linear-vectors.ts
-pnpm exec tsx tools/lazer-oracle/generate-ballot-field-linear-vectors.ts
+pnpm exec tsx tools/lazer-oracle/generate-vectors.ts --profile demo-linear
+pnpm exec tsx tools/lazer-oracle/generate-vectors.ts --profile receiver-key-linear
+pnpm exec tsx tools/lazer-oracle/generate-vectors.ts --profile ballot-field-linear
 ```
 
 The LaZer-backed vectors are refreshed only through the Docker/Sage oracle path. Do not regenerate them in normal CI. Normal CI should verify committed hashes and run tests; oracle refreshes should be explicit maintenance work.

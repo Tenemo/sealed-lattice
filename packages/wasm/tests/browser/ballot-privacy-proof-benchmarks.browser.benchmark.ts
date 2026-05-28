@@ -20,15 +20,6 @@ import {
 const proofBenchmarkTimeoutMs = 60 * 60_000;
 let mobileCpuThrottleCalibration: CpuThrottleCalibrationSuccess | undefined;
 
-const mobileCpuThrottleEnabled = (): boolean =>
-    Boolean(
-        (
-            import.meta as {
-                readonly env?: Record<string, string | undefined>;
-            }
-        ).env?.VITE_SEALED_LATTICE_ENABLE_THROTTLED_MOBILE_BENCHMARK === '1',
-    );
-
 const setCpuThrottleRate: BrowserCpuThrottleRateSetter = async (
     throttleRate,
 ) => {
@@ -89,11 +80,6 @@ describe('ballot privacy proof benchmarks in browsers', () => {
     beforeAll(async () => {
         if (!hasMobileBrowserUserAgent()) {
             return;
-        }
-        if (!mobileCpuThrottleEnabled()) {
-            throw new Error(
-                'Mobile proof benchmarks must run through the throttled mobile benchmark lane.',
-            );
         }
         if (server.provider !== 'playwright' || server.browser !== 'chromium') {
             throw new Error(

@@ -8,7 +8,7 @@ use super::validation::{
 };
 use super::*;
 use num_bigint::{BigInt, Sign};
-use num_traits::{One, Signed, ToPrimitive};
+use num_traits::{One, ToPrimitive};
 
 pub(super) struct BridgeSharedWitnessProverInput<'value> {
     pub(super) setup_package: &'value Value,
@@ -72,6 +72,8 @@ pub(super) fn generate_bridge_shared_witness_proof(
         bridge_aggregate_relation_commitment_context(input.proof_input)?;
     let mut checks = Vec::with_capacity(BRIDGE_SHARED_WITNESS_CHECK_COUNT);
     let mut challenge_hex = String::new();
+    let mask_absolute_bound = bridge_shared_witness_mask_absolute_bound_exclusive();
+    let response_shift_bound = bridge_shared_witness_response_shift_bound_exclusive();
 
     for check_index in 0..BRIDGE_SHARED_WITNESS_CHECK_COUNT {
         let mut accepted_check = None;
@@ -83,6 +85,7 @@ pub(super) fn generate_bridge_shared_witness_proof(
                 rejection_attempt_index,
                 "aggregate-share",
                 aggregate_integer_witness.len(),
+                &mask_absolute_bound,
             );
             let aggregate_opening_mask = sample_bridge_mask_vector(
                 input.bridge_proof_statement_digest,
@@ -91,6 +94,7 @@ pub(super) fn generate_bridge_shared_witness_proof(
                 rejection_attempt_index,
                 "aggregate-opening",
                 aggregate_opening_witness.len(),
+                &mask_absolute_bound,
             );
             let aggregate_reduced_mask = sample_bridge_mask_vector(
                 input.bridge_proof_statement_digest,
@@ -99,6 +103,7 @@ pub(super) fn generate_bridge_shared_witness_proof(
                 rejection_attempt_index,
                 "aggregate-reduced",
                 aggregate_reduced_witness.len(),
+                &mask_absolute_bound,
             );
             let aggregate_quotient_mask = sample_bridge_mask_vector(
                 input.bridge_proof_statement_digest,
@@ -107,6 +112,7 @@ pub(super) fn generate_bridge_shared_witness_proof(
                 rejection_attempt_index,
                 "aggregate-quotient",
                 aggregate_quotient_witness.len(),
+                &mask_absolute_bound,
             );
             let plaintext_coefficient_mask = sample_bridge_mask_vector(
                 input.bridge_proof_statement_digest,
@@ -115,6 +121,7 @@ pub(super) fn generate_bridge_shared_witness_proof(
                 rejection_attempt_index,
                 "batch-coefficient",
                 plaintext_coefficient_witness.len(),
+                &mask_absolute_bound,
             );
             let randomizer_mask = sample_bridge_mask_vector(
                 input.bridge_proof_statement_digest,
@@ -123,6 +130,7 @@ pub(super) fn generate_bridge_shared_witness_proof(
                 rejection_attempt_index,
                 "cipher-randomizer",
                 randomizer_witness.len(),
+                &mask_absolute_bound,
             );
             let perturbation_zero_mask = sample_bridge_mask_vector(
                 input.bridge_proof_statement_digest,
@@ -131,6 +139,7 @@ pub(super) fn generate_bridge_shared_witness_proof(
                 rejection_attempt_index,
                 "bounded-perturbation-zero",
                 perturbation_zero_witness.len(),
+                &mask_absolute_bound,
             );
             let perturbation_one_mask = sample_bridge_mask_vector(
                 input.bridge_proof_statement_digest,
@@ -139,6 +148,7 @@ pub(super) fn generate_bridge_shared_witness_proof(
                 rejection_attempt_index,
                 "bounded-perturbation-one",
                 perturbation_one_witness.len(),
+                &mask_absolute_bound,
             );
             let aggregate_commitment_digest = aggregate_relation_commitment_digest_from_responses(
                 &aggregate_relation_context,
@@ -186,41 +196,53 @@ pub(super) fn generate_bridge_shared_witness_proof(
                 &bgv_commitment_digest,
                 &bgv_randomness_bound_commitment_digest,
             );
+            let challenge = BigInt::from(challenge_scalar);
             let aggregate_share_response = response_vector(
                 &aggregate_integer_mask,
-                challenge_scalar,
+                &challenge,
+                &response_shift_bound,
                 &aggregate_integer_witness,
             )?;
             let aggregate_opening_response = response_vector(
                 &aggregate_opening_mask,
-                challenge_scalar,
+                &challenge,
+                &response_shift_bound,
                 &aggregate_opening_witness,
             )?;
             let aggregate_reduced_response = response_vector(
                 &aggregate_reduced_mask,
-                challenge_scalar,
+                &challenge,
+                &response_shift_bound,
                 &aggregate_reduced_witness,
             )?;
             let aggregate_quotient_response = response_vector(
                 &aggregate_quotient_mask,
-                challenge_scalar,
+                &challenge,
+                &response_shift_bound,
                 &aggregate_quotient_witness,
             )?;
             let batch_coefficient_response = response_vector(
                 &plaintext_coefficient_mask,
-                challenge_scalar,
+                &challenge,
+                &response_shift_bound,
                 &plaintext_coefficient_witness,
             )?;
-            let cipher_randomizer_response =
-                response_vector(&randomizer_mask, challenge_scalar, &randomizer_witness)?;
+            let cipher_randomizer_response = response_vector(
+                &randomizer_mask,
+                &challenge,
+                &response_shift_bound,
+                &randomizer_witness,
+            )?;
             let bounded_perturbation_zero_response = response_vector(
                 &perturbation_zero_mask,
-                challenge_scalar,
+                &challenge,
+                &response_shift_bound,
                 &perturbation_zero_witness,
             )?;
             let bounded_perturbation_one_response = response_vector(
                 &perturbation_one_mask,
-                challenge_scalar,
+                &challenge,
+                &response_shift_bound,
                 &perturbation_one_witness,
             )?;
             if validate_all_response_vector_bounds(
@@ -575,6 +597,7 @@ pub(super) fn verify_bridge_shared_witness_proof(
             expected_aggregate_count,
             expected_quotient_count,
         )?;
+        let response_bound = bridge_shared_witness_response_absolute_bound_exclusive();
         for (role, responses) in [
             ("aggregate share", aggregate_share_response.as_slice()),
             ("aggregate opening", aggregate_opening_response.as_slice()),
@@ -591,7 +614,7 @@ pub(super) fn verify_bridge_shared_witness_proof(
                 bounded_perturbation_one_response.as_slice(),
             ),
         ] {
-            validate_response_vector_bounds(role, responses)?;
+            validate_response_vector_bounds_with_bound(role, responses, &response_bound)?;
         }
         let aggregate_commitment_digest = aggregate_relation_commitment_digest_from_responses(
             &aggregate_relation_context,
@@ -700,12 +723,13 @@ fn aggregate_relation_commitment_digest_from_responses(
     challenge_scalar: u64,
 ) -> CanonicalResult<String> {
     let ring = context.parsed_statement.source_statement_matrix.ring();
+    let modulus_bigint = BigInt::from(ring.modulus());
     let response_entries = aggregate_share_response
         .iter()
         .chain(aggregate_opening_response.iter())
         .chain(aggregate_reduced_response.iter())
         .chain(aggregate_quotient_response.iter())
-        .map(|response| constant_response_polynomial(response, ring.degree(), ring.modulus()))
+        .map(|response| constant_response_polynomial(response, ring.degree(), &modulus_bigint))
         .collect::<Vec<_>>();
     let response_vector = PolynomialVector::new(ring, response_entries)?;
     let response_image = context
@@ -744,6 +768,7 @@ fn sample_bridge_mask_vector(
     rejection_attempt_index: usize,
     role: &str,
     length: usize,
+    mask_absolute_bound: &BigInt,
 ) -> Vec<BigInt> {
     let check_index_bytes = (check_index as u64).to_le_bytes();
     let rejection_attempt_index_bytes = (rejection_attempt_index as u64).to_le_bytes();
@@ -770,7 +795,7 @@ fn sample_bridge_mask_vector(
             let lane_start = lane_index * BRIDGE_SHARED_WITNESS_MASK_BYTES_PER_COORDINATE;
             let lane_end = lane_start + BRIDGE_SHARED_WITNESS_MASK_BYTES_PER_COORDINATE;
             let lane = &digest[lane_start..lane_end];
-            masks.push(mask_from_uniform_lane(lane));
+            masks.push(mask_from_uniform_lane(lane, mask_absolute_bound));
         }
         block_index = block_index
             .checked_add(1)
@@ -780,7 +805,7 @@ fn sample_bridge_mask_vector(
     masks
 }
 
-fn mask_from_uniform_lane(lane: &[u8]) -> BigInt {
+fn mask_from_uniform_lane(lane: &[u8], mask_absolute_bound: &BigInt) -> BigInt {
     debug_assert_eq!(lane.len(), BRIDGE_SHARED_WITNESS_MASK_BYTES_PER_COORDINATE);
     let mut coordinate_bytes = lane.to_vec();
     let top_byte_index = coordinate_bytes
@@ -792,8 +817,7 @@ fn mask_from_uniform_lane(lane: &[u8]) -> BigInt {
         let high_bit_mask = (1_u8 << retained_high_bits) - 1;
         coordinate_bytes[top_byte_index] &= high_bit_mask;
     }
-    BigInt::from_bytes_le(Sign::Plus, &coordinate_bytes)
-        - bridge_shared_witness_mask_absolute_bound_exclusive()
+    BigInt::from_bytes_le(Sign::Plus, &coordinate_bytes) - mask_absolute_bound
 }
 
 fn bridge_shared_witness_challenge_scalar(
@@ -890,7 +914,8 @@ fn parse_bridge_challenge_scalar(challenge_scalar_hex: &str) -> CanonicalResult<
 
 fn response_vector(
     masks: &[BigInt],
-    challenge_scalar: u64,
+    challenge: &BigInt,
+    shift_bound: &BigInt,
     witness: &[BigInt],
 ) -> CanonicalResult<Vec<BigInt>> {
     if masks.len() != witness.len() {
@@ -899,14 +924,13 @@ fn response_vector(
             "M9 bridge proof mask and witness dimensions do not match",
         ));
     }
-    let challenge = BigInt::from(challenge_scalar);
-    let shift_bound = bridge_shared_witness_response_shift_bound_exclusive();
+    let negative_shift_bound = -shift_bound;
     masks
         .iter()
         .zip(witness.iter())
         .map(|(mask, witness_value)| {
-            let scaled_witness = &challenge * witness_value;
-            if scaled_witness.abs() >= shift_bound {
+            let scaled_witness = challenge * witness_value;
+            if &scaled_witness >= shift_bound || scaled_witness <= negative_shift_bound {
                 return Err(CanonicalError::new(
                     CanonicalErrorCode::ProfileComponentMismatch,
                     "M9 bridge proof witness shift exceeds the supported response-distribution slack",
@@ -917,16 +941,19 @@ fn response_vector(
         .collect()
 }
 
-fn constant_response_polynomial(value: &BigInt, degree: usize, modulus: u64) -> Vec<u64> {
+fn constant_response_polynomial(
+    value: &BigInt,
+    degree: usize,
+    modulus_bigint: &BigInt,
+) -> Vec<u64> {
     let mut polynomial = vec![0_u64; degree];
-    polynomial[0] = signed_bigint_to_modulus_residue(value, modulus);
+    polynomial[0] = signed_bigint_to_modulus_residue(value, modulus_bigint);
 
     polynomial
 }
 
-pub(crate) fn signed_bigint_to_modulus_residue(value: &BigInt, modulus: u64) -> u64 {
-    let modulus = BigInt::from(modulus);
-    let residue = ((value % &modulus) + &modulus) % &modulus;
+pub(crate) fn signed_bigint_to_modulus_residue(value: &BigInt, modulus_bigint: &BigInt) -> u64 {
+    let residue = ((value % modulus_bigint) + modulus_bigint) % modulus_bigint;
 
     residue
         .to_u64()
@@ -950,12 +977,6 @@ fn signed_i256_vector_hex(values: &[BigInt]) -> CanonicalResult<String> {
         }
         let mut fixed_bytes = [sign_extension; BRIDGE_SHARED_WITNESS_RESPONSE_BYTE_LENGTH];
         fixed_bytes[..value_bytes.len()].copy_from_slice(&value_bytes);
-        if BigInt::from_signed_bytes_le(&fixed_bytes) != *value {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                "M9 bridge shared-witness response is not representable as canonical signed i256",
-            ));
-        }
         bytes.extend_from_slice(&fixed_bytes);
     }
 
@@ -1024,6 +1045,7 @@ fn validate_all_response_vector_bounds(
     bounded_perturbation_zero_response: &[BigInt],
     bounded_perturbation_one_response: &[BigInt],
 ) -> CanonicalResult<()> {
+    let response_bound = bridge_shared_witness_response_absolute_bound_exclusive();
     for (role, responses) in [
         ("aggregate share", aggregate_share_response),
         ("aggregate opening", aggregate_opening_response),
@@ -1040,20 +1062,30 @@ fn validate_all_response_vector_bounds(
             bounded_perturbation_one_response,
         ),
     ] {
-        validate_response_vector_bounds(role, responses)?;
+        validate_response_vector_bounds_with_bound(role, responses, &response_bound)?;
     }
 
     Ok(())
 }
 
+#[cfg(test)]
 pub(super) fn validate_response_vector_bounds(
     role: &str,
     responses: &[BigInt],
 ) -> CanonicalResult<()> {
     let response_bound = bridge_shared_witness_response_absolute_bound_exclusive();
+    validate_response_vector_bounds_with_bound(role, responses, &response_bound)
+}
+
+fn validate_response_vector_bounds_with_bound(
+    role: &str,
+    responses: &[BigInt],
+    response_bound: &BigInt,
+) -> CanonicalResult<()> {
+    let negative_response_bound = -response_bound;
     if responses
         .iter()
-        .any(|response| response.abs() >= response_bound)
+        .any(|response| response >= response_bound || response <= &negative_response_bound)
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
@@ -1156,10 +1188,15 @@ mod tests {
     use num_traits::One;
     use serde_json::json;
 
+    fn bridge_mask_absolute_bound() -> BigInt {
+        BigInt::one() << 240_u32
+    }
+
     fn mask_from_digest_lane(digest: &[u8], lane_index: usize) -> BigInt {
         let lane_start = lane_index * BRIDGE_SHARED_WITNESS_MASK_BYTES_PER_COORDINATE;
         let lane_end = lane_start + BRIDGE_SHARED_WITNESS_MASK_BYTES_PER_COORDINATE;
-        mask_from_uniform_lane(&digest[lane_start..lane_end])
+        let mask_absolute_bound = bridge_mask_absolute_bound();
+        mask_from_uniform_lane(&digest[lane_start..lane_end], &mask_absolute_bound)
     }
 
     #[test]
@@ -1206,8 +1243,16 @@ mod tests {
             ],
         );
 
-        let masks =
-            sample_bridge_mask_vector(statement_digest, prover_randomness_hex, 3, 2, role, 5);
+        let mask_absolute_bound = bridge_mask_absolute_bound();
+        let masks = sample_bridge_mask_vector(
+            statement_digest,
+            prover_randomness_hex,
+            3,
+            2,
+            role,
+            5,
+            &mask_absolute_bound,
+        );
 
         assert_eq!(
             masks,
@@ -1221,11 +1266,27 @@ mod tests {
         );
         assert_ne!(
             masks,
-            sample_bridge_mask_vector(statement_digest, prover_randomness_hex, 4, 2, role, 5)
+            sample_bridge_mask_vector(
+                statement_digest,
+                prover_randomness_hex,
+                4,
+                2,
+                role,
+                5,
+                &mask_absolute_bound,
+            )
         );
         assert_ne!(
             masks,
-            sample_bridge_mask_vector(statement_digest, prover_randomness_hex, 3, 3, role, 5)
+            sample_bridge_mask_vector(
+                statement_digest,
+                prover_randomness_hex,
+                3,
+                3,
+                role,
+                5,
+                &mask_absolute_bound,
+            )
         );
     }
 

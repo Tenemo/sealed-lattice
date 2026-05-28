@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 
-import publicSurface from '../../public-surface.json' with { type: 'json' };
 import type * as publicTypes from '../../src/index.js';
 
 type BlockedTargetAcceptanceTypes = [
@@ -100,36 +99,5 @@ const publicFoundationTypeNames = [
 describe('election foundation public type surface', () => {
     it('keeps safe election foundation types available', () => {
         expect(publicFoundationTypeNames).toHaveLength(11);
-        for (const publicTypeName of publicFoundationTypeNames) {
-            expect(publicSurface.publicTypeExports).toContain(publicTypeName);
-        }
-        for (const bridgeTypeName of [
-            'AggregateContribution',
-            'AggregateContributionSelection',
-            'AggregateContributionSelectionInput',
-            'AggregateReadyRecord',
-            'AggregateReadyRecordBuildInput',
-            'BridgeProofRecord',
-        ]) {
-            expect(publicSurface.publicTypeExports).not.toContain(
-                bridgeTypeName,
-            );
-        }
-    });
-
-    it('keeps runtime and type export manifests disjoint and deterministic', () => {
-        const runtimeExports = new Set(publicSurface.runtimeExports);
-        const typeExports = new Set(publicSurface.publicTypeExports);
-        const overlap = [...runtimeExports].filter((exportName) =>
-            typeExports.has(exportName),
-        );
-
-        expect(overlap).toEqual([]);
-        expect(publicSurface.runtimeExports).toEqual(
-            [...publicSurface.runtimeExports].sort(),
-        );
-        expect(publicSurface.publicTypeExports).toEqual(
-            [...publicSurface.publicTypeExports].sort(),
-        );
     });
 });

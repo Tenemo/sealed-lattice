@@ -2,20 +2,8 @@ import mdx from '@astrojs/mdx';
 import StarlightIntegration from '@astrojs/starlight';
 import { defineConfig } from 'astro/config';
 
-const normalizeBase = (value: string | undefined): string => {
-    const trimmed = (value ?? '/').trim();
-
-    if (!trimmed || trimmed === '/') {
-        return '/';
-    }
-
-    return `/${trimmed.replace(/^\/+|\/+$/g, '')}`;
-};
-
-const docsBase = normalizeBase(
-    process.env.DOCS_BASE_PATH ??
-        (process.env.GITHUB_ACTIONS === 'true' ? '/sealed-lattice' : '/'),
-);
+const docsBase =
+    process.env.GITHUB_ACTIONS === 'true' ? '/sealed-lattice' : '/';
 
 export default defineConfig({
     site: 'https://tenemo.github.io',

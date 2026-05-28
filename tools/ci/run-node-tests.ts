@@ -3,18 +3,12 @@ import { pathToFileURL } from 'node:url';
 import {
     createPackageManagerCommand,
     resolvePackageManagerRunner,
-    runCommands,
+    runCommandsInParallel,
     type CommandInvocation,
     type PackageManagerRunner,
 } from './run-command.js';
 
-export const nodeTestLaneValues = [
-    'fast',
-    'relation-heavy',
-    'proof-input-heavy',
-    'kernel-remaining',
-    'kernel-aggregate',
-] as const;
+export const nodeTestLaneValues = ['fast', 'protocol', 'kernel'] as const;
 
 export type NodeTestLane = (typeof nodeTestLaneValues)[number];
 
@@ -22,18 +16,14 @@ const defaultNodeTestLanes = nodeTestLaneValues;
 
 const nodeTestLaneProjectNames = {
     fast: 'node',
-    'relation-heavy': 'node-relation-heavy',
-    'proof-input-heavy': 'node-proof-input-heavy',
-    'kernel-remaining': 'node-kernel-remaining',
-    'kernel-aggregate': 'node-kernel-aggregate',
+    protocol: 'node-protocol',
+    kernel: 'node-kernel',
 } as const satisfies Record<NodeTestLane, string>;
 
 const nodeTestLaneDescriptions = {
     fast: 'Run fast Node tests',
-    'relation-heavy': 'Run relation-heavy Node tests',
-    'proof-input-heavy': 'Run proof-input-heavy Node tests',
-    'kernel-remaining': 'Run remaining heavy Node kernel tests',
-    'kernel-aggregate': 'Run aggregate heavy Node kernel tests',
+    protocol: 'Run protocol Node tests',
+    kernel: 'Run heavy Node kernel tests',
 } as const satisfies Record<NodeTestLane, string>;
 
 const isNodeTestLane = (lane: string): lane is NodeTestLane =>
@@ -46,28 +36,18 @@ export const parseRequestedNodeTestLanes = (
         return defaultNodeTestLanes;
     }
     if (commandArguments.length !== 2 || commandArguments[0] !== '--only') {
-        throw new Error('Usage: run-node-tests.ts [--only lane[,lane...]].');
+        throw new Error('Usage: run-node-tests.ts [--only lane].');
     }
 
-    const requestedLanes = commandArguments[1]
-        ?.split(',')
-        .map((lane) => lane.trim())
-        .filter((lane) => lane.length > 0);
-    if (requestedLanes === undefined || requestedLanes.length === 0) {
+    const requestedLane = commandArguments[1]?.trim();
+    if (requestedLane === undefined || requestedLane.length === 0) {
         throw new Error('At least one Node test lane is required.');
     }
-
-    const uniqueLanes: NodeTestLane[] = [];
-    for (const requestedLane of requestedLanes) {
-        if (!isNodeTestLane(requestedLane)) {
-            throw new Error(`Unsupported Node test lane: ${requestedLane}`);
-        }
-        if (!uniqueLanes.includes(requestedLane)) {
-            uniqueLanes.push(requestedLane);
-        }
+    if (!isNodeTestLane(requestedLane)) {
+        throw new Error(`Unsupported Node test lane: ${requestedLane}`);
     }
 
-    return uniqueLanes;
+    return [requestedLane];
 };
 
 export const buildNodeTestCommands = (
@@ -97,8 +77,8 @@ export const buildNodeTestCommands = (
     return lanes.map((lane) => buildCommand(lane));
 };
 
-const main = (): void => {
-    process.exitCode = runCommands(
+const main = async (): Promise<void> => {
+    process.exitCode = await runCommandsInParallel(
         buildNodeTestCommands({
             lanes: parseRequestedNodeTestLanes(process.argv.slice(2)),
         }),
@@ -111,5 +91,5 @@ const isMainModule =
     import.meta.url === pathToFileURL(scriptEntryPoint).href;
 
 if (isMainModule) {
-    main();
+    void main();
 }
