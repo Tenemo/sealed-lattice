@@ -53,8 +53,6 @@ export type ThresholdProfileInput = {
     readonly targetBoundShareSelectionProfile?: TargetBoundShareSelectionProfile;
     readonly dynamicRosterProfileCertificateHash?: ProtocolHash;
     readonly casualMicroRosterAcknowledged?: boolean;
-    readonly unsafeSmallRosterAcknowledged?: boolean;
-    readonly unsafeMicroRosterAcknowledged?: boolean;
 };
 
 /** Roster profile classification for the derived threshold parameters. */
@@ -277,14 +275,14 @@ export type FailureStatusLabel =
 export type ModeStatusLabel =
     | 'activeMaliciousClosure'
     | 'casualMicroRoster'
-    | 'developmentIntegration'
     | 'evaluationProofClosure'
     | 'kllpsCpadClosure'
     | 'localReplayFailed'
     | 'localReplayMatched'
     | 'localReplayUnavailable'
     | 'longRunningCryptographicCheck'
-    | 'measuredRuntimeProfile';
+    | 'measuredRuntimeProfile'
+    | 'passiveMhePrototype';
 
 /** Allowed lifecycle transition edge. */
 export type LifecycleTransition = {

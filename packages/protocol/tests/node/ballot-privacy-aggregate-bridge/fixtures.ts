@@ -269,6 +269,9 @@ export const createAggregateContributionFixture = (
         hwangPiopStatus: 'DeferredUntilSealedLatticeBgvRnsProfileFreeze',
         level: 15,
         manifestHash: baseFields.manifestHash,
+        aggregateDerivationVerificationScope:
+            'AggregateDerivationFullVerificationPreconditionNotBound',
+        plaintextCanonicalLiftProofStatus: 'PlaintextCanonicalLiftProofMissing',
         plaintextRoot: hash(`bridge-plaintext-${input.rosterPosition}`),
         pollSpecHash: baseFields.pollSpecHash,
         postVotingClosedContextHash,

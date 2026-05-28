@@ -24,7 +24,7 @@ import type {
     BgvPassiveSetupVerification,
     BgvProfileRejection,
     BgvReferenceOracleRejection,
-    BgvRnsProfileReport,
+    BgvRnsProfileDescription,
     TranscriptCoreKernel,
     TranscriptCoreKernelCommand,
     TranscriptCoreKernelExports,
@@ -335,8 +335,6 @@ export const createTranscriptCoreKernelLoader = (
                         componentSecretStates: input.componentSecretStates,
                         casualMicroRosterAcknowledged:
                             input.casualMicroRosterAcknowledged,
-                        unsafeSmallRosterAcknowledged:
-                            input.unsafeSmallRosterAcknowledged,
                     }),
                 verifyBallotProof: (input): BallotPrivacyKernelVerification =>
                     executeCommand<BallotPrivacyKernelVerification>({
@@ -356,8 +354,6 @@ export const createTranscriptCoreKernelLoader = (
                         statement: input.statement,
                         casualMicroRosterAcknowledged:
                             input.casualMicroRosterAcknowledged,
-                        unsafeSmallRosterAcknowledged:
-                            input.unsafeSmallRosterAcknowledged,
                     }),
                 verifyClaimBearingBallotPackage: (
                     input,
@@ -369,8 +365,6 @@ export const createTranscriptCoreKernelLoader = (
                             input.dynamicRosterProfileEvidence,
                         casualMicroRosterAcknowledged:
                             input.casualMicroRosterAcknowledged,
-                        unsafeSmallRosterAcknowledged:
-                            input.unsafeSmallRosterAcknowledged,
                     }),
                 generateAggregateDerivationProof: (
                     input,
@@ -395,8 +389,6 @@ export const createTranscriptCoreKernelLoader = (
                         countedBallotPackages: input.countedBallotPackages,
                         casualMicroRosterAcknowledged:
                             input.casualMicroRosterAcknowledged,
-                        unsafeSmallRosterAcknowledged:
-                            input.unsafeSmallRosterAcknowledged,
                     }),
                 generateAggregateBridgeEncryption: (input) =>
                     executeCommand({
@@ -446,8 +438,8 @@ export const createTranscriptCoreKernelLoader = (
                         heParamHash: input.heParamHash,
                         setupPackage: input.setupPackage,
                     }),
-                describeBgvRnsProfile: (): BgvRnsProfileReport =>
-                    executeCommand<BgvRnsProfileReport>({
+                describeBgvRnsProfile: (): BgvRnsProfileDescription =>
+                    executeCommand<BgvRnsProfileDescription>({
                         command: 'DescribeBgvRnsProfile',
                     }),
                 describeBgvOperationRegistry: (): unknown =>
@@ -460,10 +452,6 @@ export const createTranscriptCoreKernelLoader = (
                     executeCommand<BgvEvaluatorOperationValidation>({
                         command: 'ValidateBgvEvaluatorOperation',
                         operation: input.operation,
-                    }),
-                generateBgvBackendReport: (): unknown =>
-                    executeCommand<unknown>({
-                        command: 'GenerateBgvBackendReport',
                     }),
                 describeBgvPassiveSetupObjectModel: (): unknown =>
                     executeCommand<unknown>({

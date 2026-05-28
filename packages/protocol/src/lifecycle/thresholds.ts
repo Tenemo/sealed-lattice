@@ -208,11 +208,7 @@ const deriveRosterProfile = (
         );
 
     if (rosterSize < minimumDynamicRosterSize) {
-        if (
-            input.casualMicroRosterAcknowledged !== true &&
-            input.unsafeSmallRosterAcknowledged !== true &&
-            input.unsafeMicroRosterAcknowledged !== true
-        ) {
+        if (input.casualMicroRosterAcknowledged !== true) {
             throw new Error(
                 'Casual micro-roster profiles require explicit acknowledgement.',
             );

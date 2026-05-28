@@ -1,3 +1,4 @@
+import { verifyBridgeProof as verifyPublicSdkBridgeProof } from 'sealed-lattice';
 import { expect, it } from 'vitest';
 
 import { loadTranscriptCoreKernel } from '../../../../src/index';
@@ -13,7 +14,6 @@ import {
     deriveBridgeProofTargetContractHash,
     sumAggregateDerivationWitnesses,
 } from '#packages/protocol/src/ballot-privacy/index';
-import { verifyBridgeProof as verifyPublicSdkBridgeProof } from '#packages/sdk/dist/index.js';
 
 type AggregateComponentContext = {
     readonly component: ReturnType<typeof createAggregateDerivationComponent>;
@@ -130,6 +130,8 @@ export const registerAggregateBridgeEncryptionTest = (
                         'BridgeProofImplementationEvidenceOnly',
                         'SharedWitnessZeroKnowledgeResponseDistributionChecked',
                         'BgvRandomnessErrorSupportPolynomialChecked',
+                        'PlaintextCanonicalLiftProofMissing',
+                        'AggregateDerivationFullVerificationPreconditionNotBound',
                         'BridgeProofClaimClosureMissing',
                         'RepresentativeBridgeMatrixRowEvidence',
                     ]);
@@ -299,8 +301,8 @@ export const registerAggregateBridgeEncryptionTest = (
                             dataPrimeCount: 16,
                             naiveLinearExpansionBackendStatus:
                                 'InfeasibleForEncryptedAggregateBridgeClaim',
-                            plaintextRootProofBindingStatus:
-                                'PlaintextRootProofBindingChecked',
+                            plaintextCanonicalLiftProofStatus:
+                                'PlaintextCanonicalLiftProofMissing',
                             proofFriendlyPlaintextBindingRequired: true,
                             publicPlaintextRootAcceptedAsClosureEvidence: false,
                             sharedWitnessCheckCount: 2,
@@ -411,6 +413,8 @@ export const registerAggregateBridgeEncryptionTest = (
                         'BridgeProofImplementationEvidenceOnly',
                         'SharedWitnessZeroKnowledgeResponseDistributionChecked',
                         'BgvRandomnessErrorSupportPolynomialChecked',
+                        'PlaintextCanonicalLiftProofMissing',
+                        'AggregateDerivationFullVerificationPreconditionNotBound',
                         'BridgeProofClaimClosureMissing',
                         'FinalBridgeTheoremPending',
                         'RepresentativeBridgeMatrixRowEvidence',

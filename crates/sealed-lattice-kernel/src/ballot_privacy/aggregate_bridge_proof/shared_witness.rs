@@ -191,6 +191,7 @@ pub(super) fn generate_bridge_shared_witness_proof(
             let challenge_scalar = bridge_shared_witness_challenge_scalar(
                 input.bridge_proof_statement_hash,
                 check_index,
+                rejection_attempt_index,
                 &aggregate_commitment_hash,
                 &batch_commitment_hash,
                 &bgv_commitment_hash,
@@ -671,6 +672,7 @@ pub(super) fn verify_bridge_shared_witness_proof(
         let recomputed_challenge_scalar = bridge_shared_witness_challenge_scalar(
             bridge_proof_statement_hash,
             check_index,
+            rejection_attempt_index,
             &aggregate_commitment_hash,
             &batch_commitment_hash,
             &bgv_commitment_hash,
@@ -822,17 +824,20 @@ fn mask_from_uniform_lane(lane: &[u8], mask_absolute_bound: &BigInt) -> BigInt {
 fn bridge_shared_witness_challenge_scalar(
     statement_hash: &str,
     check_index: usize,
+    rejection_attempt_index: usize,
     aggregate_commitment_hash: &str,
     batch_commitment_hash: &str,
     bgv_commitment_hash: &str,
     bgv_randomness_bound_commitment_hash: &str,
 ) -> u64 {
     let check_index_bytes = (check_index as u64).to_le_bytes();
+    let rejection_attempt_index_bytes = (rejection_attempt_index as u64).to_le_bytes();
     let hash = hash512(
         "sealed-lattice-root/aggregate-bridge-shared-witness-challenge-v1",
         &[
             statement_hash.as_bytes(),
             &check_index_bytes,
+            &rejection_attempt_index_bytes,
             aggregate_commitment_hash.as_bytes(),
             batch_commitment_hash.as_bytes(),
             bgv_commitment_hash.as_bytes(),
@@ -851,6 +856,7 @@ fn bridge_shared_witness_challenge_scalar(
             &[
                 statement_hash.as_bytes(),
                 &check_index_bytes,
+                &rejection_attempt_index_bytes,
                 aggregate_commitment_hash.as_bytes(),
                 batch_commitment_hash.as_bytes(),
                 bgv_commitment_hash.as_bytes(),
@@ -1178,9 +1184,9 @@ fn canonical_polynomial_vector_response(entries: &[Vec<u64>]) -> Value {
 #[cfg(test)]
 mod tests {
     use super::{
-        BRIDGE_SHARED_WITNESS_MASK_BYTES_PER_COORDINATE, first_nonzero_u64_chunk,
-        mask_from_uniform_lane, read_signed_i256_hex_vector, sample_bridge_mask_vector,
-        signed_i256_vector_hex,
+        BRIDGE_SHARED_WITNESS_MASK_BYTES_PER_COORDINATE, bridge_shared_witness_challenge_scalar,
+        first_nonzero_u64_chunk, mask_from_uniform_lane, read_signed_i256_hex_vector,
+        sample_bridge_mask_vector, signed_i256_vector_hex,
     };
     use crate::hashing::hash512;
     use num_bigint::BigInt;
@@ -1330,5 +1336,29 @@ mod tests {
 
         assert_eq!(first_nonzero_u64_chunk(&hash), Some(37));
         assert_eq!(first_nonzero_u64_chunk(&[0_u8; 64]), None);
+    }
+
+    #[test]
+    fn bridge_challenge_binds_rejection_attempt_index() {
+        let challenge = bridge_shared_witness_challenge_scalar(
+            "statement",
+            3,
+            2,
+            "aggregate-commitment",
+            "batch-commitment",
+            "bgv-commitment",
+            "bound-commitment",
+        );
+        let mutated_attempt_challenge = bridge_shared_witness_challenge_scalar(
+            "statement",
+            3,
+            3,
+            "aggregate-commitment",
+            "batch-commitment",
+            "bgv-commitment",
+            "bound-commitment",
+        );
+
+        assert_ne!(challenge, mutated_attempt_challenge);
     }
 }

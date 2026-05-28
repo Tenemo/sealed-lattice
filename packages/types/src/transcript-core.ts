@@ -1,11 +1,12 @@
 /** Claim profile label attached to transcript-core fixtures and results. */
-export type BaseClaimProfile = 'fullyVerified';
+export type BaseClaimProfile = 'FullyVerifiedResult';
 
 /** High-level malicious security closure claimed by transcript-core fixtures. */
 export type TranscriptCoreMheSecurityClosure =
-    | 'developmentIntegration'
-    | 'activeMalicious';
+    | 'PassiveMHEPrototype'
+    | 'ActiveMalicious';
 
+/** Public lifecycle alias for the transcript-core MHE security closure label. */
 export type MheSecurityClosure = TranscriptCoreMheSecurityClosure;
 
 /** Successful transcript-core status label returned by fixture verification. */
@@ -50,7 +51,7 @@ export type CanonicalError = {
     readonly message: string;
 };
 
-/** Golden transcript-core fixture with expected canonical Hashes and labels. */
+/** Golden transcript-core fixture with expected canonical hashes and labels. */
 export type GoldenTranscriptCoreFixture = {
     readonly kind: 'golden-transcript-core';
     readonly fixtureVersion: 1;

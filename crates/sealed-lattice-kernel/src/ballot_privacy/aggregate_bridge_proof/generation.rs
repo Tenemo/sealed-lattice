@@ -336,6 +336,14 @@ pub(super) fn generate_aggregate_bridge_encryption(request: &Value) -> Canonical
         "bridgeProofVerificationStatus".to_string(),
         Value::String(BRIDGE_PROOF_CHECKED_STATUS.to_string()),
     );
+    object.insert(
+        "aggregateDerivationVerificationScope".to_string(),
+        Value::String(AGGREGATE_DERIVATION_FULL_VERIFICATION_PRECONDITION_STATUS.to_string()),
+    );
+    object.insert(
+        "plaintextCanonicalLiftProofStatus".to_string(),
+        Value::String(PLAINTEXT_CANONICAL_LIFT_PROOF_MISSING_STATUS.to_string()),
+    );
     object.insert("bridgeClaimClosureVerified".to_string(), Value::Bool(false));
     object.insert(
         "bridgeClaimVerificationStatus".to_string(),
@@ -354,6 +362,8 @@ pub(super) fn generate_aggregate_bridge_encryption(request: &Value) -> Canonical
         "BridgeProofImplementationEvidenceOnly",
         SHARED_WITNESS_ZERO_KNOWLEDGE_STATUS,
         BGV_RANDOMNESS_BOUND_PROOF_STATUS,
+        PLAINTEXT_CANONICAL_LIFT_PROOF_MISSING_STATUS,
+        AGGREGATE_DERIVATION_FULL_VERIFICATION_PRECONDITION_STATUS,
         "BridgeProofClaimClosureMissing",
     ];
     status_labels.push(match dimensions.evidence_tier {

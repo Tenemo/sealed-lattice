@@ -377,7 +377,7 @@ describe.sequential(
                             contributorRosterPosition: 1,
                             postVotingClosedContextHash:
                                 postCloseEvidence.postVotingClosedContextHash,
-                            unsafeSmallRosterAcknowledged: false,
+                            casualMicroRosterAcknowledged: false,
                             votingClosedBoardHeadHash: postCloseEvidence
                                 .closeRecord.closedBoardHeadHash as string,
                         } satisfies AggregateStatementInput;
@@ -413,7 +413,7 @@ describe.sequential(
                         expect(() =>
                             buildAggregateDerivationStatement({
                                 ...statementInput,
-                                unsafeSmallRosterAcknowledged: true,
+                                casualMicroRosterAcknowledged: true,
                             }),
                         ).toThrow(
                             /casual micro-roster acknowledgement is only valid/u,

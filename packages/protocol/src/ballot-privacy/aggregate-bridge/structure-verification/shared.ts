@@ -49,6 +49,8 @@ export type BridgeEncryptionEvidence = {
     readonly bridgeProofStatementHash: ProtocolHash;
     readonly bridgeProofTargetContractHash: ProtocolHash;
     readonly bridgeProofVerificationStatus: 'BridgeProofRelationChecked';
+    readonly aggregateDerivationVerificationScope?: 'AggregateDerivationFullVerificationPreconditionNotBound';
+    readonly plaintextCanonicalLiftProofStatus?: 'PlaintextCanonicalLiftProofMissing';
     readonly bridgeClaimClosureVerified?: false;
     readonly bridgeClaimVerificationStatus?: 'BridgeProofClaimClosureMissing';
     readonly bridgeVariantEvidenceStatus?:
@@ -96,6 +98,8 @@ export type BridgeEvidenceVerification = {
     readonly bridgeProofStatementHash: ProtocolHash;
     readonly bridgeProofTargetContractHash: ProtocolHash;
     readonly bridgeProofVerificationStatus: 'BridgeProofRelationChecked';
+    readonly aggregateDerivationVerificationScope?: 'AggregateDerivationFullVerificationPreconditionNotBound';
+    readonly plaintextCanonicalLiftProofStatus?: 'PlaintextCanonicalLiftProofMissing';
     readonly bridgeClaimClosureVerified?: false;
     readonly bridgeClaimVerificationStatus?: 'BridgeProofClaimClosureMissing';
     readonly bridgeVariantEvidenceStatus?:

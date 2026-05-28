@@ -1,7 +1,7 @@
 use super::*;
 
 pub(super) const BRIDGE_PROVER_RANDOMNESS_BYTE_LENGTH: usize = 32;
-const MAX_BRIDGE_PROOF_BYTE_LENGTH: usize = 96 * 1024 * 1024;
+const MAX_BRIDGE_PROOF_BYTE_LENGTH: usize = 256 * 1024 * 1024;
 
 pub(super) fn validate_hex_field(value: &str, field_name: &str) -> CanonicalResult<()> {
     if value.is_empty() || !value.len().is_multiple_of(2) {
@@ -232,7 +232,81 @@ pub(super) fn validate_bridge_proof_public_shell(proof_value: &Value) -> Canonic
                     "singleContributionBridgeRelationChecked",
                 ],
             )?;
-            required_json_field(proof_value, "bridgeSharedWitnessProof", "bridgeProof")?;
+            let shared_witness_proof =
+                required_json_field(proof_value, "bridgeSharedWitnessProof", "bridgeProof")?;
+            reject_unexpected_object_fields(
+                shared_witness_proof,
+                "bridgeProof.bridgeSharedWitnessProof",
+                &[
+                    "bridgeProofStatementHash",
+                    "challengeHex",
+                    "checks",
+                    "maskAbsoluteBoundExclusive",
+                    "objectType",
+                    "objectVersion",
+                    "proofModel",
+                    "rejectionAttemptLimit",
+                    "relationCheckCount",
+                    "responseAbsoluteBoundExclusive",
+                    "responseBoundModel",
+                    "responseBoundStatus",
+                    "responseDistributionStatus",
+                    "responseEncoding",
+                    "responseShiftBoundExclusive",
+                    "sameHiddenAggregateCoordinatesLinked",
+                    "sharedResponseScalarCount",
+                ],
+            )?;
+            if let Some(checks) = shared_witness_proof.get("checks").and_then(Value::as_array) {
+                for (check_index, check) in checks.iter().enumerate() {
+                    reject_unexpected_object_fields(
+                        check,
+                        &format!("bridgeProof.bridgeSharedWitnessProof.checks[{check_index}]"),
+                        &[
+                            "aggregateOpeningResponseHex",
+                            "aggregateQuotientResponseHex",
+                            "aggregateReducedResponseHex",
+                            "aggregateRelationCommitmentHash",
+                            "aggregateShareResponseHex",
+                            "batchCoefficientResponseHex",
+                            "batchEncodingCommitmentHash",
+                            "bgvCiphertextCommitmentHash",
+                            "bgvRandomnessBoundCommitment",
+                            "bgvRandomnessBoundCommitmentHash",
+                            "boundedPerturbationOneResponseHex",
+                            "boundedPerturbationZeroResponseHex",
+                            "challengeScalarHex",
+                            "checkIndex",
+                            "cipherRandomizerResponseHex",
+                            "rejectionAttemptIndex",
+                        ],
+                    )?;
+                    if let Some(commitment) = check.get("bgvRandomnessBoundCommitment") {
+                        reject_unexpected_object_fields(
+                            commitment,
+                            &format!(
+                                "bridgeProof.bridgeSharedWitnessProof.checks[{check_index}].bgvRandomnessBoundCommitment"
+                            ),
+                            &[
+                                "bridgeProofStatementHash",
+                                "checkIndex",
+                                "errorOneExpansionCommitmentsByModulus",
+                                "errorSupport",
+                                "errorSupportPolynomial",
+                                "errorZeroExpansionCommitmentsByModulus",
+                                "objectType",
+                                "objectVersion",
+                                "proofModel",
+                                "randomizerExpansionCommitmentsByModulus",
+                                "randomizerSupport",
+                                "randomizerSupportPolynomial",
+                                "supportCheckModel",
+                                "supportModuli",
+                            ],
+                        )?;
+                    }
+                }
+            }
         }
         Some("SealedLatticeAggregateBridgeEncryptionEvidence") => {
             reject_unexpected_bridge_proof_fields(
@@ -256,7 +330,7 @@ pub(super) fn validate_bridge_proof_public_shell(proof_value: &Value) -> Canonic
     validate_bridge_private_material_disclosure(proof_value)
 }
 
-fn reject_unexpected_bridge_proof_fields(
+pub(super) fn reject_unexpected_object_fields(
     value: &Value,
     path: &str,
     allowed_fields: &[&str],
@@ -279,12 +353,38 @@ fn reject_unexpected_bridge_proof_fields(
     Ok(())
 }
 
+fn reject_unexpected_bridge_proof_fields(
+    value: &Value,
+    path: &str,
+    allowed_fields: &[&str],
+) -> CanonicalResult<()> {
+    reject_unexpected_object_fields(value, path, allowed_fields)
+}
+
 pub(super) fn validate_bridge_relation_gap_status(proof_value: &Value) -> CanonicalResult<()> {
     let relation_gap_status =
         required_json_field(proof_value, "bridgeRelationGapStatus", "bridgeProof")?;
     reject_forbidden_public_bridge_fields(
         relation_gap_status,
         "bridgeProof.bridgeRelationGapStatus",
+    )?;
+    reject_unexpected_object_fields(
+        relation_gap_status,
+        "bridgeProof.bridgeRelationGapStatus",
+        &[
+            "aggregateToPlaintextBindingStatus",
+            "bgvEncryptionProofStatus",
+            "bgvRandomnessBoundProofStatus",
+            "bridgeClaimClosureStatus",
+            "hwangPiopStatus",
+            "objectType",
+            "objectVersion",
+            "rnsCrtConsistencyProofStatus",
+            "sampledOnlyBridgeVerificationAccepted",
+            "scopedBridgeRelationClosure",
+            "sharedWitnessBindingStatus",
+            "sharedWitnessZeroKnowledgeStatus",
+        ],
     )?;
     if string_field(relation_gap_status, "objectType") != Some("AggregateBridgeRelationGapStatus")
         || read_u64_object_field(

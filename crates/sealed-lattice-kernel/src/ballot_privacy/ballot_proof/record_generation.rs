@@ -38,7 +38,7 @@ pub(crate) fn generate_ballot_proof_record_inner(
     let prover_randomness_hex = required_input.prover_randomness_hex;
     let component_prover_randomness_hexes = required_input.component_prover_randomness_hexes;
     let component_secret_states = required_input.component_secret_states;
-    let unsafe_small_roster_acknowledged = required_input.unsafe_small_roster_acknowledged;
+    let casual_micro_roster_acknowledged = required_input.casual_micro_roster_acknowledged;
     let component_inputs_by_id = required_input.component_inputs_by_id()?;
 
     let mut generated_component_proofs = Vec::new();
@@ -142,7 +142,7 @@ pub(crate) fn generate_ballot_proof_record_inner(
             public_randomness_hex: Some(public_randomness_hex),
             component_proof_verification_mode:
                 ComponentProofVerificationMode::AlreadyVerifiedDuringGeneration,
-            unsafe_small_roster_acknowledged,
+            casual_micro_roster_acknowledged,
         },
     );
     if verification

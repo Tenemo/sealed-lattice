@@ -118,14 +118,10 @@ pub(crate) fn verify_aggregate_derivation_proof_from_command_request(request: &V
     let counted_ballot_packages = request.get("countedBallotPackages");
     let close_record = request.get("closeRecord");
     let contributor_action_context = request.get("contributorActionContext");
-    let unsafe_small_roster_acknowledged = request
-        .get("unsafeSmallRosterAcknowledged")
+    let casual_micro_roster_acknowledged = request
+        .get("casualMicroRosterAcknowledged")
         .and_then(Value::as_bool)
-        == Some(true)
-        || request
-            .get("casualMicroRosterAcknowledged")
-            .and_then(Value::as_bool)
-            == Some(true);
+        == Some(true);
     let proof_input = match required_json_field(component, "proofInput", "component") {
         Ok(value) => value,
         Err(error) => {
@@ -296,7 +292,7 @@ pub(crate) fn verify_aggregate_derivation_proof_from_command_request(request: &V
     let counted_package_refusals = collect_aggregate_counted_package_refusals(
         counted_ballot_packages,
         component,
-        unsafe_small_roster_acknowledged,
+        casual_micro_roster_acknowledged,
     );
     if !counted_package_refusals.is_empty() {
         return structural_rejection("verifyAggregateDerivationProof", counted_package_refusals);
@@ -323,6 +319,19 @@ pub(crate) fn verify_aggregate_derivation_relation_subproof_for_component(
     proof_hex: &str,
 ) -> crate::encoding::CanonicalResult<AggregateRelationProofVerification> {
     let proof_input = required_json_field(component, "proofInput", "component")?;
+    let mut refused_objects =
+        collect_aggregate_proof_input_refusals(proof_input, Some(component), true);
+    refused_objects.extend(collect_aggregate_component_refusals(component));
+    if !refused_objects.is_empty() {
+        let refusal_messages = refused_objects
+            .iter()
+            .filter_map(|refusal| string_field(refusal, "message"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        return Err(invalid_preflight(format!(
+            "Aggregate derivation component binding is invalid for bridge verification: {refusal_messages}"
+        )));
+    }
     let proof_statement = required_json_field(proof_input, "proofStatement", "proofInput")?;
     let parameter_set_value = required_json_field(proof_input, "proofParameterSet", "proofInput")?;
     let proof_encoding_value = required_json_field(proof_input, "proofEncoding", "proofInput")?;

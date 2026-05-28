@@ -35,9 +35,9 @@ const findFixture = <Fixture extends NamedFixture>(
     return fixture;
 };
 
-const fullyVerifiedDevelopmentIntegrationFixture = findFixture(
+const fullyVerifiedPassiveMhePrototypeFixture = findFixture(
     goldenTranscriptCoreFixtures,
-    'fully-verified-development-integration-transcript-core',
+    'fully-verified-passive-mhe-prototype-transcript-core',
 );
 const invalidEnumFixture = findFixture(malformedObjectFixtures, 'invalid-enum');
 const browserM7BgvVectors = {
@@ -69,16 +69,16 @@ describe('transcript-core kernel in browsers', () => {
         const kernel = await loadTranscriptCoreKernel();
 
         expect(
-            kernel.verifyFixture(fullyVerifiedDevelopmentIntegrationFixture),
+            kernel.verifyFixture(fullyVerifiedPassiveMhePrototypeFixture),
         ).toEqual({
             verified: true,
-            caseName: 'fully-verified-development-integration-transcript-core',
+            caseName: 'fully-verified-passive-mhe-prototype-transcript-core',
             objectHash512:
-                fullyVerifiedDevelopmentIntegrationFixture.expectedObjectHash512,
+                fullyVerifiedPassiveMhePrototypeFixture.expectedObjectHash512,
             chunkRoot:
-                fullyVerifiedDevelopmentIntegrationFixture.expectedChunkRoot,
+                fullyVerifiedPassiveMhePrototypeFixture.expectedChunkRoot,
             statusLabels:
-                fullyVerifiedDevelopmentIntegrationFixture.expectedStatusLabels,
+                fullyVerifiedPassiveMhePrototypeFixture.expectedStatusLabels,
         });
     });
 

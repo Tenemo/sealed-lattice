@@ -35,11 +35,11 @@
     },
     {
       "path": "election-foundation/capability-refusals.json",
-      "sha256": "946ab8366d452cb2441bd0c1aeec7d08e03d6e076d063a610f85fdb900fa9ff7"
+      "sha256": "8c4ece26bff03b4676276cf613a6ffbc25565af8aabbfd9d5c428d1bfe3fae2e"
     },
     {
       "path": "election-foundation/deterministic-fixtures.json",
-      "sha256": "94819ad0e9ee8edc67695f82e0dd9d12acb4f421e78c4816e9160c36913bfe1e"
+      "sha256": "80455a09c62a17e1a637a5cf2c6f29165cf810650fd0638c74aa60d27e68f4b1"
     },
     {
       "path": "election-foundation/lifecycle-transitions.json",
@@ -51,7 +51,7 @@
     },
     {
       "path": "election-foundation/threshold-profiles.json",
-      "sha256": "29b4ed33bb0902e5efa1819aab97d79f64714fdc6e49217cd8ba53c3bd1e481a"
+      "sha256": "35002e59cb272cb859f314655b7a491e1e6bc7a5ad95569d9281d6b8f4bf4b75"
     },
     {
       "path": "plaintext-oracle/comparator-polynomials.json",
@@ -87,15 +87,15 @@
     },
     {
       "path": "transcript-core/golden-transcript-core.json",
-      "sha256": "de65ba83918382dc21a71b86838fc0192da680a21598b259f3f924d292795708"
+      "sha256": "dee00dcf9fa181809240fdf45bd093d7d1db45e2de06522b851b2161cc5e278c"
     },
     {
       "path": "transcript-core/malformed-objects.json",
-      "sha256": "54c04e0f857f2ae6c8279589aaa036f26f097bf959a0c61524b04f49b3e03db7"
+      "sha256": "73f143a944830c4374b01103667706911feb014fa6100c6565d94ba96bf09512"
     },
     {
       "path": "transcript-core/transcript-core-replay.json",
-      "sha256": "2c434c4967b8918614f5b8d1474996600475572541adab245e4242eee6426daf"
+      "sha256": "3f23d1aecc9766fe64a49fc174f53431fdd77a12a086b35f84e5e176929176ce"
     }
   ]
 }

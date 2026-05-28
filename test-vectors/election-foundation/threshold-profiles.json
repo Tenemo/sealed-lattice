@@ -173,7 +173,7 @@
         "targetBoundShareSelectionProfile": {
           "profileId": "target-bound-first-valid-share-selection-v1",
           "certificateHash": "target-bound-certificate-hash",
-          "cpadProfileId": "KLLPS26-AsyncLagrangeTarget-CPAD-v1",
+          "cpadProfileId": "CPAD-BGV-AsyncThreshold-v1",
           "targetBasisHash": "target-basis-hash",
           "decryptionShareQuorum": 9,
           "minimumSharesForInterpolation": 7,
@@ -201,7 +201,7 @@
         "targetBoundShareSelectionProfile": {
           "profileId": "target-bound-first-valid-share-selection-v1",
           "certificateHash": "target-bound-certificate-hash",
-          "cpadProfileId": "KLLPS26-AsyncLagrangeTarget-CPAD-v1",
+          "cpadProfileId": "CPAD-BGV-AsyncThreshold-v1",
           "targetBasisHash": "target-basis-hash",
           "decryptionShareQuorum": 9,
           "minimumSharesForInterpolation": 7,

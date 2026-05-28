@@ -48,7 +48,9 @@ const NAIVE_LINEAR_EXPANSION_BACKEND_STATUS: &str = "InfeasibleForEncryptedAggre
 const SAME_WITNESS_LINKAGE_MODEL: &str =
     "SingleTranscriptSharedWitnessOrExplicitSameWitnessLinkRequired";
 const SEPARATE_SUBPROOFS_CLOSURE_STATUS: &str = "RejectedForAggregateBridgeClaimClosure";
-const PLAINTEXT_ROOT_PROOF_BINDING_CHECKED_STATUS: &str = "PlaintextRootProofBindingChecked";
+const PLAINTEXT_CANONICAL_LIFT_PROOF_MISSING_STATUS: &str = "PlaintextCanonicalLiftProofMissing";
+const AGGREGATE_DERIVATION_FULL_VERIFICATION_PRECONDITION_STATUS: &str =
+    "AggregateDerivationFullVerificationPreconditionNotBound";
 const SHARED_WITNESS_CHALLENGE_BITS_PER_CHECK: u64 = 64;
 const BRIDGE_SHARED_WITNESS_CHECK_COUNT: usize = 2;
 const BRIDGE_SHARED_WITNESS_SOUNDNESS_BITS: u64 =

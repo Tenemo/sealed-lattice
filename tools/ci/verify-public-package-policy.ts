@@ -64,7 +64,6 @@ export const forbiddenRuntimeExports = [
     'exportSecretKey',
     'exportShare',
     'fieldModulus',
-    'generateBgvBackendReport',
     'generateBgvBaseConversionFixture',
     'generateBgvCiphertextConventionFixture',
     'generateBgvPassiveSetupPackage',

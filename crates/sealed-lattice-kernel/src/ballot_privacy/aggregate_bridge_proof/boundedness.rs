@@ -9,12 +9,13 @@ const BGV_RANDOMNESS_BOUND_STATUS_MODEL: &str = "development-bgv-randomness-boun
 const BGV_RANDOMNESS_BOUND_PROOF_MODEL: &str = "fiat-shamir-same-response-support-polynomial-v1";
 const BGV_RANDOMNESS_SUPPORT: &str = "balanced-ternary-coefficients-minus-one-to-one";
 const BGV_ERROR_SUPPORT: &str = "centered-binomial-eta2-coefficients-minus-two-to-two";
-const BGV_BOUND_WEIGHT_MODEL: &str = "hash-seeded-power-weighted-coefficient-sum-v1";
+const BGV_BOUND_SUPPORT_CHECK_MODEL: &str = "coefficientwise-support-expansion-v1";
 const RANDOMIZER_SUPPORT_POLYNOMIAL: &str = "x*(x-1)*(x+1)";
 const ERROR_SUPPORT_POLYNOMIAL: &str = "x*(x-2)*(x-1)*(x+1)*(x+2)";
 const RANDOMIZER_EXPANSION_COEFFICIENT_COUNT: usize = 3;
 const ERROR_EXPANSION_COEFFICIENT_COUNT: usize = 5;
-const BGV_BOUND_SUPPORT_MODULUS_COUNT: usize = 4;
+const BGV_BOUND_SUPPORT_MODULUS_COUNT: usize = DATA_PRIMES.len();
+const BGV_BOUND_SUPPORT_RESIDUE_BYTE_LENGTH: usize = 6;
 
 pub(super) struct BridgeBgvRandomnessBoundCommitmentInput<'value> {
     pub(super) bridge_proof_statement_hash: &'value str,
@@ -57,7 +58,7 @@ pub(super) fn bridge_bgv_randomness_bound_status(
         "errorSupport": BGV_ERROR_SUPPORT,
         "randomizerSupportPolynomial": RANDOMIZER_SUPPORT_POLYNOMIAL,
         "errorSupportPolynomial": ERROR_SUPPORT_POLYNOMIAL,
-        "weightModel": BGV_BOUND_WEIGHT_MODEL,
+        "supportCheckModel": BGV_BOUND_SUPPORT_CHECK_MODEL,
         "supportModulusCount": BGV_BOUND_SUPPORT_MODULUS_COUNT,
         "sameSharedWitnessResponseTranscript": true,
         "verifierBoundednessProofChecked": true,
@@ -140,13 +141,8 @@ pub(super) fn bridge_bgv_randomness_bound_commitment(
     )?;
     let randomizer_expansion_commitments_by_modulus = support_moduli()
         .iter()
-        .enumerate()
-        .map(|(modulus_index, modulus)| {
+        .map(|modulus| {
             support_expansion_commitment_for_role(
-                input.bridge_proof_statement_hash,
-                input.check_index,
-                "cipher-randomizer",
-                modulus_index,
                 *modulus,
                 BgvSupportKind::Randomizer,
                 input.randomizer_masks,
@@ -156,13 +152,8 @@ pub(super) fn bridge_bgv_randomness_bound_commitment(
         .collect::<CanonicalResult<Vec<_>>>()?;
     let error_zero_expansion_commitments_by_modulus = support_moduli()
         .iter()
-        .enumerate()
-        .map(|(modulus_index, modulus)| {
+        .map(|modulus| {
             support_expansion_commitment_for_role(
-                input.bridge_proof_statement_hash,
-                input.check_index,
-                "bounded-perturbation-zero",
-                modulus_index,
                 *modulus,
                 BgvSupportKind::Error,
                 input.perturbation_zero_masks,
@@ -172,13 +163,8 @@ pub(super) fn bridge_bgv_randomness_bound_commitment(
         .collect::<CanonicalResult<Vec<_>>>()?;
     let error_one_expansion_commitments_by_modulus = support_moduli()
         .iter()
-        .enumerate()
-        .map(|(modulus_index, modulus)| {
+        .map(|modulus| {
             support_expansion_commitment_for_role(
-                input.bridge_proof_statement_hash,
-                input.check_index,
-                "bounded-perturbation-one",
-                modulus_index,
                 *modulus,
                 BgvSupportKind::Error,
                 input.perturbation_one_masks,
@@ -193,7 +179,7 @@ pub(super) fn bridge_bgv_randomness_bound_commitment(
         "proofModel": BGV_RANDOMNESS_BOUND_PROOF_MODEL,
         "bridgeProofStatementHash": input.bridge_proof_statement_hash,
         "checkIndex": input.check_index,
-        "weightModel": BGV_BOUND_WEIGHT_MODEL,
+        "supportCheckModel": BGV_BOUND_SUPPORT_CHECK_MODEL,
         "supportModuli": support_moduli(),
         "randomizerSupport": BGV_RANDOMNESS_SUPPORT,
         "errorSupport": BGV_ERROR_SUPPORT,
@@ -259,10 +245,7 @@ pub(super) fn validate_bridge_bgv_randomness_bound_commitment(
 
     for (modulus_index, modulus) in support_moduli().iter().enumerate() {
         validate_support_polynomial_for_role(
-            bridge_proof_statement_hash,
-            check_index,
             "cipher-randomizer",
-            modulus_index,
             *modulus,
             BgvSupportKind::Randomizer,
             challenge_scalar,
@@ -270,10 +253,7 @@ pub(super) fn validate_bridge_bgv_randomness_bound_commitment(
             &randomizer_commitments[modulus_index],
         )?;
         validate_support_polynomial_for_role(
-            bridge_proof_statement_hash,
-            check_index,
             "bounded-perturbation-zero",
-            modulus_index,
             *modulus,
             BgvSupportKind::Error,
             challenge_scalar,
@@ -281,10 +261,7 @@ pub(super) fn validate_bridge_bgv_randomness_bound_commitment(
             &error_zero_commitments[modulus_index],
         )?;
         validate_support_polynomial_for_role(
-            bridge_proof_statement_hash,
-            check_index,
             "bounded-perturbation-one",
-            modulus_index,
             *modulus,
             BgvSupportKind::Error,
             challenge_scalar,
@@ -352,59 +329,40 @@ fn validate_bgv_support_response_dimensions(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 fn support_expansion_commitment_for_role(
-    bridge_proof_statement_hash: &str,
-    check_index: usize,
-    role: &str,
-    modulus_index: usize,
     modulus: u64,
     support_kind: BgvSupportKind,
     masks: &[BigInt],
     witness: &[BigInt],
-) -> CanonicalResult<Vec<u64>> {
+) -> CanonicalResult<String> {
     let coefficient_count = support_kind.expansion_coefficient_count();
-    let mut commitments = vec![0_u64; coefficient_count];
+    let mut commitment_bytes = Vec::with_capacity(masks.len() * coefficient_count * 8);
     let modulus_bigint = BigInt::from(modulus);
-    let weight_seed = support_weight_seed(
-        bridge_proof_statement_hash,
-        check_index,
-        role,
-        modulus_index,
-        modulus,
-    );
-    let mut weight = 1_u64;
-    for (coefficient_index, (mask, witness_value)) in masks.iter().zip(witness.iter()).enumerate() {
+    for (mask, witness_value) in masks.iter().zip(witness.iter()) {
         let mask_residue = bigint_to_modulus_residue(mask, &modulus_bigint);
         let witness_residue = bigint_to_modulus_residue(witness_value, &modulus_bigint);
         let expansion =
             support_expansion_coefficients(support_kind, mask_residue, witness_residue, modulus)?;
-        for (commitment, expansion_coefficient) in commitments.iter_mut().zip(expansion.iter()) {
-            *commitment = add_mod_u64(
-                *commitment,
-                mul_mod_u64(weight, *expansion_coefficient, modulus),
-                modulus,
+        for expansion_coefficient in expansion {
+            commitment_bytes.extend_from_slice(
+                &expansion_coefficient.to_le_bytes()[..BGV_BOUND_SUPPORT_RESIDUE_BYTE_LENGTH],
             );
         }
-        weight = next_support_weight(weight, weight_seed, coefficient_index, modulus)?;
     }
 
-    Ok(commitments)
+    Ok(to_hex(&commitment_bytes))
 }
 
-#[allow(clippy::too_many_arguments)]
 fn validate_support_polynomial_for_role(
-    bridge_proof_statement_hash: &str,
-    check_index: usize,
     role: &str,
-    modulus_index: usize,
     modulus: u64,
     support_kind: BgvSupportKind,
     challenge_scalar: u64,
     responses: &[BigInt],
     expansion_commitments: &[u64],
 ) -> CanonicalResult<()> {
-    if expansion_commitments.len() != support_kind.expansion_coefficient_count() {
+    let expansion_coefficient_count = support_kind.expansion_coefficient_count();
+    if expansion_commitments.len() != responses.len() * expansion_coefficient_count {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
             "M9 bridge BGV boundedness expansion commitment length is invalid",
@@ -412,41 +370,32 @@ fn validate_support_polynomial_for_role(
     }
     let challenge_residue = challenge_scalar % modulus;
     let modulus_bigint = BigInt::from(modulus);
-    let mut expected_weighted_support_sum = 0_u64;
-    let weight_seed = support_weight_seed(
-        bridge_proof_statement_hash,
-        check_index,
-        role,
-        modulus_index,
-        modulus,
-    );
-    let mut weight = 1_u64;
-    for (coefficient_index, response) in responses.iter().enumerate() {
+    for (coefficient_index, (response, expansion)) in responses
+        .iter()
+        .zip(expansion_commitments.chunks_exact(expansion_coefficient_count))
+        .enumerate()
+    {
         let response_residue = bigint_to_modulus_residue(response, &modulus_bigint);
         let support_value =
             support_polynomial_value(support_kind, response_residue, challenge_residue, modulus);
-        expected_weighted_support_sum = add_mod_u64(
-            expected_weighted_support_sum,
-            mul_mod_u64(weight, support_value, modulus),
-            modulus,
-        );
-        weight = next_support_weight(weight, weight_seed, coefficient_index, modulus)?;
-    }
-    let mut actual_weighted_support_sum = 0_u64;
-    let mut challenge_power = 1_u64;
-    for commitment in expansion_commitments {
-        actual_weighted_support_sum = add_mod_u64(
-            actual_weighted_support_sum,
-            mul_mod_u64(*commitment, challenge_power, modulus),
-            modulus,
-        );
-        challenge_power = mul_mod_u64(challenge_power, challenge_residue, modulus);
-    }
-    if expected_weighted_support_sum != actual_weighted_support_sum {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
-            format!("M9 bridge BGV boundedness support polynomial check failed for {role}"),
-        ));
+        let mut expanded_support_value = 0_u64;
+        let mut challenge_power = 1_u64;
+        for commitment in expansion {
+            expanded_support_value = add_mod_u64(
+                expanded_support_value,
+                mul_mod_u64(*commitment, challenge_power, modulus),
+                modulus,
+            );
+            challenge_power = mul_mod_u64(challenge_power, challenge_residue, modulus);
+        }
+        if support_value != expanded_support_value {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::ProfileComponentMismatch,
+                format!(
+                    "M9 bridge BGV boundedness support polynomial check failed for {role} coefficient {coefficient_index}"
+                ),
+            ));
+        }
     }
 
     Ok(())
@@ -460,9 +409,9 @@ fn validate_bgv_bound_commitment_shell(
     if string_field(commitment, "objectType") != Some("AggregateBridgeBgvRandomnessBoundCommitment")
         || read_u64_object_field(commitment, "objectVersion", "bgvRandomnessBoundCommitment")? != 1
         || string_field(commitment, "proofModel") != Some(BGV_RANDOMNESS_BOUND_PROOF_MODEL)
-        || string_field(commitment, "weightModel") != Some(BGV_BOUND_WEIGHT_MODEL)
         || string_field(commitment, "randomizerSupport") != Some(BGV_RANDOMNESS_SUPPORT)
         || string_field(commitment, "errorSupport") != Some(BGV_ERROR_SUPPORT)
+        || string_field(commitment, "supportCheckModel") != Some(BGV_BOUND_SUPPORT_CHECK_MODEL)
         || string_field(commitment, "randomizerSupportPolynomial")
             != Some(RANDOMIZER_SUPPORT_POLYNOMIAL)
         || string_field(commitment, "errorSupportPolynomial") != Some(ERROR_SUPPORT_POLYNOMIAL)
@@ -470,6 +419,12 @@ fn validate_bgv_bound_commitment_shell(
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
             "M9 bridge BGV boundedness commitment shell is not supported",
+        ));
+    }
+    if commitment.get("weightModel").is_some() {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "M9 bridge BGV boundedness commitment must use coefficientwise support checks, not weighted batching",
         ));
     }
     require_equal_string(
@@ -537,47 +492,65 @@ fn read_expansion_commitments_by_modulus(
         .iter()
         .zip(support_moduli())
         .map(|(commitments_for_modulus, modulus)| {
-            let commitments = commitments_for_modulus
-                .as_array()
+            let commitments_hex = commitments_for_modulus
+                .as_str()
                 .ok_or_else(|| {
                     CanonicalError::new(
                         CanonicalErrorCode::InvalidFixture,
                         format!(
-                            "bgvRandomnessBoundCommitment.{field_name} entries must be arrays"
+                            "bgvRandomnessBoundCommitment.{field_name} entries must be fixed-width hex strings"
                         ),
                     )
                 })?;
-            if commitments.len() != coefficient_count {
+            decode_support_expansion_commitments_hex(commitments_hex, coefficient_count, *modulus, field_name)
+        })
+        .collect()
+}
+
+fn decode_support_expansion_commitments_hex(
+    commitments_hex: &str,
+    coefficient_count: usize,
+    modulus: u64,
+    field_name: &str,
+) -> CanonicalResult<Vec<u64>> {
+    let expected_byte_length = POLYNOMIAL_DEGREE
+        .checked_mul(coefficient_count)
+        .and_then(|count| count.checked_mul(BGV_BOUND_SUPPORT_RESIDUE_BYTE_LENGTH))
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "M9 bridge BGV boundedness expansion commitment byte length overflowed",
+            )
+        })?;
+    if commitments_hex.len() != expected_byte_length * 2 {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            format!("bgvRandomnessBoundCommitment.{field_name} has an invalid encoded byte length"),
+        ));
+    }
+    let commitment_bytes = decode_hex(commitments_hex)?;
+    if commitment_bytes.len() != expected_byte_length {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            format!("bgvRandomnessBoundCommitment.{field_name} has an invalid byte length"),
+        ));
+    }
+    commitment_bytes
+        .chunks_exact(BGV_BOUND_SUPPORT_RESIDUE_BYTE_LENGTH)
+        .map(|chunk| {
+            let mut bytes = [0_u8; 8];
+            bytes[..BGV_BOUND_SUPPORT_RESIDUE_BYTE_LENGTH].copy_from_slice(chunk);
+            let value = u64::from_le_bytes(bytes);
+            if value >= modulus {
                 return Err(CanonicalError::new(
-                    CanonicalErrorCode::MalformedLength,
+                    CanonicalErrorCode::ProfileComponentMismatch,
                     format!(
-                        "bgvRandomnessBoundCommitment.{field_name} has an invalid coefficient count"
+                        "bgvRandomnessBoundCommitment.{field_name} entry is outside its modulus"
                     ),
                 ));
             }
-            commitments
-                .iter()
-                .map(|commitment| {
-                    let value = commitment.as_u64().ok_or_else(|| {
-                        CanonicalError::new(
-                            CanonicalErrorCode::InvalidFixture,
-                            format!(
-                                "bgvRandomnessBoundCommitment.{field_name} entries must be non-negative integers"
-                            ),
-                        )
-                    })?;
-                    if value >= *modulus {
-                        return Err(CanonicalError::new(
-                            CanonicalErrorCode::ProfileComponentMismatch,
-                            format!(
-                                "bgvRandomnessBoundCommitment.{field_name} entry is outside its modulus"
-                            ),
-                        ));
-                    }
 
-                    Ok(value)
-                })
-                .collect()
+            Ok(value)
         })
         .collect()
 }
@@ -690,47 +663,6 @@ fn powers(value: u64, highest_power: usize, modulus: u64) -> Vec<u64> {
     powers
 }
 
-fn support_weight_seed(
-    bridge_proof_statement_hash: &str,
-    check_index: usize,
-    role: &str,
-    modulus_index: usize,
-    modulus: u64,
-) -> u64 {
-    let check_index_bytes = (check_index as u64).to_le_bytes();
-    let modulus_index_bytes = (modulus_index as u64).to_le_bytes();
-    let hash = hash512(
-        "sealed-lattice-root/aggregate-bridge-bgv-randomness-bound-weight-seed-v1",
-        &[
-            bridge_proof_statement_hash.as_bytes(),
-            role.as_bytes(),
-            &check_index_bytes,
-            &modulus_index_bytes,
-        ],
-    );
-    let mut bytes = [0_u8; 8];
-    bytes.copy_from_slice(&hash[..8]);
-    let seed = u64::from_le_bytes(bytes) % modulus;
-    if seed == 0 { 1 } else { seed }
-}
-
-fn next_support_weight(
-    current_weight: u64,
-    weight_seed: u64,
-    coefficient_index: usize,
-    modulus: u64,
-) -> CanonicalResult<u64> {
-    let next_weight = mul_mod_u64(current_weight, weight_seed, modulus);
-    if coefficient_index + 1 == POLYNOMIAL_DEGREE && next_weight == 0 {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "M9 bridge BGV boundedness support weight stream unexpectedly reached zero",
-        ));
-    }
-
-    Ok(next_weight)
-}
-
 fn bigint_to_modulus_residue(value: &BigInt, modulus_bigint: &BigInt) -> u64 {
     let residue = ((value % modulus_bigint) + modulus_bigint) % modulus_bigint;
     residue
@@ -761,6 +693,17 @@ fn mul_small_mod(scalar: u64, value: u64, modulus: u64) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn boundedness_support_checks_cover_every_data_prime_with_compact_residue_encoding() {
+        assert_eq!(support_moduli(), DATA_PRIMES.as_slice());
+        assert_eq!(BGV_BOUND_SUPPORT_MODULUS_COUNT, 16);
+        assert!(
+            support_moduli()
+                .iter()
+                .all(|modulus| *modulus < (1_u64 << 48))
+        );
+    }
 
     #[test]
     fn randomizer_support_expansion_matches_challenged_response() {
@@ -858,5 +801,49 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn support_check_rejects_coefficientwise_invalid_randomizer() {
+        let modulus = support_moduli()[0];
+        let challenge = 17_u64;
+        let masks = vec![BigInt::from(0_u8); POLYNOMIAL_DEGREE];
+        let mut witnesses = vec![BigInt::from(0_u8); POLYNOMIAL_DEGREE];
+        witnesses[0] = BigInt::from(2_i8);
+        witnesses[1] = BigInt::from(-2_i8);
+        let responses = witnesses
+            .iter()
+            .map(|witness| BigInt::from(challenge) * witness)
+            .collect::<Vec<_>>();
+        let commitments_hex = support_expansion_commitment_for_role(
+            modulus,
+            BgvSupportKind::Randomizer,
+            &masks,
+            &witnesses,
+        )
+        .expect("commitment should build");
+        let commitments = decode_support_expansion_commitments_hex(
+            &commitments_hex,
+            BgvSupportKind::Randomizer.expansion_coefficient_count(),
+            modulus,
+            "testRandomizerCommitments",
+        )
+        .expect("commitment should decode");
+
+        let error = validate_support_polynomial_for_role(
+            "cipher-randomizer",
+            modulus,
+            BgvSupportKind::Randomizer,
+            challenge,
+            &responses,
+            &commitments,
+        )
+        .expect_err("non-support coefficients must not cancel across the batch");
+
+        assert!(
+            error.message.contains("coefficient 0"),
+            "unexpected error: {}",
+            error.message
+        );
     }
 }

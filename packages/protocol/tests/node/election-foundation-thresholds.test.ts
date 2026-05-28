@@ -44,11 +44,7 @@ const targetBoundShareSelectionProfile = {
     invalidShareFilteringMode: 'ProofVerifiedSharesOnly',
     selectedShareRule: 'FirstValidSharesInCanonicalBoardOrder',
 } as const;
-const retiredGenericThresholdDecryptionProfileId = [
-    'BGV-RNS',
-    'AsyncThresholdDecryption',
-    'CPAD-v1',
-].join('-');
+const retiredKllpsCpadProfileId = 'KLLPS26-AsyncLagrangeTarget-CPAD-v1';
 
 const expectFeasibleThresholds = (rosterSize: number): void => {
     const decryptionThreshold = Math.floor((rosterSize - 1) / 3) + 1;
@@ -392,7 +388,7 @@ describe('election foundation threshold profiles', () => {
                 rosterSize: 20,
                 targetBoundShareSelectionProfile: {
                     ...targetBoundShareSelectionProfile,
-                    cpadProfileId: retiredGenericThresholdDecryptionProfileId,
+                    cpadProfileId: retiredKllpsCpadProfileId,
                 },
             }),
         ).toThrow(

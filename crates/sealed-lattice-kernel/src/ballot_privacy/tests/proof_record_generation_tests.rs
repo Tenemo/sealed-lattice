@@ -745,7 +745,7 @@ fn ballot_proof_record_generation_emits_bound_component_bundle() {
             "receiver-encryption-component": "a4".repeat(32)
         })),
         component_secret_states: Some(&component_secret_states),
-        unsafe_small_roster_acknowledged: true,
+        casual_micro_roster_acknowledged: true,
     });
 
     assert_eq!(
@@ -792,7 +792,7 @@ fn ballot_proof_record_generation_emits_bound_component_bundle() {
                 "receiver-encryption-component": "a4".repeat(32)
             })),
             component_secret_states: Some(&component_secret_states),
-            unsafe_small_roster_acknowledged: true,
+            casual_micro_roster_acknowledged: true,
         });
     assert_eq!(wrong_generation["ok"], false);
     assert_eq!(wrong_generation["unresolvedReason"], "BallotPackageInvalid");

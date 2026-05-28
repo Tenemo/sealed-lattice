@@ -238,9 +238,9 @@ describe('transcript-core kernel in Node', () => {
         };
         const claimVerification = kernel.verifyClaimBearingBallotPackage({
             ballotPackage,
-            unsafeSmallRosterAcknowledged:
+            casualMicroRosterAcknowledged:
                 proofRecordGenerationFixture.request
-                    .unsafeSmallRosterAcknowledged,
+                    .casualMicroRosterAcknowledged,
         });
 
         expect(claimVerification).toMatchObject({
@@ -265,9 +265,9 @@ describe('transcript-core kernel in Node', () => {
                     ...ballotPackage,
                     proofBytesHex: `00${String(generation.proofBytesHex).slice(2)}`,
                 },
-                unsafeSmallRosterAcknowledged:
+                casualMicroRosterAcknowledged:
                     proofRecordGenerationFixture.request
-                        .unsafeSmallRosterAcknowledged,
+                        .casualMicroRosterAcknowledged,
             }),
         ).toMatchObject({
             ok: false,

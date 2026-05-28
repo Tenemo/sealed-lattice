@@ -48,7 +48,7 @@ pub(super) fn bridge_proof_target_contract_value(
         "separateSubproofsAcceptedForClosure": false,
         "aggregateToPlaintextBindingStatus": AGGREGATE_TO_PLAINTEXT_BINDING_CHECKED_STATUS,
         "proofFriendlyPlaintextBindingRequired": true,
-        "plaintextRootProofBindingStatus": PLAINTEXT_ROOT_PROOF_BINDING_CHECKED_STATUS,
+        "plaintextCanonicalLiftProofStatus": PLAINTEXT_CANONICAL_LIFT_PROOF_MISSING_STATUS,
         "publicPlaintextRootAcceptedAsClosureEvidence": false,
         "sharedWitnessLayout": shared_witness_layout,
         "sharedWitnessLayoutHash": shared_witness_layout_hash,

@@ -207,6 +207,10 @@ fn bridge_proof_target_contract_is_variant_parametric() {
             target_contract["bgvRandomnessBoundProofStatus"],
             json!(BGV_RANDOMNESS_BOUND_PROOF_STATUS)
         );
+        assert_eq!(
+            target_contract["plaintextCanonicalLiftProofStatus"],
+            json!(PLAINTEXT_CANONICAL_LIFT_PROOF_MISSING_STATUS)
+        );
     }
 }
 
@@ -514,6 +518,27 @@ fn bridge_proof_shell_rejects_unsupported_bgv_boundedness_proof_bytes() {
         error.message.contains("bgvRandomnessBoundProofBytesHex"),
         "{error:?}"
     );
+}
+
+#[test]
+fn bridge_proof_shell_rejects_unknown_nested_shared_witness_fields() {
+    let proof_value = json!({
+        "objectType": "SealedLatticeAggregateBridgeRelationProof",
+        "bridgeSharedWitnessProof": {
+            "objectType": "AggregateBridgeSharedWitnessProof",
+            "checks": [
+                {
+                    "checkIndex": 0,
+                    "novelWitnessLeak": "not accepted"
+                }
+            ]
+        },
+        "privateMaterialDisclosure": private_material_disclosure(),
+    });
+    let error = validate_bridge_proof_public_shell(&proof_value)
+        .expect_err("unknown nested shared-witness fields should reject");
+
+    assert!(error.message.contains("novelWitnessLeak"), "{error:?}");
 }
 
 #[test]

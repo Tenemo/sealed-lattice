@@ -14,14 +14,9 @@ import {
     verifyRosterManifestTranscript,
 } from './election-foundation-test-helpers';
 
-const retiredGenericThresholdDecryptionProfileId = [
-    'BGV-RNS',
-    'AsyncThresholdDecryption',
-    'CPAD-v1',
-].join('-');
-const retiredGenericCpadProfileId = ['CPAD', 'BGV', 'AsyncThreshold-v1'].join(
-    '-',
-);
+const retiredKllpsThresholdDecryptionProfileId =
+    'BGV-RNS-KLLPS26-AsyncLagrangeTarget-v1';
+const retiredKllpsCpadProfileId = 'KLLPS26-AsyncLagrangeTarget-CPAD-v1';
 
 describe('roster and manifest shells', () => {
     it('accepts an honest registration to manifest transcript', () => {
@@ -94,7 +89,7 @@ describe('roster and manifest shells', () => {
         );
     });
 
-    it('rejects retired generic CPAD profile identifiers in claim-bearing manifests', () => {
+    it('rejects retired KLLPS CPAD profile identifiers in claim-bearing manifests', () => {
         const registrations = [
             createRegistrationEntry('participant-1', 1, 0),
             createRegistrationEntry('participant-2', 1, 1),
@@ -106,7 +101,7 @@ describe('roster and manifest shells', () => {
                 manifestOpaqueBindings: {
                     ...manifestOpaqueBindings,
                     thresholdDecryptionProfileId:
-                        retiredGenericThresholdDecryptionProfileId,
+                        retiredKllpsThresholdDecryptionProfileId,
                 },
             },
         );
@@ -115,7 +110,7 @@ describe('roster and manifest shells', () => {
             {
                 manifestOpaqueBindings: {
                     ...manifestOpaqueBindings,
-                    cpadProfileId: retiredGenericCpadProfileId,
+                    cpadProfileId: retiredKllpsCpadProfileId,
                 },
             },
         );

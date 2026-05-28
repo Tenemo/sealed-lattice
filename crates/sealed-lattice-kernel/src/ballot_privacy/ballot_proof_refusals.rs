@@ -5,7 +5,7 @@ pub(crate) fn collect_ballot_proof_refusals(
     ballot_proof: &Value,
     dynamic_roster_profile_evidence: Option<&Value>,
     claim_bearing_package: bool,
-    unsafe_small_roster_acknowledged: bool,
+    casual_micro_roster_acknowledged: bool,
 ) -> Vec<Value> {
     let mut refused_objects = Vec::new();
     let statement_digest = string_field(statement, "ballotProofStatementDigest");
@@ -45,7 +45,7 @@ pub(crate) fn collect_ballot_proof_refusals(
         statement_digest,
         dynamic_roster_profile_evidence,
         claim_bearing_package,
-        unsafe_small_roster_acknowledged,
+        casual_micro_roster_acknowledged,
     ));
 
     let receiver_public_keys = object_map(statement)
@@ -354,7 +354,7 @@ fn non_null_package_field<'a>(
 pub(crate) fn collect_claim_bearing_package_refusals(
     ballot_package: &Value,
     dynamic_roster_profile_evidence: Option<&Value>,
-    unsafe_small_roster_acknowledged: bool,
+    casual_micro_roster_acknowledged: bool,
 ) -> Vec<Value> {
     let Some(package_object) = object_map(ballot_package) else {
         return vec![structural_refusal(
@@ -377,7 +377,7 @@ pub(crate) fn collect_claim_bearing_package_refusals(
         ballot_proof,
         package_dynamic_roster_profile_evidence,
         true,
-        unsafe_small_roster_acknowledged,
+        casual_micro_roster_acknowledged,
     );
     refused_objects.extend(collect_proof_bytes_refusals(
         package_object.get("proofBytesHex").and_then(Value::as_str),

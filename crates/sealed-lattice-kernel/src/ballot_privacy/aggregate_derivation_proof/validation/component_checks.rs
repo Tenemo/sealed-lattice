@@ -30,6 +30,22 @@ pub(in crate::ballot_privacy::aggregate_derivation_proof) fn collect_aggregate_c
 
         return refused_objects;
     };
+    let Some(proof_input) = component.get("proofInput") else {
+        refused_objects.push(structural_refusal(
+            "Aggregate derivation component must include proofInput.",
+            object_hash,
+        ));
+
+        return refused_objects;
+    };
+    let Some(proof_record) = component.get("proofRecord") else {
+        refused_objects.push(structural_refusal(
+            "Aggregate derivation component must include proofRecord.",
+            object_hash,
+        ));
+
+        return refused_objects;
+    };
 
     refused_objects.extend(collect_aggregate_statement_refusals(statement, object_hash));
     refused_objects.extend(collect_aggregate_commitment_refusals(
@@ -40,6 +56,17 @@ pub(in crate::ballot_privacy::aggregate_derivation_proof) fn collect_aggregate_c
     refused_objects.extend(collect_aggregate_certificate_refusals(
         certificate,
         statement,
+        object_hash,
+    ));
+    refused_objects.extend(collect_aggregate_proof_record_refusals(
+        proof_input,
+        proof_record,
+        statement,
+        aggregate_commitment,
+        object_hash,
+    ));
+    refused_objects.extend(collect_aggregate_component_hash_refusals(
+        component,
         object_hash,
     ));
 
@@ -66,15 +93,15 @@ fn collect_aggregate_statement_refusals(
         );
     let option_count = u64_object_field(statement, "optionCount").unwrap_or(0);
     let participant_count = usize_object_field(statement, "participantCount").unwrap_or(0);
-    let unsafe_small_roster_acknowledged = statement
-        .get("unsafeSmallRosterAcknowledged")
+    let casual_micro_roster_acknowledged = statement
+        .get("casualMicroRosterAcknowledged")
         .and_then(Value::as_bool)
         .unwrap_or(false);
     let small_roster_acknowledgement_matches_policy =
         if participant_count < BALLOT_PRIVACY_MINIMUM_SAFE_PARTICIPANT_COUNT {
-            unsafe_small_roster_acknowledged
+            casual_micro_roster_acknowledged
         } else {
-            !unsafe_small_roster_acknowledged
+            !casual_micro_roster_acknowledged
         };
     let share_vector_width = usize_object_field(statement, "shareVectorWidth").unwrap_or(0);
     let expected_width = option_count.checked_mul(BALLOT_PRIVACY_ENCODED_COORDINATES_PER_OPTION);
@@ -248,6 +275,118 @@ fn collect_aggregate_certificate_refusals(
     }
 
     refused_objects
+}
+
+fn collect_aggregate_proof_record_refusals(
+    proof_input: &Value,
+    proof_record: &Value,
+    statement: &Value,
+    aggregate_commitment: &Value,
+    object_hash: Option<&str>,
+) -> Vec<Value> {
+    let mut refused_objects = Vec::new();
+    let proof_record_hash = string_field(proof_record, "aggregateDerivationProofRecordHash");
+    let expected_proof_record_hash =
+        value_without_field(proof_record, "aggregateDerivationProofRecordHash").and_then(
+            |proof_record_payload| {
+                derive_hash(
+                    "AggregateDerivationComponentHash",
+                    &json!({
+                        "proofRecord": proof_record_payload,
+                        "purpose": "aggregate-derivation-proof-record-v1"
+                    }),
+                )
+            },
+        );
+    let proof_bytes_hex = string_field(proof_input, "proofBytesHex");
+    let expected_proof_bytes_hash = proof_bytes_hex.and_then(derive_proof_bytes_hash);
+    let proof_size_bytes = proof_bytes_hex.and_then(|proof_bytes| {
+        proof_bytes
+            .len()
+            .is_multiple_of(2)
+            .then_some((proof_bytes.len() / 2) as u64)
+    });
+
+    if string_field(proof_record, "objectType") != Some("AggregateDerivationProofRecord")
+        || u64_object_field(proof_record, "objectVersion") != Some(1)
+        || proof_record_hash.is_none()
+        || expected_proof_record_hash.as_deref() != proof_record_hash
+        || string_field(proof_record, "aggregateDerivationStatementHash")
+            != string_field(statement, "aggregateDerivationStatementHash")
+        || string_field(proof_record, "aggregateShareCommitmentHash")
+            != string_field(aggregate_commitment, "aggregateShareCommitmentHash")
+        || string_field(proof_record, "componentId") != Some(AGGREGATE_DERIVATION_COMPONENT_ID)
+        || string_field(proof_input, "componentId") != Some(AGGREGATE_DERIVATION_COMPONENT_ID)
+        || string_field(proof_input, "proofStatementFormat")
+            != Some(AGGREGATE_DERIVATION_PROOF_STATEMENT_FORMAT)
+        || string_field(proof_input, "statementHash")
+            != string_field(statement, "aggregateDerivationStatementHash")
+        || string_field(proof_input, "componentProofStatementHash")
+            != string_field(proof_record, "componentProofStatementHash")
+        || expected_proof_bytes_hash.as_deref() != string_field(proof_record, "proofBytesHash")
+        || proof_size_bytes != u64_object_field(proof_record, "proofSizeBytes")
+        || string_field(proof_record, "proofRoot").is_none_or(|hash| !is_protocol_hash(hash))
+    {
+        refused_objects.push(structural_refusal(
+            "Aggregate derivation proof record or proof input is invalid.",
+            proof_record_hash.or(object_hash),
+        ));
+    }
+
+    refused_objects
+}
+
+fn collect_aggregate_component_hash_refusals(
+    component: &Value,
+    object_hash: Option<&str>,
+) -> Vec<Value> {
+    let Some(component_hash) = string_field(component, "aggregateDerivationComponentHash") else {
+        return vec![structural_refusal(
+            "Aggregate derivation component hash is missing.",
+            object_hash,
+        )];
+    };
+    let expected_component_hash =
+        value_without_field(component, "aggregateDerivationComponentHash").and_then(
+            |component_payload| {
+                derive_hash(
+                    "AggregateDerivationComponentHash",
+                    &json!({
+                        "component": component_payload,
+                        "purpose": "aggregate-derivation-component-v1"
+                    }),
+                )
+            },
+        );
+
+    if expected_component_hash.as_deref() != Some(component_hash) {
+        return vec![structural_refusal(
+            "Aggregate derivation component hash does not match its canonical payload.",
+            Some(component_hash),
+        )];
+    }
+
+    Vec::new()
+}
+
+fn derive_proof_bytes_hash(proof_bytes_hex: &str) -> Option<String> {
+    if proof_bytes_hex.is_empty()
+        || !proof_bytes_hex.len().is_multiple_of(2)
+        || !proof_bytes_hex
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return None;
+    }
+    derive_hash(
+        "ProofBytesHash",
+        &json!({
+            "objectType": "ProofBytes",
+            "objectVersion": 1,
+            "proofBytesHex": proof_bytes_hex,
+            "proofSizeBytes": proof_bytes_hex.len() / 2,
+        }),
+    )
 }
 
 fn collect_forbidden_witness_field_refusals(

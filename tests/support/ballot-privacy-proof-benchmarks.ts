@@ -602,7 +602,7 @@ export const runAggregateDerivationProofBenchmark = (input: {
                 contributorRosterPosition: 1,
                 postVotingClosedContextHash:
                     postCloseEvidence.postVotingClosedContextHash,
-                unsafeSmallRosterAcknowledged: false,
+                casualMicroRosterAcknowledged: false,
                 votingClosedBoardHeadHash: hash(
                     'aggregate-voting-closed-board-head',
                 ),

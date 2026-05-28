@@ -89,14 +89,14 @@ const collectAggregateStatementRefusals = (
             optionCount: statement.optionCount,
             participantCount: statement.participantCount,
             shareVectorWidth: statement.shareVectorWidth,
-            unsafeSmallRosterAcknowledged:
-                statement.unsafeSmallRosterAcknowledged === true,
+            casualMicroRosterAcknowledged:
+                statement.casualMicroRosterAcknowledged === true,
         }),
     );
     const smallRosterAcknowledgementMatchesPolicy =
         statement.participantCount < ballotPrivacyMinimumSafeParticipantCount
-            ? statement.unsafeSmallRosterAcknowledged === true
-            : statement.unsafeSmallRosterAcknowledged !== true;
+            ? statement.casualMicroRosterAcknowledged === true
+            : statement.casualMicroRosterAcknowledged !== true;
     if (
         statement.objectType !== 'AggregateDerivationStatement' ||
         statement.objectVersion !== 1 ||
@@ -316,7 +316,7 @@ export const verifyAggregateDerivationComponentStructure = (
         );
     }
 
-    const unsafeSmallRosterStatusLabels =
+    const casualMicroRosterStatusLabels =
         component.statement.participantCount >=
             ballotPrivacyMinimumUnsafeParticipantCount &&
         component.statement.participantCount <
@@ -330,7 +330,7 @@ export const verifyAggregateDerivationComponentStructure = (
             aggregateDerivationComponentHash: componentHash,
             backendAvailable: false,
             refusedObjects,
-            statusLabels: unsafeSmallRosterStatusLabels,
+            statusLabels: casualMicroRosterStatusLabels,
             unresolvedReason: refusedObjects[0]?.code ?? 'BallotPackageInvalid',
         };
     }
@@ -345,7 +345,7 @@ export const verifyAggregateDerivationComponentStructure = (
         aggregateDerivationComponentHash: componentHash,
         backendAvailable: false,
         refusedObjects: [],
-        statusLabels: ['pending', ...unsafeSmallRosterStatusLabels],
+        statusLabels: ['pending', ...casualMicroRosterStatusLabels],
         unresolvedReason: null,
     };
 };

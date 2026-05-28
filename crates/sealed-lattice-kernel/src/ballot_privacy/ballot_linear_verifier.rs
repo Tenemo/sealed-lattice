@@ -23,7 +23,7 @@ pub(crate) struct BallotProofVerificationInputs<'a> {
     pub(crate) component_proof_bundle: Option<&'a Value>,
     pub(crate) dynamic_roster_profile_evidence: Option<&'a Value>,
     pub(crate) component_proof_verification_mode: ComponentProofVerificationMode,
-    pub(crate) unsafe_small_roster_acknowledged: bool,
+    pub(crate) casual_micro_roster_acknowledged: bool,
 }
 
 pub(crate) struct BallotProofVerificationRequest<'a> {
@@ -55,14 +55,10 @@ impl<'a> BallotProofVerificationRequest<'a> {
                 proof_encoding: object_map(request).and_then(|object| object.get("proofEncoding")),
                 public_randomness_hex: string_field(request, "publicRandomnessHex"),
                 component_proof_verification_mode: ComponentProofVerificationMode::VerifyBackend,
-                unsafe_small_roster_acknowledged: object_map(request)
-                    .and_then(|object| object.get("unsafeSmallRosterAcknowledged"))
+                casual_micro_roster_acknowledged: object_map(request)
+                    .and_then(|object| object.get("casualMicroRosterAcknowledged"))
                     .and_then(Value::as_bool)
-                    == Some(true)
-                    || object_map(request)
-                        .and_then(|object| object.get("casualMicroRosterAcknowledged"))
-                        .and_then(Value::as_bool)
-                        == Some(true),
+                    == Some(true),
             },
         })
     }
@@ -378,7 +374,7 @@ pub(crate) fn verify_ballot_proof(
         ballot_proof,
         backend_inputs.dynamic_roster_profile_evidence,
         false,
-        backend_inputs.unsafe_small_roster_acknowledged,
+        backend_inputs.casual_micro_roster_acknowledged,
     );
     refused_objects.extend(collect_proof_bytes_refusals(
         backend_inputs.proof_bytes_hex,

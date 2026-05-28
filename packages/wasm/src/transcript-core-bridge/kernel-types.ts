@@ -34,7 +34,7 @@ import type {
     BgvPassiveSetupVerification,
     BgvProfileRejection,
     BgvReferenceOracleRejection,
-    BgvRnsProfileReport,
+    BgvRnsProfileDescription,
 } from './kernel-types/bgv.js';
 
 export type {
@@ -64,7 +64,7 @@ export type {
     BgvPassiveSetupVerification,
     BgvProfileRejection,
     BgvReferenceOracleRejection,
-    BgvRnsProfileReport,
+    BgvRnsProfileDescription,
 } from './kernel-types/bgv.js';
 export type TranscriptCoreKernelSharePoint = {
     readonly rosterPosition: number;
@@ -169,7 +169,6 @@ export type TranscriptCoreKernel = {
         >;
         readonly componentSecretStates?: Readonly<Record<string, unknown>>;
         readonly casualMicroRosterAcknowledged?: boolean;
-        readonly unsafeSmallRosterAcknowledged?: boolean;
     }): BallotPrivacyProofGeneration;
     verifyBallotProof(input: {
         readonly ballotProof: unknown;
@@ -184,13 +183,11 @@ export type TranscriptCoreKernel = {
         readonly publicRandomnessHex?: string;
         readonly statement: unknown;
         readonly casualMicroRosterAcknowledged?: boolean;
-        readonly unsafeSmallRosterAcknowledged?: boolean;
     }): BallotPrivacyKernelVerification;
     verifyClaimBearingBallotPackage(input: {
         readonly ballotPackage: unknown;
         readonly dynamicRosterProfileEvidence?: unknown;
         readonly casualMicroRosterAcknowledged?: boolean;
-        readonly unsafeSmallRosterAcknowledged?: boolean;
     }): BallotPrivacyKernelVerification;
     generateAggregateDerivationProof(input: {
         readonly proofInput: unknown;
@@ -203,7 +200,6 @@ export type TranscriptCoreKernel = {
         readonly contributorActionContext: unknown;
         readonly countedBallotPackages?: readonly unknown[];
         readonly casualMicroRosterAcknowledged?: boolean;
-        readonly unsafeSmallRosterAcknowledged?: boolean;
     }): BallotPrivacyKernelVerification;
     generateAggregateBridgeEncryption(input: {
         readonly aggregateSelectionPolicyHash: ProtocolHash;
@@ -233,9 +229,8 @@ export type TranscriptCoreKernel = {
         readonly heParamHash: ProtocolHash;
         readonly setupPackage: unknown;
     }): AggregateBridgeEncryptionVerification | BallotPrivacyKernelVerification;
-    describeBgvRnsProfile(): BgvRnsProfileReport;
+    describeBgvRnsProfile(): BgvRnsProfileDescription;
     describeBgvOperationRegistry(): unknown;
-    generateBgvBackendReport(): unknown;
     describeBgvPassiveSetupObjectModel(): unknown;
     generateBgvPassiveSetup(input: {
         readonly ceremonyId: string;
@@ -401,7 +396,6 @@ type TranscriptCoreKernelCommand =
           >;
           readonly componentSecretStates?: Readonly<Record<string, unknown>>;
           readonly casualMicroRosterAcknowledged?: boolean;
-          readonly unsafeSmallRosterAcknowledged?: boolean;
       }
     | {
           readonly command: 'VerifyBallotProof';
@@ -417,14 +411,12 @@ type TranscriptCoreKernelCommand =
           readonly publicRandomnessHex?: string;
           readonly statement: unknown;
           readonly casualMicroRosterAcknowledged?: boolean;
-          readonly unsafeSmallRosterAcknowledged?: boolean;
       }
     | {
           readonly command: 'VerifyClaimBearingBallotPackage';
           readonly ballotPackage: unknown;
           readonly dynamicRosterProfileEvidence?: unknown;
           readonly casualMicroRosterAcknowledged?: boolean;
-          readonly unsafeSmallRosterAcknowledged?: boolean;
       }
     | {
           readonly command: 'GenerateAggregateDerivationProof';
@@ -439,7 +431,6 @@ type TranscriptCoreKernelCommand =
           readonly contributorActionContext: unknown;
           readonly countedBallotPackages?: readonly unknown[];
           readonly casualMicroRosterAcknowledged?: boolean;
-          readonly unsafeSmallRosterAcknowledged?: boolean;
       }
     | {
           readonly command: 'GenerateAggregateBridgeEncryption';
@@ -481,9 +472,6 @@ type TranscriptCoreKernelCommand =
     | {
           readonly command: 'ValidateBgvEvaluatorOperation';
           readonly operation: string;
-      }
-    | {
-          readonly command: 'GenerateBgvBackendReport';
       }
     | {
           readonly command: 'DescribeBgvPassiveSetupObjectModel';

@@ -566,7 +566,7 @@ export type AggregateDerivationStatement = {
     readonly encodedAggregateLayoutHash: ProtocolHash;
     readonly optionCount: number;
     readonly participantCount: number;
-    readonly unsafeSmallRosterAcknowledged?: true;
+    readonly casualMicroRosterAcknowledged?: true;
     readonly shareVectorWidth: number;
     readonly canonicalTurnout: number;
     readonly proofProfileId: string;

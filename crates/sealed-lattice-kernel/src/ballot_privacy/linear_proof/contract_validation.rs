@@ -34,7 +34,7 @@ pub(crate) fn collect_supported_ballot_privacy_dimension_refusals(
     object_hash: Option<&str>,
     dynamic_roster_profile_evidence: Option<&Value>,
     claim_bearing_package: bool,
-    unsafe_small_roster_acknowledged: bool,
+    casual_micro_roster_acknowledged: bool,
 ) -> Vec<Value> {
     let mut refused_objects = Vec::new();
     let option_count = unsigned_integer_field(statement, "optionCount");
@@ -74,7 +74,7 @@ pub(crate) fn collect_supported_ballot_privacy_dimension_refusals(
                 "Claim-bearing ballot privacy proof statements must use at least ten frozen participants.",
                 object_hash,
             ));
-        } else if !unsafe_small_roster_acknowledged {
+        } else if !casual_micro_roster_acknowledged {
             refused_objects.push(structural_refusal(
                 "Ballot privacy proof statements with three to nine participants require explicit casual micro-roster acknowledgement.",
                 object_hash,

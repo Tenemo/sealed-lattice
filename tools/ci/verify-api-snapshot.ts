@@ -255,7 +255,7 @@ const formatMismatch = (
     );
 
     return [
-        'Public API snapshot is out of date. Run `pnpm run api:report` after intentional public SDK API changes.',
+        'Public API snapshot is out of date. Run `pnpm run api-surface:update` after intentional public SDK API changes.',
         '',
         `Expected declaration hash: ${expectedSnapshot.declarationHash}`,
         `Actual declaration hash:   ${actualSnapshot.declarationHash}`,
@@ -281,7 +281,7 @@ const readExpectedSnapshot = async (): Promise<ApiSnapshot> => {
         ) as ApiSnapshot;
     } catch (error) {
         if (hasNodeErrorCode(error) && error.code === 'ENOENT') {
-            error.message = `Missing public API snapshot. Run \`pnpm run api:report\` to create packages/sdk/api-snapshot.json. ${error.message}`;
+            error.message = `Missing public API snapshot. Run \`pnpm run api-surface:update\` to create packages/sdk/api-snapshot.json. ${error.message}`;
             throw error;
         }
 

@@ -1,23 +1,17 @@
-import path from 'path';
-import { fileURLToPath } from 'url';
-
-import { FlatCompat } from '@eslint/eslintrc';
 import eslintJs from '@eslint/js';
+import typescriptEslintPlugin from '@typescript-eslint/eslint-plugin';
+import * as typescriptParser from '@typescript-eslint/parser';
 import { createTypeScriptImportResolver } from 'eslint-import-resolver-typescript';
-import { createNodeResolver } from 'eslint-plugin-import-x';
+import {
+    createNodeResolver,
+    flatConfigs as importFlatConfigs,
+} from 'eslint-plugin-import-x';
 import errorOnlyPlugin from 'eslint-plugin-only-error';
 import prettierPluginRecommended from 'eslint-plugin-prettier/recommended';
 import globals from 'globals';
 
 const OFF = 0;
 const ERROR = 2;
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-const compat = new FlatCompat({
-    baseDirectory: __dirname,
-});
 
 const projectPaths = [
     './tsconfig.tools.json',
@@ -27,20 +21,82 @@ const projectPaths = [
 
 /** @type {import('eslint').Linter.FlatConfig[]} */
 const config = [
-    ...compat.config({
-        extends: ['plugin:import-x/errors', 'plugin:import-x/warnings'],
-        parser: '@typescript-eslint/parser',
-        parserOptions: {
-            parser: '@typescript-eslint/parser',
-            sourceType: 'module',
-            ecmaFeatures: {
-                jsx: true,
-            },
-            project: projectPaths,
-            noWarnOnMultipleProjects: true,
-            ecmaVersion: 2021,
+    importFlatConfigs.errors,
+    importFlatConfigs.warnings,
+    importFlatConfigs.typescript,
+    ...typescriptEslintPlugin.configs['flat/recommended-type-checked'],
+    ...typescriptEslintPlugin.configs['flat/stylistic-type-checked'],
+    prettierPluginRecommended,
+    {
+        files: ['**/*.js', '**/*.jsx', '**/*.ts', '**/*.tsx', '**/*.mjs'],
+        rules: {
+            ...eslintJs.configs.recommended.rules,
+            'arrow-parens': [ERROR, 'always', { requireForBlockBody: false }],
+            'no-redeclare': OFF,
+            'no-restricted-exports': OFF,
+            'no-restricted-properties': [
+                ERROR,
+                {
+                    object: 'Math',
+                    property: 'random',
+                    message:
+                        'Use the project crypto-backed randomness helpers instead.',
+                },
+            ],
+            'no-shadow': OFF,
+            'no-undef': OFF,
+            'no-unused-vars': OFF,
+            '@typescript-eslint/no-use-before-define': ERROR,
+            '@typescript-eslint/no-shadow': ERROR,
+            '@typescript-eslint/explicit-module-boundary-types': ERROR,
+            '@typescript-eslint/unbound-method': ERROR,
+            '@typescript-eslint/explicit-function-return-type': [
+                ERROR,
+                {
+                    allowExpressions: true,
+                    allowTypedFunctionExpressions: true,
+                },
+            ],
+            '@typescript-eslint/consistent-type-definitions': ['error', 'type'],
+            'prettier/prettier': [
+                ERROR,
+                {
+                    useTabs: false,
+                    semi: true,
+                    singleQuote: true,
+                    jsxSingleQuote: false,
+                    trailingComma: 'all',
+                    arrowParens: 'always',
+                    endOfLine: 'lf',
+                },
+            ],
+            'import-x/no-extraneous-dependencies': [
+                ERROR,
+                { devDependencies: true },
+            ],
+            'import-x/prefer-default-export': OFF,
+            'import-x/extensions': [
+                ERROR,
+                'ignorePackages',
+                {
+                    js: 'never',
+                    jsx: 'never',
+                    ts: 'never',
+                    tsx: 'never',
+                },
+            ],
+            'import-x/order': [
+                ERROR,
+                {
+                    'newlines-between': 'always',
+                    alphabetize: { order: 'asc', caseInsensitive: true },
+                    pathGroupsExcludedImportTypes: ['builtin'],
+                },
+            ],
         },
-        plugins: ['only-error'],
+        plugins: {
+            'only-error': errorOnlyPlugin,
+        },
         settings: {
             react: {
                 version: 'detect',
@@ -95,79 +151,20 @@ const config = [
                 }),
             ],
         },
-    }),
-    prettierPluginRecommended,
-    {
-        files: ['**/*.js', '**/*.jsx', '**/*.ts', '**/*.tsx', '**/*.mjs'],
-        rules: {
-            ...eslintJs.configs.recommended.rules,
-            'arrow-parens': [ERROR, 'always', { requireForBlockBody: false }],
-            'no-restricted-exports': OFF,
-            'no-restricted-properties': [
-                ERROR,
-                {
-                    object: 'Math',
-                    property: 'random',
-                    message:
-                        'Use the project crypto-backed randomness helpers instead.',
-                },
-            ],
-            'no-shadow': OFF,
-            '@typescript-eslint/no-use-before-define': ERROR,
-            '@typescript-eslint/no-shadow': ERROR,
-            '@typescript-eslint/explicit-module-boundary-types': ERROR,
-            '@typescript-eslint/unbound-method': ERROR,
-            '@typescript-eslint/explicit-function-return-type': [
-                ERROR,
-                {
-                    allowExpressions: true,
-                    allowTypedFunctionExpressions: true,
-                },
-            ],
-            '@typescript-eslint/consistent-type-definitions': ['error', 'type'],
-            'prettier/prettier': [
-                ERROR,
-                {
-                    useTabs: false,
-                    semi: true,
-                    singleQuote: true,
-                    jsxSingleQuote: false,
-                    trailingComma: 'all',
-                    arrowParens: 'always',
-                    endOfLine: 'lf',
-                },
-            ],
-            'import-x/no-extraneous-dependencies': [
-                ERROR,
-                { devDependencies: true },
-            ],
-            'import-x/prefer-default-export': OFF,
-            'import-x/extensions': [
-                ERROR,
-                'ignorePackages',
-                {
-                    js: 'never',
-                    jsx: 'never',
-                    ts: 'never',
-                    tsx: 'never',
-                },
-            ],
-            'import-x/order': [
-                ERROR,
-                {
-                    'newlines-between': 'always',
-                    alphabetize: { order: 'asc', caseInsensitive: true },
-                    pathGroupsExcludedImportTypes: ['builtin'],
-                },
-            ],
-        },
-        plugins: {
-            'only-error': errorOnlyPlugin,
-        },
         linterOptions: {
             reportUnusedDisableDirectives: true,
         },
         languageOptions: {
+            parser: typescriptParser,
+            parserOptions: {
+                sourceType: 'module',
+                ecmaFeatures: {
+                    jsx: true,
+                },
+                project: projectPaths,
+                noWarnOnMultipleProjects: true,
+                ecmaVersion: 2021,
+            },
             globals: {
                 ...globals.browser,
                 ...globals.node,
@@ -182,29 +179,50 @@ const config = [
             'import-x/no-unresolved': OFF,
         },
     },
-    ...compat.config({
-        extends: [
-            'plugin:@typescript-eslint/recommended-requiring-type-checking',
-            'plugin:@typescript-eslint/stylistic-type-checked',
-            'plugin:import-x/typescript',
-        ],
-        overrides: [
-            {
-                files: ['**/*.mjs', '**/*.js'],
-                rules: {
-                    '@typescript-eslint/no-unsafe-assignment': OFF,
-                    '@typescript-eslint/no-unsafe-member-access': OFF,
-                    '@typescript-eslint/no-unsafe-call': OFF,
+    {
+        files: ['**/*.cjs', '**/*.cts', '**/*.mts'],
+        languageOptions: {
+            parser: typescriptParser,
+            parserOptions: {
+                sourceType: 'module',
+                ecmaFeatures: {
+                    jsx: true,
                 },
+                project: projectPaths,
+                noWarnOnMultipleProjects: true,
+                ecmaVersion: 2021,
             },
-        ],
-    }),
+            globals: {
+                ...globals.node,
+                ...globals.es2021,
+                ...globals.commonjs,
+            },
+        },
+    },
+    {
+        files: ['**/*.cjs', '**/*.js', '**/*.mjs', '**/*.mts'],
+        rules: {
+            '@typescript-eslint/no-unsafe-assignment': OFF,
+            '@typescript-eslint/no-unsafe-member-access': OFF,
+            '@typescript-eslint/no-unsafe-call': OFF,
+        },
+    },
     {
         files: ['packages/*/tests/**/*.ts', 'tests/**/*.ts'],
         languageOptions: {
             parserOptions: {
                 project: './tsconfig.tools.json',
             },
+        },
+        rules: {
+            'import-x/no-extraneous-dependencies': [
+                ERROR,
+                {
+                    devDependencies: true,
+                    // Vitest resolves this package name to the built public SDK entry point for public-package tests.
+                    whitelist: ['sealed-lattice'],
+                },
+            ],
         },
     },
     {

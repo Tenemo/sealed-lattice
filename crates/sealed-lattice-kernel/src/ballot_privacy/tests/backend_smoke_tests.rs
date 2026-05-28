@@ -37,7 +37,7 @@ pub(super) fn ballot_proof_backend_inputs<'a>(
         proof_encoding: parts.proof_encoding,
         public_randomness_hex: parts.public_randomness_hex,
         component_proof_verification_mode: super::ComponentProofVerificationMode::VerifyBackend,
-        unsafe_small_roster_acknowledged: false,
+        casual_micro_roster_acknowledged: false,
     }
 }
 

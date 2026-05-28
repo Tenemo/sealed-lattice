@@ -13,7 +13,7 @@ describe('transcript-core fixtures', () => {
         await expect(
             verifyTranscriptCoreFixture(replayFixture.fixture),
         ).resolves.toEqual({
-            caseName: 'fully-verified-development-integration-transcript-core',
+            caseName: 'fully-verified-passive-mhe-prototype-transcript-core',
             label: 'TranscriptCoreVerified',
             objectHash512: replayFixture.fixture.expectedObjectHash512,
             chunkRoot: replayFixture.fixture.expectedChunkRoot,

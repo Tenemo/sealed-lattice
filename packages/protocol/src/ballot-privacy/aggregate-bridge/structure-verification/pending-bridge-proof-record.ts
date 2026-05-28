@@ -289,6 +289,9 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
         hwangPiopStatus: 'DeferredUntilSealedLatticeBgvRnsProfileFreeze',
         level: bridgeEncryptionEvidence.level,
         manifestHash: statement.manifestHash,
+        aggregateDerivationVerificationScope:
+            'AggregateDerivationFullVerificationPreconditionNotBound',
+        plaintextCanonicalLiftProofStatus: 'PlaintextCanonicalLiftProofMissing',
         plaintextRoot: bridgeEncryptionEvidence.plaintextRoot,
         pollSpecHash: statement.pollSpecHash,
         postVotingClosedContextHash: statement.postVotingClosedContextHash,
@@ -329,9 +332,29 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
         'checked bridge proof status',
     );
     requireMatchingValue(
+        bridgeEncryptionEvidence.aggregateDerivationVerificationScope,
+        'AggregateDerivationFullVerificationPreconditionNotBound',
+        'aggregate derivation verification scope',
+    );
+    requireMatchingValue(
+        bridgeEncryptionEvidence.plaintextCanonicalLiftProofStatus,
+        'PlaintextCanonicalLiftProofMissing',
+        'plaintext canonical lift proof status',
+    );
+    requireMatchingValue(
         input.bridgeEvidenceVerification.bridgeEvidenceVerificationStatus,
         'BridgeProofEvidenceChecked',
         'bridge evidence verification label',
+    );
+    requireMatchingValue(
+        input.bridgeEvidenceVerification.aggregateDerivationVerificationScope,
+        'AggregateDerivationFullVerificationPreconditionNotBound',
+        'verified aggregate derivation verification scope',
+    );
+    requireMatchingValue(
+        input.bridgeEvidenceVerification.plaintextCanonicalLiftProofStatus,
+        'PlaintextCanonicalLiftProofMissing',
+        'verified plaintext canonical lift proof status',
     );
     requireMatchingValue(
         bridgeEncryptionEvidence.aggregateDerivationComponentHash,

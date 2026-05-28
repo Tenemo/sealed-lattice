@@ -269,7 +269,7 @@ const createAggregateComponentForContributor = (input: {
     readonly kernel: TranscriptCoreKernel;
     readonly postVotingClosedContextHash: ProtocolHash;
     readonly proverRandomnessHex: string;
-    readonly unsafeSmallRosterAcknowledged: boolean;
+    readonly casualMicroRosterAcknowledged: boolean;
     readonly votingClosedBoardHeadHash: ProtocolHash;
     readonly witness: AggregateDerivationWitnessInput;
 }): AggregateDerivationComponent => {
@@ -376,8 +376,8 @@ const createAggregateComponentForContributor = (input: {
         shareCommitmentProfileHash: statement.shareCommitmentProfileHash,
         shareVectorWidth: statement.shareVectorWidth,
         thresholdProfileHash: statement.thresholdProfileHash,
-        ...(input.unsafeSmallRosterAcknowledged
-            ? { unsafeSmallRosterAcknowledged: true as const }
+        ...(input.casualMicroRosterAcknowledged
+            ? { casualMicroRosterAcknowledged: true as const }
             : {}),
         votingClosedBoardHeadHash: input.votingClosedBoardHeadHash,
     };
@@ -435,7 +435,7 @@ export const createContribution = (input: {
     readonly heParamHash: ProtocolHash;
     readonly kernel: TranscriptCoreKernel;
     readonly setupPackage: Record<string, unknown>;
-    readonly unsafeSmallRosterAcknowledged: boolean;
+    readonly casualMicroRosterAcknowledged: boolean;
     readonly variant: Variant;
 }): ContributionBuild => {
     const statement = input.ballotPackage.ballotProofStatement;
@@ -481,7 +481,7 @@ export const createContribution = (input: {
             kernel: input.kernel,
             postVotingClosedContextHash,
             proverRandomnessHex: '66'.repeat(32),
-            unsafeSmallRosterAcknowledged: input.unsafeSmallRosterAcknowledged,
+            casualMicroRosterAcknowledged: input.casualMicroRosterAcknowledged,
             votingClosedBoardHeadHash: lowerHexHash('closed-board-head'),
             witness: aggregateWitness,
         },

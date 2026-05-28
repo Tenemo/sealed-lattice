@@ -138,7 +138,7 @@ describe('ballot proof record generation input', () => {
                 microRosterFixture.request.casualMicroRosterAcknowledged,
             ).toBe(true);
             expect(
-                microRosterFixture.request.unsafeSmallRosterAcknowledged,
+                microRosterFixture.request.casualMicroRosterAcknowledged,
             ).toBe(true);
             expect(
                 receiverEncryptionStatementForRoster.receiverRows,

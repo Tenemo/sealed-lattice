@@ -419,11 +419,11 @@ const createBallotProofRecordGenerationFixtureWithOptions = (
                   casualMicroRosterAcknowledged:
                       options.casualMicroRosterAcknowledged,
               }),
-        ...(options.unsafeSmallRosterAcknowledged === undefined
+        ...(options.casualMicroRosterAcknowledged === undefined
             ? {}
             : {
-                  unsafeSmallRosterAcknowledged:
-                      options.unsafeSmallRosterAcknowledged,
+                  casualMicroRosterAcknowledged:
+                      options.casualMicroRosterAcknowledged,
               }),
     };
 
@@ -455,7 +455,6 @@ export const createMicroRosterBallotProofRecordGenerationFixture = (
         casualMicroRosterAcknowledged: true,
         relationInput: casualMicroRosterRelationInput(rosterSize),
         topOptionCount: 2,
-        unsafeSmallRosterAcknowledged: true,
     });
 
 export const createBallotProofRecordGenerationFixture =
@@ -477,7 +476,6 @@ export const createVariantBallotProofRecordGenerationFixture = (input: {
         casualMicroRosterAcknowledged: input.rosterSize < 10 ? true : undefined,
         relationInput: variantRelationInput(input),
         topOptionCount: input.optionCount,
-        unsafeSmallRosterAcknowledged: input.rosterSize < 10 ? true : undefined,
     });
 
 export const createMandatoryProfileBallotProofRecordBenchmarkFixture =

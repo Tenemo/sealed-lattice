@@ -168,7 +168,8 @@ export const deriveBridgeProofTargetContractHash = (input: {
             plaintextCoefficientCount: bridgePlaintextCoefficientCount,
             plaintextEncodingRelation:
                 'BGVBatchEncode65537InverseNegacyclicNtt',
-            plaintextRootProofBindingStatus: 'PlaintextRootProofBindingChecked',
+            plaintextCanonicalLiftProofStatus:
+                'PlaintextCanonicalLiftProofMissing',
             polynomialDegree: bridgePlaintextCoefficientCount,
             proofFriendlyPlaintextBindingRequired: true,
             proofBackend: 'SealedLatticeBridgeRelation',
@@ -240,6 +241,8 @@ export const deriveBridgeProofStatementHash = (input: {
     readonly hwangPiopStatus: 'DeferredUntilSealedLatticeBgvRnsProfileFreeze';
     readonly level: number;
     readonly manifestHash: ProtocolHash;
+    readonly aggregateDerivationVerificationScope: 'AggregateDerivationFullVerificationPreconditionNotBound';
+    readonly plaintextCanonicalLiftProofStatus: 'PlaintextCanonicalLiftProofMissing';
     readonly plaintextRoot: ProtocolHash;
     readonly pollSpecHash: ProtocolHash;
     readonly postVotingClosedContextHash: ProtocolHash;

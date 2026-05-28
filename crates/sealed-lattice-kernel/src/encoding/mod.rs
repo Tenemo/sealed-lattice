@@ -320,7 +320,6 @@ enum TranscriptCoreCommand {
     EvaluateAggregateBridgeRelation,
     DescribeBgvRnsProfile,
     DescribeBgvOperationRegistry,
-    GenerateBgvBackendReport,
     ValidateBgvEvaluatorOperation,
     DescribeBgvPassiveSetupObjectModel,
     GenerateBgvPassiveSetup,
@@ -509,7 +508,6 @@ fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult<Value> {
         }
         TranscriptCoreCommand::DescribeBgvRnsProfile
         | TranscriptCoreCommand::DescribeBgvOperationRegistry
-        | TranscriptCoreCommand::GenerateBgvBackendReport
         | TranscriptCoreCommand::ValidateBgvEvaluatorOperation
         | TranscriptCoreCommand::DescribeBgvPassiveSetupObjectModel
         | TranscriptCoreCommand::GenerateBgvPassiveSetup
@@ -591,20 +589,16 @@ fn run_ballot_privacy_command(
                     "ballotPackage is required",
                 )
             })?;
-            let unsafe_small_roster_acknowledged = request
-                .get("unsafeSmallRosterAcknowledged")
+            let casual_micro_roster_acknowledged = request
+                .get("casualMicroRosterAcknowledged")
                 .and_then(Value::as_bool)
-                == Some(true)
-                || request
-                    .get("casualMicroRosterAcknowledged")
-                    .and_then(Value::as_bool)
-                    == Some(true);
+                == Some(true);
             let dynamic_roster_profile_evidence = request.get("dynamicRosterProfileEvidence");
 
             Ok(crate::ballot_privacy::verify_claim_bearing_ballot_package(
                 ballot_package,
                 dynamic_roster_profile_evidence,
-                unsafe_small_roster_acknowledged,
+                casual_micro_roster_acknowledged,
             ))
         }
         TranscriptCoreCommand::GenerateAggregateDerivationProof => Ok(
@@ -637,9 +631,6 @@ fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> Canonical
         }
         TranscriptCoreCommand::DescribeBgvOperationRegistry => {
             crate::bgv::commands::describe_bgv_operation_registry()
-        }
-        TranscriptCoreCommand::GenerateBgvBackendReport => {
-            crate::bgv::commands::generate_bgv_backend_report()
         }
         TranscriptCoreCommand::ValidateBgvEvaluatorOperation => {
             crate::bgv::commands::validate_bgv_evaluator_operation_from_request(request)

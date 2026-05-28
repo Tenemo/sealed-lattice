@@ -88,19 +88,6 @@ pub(crate) fn inverse_mod(value: u64, modulus: u64) -> CanonicalResult<u64> {
     Ok(normalized as u64)
 }
 
-pub(crate) fn centered_representative(value: u64, modulus: u64) -> CanonicalResult<i128> {
-    validate_modulus(modulus)?;
-    if value >= modulus {
-        return Err(out_of_range_error());
-    }
-    let half = modulus / 2;
-    if value <= half {
-        Ok(i128::from(value))
-    } else {
-        Ok(i128::from(value) - i128::from(modulus))
-    }
-}
-
 fn validate_modulus(modulus: u64) -> CanonicalResult<()> {
     if modulus <= 1 {
         return Err(CanonicalError::new(
@@ -140,7 +127,7 @@ pub(crate) fn is_prime_for_tests(value: u64) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{add_mod, centered_representative, inverse_mod, mul_mod, pow_mod, sub_mod};
+    use super::{add_mod, inverse_mod, mul_mod, pow_mod, sub_mod};
     use crate::bgv::profile::{DATA_PRIMES, SPECIAL_PRIME};
 
     #[test]
@@ -161,15 +148,6 @@ mod tests {
                 mul_mod(5, inverse_mod(5, modulus).expect("inverse"), modulus).expect("mul"),
                 1
             );
-            assert_eq!(centered_representative(0, modulus).expect("center"), 0);
-            assert_eq!(
-                centered_representative(modulus - 1, modulus).expect("center"),
-                -1
-            );
-            assert_eq!(
-                centered_representative((modulus / 2) + 1, modulus).expect("center"),
-                i128::from((modulus / 2) + 1) - i128::from(modulus)
-            );
         }
     }
 
@@ -182,7 +160,6 @@ mod tests {
             assert!(pow_mod(modulus, 2, modulus).is_err());
             assert!(inverse_mod(0, modulus).is_err());
             assert!(inverse_mod(modulus, modulus).is_err());
-            assert!(centered_representative(modulus, modulus).is_err());
         }
     }
 }

@@ -38,7 +38,7 @@ Several protocol components exist only as workspace-internal implementation, tes
 - plaintext `GF(65537)` arithmetic, Shamir interpolation, top-k tallying, and sparse target fixtures;
 - deterministic PVSS ballot-algebra helpers used for regression tests;
 - ballot privacy profile, relation, proof-record, receiver-key proof, and scoped relation package shell infrastructure;
-- M7 sealed-lattice Rust/WASM BGV-RNS profile, selected-prime arithmetic, RNS coefficient objects, NTT/INTT, plaintext-lifted base conversion, `BGVBatchEncode_65537`, canonical plaintext/ciphertext roots, object validation, allowed-operation registry, and report commands for the encrypted aggregate path;
+- M7 sealed-lattice Rust/WASM BGV-RNS profile, selected-prime arithmetic, RNS coefficient objects, NTT/INTT, plaintext-lifted base conversion, `BGVBatchEncode_65537`, canonical plaintext/ciphertext roots, object validation, and allowed-operation registry for the encrypted aggregate path;
 - Rust/WASM transcript-core commands used to keep TypeScript and native canonicalization behavior aligned;
 - offline proof-oracle comparison tooling, development-only Lattigo oracle tooling, and generated public test vectors.
 
@@ -60,8 +60,8 @@ Implemented internally:
 - scoped relation-bearing ballot package verification that recomputes the package digest, requires accepted receiver-key proof root evidence, checks receiver coverage, rejects witness leakage, binds the full ballot relation to the supplied component bundle, and verifies the top-level and component proof bytes;
 - aggregate derivation statements and components that bind a canonical post-close counted set of proof-byte-bearing package shells, voting-closed close-record evidence, contributor action context, contributor identity, homomorphic aggregate share commitment, full encoded share layout, no-wraparound certificate, and Rust/WASM proof bytes for hidden aggregate opening knowledge. Component verification reruns the counted packages through the accepted M5 Rust/WASM package verifier, recomputes the aggregate package references, ballot-set digest, and public aggregate commitment sum, and rejects public leakage of aggregate histograms, exact aggregate scores, aggregate score bits, plaintext comparison inputs, and raw aggregate witnesses;
 - native and WASM verification of public vectors for the supported internal linear proof slices and full encoded-score package path.
-- M7 BGV-RNS backend evidence is implemented internally for the selected encrypted aggregate path: `N = 32768`, `p = 65537`, 16 selected 47-bit data primes, one 47-bit special prime, coefficient-domain canonical RNS objects, `PlaintextRoot`, `CiphertextRoot`, `BGVProfileDigest`, `BGVBatchEncoderDigest`, allowed evaluator-operation registry, and M6-to-M7 encrypted aggregate TargetBasisData layout/report bindings. This is backend and encoding evidence only, not setup, bridge closure, evaluator closure, decryption, CPAD, mobile certification, or active-malicious closure.
-- M9 internal representative-path evidence exists for witness-clean bridge objects, private Rust/WASM bridge plaintext assembly, collective-key bridge encryption generation, checked relation verification, checked proof-record/contribution assembly, and aggregate-ready handoff helpers. M9 is not closed: the public SDK verifier remains fail-closed, M9.5 claim closure remains open, full 342-row matrix evidence and complete negative coverage remain open, and closure labels remain unavailable.
+- M7 BGV-RNS backend evidence is implemented internally for the selected encrypted aggregate path: `N = 32768`, `p = 65537`, 16 selected 47-bit data primes, one 47-bit special prime, coefficient-domain canonical RNS objects, `PlaintextRoot`, `CiphertextRoot`, `BGVProfileDigest`, `BGVBatchEncoderDigest`, allowed evaluator-operation registry, and M6-to-M7 encrypted aggregate layout/profile bindings. This is backend and encoding evidence only, not setup, bridge closure, evaluator closure, decryption, CPAD, mobile certification, or active-malicious closure.
+- M9 internal representative-path evidence exists for witness-clean bridge objects, private Rust/WASM bridge plaintext assembly, collective-key development ciphertext-equation generation, checked relation verification, checked proof-record/contribution assembly, and aggregate-ready handoff helpers. M9 is not closed: the public SDK verifier remains fail-closed, plaintext canonical-lift proof status remains `PlaintextCanonicalLiftProofMissing`, deterministic caller-supplied prover randomness is development/test-only and not public entropy evidence, standalone bridge verification records that full M6 verification is a precondition, M9.5 claim closure remains open, full 342-row matrix evidence and complete negative coverage remain open, and closure labels remain unavailable.
 
 Still unavailable:
 
@@ -121,7 +121,7 @@ Run the main CI-equivalent check:
 pnpm run check
 ```
 
-`pnpm run check` builds first, then runs the static gate. Use `pnpm run check:static` after an explicit build when you only need lint, TypeScript, Rust, public API snapshot, package policy, package-boundary, vector, and dead-code checks.
+`pnpm run check` runs lint, TypeScript, public API snapshot, package build, public package policy, package-boundary, vector, dead-code, Rust format, Rust clippy, and Rust test verification.
 
 Run targeted verification:
 
@@ -140,7 +140,14 @@ pnpm run test:proof-benchmark:browser:mobile:throttled
 pnpm run verify:docs
 ```
 
-The pre-commit test command runs the fast Node project plus desktop and mobile browser Vitest projects against already built output. The default Node test command runs the fast Node project plus the heavy protocol and kernel projects. The Node coverage command covers the fast Node project only; heavy protocol, kernel, and proof-benchmark flows still run through their explicit non-coverage lanes. The proof benchmark command builds once, then runs the Node and desktop Chromium benchmark projects sequentially to avoid benchmark worker memory contention on one machine. Use the individual proof-benchmark commands on separate CI workers when parallel resources are available. The mobile proof benchmark is throttled-only and manual-only through `pnpm run test:proof-benchmark:browser:mobile:throttled`.
+The pre-commit hook runs these commands directly:
+
+```bash
+pnpm run check
+pnpm exec vitest --project node --project browser-desktop --project browser-mobile --run
+```
+
+The default Node test command runs the fast Node project plus the heavy protocol and kernel projects. The Node coverage command covers the fast Node project only; heavy protocol, kernel, and proof-benchmark flows still run through their explicit non-coverage lanes. The proof benchmark command builds once, then runs the Node and desktop Chromium benchmark projects sequentially to avoid benchmark worker memory contention on one machine. Use the individual proof-benchmark commands on separate CI workers when parallel resources are available. The mobile proof benchmark is throttled-only and manual-only through `pnpm run test:proof-benchmark:browser:mobile:throttled`.
 
 Heavy ballot privacy proof flows write resumable development checkpoints to `temp/test-checkpoints/`. Checkpoint filenames are named after their test suite and step. Set `SEALED_LATTICE_RESUME_TEST_CHECKPOINTS=1` only when intentionally debugging from the latest local checkpoint.
 
@@ -148,7 +155,6 @@ Build and package-smoke the published SDK:
 
 ```bash
 pnpm run build
-pnpm run smoke:pack
 pnpm run smoke:pack:npm
 ```
 

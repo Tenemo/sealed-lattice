@@ -44,7 +44,6 @@ export const collectBallotPrivacyDimensionRefusals = (input: {
     readonly dynamicRosterProfileEvidence?: BallotPrivacyRosterProfileEvidence;
     readonly claimBearingPackage?: boolean;
     readonly casualMicroRosterAcknowledged?: boolean;
-    readonly unsafeSmallRosterAcknowledged?: boolean;
 }): readonly RefusalRecord[] => {
     const refusedObjects: RefusalRecord[] = [];
 
@@ -82,8 +81,7 @@ export const collectBallotPrivacyDimensionRefusals = (input: {
         input.participantCount < ballotPrivacyMinimumSafeParticipantCount
     ) {
         const casualMicroRosterAcknowledged =
-            input.casualMicroRosterAcknowledged === true ||
-            input.unsafeSmallRosterAcknowledged === true;
+            input.casualMicroRosterAcknowledged === true;
         if (input.claimBearingPackage === true) {
             refusedObjects.push(
                 createRefusal(

@@ -19,13 +19,9 @@ The workspace is only in a good state when the checks, docs, smoke tests, and Ru
 ```bash
 pnpm install
 pnpm run build
-pnpm run build:api
-pnpm run api:report
-pnpm run api:check
+pnpm run api-surface:update
+pnpm run api-surface:check
 pnpm run check
-pnpm run check:static
-pnpm run check:rust
-pnpm run check:wasm
 pnpm run vectors
 pnpm exec playwright install chromium firefox webkit
 pnpm run test:node:fast
@@ -45,13 +41,9 @@ pnpm run smoke:pack:npm
 ## What each command proves
 
 - `pnpm run build`: every package builds, the private crypto/runtime bridge is vendored into the SDK, the WASM transcript-core artifact is copied into the internal loader package, and the published SDK loader is pinned to the packaged kernel hash
-- `pnpm run build:api`: builds the TypeScript project graph and SDK runtime facade needed by public API checks without copying the packaged WASM kernel
-- `pnpm run api:report`: rebuilds the public SDK facade and updates the compact public API snapshot
-- `pnpm run api:check`: rebuilds the public SDK facade and verifies it against the compact public API snapshot
-- `pnpm run check`: builds every package, then runs the static verification lane and the Rust verification lane
-- `pnpm run check:static`: runs repo lint, builds the public API facade, verifies the public API snapshot, checks dependency boundaries, verifies public package policy, verifies the vector manifest, and runs dead-code analysis
-- `pnpm run check:rust`: runs Rust formatting, Rust clippy, and Rust tests
-- `pnpm run check:wasm`: builds the Rust workspace libraries for `wasm32-unknown-unknown` in release mode
+- `pnpm run api-surface:update`: runs the full build and updates the compact public API snapshot
+- `pnpm run api-surface:check`: runs the full build and verifies it against the compact public API snapshot
+- `pnpm run check`: runs repo lint, TypeScript, public API snapshot verification, package build verification, dependency-boundary checks, public package policy, vector manifest verification, dead-code analysis, Rust formatting, Rust clippy, and Rust tests
 - `pnpm run vectors`: committed test vector files match `test-vectors/manifest.json`
 - `pnpm run test:node:fast`: pre-commit-friendly Node tests, excluding slow protocol, kernel-heavy WASM, and proof-benchmark suites
 - `pnpm run test:node:protocol`: slow protocol relation and proof-record generation input tests that remain part of the default Node gate without running under coverage instrumentation
@@ -64,13 +56,13 @@ pnpm run smoke:pack:npm
 - `pnpm run test:encrypted-aggregate-bridge`: builds once, runs the cheap all-row bridge shape/config guardrail, then runs the full encrypted aggregate bridge matrix with a default 16-worker floor
 - `pnpm run test:encrypted-aggregate-bridge:representative`: builds once, then runs the ten selected representative bridge rows with a default ten-worker floor
 - `pnpm run verify:docs`: generated API pages, docs link structure, and the production docs site build stay consistent
-- `pnpm run docs:build`: builds the docs site without the surrounding verification checks when that narrower target is needed
+- `pnpm run docs:build:site`: builds the docs site without the surrounding verification checks when that narrower target is needed
 - `pnpm run smoke:pack:npm`: the published package tarball installs cleanly through npm and exposes safe-by-default helpers for transcript-core fixture verification, election foundation checks, and verification-oriented ballot privacy APIs
 
 ## Local hooks
 
 The pre-commit hook runs `pnpm run check` and `pnpm exec vitest --project node --project browser-desktop --project browser-mobile --run`.
-This builds once through the full check command, runs static verification once, runs Rust verification once, then exercises fast Node and browser Vitest projects against the built output.
+This leaves a full package build in place through the check command, runs static verification once, runs Rust verification once, then exercises fast Node and browser Vitest projects against the built output.
 Split Node and proof benchmark lanes remain explicit commands so they can use checkpoints and targeted reruns instead of slowing every local commit. The Node kernel command runs its merged heavy WASM project sequentially, while the proof benchmark command and encrypted aggregate bridge matrix default to parallel local execution. The coverage lane covers the fast Node project only; heavy protocol, kernel, and proof-benchmark coverage comes from their explicit test lanes rather than V8 coverage instrumentation.
 
 ## Heavy proof checkpoints

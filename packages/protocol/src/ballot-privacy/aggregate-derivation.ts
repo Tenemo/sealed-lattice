@@ -210,7 +210,7 @@ const createAggregateShareCommitment = (input: {
 
 const requireProofBearingPackageShell = (input: {
     readonly ballotPackage: ClaimBearingBallotPackage;
-    readonly unsafeSmallRosterAcknowledged?: boolean;
+    readonly casualMicroRosterAcknowledged?: boolean;
 }): void => {
     const missingFieldNames = [
         input.ballotPackage.proofBytesHex === undefined
@@ -247,7 +247,7 @@ const requireProofBearingPackageShell = (input: {
 
     const verification = verifyClaimBearingBallotPackage({
         ballotPackage: input.ballotPackage,
-        unsafeSmallRosterAcknowledged: input.unsafeSmallRosterAcknowledged,
+        casualMicroRosterAcknowledged: input.casualMicroRosterAcknowledged,
     });
     if (verification.unresolvedReason !== 'OperationUnavailable') {
         const refusalSummary = verification.refusedObjects
@@ -276,7 +276,7 @@ export const buildAggregateDerivationStatement = (input: {
     readonly contributorRosterExternalAcceptanceHash: ProtocolHash;
     readonly contributorRosterPosition: number;
     readonly postVotingClosedContextHash: ProtocolHash;
-    readonly unsafeSmallRosterAcknowledged?: boolean;
+    readonly casualMicroRosterAcknowledged?: boolean;
     readonly votingClosedBoardHeadHash: ProtocolHash;
 }): {
     readonly aggregateCommitment: AggregateShareCommitment;
@@ -290,7 +290,7 @@ export const buildAggregateDerivationStatement = (input: {
     for (const ballotPackage of input.ballotPackages) {
         requireProofBearingPackageShell({
             ballotPackage,
-            unsafeSmallRosterAcknowledged: input.unsafeSmallRosterAcknowledged,
+            casualMicroRosterAcknowledged: input.casualMicroRosterAcknowledged,
         });
     }
     const orderedBallotPackages = orderedBallotPackagesByHash(
@@ -369,7 +369,7 @@ export const buildAggregateDerivationStatement = (input: {
     const participantCount = firstStatement.receiverPublicKeys.length;
     if (
         participantCount < ballotPrivacyMinimumSafeParticipantCount &&
-        input.unsafeSmallRosterAcknowledged !== true
+        input.casualMicroRosterAcknowledged !== true
     ) {
         throw new RangeError(
             'Aggregate derivation micro-roster participants require explicit casual acknowledgement.',
@@ -377,7 +377,7 @@ export const buildAggregateDerivationStatement = (input: {
     }
     if (
         participantCount >= ballotPrivacyMinimumSafeParticipantCount &&
-        input.unsafeSmallRosterAcknowledged === true
+        input.casualMicroRosterAcknowledged === true
     ) {
         throw new RangeError(
             'Aggregate derivation casual micro-roster acknowledgement is only valid for participants below the dynamic roster range.',
@@ -435,8 +435,8 @@ export const buildAggregateDerivationStatement = (input: {
         shareCommitmentProfileHash: firstStatement.shareCommitmentProfileHash,
         shareVectorWidth: firstStatement.shareVectorWidth,
         thresholdProfileHash: firstStatement.thresholdProfileHash,
-        ...(input.unsafeSmallRosterAcknowledged === true
-            ? { unsafeSmallRosterAcknowledged: true as const }
+        ...(input.casualMicroRosterAcknowledged === true
+            ? { casualMicroRosterAcknowledged: true as const }
             : {}),
         votingClosedBoardHeadHash: input.votingClosedBoardHeadHash,
     };

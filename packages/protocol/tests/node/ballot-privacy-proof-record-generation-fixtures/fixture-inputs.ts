@@ -95,7 +95,6 @@ type BallotProofRecordGenerationFixtureOptions = {
     readonly relationInput: BallotPrivacyRelationCompilerInput;
     readonly topOptionCount: number;
     readonly casualMicroRosterAcknowledged?: boolean;
-    readonly unsafeSmallRosterAcknowledged?: boolean;
 };
 
 export const cloneJsonValue = <Value>(value: Value): Value =>

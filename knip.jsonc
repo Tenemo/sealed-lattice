@@ -24,9 +24,8 @@
                 // The docs theme imports these packages from CSS. Knip does not follow CSS @import dependencies.
                 "@fontsource/ibm-plex-sans",
                 "@fontsource/jetbrains-mono",
-                // The flat ESLint config refers to these through FlatCompat string names that Knip cannot resolve.
-                "@typescript-eslint/eslint-plugin",
-                "@typescript-eslint/parser",
+                // The packed-package verifier invokes publint through the shared package-manager runner.
+                "publint",
                 // Root-level public API tests intentionally import the workspace package by its published name.
                 "sealed-lattice"
             ]

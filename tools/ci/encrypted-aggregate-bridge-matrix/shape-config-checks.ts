@@ -266,6 +266,9 @@ const syntheticBridgeProofStatementHash = (input: {
         hwangPiopStatus: 'DeferredUntilSealedLatticeBgvRnsProfileFreeze',
         level: 15,
         manifestHash: input.statement.manifestHash,
+        aggregateDerivationVerificationScope:
+            'AggregateDerivationFullVerificationPreconditionNotBound',
+        plaintextCanonicalLiftProofStatus: 'PlaintextCanonicalLiftProofMissing',
         optionCount: input.statement.optionCount,
         participantCount: input.statement.participantCount,
         plaintextRoot: syntheticHash(

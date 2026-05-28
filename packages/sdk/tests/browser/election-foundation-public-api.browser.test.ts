@@ -13,6 +13,7 @@ import type {
 } from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
+import apiSnapshot from '../../api-snapshot.json' with { type: 'json' };
 import * as publicApiRuntime from '../../dist/index.js';
 
 type DeriveThresholdProfile = (
@@ -41,34 +42,7 @@ const deriveValidatedFirstValidOrder =
     publicApiRuntimeRecord.deriveValidatedFirstValidOrder as DeriveValidatedFirstValidOrder;
 const verifyBoardConsistency =
     publicApiRuntimeRecord.verifyBoardConsistency as VerifyBoardConsistency;
-const expectedRuntimeExports = [
-    'deriveFrozenRosterProfile',
-    'deriveLifecycleLabels',
-    'derivePollSpecHash',
-    'deriveThresholdProfile',
-    'deriveThresholdProfileHash',
-    'deriveValidatedFirstValidOrder',
-    'evaluateActionCapability',
-    'isActionCurrentForRecoveryEpoch',
-    'isValidLifecycleTransition',
-    'validatePollSpec',
-    'verifyAggregateDerivationComponent',
-    'verifyBallotProof',
-    'verifyBoardConsistency',
-    'verifyBridgeProof',
-    'verifyCastReceiptShell',
-    'verifyClaimBearingBallotPackage',
-    'verifyCloseRecordShell',
-    'verifyFirstValidPolicy',
-    'verifyOneShotSharePolicy',
-    'verifyReceiverKeyProof',
-    'verifyRecoveryEpochUpdate',
-    'verifyRosterExternalAcceptance',
-    'verifyRosterManifestTranscript',
-    'verifyTargetFinality',
-    'verifyTranscript',
-    'verifyTranscriptCoreFixture',
-] as const;
+const expectedRuntimeExports = [...apiSnapshot.runtimeExports].sort();
 
 describe('election foundation public package API in browsers', () => {
     it('exposes callable safe runtime functions', () => {

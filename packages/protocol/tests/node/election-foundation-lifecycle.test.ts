@@ -2,6 +2,7 @@ import {
     activeMaliciousMheProfileId,
     cpadProfileId,
     evaluationProofProfileId,
+    passiveMhePrototypeProfileId,
     targetBoundShareSelectionProfileId,
     thresholdDecryptionProfileId,
     type LifecycleLabelInput,
@@ -50,7 +51,7 @@ const fullyVerifiedLabelInput = (
 ): LifecycleLabelInput => ({
     lifecycleState: 'fullyVerified',
     thresholdProfile,
-    mheSecurityClosure: 'activeMalicious',
+    mheSecurityClosure: 'ActiveMalicious',
     localRosterAccepted: true,
     runtimeClaimGatePassed: true,
     bridgeBenchmarkReportPresent: true,
@@ -224,7 +225,7 @@ describe('election foundation lifecycle', () => {
             );
             const passiveLabels = deriveLifecycleLabels(
                 fullyVerifiedLabelInput({
-                    mheSecurityClosure: 'developmentIntegration',
+                    mheSecurityClosure: 'PassiveMHEPrototype',
                     activeMaliciousClosureApplied: false,
                 }),
             );
@@ -233,7 +234,7 @@ describe('election foundation lifecycle', () => {
             expect(casualLabels.resultClaimLabels).toEqual([]);
             expect(dynamicLabels.resultClaimLabels).toEqual(['fullyVerified']);
             expect(passiveLabels.primary).toEqual(['pending']);
-            expect(passiveLabels.modes).toContain('developmentIntegration');
+            expect(passiveLabels.modes).toContain('passiveMhePrototype');
         },
     );
 
@@ -241,8 +242,9 @@ describe('election foundation lifecycle', () => {
         const labels = deriveLifecycleLabels({
             lifecycleState: 'fullyVerified',
             thresholdProfile,
-            mheSecurityClosure: 'activeMalicious',
+            mheSecurityClosure: 'ActiveMalicious',
             securityProfileIds: [
+                passiveMhePrototypeProfileId,
                 evaluationProofProfileId,
                 thresholdDecryptionProfileId,
                 activeMaliciousMheProfileId,
@@ -266,9 +268,9 @@ describe('election foundation lifecycle', () => {
                 'evaluationProofClosure',
                 'kllpsCpadClosure',
                 'activeMaliciousClosure',
+                'passiveMhePrototype',
             ]),
         );
-        expect(labels.modes).not.toContain('developmentIntegration');
         expect(labels.resultClaimLabels).toEqual(['fullyVerified']);
     });
 

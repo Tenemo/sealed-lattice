@@ -139,6 +139,10 @@ describe('encrypted aggregate bridge objects', () => {
             hwangPiopStatus: 'DeferredUntilSealedLatticeBgvRnsProfileFreeze',
             level: 15,
             manifestHash: baseFields.manifestHash,
+            aggregateDerivationVerificationScope:
+                'AggregateDerivationFullVerificationPreconditionNotBound',
+            plaintextCanonicalLiftProofStatus:
+                'PlaintextCanonicalLiftProofMissing',
             plaintextRoot: hash('bridge-plaintext-1'),
             pollSpecHash: baseFields.pollSpecHash,
             postVotingClosedContextHash: baseFields.postVotingClosedContextHash,
@@ -207,6 +211,10 @@ describe('encrypted aggregate bridge objects', () => {
                 bridgeProofTargetContractHash,
                 bridgeProofVerificationStatus:
                     'BridgeProofRelationChecked' as const,
+                aggregateDerivationVerificationScope:
+                    'AggregateDerivationFullVerificationPreconditionNotBound' as const,
+                plaintextCanonicalLiftProofStatus:
+                    'PlaintextCanonicalLiftProofMissing' as const,
                 sharedWitnessZeroKnowledgeStatusHash,
                 bgvRandomnessBoundProofStatusHash,
                 canonicalByteLength,
@@ -246,6 +254,10 @@ describe('encrypted aggregate bridge objects', () => {
                 bridgeProofTargetContractHash,
                 bridgeProofVerificationStatus:
                     'BridgeProofRelationChecked' as const,
+                aggregateDerivationVerificationScope:
+                    'AggregateDerivationFullVerificationPreconditionNotBound' as const,
+                plaintextCanonicalLiftProofStatus:
+                    'PlaintextCanonicalLiftProofMissing' as const,
                 sharedWitnessZeroKnowledgeStatusHash,
                 bgvRandomnessBoundProofStatusHash,
                 encryptedAggregateInputRoot:

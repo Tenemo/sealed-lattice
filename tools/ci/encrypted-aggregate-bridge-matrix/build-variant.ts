@@ -101,7 +101,7 @@ export const buildVariant = (input: {
                 heParamHash,
                 kernel: input.kernel,
                 setupPackage,
-                unsafeSmallRosterAcknowledged: input.variant.rosterSize < 10,
+                casualMicroRosterAcknowledged: input.variant.rosterSize < 10,
                 variant: input.variant,
             }),
     );

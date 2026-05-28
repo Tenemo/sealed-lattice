@@ -200,9 +200,9 @@ const expandBallotFieldLinearProofVectorCase = (
     };
 };
 
-const fullyVerifiedDevelopmentIntegrationFixture = findFixture(
+const fullyVerifiedPassiveMhePrototypeFixture = findFixture(
     goldenTranscriptCoreFixtures,
-    'fully-verified-development-integration-transcript-core',
+    'fully-verified-passive-mhe-prototype-transcript-core',
 );
 
 const fullyVerifiedActiveFixture = findFixture(
@@ -356,7 +356,7 @@ export {
     cloneJsonValue,
     expectRefusalMessage,
     expandBallotFieldLinearProofVectorCase,
-    fullyVerifiedDevelopmentIntegrationFixture,
+    fullyVerifiedPassiveMhePrototypeFixture,
     fullyVerifiedActiveFixture,
     invalidEnumFixture,
     textEncoder,

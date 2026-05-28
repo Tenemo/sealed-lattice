@@ -12,7 +12,7 @@ pub struct BallotProofRecordGenerationInput<'a> {
     pub prover_randomness_hex: Option<&'a str>,
     pub component_prover_randomness_hexes: Option<&'a Value>,
     pub component_secret_states: Option<&'a Value>,
-    pub unsafe_small_roster_acknowledged: bool,
+    pub casual_micro_roster_acknowledged: bool,
 }
 
 impl<'a> BallotProofRecordGenerationInput<'a> {
@@ -33,14 +33,10 @@ impl<'a> BallotProofRecordGenerationInput<'a> {
                 .and_then(|object| object.get("componentProverRandomnessHexes")),
             component_secret_states: object_map(request)
                 .and_then(|object| object.get("componentSecretStates")),
-            unsafe_small_roster_acknowledged: object_map(request)
-                .and_then(|object| object.get("unsafeSmallRosterAcknowledged"))
+            casual_micro_roster_acknowledged: object_map(request)
+                .and_then(|object| object.get("casualMicroRosterAcknowledged"))
                 .and_then(Value::as_bool)
-                == Some(true)
-                || object_map(request)
-                    .and_then(|object| object.get("casualMicroRosterAcknowledged"))
-                    .and_then(Value::as_bool)
-                    == Some(true),
+                == Some(true),
         }
     }
 }
@@ -57,7 +53,7 @@ pub(crate) struct RequiredBallotProofRecordGenerationInput<'a> {
     pub(crate) prover_randomness_hex: &'a str,
     pub(crate) component_prover_randomness_hexes: &'a Value,
     pub(crate) component_secret_states: Option<&'a Value>,
-    pub(crate) unsafe_small_roster_acknowledged: bool,
+    pub(crate) casual_micro_roster_acknowledged: bool,
 }
 
 impl<'a> RequiredBallotProofRecordGenerationInput<'a> {
@@ -110,7 +106,7 @@ impl<'a> RequiredBallotProofRecordGenerationInput<'a> {
                     )
                 })?,
             component_secret_states: input.component_secret_states,
-            unsafe_small_roster_acknowledged: input.unsafe_small_roster_acknowledged,
+            casual_micro_roster_acknowledged: input.casual_micro_roster_acknowledged,
         })
     }
 

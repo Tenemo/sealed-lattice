@@ -22,9 +22,9 @@ export const evaluationProofProfileId = 'PQEvalProof-STARK-BGVReplay-v1';
 export const fullyVerifiedResultProfileId =
     'transcript-core-fully-verified-result-profile-v1';
 
-/** Development integration MHE profile emitted by transcript-core fixtures. */
-export const developmentIntegrationProfileId =
-    'transcript-core-development-integration-profile-v1';
+/** Passive MHE prototype profile emitted by transcript-core fixtures. */
+export const passiveMhePrototypeProfileId =
+    'transcript-core-passive-mhe-prototype-profile-v1';
 
 /** Active malicious MHE profile emitted by transcript-core fixtures. */
 export const activeMaliciousMheProfileId =
@@ -64,7 +64,7 @@ export const aggregateDerivationProofProfileId =
 
 /** Aggregate derivation sparse proof parameter profile. */
 export const aggregateDerivationProofParameterProfileId =
-    'aggregate-derivation-linear-compatibility-v1';
+    'aggregate-derivation-linear-proof-parameter-v1';
 
 /** Aggregate derivation sparse proof encoding profile. */
 export const aggregateDerivationProofEncodingProfileId =

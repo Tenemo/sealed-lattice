@@ -42,7 +42,6 @@ const collectBallotProofStructuralRefusals = (
         readonly casualMicroRosterAcknowledged?: boolean;
         readonly claimBearingPackage?: boolean;
         readonly dynamicRosterProfileEvidence?: BallotPrivacyRosterProfileEvidence;
-        readonly unsafeSmallRosterAcknowledged?: boolean;
     } = {},
 ): readonly RefusalRecord[] => {
     const refusedObjects: RefusalRecord[] = [];
@@ -104,8 +103,6 @@ const collectBallotProofStructuralRefusals = (
             claimBearingPackage: options.claimBearingPackage,
             dynamicRosterProfileEvidence: options.dynamicRosterProfileEvidence,
             thresholdProfileHash: statement.thresholdProfileHash,
-            unsafeSmallRosterAcknowledged:
-                options.unsafeSmallRosterAcknowledged,
         }),
     );
     refusedObjects.push(

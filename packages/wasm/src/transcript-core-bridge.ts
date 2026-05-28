@@ -18,7 +18,7 @@ export type {
     BgvCiphertextConventionFixture,
     BgvObjectValidation,
     BgvReferenceOracleRejection,
-    BgvRnsProfileReport,
+    BgvRnsProfileDescription,
     TranscriptCoreKernel,
 } from './transcript-core-bridge/kernel-contracts.js';
 export {

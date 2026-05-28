@@ -29,6 +29,8 @@ export type AggregateBridgeEncryptionGeneration = {
     readonly sharedWitnessZeroKnowledgeStatusHash: ProtocolHash;
     readonly bgvRandomnessBoundProofStatusHash: ProtocolHash;
     readonly bridgeProofVerificationStatus: 'BridgeProofRelationChecked';
+    readonly aggregateDerivationVerificationScope: 'AggregateDerivationFullVerificationPreconditionNotBound';
+    readonly plaintextCanonicalLiftProofStatus: 'PlaintextCanonicalLiftProofMissing';
     readonly bridgeClaimClosureVerified: false;
     readonly bridgeClaimVerificationStatus: 'BridgeProofClaimClosureMissing';
     readonly bridgeVariantEvidenceStatus:
@@ -69,6 +71,8 @@ export type AggregateBridgeEncryptionVerification = {
         | 'BridgeProofBackendPending'
         | 'BridgeProofRelationChecked';
     readonly bridgeEvidenceVerificationStatus: 'BridgeProofEvidenceChecked';
+    readonly aggregateDerivationVerificationScope: 'AggregateDerivationFullVerificationPreconditionNotBound';
+    readonly plaintextCanonicalLiftProofStatus: 'PlaintextCanonicalLiftProofMissing';
     readonly bridgeClaimClosureVerified: false;
     readonly bridgeClaimVerificationStatus: 'BridgeProofClaimClosureMissing';
     readonly bridgeVariantEvidenceStatus:

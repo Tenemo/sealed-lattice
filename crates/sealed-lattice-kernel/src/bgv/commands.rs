@@ -6,12 +6,14 @@ use crate::{
         base_conversion::convert_plaintext_lifted_basis,
         encoding::{decode_batch_plaintext_polynomial, encode_batch_plaintext_slots},
         profile::{
-            BgvBasisKind, DATA_PRIMES, POLYNOMIAL_DEGREE, allowed_operation_registry_value,
-            batch_layout_binding_hash, batch_layout_binding_value, profile_hash,
-        },
-        reports::{
-            backend_parameter_certificate_report, describe_profile_report,
-            operation_registry_report,
+            BgvBasisKind, DATA_PRIMES, POLYNOMIAL_DEGREE, aggregate_input_encoding_profile_hash,
+            allowed_operation_registry_hash, allowed_operation_registry_value,
+            backend_profile_hash, ballot_score_encoding_profile_hash,
+            ballot_share_layout_profile_hash, batch_encoder_hash, batch_layout_binding_hash,
+            batch_layout_binding_value, canonical_ciphertext_convention_hash,
+            encoded_aggregate_layout_hash, layout_hash, profile_hash,
+            security_estimator_input_hash, selected_profile_value,
+            top_k_evaluator_input_layout_hash,
         },
         serialization::{
             BgvObjectKind, canonical_bytes_hash, canonical_bytes_hex, ciphertext_root,
@@ -32,11 +34,30 @@ use crate::{
 pub(crate) use crate::bgv::setup::M9BridgeCiphertextRelationTrace;
 
 pub(crate) fn describe_bgv_rns_profile() -> CanonicalResult<Value> {
-    describe_profile_report()
+    Ok(json!({
+        "profile": selected_profile_value(),
+        "profileHash": profile_hash()?,
+        "backendProfileHash": backend_profile_hash()?,
+        "batchEncoderHash": batch_encoder_hash()?,
+        "encryptedAggregateInputLayoutHash": layout_hash()?,
+        "batchLayoutBinding": batch_layout_binding_value()?,
+        "batchLayoutBindingHash": batch_layout_binding_hash()?,
+        "ballotScoreEncodingProfileHash": ballot_score_encoding_profile_hash()?,
+        "ballotShareLayoutProfileHash": ballot_share_layout_profile_hash()?,
+        "aggregateInputEncodingProfileHash": aggregate_input_encoding_profile_hash()?,
+        "encodedAggregateLayoutHash": encoded_aggregate_layout_hash()?,
+        "topKEvaluatorInputLayoutHash": top_k_evaluator_input_layout_hash()?,
+        "canonicalCiphertextConventionHash": canonical_ciphertext_convention_hash()?,
+        "allowedEvaluatorOpsHash": allowed_operation_registry_hash()?,
+        "securityEstimatorInputHash": security_estimator_input_hash()?,
+    }))
 }
 
 pub(crate) fn describe_bgv_operation_registry() -> CanonicalResult<Value> {
-    operation_registry_report()
+    Ok(json!({
+        "registry": allowed_operation_registry_value()?,
+        "allowedEvaluatorOpsHash": allowed_operation_registry_hash()?,
+    }))
 }
 
 pub(crate) fn validate_bgv_evaluator_operation_from_request(
@@ -89,10 +110,6 @@ pub(crate) fn validate_bgv_evaluator_operation_from_request(
         ),
         None,
     ))
-}
-
-pub(crate) fn generate_bgv_backend_report() -> CanonicalResult<Value> {
-    backend_parameter_certificate_report()
 }
 
 pub(crate) fn describe_bgv_passive_setup_object_model() -> CanonicalResult<Value> {
@@ -476,16 +493,15 @@ mod tests {
     };
 
     #[test]
-    fn commands_report_profile_and_encode_plaintext() {
-        let profile = describe_bgv_rns_profile().expect("profile report");
+    fn commands_describe_profile_and_encode_plaintext() {
+        let profile = describe_bgv_rns_profile().expect("profile description");
         let layout_binding = profile["batchLayoutBinding"].clone();
         assert_eq!(profile["profile"]["polynomialDegree"], 32_768);
         assert_eq!(profile["profile"]["plaintextModulus"], 65_537);
-        assert!(
-            profile["statusLabels"]
-                .as_array()
-                .expect("labels")
-                .contains(&serde_json::json!("M7ImplementationEvidence"))
+        assert_eq!(
+            profile["allowedEvaluatorOpsHash"],
+            crate::bgv::profile::allowed_operation_registry_hash()
+                .expect("operation registry hash")
         );
 
         let encoded = encode_bgv_batch_plaintext_from_request(&serde_json::json!({
@@ -518,8 +534,8 @@ mod tests {
     }
 
     #[test]
-    fn native_commands_emit_stable_m7_canonical_roots() {
-        let profile = describe_bgv_rns_profile().expect("profile report");
+    fn native_commands_produce_stable_m7_canonical_roots() {
+        let profile = describe_bgv_rns_profile().expect("profile description");
         let layout_binding = profile["batchLayoutBinding"].clone();
         let encoded = encode_bgv_batch_plaintext_from_request(&serde_json::json!({
             "slots": [0, 1, 65_536, 17, 99],
@@ -572,7 +588,7 @@ mod tests {
     }
 
     #[test]
-    fn commands_emit_convention_and_base_conversion_fixtures_without_claiming_encryption() {
+    fn commands_produce_convention_and_base_conversion_fixtures_without_claiming_encryption() {
         let ciphertext =
             generate_bgv_ciphertext_convention_fixture_from_request(&serde_json::json!({
                 "leftSlots": [1, 2, 3],

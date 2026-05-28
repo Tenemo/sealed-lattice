@@ -499,6 +499,8 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
             "BridgeProofImplementationEvidenceOnly",
             SHARED_WITNESS_ZERO_KNOWLEDGE_STATUS,
             BGV_RANDOMNESS_BOUND_PROOF_STATUS,
+            PLAINTEXT_CANONICAL_LIFT_PROOF_MISSING_STATUS,
+            AGGREGATE_DERIVATION_FULL_VERIFICATION_PRECONDITION_STATUS,
             "BridgeProofClaimClosureMissing",
             "FinalBridgeTheoremPending",
         ]
@@ -548,6 +550,8 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
         "unresolvedReason": Value::Null,
         "bridgeProofVerificationStatus": bridge_proof_verification_status,
         "bridgeEvidenceVerificationStatus": "BridgeProofEvidenceChecked",
+        "aggregateDerivationVerificationScope": AGGREGATE_DERIVATION_FULL_VERIFICATION_PRECONDITION_STATUS,
+        "plaintextCanonicalLiftProofStatus": PLAINTEXT_CANONICAL_LIFT_PROOF_MISSING_STATUS,
         "bridgeClaimClosureVerified": false,
         "bridgeClaimVerificationStatus": BRIDGE_CLAIM_CLOSURE_STATUS,
         "bridgeVariantEvidenceStatus": dimensions.evidence_tier,

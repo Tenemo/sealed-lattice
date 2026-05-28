@@ -73,7 +73,7 @@ pub(in crate::ballot_privacy::aggregate_derivation_proof) fn collect_aggregate_c
 pub(in crate::ballot_privacy::aggregate_derivation_proof) fn collect_aggregate_counted_package_refusals(
     counted_ballot_packages: Option<&Value>,
     component: &Value,
-    unsafe_small_roster_acknowledged: bool,
+    casual_micro_roster_acknowledged: bool,
 ) -> Vec<Value> {
     let preflight_refusals =
         collect_aggregate_counted_package_preflight_refusals(counted_ballot_packages, component);
@@ -102,7 +102,7 @@ pub(in crate::ballot_privacy::aggregate_derivation_proof) fn collect_aggregate_c
         let verification = verify_claim_bearing_ballot_package(
             package,
             dynamic_roster_profile_evidence,
-            unsafe_small_roster_acknowledged,
+            casual_micro_roster_acknowledged,
         );
         if verification.get("ok").and_then(Value::as_bool) != Some(true) {
             refused_objects.push(structural_refusal(

@@ -124,7 +124,6 @@ const collectScopedRelationBearingPackageStructuralRefusals = (
     ballotPackage: ScopedRelationBearingBallotPackageVerificationShell,
     options: {
         readonly casualMicroRosterAcknowledged?: boolean;
-        readonly unsafeSmallRosterAcknowledged?: boolean;
     } = {},
 ): readonly RefusalRecord[] => {
     const refusedObjects: RefusalRecord[] = [
@@ -138,8 +137,6 @@ const collectScopedRelationBearingPackageStructuralRefusals = (
                 claimBearingPackage: true,
                 dynamicRosterProfileEvidence:
                     ballotPackage.dynamicRosterProfileEvidence,
-                unsafeSmallRosterAcknowledged:
-                    options.unsafeSmallRosterAcknowledged,
             },
         ),
         ...collectReceiverKeyProofRootEvidenceStructuralRefusals(
@@ -352,7 +349,6 @@ export const verifyBallotProof = (input: {
     readonly dynamicRosterProfileEvidence?: ScopedRelationBearingBallotPackageVerificationShell['dynamicRosterProfileEvidence'];
     readonly proofBytesHex?: string;
     readonly casualMicroRosterAcknowledged?: boolean;
-    readonly unsafeSmallRosterAcknowledged?: boolean;
 }): BallotPrivacyVerification => {
     const structuralRefusals = [
         ...collectBallotProofStructuralRefusals(
@@ -364,8 +360,6 @@ export const verifyBallotProof = (input: {
                     input.casualMicroRosterAcknowledged,
                 dynamicRosterProfileEvidence:
                     input.dynamicRosterProfileEvidence,
-                unsafeSmallRosterAcknowledged:
-                    input.unsafeSmallRosterAcknowledged,
             },
         ),
         ...collectBallotProofComponentProofBundleRefusals({
@@ -394,7 +388,6 @@ export const verifyBallotProof = (input: {
 export const verifyClaimBearingBallotPackage = (input: {
     readonly ballotPackage: ScopedRelationBearingBallotPackageVerificationShell;
     readonly casualMicroRosterAcknowledged?: boolean;
-    readonly unsafeSmallRosterAcknowledged?: boolean;
 }): BallotPrivacyVerification => {
     const structuralRefusals =
         collectScopedRelationBearingPackageStructuralRefusals(
@@ -402,8 +395,6 @@ export const verifyClaimBearingBallotPackage = (input: {
             {
                 casualMicroRosterAcknowledged:
                     input.casualMicroRosterAcknowledged,
-                unsafeSmallRosterAcknowledged:
-                    input.unsafeSmallRosterAcknowledged,
             },
         );
     if (structuralRefusals.length > 0) {

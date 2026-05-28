@@ -16,9 +16,6 @@ use super::linear_proof_profile_constants::{
     RECEIVER_KEY_GENERATED_PARAMETER_CONTRACT,
 };
 
-const UPSTREAM_COMPATIBILITY_DEMO_LINEAR_PROOF_ENCODING_PROFILE_ID: &str =
-    concat!("la", "zer-demo-linear-proof-encoding-v1");
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LinearProofParameterSet {
@@ -226,10 +223,7 @@ pub(crate) fn linear_proof_profile_for_encoding(
 ) -> CanonicalResult<LinearProofProfile> {
     proof_encoding.validate()?;
     let proof_profile = match proof_encoding.profile_id.as_str() {
-        "demo-linear-proof-encoding-v1"
-        | UPSTREAM_COMPATIBILITY_DEMO_LINEAR_PROOF_ENCODING_PROFILE_ID => {
-            profile_from_generated_constants(DEMO_GENERATED_PROFILE)
-        }
+        "demo-linear-proof-encoding-v1" => profile_from_generated_constants(DEMO_GENERATED_PROFILE),
         "receiver-key-linear-proof-encoding-v1" => {
             profile_from_generated_constants(RECEIVER_KEY_GENERATED_PROFILE)
         }
@@ -374,7 +368,7 @@ fn encoded_score_compatible_profile(
 #[cfg(test)]
 pub fn demo_linear_parameter_contract() -> LinearProofParameterSet {
     LinearProofParameterSet {
-        profile_id: "demo-linear-proof-compatibility-v1".to_string(),
+        profile_id: "demo-linear-proof-parameter-v1".to_string(),
         source: "sealed-lattice/linear-proof/demo-parameters-v1".to_string(),
         relation: "A*w + t = 0".to_string(),
         ring_degree: DEMO_GENERATED_PARAMETER_CONTRACT.source_ring_degree,
@@ -407,7 +401,7 @@ pub fn receiver_key_linear_parameter_contract() -> LinearProofParameterSet {
 #[cfg(test)]
 pub fn encoded_score_field_linear_parameter_contract() -> LinearProofParameterSet {
     LinearProofParameterSet {
-        profile_id: "encoded-score-field-linear-compatibility-v1".to_string(),
+        profile_id: "encoded-score-field-linear-proof-parameter-v1".to_string(),
         source: "sealed-lattice/linear-proof/encoded-score-field-parameters-v1".to_string(),
         relation: "A*w + t = 0".to_string(),
         ring_degree: ENCODED_SCORE_FIELD_GENERATED_PARAMETER_CONTRACT.source_ring_degree,
@@ -646,7 +640,7 @@ mod tests {
             .expect("encoded-score field parameter contract should validate");
         assert_eq!(
             parameter_contract.profile_id,
-            "encoded-score-field-linear-compatibility-v1"
+            "encoded-score-field-linear-proof-parameter-v1"
         );
         assert_eq!(
             parameter_contract.coefficient_modulus,

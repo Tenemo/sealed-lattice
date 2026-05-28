@@ -22,7 +22,7 @@ import {
     type BgvCiphertextConventionFixture,
     type BgvObjectValidation,
     type BgvReferenceOracleRejection,
-    type BgvRnsProfileReport,
+    type BgvRnsProfileDescription,
     type TranscriptCoreKernelLoaderOptions,
     type TranscriptCoreKernelSharePoint,
     type TranscriptCorePlaintextComparison,
@@ -34,7 +34,7 @@ const transcriptCoreKernelUrl = new URL(
     import.meta.url,
 );
 const packagedTranscriptCoreKernelNormalizedSha256Hex =
-    '5648d676d712c7e5a420135784507d2f43bc25d1e12d04b80a01cf54656ef98f';
+    '81bcefa4af7213275db170fcb635e7362cbd5921e5a37d5fe70cc293cd55c4f3';
 
 export {
     canonicalErrorCodes,
@@ -58,7 +58,7 @@ export type {
     BgvCiphertextConventionFixture,
     BgvObjectValidation,
     BgvReferenceOracleRejection,
-    BgvRnsProfileReport,
+    BgvRnsProfileDescription,
     TranscriptCoreKernelLoaderOptions,
     TranscriptCoreKernelSharePoint,
     TranscriptCorePlaintextComparison,

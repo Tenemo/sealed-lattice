@@ -560,6 +560,26 @@ const validateExpectation = (
     return undefined;
 };
 
+const hasExplicitSignatureExpectationBinding = (
+    expectation: SignatureExpectation,
+): boolean =>
+    [
+        expectation.objectType,
+        expectation.objectVersion,
+        expectation.signerRole,
+        expectation.signerIdentity,
+        expectation.ceremonyId,
+        expectation.publicKeyHash,
+        expectation.manifestHash,
+        expectation.objectRoot,
+        expectation.chunkMerkleRoot,
+        expectation.boardHeadHash,
+        expectation.contextHash,
+        expectation.byteLength,
+        expectation.recoveryEpoch,
+        expectation.deviceEpoch,
+    ].some((value) => value !== undefined);
+
 const verifySignedObjectSignatureInner = (
     signature: ProtocolSignatureEnvelope,
     expectation: SignatureExpectation = {},
@@ -577,6 +597,17 @@ const verifySignedObjectSignatureInner = (
     const shapeFailure = validateSignedRootShape(signature.signedRoot);
     if (shapeFailure !== undefined) {
         return shapeFailure;
+    }
+
+    if (
+        expectation.allowUnboundVerification !== true &&
+        !hasExplicitSignatureExpectationBinding(expectation)
+    ) {
+        return emptySignatureVerificationResult(
+            'InvalidSignedRoot',
+            'Signature verification requires explicit expectation bindings.',
+            signature.signatureHash,
+        );
     }
 
     const expectationFailure = validateExpectation(signature, expectation);

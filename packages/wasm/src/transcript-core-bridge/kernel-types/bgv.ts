@@ -1,6 +1,6 @@
 import type { ProtocolHash } from '@sealed-lattice/types';
 
-export type BgvRnsProfileReport = {
+export type BgvRnsProfileDescription = {
     readonly profile: {
         readonly profileId: string;
         readonly backendProfileId: string;
@@ -32,11 +32,6 @@ export type BgvRnsProfileReport = {
     readonly canonicalCiphertextConventionHash: ProtocolHash;
     readonly allowedEvaluatorOpsHash: ProtocolHash;
     readonly securityEstimatorInputHash: string;
-    readonly bigIntegerReferenceVectors: unknown;
-    readonly bigIntegerReferenceVectorRoot: ProtocolHash;
-    readonly basisReports: readonly unknown[];
-    readonly statusLabels: readonly string[];
-    readonly nonClaims: readonly string[];
 };
 
 export type BgvObjectValidation = {
