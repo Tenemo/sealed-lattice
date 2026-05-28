@@ -3,7 +3,7 @@ use super::{
     dimensions::bridge_variant_dimensions,
     evaluation::compare_bridge_relation_public_artifacts,
     target_contract::{
-        bridge_proof_target_contract_digest, bridge_proof_target_contract_value,
+        bridge_proof_target_contract_hash, bridge_proof_target_contract_value,
         validate_bridge_proof_target_contract,
     },
     validation::validate_bridge_proof_public_shell,
@@ -44,9 +44,9 @@ fn minimal_verify_request(bridge_encryption: Value) -> Value {
         "aggregateDerivationComponent": {},
         "setupPackage": {},
         "bridgeEncryption": bridge_encryption,
-        "aggregateSelectionPolicyDigest": "1".repeat(128),
-        "bridgeWitnessPrivacyProfileDigest": "2".repeat(128),
-        "heParamDigest": "3".repeat(128),
+        "aggregateSelectionPolicyHash": "1".repeat(128),
+        "bridgeWitnessPrivacyProfileHash": "2".repeat(128),
+        "heParamHash": "3".repeat(128),
     })
 }
 
@@ -89,15 +89,15 @@ fn minimal_checked_relation_proof_bytes_hex() -> String {
     )
 }
 
-fn bridge_proof_bytes_digest(proof_bytes_hex: &str) -> String {
-    derive_protocol_digest(
-        "ProofBytesDigest",
+fn bridge_proof_bytes_hash(proof_bytes_hex: &str) -> String {
+    derive_protocol_hash(
+        "ProofBytesHash",
         &json!({
             "purpose": "sealed-lattice-aggregate-bridge-encryption-proof-bytes-v1",
             "proofBytesHex": proof_bytes_hex,
         }),
     )
-    .expect("proof bytes digest should derive")
+    .expect("proof bytes hash should derive")
 }
 
 fn first_refusal_message(value: &Value) -> &str {
@@ -248,11 +248,11 @@ fn bridge_verifier_rejects_forged_checked_status_before_root_checks() {
 }
 
 #[test]
-fn bridge_verifier_rejects_proof_bytes_digest_before_setup_checks() {
+fn bridge_verifier_rejects_proof_bytes_hash_before_setup_checks() {
     let proof_bytes_hex = minimal_checked_relation_proof_bytes_hex();
     let result =
         verify_aggregate_bridge_encryption_from_command_request(&minimal_verify_request(json!({
-            "bridgeProofBytesDigest": "0".repeat(128),
+            "bridgeProofBytesHash": "0".repeat(128),
             "bridgeProofBytesHex": proof_bytes_hex,
             "bridgeProofVerificationStatus": BRIDGE_PROOF_CHECKED_STATUS,
             "canonicalBytesHex": "00",
@@ -263,7 +263,7 @@ fn bridge_verifier_rejects_proof_bytes_digest_before_setup_checks() {
 
     assert_eq!(result["ok"], false);
     assert!(
-        first_refusal_message(&result).contains("bridge proof bytes digest"),
+        first_refusal_message(&result).contains("bridge proof bytes hash"),
         "{result}"
     );
 }
@@ -273,7 +273,7 @@ fn bridge_verifier_rejects_pending_status_before_setup_checks() {
     let proof_bytes_hex = minimal_checked_relation_proof_bytes_hex();
     let result =
         verify_aggregate_bridge_encryption_from_command_request(&minimal_verify_request(json!({
-            "bridgeProofBytesDigest": bridge_proof_bytes_digest(&proof_bytes_hex),
+            "bridgeProofBytesHash": bridge_proof_bytes_hash(&proof_bytes_hex),
             "bridgeProofBytesHex": proof_bytes_hex,
             "bridgeProofVerificationStatus": BRIDGE_PROOF_PENDING_STATUS,
             "canonicalBytesHex": "00",
@@ -344,11 +344,11 @@ fn bridge_proof_target_contract_rejects_dimension_mutation() {
         "aggregateQuotientCoordinateCount": 220,
     });
     let target_contract = bridge_proof_target_contract_value(220, 220).expect("target contract");
-    let target_contract_digest =
-        bridge_proof_target_contract_digest(&target_contract).expect("target digest");
+    let target_contract_hash =
+        bridge_proof_target_contract_hash(&target_contract).expect("target hash");
     let mut bridge_statement = json!({
         "bridgeProofTargetContract": target_contract,
-        "bridgeProofTargetContractDigest": target_contract_digest,
+        "bridgeProofTargetContractHash": target_contract_hash,
     });
     bridge_statement["bridgeProofTargetContract"]["aggregateReductionRowCount"] = json!(219);
 
@@ -362,7 +362,7 @@ fn bridge_proof_target_contract_rejects_dimension_mutation() {
 }
 
 #[test]
-fn bridge_proof_target_contract_rejects_digest_mutation() {
+fn bridge_proof_target_contract_rejects_hash_mutation() {
     let relation_requirements = json!({
         "aggregateReducedCoordinateCount": 220,
         "aggregateQuotientCoordinateCount": 220,
@@ -370,16 +370,14 @@ fn bridge_proof_target_contract_rejects_digest_mutation() {
     let target_contract = bridge_proof_target_contract_value(220, 220).expect("target contract");
     let bridge_statement = json!({
         "bridgeProofTargetContract": target_contract,
-        "bridgeProofTargetContractDigest": "0".repeat(128),
+        "bridgeProofTargetContractHash": "0".repeat(128),
     });
 
     let error = validate_bridge_proof_target_contract(&bridge_statement, &relation_requirements)
-        .expect_err("mutated target contract digest should reject");
+        .expect_err("mutated target contract hash should reject");
 
     assert!(
-        error
-            .message
-            .contains("bridge proof target contract digest"),
+        error.message.contains("bridge proof target contract hash"),
         "{error:?}"
     );
 }
@@ -391,11 +389,11 @@ fn bridge_proof_target_contract_rejects_separate_subproof_closure() {
         "aggregateQuotientCoordinateCount": 220,
     });
     let target_contract = bridge_proof_target_contract_value(220, 220).expect("target contract");
-    let target_contract_digest =
-        bridge_proof_target_contract_digest(&target_contract).expect("target digest");
+    let target_contract_hash =
+        bridge_proof_target_contract_hash(&target_contract).expect("target hash");
     let mut bridge_statement = json!({
         "bridgeProofTargetContract": target_contract,
-        "bridgeProofTargetContractDigest": target_contract_digest,
+        "bridgeProofTargetContractHash": target_contract_hash,
     });
     bridge_statement["bridgeProofTargetContract"]["separateSubproofsAcceptedForClosure"] =
         json!(true);
@@ -416,11 +414,11 @@ fn bridge_proof_target_contract_rejects_shared_witness_layout_mutation() {
         "aggregateQuotientCoordinateCount": 220,
     });
     let target_contract = bridge_proof_target_contract_value(220, 220).expect("target contract");
-    let target_contract_digest =
-        bridge_proof_target_contract_digest(&target_contract).expect("target digest");
+    let target_contract_hash =
+        bridge_proof_target_contract_hash(&target_contract).expect("target hash");
     let mut bridge_statement = json!({
         "bridgeProofTargetContract": target_contract,
-        "bridgeProofTargetContractDigest": target_contract_digest,
+        "bridgeProofTargetContractHash": target_contract_hash,
     });
     bridge_statement["bridgeProofTargetContract"]["sharedWitnessLayout"]["sharedResponseScalarCount"] =
         json!(164_563);
@@ -435,23 +433,23 @@ fn bridge_proof_target_contract_rejects_shared_witness_layout_mutation() {
 }
 
 #[test]
-fn bridge_proof_target_contract_rejects_shared_witness_layout_digest_mutation() {
+fn bridge_proof_target_contract_rejects_shared_witness_layout_hash_mutation() {
     let relation_requirements = json!({
         "aggregateReducedCoordinateCount": 220,
         "aggregateQuotientCoordinateCount": 220,
     });
     let target_contract = bridge_proof_target_contract_value(220, 220).expect("target contract");
-    let target_contract_digest =
-        bridge_proof_target_contract_digest(&target_contract).expect("target digest");
+    let target_contract_hash =
+        bridge_proof_target_contract_hash(&target_contract).expect("target hash");
     let mut bridge_statement = json!({
         "bridgeProofTargetContract": target_contract,
-        "bridgeProofTargetContractDigest": target_contract_digest,
+        "bridgeProofTargetContractHash": target_contract_hash,
     });
-    bridge_statement["bridgeProofTargetContract"]["sharedWitnessLayoutDigest"] =
+    bridge_statement["bridgeProofTargetContract"]["sharedWitnessLayoutHash"] =
         json!("0".repeat(128));
 
     let error = validate_bridge_proof_target_contract(&bridge_statement, &relation_requirements)
-        .expect_err("mutated shared-witness layout digest should reject");
+        .expect_err("mutated shared-witness layout hash should reject");
 
     assert!(
         error.message.contains("target contract does not match"),

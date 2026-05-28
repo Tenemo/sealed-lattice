@@ -7,7 +7,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { isWithinDirectory } from '../internal/files.js';
 
-import { normalizeTranscriptCoreKernelBytesForDigest } from '#packages/wasm/src/transcript-core-bridge.js';
+import { normalizeTranscriptCoreKernelBytesForHash } from '#packages/wasm/src/transcript-core-bridge.js';
 
 const repoRoot = path.resolve(
     fileURLToPath(new URL('../../', import.meta.url)),
@@ -49,7 +49,7 @@ const wasmKernelDistLoaderFilePath = path.resolve(
     'dist',
     'index.js',
 );
-const kernelDigestAssignmentPattern =
+const kernelHashAssignmentPattern =
     /const packagedTranscriptCoreKernelNormalizedSha256Hex(?:\s*:\s*string\s*\|\s*undefined)?\s*=\s*(?:undefined|'[a-f0-9]{64}');/u;
 const sha256HexPattern = /^[a-f0-9]{64}$/u;
 
@@ -155,17 +155,17 @@ const hashFileSha256Hex = async (filePath: string): Promise<string> => {
     const bytes = await readFile(filePath);
 
     return createHash('sha256')
-        .update(normalizeTranscriptCoreKernelBytesForDigest(bytes))
+        .update(normalizeTranscriptCoreKernelBytesForHash(bytes))
         .digest('hex');
 };
 
-export const pinKernelDigestInLoaderSource = (
+export const pinKernelHashInLoaderSource = (
     sourceText: string,
     sha256Hex: string,
 ): string => {
     if (!sha256HexPattern.test(sha256Hex)) {
         throw new Error(
-            `Cannot pin an invalid transcript-core kernel digest: ${sha256Hex}`,
+            `Cannot pin an invalid transcript-core kernel hash: ${sha256Hex}`,
         );
     }
 
@@ -175,7 +175,7 @@ export const pinKernelDigestInLoaderSource = (
     ].join('\n');
     let assignmentFound = false;
     const pinnedSourceText = sourceText.replace(
-        kernelDigestAssignmentPattern,
+        kernelHashAssignmentPattern,
         () => {
             assignmentFound = true;
 
@@ -185,14 +185,14 @@ export const pinKernelDigestInLoaderSource = (
 
     if (!assignmentFound) {
         throw new Error(
-            'Cannot pin the transcript-core kernel digest because the loader file does not contain the expected digest assignment.',
+            'Cannot pin the transcript-core kernel hash because the loader file does not contain the expected hash assignment.',
         );
     }
 
     return pinnedSourceText;
 };
 
-const pinSdkKernelDigestIfNeeded = async (
+const pinSdkKernelHashIfNeeded = async (
     outputFilePath: string,
     sha256Hex: string,
 ): Promise<void> => {
@@ -203,12 +203,12 @@ const pinSdkKernelDigestIfNeeded = async (
     const sourceText = await readFile(sdkKernelLoaderFilePath, 'utf8');
     await writeFile(
         sdkKernelLoaderFilePath,
-        pinKernelDigestInLoaderSource(sourceText, sha256Hex),
+        pinKernelHashInLoaderSource(sourceText, sha256Hex),
         'utf8',
     );
 };
 
-const pinInternalWasmKernelDigestIfNeeded = async (
+const pinInternalWasmKernelHashIfNeeded = async (
     outputFilePath: string,
     sha256Hex: string,
 ): Promise<void> => {
@@ -223,7 +223,7 @@ const pinInternalWasmKernelDigestIfNeeded = async (
         const sourceText = await readFile(loaderFilePath, 'utf8');
         await writeFile(
             loaderFilePath,
-            pinKernelDigestInLoaderSource(sourceText, sha256Hex),
+            pinKernelHashInLoaderSource(sourceText, sha256Hex),
             'utf8',
         );
     }
@@ -237,8 +237,8 @@ export const buildWasmKernel = async (): Promise<void> => {
     await mkdir(outputDirectory, { recursive: true });
     await copyFile(resolveSourceFilePath(), outputFilePath);
     const sha256Hex = await hashFileSha256Hex(outputFilePath);
-    await pinSdkKernelDigestIfNeeded(outputFilePath, sha256Hex);
-    await pinInternalWasmKernelDigestIfNeeded(outputFilePath, sha256Hex);
+    await pinSdkKernelHashIfNeeded(outputFilePath, sha256Hex);
+    await pinInternalWasmKernelHashIfNeeded(outputFilePath, sha256Hex);
 
     console.log(
         `transcript-core kernel copied to ${path.relative(repoRoot, outputFilePath)} (${sha256Hex})`,

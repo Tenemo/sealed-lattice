@@ -11,32 +11,32 @@ use super::{
 };
 
 pub(super) fn build_passive_setup_package(input: &PassiveSetupInput) -> CanonicalResult<Value> {
-    let profile_digest = profile_digest()?;
-    let backend_profile_digest = backend_profile_digest()?;
+    let profile_hash = profile_hash()?;
+    let backend_profile_hash = backend_profile_hash()?;
     let collective_secret_distribution_certificate =
         collective_secret_distribution_certificate(input.participants.len())?;
-    let collective_secret_distribution_certificate_digest = derive_protocol_digest(
-        "CollectiveSecretDistributionCertificateDigest",
+    let collective_secret_distribution_certificate_hash = derive_protocol_hash(
+        "CollectiveSecretDistributionCertificateHash",
         &collective_secret_distribution_certificate,
     )?;
     let error_distribution_certificate = error_distribution_certificate()?;
-    let error_distribution_certificate_digest = derive_protocol_digest(
-        "ErrorDistributionCertificateDigest",
+    let error_distribution_certificate_hash = derive_protocol_hash(
+        "ErrorDistributionCertificateHash",
         &error_distribution_certificate,
     )?;
     let key_switch_decomposition = key_switch_decomposition_profile()?;
-    let key_switch_decomposition_digest =
-        derive_protocol_digest("KeySwitchDecompositionDigest", &key_switch_decomposition)?;
-    let threshold_decryption_profile = threshold_decryption_profile(&profile_digest)?;
-    let threshold_decryption_profile_digest = derive_protocol_digest(
-        "ThresholdDecryptionProfileDigest",
+    let key_switch_decomposition_hash =
+        derive_protocol_hash("KeySwitchDecompositionHash", &key_switch_decomposition)?;
+    let threshold_decryption_profile = threshold_decryption_profile(&profile_hash)?;
+    let threshold_decryption_profile_hash = derive_protocol_hash(
+        "ThresholdDecryptionProfileHash",
         &threshold_decryption_profile,
     )?;
-    let kllps_target_decryption_profile_digest = derive_protocol_digest(
-        "KllpsTargetDecryptionProfileDigest",
+    let kllps_target_decryption_profile_hash = derive_protocol_hash(
+        "KllpsTargetDecryptionProfileHash",
         &json!({
             "profileId": THRESHOLD_DECRYPTION_PROFILE_ID,
-            "thresholdDecryptionProfileDigest": threshold_decryption_profile_digest,
+            "thresholdDecryptionProfileHash": threshold_decryption_profile_hash,
             "profileStatus": "future-target-decryption-profile-binding",
         }),
     )?;
@@ -48,11 +48,11 @@ pub(super) fn build_passive_setup_package(input: &PassiveSetupInput) -> Canonica
             participant_setup_material(
                 input,
                 participant,
-                &profile_digest,
-                &backend_profile_digest,
+                &profile_hash,
+                &backend_profile_hash,
                 &public_common_random_polynomial_root,
-                &threshold_decryption_profile_digest,
-                &kllps_target_decryption_profile_digest,
+                &threshold_decryption_profile_hash,
+                &kllps_target_decryption_profile_hash,
             )
         })
         .collect::<CanonicalResult<Vec<_>>>()?;
@@ -64,57 +64,57 @@ pub(super) fn build_passive_setup_package(input: &PassiveSetupInput) -> Canonica
         .iter()
         .map(|material| material.public_key_share_root.clone())
         .collect::<Vec<_>>();
-    let participant_setup_record_digests = participant_material
+    let participant_setup_record_hashes = participant_material
         .iter()
-        .map(|material| material.participant_setup_record_digest.clone())
+        .map(|material| material.participant_setup_record_hash.clone())
         .collect::<Vec<_>>();
-    let trustee_threshold_verification_key_digests = participant_material
+    let trustee_threshold_verification_key_hashes = participant_material
         .iter()
-        .map(|material| material.trustee_threshold_verification_key_digest.clone())
+        .map(|material| material.trustee_threshold_verification_key_hash.clone())
         .collect::<Vec<_>>();
     let collective_public_key = collective_public_key(
         input,
-        &profile_digest,
-        &backend_profile_digest,
+        &profile_hash,
+        &backend_profile_hash,
         &public_common_random_polynomial_root,
         &public_key_share_roots,
     )?;
     let threshold_verification_material = threshold_verification_material(
         input,
-        &threshold_decryption_profile_digest,
-        &kllps_target_decryption_profile_digest,
-        &participant_setup_record_digests,
-        &trustee_threshold_verification_key_digests,
+        &threshold_decryption_profile_hash,
+        &kllps_target_decryption_profile_hash,
+        &participant_setup_record_hashes,
+        &trustee_threshold_verification_key_hashes,
     )?;
     let evaluation_keys = evaluation_keys(
         input,
         &collective_public_key,
-        &key_switch_decomposition_digest,
+        &key_switch_decomposition_hash,
     )?;
     let development_encryption_fixture =
         development_encryption_fixture(input, &collective_public_key)?;
     let certificates = setup_certificates(
         input,
         &collective_secret_distribution_certificate,
-        &collective_secret_distribution_certificate_digest,
+        &collective_secret_distribution_certificate_hash,
         &error_distribution_certificate,
-        &error_distribution_certificate_digest,
+        &error_distribution_certificate_hash,
         &key_switch_decomposition,
-        &key_switch_decomposition_digest,
-        &threshold_decryption_profile_digest,
-        &kllps_target_decryption_profile_digest,
+        &key_switch_decomposition_hash,
+        &threshold_decryption_profile_hash,
+        &kllps_target_decryption_profile_hash,
         &evaluation_keys,
         &development_encryption_fixture,
     )?;
     let setup_inputs = json!({
         "ceremonyId": input.ceremony_id,
-        "manifestDigest": input.manifest_digest,
-        "rosterDigest": input.roster_digest,
-        "thresholdProfileDigest": input.threshold_profile_digest,
+        "manifestHash": input.manifest_hash,
+        "rosterHash": input.roster_hash,
+        "thresholdProfileHash": input.threshold_profile_hash,
         "participantCount": input.participants.len(),
         "participantIdentities": input.participants.iter().map(|participant| participant.trustee_identity.clone()).collect::<Vec<_>>(),
         "defaultSetupSeedUsed": !input.setup_seed_provided,
-        "setupSeedDigest": input.setup_seed_digest,
+        "setupSeedHash": input.setup_seed_hash,
     });
     let evaluator_context_bindings = m8_evaluator_context_bindings(&setup_inputs)?;
 
@@ -127,30 +127,30 @@ pub(super) fn build_passive_setup_package(input: &PassiveSetupInput) -> Canonica
         "profileBindings": {
             "profileId": PROFILE_ID,
             "backendProfileId": BACKEND_PROFILE_ID,
-            "profileDigest": profile_digest,
-            "backendProfileDigest": backend_profile_digest,
-            "canonicalCiphertextConventionDigest": canonical_ciphertext_convention_digest()?,
+            "profileHash": profile_hash,
+            "backendProfileHash": backend_profile_hash,
+            "canonicalCiphertextConventionHash": canonical_ciphertext_convention_hash()?,
             "batchEncoderId": BATCH_ENCODER_ID,
-            "batchEncoderDigest": batch_encoder_digest()?,
-            "batchLayoutBindingDigest": batch_layout_binding_digest()?,
-            "allowedEvaluatorOpsDigest": allowed_operation_registry_digest()?,
-            "encryptedAggregateInputLayoutDigest": layout_digest()?,
-            "ballotScoreEncodingProfileDigest": ballot_score_encoding_profile_digest()?,
-            "ballotShareLayoutProfileDigest": ballot_share_layout_profile_digest()?,
-            "aggregateInputEncodingProfileDigest": aggregate_input_encoding_profile_digest()?,
-            "encodedAggregateLayoutDigest": encoded_aggregate_layout_digest()?,
-            "topKEvaluatorInputLayoutDigest": top_k_evaluator_input_layout_digest()?,
-            "evaluatorBindingContextDigest": evaluator_context_bindings["evaluatorBindingContextDigest"],
-            "encryptedAggregateBridgeDigest": evaluator_context_bindings["encryptedAggregateBridgeDigest"],
-            "encryptedAggregateTargetBasisDataRoot": evaluator_context_bindings["encryptedAggregateTargetBasisDataRoot"],
-            "encryptedAggregateReconstructionDigest": evaluator_context_bindings["encryptedAggregateReconstructionDigest"],
-            "scoreBitDerivationCircuitDigest": evaluator_context_bindings["scoreBitDerivationCircuitDigest"],
-            "comparisonInputDerivationCircuitDigest": evaluator_context_bindings["comparisonInputDerivationCircuitDigest"],
-            "encryptedScoreBitInputDigest": evaluator_context_bindings["encryptedScoreBitInputDigest"],
-            "encryptedComparisonInputDigest": evaluator_context_bindings["encryptedComparisonInputDigest"],
-            "bitSlicedComparatorDigest": evaluator_context_bindings["bitSlicedComparatorDigest"],
-            "encryptedSparseTargetProjectionDigest": evaluator_context_bindings["encryptedSparseTargetProjectionDigest"],
-            "m8EvaluatorContextBindingDigest": evaluator_context_bindings["m8EvaluatorContextBindingDigest"],
+            "batchEncoderHash": batch_encoder_hash()?,
+            "batchLayoutBindingHash": batch_layout_binding_hash()?,
+            "allowedEvaluatorOpsHash": allowed_operation_registry_hash()?,
+            "encryptedAggregateInputLayoutHash": layout_hash()?,
+            "ballotScoreEncodingProfileHash": ballot_score_encoding_profile_hash()?,
+            "ballotShareLayoutProfileHash": ballot_share_layout_profile_hash()?,
+            "aggregateInputEncodingProfileHash": aggregate_input_encoding_profile_hash()?,
+            "encodedAggregateLayoutHash": encoded_aggregate_layout_hash()?,
+            "topKEvaluatorInputLayoutHash": top_k_evaluator_input_layout_hash()?,
+            "evaluatorBindingContextHash": evaluator_context_bindings["evaluatorBindingContextHash"],
+            "encryptedAggregateBridgeHash": evaluator_context_bindings["encryptedAggregateBridgeHash"],
+            "encryptedAggregateTargetBasisRoot": evaluator_context_bindings["encryptedAggregateTargetBasisRoot"],
+            "encryptedAggregateReconstructionHash": evaluator_context_bindings["encryptedAggregateReconstructionHash"],
+            "scoreBitDerivationCircuitHash": evaluator_context_bindings["scoreBitDerivationCircuitHash"],
+            "comparisonInputDerivationCircuitHash": evaluator_context_bindings["comparisonInputDerivationCircuitHash"],
+            "encryptedScoreBitInputHash": evaluator_context_bindings["encryptedScoreBitInputHash"],
+            "encryptedComparisonInputHash": evaluator_context_bindings["encryptedComparisonInputHash"],
+            "bitSlicedComparatorHash": evaluator_context_bindings["bitSlicedComparatorHash"],
+            "encryptedSparseTargetProjectionHash": evaluator_context_bindings["encryptedSparseTargetProjectionHash"],
+            "m8EvaluatorContextBindingHash": evaluator_context_bindings["m8EvaluatorContextBindingHash"],
         },
         "participants": participant_records,
         "collectivePublicKey": collective_public_key,
@@ -164,23 +164,23 @@ pub(super) fn build_passive_setup_package(input: &PassiveSetupInput) -> Canonica
             "rawSecretSharesExported": false,
             "forbiddenRequestFields": forbidden_setup_field_names(),
         },
-        "kllpsCompatibility": {
+        "kllpsStatus": {
             "thresholdDecryptionProfileId": THRESHOLD_DECRYPTION_PROFILE_ID,
-            "thresholdDecryptionProfileDigest": threshold_decryption_profile_digest,
-            "kllpsTargetDecryptionProfileDigest": kllps_target_decryption_profile_digest,
-            "setupMaterialCompatibleWithKLLPS": true,
-            "KLLPSPartDecImplemented": false,
-            "KLLPSC1C4Certified": false,
+            "thresholdDecryptionProfileHash": threshold_decryption_profile_hash,
+            "kllpsTargetDecryptionProfileHash": kllps_target_decryption_profile_hash,
+            "setupMaterialMatchesKLLPS": true,
+            "KLLPSPartDecStatusImplemented": false,
+            "KLLPSC1C4StatusAccepted": false,
         },
         "statusLabels": [
             "M8PassiveSetupGenerated",
             "PassiveSetupDevelopmentFixtureOnly",
             "FullRosterSetupMaterialGenerated",
             "CollectivePublicKeyRootBound",
-            "BgvPublicKeyRootDigestOnly",
+            "BgvPublicKeyRootHashOnly",
             "ThresholdVerificationMaterialBound",
             "EvaluationKeyRootBound",
-            "KllpsCompatibleSetupMaterial",
+            "KllpsSetupMaterialMatched",
             "AppendixBSetupInputReady",
             "FinalAppendixBPendingQTarget"
         ],
@@ -197,8 +197,8 @@ pub(super) fn build_passive_setup_package(input: &PassiveSetupInput) -> Canonica
             "StageANotClosed"
         ],
     });
-    let setup_package_digest = derive_protocol_digest("BGVPassiveSetupPackageDigest", &package)?;
-    package["setupPackageDigest"] = Value::String(setup_package_digest);
+    let setup_package_hash = derive_protocol_hash("BGVPassiveSetupPackageHash", &package)?;
+    package["setupPackageHash"] = Value::String(setup_package_hash);
 
     Ok(package)
 }

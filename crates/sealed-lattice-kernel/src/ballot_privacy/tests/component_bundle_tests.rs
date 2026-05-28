@@ -2,8 +2,8 @@ use super::*;
 
 pub(super) fn component_proof_statement_for_test(
     component_id: &str,
-    component_statement_digest: &Value,
-    component_proof_statement_digest: Option<String>,
+    component_statement_hash: &Value,
+    component_proof_statement_hash: Option<String>,
     proof_statement_format: &str,
 ) -> Value {
     if proof_statement_format == "dense-polynomial-matrix-linear-proof-v1" {
@@ -11,22 +11,22 @@ pub(super) fn component_proof_statement_for_test(
             "objectType": "BallotProofLinearProofStatement",
             "objectVersion": 1,
             "componentId": component_id,
-            "componentStatementDigest": component_statement_digest,
+            "componentStatementHash": component_statement_hash,
             "proofStatementFormat": proof_statement_format,
         });
-        let statement_digest = super::derive_digest(
-            "ChallengeDomainDigest",
+        let statement_hash = super::derive_hash(
+            "ChallengeDomainHash",
             &json!({
                 "payload": statement_payload,
                 "purpose": "ballot-proof-linear-proof-statement-v1"
             }),
         )
-        .expect("dense component proof statement digest should derive");
+        .expect("dense component proof statement hash should derive");
         let mut statement = statement_payload;
         statement
             .as_object_mut()
             .expect("dense component proof statement should be an object")
-            .insert("statementDigest".to_string(), json!(statement_digest));
+            .insert("statementHash".to_string(), json!(statement_hash));
 
         return statement;
     }
@@ -35,28 +35,28 @@ pub(super) fn component_proof_statement_for_test(
             "objectType": "BallotProofSparseComponentLinearProofStatement",
             "objectVersion": 1,
             "componentId": component_id,
-            "componentStatementDigest": component_statement_digest,
+            "componentStatementHash": component_statement_hash,
             "proofStatementFormat": proof_statement_format,
         });
-        let statement_digest = super::derive_digest(
-            "ChallengeDomainDigest",
+        let statement_hash = super::derive_hash(
+            "ChallengeDomainHash",
             &json!({
                 "payload": statement_payload,
                 "purpose": "ballot-proof-sparse-linear-proof-statement-v1"
             }),
         )
-        .expect("sparse component proof statement digest should derive");
+        .expect("sparse component proof statement hash should derive");
         let mut statement = statement_payload;
         statement
             .as_object_mut()
             .expect("sparse component proof statement should be an object")
-            .insert("statementDigest".to_string(), json!(statement_digest));
+            .insert("statementHash".to_string(), json!(statement_hash));
 
         return statement;
     }
     let is_structured = proof_statement_format == "structured-module-lwe-linear-proof-v1";
     let statement_payload = json!({
-        "backendStatementDigest": test_digest(&format!("{component_id}-backend")),
+        "backendStatementHash": test_hash(&format!("{component_id}-backend")),
         "coefficientModulus": if component_id == "share-commitment-component" {
             "18446744069414584321"
         } else if component_id == "score-and-shamir-field-component"
@@ -68,9 +68,9 @@ pub(super) fn component_proof_statement_for_test(
         "objectType": "BallotProofComponentProofStatementPlan",
         "objectVersion": 1,
         "componentId": component_id,
-        "componentStatementDigest": component_statement_digest,
+        "componentStatementHash": component_statement_hash,
         "denseCoefficientCount": if is_structured { json!("1024") } else { Value::Null },
-        "matrixDigest": test_digest(&format!("{component_id}-matrix")),
+        "matrixHash": test_hash(&format!("{component_id}-matrix")),
         "proofBytesAvailability": if is_structured {
             "requires-structured-proof-statement"
         } else {
@@ -80,14 +80,14 @@ pub(super) fn component_proof_statement_for_test(
         "proofStatementFormat": proof_statement_format,
         "proofSystemRingDegree": if is_structured { json!(64) } else { Value::Null },
         "relation": "A*w + t = 0",
-        "relationStatementDigest": test_digest(&format!("{component_id}-relation")),
-        "rowBatchMatrixDigests": [test_digest(&format!("{component_id}-row-matrix"))],
+        "relationStatementHash": test_hash(&format!("{component_id}-relation")),
+        "rowBatchMatrixHashes": [test_hash(&format!("{component_id}-row-matrix"))],
         "rowBatchNames": [if is_structured {
             "receiver_payload_encryption_equation_rows"
         } else {
             "receiver_key_binding_rows"
         }],
-        "rowBatchTargetVectorDigests": [test_digest(&format!("{component_id}-row-target"))],
+        "rowBatchTargetVectorHashes": [test_hash(&format!("{component_id}-row-target"))],
         "rowBatchTermCounts": [if is_structured { "1024" } else { "0" }],
         "rowCount": 1,
         "sparseTermCount": Value::Null,
@@ -95,27 +95,26 @@ pub(super) fn component_proof_statement_for_test(
         "structuredCiphertextChunkCount": if is_structured { json!(1) } else { Value::Null },
         "structuredReceiverCount": if is_structured { json!(1) } else { Value::Null },
         "structuredWitnessTermCount": if is_structured { json!("1024") } else { Value::Null },
-        "targetVectorDigest": test_digest(&format!("{component_id}-target")),
+        "targetVectorHash": test_hash(&format!("{component_id}-target")),
         "variableColumnCount": if is_structured { 1 } else { 0 },
         "variableColumnIndices": if is_structured { json!([0]) } else { json!([]) },
     });
-    let canonical_component_proof_statement_digest = super::derive_digest(
-        "ChallengeDomainDigest",
+    let canonical_component_proof_statement_hash = super::derive_hash(
+        "ChallengeDomainHash",
         &json!({
             "payload": statement_payload,
             "purpose": "ballot-proof-component-proof-statement-plan-v1"
         }),
     )
-    .expect("component proof statement plan digest should derive");
+    .expect("component proof statement plan hash should derive");
     let mut statement_plan = statement_payload;
     statement_plan
         .as_object_mut()
         .expect("component proof statement plan should be an object")
         .insert(
-            "componentProofStatementDigest".to_string(),
+            "componentProofStatementHash".to_string(),
             json!(
-                component_proof_statement_digest
-                    .unwrap_or(canonical_component_proof_statement_digest)
+                component_proof_statement_hash.unwrap_or(canonical_component_proof_statement_hash)
             ),
         );
 
@@ -124,9 +123,9 @@ pub(super) fn component_proof_statement_for_test(
 
 pub(super) fn component_proof_for_test(
     component_id: &str,
-    component_statement_digest: &Value,
+    component_statement_hash: &Value,
 ) -> Value {
-    let proof_input = component_proof_input_for_test(component_id, component_statement_digest);
+    let proof_input = component_proof_input_for_test(component_id, component_statement_hash);
     let proof_bytes_hex = proof_input["proofBytesHex"]
         .as_str()
         .expect("component proof bytes should be a string");
@@ -139,59 +138,59 @@ pub(super) fn component_proof_for_test(
     let public_randomness_hex = proof_input["publicRandomnessHex"]
         .as_str()
         .expect("component proof public randomness should be a string");
-    let proof_bytes_digest = proof_bytes_digest_for_test(proof_bytes_hex);
-    let proof_encoding_profile_digest =
-        super::derive_ballot_proof_encoding_profile_digest(proof_encoding)
-            .expect("component proof encoding digest should derive");
-    let proof_parameter_set_digest =
-        super::derive_ballot_proof_parameter_set_digest(proof_parameter_set)
-            .expect("component proof parameter set digest should derive");
-    let public_randomness_digest =
-        super::derive_ballot_proof_public_randomness_digest(public_randomness_hex)
-            .expect("component proof public randomness digest should derive");
-    let proof_root = super::derive_digest(
-        "ChallengeDomainDigest",
+    let proof_bytes_hash = proof_bytes_hash_for_test(proof_bytes_hex);
+    let proof_encoding_profile_hash =
+        super::derive_ballot_proof_encoding_profile_hash(proof_encoding)
+            .expect("component proof encoding hash should derive");
+    let proof_parameter_set_hash =
+        super::derive_ballot_proof_parameter_set_hash(proof_parameter_set)
+            .expect("component proof parameter set hash should derive");
+    let public_randomness_hash =
+        super::derive_ballot_proof_public_randomness_hash(public_randomness_hex)
+            .expect("component proof public randomness hash should derive");
+    let proof_root = super::derive_hash(
+        "ChallengeDomainHash",
         &json!({
             "componentId": component_id,
-            "componentProofStatementDigest": proof_input["componentProofStatementDigest"],
-            "componentStatementDigest": component_statement_digest,
-            "proofBytesDigest": proof_bytes_digest,
-            "proofEncodingProfileDigest": proof_encoding_profile_digest,
-            "proofParameterSetDigest": proof_parameter_set_digest,
+            "componentProofStatementHash": proof_input["componentProofStatementHash"],
+            "componentStatementHash": component_statement_hash,
+            "proofBytesHash": proof_bytes_hash,
+            "proofEncodingProfileHash": proof_encoding_profile_hash,
+            "proofParameterSetHash": proof_parameter_set_hash,
             "proofStatementFormat": proof_input["proofStatementFormat"],
-            "publicRandomnessDigest": public_randomness_digest,
+            "publicRandomnessHash": public_randomness_hash,
             "purpose": "ballot-proof-component-proof-root-v1",
-            "statementDigest": component_statement_digest,
+            "statementHash": component_statement_hash,
         }),
     )
     .expect("component proof root should derive");
     let component_proof_payload = json!({
         "objectType": "BallotProofComponentProofRecord",
         "objectVersion": 1,
-        "backendStatementDigest": test_digest("backend-statement"),
-        "ballotProofStatementDigest": test_digest("ballot-proof-statement"),
+        "backendStatementHash": test_hash("backend-statement"),
+        "ballotProofStatementHash": test_hash("ballot-proof-statement"),
         "componentId": component_id,
-        "componentProofStatementDigest": proof_input["componentProofStatementDigest"],
-        "componentStatementDigest": component_statement_digest,
+        "componentProofStatementHash": proof_input["componentProofStatementHash"],
+        "componentStatementHash": component_statement_hash,
         "proofBackend": "LocalLinearLatticeRelation",
-        "proofBytesDigest": proof_bytes_digest,
-        "proofEncodingProfileDigest": proof_encoding_profile_digest,
-        "proofParameterSetDigest": proof_parameter_set_digest,
+        "proofBytesHash": proof_bytes_hash,
+        "proofEncodingProfileHash": proof_encoding_profile_hash,
+        "proofParameterSetHash": proof_parameter_set_hash,
         "proofRoot": proof_root,
         "proofSizeBytes": proof_bytes_hex.len() / 2,
-        "publicRandomnessDigest": public_randomness_digest,
-        "relationStatementDigest": test_digest("relation-statement"),
+        "publicRandomnessHash": public_randomness_hash,
+        "relationStatementHash": test_hash("relation-statement"),
     });
-    let component_proof_record_digest =
-        super::derive_ballot_component_proof_record_digest(&component_proof_payload)
-            .expect("component proof digest should derive");
+    let component_proof_record_hash =
+        super::derive_ballot_component_proof_record_hash(&component_proof_payload)
+            .expect("component proof hash should derive");
     let mut component_proof = component_proof_payload;
     component_proof
         .as_object_mut()
         .expect("component proof should be an object")
         .insert(
-            "componentProofRecordDigest".to_string(),
-            json!(component_proof_record_digest),
+            "componentProofRecordHash".to_string(),
+            json!(component_proof_record_hash),
         );
 
     component_proof
@@ -204,24 +203,24 @@ fn component_proof_bundle_for_test(
     let component_proof_bundle_payload = json!({
         "objectType": "BallotProofComponentProofBundle",
         "objectVersion": 1,
-        "backendStatementDigest": test_digest("backend-statement"),
-        "ballotProofStatementDigest": test_digest("ballot-proof-statement"),
+        "backendStatementHash": test_hash("backend-statement"),
+        "ballotProofStatementHash": test_hash("ballot-proof-statement"),
         "bundleCoverage": super::FULL_BALLOT_PROOF_PROJECTION_COVERAGE,
-        "componentBundleStatementDigest": component_bundle_statement["componentBundleStatementDigest"],
+        "componentBundleStatementHash": component_bundle_statement["componentBundleStatementHash"],
         "componentProofs": component_proofs,
-        "relationStatementDigest": test_digest("relation-statement"),
+        "relationStatementHash": test_hash("relation-statement"),
         "requiredComponentIds": super::REQUIRED_BALLOT_PROOF_COMPONENT_IDS,
     });
-    let component_proof_bundle_digest =
-        super::derive_ballot_component_proof_bundle_digest(&component_proof_bundle_payload)
-            .expect("component proof bundle digest should derive");
+    let component_proof_bundle_hash =
+        super::derive_ballot_component_proof_bundle_hash(&component_proof_bundle_payload)
+            .expect("component proof bundle hash should derive");
     let mut component_proof_bundle = component_proof_bundle_payload;
     component_proof_bundle
         .as_object_mut()
         .expect("component proof bundle should be an object")
         .insert(
-            "componentProofBundleDigest".to_string(),
-            json!(component_proof_bundle_digest),
+            "componentProofBundleHash".to_string(),
+            json!(component_proof_bundle_hash),
         );
 
     component_proof_bundle
@@ -230,12 +229,12 @@ fn component_proof_bundle_for_test(
 #[test]
 fn component_bundle_refusals_cover_incomplete_and_reordered_components() {
     let statement = json!({
-        "ballotProofStatementDigest": test_digest("ballot-proof-statement")
+        "ballotProofStatementHash": test_hash("ballot-proof-statement")
     });
     let linear_statement = json!({
-        "backendStatementDigest": test_digest("backend-statement"),
+        "backendStatementHash": test_hash("backend-statement"),
         "projectionCoverage": super::FULL_BALLOT_PROOF_PROJECTION_COVERAGE,
-        "relationStatementDigest": test_digest("relation-statement")
+        "relationStatementHash": test_hash("relation-statement")
     });
     let incomplete_component_statements = super::REQUIRED_BALLOT_PROOF_COMPONENT_IDS
         .iter()
@@ -246,7 +245,7 @@ fn component_bundle_refusals_cover_incomplete_and_reordered_components() {
                 if component_index == 0 {
                     "explicitRowsAvailable"
                 } else {
-                    "digestExpandedRowsPending"
+                    "HashExpandedRowsPending"
                 },
             )
         })
@@ -256,8 +255,8 @@ fn component_bundle_refusals_cover_incomplete_and_reordered_components() {
         super::COMPONENT_BUNDLE_INCOMPLETE_COVERAGE,
     );
     let ballot_proof = json!({
-        "ballotProofRecordDigest": test_digest("ballot-proof-record"),
-        "componentBundleStatementDigest": incomplete_bundle["componentBundleStatementDigest"],
+        "ballotProofRecordHash": test_hash("ballot-proof-record"),
+        "componentBundleStatementHash": incomplete_bundle["componentBundleStatementHash"],
     });
     let incomplete_refusals = super::collect_ballot_component_bundle_refusals(
         &statement,
@@ -289,8 +288,8 @@ fn component_bundle_refusals_cover_incomplete_and_reordered_components() {
         super::FULL_BALLOT_PROOF_PROJECTION_COVERAGE,
     );
     let reordered_ballot_proof = json!({
-        "ballotProofRecordDigest": test_digest("reordered-ballot-proof-record"),
-        "componentBundleStatementDigest": reordered_bundle["componentBundleStatementDigest"],
+        "ballotProofRecordHash": test_hash("reordered-ballot-proof-record"),
+        "componentBundleStatementHash": reordered_bundle["componentBundleStatementHash"],
     });
     let reordered_refusals = super::collect_ballot_component_bundle_refusals(
         &statement,
@@ -310,7 +309,7 @@ fn component_bundle_refusals_cover_incomplete_and_reordered_components() {
 #[test]
 fn component_proof_bundle_refusals_cover_missing_reordered_and_wrong_statement_binding() {
     let statement = json!({
-        "ballotProofStatementDigest": test_digest("ballot-proof-statement")
+        "ballotProofStatementHash": test_hash("ballot-proof-statement")
     });
     let component_statements = super::REQUIRED_BALLOT_PROOF_COMPONENT_IDS
         .iter()
@@ -324,10 +323,7 @@ fn component_proof_bundle_refusals_cover_missing_reordered_and_wrong_statement_b
         .iter()
         .zip(super::REQUIRED_BALLOT_PROOF_COMPONENT_IDS.iter())
         .map(|(component_statement, component_id)| {
-            component_proof_for_test(
-                component_id,
-                &component_statement["componentStatementDigest"],
-            )
+            component_proof_for_test(component_id, &component_statement["componentStatementHash"])
         })
         .collect::<Vec<_>>();
     let component_proof_inputs = component_statements
@@ -336,7 +332,7 @@ fn component_proof_bundle_refusals_cover_missing_reordered_and_wrong_statement_b
         .map(|(component_statement, component_id)| {
             component_proof_input_for_test(
                 component_id,
-                &component_statement["componentStatementDigest"],
+                &component_statement["componentStatementHash"],
             )
         })
         .collect::<Vec<_>>();
@@ -344,11 +340,11 @@ fn component_proof_bundle_refusals_cover_missing_reordered_and_wrong_statement_b
         component_proof_bundle_for_test(&component_bundle_statement, component_proofs.clone());
     let component_proof_inputs = json!(component_proof_inputs);
     let ballot_proof = json!({
-        "backendStatementDigest": test_digest("backend-statement"),
-        "ballotProofRecordDigest": test_digest("ballot-proof-record"),
-        "componentBundleStatementDigest": component_bundle_statement["componentBundleStatementDigest"],
-        "componentProofBundleDigest": component_proof_bundle["componentProofBundleDigest"],
-        "relationStatementDigest": test_digest("relation-statement"),
+        "backendStatementHash": test_hash("backend-statement"),
+        "ballotProofRecordHash": test_hash("ballot-proof-record"),
+        "componentBundleStatementHash": component_bundle_statement["componentBundleStatementHash"],
+        "componentProofBundleHash": component_proof_bundle["componentProofBundleHash"],
+        "relationStatementHash": test_hash("relation-statement"),
     });
     let valid_refusals = super::collect_ballot_component_proof_bundle_refusals(
         &statement,
@@ -364,8 +360,8 @@ fn component_proof_bundle_refusals_cover_missing_reordered_and_wrong_statement_b
     );
 
     let mut wrong_component_proof_statement_inputs = component_proof_inputs.clone();
-    wrong_component_proof_statement_inputs[0]["componentProofStatementDigest"] =
-        json!(test_digest("wrong-component-proof-statement"));
+    wrong_component_proof_statement_inputs[0]["componentProofStatementHash"] =
+        json!(test_hash("wrong-component-proof-statement"));
     let wrong_component_proof_statement_refusals =
         super::collect_ballot_component_proof_bundle_refusals(
             &statement,
@@ -388,9 +384,9 @@ fn component_proof_bundle_refusals_cover_missing_reordered_and_wrong_statement_b
     let mut wrong_supplied_proof_statement_inputs = component_proof_inputs.clone();
     wrong_supplied_proof_statement_inputs[3]["proofStatement"] = component_proof_statement_for_test(
         "receiver-encryption-component",
-        &component_bundle_statement["componentStatements"][3]["componentStatementDigest"],
-        Some(test_digest(
-            "wrong-supplied-component-proof-statement-canonical-digest",
+        &component_bundle_statement["componentStatements"][3]["componentStatementHash"],
+        Some(test_hash(
+            "wrong-supplied-component-proof-statement-canonical-hash",
         )),
         "structured-module-lwe-linear-proof-v1",
     );
@@ -410,7 +406,7 @@ fn component_proof_bundle_refusals_cover_missing_reordered_and_wrong_statement_b
                         .as_str()
                         .expect("refusal message should be a string")
                         .contains(
-                            "proof statement digest for receiver-encryption-component does not match its canonical payload",
+                            "proof statement hash for receiver-encryption-component does not match its canonical payload",
                         )
                 })
         );
@@ -434,11 +430,11 @@ fn component_proof_bundle_refusals_cover_missing_reordered_and_wrong_statement_b
     let reordered_proof_bundle =
         component_proof_bundle_for_test(&component_bundle_statement, reordered_component_proofs);
     let reordered_ballot_proof = json!({
-        "backendStatementDigest": test_digest("backend-statement"),
-        "ballotProofRecordDigest": test_digest("reordered-ballot-proof-record"),
-        "componentBundleStatementDigest": component_bundle_statement["componentBundleStatementDigest"],
-        "componentProofBundleDigest": reordered_proof_bundle["componentProofBundleDigest"],
-        "relationStatementDigest": test_digest("relation-statement"),
+        "backendStatementHash": test_hash("backend-statement"),
+        "ballotProofRecordHash": test_hash("reordered-ballot-proof-record"),
+        "componentBundleStatementHash": component_bundle_statement["componentBundleStatementHash"],
+        "componentProofBundleHash": reordered_proof_bundle["componentProofBundleHash"],
+        "relationStatementHash": test_hash("relation-statement"),
     });
     let reordered_refusals = super::collect_ballot_component_proof_bundle_refusals(
         &statement,
@@ -455,8 +451,8 @@ fn component_proof_bundle_refusals_cover_missing_reordered_and_wrong_statement_b
     }));
 
     let mut wrong_statement_proof_bundle = component_proof_bundle;
-    wrong_statement_proof_bundle["componentProofs"][0]["componentStatementDigest"] =
-        json!(test_digest("wrong-component-statement"));
+    wrong_statement_proof_bundle["componentProofs"][0]["componentStatementHash"] =
+        json!(test_hash("wrong-component-statement"));
     let wrong_statement_refusals = super::collect_ballot_component_proof_bundle_refusals(
         &statement,
         &ballot_proof,
@@ -478,7 +474,7 @@ fn component_backend_rejects_unmatched_and_malformed_bundle_entries() {
     let missing_proof_component_id_bundle = json!({
         "componentProofs": [
             {
-                "componentProofRecordDigest": test_digest("missing-component-id-proof")
+                "componentProofRecordHash": test_hash("missing-component-id-proof")
             }
         ]
     });
@@ -516,7 +512,7 @@ fn component_backend_rejects_unmatched_and_malformed_bundle_entries() {
         "componentProofs": [
             {
                 "componentId": "score-and-shamir-field-component",
-                "componentProofRecordDigest": test_digest("unmatched-component-proof")
+                "componentProofRecordHash": test_hash("unmatched-component-proof")
             }
         ]
     });

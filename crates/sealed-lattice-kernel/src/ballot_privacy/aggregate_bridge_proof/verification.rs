@@ -3,15 +3,15 @@ use super::{
     boundedness::validate_bridge_bgv_randomness_bound_status,
     dimensions::bridge_variant_dimensions,
     shared_witness::{
-        bridge_shared_witness_proof_digest, validate_bridge_shared_witness_zero_knowledge_status,
+        bridge_shared_witness_proof_hash, validate_bridge_shared_witness_zero_knowledge_status,
         verify_bridge_shared_witness_proof,
     },
     statement::{
-        bridge_proof_profile_digest, bridge_proof_statement_digest, build_bridge_proof_statement,
+        bridge_proof_profile_hash, bridge_proof_statement_hash, build_bridge_proof_statement,
     },
     validation::{
         parse_bridge_proof_value, read_u64_object_field, require_equal_string, require_equal_u64,
-        required_protocol_digest_field, required_string_at_path,
+        required_protocol_hash_field, required_string_at_path,
         validate_bridge_encryption_public_shell, validate_bridge_proof_public_shell,
     },
 };
@@ -30,29 +30,26 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
         "verifyAggregateBridgeEncryption",
     )?;
     validate_bridge_encryption_public_shell(bridge_encryption)?;
-    let aggregate_selection_policy_digest = required_protocol_digest_field(
+    let aggregate_selection_policy_hash = required_protocol_hash_field(
         request,
-        "aggregateSelectionPolicyDigest",
+        "aggregateSelectionPolicyHash",
         "verifyAggregateBridgeEncryption",
     )?;
-    let bridge_witness_privacy_profile_digest = required_protocol_digest_field(
+    let bridge_witness_privacy_profile_hash = required_protocol_hash_field(
         request,
-        "bridgeWitnessPrivacyProfileDigest",
+        "bridgeWitnessPrivacyProfileHash",
         "verifyAggregateBridgeEncryption",
     )?;
-    let he_param_digest = required_protocol_digest_field(
-        request,
-        "heParamDigest",
-        "verifyAggregateBridgeEncryption",
-    )?;
+    let he_param_hash =
+        required_protocol_hash_field(request, "heParamHash", "verifyAggregateBridgeEncryption")?;
     let bridge_proof_bytes_hex =
         required_string_field(bridge_encryption, "bridgeProofBytesHex", "bridgeEncryption")?;
     let canonical_bytes_hex =
         required_string_field(bridge_encryption, "canonicalBytesHex", "bridgeEncryption")?;
     let proof_value = parse_bridge_proof_value(bridge_proof_bytes_hex)?;
     validate_bridge_proof_public_shell(&proof_value)?;
-    let bridge_proof_bytes_digest = derive_protocol_digest(
-        "ProofBytesDigest",
+    let bridge_proof_bytes_hash = derive_protocol_hash(
+        "ProofBytesHash",
         &json!({
             "purpose": "sealed-lattice-aggregate-bridge-encryption-proof-bytes-v1",
             "proofBytesHex": bridge_proof_bytes_hex,
@@ -60,9 +57,9 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
     )?;
     require_equal_string(
         bridge_encryption,
-        "bridgeProofBytesDigest",
-        &bridge_proof_bytes_digest,
-        "bridge proof bytes digest",
+        "bridgeProofBytesHash",
+        &bridge_proof_bytes_hash,
+        "bridge proof bytes hash",
     )?;
     let proof_object_type = string_field(&proof_value, "objectType").ok_or_else(|| {
         CanonicalError::new(
@@ -90,14 +87,11 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
             ));
         }
         for (field_name, label) in [
-            ("bridgeProofProfileDigest", "bridge proof profile digest"),
+            ("bridgeProofProfileHash", "bridge proof profile hash"),
+            ("bridgeProofStatementHash", "bridge proof statement hash"),
             (
-                "bridgeProofStatementDigest",
-                "bridge proof statement digest",
-            ),
-            (
-                "bridgeProofTargetContractDigest",
-                "bridge proof target contract digest",
+                "bridgeProofTargetContractHash",
+                "bridge proof target contract hash",
             ),
         ] {
             require_equal_string(
@@ -115,16 +109,16 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
             "M9 bridge checked status requires a real shared-witness relation proof",
         ));
     }
-    let component_digest = required_string_field(
+    let component_hash = required_string_field(
         component,
-        "aggregateDerivationComponentDigest",
+        "aggregateDerivationComponentHash",
         "aggregateDerivationComponent",
     )?;
     let statement = required_json_field(component, "statement", "aggregateDerivationComponent")?;
     let dimensions = bridge_variant_dimensions(statement)?;
-    let statement_digest = required_string_field(
+    let statement_hash = required_string_field(
         statement,
-        "aggregateDerivationStatementDigest",
+        "aggregateDerivationStatementHash",
         "aggregateDerivationComponent.statement",
     )?;
     let contributor_identity = required_string_field(
@@ -132,9 +126,9 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
         "contributorIdentity",
         "aggregateDerivationComponent.statement",
     )?;
-    let post_voting_closed_context_digest = required_string_field(
+    let post_voting_closed_context_hash = required_string_field(
         statement,
-        "postVotingClosedContextDigest",
+        "postVotingClosedContextHash",
         "aggregateDerivationComponent.statement",
     )?;
     crate::bgv::commands::verify_bgv_passive_setup_from_request(&json!({
@@ -166,7 +160,7 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
         "canonicalBytesHash512",
         "ciphertextValidation",
     )?;
-    if !is_protocol_digest(canonical_bytes_hash) {
+    if !is_protocol_hash(canonical_bytes_hash) {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
             "M9 bridge canonical ciphertext bytes hash must be a nonzero lowercase 512-bit hash",
@@ -192,9 +186,9 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
     )?;
     crate::bgv::commands::verify_m9_bridge_ciphertext_public_bindings(
         setup_package,
-        component_digest,
-        statement_digest,
-        post_voting_closed_context_digest,
+        component_hash,
+        statement_hash,
+        post_voting_closed_context_hash,
         bridge_encryption,
     )?;
     let aggregate_relation_subproof_hex =
@@ -204,57 +198,57 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
             component,
             aggregate_relation_subproof_hex,
         )?;
-    let bridge_proof_profile_digest = bridge_proof_profile_digest()?;
+    let bridge_proof_profile_hash = bridge_proof_profile_hash()?;
     let bridge_proof_statement = build_bridge_proof_statement(
         component,
         setup_package,
         bridge_encryption,
-        &bridge_proof_profile_digest,
-        aggregate_selection_policy_digest,
-        bridge_witness_privacy_profile_digest,
-        he_param_digest,
+        &bridge_proof_profile_hash,
+        aggregate_selection_policy_hash,
+        bridge_witness_privacy_profile_hash,
+        he_param_hash,
     )?;
-    let bridge_proof_statement_digest = bridge_proof_statement_digest(&bridge_proof_statement)?;
-    let bridge_proof_target_contract_digest = required_string_field(
+    let bridge_proof_statement_hash = bridge_proof_statement_hash(&bridge_proof_statement)?;
+    let bridge_proof_target_contract_hash = required_string_field(
         &bridge_proof_statement,
-        "bridgeProofTargetContractDigest",
+        "bridgeProofTargetContractHash",
         "bridgeProofStatement",
     )?;
     require_equal_string(
         &proof_value,
-        "bridgeProofProfileDigest",
-        &bridge_proof_profile_digest,
-        "bridge proof profile digest",
+        "bridgeProofProfileHash",
+        &bridge_proof_profile_hash,
+        "bridge proof profile hash",
     )?;
     require_equal_string(
         &proof_value,
-        "bridgeProofStatementDigest",
-        &bridge_proof_statement_digest,
-        "bridge proof statement digest",
+        "bridgeProofStatementHash",
+        &bridge_proof_statement_hash,
+        "bridge proof statement hash",
     )?;
     require_equal_string(
         &proof_value,
-        "bridgeProofTargetContractDigest",
-        bridge_proof_target_contract_digest,
-        "bridge proof target contract digest",
+        "bridgeProofTargetContractHash",
+        bridge_proof_target_contract_hash,
+        "bridge proof target contract hash",
     )?;
     require_equal_string(
         bridge_encryption,
-        "bridgeProofProfileDigest",
-        &bridge_proof_profile_digest,
-        "bridge proof profile digest",
+        "bridgeProofProfileHash",
+        &bridge_proof_profile_hash,
+        "bridge proof profile hash",
     )?;
     require_equal_string(
         bridge_encryption,
-        "bridgeProofStatementDigest",
-        &bridge_proof_statement_digest,
-        "bridge proof statement digest",
+        "bridgeProofStatementHash",
+        &bridge_proof_statement_hash,
+        "bridge proof statement hash",
     )?;
     require_equal_string(
         bridge_encryption,
-        "bridgeProofTargetContractDigest",
-        bridge_proof_target_contract_digest,
-        "bridge proof target contract digest",
+        "bridgeProofTargetContractHash",
+        bridge_proof_target_contract_hash,
+        "bridge proof target contract hash",
     )?;
     let proof_statement_value =
         required_json_field(&proof_value, "bridgeProofStatement", "bridgeProof")?;
@@ -298,9 +292,9 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
     )?;
     require_equal_string(
         &proof_value,
-        "aggregateRelationCommitmentDigest",
-        &aggregate_relation_verification.relation_commitment_digest,
-        "aggregate relation commitment digest",
+        "aggregateRelationCommitmentHash",
+        &aggregate_relation_verification.relation_commitment_hash,
+        "aggregate relation commitment hash",
     )?;
     require_equal_u64(
         &proof_value,
@@ -317,21 +311,21 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
 
     require_equal_string(
         &proof_value,
-        "aggregateDerivationComponentDigest",
-        component_digest,
-        "bridge proof component digest",
+        "aggregateDerivationComponentHash",
+        component_hash,
+        "bridge proof component hash",
     )?;
     require_equal_string(
         &proof_value,
-        "aggregateDerivationStatementDigest",
-        statement_digest,
-        "bridge proof statement digest",
+        "aggregateDerivationStatementHash",
+        statement_hash,
+        "bridge proof statement hash",
     )?;
     require_equal_string(
         &proof_value,
-        "postVotingClosedContextDigest",
-        post_voting_closed_context_digest,
-        "bridge proof post-close context digest",
+        "postVotingClosedContextHash",
+        post_voting_closed_context_hash,
+        "bridge proof post-close context hash",
     )?;
     for field_name in [
         "plaintextRoot",
@@ -372,28 +366,28 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
             "M9 bridge proof shell is not the supported scoped relation",
         ));
     }
-    let shared_witness_proof_digest = if proof_is_checked_relation {
+    let shared_witness_proof_hash = if proof_is_checked_relation {
         let shared_witness_proof =
             required_json_field(&proof_value, "bridgeSharedWitnessProof", "bridgeProof")?;
-        let digest = bridge_shared_witness_proof_digest(shared_witness_proof)?;
+        let hash = bridge_shared_witness_proof_hash(shared_witness_proof)?;
         require_equal_string(
             &proof_value,
-            "bridgeSharedWitnessProofDigest",
-            &digest,
-            "shared-witness proof digest",
+            "bridgeSharedWitnessProofHash",
+            &hash,
+            "shared-witness proof hash",
         )?;
-        Some(digest)
+        Some(hash)
     } else {
         None
     };
-    let bgv_randomness_bound_proof_status_digest = if proof_is_checked_relation {
+    let bgv_randomness_bound_proof_status_hash = if proof_is_checked_relation {
         Some(validate_bridge_bgv_randomness_bound_status(
             &proof_value,
-            &bridge_proof_statement_digest,
-            shared_witness_proof_digest.as_deref().ok_or_else(|| {
+            &bridge_proof_statement_hash,
+            shared_witness_proof_hash.as_deref().ok_or_else(|| {
                 CanonicalError::new(
                     CanonicalErrorCode::InvalidFixture,
-                    "M9 bridge checked relation requires a shared-witness proof digest",
+                    "M9 bridge checked relation requires a shared-witness proof hash",
                 )
             })?,
             bridge_encryption,
@@ -401,12 +395,12 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
     } else {
         None
     };
-    let shared_witness_zero_knowledge_status_digest =
-        if let Some(shared_witness_proof_digest) = &shared_witness_proof_digest {
+    let shared_witness_zero_knowledge_status_hash =
+        if let Some(shared_witness_proof_hash) = &shared_witness_proof_hash {
             Some(validate_bridge_shared_witness_zero_knowledge_status(
                 &proof_value,
-                &bridge_proof_statement_digest,
-                shared_witness_proof_digest,
+                &bridge_proof_statement_hash,
+                shared_witness_proof_hash,
             )?)
         } else {
             None
@@ -417,9 +411,9 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
             component,
             setup_package,
             bridge_encryption,
-            &bridge_proof_statement_digest,
+            &bridge_proof_statement_hash,
             contributor_identity,
-            statement_digest,
+            statement_hash,
             aggregate_reduced_coordinate_count,
             aggregate_quotient_coordinate_count,
         )?)
@@ -428,11 +422,11 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
     };
     let mut proof_root_payload = json!({
             "purpose": "sealed-lattice-aggregate-bridge-encryption-proof-root-v1",
-            "aggregateDerivationComponentDigest": component_digest,
-            "aggregateDerivationStatementDigest": statement_digest,
-            "bridgeProofProfileDigest": bridge_proof_profile_digest,
-            "bridgeProofStatementDigest": bridge_proof_statement_digest,
-            "proofBytesDigest": bridge_proof_bytes_digest,
+            "aggregateDerivationComponentHash": component_hash,
+            "aggregateDerivationStatementHash": statement_hash,
+            "bridgeProofProfileHash": bridge_proof_profile_hash,
+            "bridgeProofStatementHash": bridge_proof_statement_hash,
+            "proofBytesHash": bridge_proof_bytes_hash,
             "encryptedAggregateShareCiphertextRoot": bridge_encryption["encryptedAggregateShareCiphertextRoot"],
             "collectivePublicKeyRoot": bridge_encryption["collectivePublicKeyRoot"],
             "bgvPublicKeyRoot": bridge_encryption["bgvPublicKeyRoot"],
@@ -443,53 +437,53 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
             "M9 bridge proof root payload must be an object",
         )
     })?;
-    if let Some(digest) = &shared_witness_proof_digest {
+    if let Some(hash) = &shared_witness_proof_hash {
         proof_root_payload_object.insert(
-            "bridgeSharedWitnessProofDigest".to_string(),
-            Value::String(digest.clone()),
+            "bridgeSharedWitnessProofHash".to_string(),
+            Value::String(hash.clone()),
         );
     }
-    if let Some(digest) = &shared_witness_zero_knowledge_status_digest {
+    if let Some(hash) = &shared_witness_zero_knowledge_status_hash {
         proof_root_payload_object.insert(
-            "sharedWitnessZeroKnowledgeStatusDigest".to_string(),
-            Value::String(digest.clone()),
+            "sharedWitnessZeroKnowledgeStatusHash".to_string(),
+            Value::String(hash.clone()),
         );
     }
-    if let Some(digest) = &bgv_randomness_bound_proof_status_digest {
+    if let Some(hash) = &bgv_randomness_bound_proof_status_hash {
         proof_root_payload_object.insert(
-            "bgvRandomnessBoundProofStatusDigest".to_string(),
-            Value::String(digest.clone()),
+            "bgvRandomnessBoundProofStatusHash".to_string(),
+            Value::String(hash.clone()),
         );
     }
-    let bridge_proof_root = derive_protocol_digest("BridgeProofRecordDigest", &proof_root_payload)?;
+    let bridge_proof_root = derive_protocol_hash("BridgeProofRecordHash", &proof_root_payload)?;
     require_equal_string(
         bridge_encryption,
         "bridgeProofRoot",
         &bridge_proof_root,
         "bridge proof root",
     )?;
-    if let Some(digest) = &shared_witness_proof_digest {
+    if let Some(hash) = &shared_witness_proof_hash {
         require_equal_string(
             bridge_encryption,
-            "bridgeSharedWitnessProofDigest",
-            digest,
-            "shared-witness proof digest",
+            "bridgeSharedWitnessProofHash",
+            hash,
+            "shared-witness proof hash",
         )?;
     }
-    if let Some(digest) = &shared_witness_zero_knowledge_status_digest {
+    if let Some(hash) = &shared_witness_zero_knowledge_status_hash {
         require_equal_string(
             bridge_encryption,
-            "sharedWitnessZeroKnowledgeStatusDigest",
-            digest,
-            "shared-witness zero-knowledge status digest",
+            "sharedWitnessZeroKnowledgeStatusHash",
+            hash,
+            "shared-witness zero-knowledge status hash",
         )?;
     }
-    if let Some(digest) = &bgv_randomness_bound_proof_status_digest {
+    if let Some(hash) = &bgv_randomness_bound_proof_status_hash {
         require_equal_string(
             bridge_encryption,
-            "bgvRandomnessBoundProofStatusDigest",
-            digest,
-            "BGV randomness-bound status digest",
+            "bgvRandomnessBoundProofStatusHash",
+            hash,
+            "BGV randomness-bound status hash",
         )?;
     }
     let bridge_proof_verification_status = if shared_witness_verification.is_some() {
@@ -524,24 +518,24 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
         "encryptedAggregateShareCiphertextRoot",
         "bridgeEncryption",
     )?;
-    let mut accepted_digests = vec![
-        Value::String(component_digest.to_string()),
-        Value::String(statement_digest.to_string()),
-        Value::String(bridge_proof_profile_digest.clone()),
-        Value::String(bridge_proof_statement_digest.clone()),
-        Value::String(bridge_proof_target_contract_digest.to_string()),
-        Value::String(bridge_proof_bytes_digest.clone()),
+    let mut accepted_hashes = vec![
+        Value::String(component_hash.to_string()),
+        Value::String(statement_hash.to_string()),
+        Value::String(bridge_proof_profile_hash.clone()),
+        Value::String(bridge_proof_statement_hash.clone()),
+        Value::String(bridge_proof_target_contract_hash.to_string()),
+        Value::String(bridge_proof_bytes_hash.clone()),
         Value::String(bridge_proof_root.clone()),
         Value::String(encrypted_aggregate_share_ciphertext_root.to_string()),
     ];
-    if let Some(digest) = &shared_witness_proof_digest {
-        accepted_digests.push(Value::String(digest.clone()));
+    if let Some(hash) = &shared_witness_proof_hash {
+        accepted_hashes.push(Value::String(hash.clone()));
     }
-    if let Some(digest) = &shared_witness_zero_knowledge_status_digest {
-        accepted_digests.push(Value::String(digest.clone()));
+    if let Some(hash) = &shared_witness_zero_knowledge_status_hash {
+        accepted_hashes.push(Value::String(hash.clone()));
     }
-    if let Some(digest) = &bgv_randomness_bound_proof_status_digest {
-        accepted_digests.push(Value::String(digest.clone()));
+    if let Some(hash) = &bgv_randomness_bound_proof_status_hash {
+        accepted_hashes.push(Value::String(hash.clone()));
     }
 
     Ok(json!({
@@ -549,7 +543,7 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
         "backendAvailable": true,
         "operation": "verifyAggregateBridgeEncryption",
         "statusLabels": status_labels,
-        "acceptedDigests": accepted_digests,
+        "acceptedHashes": accepted_hashes,
         "refusedObjects": [],
         "unresolvedReason": Value::Null,
         "bridgeProofVerificationStatus": bridge_proof_verification_status,
@@ -557,19 +551,19 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
         "bridgeClaimClosureVerified": false,
         "bridgeClaimVerificationStatus": BRIDGE_CLAIM_CLOSURE_STATUS,
         "bridgeVariantEvidenceStatus": dimensions.evidence_tier,
-        "bridgeProofProfileDigest": bridge_proof_profile_digest,
-        "bridgeProofStatementDigest": bridge_proof_statement_digest,
-        "bridgeProofTargetContractDigest": bridge_proof_target_contract_digest,
-        "bridgeProofBytesDigest": bridge_proof_bytes_digest,
+        "bridgeProofProfileHash": bridge_proof_profile_hash,
+        "bridgeProofStatementHash": bridge_proof_statement_hash,
+        "bridgeProofTargetContractHash": bridge_proof_target_contract_hash,
+        "bridgeProofBytesHash": bridge_proof_bytes_hash,
         "bridgeProofRoot": bridge_proof_root,
-        "bridgeSharedWitnessProofDigest": shared_witness_proof_digest,
-        "sharedWitnessZeroKnowledgeStatusDigest": shared_witness_zero_knowledge_status_digest,
-        "bgvRandomnessBoundProofStatusDigest": bgv_randomness_bound_proof_status_digest,
+        "bridgeSharedWitnessProofHash": shared_witness_proof_hash,
+        "sharedWitnessZeroKnowledgeStatusHash": shared_witness_zero_knowledge_status_hash,
+        "bgvRandomnessBoundProofStatusHash": bgv_randomness_bound_proof_status_hash,
         "encryptedAggregateInputRoot": bridge_encryption["encryptedAggregateInputRoot"],
         "encryptedAggregateShareCiphertextRoot": bridge_encryption["encryptedAggregateShareCiphertextRoot"],
         "aggregateRelationSubproofSizeBytes": aggregate_relation_verification.proof_size_bytes,
         "aggregateRelationChallengeHex": aggregate_relation_verification.challenge_hex,
-        "aggregateRelationCommitmentDigest": aggregate_relation_verification.relation_commitment_digest,
+        "aggregateRelationCommitmentHash": aggregate_relation_verification.relation_commitment_hash,
         "aggregateReducedCoordinateCount": aggregate_reduced_coordinate_count,
         "aggregateQuotientCoordinateCount": aggregate_quotient_coordinate_count,
         "sharedWitnessChallengeHex": shared_witness_verification

@@ -5,16 +5,16 @@ pub(in crate::ballot_privacy::aggregate_derivation_proof) fn collect_aggregate_p
     component: Option<&Value>,
     proof_bytes_required: bool,
 ) -> Vec<Value> {
-    let object_digest = component
+    let object_hash = component
         .and_then(|component_value| {
-            string_field(component_value, "aggregateDerivationComponentDigest")
+            string_field(component_value, "aggregateDerivationComponentHash")
         })
-        .or_else(|| string_field(proof_input, "statementDigest"));
+        .or_else(|| string_field(proof_input, "statementHash"));
     let mut refused_objects = Vec::new();
     if string_field(proof_input, "componentId") != Some(AGGREGATE_DERIVATION_COMPONENT_ID) {
         refused_objects.push(structural_refusal(
             "Aggregate derivation proof input must use aggregate-derivation-component.",
-            object_digest,
+            object_hash,
         ));
     }
     if string_field(proof_input, "proofStatementFormat")
@@ -22,7 +22,7 @@ pub(in crate::ballot_privacy::aggregate_derivation_proof) fn collect_aggregate_p
     {
         refused_objects.push(structural_refusal(
             "Aggregate derivation proof input must use sparse-polynomial-matrix-linear-proof-v1.",
-            object_digest,
+            object_hash,
         ));
     }
     if proof_bytes_required {
@@ -35,14 +35,14 @@ pub(in crate::ballot_privacy::aggregate_derivation_proof) fn collect_aggregate_p
                         .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)) => {}
             _ => refused_objects.push(structural_refusal(
                 "Aggregate derivation proof bytes must be non-empty lowercase hexadecimal bytes.",
-                object_digest,
+                object_hash,
             )),
         }
     }
     let Some(proof_statement) = proof_input.get("proofStatement") else {
         refused_objects.push(structural_refusal(
             "Aggregate derivation proof input must include proofStatement.",
-            object_digest,
+            object_hash,
         ));
 
         return refused_objects;
@@ -50,7 +50,7 @@ pub(in crate::ballot_privacy::aggregate_derivation_proof) fn collect_aggregate_p
     let Some(parameter_set) = proof_input.get("proofParameterSet") else {
         refused_objects.push(structural_refusal(
             "Aggregate derivation proof input must include proofParameterSet.",
-            object_digest,
+            object_hash,
         ));
 
         return refused_objects;
@@ -58,7 +58,7 @@ pub(in crate::ballot_privacy::aggregate_derivation_proof) fn collect_aggregate_p
     let Some(proof_encoding) = proof_input.get("proofEncoding") else {
         refused_objects.push(structural_refusal(
             "Aggregate derivation proof input must include proofEncoding.",
-            object_digest,
+            object_hash,
         ));
 
         return refused_objects;
@@ -103,7 +103,7 @@ pub(in crate::ballot_privacy::aggregate_derivation_proof) fn collect_aggregate_p
     {
         refused_objects.push(structural_refusal(
             "Aggregate derivation sparse proof statement shape is invalid.",
-            object_digest,
+            object_hash,
         ));
     }
     let Some(share_vector_width) = share_vector_width else {
@@ -122,7 +122,7 @@ pub(in crate::ballot_privacy::aggregate_derivation_proof) fn collect_aggregate_p
     {
         refused_objects.push(structural_refusal(
             "Aggregate derivation must use the full scalar-plus-one-hot encoded layout.",
-            object_digest,
+            object_hash,
         ));
     }
     if string_field(parameter_set, "profileId") != Some(AGGREGATE_DERIVATION_PARAMETER_PROFILE_ID)
@@ -139,7 +139,7 @@ pub(in crate::ballot_privacy::aggregate_derivation_proof) fn collect_aggregate_p
     {
         refused_objects.push(structural_refusal(
             "Aggregate derivation parameter set is not bound to the proof statement.",
-            object_digest,
+            object_hash,
         ));
     }
     if string_field(proof_encoding, "profileId")
@@ -153,49 +153,49 @@ pub(in crate::ballot_privacy::aggregate_derivation_proof) fn collect_aggregate_p
     {
         refused_objects.push(structural_refusal(
             "Aggregate derivation proof encoding is not bound to the proof statement.",
-            object_digest,
+            object_hash,
         ));
     }
-    if let Some(statement_digest) = string_field(proof_statement, "statementDigest") {
-        let expected_statement_digest =
-            derive_aggregate_sparse_linear_statement_digest(proof_statement);
-        if expected_statement_digest.as_deref() != Some(statement_digest) {
+    if let Some(statement_hash) = string_field(proof_statement, "statementHash") {
+        let expected_statement_hash =
+            derive_aggregate_sparse_linear_statement_hash(proof_statement);
+        if expected_statement_hash.as_deref() != Some(statement_hash) {
             refused_objects.push(structural_refusal(
-                "Aggregate derivation proof statement digest does not match its canonical payload.",
-                Some(statement_digest),
+                "Aggregate derivation proof statement hash does not match its canonical payload.",
+                Some(statement_hash),
             ));
         }
-        if string_field(proof_input, "componentProofStatementDigest") != Some(statement_digest) {
+        if string_field(proof_input, "componentProofStatementHash") != Some(statement_hash) {
             refused_objects.push(structural_refusal(
-                "Aggregate derivation proof input is not bound to the proof statement digest.",
-                Some(statement_digest),
+                "Aggregate derivation proof input is not bound to the proof statement hash.",
+                Some(statement_hash),
             ));
         }
     } else {
         refused_objects.push(structural_refusal(
-            "Aggregate derivation proof statement is missing statementDigest.",
-            object_digest,
+            "Aggregate derivation proof statement is missing statementHash.",
+            object_hash,
         ));
     }
     if let Some(component_value) = component
         && let Some(statement) = component_value.get("statement")
-        && let Some(challenge_domain_digest) = string_field(statement, "challengeDomainDigest")
-        && challenge_domain_digest.len() >= 64
-        && string_field(proof_input, "publicRandomnessHex") != Some(&challenge_domain_digest[..64])
+        && let Some(challenge_domain_hash) = string_field(statement, "challengeDomainHash")
+        && challenge_domain_hash.len() >= 64
+        && string_field(proof_input, "publicRandomnessHex") != Some(&challenge_domain_hash[..64])
     {
         refused_objects.push(structural_refusal(
             "Aggregate derivation public randomness must be verifier-derived from the statement challenge domain.",
-            object_digest,
+            object_hash,
         ));
     }
 
     refused_objects
 }
 
-fn derive_aggregate_sparse_linear_statement_digest(proof_statement: &Value) -> Option<String> {
-    let statement_payload = value_without_field(proof_statement, "statementDigest")?;
-    derive_digest(
-        "ChallengeDomainDigest",
+fn derive_aggregate_sparse_linear_statement_hash(proof_statement: &Value) -> Option<String> {
+    let statement_payload = value_without_field(proof_statement, "statementHash")?;
+    derive_hash(
+        "ChallengeDomainHash",
         &json!({
             "payload": statement_payload,
             "purpose": "aggregate-derivation-sparse-linear-proof-statement-v1"

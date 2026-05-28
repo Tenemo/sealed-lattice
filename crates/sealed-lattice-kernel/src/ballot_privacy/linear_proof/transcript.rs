@@ -27,12 +27,12 @@ pub struct LinearProofPreflightTranscriptInput<'input> {
 pub struct LinearProofPreflightTranscript {
     pub domain: String,
     pub hash: String,
-    pub parameter_digest: String,
-    pub statement_digest: String,
-    pub target_digest: String,
-    pub proof_digest: String,
-    pub public_randomness_digest: String,
-    pub preflight_transcript_digest: String,
+    pub parameter_hash: String,
+    pub statement_hash: String,
+    pub target_hash: String,
+    pub proof_hash: String,
+    pub public_randomness_hash: String,
+    pub preflight_transcript_hash: String,
 }
 
 /// SHAKE128 over raw concatenated parts for the LaZer-compatible proof
@@ -98,12 +98,12 @@ pub fn compute_linear_proof_preflight_transcript(
     let statement_matrix_canonical = canonical_json(input.statement_matrix_coefficients)?;
     let target_vector_canonical = canonical_json(input.target_vector_coefficients)?;
 
-    let parameter_digest = shake128_32_hex(&[parameter_set_canonical.as_bytes()]);
-    let statement_digest = shake128_32_hex(&[statement_matrix_canonical.as_bytes()]);
-    let target_digest = shake128_32_hex(&[target_vector_canonical.as_bytes()]);
-    let proof_digest = shake128_32_hex(&[input.proof_bytes]);
-    let public_randomness_digest = shake128_32_hex(&[input.public_randomness]);
-    let preflight_transcript_digest = shake128_32_framed_hex(&[
+    let parameter_hash = shake128_32_hex(&[parameter_set_canonical.as_bytes()]);
+    let statement_hash = shake128_32_hex(&[statement_matrix_canonical.as_bytes()]);
+    let target_hash = shake128_32_hex(&[target_vector_canonical.as_bytes()]);
+    let proof_hash = shake128_32_hex(&[input.proof_bytes]);
+    let public_randomness_hash = shake128_32_hex(&[input.public_randomness]);
+    let preflight_transcript_hash = shake128_32_framed_hex(&[
         ("domain", LINEAR_PROOF_PREFLIGHT_DOMAIN.as_bytes()),
         ("parameterSet", parameter_set_canonical.as_bytes()),
         ("statementMatrix", statement_matrix_canonical.as_bytes()),
@@ -115,12 +115,12 @@ pub fn compute_linear_proof_preflight_transcript(
     Ok(LinearProofPreflightTranscript {
         domain: LINEAR_PROOF_PREFLIGHT_DOMAIN.to_string(),
         hash: LINEAR_PROOF_PREFLIGHT_HASH_NAME.to_string(),
-        parameter_digest,
-        statement_digest,
-        target_digest,
-        proof_digest,
-        public_randomness_digest,
-        preflight_transcript_digest,
+        parameter_hash,
+        statement_hash,
+        target_hash,
+        proof_hash,
+        public_randomness_hash,
+        preflight_transcript_hash,
     })
 }
 
@@ -162,23 +162,23 @@ mod tests {
     }
 
     #[test]
-    fn canonical_json_digest_is_order_independent() {
+    fn canonical_json_hash_is_order_independent() {
         let left = canonical_json_shake128_32_hex(&json!({
             "parameter": 17,
             "profile": "demo"
         }))
-        .expect("digest should compute");
+        .expect("Hash should compute");
         let right = canonical_json_shake128_32_hex(&json!({
             "profile": "demo",
             "parameter": 17
         }))
-        .expect("digest should compute");
+        .expect("Hash should compute");
 
         assert_eq!(left, right);
     }
 
     #[test]
-    fn framed_preflight_digest_separates_component_boundaries() {
+    fn framed_preflight_hash_separates_component_boundaries() {
         assert_ne!(
             shake128_32_framed_hex(&[("left", b"ab"), ("right", b"c")]),
             shake128_32_framed_hex(&[("left", b"a"), ("right", b"bc")])
@@ -197,7 +197,7 @@ mod tests {
         let mutated_proof_case = generated_vector_case("mutated-proof-byte");
         let wrong_randomness_case = generated_vector_case("wrong-public-randomness");
 
-        let compute_digest = |vector_case: &serde_json::Value| {
+        let compute_hash = |vector_case: &serde_json::Value| {
             let public_randomness = decode_lower_hex(
                 vector_case["publicRandomnessHex"]
                     .as_str()
@@ -217,14 +217,14 @@ mod tests {
                 proof_bytes: &proof_bytes,
             })
             .expect("preflight transcript should compute")
-            .preflight_transcript_digest
+            .preflight_transcript_hash
         };
 
-        let valid_digest = compute_digest(&valid_case);
+        let valid_hash = compute_hash(&valid_case);
 
-        assert_ne!(valid_digest, compute_digest(&mutated_statement_case));
-        assert_ne!(valid_digest, compute_digest(&mutated_target_case));
-        assert_ne!(valid_digest, compute_digest(&mutated_proof_case));
-        assert_ne!(valid_digest, compute_digest(&wrong_randomness_case));
+        assert_ne!(valid_hash, compute_hash(&mutated_statement_case));
+        assert_ne!(valid_hash, compute_hash(&mutated_target_case));
+        assert_ne!(valid_hash, compute_hash(&mutated_proof_case));
+        assert_ne!(valid_hash, compute_hash(&wrong_randomness_case));
     }
 }

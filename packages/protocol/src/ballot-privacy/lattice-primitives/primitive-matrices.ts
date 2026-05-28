@@ -1,4 +1,4 @@
-import type { ProtocolDigest } from '@sealed-lattice/types';
+import type { ProtocolHash } from '@sealed-lattice/types';
 
 import {
     receiverEncryptionModuleDegree,
@@ -21,12 +21,12 @@ type ShareCommitmentRandomnessMatrix =
     readonly (readonly (readonly bigint[])[])[];
 
 const shareCommitmentMessageMatrixCache = new Map<
-    ProtocolDigest,
+    ProtocolHash,
     ShareCommitmentMessageMatrix
 >();
 
 const shareCommitmentRandomnessMatrixCache = new Map<
-    ProtocolDigest,
+    ProtocolHash,
     ShareCommitmentRandomnessMatrix
 >();
 
@@ -51,8 +51,8 @@ const deriveBigIntPolynomial = (
     );
 
 export const deriveReceiverPublicMatrix = (
-    receiverEncryptionProfileDigest: ProtocolDigest,
-    publicMatrixSeedDigest: ProtocolDigest,
+    receiverEncryptionProfileHash: ProtocolHash,
+    publicMatrixSeedHash: ProtocolHash,
 ): readonly (readonly (readonly number[])[])[] =>
     Array.from(
         { length: receiverEncryptionModuleRank },
@@ -64,8 +64,8 @@ export const deriveReceiverPublicMatrix = (
                         'sealed.vote/internal/receiver-encryption/public-matrix-v1',
                         {
                             columnIndex,
-                            publicMatrixSeedDigest,
-                            receiverEncryptionProfileDigest,
+                            publicMatrixSeedHash,
+                            receiverEncryptionProfileHash,
                             rowIndex,
                         },
                         receiverEncryptionModuleDegree,
@@ -75,10 +75,10 @@ export const deriveReceiverPublicMatrix = (
     );
 
 export const deriveShareCommitmentMessageMatrix = (
-    shareCommitmentProfileDigest: ProtocolDigest,
+    shareCommitmentProfileHash: ProtocolHash,
 ): ShareCommitmentMessageMatrix => {
     const cachedMatrix = shareCommitmentMessageMatrixCache.get(
-        shareCommitmentProfileDigest,
+        shareCommitmentProfileHash,
     );
     if (cachedMatrix !== undefined) {
         return cachedMatrix;
@@ -88,21 +88,21 @@ export const deriveShareCommitmentMessageMatrix = (
         (_unusedRow, rowIndex) =>
             deriveBigIntPolynomial(
                 'sealed.vote/internal/share-commitment/message-matrix-v1',
-                { rowIndex, shareCommitmentProfileDigest },
+                { rowIndex, shareCommitmentProfileHash },
                 shareCommitmentModuleDegree,
                 shareCommitmentModulus,
             ),
     );
-    shareCommitmentMessageMatrixCache.set(shareCommitmentProfileDigest, matrix);
+    shareCommitmentMessageMatrixCache.set(shareCommitmentProfileHash, matrix);
 
     return matrix;
 };
 
 export const deriveShareCommitmentRandomnessMatrix = (
-    shareCommitmentProfileDigest: ProtocolDigest,
+    shareCommitmentProfileHash: ProtocolHash,
 ): ShareCommitmentRandomnessMatrix => {
     const cachedMatrix = shareCommitmentRandomnessMatrixCache.get(
-        shareCommitmentProfileDigest,
+        shareCommitmentProfileHash,
     );
     if (cachedMatrix !== undefined) {
         return cachedMatrix;
@@ -118,7 +118,7 @@ export const deriveShareCommitmentRandomnessMatrix = (
                         {
                             columnIndex,
                             rowIndex,
-                            shareCommitmentProfileDigest,
+                            shareCommitmentProfileHash,
                         },
                         shareCommitmentModuleDegree,
                         shareCommitmentModulus,
@@ -126,7 +126,7 @@ export const deriveShareCommitmentRandomnessMatrix = (
             ),
     );
     shareCommitmentRandomnessMatrixCache.set(
-        shareCommitmentProfileDigest,
+        shareCommitmentProfileHash,
         matrix,
     );
 

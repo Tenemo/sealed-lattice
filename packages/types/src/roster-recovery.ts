@@ -1,6 +1,6 @@
 import type { BoardConsistencyInput, InclusionProof } from './board-target.js';
 import type { FrozenRosterProfile, PollSpec } from './lifecycle.js';
-import type { ProtocolDigest } from './protocol-digest.js';
+import type { ProtocolHash } from './protocol-hash.js';
 import type {
     ProtocolObjectType,
     ProtocolSignatureEnvelope,
@@ -11,10 +11,10 @@ import type {
 export type RegistrationEntry = {
     readonly objectType: 'RegistrationEntry';
     readonly objectVersion: 1;
-    readonly registrationEntryDigest: ProtocolDigest;
+    readonly registrationEntryHash: ProtocolHash;
     readonly ceremonyId: string;
     readonly participantIdentity: string;
-    readonly signingPublicKeyDigest: ProtocolDigest;
+    readonly signingPublicKeyHash: ProtocolHash;
     readonly boardSequence: number;
     readonly boardPosition: number;
     readonly recoveryEpoch: number;
@@ -26,10 +26,10 @@ export type RegistrationEntry = {
 export type ReceiverKeyRegistration = {
     readonly objectType: 'ReceiverKeyRegistration';
     readonly objectVersion: 1;
-    readonly receiverKeyRegistrationDigest: ProtocolDigest;
+    readonly receiverKeyRegistrationHash: ProtocolHash;
     readonly ceremonyId: string;
     readonly participantIdentity: string;
-    readonly receiverKeyRoot: ProtocolDigest;
+    readonly receiverKeyRoot: ProtocolHash;
     readonly boardSequence: number;
     readonly boardPosition: number;
     readonly recoveryEpoch: number;
@@ -41,21 +41,21 @@ export type ReceiverKeyRegistration = {
 export type TrusteeSetupEntry = {
     readonly objectType: 'TrusteeSetupEntry';
     readonly objectVersion: 1;
-    readonly trusteeSetupEntryDigest: ProtocolDigest;
+    readonly trusteeSetupEntryHash: ProtocolHash;
     readonly ceremonyId: string;
+    readonly trusteeIdentity: string;
     readonly setupProfileId: string;
     readonly thresholdDecryptionProfileId: string;
-    readonly trusteeIdentity: string;
-    readonly trusteeSetupRoot: ProtocolDigest;
-    readonly bgvProfileDigest: ProtocolDigest;
-    readonly rustBgvBackendProfileDigest: ProtocolDigest;
-    readonly participantSetupRecordDigest: ProtocolDigest;
-    readonly publicKeyShareRoot: ProtocolDigest;
-    readonly collectivePublicKeyRoot: ProtocolDigest;
-    readonly trusteeThresholdVerificationKeyDigest: ProtocolDigest;
-    readonly thresholdShareVerificationKeyRoot: ProtocolDigest;
-    readonly evaluationKeyRoot: ProtocolDigest;
-    readonly rotSetDigest: ProtocolDigest;
+    readonly trusteeSetupRoot: ProtocolHash;
+    readonly bgvProfileHash: ProtocolHash;
+    readonly rustBgvBackendProfileHash: ProtocolHash;
+    readonly participantSetupRecordHash: ProtocolHash;
+    readonly publicKeyShareRoot: ProtocolHash;
+    readonly collectivePublicKeyRoot: ProtocolHash;
+    readonly trusteeThresholdVerificationKeyHash: ProtocolHash;
+    readonly thresholdShareVerificationKeyRoot: ProtocolHash;
+    readonly evaluationKeyRoot: ProtocolHash;
+    readonly rotSetHash: ProtocolHash;
     readonly boardSequence: number;
     readonly boardPosition: number;
     readonly recoveryEpoch: number;
@@ -63,14 +63,14 @@ export type TrusteeSetupEntry = {
     readonly signature: ProtocolSignatureEnvelope;
 };
 
-/** Policy digests embedded in an election manifest. */
-export type ManifestPolicyDigests = {
-    readonly aggregateSelectionPolicyDigest: ProtocolDigest;
-    readonly duplicateBallotPolicyDigest: ProtocolDigest;
-    readonly firstValidPolicyDigest: ProtocolDigest;
-    readonly recoveryPolicyDigest: ProtocolDigest;
-    readonly targetFinalityPolicyDigest: ProtocolDigest;
-    readonly witnessPolicyDigest: ProtocolDigest;
+/** Policy hashes embedded in an election manifest. */
+export type ManifestPolicyHashes = {
+    readonly aggregateSelectionPolicyHash: ProtocolHash;
+    readonly duplicateBallotPolicyHash: ProtocolHash;
+    readonly firstValidPolicyHash: ProtocolHash;
+    readonly recoveryPolicyHash: ProtocolHash;
+    readonly targetFinalityPolicyHash: ProtocolHash;
+    readonly witnessPolicyHash: ProtocolHash;
 };
 
 /** Opaque cryptographic implementation bindings embedded in a manifest. */
@@ -78,58 +78,58 @@ export type ManifestOpaqueBindings = {
     readonly encryptedAggregateBridgeProfileId: string;
     readonly bgvPassiveSetupProfileId: string;
     readonly bridgeWitnessPrivacyProfileId: string;
-    readonly heParamDigest: ProtocolDigest;
-    readonly bgvPassiveSetupPackageDigest: ProtocolDigest;
-    readonly bgvSetupParameterCertificateDigest: ProtocolDigest;
-    readonly bgvProfileDigest: ProtocolDigest;
-    readonly rustBgvBackendProfileDigest: ProtocolDigest;
-    readonly bgvPublicKeyRoot: ProtocolDigest;
-    readonly collectivePublicKeyRoot: ProtocolDigest;
-    readonly collectiveSecretDistributionCertificateDigest: ProtocolDigest;
-    readonly errorDistributionCertificateDigest: ProtocolDigest;
-    readonly keySwitchDecompositionDigest: ProtocolDigest;
-    readonly canonicalCiphertextConventionDigest: ProtocolDigest;
-    readonly encryptedAggregateBridgeDigest: ProtocolDigest;
-    readonly bridgeWitnessPrivacyProfileDigest: ProtocolDigest;
-    readonly bgvBatchEncoderDigest: ProtocolDigest;
-    readonly bridgeLayoutDigest: ProtocolDigest;
-    readonly encryptedAggregateInputRoot: ProtocolDigest;
-    readonly encryptedAggregateShareCiphertextRoot: ProtocolDigest;
-    readonly encryptedAggregateReconstructionDigest: ProtocolDigest;
-    readonly scoreBitDerivationCircuitDigest: ProtocolDigest;
-    readonly encryptedScoreBitInputDigest: ProtocolDigest;
-    readonly comparisonInputDerivationCircuitDigest: ProtocolDigest;
-    readonly encryptedComparisonInputDigest: ProtocolDigest;
-    readonly evaluationNoiseProfileDigest: ProtocolDigest;
-    readonly heEvaluationNoiseCertDigest: ProtocolDigest;
-    readonly allowedEvaluatorOpsDigest: ProtocolDigest;
-    readonly rotSetDigest: ProtocolDigest;
-    readonly evaluationKeyRoot: ProtocolDigest;
-    readonly evaluationKeySizeProfileDigest: ProtocolDigest;
-    readonly thresholdShareVerificationKeyRoot: ProtocolDigest;
-    readonly thresholdShareVerificationKeyDigest: ProtocolDigest;
+    readonly heParamHash: ProtocolHash;
+    readonly bgvPassiveSetupPackageHash: ProtocolHash;
+    readonly bgvSetupParameterCertificateHash: ProtocolHash;
+    readonly bgvProfileHash: ProtocolHash;
+    readonly rustBgvBackendProfileHash: ProtocolHash;
+    readonly bgvPublicKeyRoot: ProtocolHash;
+    readonly collectivePublicKeyRoot: ProtocolHash;
+    readonly collectiveSecretDistributionCertificateHash: ProtocolHash;
+    readonly errorDistributionCertificateHash: ProtocolHash;
+    readonly keySwitchDecompositionHash: ProtocolHash;
+    readonly canonicalCiphertextConventionHash: ProtocolHash;
+    readonly encryptedAggregateBridgeHash: ProtocolHash;
+    readonly bridgeWitnessPrivacyProfileHash: ProtocolHash;
+    readonly bgvBatchEncoderHash: ProtocolHash;
+    readonly bridgeLayoutHash: ProtocolHash;
+    readonly encryptedAggregateInputRoot: ProtocolHash;
+    readonly encryptedAggregateShareCiphertextRoot: ProtocolHash;
+    readonly encryptedAggregateReconstructionHash: ProtocolHash;
+    readonly scoreBitDerivationCircuitHash: ProtocolHash;
+    readonly encryptedScoreBitInputHash: ProtocolHash;
+    readonly comparisonInputDerivationCircuitHash: ProtocolHash;
+    readonly encryptedComparisonInputHash: ProtocolHash;
+    readonly evaluationNoiseProfileHash: ProtocolHash;
+    readonly heEvaluationNoiseCertHash: ProtocolHash;
+    readonly allowedEvaluatorOpsHash: ProtocolHash;
+    readonly rotSetHash: ProtocolHash;
+    readonly evaluationKeyRoot: ProtocolHash;
+    readonly evaluationKeySizeProfileHash: ProtocolHash;
+    readonly thresholdShareVerificationKeyRoot: ProtocolHash;
+    readonly thresholdShareVerificationKeyHash: ProtocolHash;
     readonly evaluationProofProfileId: string;
-    readonly evaluationProofProfileDigest: ProtocolDigest;
+    readonly evaluationProofProfileHash: ProtocolHash;
     readonly thresholdDecryptionProfileId: string;
-    readonly thresholdDecryptionProfileDigest: ProtocolDigest;
-    readonly kllpsTargetDecryptionProfileDigest: ProtocolDigest;
+    readonly thresholdDecryptionProfileHash: ProtocolHash;
+    readonly kllpsTargetDecryptionProfileHash: ProtocolHash;
     readonly cpadProfileId: string;
-    readonly cpadProfileDigest: ProtocolDigest;
-    readonly targetBasisDigest: ProtocolDigest;
+    readonly cpadProfileHash: ProtocolHash;
+    readonly targetBasisHash: ProtocolHash;
     readonly mobileProfileId: string;
-    readonly bridgeBenchmarkReportPolicyDigest: ProtocolDigest;
+    readonly bridgeBenchmarkReportPolicyHash: ProtocolHash;
 };
 
 /** Signed election manifest accepted after roster and setup checks. */
 export type ElectionManifest = {
     readonly objectType: 'ElectionManifest';
     readonly objectVersion: 1;
-    readonly electionManifestDigest: ProtocolDigest;
+    readonly electionManifestHash: ProtocolHash;
     readonly ceremonyId: string;
-    readonly pollSpecDigest: ProtocolDigest;
-    readonly rosterDigest: ProtocolDigest;
-    readonly thresholdProfileDigest: ProtocolDigest;
-    readonly manifestPolicyDigests: ManifestPolicyDigests;
+    readonly pollSpecHash: ProtocolHash;
+    readonly rosterHash: ProtocolHash;
+    readonly thresholdProfileHash: ProtocolHash;
+    readonly manifestPolicyHashes: ManifestPolicyHashes;
     readonly manifestOpaqueBindings: ManifestOpaqueBindings;
     readonly boardSequence: number;
     readonly boardPosition: number;
@@ -140,12 +140,12 @@ export type ElectionManifest = {
 export type RosterExternalAcceptance = {
     readonly objectType: 'RosterExternalAcceptance';
     readonly objectVersion: 1;
-    readonly rosterExternalAcceptanceDigest: ProtocolDigest;
+    readonly rosterExternalAcceptanceHash: ProtocolHash;
     readonly ceremonyId: string;
     readonly participantIdentity: string;
-    readonly rosterDigest: ProtocolDigest;
-    readonly electionManifestDigest: ProtocolDigest;
-    readonly acceptedBoardHeadDigest: ProtocolDigest;
+    readonly rosterHash: ProtocolHash;
+    readonly electionManifestHash: ProtocolHash;
+    readonly acceptedBoardHeadHash: ProtocolHash;
     readonly warningTextVersion: string;
     readonly signature: ProtocolSignatureEnvelope;
 };
@@ -169,7 +169,7 @@ export type RosterManifestTranscriptInput = {
     readonly pollSpec: PollSpec;
     readonly frozenRosterProfile: FrozenRosterProfile;
     readonly electionManifest: ElectionManifest;
-    readonly organizerPublicKeyDigest: ProtocolDigest;
+    readonly organizerPublicKeyHash: ProtocolHash;
     readonly organizerIdentity: string;
     readonly rosterFreezeBoardSequence: number;
     readonly manifestInclusionProof: InclusionProof;
@@ -180,8 +180,8 @@ export type RosterManifestTranscriptInput = {
 /** Roster and manifest transcript verification result. */
 export type RosterManifestTranscriptVerification =
     StructuredProtocolVerificationResult & {
-        readonly electionManifestDigest?: ProtocolDigest;
-        readonly rosterDigest?: ProtocolDigest;
+        readonly electionManifestHash?: ProtocolHash;
+        readonly rosterHash?: ProtocolHash;
         readonly participantIdentities: readonly string[];
     };
 
@@ -189,33 +189,33 @@ export type RosterManifestTranscriptVerification =
 export type RosterExternalAcceptanceVerificationInput = {
     readonly acceptance: RosterExternalAcceptance;
     readonly expectedCeremonyId: string;
-    readonly expectedRosterDigest: ProtocolDigest;
-    readonly expectedElectionManifestDigest: ProtocolDigest;
-    readonly expectedAcceptedBoardHeadDigest: ProtocolDigest;
-    readonly expectedParticipantPublicKeyDigest: ProtocolDigest;
+    readonly expectedRosterHash: ProtocolHash;
+    readonly expectedElectionManifestHash: ProtocolHash;
+    readonly expectedAcceptedBoardHeadHash: ProtocolHash;
+    readonly expectedParticipantPublicKeyHash: ProtocolHash;
 };
 
 /** Verification result for participant-local open-link roster acceptance. */
 export type RosterExternalAcceptanceVerification =
     StructuredProtocolVerificationResult & {
-        readonly rosterExternalAcceptanceDigest?: ProtocolDigest;
+        readonly rosterExternalAcceptanceHash?: ProtocolHash;
     };
 
 /** Signed-action context used for replay and recovery freshness checks. */
 export type ActionContext = {
-    readonly actionContextDigest: ProtocolDigest;
+    readonly actionContextHash: ProtocolHash;
     readonly ceremonyId: string;
-    readonly electionManifestDigest: ProtocolDigest;
+    readonly electionManifestHash: ProtocolHash;
     readonly signerIdentity: string;
-    readonly boardHeadDigest: ProtocolDigest;
+    readonly boardHeadHash: ProtocolHash;
     readonly boardSequence: number;
     readonly recoveryEpoch: number;
     readonly deviceEpoch: number;
     readonly actionSequence: number;
-    readonly recoveryPolicyDigest: ProtocolDigest;
-    readonly acceptedRecoveryEpochUpdateDigest: ProtocolDigest | null;
-    readonly rosterExternalAcceptanceDigest: ProtocolDigest | null;
-    readonly contextDigest: ProtocolDigest;
+    readonly recoveryPolicyHash: ProtocolHash;
+    readonly acceptedRecoveryEpochUpdateHash: ProtocolHash | null;
+    readonly rosterExternalAcceptanceHash: ProtocolHash | null;
+    readonly contextHash: ProtocolHash;
 };
 
 /** Current recovery epoch state for one signer identity. */
@@ -228,7 +228,7 @@ export type RecoveryEpochMapEntry = {
 
 /** Candidate action after context, epoch, and duplicate checks. */
 export type ValidatedFirstValidObject = {
-    readonly objectDigest: ProtocolDigest;
+    readonly objectHash: ProtocolHash;
     readonly objectType: ProtocolObjectType;
     readonly boardSequence: number;
     readonly boardPosition: number;
@@ -236,16 +236,16 @@ export type ValidatedFirstValidObject = {
     readonly recoveryEpoch: number;
     readonly deviceEpoch: number;
     readonly actionSequence: number;
-    readonly contextDigest: ProtocolDigest;
+    readonly contextHash: ProtocolHash;
     readonly isByteIdenticalRetransmission: boolean;
 };
 
 /** Input used to derive deterministic first-valid ordering. */
 export type FirstValidOrderingInput = {
     readonly objects: readonly ValidatedFirstValidObject[];
-    readonly requiredContextDigest: ProtocolDigest;
-    readonly selectionPolicyDigest: ProtocolDigest;
-    readonly expectedSelectionPolicyDigest: ProtocolDigest;
+    readonly requiredContextHash: ProtocolHash;
+    readonly selectionPolicyHash: ProtocolHash;
+    readonly expectedSelectionPolicyHash: ProtocolHash;
     readonly currentRecoveryEpochMap: Readonly<
         Record<string, RecoveryEpochMapEntry>
     >;
@@ -255,7 +255,7 @@ export type FirstValidOrderingInput = {
 /** First-valid ordering verification result with ordered objects. */
 export type FirstValidOrderingVerification =
     StructuredProtocolVerificationResult & {
-        readonly firstValidOrderDigest?: ProtocolDigest;
+        readonly firstValidOrderHash?: ProtocolHash;
         readonly orderedObjects: readonly ValidatedFirstValidObject[];
     };
 
@@ -263,20 +263,20 @@ export type FirstValidOrderingVerification =
 export type RecoveryEpochUpdate = {
     readonly objectType: 'RecoveryEpochUpdate';
     readonly objectVersion: 1;
-    readonly recoveryEpochUpdateDigest: ProtocolDigest;
+    readonly recoveryEpochUpdateHash: ProtocolHash;
     readonly ceremonyId: string;
     readonly signerIdentity: string;
-    readonly recoveryRootPublicKeyDigest: ProtocolDigest;
-    readonly recoveryPolicyDigest: ProtocolDigest;
+    readonly recoveryRootPublicKeyHash: ProtocolHash;
+    readonly recoveryPolicyHash: ProtocolHash;
     readonly previousRecoveryEpoch: number;
     readonly newRecoveryEpoch: number;
     readonly previousDeviceEpoch: number;
     readonly newDeviceEpoch: number;
     readonly oldActionCutoffBoardSequence: number;
-    readonly boardHeadDigest: ProtocolDigest;
-    readonly newSigningPublicKeyDigest: ProtocolDigest;
-    readonly restoredFrozenReceiverStateCommitment: ProtocolDigest;
-    readonly newTrusteeSetupCommitment: ProtocolDigest;
+    readonly boardHeadHash: ProtocolHash;
+    readonly newSigningPublicKeyHash: ProtocolHash;
+    readonly restoredFrozenReceiverStateCommitment: ProtocolHash;
+    readonly newTrusteeSetupCommitment: ProtocolHash;
     readonly signature: ProtocolSignatureEnvelope;
 };
 
@@ -284,8 +284,8 @@ export type RecoveryEpochUpdate = {
 export type RecoveryEpochVerificationInput = {
     readonly update: RecoveryEpochUpdate;
     readonly currentEntry: RecoveryEpochMapEntry;
-    readonly expectedRecoveryRootPublicKeyDigest: ProtocolDigest;
-    readonly expectedRecoveryPolicyDigest: ProtocolDigest;
+    readonly expectedRecoveryRootPublicKeyHash: ProtocolHash;
+    readonly expectedRecoveryPolicyHash: ProtocolHash;
     readonly boardEvidence: BoardConsistencyInput;
     readonly updateInclusionProof: InclusionProof;
     readonly conflictingUpdates?: readonly RecoveryEpochUpdate[];
@@ -300,7 +300,7 @@ export type RecoveryEpochVerification = StructuredProtocolVerificationResult & {
 export type ActionCurrentForRecoveryEpochInput = {
     readonly actionContext: ActionContext;
     readonly recoveryEpochState: RecoveryEpochMapEntry;
-    readonly expectedRosterExternalAcceptanceDigest?: ProtocolDigest | null;
+    readonly expectedRosterExternalAcceptanceHash?: ProtocolHash | null;
 };
 
 /** Result returned when checking action freshness against recovery state. */

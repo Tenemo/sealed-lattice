@@ -1,4 +1,4 @@
-import { deriveProtocolDigest } from '@sealed-lattice/crypto';
+import { deriveProtocolHash } from '@sealed-lattice/crypto';
 import type {
     BallotProofStatement,
     ReceiverKeyProofRootEvidence,
@@ -19,13 +19,13 @@ import {
     createReceiverPayloadShell,
     createShareCommitmentMessageBoundCert,
     createShareCommitmentShell,
-    deriveClaimBearingBallotPackageDigest,
+    deriveClaimBearingBallotPackageHash,
     type BallotPrivacyRelationCompilerInput,
 } from '../../../src/ballot-privacy/index';
 import {
     createFixtureRandomnessSource,
     createShareCommitmentPolynomialVector,
-    deriveShareCommitmentBodyDigest,
+    deriveShareCommitmentBodyHash,
     generateReceiverState,
 } from '../../../src/ballot-privacy/lattice-primitives';
 import {
@@ -39,11 +39,11 @@ import {
 import { type BallotPrivacyRelationBackendPublicContext } from '../../../src/ballot-privacy/relation-backend-lowering';
 import {
     deriveThresholdProfile,
-    deriveThresholdProfileDigest,
+    deriveThresholdProfileHash,
 } from '../../../src/lifecycle/thresholds';
 
-const digest = (label: string): string =>
-    deriveProtocolDigest('ChallengeDomainDigest', {
+const hash = (label: string): string =>
+    deriveProtocolHash('ChallengeDomainHash', {
         label,
         purpose: 'ballot-proof-record-generation-fixture',
     });
@@ -141,12 +141,12 @@ const zeroReceiverEncryptionPolynomial = (): readonly number[] =>
 
 const deterministicReceiverPayloadCiphertextForTest = (input: {
     readonly plaintextBits: readonly number[];
-    readonly receiverEncryptionProfileDigest: string;
+    readonly receiverEncryptionProfileHash: string;
     readonly receiverIdentity: string;
     readonly receiverRosterPosition: number;
 }): {
-    readonly ciphertextBodyDigest: string;
-    readonly ciphertextChunkDigest: string;
+    readonly ciphertextBodyHash: string;
+    readonly ciphertextChunkHash: string;
     readonly ciphertextChunks: readonly {
         readonly chunkIndex: number;
         readonly firstCiphertextVector: readonly (readonly number[])[];
@@ -154,7 +154,7 @@ const deterministicReceiverPayloadCiphertextForTest = (input: {
     }[];
     readonly plaintextBitLength: number;
     readonly receiverPayloadCiphertextRoot: string;
-    readonly receiverPayloadDigest: string;
+    readonly receiverPayloadHash: string;
     readonly witness: NonNullable<
         BallotProofComponentProjectionWitness['receiverEncryptionWitnesses']
     >[number];
@@ -180,35 +180,31 @@ const deterministicReceiverPayloadCiphertextForTest = (input: {
             ),
         }),
     );
-    const ciphertextBodyDigest = deriveProtocolDigest(
+    const ciphertextBodyHash = deriveProtocolHash(
         'ReceiverPayloadCiphertextRoot',
         {
             ciphertextChunks,
             plaintextBitLength: input.plaintextBits.length,
-            receiverEncryptionProfileDigest:
-                input.receiverEncryptionProfileDigest,
+            receiverEncryptionProfileHash: input.receiverEncryptionProfileHash,
         },
     );
-    const receiverPayloadCiphertextRoot = deriveProtocolDigest(
+    const receiverPayloadCiphertextRoot = deriveProtocolHash(
         'ReceiverPayloadCiphertextRoot',
         {
-            ciphertextBodyDigest,
+            ciphertextBodyHash,
             receiverIdentity: input.receiverIdentity,
             receiverRosterPosition: input.receiverRosterPosition,
         },
     );
-    const receiverPayloadDigest = deriveProtocolDigest(
-        'ReceiverPayloadDigest',
-        {
-            receiverIdentity: input.receiverIdentity,
-            receiverPayloadCiphertextRoot,
-            receiverRosterPosition: input.receiverRosterPosition,
-        },
-    );
+    const receiverPayloadHash = deriveProtocolHash('ReceiverPayloadHash', {
+        receiverIdentity: input.receiverIdentity,
+        receiverPayloadCiphertextRoot,
+        receiverRosterPosition: input.receiverRosterPosition,
+    });
 
     return {
-        ciphertextBodyDigest,
-        ciphertextChunkDigest: deriveProtocolDigest('ChallengeDomainDigest', {
+        ciphertextBodyHash,
+        ciphertextChunkHash: deriveProtocolHash('ChallengeDomainHash', {
             ciphertextChunks,
             plaintextBitLength: input.plaintextBits.length,
             purpose: 'ballot-proof-record-generation-fixture-ciphertext',
@@ -216,7 +212,7 @@ const deterministicReceiverPayloadCiphertextForTest = (input: {
         ciphertextChunks,
         plaintextBitLength: input.plaintextBits.length,
         receiverPayloadCiphertextRoot,
-        receiverPayloadDigest,
+        receiverPayloadHash,
         witness: {
             chunkWitnesses: ciphertextChunks.map((ciphertextChunk) => ({
                 chunkIndex: ciphertextChunk.chunkIndex,
@@ -350,7 +346,7 @@ export const mandatoryProfileRelationInput =
         return variantRelationInput({ optionCount: 20, rosterSize: 20 });
     };
 
-const thresholdProfileDigestForRelationInput = (input: {
+const thresholdProfileHashForRelationInput = (input: {
     readonly publicContext: BallotPrivacyRelationBackendPublicContext;
     readonly relationInput: BallotPrivacyRelationCompilerInput;
 }): string => {
@@ -361,11 +357,11 @@ const thresholdProfileDigestForRelationInput = (input: {
         rosterSize: input.relationInput.rosterSize,
     });
 
-    return deriveThresholdProfileDigest({
+    return deriveThresholdProfileHash({
         maxRosterSize: maximumVariantRosterSize,
         minRosterSize: minimumVariantRosterSize,
-        pollSpecDigest: input.publicContext.pollSpecDigest,
-        rosterDigest: input.publicContext.rosterDigest,
+        pollSpecHash: input.publicContext.pollSpecHash,
+        rosterHash: input.publicContext.rosterHash,
         rosterPolicy: 'OpenLinkPublicRoster',
         smallRosterPolicy: isMicroRoster
             ? 'AllowMicroRoster'
@@ -389,40 +385,38 @@ const publicContextAndProjectionWitness = (
         shareCommitmentProfile: profileSet.shareCommitmentProfile,
     });
     const baseContext = {
-        actionContextDigest: digest('action-context'),
-        aggregateInputEncodingProfileDigest:
+        actionContextHash: hash('action-context'),
+        aggregateInputEncodingProfileHash:
             profileSet.aggregateInputEncodingProfile
-                .aggregateInputEncodingProfileDigest,
-        ballotProofProfileDigest:
-            profileSet.ballotProofProfile.ballotProofProfileDigest,
-        ballotScoreEncodingProfileDigest:
+                .aggregateInputEncodingProfileHash,
+        ballotProofProfileHash:
+            profileSet.ballotProofProfile.ballotProofProfileHash,
+        ballotScoreEncodingProfileHash:
             profileSet.ballotScoreEncodingProfile
-                .ballotScoreEncodingProfileDigest,
-        ballotShareLayoutProfileDigest:
-            profileSet.ballotShareLayoutProfile.ballotShareLayoutProfileDigest,
+                .ballotScoreEncodingProfileHash,
+        ballotShareLayoutProfileHash:
+            profileSet.ballotShareLayoutProfile.ballotShareLayoutProfileHash,
         ceremonyId: 'ceremony-proof-record-generation',
-        encodedAggregateLayoutDigest:
-            profileSet.encodedAggregateLayoutProfile
-                .encodedAggregateLayoutDigest,
-        encodedShareVectorLayoutDigest:
+        encodedAggregateLayoutHash:
+            profileSet.encodedAggregateLayoutProfile.encodedAggregateLayoutHash,
+        encodedShareVectorLayoutHash:
             profileSet.encodedShareVectorLayoutProfile
-                .encodedShareVectorLayoutDigest,
-        manifestDigest: digest('manifest'),
-        payloadContextDigest: digest('payload-context'),
-        pollSpecDigest: digest('poll-spec'),
-        receiverEncryptionProfileDigest:
-            profileSet.receiverEncryptionProfile
-                .receiverEncryptionProfileDigest,
-        receiverKeyProofRoot: digest('receiver-key-proof-root'),
-        receiverKeyRoot: digest('receiver-key-root'),
-        rosterDigest: digest('roster'),
-        rosterExternalAcceptanceDigest: digest('external-acceptance'),
-        scoreMembershipProfileDigest:
-            profileSet.scoreMembershipProfile.scoreMembershipProfileDigest,
-        shareCommitmentMessageBoundCertDigest:
-            certificate.shareCommitmentMessageBoundCertDigest,
-        shareCommitmentProfileDigest:
-            profileSet.shareCommitmentProfile.shareCommitmentProfileDigest,
+                .encodedShareVectorLayoutHash,
+        manifestHash: hash('manifest'),
+        payloadContextHash: hash('payload-context'),
+        pollSpecHash: hash('poll-spec'),
+        receiverEncryptionProfileHash:
+            profileSet.receiverEncryptionProfile.receiverEncryptionProfileHash,
+        receiverKeyProofRoot: hash('receiver-key-proof-root'),
+        receiverKeyRoot: hash('receiver-key-root'),
+        rosterHash: hash('roster'),
+        rosterExternalAcceptanceHash: hash('external-acceptance'),
+        scoreMembershipProfileHash:
+            profileSet.scoreMembershipProfile.scoreMembershipProfileHash,
+        shareCommitmentMessageBoundCertHash:
+            certificate.shareCommitmentMessageBoundCertHash,
+        shareCommitmentProfileHash:
+            profileSet.shareCommitmentProfile.shareCommitmentProfileHash,
     };
     const receiverRecords = relationInput.receivers.map((receiver) => {
         const openingRandomness = shareCommitmentOpeningForReceiver(
@@ -439,7 +433,7 @@ const publicContextAndProjectionWitness = (
             });
         const receiverState = generateReceiverState({
             ceremonyId: baseContext.ceremonyId,
-            manifestDigest: baseContext.manifestDigest,
+            manifestHash: baseContext.manifestHash,
             randomnessSource: createFixtureRandomnessSource(
                 `receiver-key-${receiver.receiverRosterPosition}`,
             ),
@@ -447,15 +441,15 @@ const publicContextAndProjectionWitness = (
             receiverIdentity: receiver.receiverIdentity,
             receiverRosterPosition: receiver.receiverRosterPosition,
             recoveryEpoch: 0,
-            rosterDigest: baseContext.rosterDigest,
+            rosterHash: baseContext.rosterHash,
         });
         const encryptedPayload = deterministicReceiverPayloadCiphertextForTest({
             plaintextBits: receiverPayloadPlaintextBitsForTest({
                 openingRandomness,
                 receiverShareVector: receiver.receiverShareVector,
             }),
-            receiverEncryptionProfileDigest:
-                baseContext.receiverEncryptionProfileDigest,
+            receiverEncryptionProfileHash:
+                baseContext.receiverEncryptionProfileHash,
             receiverIdentity: receiver.receiverIdentity,
             receiverRosterPosition: receiver.receiverRosterPosition,
         });
@@ -497,28 +491,27 @@ const publicContextAndProjectionWitness = (
                 ({ encryptedPayload, receiver, receiverState }) => {
                     const receiverPayloadShell = createReceiverPayloadShell({
                         ceremonyId: baseContext.ceremonyId,
-                        ciphertextBodyDigest:
-                            encryptedPayload.ciphertextBodyDigest,
-                        manifestDigest: baseContext.manifestDigest,
-                        payloadContextDigest: baseContext.payloadContextDigest,
-                        pollSpecDigest: baseContext.pollSpecDigest,
-                        receiverEncryptionProfileDigest:
-                            baseContext.receiverEncryptionProfileDigest,
+                        ciphertextBodyHash: encryptedPayload.ciphertextBodyHash,
+                        manifestHash: baseContext.manifestHash,
+                        payloadContextHash: baseContext.payloadContextHash,
+                        pollSpecHash: baseContext.pollSpecHash,
+                        receiverEncryptionProfileHash:
+                            baseContext.receiverEncryptionProfileHash,
                         receiverIdentity: receiver.receiverIdentity,
-                        receiverPublicKeyDigest:
+                        receiverPublicKeyHash:
                             receiverState.receiverPublicKey
-                                .receiverPublicKeyDigest,
+                                .receiverPublicKeyHash,
                         receiverRosterPosition: receiver.receiverRosterPosition,
-                        rosterDigest: baseContext.rosterDigest,
-                        voterIdentityDigest: digest('voter-1'),
+                        rosterHash: baseContext.rosterHash,
+                        voterIdentityHash: hash('voter-1'),
                     });
 
                     return {
                         ...receiverPayloadShell,
                         ciphertextChunkCount:
                             encryptedPayload.ciphertextChunks.length,
-                        ciphertextChunkDigest:
-                            encryptedPayload.ciphertextChunkDigest,
+                        ciphertextChunkHash:
+                            encryptedPayload.ciphertextChunkHash,
                         ciphertextChunks: encryptedPayload.ciphertextChunks,
                         plaintextBitLength: encryptedPayload.plaintextBitLength,
                     };
@@ -526,44 +519,43 @@ const publicContextAndProjectionWitness = (
             ),
             receiverPublicKeys: receiverRecords.map(
                 ({ receiver, receiverState }) => ({
-                    keyMaterialDigest:
-                        receiverState.receiverPublicKey.keyMaterialDigest,
+                    keyMaterialHash:
+                        receiverState.receiverPublicKey.keyMaterialHash,
                     publicKeyVector:
                         receiverState.publicKeyMaterial.publicKeyVector,
-                    publicMatrixSeedDigest:
-                        receiverState.publicKeyMaterial.publicMatrixSeedDigest,
+                    publicMatrixSeedHash:
+                        receiverState.publicKeyMaterial.publicMatrixSeedHash,
                     receiverIdentity: receiver.receiverIdentity,
-                    receiverPublicKeyDigest:
-                        receiverState.receiverPublicKey.receiverPublicKeyDigest,
+                    receiverPublicKeyHash:
+                        receiverState.receiverPublicKey.receiverPublicKeyHash,
                     receiverRosterPosition: receiver.receiverRosterPosition,
                 }),
             ),
             shareCommitments: receiverRecords.map(
                 ({ commitmentPolynomialVector, receiver }) => {
-                    const commitmentBodyDigest =
-                        deriveShareCommitmentBodyDigest({
-                            commitmentPolynomialVector,
-                            shareCommitmentProfileDigest:
-                                baseContext.shareCommitmentProfileDigest,
-                        });
+                    const commitmentBodyHash = deriveShareCommitmentBodyHash({
+                        commitmentPolynomialVector,
+                        shareCommitmentProfileHash:
+                            baseContext.shareCommitmentProfileHash,
+                    });
                     const shareCommitmentShell = createShareCommitmentShell({
                         ceremonyId: baseContext.ceremonyId,
-                        commitmentBodyDigest,
+                        commitmentBodyHash,
                         commitmentPolynomialVector,
-                        manifestDigest: baseContext.manifestDigest,
+                        manifestHash: baseContext.manifestHash,
                         receiverIdentity: receiver.receiverIdentity,
                         receiverRosterPosition: receiver.receiverRosterPosition,
-                        rosterDigest: baseContext.rosterDigest,
-                        shareCommitmentProfileDigest:
-                            baseContext.shareCommitmentProfileDigest,
+                        rosterHash: baseContext.rosterHash,
+                        shareCommitmentProfileHash:
+                            baseContext.shareCommitmentProfileHash,
                         shareVectorWidth: receiver.receiverShareVector.length,
                     });
 
                     return {
                         ...shareCommitmentShell,
-                        commitmentBodyDigest,
-                        commitmentPolynomialVectorDigest: deriveProtocolDigest(
-                            'ChallengeDomainDigest',
+                        commitmentBodyHash,
+                        commitmentPolynomialVectorHash: deriveProtocolHash(
+                            'ChallengeDomainHash',
                             {
                                 commitmentPolynomialVector,
                                 purpose:
@@ -584,23 +576,23 @@ const claimBearingReceiverPayloadShells = (
         const payload = receiverPayload as Record<string, unknown>;
 
         return {
-            ciphertextBodyDigest: payload.ciphertextBodyDigest as string,
+            ciphertextBodyHash: payload.ciphertextBodyHash as string,
             ceremonyId: payload.ceremonyId as string,
-            manifestDigest: payload.manifestDigest as string,
+            manifestHash: payload.manifestHash as string,
             objectType: 'ReceiverPayload',
             objectVersion: 1,
-            payloadContextDigest: payload.payloadContextDigest as string,
-            pollSpecDigest: payload.pollSpecDigest as string,
-            receiverEncryptionProfileDigest:
-                payload.receiverEncryptionProfileDigest as string,
+            payloadContextHash: payload.payloadContextHash as string,
+            pollSpecHash: payload.pollSpecHash as string,
+            receiverEncryptionProfileHash:
+                payload.receiverEncryptionProfileHash as string,
             receiverIdentity: payload.receiverIdentity as string,
             receiverPayloadCiphertextRoot:
                 payload.receiverPayloadCiphertextRoot as string,
-            receiverPayloadDigest: payload.receiverPayloadDigest as string,
-            receiverPublicKeyDigest: payload.receiverPublicKeyDigest as string,
+            receiverPayloadHash: payload.receiverPayloadHash as string,
+            receiverPublicKeyHash: payload.receiverPublicKeyHash as string,
             receiverRosterPosition: payload.receiverRosterPosition as number,
-            rosterDigest: payload.rosterDigest as string,
-            voterIdentityDigest: payload.voterIdentityDigest as string,
+            rosterHash: payload.rosterHash as string,
+            voterIdentityHash: payload.voterIdentityHash as string,
         };
     });
 
@@ -612,18 +604,18 @@ const claimBearingShareCommitmentShells = (
 
         return {
             ceremonyId: commitment.ceremonyId as string,
-            commitmentBodyDigest: commitment.commitmentBodyDigest as string,
+            commitmentBodyHash: commitment.commitmentBodyHash as string,
             commitmentPolynomialVector:
                 commitment.commitmentPolynomialVector as readonly (readonly string[])[],
-            manifestDigest: commitment.manifestDigest as string,
+            manifestHash: commitment.manifestHash as string,
             objectType: 'ShareCommitment',
             objectVersion: 1,
             receiverIdentity: commitment.receiverIdentity as string,
             receiverRosterPosition: commitment.receiverRosterPosition as number,
-            rosterDigest: commitment.rosterDigest as string,
-            shareCommitmentDigest: commitment.shareCommitmentDigest as string,
-            shareCommitmentProfileDigest:
-                commitment.shareCommitmentProfileDigest as string,
+            rosterHash: commitment.rosterHash as string,
+            shareCommitmentHash: commitment.shareCommitmentHash as string,
+            shareCommitmentProfileHash:
+                commitment.shareCommitmentProfileHash as string,
             shareVectorWidth: commitment.shareVectorWidth as number,
         };
     });
@@ -635,19 +627,18 @@ const receiverKeyProofRootEvidence = (
         acceptedReceiverKeyProofCount: publicContext.receiverPublicKeys.length,
         ceremonyId: publicContext.ceremonyId,
         evidenceStatus: 'ReceiverKeyProofRootAccepted',
-        manifestDigest: publicContext.manifestDigest,
+        manifestHash: publicContext.manifestHash,
         receiverKeyProofRoot: publicContext.receiverKeyProofRoot,
         receiverKeyRoot: publicContext.receiverKeyRoot,
         receiverPublicKeys: publicContext.receiverPublicKeys.map(
             (receiverPublicKey) => ({
                 receiverIdentity: receiverPublicKey.receiverIdentity,
-                receiverPublicKeyDigest:
-                    receiverPublicKey.receiverPublicKeyDigest,
+                receiverPublicKeyHash: receiverPublicKey.receiverPublicKeyHash,
                 receiverRosterPosition:
                     receiverPublicKey.receiverRosterPosition,
             }),
         ),
-        rosterDigest: publicContext.rosterDigest,
+        rosterHash: publicContext.rosterHash,
     });
 
 const ballotProofStatement = (input: {
@@ -659,25 +650,25 @@ const ballotProofStatement = (input: {
     readonly topOptionCount: number;
 }): BallotProofStatement => {
     const statementInput = {
-        actionContextDigest: input.publicContext.actionContextDigest,
-        aggregateInputEncodingProfileDigest:
-            input.publicContext.aggregateInputEncodingProfileDigest,
-        ballotProofProfileDigest: input.publicContext.ballotProofProfileDigest,
-        ballotScoreEncodingProfileDigest:
-            input.publicContext.ballotScoreEncodingProfileDigest,
-        ballotShareLayoutProfileDigest:
-            input.publicContext.ballotShareLayoutProfileDigest,
+        actionContextHash: input.publicContext.actionContextHash,
+        aggregateInputEncodingProfileHash:
+            input.publicContext.aggregateInputEncodingProfileHash,
+        ballotProofProfileHash: input.publicContext.ballotProofProfileHash,
+        ballotScoreEncodingProfileHash:
+            input.publicContext.ballotScoreEncodingProfileHash,
+        ballotShareLayoutProfileHash:
+            input.publicContext.ballotShareLayoutProfileHash,
         ceremonyId: input.publicContext.ceremonyId,
-        duplicateBallotPolicyDigest: digest('duplicate-ballot-policy'),
-        encodedAggregateLayoutDigest:
-            input.publicContext.encodedAggregateLayoutDigest,
-        encodedShareVectorLayoutDigest:
-            input.publicContext.encodedShareVectorLayoutDigest,
-        manifestDigest: input.publicContext.manifestDigest,
+        duplicateBallotPolicyHash: hash('duplicate-ballot-policy'),
+        encodedAggregateLayoutHash:
+            input.publicContext.encodedAggregateLayoutHash,
+        encodedShareVectorLayoutHash:
+            input.publicContext.encodedShareVectorLayoutHash,
+        manifestHash: input.publicContext.manifestHash,
         optionCount: input.relationInput.optionCount,
-        pollSpecDigest: input.publicContext.pollSpecDigest,
-        receiverEncryptionProfileDigest:
-            input.publicContext.receiverEncryptionProfileDigest,
+        pollSpecHash: input.publicContext.pollSpecHash,
+        receiverEncryptionProfileHash:
+            input.publicContext.receiverEncryptionProfileHash,
         receiverKeyProofRoot: input.publicContext.receiverKeyProofRoot,
         receiverKeyRoot: input.publicContext.receiverKeyRoot,
         receiverPayloads: input.publicContext.receiverPayloads.map(
@@ -685,51 +676,50 @@ const ballotProofStatement = (input: {
                 receiverIdentity: receiverPayload.receiverIdentity,
                 receiverPayloadCiphertextRoot:
                     receiverPayload.receiverPayloadCiphertextRoot,
-                receiverPayloadDigest: receiverPayload.receiverPayloadDigest,
+                receiverPayloadHash: receiverPayload.receiverPayloadHash,
                 receiverRosterPosition: receiverPayload.receiverRosterPosition,
             }),
         ),
         receiverPublicKeys: input.publicContext.receiverPublicKeys.map(
             (receiverPublicKey) => ({
                 receiverIdentity: receiverPublicKey.receiverIdentity,
-                receiverPublicKeyDigest:
-                    receiverPublicKey.receiverPublicKeyDigest,
+                receiverPublicKeyHash: receiverPublicKey.receiverPublicKeyHash,
                 receiverRosterPosition:
                     receiverPublicKey.receiverRosterPosition,
             }),
         ),
-        rosterDigest: input.publicContext.rosterDigest,
-        rosterExternalAcceptanceDigest:
-            input.publicContext.rosterExternalAcceptanceDigest,
-        scoreDomainDigest: digest('score-domain'),
-        scoreMembershipProfileDigest:
-            input.publicContext.scoreMembershipProfileDigest,
-        shareCommitmentMessageBoundCertDigest:
-            input.publicContext.shareCommitmentMessageBoundCertDigest,
-        shareCommitmentProfileDigest:
-            input.publicContext.shareCommitmentProfileDigest,
+        rosterHash: input.publicContext.rosterHash,
+        rosterExternalAcceptanceHash:
+            input.publicContext.rosterExternalAcceptanceHash,
+        scoreDomainHash: hash('score-domain'),
+        scoreMembershipProfileHash:
+            input.publicContext.scoreMembershipProfileHash,
+        shareCommitmentMessageBoundCertHash:
+            input.publicContext.shareCommitmentMessageBoundCertHash,
+        shareCommitmentProfileHash:
+            input.publicContext.shareCommitmentProfileHash,
         shareCommitments: input.publicContext.shareCommitments.map(
             (shareCommitment) => ({
                 receiverIdentity: shareCommitment.receiverIdentity,
                 receiverRosterPosition: shareCommitment.receiverRosterPosition,
-                shareCommitmentDigest: shareCommitment.shareCommitmentDigest,
+                shareCommitmentHash: shareCommitment.shareCommitmentHash,
             }),
         ),
-        thresholdProfileDigest: thresholdProfileDigestForRelationInput({
+        thresholdProfileHash: thresholdProfileHashForRelationInput({
             publicContext: input.publicContext,
             relationInput: input.relationInput,
         }),
-        tiePolicyDigest: digest('tie-policy'),
+        tiePolicyHash: hash('tie-policy'),
         topOptionCount: input.topOptionCount,
-        voterIdentityDigest: digest('voter-1'),
+        voterIdentityHash: hash('voter-1'),
         voterRosterPosition: 1,
-        voterSigningKeyDigest: digest('voter-signing-key'),
+        voterSigningKeyHash: hash('voter-signing-key'),
     };
     const placeholderStatement = buildBallotProofStatement({
         ...statementInput,
-        ballotPackageDigest: digest('ballot-package-placeholder'),
+        ballotPackageHash: hash('ballot-package-placeholder'),
     });
-    const ballotPackageDigest = deriveClaimBearingBallotPackageDigest({
+    const ballotPackageHash = deriveClaimBearingBallotPackageHash({
         ballotProofStatement: placeholderStatement,
         receiverKeyProofRootEvidence: input.receiverKeyProofRootEvidence,
         receiverPayloads: input.claimBearingReceiverPayloads,
@@ -738,7 +728,7 @@ const ballotProofStatement = (input: {
 
     return buildBallotProofStatement({
         ...statementInput,
-        ballotPackageDigest,
+        ballotPackageHash,
     });
 };
 

@@ -10,26 +10,25 @@ pub(crate) fn verify_receiver_key_linear_proof_bytes(
 ) -> Value {
     let mut refused_objects = Vec::new();
     let receiver_key_proof_root = string_field(receiver_key_proof, "receiverKeyProofRoot");
-    let linear_statement_digest = string_field(linear_statement, "statementDigest");
-    let expected_proof_encoding_digest =
-        derive_receiver_key_proof_encoding_profile_digest(proof_encoding);
-    let expected_parameter_set_digest =
-        derive_receiver_key_proof_parameter_set_digest(parameter_set);
-    let expected_public_randomness_digest =
-        derive_receiver_key_public_randomness_digest(public_randomness_hex);
-    let expected_linear_statement_digest =
-        derive_receiver_key_linear_statement_digest(linear_statement);
+    let linear_statement_hash = string_field(linear_statement, "statementHash");
+    let expected_proof_encoding_hash =
+        derive_receiver_key_proof_encoding_profile_hash(proof_encoding);
+    let expected_parameter_set_hash = derive_receiver_key_proof_parameter_set_hash(parameter_set);
+    let expected_public_randomness_hash =
+        derive_receiver_key_public_randomness_hash(public_randomness_hex);
+    let expected_linear_statement_hash =
+        derive_receiver_key_linear_statement_hash(linear_statement);
     refused_objects.extend(collect_linear_proof_binding_refusals(
         LinearProofBindingValidationInput {
             proof_record: receiver_key_proof,
             linear_statement,
             parameter_set,
             proof_encoding,
-            expected_linear_statement_digest,
-            expected_parameter_set_digest,
-            expected_proof_encoding_digest,
-            expected_public_randomness_digest,
-            object_digest: receiver_key_proof_root,
+            expected_linear_statement_hash,
+            expected_parameter_set_hash,
+            expected_proof_encoding_hash,
+            expected_public_randomness_hash,
+            object_hash: receiver_key_proof_root,
             parameter_profile_requirement: Some(LinearProofProfileRequirement {
                 profile_id: RECEIVER_KEY_PROOF_PARAMETER_PROFILE_ID,
                 refusal_message:
@@ -41,15 +40,15 @@ pub(crate) fn verify_receiver_key_linear_proof_bytes(
                     "Receiver key proof records require the production receiver-key proof encoding profile.",
             }),
             messages: LinearProofBindingValidationMessages {
-                canonical_statement_digest_mismatch:
-                    "Receiver key linear statement digest does not match its canonical payload.",
+                canonical_statement_hash_mismatch:
+                    "Receiver key linear statement hash does not match its canonical payload.",
                 proof_record_statement_mismatch:
                     "Receiver key proof record is not bound to the supplied linear statement.",
-                proof_encoding_digest_mismatch:
+                proof_encoding_hash_mismatch:
                     "Receiver key proof record is not bound to the supplied proof encoding profile.",
-                parameter_set_digest_mismatch:
+                parameter_set_hash_mismatch:
                     "Receiver key proof record is not bound to the supplied proof parameter set.",
-                public_randomness_digest_mismatch:
+                public_randomness_hash_mismatch:
                     "Receiver key proof record is not bound to the supplied public randomness.",
                 parameter_set_size_mismatch:
                     "Receiver key proof parameter set is not bound to the proof record byte length.",
@@ -92,7 +91,7 @@ pub(crate) fn verify_receiver_key_linear_proof_bytes(
             .unwrap_or(Value::Null)
     });
     let proof_verification =
-        linear_proof::verifier::verify_linear_proof_vector_case_value(&vector_case);
+        linear_proof_verifier::verify_linear_proof_vector_case_value(&vector_case);
     if proof_verification
         .as_object()
         .and_then(|object| object.get("ok"))
@@ -105,7 +104,7 @@ pub(crate) fn verify_receiver_key_linear_proof_bytes(
             "backendStatus": describe_proof_backend(),
             "operation": "verifyReceiverKeyProof",
             "statusLabels": [],
-            "acceptedDigests": [],
+            "acceptedHashes": [],
             "refusedObjects": proof_verification
                 .as_object()
                 .and_then(|object| object.get("refusedObjects"))
@@ -126,7 +125,7 @@ pub(crate) fn verify_receiver_key_linear_proof_bytes(
 
     let mut status_labels = vec![
         json!("ReceiverKeyProofRootRecomputed"),
-        json!("ReceiverKeyProofBytesDigestChecked"),
+        json!("ReceiverKeyProofBytesHashChecked"),
         json!("ReceiverKeyLinearStatementBound"),
         json!("ReceiverKeyLinearProofVerified"),
     ];
@@ -137,11 +136,11 @@ pub(crate) fn verify_receiver_key_linear_proof_bytes(
     {
         status_labels.extend(proof_status_labels.iter().cloned());
     }
-    let accepted_digests = [
+    let accepted_hashes = [
         receiver_key_proof_root,
-        string_field(receiver_key_proof, "proofBytesDigest"),
-        string_field(receiver_key_proof, "proofParameterSetDigest"),
-        linear_statement_digest,
+        string_field(receiver_key_proof, "proofBytesHash"),
+        string_field(receiver_key_proof, "proofParameterSetHash"),
+        linear_statement_hash,
     ]
     .into_iter()
     .flatten()
@@ -154,7 +153,7 @@ pub(crate) fn verify_receiver_key_linear_proof_bytes(
         "backendStatus": describe_proof_backend(),
         "operation": "verifyReceiverKeyProof",
         "statusLabels": status_labels,
-        "acceptedDigests": accepted_digests,
+        "acceptedHashes": accepted_hashes,
         "refusedObjects": [],
         "unresolvedReason": Value::Null
     })
@@ -458,11 +457,11 @@ pub(crate) fn prepare_receiver_key_proof_generation_inner(
         }
         None => None,
     };
-    let accepted_digests = [
-        derive_receiver_key_linear_statement_digest(linear_statement),
-        derive_receiver_key_proof_parameter_set_digest(parameter_set_value),
-        derive_receiver_key_proof_encoding_profile_digest(proof_encoding_value),
-        derive_receiver_key_public_randomness_digest(public_randomness_hex),
+    let accepted_hashes = [
+        derive_receiver_key_linear_statement_hash(linear_statement),
+        derive_receiver_key_proof_parameter_set_hash(parameter_set_value),
+        derive_receiver_key_proof_encoding_profile_hash(proof_encoding_value),
+        derive_receiver_key_public_randomness_hash(public_randomness_hex),
     ]
     .into_iter()
     .flatten()
@@ -493,7 +492,7 @@ pub(crate) fn prepare_receiver_key_proof_generation_inner(
         "backendStatus": describe_proof_backend(),
         "operation": "prepareReceiverKeyProofGeneration",
         "statusLabels": status_labels,
-        "acceptedDigests": accepted_digests,
+        "acceptedHashes": accepted_hashes,
         "refusedObjects": [],
         "unresolvedReason": Value::Null,
         "generatedProofBytes": false,
@@ -690,7 +689,7 @@ pub(crate) fn generate_receiver_key_proof_inner(
         "proofHex": proof_hex,
         "expectedProofSizeBytes": generation.summary.proof_size_bytes
     });
-    let verification = linear_proof::verifier::verify_linear_proof_vector_case_value(&vector_case);
+    let verification = linear_proof_verifier::verify_linear_proof_vector_case_value(&vector_case);
     if verification
         .as_object()
         .and_then(|object| object.get("ok"))
@@ -701,11 +700,11 @@ pub(crate) fn generate_receiver_key_proof_inner(
             "generated receiver-key proof did not verify against its public statement",
         ));
     }
-    let accepted_digests = [
-        derive_receiver_key_linear_statement_digest(linear_statement),
-        derive_receiver_key_proof_parameter_set_digest(parameter_set_value),
-        derive_receiver_key_proof_encoding_profile_digest(proof_encoding_value),
-        derive_receiver_key_public_randomness_digest(public_randomness_hex),
+    let accepted_hashes = [
+        derive_receiver_key_linear_statement_hash(linear_statement),
+        derive_receiver_key_proof_parameter_set_hash(parameter_set_value),
+        derive_receiver_key_proof_encoding_profile_hash(proof_encoding_value),
+        derive_receiver_key_public_randomness_hash(public_randomness_hex),
     ]
     .into_iter()
     .flatten()
@@ -725,7 +724,7 @@ pub(crate) fn generate_receiver_key_proof_inner(
             "ReceiverKeyProofBytesGenerated",
             "ReceiverKeyProofGenerationVerified"
         ],
-        "acceptedDigests": accepted_digests,
+        "acceptedHashes": accepted_hashes,
         "refusedObjects": [],
         "unresolvedReason": Value::Null,
         "generatedProofBytes": true,

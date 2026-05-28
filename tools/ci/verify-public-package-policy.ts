@@ -2,8 +2,6 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-import publicSurfacePolicy from '#packages/sdk/public-surface.json' with { type: 'json' };
-
 type VendoredProtocolRuntimeEntryExport = {
     readonly exports: readonly string[];
     readonly source: string;
@@ -14,6 +12,185 @@ type PublicPackagePolicy = {
     readonly vendoredProtocolRuntimeEntryExports: readonly VendoredProtocolRuntimeEntryExport[];
     readonly vendoredProtocolRuntimeModules: readonly string[];
 };
+
+export const forbiddenRuntimeExports = [
+    'bootstrap',
+    'aggregateWitnessFromReceiverPlaintext',
+    'createAggregateContributionFromBridgeProofRecord',
+    'createAggregateReadyRecord',
+    'createBallotProof',
+    'createPendingBridgeProofRecordFromBridgeEvidence',
+    'createPvssBallot',
+    'createShamirPolynomial',
+    'analyzeBgvCanonicalObject',
+    'decodeBgvCanonicalObject',
+    'decodeSparseTopKTarget',
+    'decryptAggregateHistogram',
+    'decryptAggregateScore',
+    'decryptAggregateScoreBits',
+    'decryptAggregateShare',
+    'decryptComparisonInput',
+    'decryptComparisonBit',
+    'decryptEncryptedAggregate',
+    'decryptExactSum',
+    'decryptIntermediateWire',
+    'decryptRank',
+    'decryptReceiverPayload',
+    'decryptTopKCiphertext',
+    'decryptToFile',
+    'decryptToString',
+    'deriveAggregateContributionHash',
+    'deriveAggregateReadyRecordHash',
+    'deriveBallotPackageHash',
+    'deriveBridgeProofProfileHash',
+    'deriveBridgeProofRecordHash',
+    'deriveBridgeProofStatementHash',
+    'deriveBridgeProofTargetContractHash',
+    'deriveCanonicalBallotSet',
+    'deriveEncryptedAggregateReconstructionRoot',
+    'derivePlaintextTopKOracle',
+    'deriveReceiverShareVectors',
+    'deriveTestAggregateShares',
+    'deriveTestBallotPackage',
+    'describeBgvOperationRegistry',
+    'describeBgvRnsProfile',
+    'dockerOracle',
+    'encodeBgvBatchPlaintext',
+    'exportAggregateOpening',
+    'exportAggregateShare',
+    'exportAggregateWitness',
+    'exportBridgeWitness',
+    'exportProofWitness',
+    'exportSecretKey',
+    'exportShare',
+    'fieldModulus',
+    'generateBgvBackendReport',
+    'generateBgvBaseConversionFixture',
+    'generateBgvCiphertextConventionFixture',
+    'generateBgvPassiveSetupPackage',
+    'generateAggregateBridgeEncryption',
+    'getShare',
+    'importSecretKey',
+    'lattigoOracle',
+    'oracleSerializer',
+    'oracleVectorGenerator',
+    'partialDecrypt',
+    'partialDecryptWithoutTarget',
+    'publishAggregateOpening',
+    'rawBridgeWitness',
+    'rawHEAdd',
+    'rawHEMul',
+    'rawHENoiseBudget',
+    'rawHERelin',
+    'rawHERotate',
+    'rawNTT',
+    'rawRNSLimbAccess',
+    'setNoiseFloodSigma',
+    'setSecretKey',
+    'setSmudgingDistribution',
+    'selectFirstValidAggregateContributions',
+    'thresholdDecrypt',
+    'verifyAggregateBridgeEncryption',
+    'verifyAggregateContributionStructure',
+    'verifyBallotPackageShell',
+    'verifyBgvCiphertextObject',
+    'verifyBgvLattigoOracle',
+    'verifyBgvPlaintextObject',
+    'verifyLattigoOracle',
+    'verifyLocalReplayRecordShell',
+    'verifyPvssBallotProof',
+    'verifyTargetAcceptedRecordShell',
+    'verifyTestAggregateShareOpening',
+    'verifyTestShareCommitmentOpening',
+    'verifyTopKDecryptionShareShell',
+] as const;
+
+export const vendoredProtocolRuntimeModules = [
+    'board/hashes.ts',
+    'board/index.ts',
+    'board/shell-evidence.ts',
+    'closing/index.ts',
+    'common/verification-helpers.ts',
+    'finality/hashes.ts',
+    'finality/index.ts',
+    'lifecycle/capabilities.ts',
+    'lifecycle/labels.ts',
+    'lifecycle/lifecycle.ts',
+    'lifecycle/poll-spec.ts',
+    'lifecycle/profiles.ts',
+    'lifecycle/refusal.ts',
+    'lifecycle/thresholds.ts',
+    'ordering/index.ts',
+    'recovery/index.ts',
+    'roster/hashes.ts',
+    'roster/inclusion.ts',
+    'roster/index.ts',
+    'roster/object-validation.ts',
+    'roster/verification.ts',
+] as const;
+
+export const vendoredProtocolRuntimeEntryExports = [
+    {
+        source: 'board/index.js',
+        exports: ['verifyBoardConsistency'],
+    },
+    {
+        source: 'closing/index.js',
+        exports: ['verifyCastReceiptShell', 'verifyCloseRecordShell'],
+    },
+    {
+        source: 'finality/index.js',
+        exports: ['verifyTargetFinality'],
+    },
+    {
+        source: 'lifecycle/capabilities.js',
+        exports: ['evaluateActionCapability'],
+    },
+    {
+        source: 'lifecycle/labels.js',
+        exports: ['deriveLifecycleLabels'],
+    },
+    {
+        source: 'lifecycle/lifecycle.js',
+        exports: ['isValidLifecycleTransition'],
+    },
+    {
+        source: 'lifecycle/poll-spec.js',
+        exports: ['derivePollSpecHash', 'validatePollSpec'],
+    },
+    {
+        source: 'lifecycle/thresholds.js',
+        exports: [
+            'deriveFrozenRosterProfile',
+            'deriveThresholdProfile',
+            'deriveThresholdProfileHash',
+        ],
+    },
+    {
+        source: 'ordering/index.js',
+        exports: ['deriveValidatedFirstValidOrder', 'verifyFirstValidPolicy'],
+    },
+    {
+        source: 'recovery/index.js',
+        exports: [
+            'isActionCurrentForRecoveryEpoch',
+            'verifyRecoveryEpochUpdate',
+        ],
+    },
+    {
+        source: 'roster/index.js',
+        exports: [
+            'verifyRosterExternalAcceptance',
+            'verifyRosterManifestTranscript',
+        ],
+    },
+] as const satisfies readonly VendoredProtocolRuntimeEntryExport[];
+
+const publicPackagePolicy = {
+    forbiddenRuntimeExports,
+    vendoredProtocolRuntimeEntryExports,
+    vendoredProtocolRuntimeModules,
+} satisfies PublicPackagePolicy;
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const sdkRuntimePath = path.resolve(
@@ -175,7 +352,7 @@ const loadRuntimeExportNames = async (): Promise<string[]> => {
 
 const main = async (): Promise<void> => {
     const failures = await validatePublicPackagePolicy(
-        publicSurfacePolicy as PublicPackagePolicy,
+        publicPackagePolicy,
         await loadRuntimeExportNames(),
     );
 

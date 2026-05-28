@@ -12,19 +12,19 @@ import {
 import { signedObjectRootByteLength } from '../../../common/verification-helpers.js';
 import {
     createAggregateRefusal,
-    protocolDigestPattern,
+    protocolHashPattern,
 } from '../../aggregate-derivation/constants.js';
 import {
-    deriveAggregateContributionDigest,
-    deriveBridgeProofProfileDigest,
-    deriveBridgeProofRecordDigest,
-} from '../digests.js';
+    deriveAggregateContributionHash,
+    deriveBridgeProofProfileHash,
+    deriveBridgeProofRecordHash,
+} from '../hashes.js';
 
 import {
-    bridgeDigestFieldNames,
-    collectDigestShapeRefusals,
+    bridgeHashFieldNames,
+    collectHashShapeRefusals,
     collectForbiddenWitnessFieldRefusals,
-    contributionDigestFieldNames,
+    contributionHashFieldNames,
     type AggregateContributionFromBridgeProofRecordInput,
 } from './shared.js';
 
@@ -34,122 +34,118 @@ const bridgeProofPublicFieldsMatchContribution = (
     const proofRecord = contribution.bridgeProofRecord;
 
     return (
-        proofRecord.aggregateDerivationComponentDigest ===
-            contribution.aggregateDerivationComponentDigest &&
-        proofRecord.aggregateShareCommitmentDigest ===
-            contribution.aggregateShareCommitmentDigest &&
-        proofRecord.shareCommitmentMessageBoundCertDigest ===
-            contribution.shareCommitmentMessageBoundCertDigest &&
-        proofRecord.encryptedAggregateBridgeDigest ===
-            contribution.encryptedAggregateBridgeDigest &&
-        proofRecord.encryptedAggregateTargetBasisDataRoot ===
-            contribution.encryptedAggregateTargetBasisDataRoot &&
+        proofRecord.aggregateDerivationComponentHash ===
+            contribution.aggregateDerivationComponentHash &&
+        proofRecord.aggregateShareCommitmentHash ===
+            contribution.aggregateShareCommitmentHash &&
+        proofRecord.shareCommitmentMessageBoundCertHash ===
+            contribution.shareCommitmentMessageBoundCertHash &&
+        proofRecord.encryptedAggregateBridgeHash ===
+            contribution.encryptedAggregateBridgeHash &&
+        proofRecord.encryptedAggregateTargetBasisRoot ===
+            contribution.encryptedAggregateTargetBasisRoot &&
         proofRecord.encryptedAggregateInputRoot ===
             contribution.encryptedAggregateInputRoot &&
         proofRecord.encryptedAggregateShareCiphertextRoot ===
             contribution.encryptedAggregateShareCiphertextRoot &&
-        proofRecord.encryptedAggregateReconstructionDigest ===
-            contribution.encryptedAggregateReconstructionDigest &&
-        proofRecord.bridgeProofProfileDigest ===
-            contribution.bridgeProofProfileDigest &&
-        proofRecord.bridgeWitnessPrivacyProfileDigest ===
-            contribution.bridgeWitnessPrivacyProfileDigest &&
-        proofRecord.bgvBatchEncoderDigest ===
-            contribution.bgvBatchEncoderDigest &&
-        proofRecord.bridgeLayoutDigest === contribution.bridgeLayoutDigest &&
-        proofRecord.ballotScoreEncodingProfileDigest ===
-            contribution.ballotScoreEncodingProfileDigest &&
-        proofRecord.ballotShareLayoutProfileDigest ===
-            contribution.ballotShareLayoutProfileDigest &&
-        proofRecord.aggregateInputEncodingProfileDigest ===
-            contribution.aggregateInputEncodingProfileDigest &&
-        proofRecord.encodedShareVectorLayoutDigest ===
-            contribution.encodedShareVectorLayoutDigest &&
-        proofRecord.encodedAggregateLayoutDigest ===
-            contribution.encodedAggregateLayoutDigest &&
-        proofRecord.encryptedAggregateInputLayoutDigest ===
-            contribution.encryptedAggregateInputLayoutDigest &&
-        proofRecord.topKEvaluatorInputLayoutDigest ===
-            contribution.topKEvaluatorInputLayoutDigest &&
-        proofRecord.heParamDigest === contribution.heParamDigest &&
-        proofRecord.bgvProfileDigest === contribution.bgvProfileDigest &&
-        proofRecord.rustBgvBackendProfileDigest ===
-            contribution.rustBgvBackendProfileDigest &&
-        proofRecord.canonicalCiphertextConventionDigest ===
-            contribution.canonicalCiphertextConventionDigest &&
+        proofRecord.encryptedAggregateReconstructionHash ===
+            contribution.encryptedAggregateReconstructionHash &&
+        proofRecord.bridgeProofProfileHash ===
+            contribution.bridgeProofProfileHash &&
+        proofRecord.bridgeWitnessPrivacyProfileHash ===
+            contribution.bridgeWitnessPrivacyProfileHash &&
+        proofRecord.bgvBatchEncoderHash === contribution.bgvBatchEncoderHash &&
+        proofRecord.bridgeLayoutHash === contribution.bridgeLayoutHash &&
+        proofRecord.ballotScoreEncodingProfileHash ===
+            contribution.ballotScoreEncodingProfileHash &&
+        proofRecord.ballotShareLayoutProfileHash ===
+            contribution.ballotShareLayoutProfileHash &&
+        proofRecord.aggregateInputEncodingProfileHash ===
+            contribution.aggregateInputEncodingProfileHash &&
+        proofRecord.encodedShareVectorLayoutHash ===
+            contribution.encodedShareVectorLayoutHash &&
+        proofRecord.encodedAggregateLayoutHash ===
+            contribution.encodedAggregateLayoutHash &&
+        proofRecord.encryptedAggregateInputLayoutHash ===
+            contribution.encryptedAggregateInputLayoutHash &&
+        proofRecord.topKEvaluatorInputLayoutHash ===
+            contribution.topKEvaluatorInputLayoutHash &&
+        proofRecord.heParamHash === contribution.heParamHash &&
+        proofRecord.bgvProfileHash === contribution.bgvProfileHash &&
+        proofRecord.rustBgvBackendProfileHash ===
+            contribution.rustBgvBackendProfileHash &&
+        proofRecord.canonicalCiphertextConventionHash ===
+            contribution.canonicalCiphertextConventionHash &&
         proofRecord.bgvPublicKeyRoot === contribution.bgvPublicKeyRoot &&
         proofRecord.collectivePublicKeyRoot ===
             contribution.collectivePublicKeyRoot &&
-        proofRecord.aggregateSelectionPolicyDigest ===
-            contribution.aggregateSelectionPolicyDigest &&
-        proofRecord.postVotingClosedContextDigest ===
-            contribution.postVotingClosedContextDigest &&
+        proofRecord.aggregateSelectionPolicyHash ===
+            contribution.aggregateSelectionPolicyHash &&
+        proofRecord.postVotingClosedContextHash ===
+            contribution.postVotingClosedContextHash &&
         proofRecord.ceremonyId === contribution.ceremonyId &&
-        proofRecord.manifestDigest === contribution.manifestDigest &&
-        proofRecord.rosterDigest === contribution.rosterDigest &&
-        proofRecord.pollSpecDigest === contribution.pollSpecDigest &&
-        proofRecord.thresholdProfileDigest ===
-            contribution.thresholdProfileDigest &&
-        proofRecord.setupPackageDigest === contribution.setupPackageDigest &&
+        proofRecord.manifestHash === contribution.manifestHash &&
+        proofRecord.rosterHash === contribution.rosterHash &&
+        proofRecord.pollSpecHash === contribution.pollSpecHash &&
+        proofRecord.thresholdProfileHash ===
+            contribution.thresholdProfileHash &&
+        proofRecord.setupPackageHash === contribution.setupPackageHash &&
         proofRecord.participantCount === contribution.participantCount &&
         proofRecord.optionCount === contribution.optionCount &&
         proofRecord.shareVectorWidth === contribution.shareVectorWidth &&
-        proofRecord.ballotSetDigest === contribution.ballotSetDigest &&
-        proofRecord.votingClosedBoardHeadDigest ===
-            contribution.votingClosedBoardHeadDigest &&
+        proofRecord.ballotSetHash === contribution.ballotSetHash &&
+        proofRecord.votingClosedBoardHeadHash ===
+            contribution.votingClosedBoardHeadHash &&
         proofRecord.contributorIdentity === contribution.contributorIdentity &&
         proofRecord.contributorRosterPosition ===
             contribution.contributorRosterPosition &&
-        proofRecord.contributorRosterExternalAcceptanceDigest ===
-            contribution.contributorRosterExternalAcceptanceDigest
+        proofRecord.contributorRosterExternalAcceptanceHash ===
+            contribution.contributorRosterExternalAcceptanceHash
     );
 };
 
 const actionContextMatchesContribution = (
     contribution: AggregateContribution,
 ): boolean =>
-    protocolDigestPattern.test(
-        contribution.actionContext.actionContextDigest,
-    ) &&
-    contribution.actionContext.actionContextDigest ===
-        contribution.bridgeProofRecord.contributorActionContextDigest &&
+    protocolHashPattern.test(contribution.actionContext.actionContextHash) &&
+    contribution.actionContext.actionContextHash ===
+        contribution.bridgeProofRecord.contributorActionContextHash &&
     contribution.actionContext.ceremonyId === contribution.ceremonyId &&
-    contribution.actionContext.electionManifestDigest ===
-        contribution.manifestDigest &&
+    contribution.actionContext.electionManifestHash ===
+        contribution.manifestHash &&
     contribution.actionContext.signerIdentity ===
         contribution.contributorIdentity &&
-    contribution.actionContext.boardHeadDigest ===
-        contribution.votingClosedBoardHeadDigest &&
+    contribution.actionContext.boardHeadHash ===
+        contribution.votingClosedBoardHeadHash &&
     contribution.actionContext.boardSequence === contribution.boardSequence &&
     contribution.actionContext.recoveryEpoch === contribution.recoveryEpoch &&
     contribution.actionContext.deviceEpoch === contribution.deviceEpoch &&
     contribution.actionContext.actionSequence === contribution.actionSequence &&
-    contribution.actionContext.rosterExternalAcceptanceDigest ===
-        contribution.contributorRosterExternalAcceptanceDigest &&
-    contribution.actionContext.contextDigest ===
-        contribution.postVotingClosedContextDigest;
+    contribution.actionContext.rosterExternalAcceptanceHash ===
+        contribution.contributorRosterExternalAcceptanceHash &&
+    contribution.actionContext.contextHash ===
+        contribution.postVotingClosedContextHash;
 
 const collectBridgeProofRecordRefusals = (
     proofRecord: BridgeProofRecord,
 ): readonly RefusalRecord[] => {
     const refusedObjects: RefusalRecord[] = [
-        ...collectDigestShapeRefusals(
+        ...collectHashShapeRefusals(
             proofRecord as unknown as Record<string, unknown>,
-            bridgeDigestFieldNames,
-            proofRecord.bridgeProofRecordDigest,
+            bridgeHashFieldNames,
+            proofRecord.bridgeProofRecordHash,
         ),
     ];
-    const expectedBridgeProofProfileDigest = deriveBridgeProofProfileDigest({
+    const expectedBridgeProofProfileHash = deriveBridgeProofProfileHash({
         bgvEncryptionProofSubrelation:
             proofRecord.bgvEncryptionProofSubrelation,
         bridgeProofProfileId: proofRecord.bridgeProofProfileId,
         proofBackend: proofRecord.proofBackend,
     });
-    const { bridgeProofRecordDigest, ...proofRecordWithoutDigest } =
-        proofRecord;
-    void bridgeProofRecordDigest;
-    const expectedBridgeProofRecordDigest = deriveBridgeProofRecordDigest(
-        proofRecordWithoutDigest,
+    const { bridgeProofRecordHash, ...proofRecordWithoutHash } = proofRecord;
+    void bridgeProofRecordHash;
+    const expectedBridgeProofRecordHash = deriveBridgeProofRecordHash(
+        proofRecordWithoutHash,
     );
 
     if (
@@ -157,18 +153,17 @@ const collectBridgeProofRecordRefusals = (
         proofRecord.objectVersion !== 1 ||
         proofRecord.bridgeProofProfileId !==
             encryptedAggregateBridgeProfileId ||
-        proofRecord.bridgeProofProfileDigest !==
-            expectedBridgeProofProfileDigest ||
+        proofRecord.bridgeProofProfileHash !== expectedBridgeProofProfileHash ||
         proofRecord.proofBackend !== 'SealedLatticeBridgeRelation' ||
         !['BridgeProofBackendPending', 'BridgeProofRelationChecked'].includes(
             proofRecord.bridgeProofVerificationStatus,
         ) ||
-        proofRecord.bridgeProofRecordDigest !== expectedBridgeProofRecordDigest
+        proofRecord.bridgeProofRecordHash !== expectedBridgeProofRecordHash
     ) {
         refusedObjects.push(
             createAggregateRefusal(
-                'Bridge proof record digest, profile, or backend status is invalid.',
-                proofRecord.bridgeProofRecordDigest,
+                'Bridge proof record hash, profile, or backend status is invalid.',
+                proofRecord.bridgeProofRecordHash,
             ),
         );
     }
@@ -187,7 +182,7 @@ const collectBridgeProofRecordRefusals = (
         refusedObjects.push(
             createAggregateRefusal(
                 'Bridge proof record contributor position, variant dimensions, and proof size must be canonical.',
-                proofRecord.bridgeProofRecordDigest,
+                proofRecord.bridgeProofRecordHash,
             ),
         );
     }
@@ -218,16 +213,16 @@ const actionContextMatchesBridgeProofRecord = (
     actionContext: ActionContext,
     proofRecord: BridgeProofRecord,
 ): boolean =>
-    protocolDigestPattern.test(actionContext.actionContextDigest) &&
+    protocolHashPattern.test(actionContext.actionContextHash) &&
     actionContext.ceremonyId === proofRecord.ceremonyId &&
-    actionContext.electionManifestDigest === proofRecord.manifestDigest &&
+    actionContext.electionManifestHash === proofRecord.manifestHash &&
     actionContext.signerIdentity === proofRecord.contributorIdentity &&
-    actionContext.boardHeadDigest === proofRecord.votingClosedBoardHeadDigest &&
-    actionContext.contextDigest === proofRecord.postVotingClosedContextDigest &&
-    actionContext.actionContextDigest ===
-        proofRecord.contributorActionContextDigest &&
-    actionContext.rosterExternalAcceptanceDigest ===
-        proofRecord.contributorRosterExternalAcceptanceDigest &&
+    actionContext.boardHeadHash === proofRecord.votingClosedBoardHeadHash &&
+    actionContext.contextHash === proofRecord.postVotingClosedContextHash &&
+    actionContext.actionContextHash ===
+        proofRecord.contributorActionContextHash &&
+    actionContext.rosterExternalAcceptanceHash ===
+        proofRecord.contributorRosterExternalAcceptanceHash &&
     Number.isSafeInteger(actionContext.boardSequence) &&
     actionContext.boardSequence >= 0 &&
     Number.isSafeInteger(actionContext.recoveryEpoch) &&
@@ -241,31 +236,30 @@ const signatureEnvelopeMatchesContributionContext = (
     signature: ProtocolSignatureEnvelope,
     contributionPayload: Omit<
         AggregateContribution,
-        'aggregateContributionDigest'
+        'aggregateContributionHash'
     >,
-    aggregateContributionDigest: string,
+    aggregateContributionHash: string,
 ): boolean =>
     signature.signedRoot.objectType === 'AggregateContribution' &&
     signature.signedRoot.objectVersion === 1 &&
-    signature.signedRoot.objectRoot === aggregateContributionDigest &&
+    signature.signedRoot.objectRoot === aggregateContributionHash &&
     signature.signedRoot.chunkMerkleRoot === null &&
     signature.signedRoot.byteLength === signedObjectRootByteLength &&
     signature.signedRoot.ceremonyId === contributionPayload.ceremonyId &&
-    signature.signedRoot.manifestDigest ===
-        contributionPayload.manifestDigest &&
-    signature.signedRoot.boardHeadDigest ===
-        contributionPayload.votingClosedBoardHeadDigest &&
+    signature.signedRoot.manifestHash === contributionPayload.manifestHash &&
+    signature.signedRoot.boardHeadHash ===
+        contributionPayload.votingClosedBoardHeadHash &&
     signature.signedRoot.signerRole === 'Trustee' &&
     signature.signedRoot.signerIdentity ===
         contributionPayload.contributorIdentity &&
     signature.signedRoot.recoveryEpoch === contributionPayload.recoveryEpoch &&
     signature.signedRoot.deviceEpoch === contributionPayload.deviceEpoch &&
-    signature.signedRoot.contextDigest ===
-        contributionPayload.postVotingClosedContextDigest;
+    signature.signedRoot.contextHash ===
+        contributionPayload.postVotingClosedContextHash;
 
 const verifyAggregateContributionSignature = (
     contribution: AggregateContribution,
-    expectedAggregateContributionDigest: string,
+    expectedAggregateContributionHash: string,
 ): readonly RefusalRecord[] =>
     verifySignedObjectSignature(contribution.signature, {
         objectType: 'AggregateContribution',
@@ -273,55 +267,55 @@ const verifyAggregateContributionSignature = (
         signerRole: 'Trustee',
         signerIdentity: contribution.contributorIdentity,
         ceremonyId: contribution.ceremonyId,
-        publicKeyDigest: contribution.signature.publicKeyDigest,
-        manifestDigest: contribution.manifestDigest,
-        objectRoot: expectedAggregateContributionDigest,
+        publicKeyHash: contribution.signature.publicKeyHash,
+        manifestHash: contribution.manifestHash,
+        objectRoot: expectedAggregateContributionHash,
         chunkMerkleRoot: null,
-        boardHeadDigest: contribution.votingClosedBoardHeadDigest,
+        boardHeadHash: contribution.votingClosedBoardHeadHash,
         byteLength: signedObjectRootByteLength,
         recoveryEpoch: contribution.recoveryEpoch,
         deviceEpoch: contribution.deviceEpoch,
-        contextDigest: contribution.postVotingClosedContextDigest,
+        contextHash: contribution.postVotingClosedContextHash,
     }).refusedObjects;
 
 export function verifyAggregateContributionStructure(
     contribution: AggregateContribution,
 ): AggregateContributionVerification {
-    const contributionDigest = contribution.aggregateContributionDigest;
-    const { aggregateContributionDigest, ...contributionWithoutDigest } =
+    const contributionHash = contribution.aggregateContributionHash;
+    const { aggregateContributionHash, ...contributionWithoutHash } =
         contribution;
-    void aggregateContributionDigest;
-    let expectedContributionDigest: string | undefined;
+    void aggregateContributionHash;
+    let expectedContributionHash: string | undefined;
     const refusedObjects: RefusalRecord[] = [
         ...collectForbiddenWitnessFieldRefusals(
             contribution,
-            contributionDigest,
+            contributionHash,
             'contribution',
         ),
-        ...collectDigestShapeRefusals(
+        ...collectHashShapeRefusals(
             contribution as unknown as Record<string, unknown>,
-            contributionDigestFieldNames,
-            contributionDigest,
+            contributionHashFieldNames,
+            contributionHash,
         ),
         ...collectBridgeProofRecordRefusals(contribution.bridgeProofRecord),
     ];
     try {
-        expectedContributionDigest = deriveAggregateContributionDigest(
-            contributionWithoutDigest,
+        expectedContributionHash = deriveAggregateContributionHash(
+            contributionWithoutHash,
         );
         refusedObjects.push(
             ...verifyAggregateContributionSignature(
                 contribution,
-                expectedContributionDigest,
+                expectedContributionHash,
             ),
         );
     } catch (error) {
         refusedObjects.push(
             createAggregateRefusal(
-                `Aggregate contribution digest could not be canonicalized: ${
+                `Aggregate contribution hash could not be canonicalized: ${
                     error instanceof Error ? error.message : String(error)
                 }.`,
-                contributionDigest,
+                contributionHash,
             ),
         );
     }
@@ -329,11 +323,10 @@ export function verifyAggregateContributionStructure(
     if (
         contribution.objectType !== 'AggregateContribution' ||
         contribution.objectVersion !== 1 ||
-        expectedContributionDigest === undefined ||
-        contribution.aggregateContributionDigest !==
-            expectedContributionDigest ||
-        contribution.bridgeProofRecordDigest !==
-            contribution.bridgeProofRecord.bridgeProofRecordDigest ||
+        expectedContributionHash === undefined ||
+        contribution.aggregateContributionHash !== expectedContributionHash ||
+        contribution.bridgeProofRecordHash !==
+            contribution.bridgeProofRecord.bridgeProofRecordHash ||
         !bridgeProofPublicFieldsMatchContribution(contribution) ||
         !actionContextMatchesContribution(contribution) ||
         !Number.isSafeInteger(contribution.contributorRosterPosition) ||
@@ -357,19 +350,19 @@ export function verifyAggregateContributionStructure(
     ) {
         refusedObjects.push(
             createAggregateRefusal(
-                'Aggregate contribution digest, proof binding, action context, or sequence metadata is invalid.',
-                contributionDigest,
+                'Aggregate contribution hash, proof binding, action context, or sequence metadata is invalid.',
+                contributionHash,
             ),
         );
     }
 
     if (refusedObjects.length > 0) {
         return {
-            acceptedDigests: [],
-            aggregateContributionDigest: contributionDigest,
+            acceptedHashes: [],
+            aggregateContributionHash: contributionHash,
             backendAvailable: false,
-            bridgeProofRecordDigest:
-                contribution.bridgeProofRecord.bridgeProofRecordDigest,
+            bridgeProofRecordHash:
+                contribution.bridgeProofRecord.bridgeProofRecordHash,
             ok: false,
             refusedObjects,
             statusLabels: [],
@@ -383,14 +376,14 @@ export function verifyAggregateContributionStructure(
         'BridgeProofRelationChecked';
 
     return {
-        acceptedDigests: [
-            contribution.bridgeProofRecord.bridgeProofRecordDigest,
-            contribution.aggregateContributionDigest,
+        acceptedHashes: [
+            contribution.bridgeProofRecord.bridgeProofRecordHash,
+            contribution.aggregateContributionHash,
         ],
-        aggregateContributionDigest: contributionDigest,
+        aggregateContributionHash: contributionHash,
         backendAvailable: bridgeProofRelationChecked,
-        bridgeProofRecordDigest:
-            contribution.bridgeProofRecord.bridgeProofRecordDigest,
+        bridgeProofRecordHash:
+            contribution.bridgeProofRecord.bridgeProofRecordHash,
         ok: true,
         refusedObjects: [],
         statusLabels: bridgeProofRelationChecked ? [] : ['pending'],
@@ -404,9 +397,9 @@ export const createAggregateContributionFromBridgeProofRecord = (
     input: AggregateContributionFromBridgeProofRecordInput,
 ): AggregateContribution => {
     requireCheckedBridgeProofRecord(input.bridgeProofRecord);
-    if (!protocolDigestPattern.test(input.closeRecordDigest)) {
+    if (!protocolHashPattern.test(input.closeRecordHash)) {
         throw new RangeError(
-            'Aggregate contribution close-record digest must be a protocol digest.',
+            'Aggregate contribution close-record hash must be a protocol hash.',
         );
     }
     if (!Number.isSafeInteger(input.boardPosition) || input.boardPosition < 0) {
@@ -428,89 +421,82 @@ export const createAggregateContributionFromBridgeProofRecord = (
     const proofRecord = input.bridgeProofRecord;
     const unsignedContributionPayload: Omit<
         AggregateContribution,
-        'aggregateContributionDigest' | 'signature'
+        'aggregateContributionHash' | 'signature'
     > = {
         actionContext: input.actionContext,
         actionSequence: input.actionContext.actionSequence,
-        aggregateDerivationComponentDigest:
-            proofRecord.aggregateDerivationComponentDigest,
-        aggregateSelectionPolicyDigest:
-            proofRecord.aggregateSelectionPolicyDigest,
-        aggregateShareCommitmentDigest:
-            proofRecord.aggregateShareCommitmentDigest,
-        aggregateInputEncodingProfileDigest:
-            proofRecord.aggregateInputEncodingProfileDigest,
-        ballotScoreEncodingProfileDigest:
-            proofRecord.ballotScoreEncodingProfileDigest,
-        ballotSetDigest: proofRecord.ballotSetDigest,
-        ballotShareLayoutProfileDigest:
-            proofRecord.ballotShareLayoutProfileDigest,
-        bgvBatchEncoderDigest: proofRecord.bgvBatchEncoderDigest,
-        bgvProfileDigest: proofRecord.bgvProfileDigest,
+        aggregateDerivationComponentHash:
+            proofRecord.aggregateDerivationComponentHash,
+        aggregateSelectionPolicyHash: proofRecord.aggregateSelectionPolicyHash,
+        aggregateShareCommitmentHash: proofRecord.aggregateShareCommitmentHash,
+        aggregateInputEncodingProfileHash:
+            proofRecord.aggregateInputEncodingProfileHash,
+        ballotScoreEncodingProfileHash:
+            proofRecord.ballotScoreEncodingProfileHash,
+        ballotSetHash: proofRecord.ballotSetHash,
+        ballotShareLayoutProfileHash: proofRecord.ballotShareLayoutProfileHash,
+        bgvBatchEncoderHash: proofRecord.bgvBatchEncoderHash,
+        bgvProfileHash: proofRecord.bgvProfileHash,
         bgvPublicKeyRoot: proofRecord.bgvPublicKeyRoot,
         boardPosition: input.boardPosition,
         boardSequence: input.actionContext.boardSequence,
-        bridgeLayoutDigest: proofRecord.bridgeLayoutDigest,
-        bridgeProofProfileDigest: proofRecord.bridgeProofProfileDigest,
+        bridgeLayoutHash: proofRecord.bridgeLayoutHash,
+        bridgeProofProfileHash: proofRecord.bridgeProofProfileHash,
         bridgeProofRecord: proofRecord,
-        bridgeProofRecordDigest: proofRecord.bridgeProofRecordDigest,
-        bridgeWitnessPrivacyProfileDigest:
-            proofRecord.bridgeWitnessPrivacyProfileDigest,
-        canonicalCiphertextConventionDigest:
-            proofRecord.canonicalCiphertextConventionDigest,
+        bridgeProofRecordHash: proofRecord.bridgeProofRecordHash,
+        bridgeWitnessPrivacyProfileHash:
+            proofRecord.bridgeWitnessPrivacyProfileHash,
+        canonicalCiphertextConventionHash:
+            proofRecord.canonicalCiphertextConventionHash,
         ceremonyId: proofRecord.ceremonyId,
-        closeRecordDigest: input.closeRecordDigest,
+        closeRecordHash: input.closeRecordHash,
         collectivePublicKeyRoot: proofRecord.collectivePublicKeyRoot,
         contributorIdentity: proofRecord.contributorIdentity,
-        contributorRosterExternalAcceptanceDigest:
-            proofRecord.contributorRosterExternalAcceptanceDigest,
+        contributorRosterExternalAcceptanceHash:
+            proofRecord.contributorRosterExternalAcceptanceHash,
         contributorRosterPosition: proofRecord.contributorRosterPosition,
         deviceEpoch: input.actionContext.deviceEpoch,
-        encodedAggregateLayoutDigest: proofRecord.encodedAggregateLayoutDigest,
-        encodedShareVectorLayoutDigest:
-            proofRecord.encodedShareVectorLayoutDigest,
-        encryptedAggregateBridgeDigest:
-            proofRecord.encryptedAggregateBridgeDigest,
-        encryptedAggregateInputLayoutDigest:
-            proofRecord.encryptedAggregateInputLayoutDigest,
-        encryptedAggregateReconstructionDigest:
-            proofRecord.encryptedAggregateReconstructionDigest,
+        encodedAggregateLayoutHash: proofRecord.encodedAggregateLayoutHash,
+        encodedShareVectorLayoutHash: proofRecord.encodedShareVectorLayoutHash,
+        encryptedAggregateBridgeHash: proofRecord.encryptedAggregateBridgeHash,
+        encryptedAggregateInputLayoutHash:
+            proofRecord.encryptedAggregateInputLayoutHash,
+        encryptedAggregateReconstructionHash:
+            proofRecord.encryptedAggregateReconstructionHash,
         encryptedAggregateInputRoot: proofRecord.encryptedAggregateInputRoot,
         encryptedAggregateShareCiphertextRoot:
             proofRecord.encryptedAggregateShareCiphertextRoot,
-        encryptedAggregateTargetBasisDataRoot:
-            proofRecord.encryptedAggregateTargetBasisDataRoot,
-        heParamDigest: proofRecord.heParamDigest,
-        manifestDigest: proofRecord.manifestDigest,
+        encryptedAggregateTargetBasisRoot:
+            proofRecord.encryptedAggregateTargetBasisRoot,
+        heParamHash: proofRecord.heParamHash,
+        manifestHash: proofRecord.manifestHash,
         objectType: 'AggregateContribution',
         objectVersion: 1,
         optionCount: proofRecord.optionCount,
         participantCount: proofRecord.participantCount,
-        pollSpecDigest: proofRecord.pollSpecDigest,
-        postVotingClosedContextDigest:
-            proofRecord.postVotingClosedContextDigest,
+        pollSpecHash: proofRecord.pollSpecHash,
+        postVotingClosedContextHash: proofRecord.postVotingClosedContextHash,
         recoveryEpoch: input.actionContext.recoveryEpoch,
-        rosterDigest: proofRecord.rosterDigest,
-        rustBgvBackendProfileDigest: proofRecord.rustBgvBackendProfileDigest,
-        setupPackageDigest: proofRecord.setupPackageDigest,
-        shareCommitmentMessageBoundCertDigest:
-            proofRecord.shareCommitmentMessageBoundCertDigest,
+        rosterHash: proofRecord.rosterHash,
+        rustBgvBackendProfileHash: proofRecord.rustBgvBackendProfileHash,
+        setupPackageHash: proofRecord.setupPackageHash,
+        shareCommitmentMessageBoundCertHash:
+            proofRecord.shareCommitmentMessageBoundCertHash,
         shareVectorWidth: proofRecord.shareVectorWidth,
-        thresholdProfileDigest: proofRecord.thresholdProfileDigest,
-        topKEvaluatorInputLayoutDigest:
-            proofRecord.topKEvaluatorInputLayoutDigest,
-        votingClosedBoardHeadDigest: proofRecord.votingClosedBoardHeadDigest,
+        thresholdProfileHash: proofRecord.thresholdProfileHash,
+        topKEvaluatorInputLayoutHash: proofRecord.topKEvaluatorInputLayoutHash,
+        votingClosedBoardHeadHash: proofRecord.votingClosedBoardHeadHash,
     };
-    const aggregateContributionDigest = deriveAggregateContributionDigest(
+    const aggregateContributionHash = deriveAggregateContributionHash(
         unsignedContributionPayload,
     );
     const signature =
         typeof input.signature === 'function'
-            ? input.signature({ aggregateContributionDigest })
+            ? input.signature({ aggregateContributionHash })
             : input.signature;
     const contributionPayload: Omit<
         AggregateContribution,
-        'aggregateContributionDigest'
+        'aggregateContributionHash'
     > = {
         ...unsignedContributionPayload,
         signature,
@@ -520,7 +506,7 @@ export const createAggregateContributionFromBridgeProofRecord = (
         !signatureEnvelopeMatchesContributionContext(
             signature,
             contributionPayload,
-            aggregateContributionDigest,
+            aggregateContributionHash,
         )
     ) {
         throw new RangeError(
@@ -530,7 +516,7 @@ export const createAggregateContributionFromBridgeProofRecord = (
 
     const contribution = {
         ...contributionPayload,
-        aggregateContributionDigest,
+        aggregateContributionHash,
     };
     const verification = verifyAggregateContributionStructure(contribution);
     if (!verification.ok || !verification.backendAvailable) {

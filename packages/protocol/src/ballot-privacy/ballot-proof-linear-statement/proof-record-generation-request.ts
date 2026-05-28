@@ -221,7 +221,7 @@ export const buildBallotProofRecordGenerationRequest = (input: {
     }
     const loweredStatement = loweringResult.statement;
     const componentBundleStatement = buildBallotProofComponentBundleStatement({
-        ballotProofStatementDigest: input.statement.ballotProofStatementDigest,
+        ballotProofStatementHash: input.statement.ballotProofStatementHash,
         loweredStatement,
     });
     if (
@@ -234,8 +234,7 @@ export const buildBallotProofRecordGenerationRequest = (input: {
     }
     const componentStatementPlans =
         buildBallotProofComponentProofStatementPlans({
-            ballotProofStatementDigest:
-                input.statement.ballotProofStatementDigest,
+            ballotProofStatementHash: input.statement.ballotProofStatementHash,
             componentBundleStatement,
             loweredStatement,
         });
@@ -309,9 +308,9 @@ export const buildBallotProofRecordGenerationRequest = (input: {
                         sourceRingDegree === 64
                             ? buildPackedFieldSparseComponentLinearProofStatement(
                                   {
-                                      ballotProofStatementDigest:
+                                      ballotProofStatementHash:
                                           input.statement
-                                              .ballotProofStatementDigest,
+                                              .ballotProofStatementHash,
                                       componentId,
                                       loweredStatement,
                                       parameterProfileId:
@@ -325,9 +324,9 @@ export const buildBallotProofRecordGenerationRequest = (input: {
                               )
                             : buildBallotProofSparseComponentLinearProofStatement(
                                   {
-                                      ballotProofStatementDigest:
+                                      ballotProofStatementHash:
                                           input.statement
-                                              .ballotProofStatementDigest,
+                                              .ballotProofStatementHash,
                                       componentId,
                                       loweredStatement,
                                       parameterProfileId:
@@ -357,21 +356,21 @@ export const buildBallotProofRecordGenerationRequest = (input: {
 
                     return {
                         componentId,
-                        componentProofStatementDigest:
-                            sparseStatement.statementDigest,
+                        componentProofStatementHash:
+                            sparseStatement.statementHash,
                         proofEncoding,
                         proofParameterSet,
                         proofStatement: sparseStatement,
                         proofStatementFormat:
                             sparseStatement.proofStatementFormat,
                         publicRandomnessHex,
-                        statementDigest:
-                            componentStatement.componentStatementDigest,
+                        statementHash:
+                            componentStatement.componentStatementHash,
                     };
                 }
                 const projection = buildEncodedScoreFieldLinearProofProjection({
-                    ballotProofStatementDigest:
-                        input.statement.ballotProofStatementDigest,
+                    ballotProofStatementHash:
+                        input.statement.ballotProofStatementHash,
                     loweredStatement,
                     parameterProfileId:
                         componentProofParameterProfileIds[componentId],
@@ -386,16 +385,15 @@ export const buildBallotProofRecordGenerationRequest = (input: {
 
                 return {
                     componentId,
-                    componentProofStatementDigest:
-                        projection.linearStatement.statementDigest,
+                    componentProofStatementHash:
+                        projection.linearStatement.statementHash,
                     proofEncoding,
                     proofParameterSet,
                     proofStatement: projection.linearStatement,
                     proofStatementFormat:
                         'dense-polynomial-matrix-linear-proof-v1',
                     publicRandomnessHex,
-                    statementDigest:
-                        componentStatement.componentStatementDigest,
+                    statementHash: componentStatement.componentStatementHash,
                 };
             }
             if (
@@ -416,8 +414,8 @@ export const buildBallotProofRecordGenerationRequest = (input: {
                     input.relationInput.optionCount > 1 &&
                     sourceRingDegree === 64
                         ? buildPackedFieldSparseComponentLinearProofStatement({
-                              ballotProofStatementDigest:
-                                  input.statement.ballotProofStatementDigest,
+                              ballotProofStatementHash:
+                                  input.statement.ballotProofStatementHash,
                               componentId,
                               loweredStatement,
                               parameterProfileId:
@@ -429,8 +427,8 @@ export const buildBallotProofRecordGenerationRequest = (input: {
                               witnessL2BoundSquared,
                           })
                         : buildBallotProofSparseComponentLinearProofStatement({
-                              ballotProofStatementDigest:
-                                  input.statement.ballotProofStatementDigest,
+                              ballotProofStatementHash:
+                                  input.statement.ballotProofStatementHash,
                               componentId,
                               loweredStatement,
                               parameterProfileId:
@@ -483,22 +481,20 @@ export const buildBallotProofRecordGenerationRequest = (input: {
 
                 return {
                     componentId,
-                    componentProofStatementDigest:
-                        sparseStatement.statementDigest,
+                    componentProofStatementHash: sparseStatement.statementHash,
                     proofEncoding,
                     proofParameterSet,
                     proofStatement: sparseStatement,
                     proofStatementFormat: sparseStatement.proofStatementFormat,
                     publicRandomnessHex,
-                    statementDigest:
-                        componentStatement.componentStatementDigest,
+                    statementHash: componentStatement.componentStatementHash,
                 };
             }
             if (componentId === 'receiver-encryption-component') {
                 const structuredStatement =
                     buildBallotProofStructuredReceiverEncryptionProofStatement({
-                        ballotProofStatementDigest:
-                            input.statement.ballotProofStatementDigest,
+                        ballotProofStatementHash:
+                            input.statement.ballotProofStatementHash,
                         componentStatement,
                         loweredStatement,
                         parameterProfileId:
@@ -518,29 +514,28 @@ export const buildBallotProofRecordGenerationRequest = (input: {
 
                 return {
                     componentId,
-                    componentProofStatementDigest:
-                        structuredStatement.statementDigest,
+                    componentProofStatementHash:
+                        structuredStatement.statementHash,
                     proofEncoding,
                     proofParameterSet,
                     proofStatement: structuredStatement,
                     proofStatementFormat:
                         'structured-module-lwe-linear-proof-v1',
                     publicRandomnessHex,
-                    statementDigest:
-                        componentStatement.componentStatementDigest,
+                    statementHash: componentStatement.componentStatementHash,
                 };
             }
 
             return {
                 componentId,
-                componentProofStatementDigest:
-                    componentStatementPlan.componentProofStatementDigest,
+                componentProofStatementHash:
+                    componentStatementPlan.componentProofStatementHash,
                 proofEncoding,
                 proofParameterSet,
                 proofStatement: componentStatementPlan,
                 proofStatementFormat: 'public-zero-witness-binding-check-v1',
                 publicRandomnessHex,
-                statementDigest: componentStatement.componentStatementDigest,
+                statementHash: componentStatement.componentStatementHash,
             };
         },
     );

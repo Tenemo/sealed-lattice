@@ -1,10 +1,10 @@
 import {
     canonicalJson,
-    deriveProtocolDigest,
+    deriveProtocolHash,
     hash512,
 } from '@sealed-lattice/crypto';
 import type {
-    ProtocolDigest,
+    ProtocolHash,
     ReceiverEncryptionProfile,
     ReceiverEncryptionPublicKey,
 } from '@sealed-lattice/types';
@@ -26,18 +26,18 @@ const receiverKeyWitnessL2BoundSquared =
     receiverEncryptionShortVectorInfinityNormBound;
 const unsignedWordModulus = 1n << 64n;
 const statementProfileId = 'receiver-key-linear-module-lwe-statement-v1';
-const statementDigestPurpose = 'receiver-key-linear-proof-statement-v1';
-const statementMatrixDigestPurpose =
+const statementHashPurpose = 'receiver-key-linear-proof-statement-v1';
+const statementMatrixHashPurpose =
     'receiver-key-linear-proof-statement-matrix-v1';
-const targetVectorDigestPurpose = 'receiver-key-linear-proof-target-vector-v1';
+const targetVectorHashPurpose = 'receiver-key-linear-proof-target-vector-v1';
 
 type ReceiverEncryptionPublicKeyPayload = Omit<
     ReceiverEncryptionPublicKey,
-    'receiverPublicKeyDigest'
+    'receiverPublicKeyHash'
 >;
 
 type ReceiverEncryptionPublicKeyMaterial = {
-    readonly publicMatrixSeedDigest: ProtocolDigest;
+    readonly publicMatrixSeedHash: ProtocolHash;
     readonly publicKeyVector: readonly (readonly number[])[];
 };
 
@@ -50,19 +50,19 @@ export type ReceiverKeyLinearProofStatement = {
     readonly objectType: 'ReceiverKeyLinearProofStatement';
     readonly objectVersion: 1;
     readonly statementProfileId: typeof statementProfileId;
-    readonly statementDigest: ProtocolDigest;
-    readonly statementMatrixDigest: ProtocolDigest;
-    readonly targetVectorDigest: ProtocolDigest;
+    readonly statementHash: ProtocolHash;
+    readonly statementMatrixHash: ProtocolHash;
+    readonly targetVectorHash: ProtocolHash;
     readonly ceremonyId: string;
-    readonly manifestDigest: ProtocolDigest;
-    readonly rosterDigest: ProtocolDigest;
+    readonly manifestHash: ProtocolHash;
+    readonly rosterHash: ProtocolHash;
     readonly receiverIdentity: string;
     readonly receiverRosterPosition: number;
     readonly recoveryEpoch: number;
-    readonly receiverEncryptionProfileDigest: ProtocolDigest;
-    readonly receiverPublicKeyDigest: ProtocolDigest;
-    readonly keyMaterialDigest: ProtocolDigest;
-    readonly publicMatrixSeedDigest: ProtocolDigest;
+    readonly receiverEncryptionProfileHash: ProtocolHash;
+    readonly receiverPublicKeyHash: ProtocolHash;
+    readonly keyMaterialHash: ProtocolHash;
+    readonly publicMatrixSeedHash: ProtocolHash;
     readonly relation: 'A*w + t = 0';
     readonly sourceRing: 'Z_q[X]/(X^256 + 1)';
     readonly coefficientModulus: '12289';
@@ -88,7 +88,7 @@ export type ReceiverKeyLinearProofStatement = {
 
 type ReceiverKeyLinearWitnessCheck = {
     readonly ok: true;
-    readonly statementDigest: ProtocolDigest;
+    readonly statementHash: ProtocolHash;
     readonly witnessL2Squared: number;
 };
 
@@ -173,8 +173,8 @@ const deriveNumberPolynomial = (
     );
 
 const deriveReceiverPublicMatrix = (
-    receiverEncryptionProfileDigest: ProtocolDigest,
-    publicMatrixSeedDigest: ProtocolDigest,
+    receiverEncryptionProfileHash: ProtocolHash,
+    publicMatrixSeedHash: ProtocolHash,
 ): readonly (readonly (readonly number[])[])[] =>
     Array.from(
         { length: receiverEncryptionModuleRank },
@@ -186,8 +186,8 @@ const deriveReceiverPublicMatrix = (
                         'sealed.vote/internal/receiver-encryption/public-matrix-v1',
                         {
                             columnIndex,
-                            publicMatrixSeedDigest,
-                            receiverEncryptionProfileDigest,
+                            publicMatrixSeedHash,
+                            receiverEncryptionProfileHash,
                             rowIndex,
                         },
                         receiverEncryptionModuleDegree,
@@ -196,35 +196,35 @@ const deriveReceiverPublicMatrix = (
             ),
     );
 
-const deriveReceiverMatrixSeedDigest = (input: {
+const deriveReceiverMatrixSeedHash = (input: {
     readonly ceremonyId: string;
-    readonly manifestDigest: ProtocolDigest;
-    readonly receiverEncryptionProfileDigest: ProtocolDigest;
+    readonly manifestHash: ProtocolHash;
+    readonly receiverEncryptionProfileHash: ProtocolHash;
     readonly receiverIdentity: string;
     readonly receiverRosterPosition: number;
     readonly recoveryEpoch: number;
-    readonly rosterDigest: ProtocolDigest;
-}): ProtocolDigest =>
-    deriveProtocolDigest('ReceiverEncryptionProfileDigest', {
+    readonly rosterHash: ProtocolHash;
+}): ProtocolHash =>
+    deriveProtocolHash('ReceiverEncryptionProfileHash', {
         purpose: 'receiver-public-matrix-seed',
         ...input,
     });
 
-const deriveReceiverEncryptionPublicKeyDigest = (
+const deriveReceiverEncryptionPublicKeyHash = (
     publicKey: ReceiverEncryptionPublicKeyPayload,
-): ProtocolDigest => deriveProtocolDigest('PublicKeyDigest', publicKey);
+): ProtocolHash => deriveProtocolHash('PublicKeyHash', publicKey);
 
-const deriveReceiverKeyMaterialDigest = (input: {
+const deriveReceiverKeyMaterialHash = (input: {
     readonly publicKeyVector: readonly (readonly number[])[];
-    readonly publicMatrixSeedDigest: ProtocolDigest;
-    readonly receiverEncryptionProfileDigest: ProtocolDigest;
-}): ProtocolDigest => deriveProtocolDigest('PublicKeyDigest', input);
+    readonly publicMatrixSeedHash: ProtocolHash;
+    readonly receiverEncryptionProfileHash: ProtocolHash;
+}): ProtocolHash => deriveProtocolHash('PublicKeyHash', input);
 
-const deriveReceiverKeyLinearDigest = (
+const deriveReceiverKeyLinearHash = (
     purpose: string,
     payload: unknown,
-): ProtocolDigest =>
-    deriveProtocolDigest('ChallengeDomainDigest', {
+): ProtocolHash =>
+    deriveProtocolHash('ChallengeDomainHash', {
         payload,
         purpose,
     });
@@ -383,63 +383,60 @@ const validateReceiverPublicKeyBinding = (input: {
     );
     const receiverPublicKeyPayload: ReceiverEncryptionPublicKeyPayload = {
         ceremonyId: input.receiverPublicKey.ceremonyId,
-        keyMaterialDigest: input.receiverPublicKey.keyMaterialDigest,
-        manifestDigest: input.receiverPublicKey.manifestDigest,
+        keyMaterialHash: input.receiverPublicKey.keyMaterialHash,
+        manifestHash: input.receiverPublicKey.manifestHash,
         objectType: 'ReceiverEncryptionPublicKey',
         objectVersion: 1,
-        receiverEncryptionProfileDigest:
-            input.receiverPublicKey.receiverEncryptionProfileDigest,
+        receiverEncryptionProfileHash:
+            input.receiverPublicKey.receiverEncryptionProfileHash,
         receiverIdentity: input.receiverPublicKey.receiverIdentity,
         receiverRosterPosition: input.receiverPublicKey.receiverRosterPosition,
         recoveryEpoch: input.receiverPublicKey.recoveryEpoch,
-        rosterDigest: input.receiverPublicKey.rosterDigest,
+        rosterHash: input.receiverPublicKey.rosterHash,
     };
-    const expectedPublicKeyDigest = deriveReceiverEncryptionPublicKeyDigest(
+    const expectedPublicKeyHash = deriveReceiverEncryptionPublicKeyHash(
         receiverPublicKeyPayload,
     );
     if (
-        input.receiverPublicKey.receiverPublicKeyDigest !==
-        expectedPublicKeyDigest
+        input.receiverPublicKey.receiverPublicKeyHash !== expectedPublicKeyHash
     ) {
         throw new RangeError(
-            'Receiver public-key digest does not match its canonical payload.',
+            'Receiver public-key hash does not match its canonical payload.',
         );
     }
     if (
-        input.receiverPublicKey.receiverEncryptionProfileDigest !==
-        input.receiverEncryptionProfile.receiverEncryptionProfileDigest
+        input.receiverPublicKey.receiverEncryptionProfileHash !==
+        input.receiverEncryptionProfile.receiverEncryptionProfileHash
     ) {
         throw new RangeError(
             'Receiver public key is not bound to the receiver encryption profile.',
         );
     }
-    const expectedPublicMatrixSeedDigest = deriveReceiverMatrixSeedDigest({
+    const expectedPublicMatrixSeedHash = deriveReceiverMatrixSeedHash({
         ceremonyId: input.receiverPublicKey.ceremonyId,
-        manifestDigest: input.receiverPublicKey.manifestDigest,
-        receiverEncryptionProfileDigest:
-            input.receiverEncryptionProfile.receiverEncryptionProfileDigest,
+        manifestHash: input.receiverPublicKey.manifestHash,
+        receiverEncryptionProfileHash:
+            input.receiverEncryptionProfile.receiverEncryptionProfileHash,
         receiverIdentity: input.receiverPublicKey.receiverIdentity,
         receiverRosterPosition: input.receiverPublicKey.receiverRosterPosition,
         recoveryEpoch: input.receiverPublicKey.recoveryEpoch,
-        rosterDigest: input.receiverPublicKey.rosterDigest,
+        rosterHash: input.receiverPublicKey.rosterHash,
     });
     if (
-        input.publicKeyMaterial.publicMatrixSeedDigest !==
-        expectedPublicMatrixSeedDigest
+        input.publicKeyMaterial.publicMatrixSeedHash !==
+        expectedPublicMatrixSeedHash
     ) {
         throw new RangeError(
             'Receiver-key linear statement public matrix seed is not roster-bound.',
         );
     }
-    const expectedKeyMaterialDigest = deriveReceiverKeyMaterialDigest({
+    const expectedKeyMaterialHash = deriveReceiverKeyMaterialHash({
         publicKeyVector: input.publicKeyMaterial.publicKeyVector,
-        publicMatrixSeedDigest: input.publicKeyMaterial.publicMatrixSeedDigest,
-        receiverEncryptionProfileDigest:
-            input.receiverEncryptionProfile.receiverEncryptionProfileDigest,
+        publicMatrixSeedHash: input.publicKeyMaterial.publicMatrixSeedHash,
+        receiverEncryptionProfileHash:
+            input.receiverEncryptionProfile.receiverEncryptionProfileHash,
     });
-    if (
-        input.receiverPublicKey.keyMaterialDigest !== expectedKeyMaterialDigest
-    ) {
+    if (input.receiverPublicKey.keyMaterialHash !== expectedKeyMaterialHash) {
         throw new RangeError(
             'Receiver-key linear statement public key material does not match the frozen receiver key.',
         );
@@ -454,8 +451,8 @@ export const createReceiverKeyLinearProofStatement = (input: {
     validateReceiverPublicKeyBinding(input);
 
     const publicMatrix = deriveReceiverPublicMatrix(
-        input.receiverEncryptionProfile.receiverEncryptionProfileDigest,
-        input.publicKeyMaterial.publicMatrixSeedDigest,
+        input.receiverEncryptionProfile.receiverEncryptionProfileHash,
+        input.publicKeyMaterial.publicMatrixSeedHash,
     );
     const statementMatrixCoefficients = publicMatrix.map(
         (matrixRow, rowIndex) => [
@@ -473,44 +470,43 @@ export const createReceiverKeyLinearProofStatement = (input: {
                 modNumber(-coefficient, receiverEncryptionModulus),
             ),
         );
-    const statementMatrixDigest = deriveReceiverKeyLinearDigest(
-        statementMatrixDigestPurpose,
+    const statementMatrixHash = deriveReceiverKeyLinearHash(
+        statementMatrixHashPurpose,
         statementMatrixCoefficients,
     );
-    const targetVectorDigest = deriveReceiverKeyLinearDigest(
-        targetVectorDigestPurpose,
+    const targetVectorHash = deriveReceiverKeyLinearHash(
+        targetVectorHashPurpose,
         targetVectorCoefficients,
     );
     const statementPayload: Omit<
         ReceiverKeyLinearProofStatement,
-        'statementDigest'
+        'statementHash'
     > = {
         ceremonyId: input.receiverPublicKey.ceremonyId,
         coefficientModulus: String(receiverEncryptionModulus) as '12289',
-        keyMaterialDigest: input.receiverPublicKey.keyMaterialDigest,
-        manifestDigest: input.receiverPublicKey.manifestDigest,
+        keyMaterialHash: input.receiverPublicKey.keyMaterialHash,
+        manifestHash: input.receiverPublicKey.manifestHash,
         objectType: 'ReceiverKeyLinearProofStatement',
         objectVersion: 1,
-        publicMatrixSeedDigest: input.publicKeyMaterial.publicMatrixSeedDigest,
-        receiverEncryptionProfileDigest:
-            input.receiverEncryptionProfile.receiverEncryptionProfileDigest,
+        publicMatrixSeedHash: input.publicKeyMaterial.publicMatrixSeedHash,
+        receiverEncryptionProfileHash:
+            input.receiverEncryptionProfile.receiverEncryptionProfileHash,
         receiverIdentity: input.receiverPublicKey.receiverIdentity,
-        receiverPublicKeyDigest:
-            input.receiverPublicKey.receiverPublicKeyDigest,
+        receiverPublicKeyHash: input.receiverPublicKey.receiverPublicKeyHash,
         receiverRosterPosition: input.receiverPublicKey.receiverRosterPosition,
         recoveryEpoch: input.receiverPublicKey.recoveryEpoch,
         relation: 'A*w + t = 0',
         ringDegree: receiverEncryptionModuleDegree,
-        rosterDigest: input.receiverPublicKey.rosterDigest,
+        rosterHash: input.receiverPublicKey.rosterHash,
         sourceRing: 'Z_q[X]/(X^256 + 1)',
         statementColumns: receiverKeyStatementColumns,
         statementMatrixCoefficients,
-        statementMatrixDigest,
+        statementMatrixHash,
         statementProfileId,
         statementRows: receiverKeyStatementRows,
         targetCoefficientRepresentation: 'centeredSignedSourceModulus',
         targetVectorCoefficients,
-        targetVectorDigest,
+        targetVectorHash,
         witnessInfinityNormBound:
             receiverEncryptionShortVectorInfinityNormBound,
         witnessL2BoundSquared: String(receiverKeyWitnessL2BoundSquared),
@@ -528,8 +524,8 @@ export const createReceiverKeyLinearProofStatement = (input: {
 
     return {
         ...statementPayload,
-        statementDigest: deriveReceiverKeyLinearDigest(
-            statementDigestPurpose,
+        statementHash: deriveReceiverKeyLinearHash(
+            statementHashPurpose,
             statementPayload,
         ),
     };
@@ -589,7 +585,7 @@ export const verifyReceiverKeyLinearWitness = (input: {
 
     return {
         ok: true,
-        statementDigest: statement.statementDigest,
+        statementHash: statement.statementHash,
         witnessL2Squared,
     };
 };

@@ -1,25 +1,25 @@
 import {
     claimTierForRosterSize,
-    lowerHexDigest,
+    lowerHexHash,
     type ShapeConfigRow,
     type Variant,
 } from './shared.js';
 
 import {
-    deriveProtocolDigest,
-    type ProtocolDigestNamespace,
+    deriveProtocolHash,
+    type ProtocolHashNamespace,
 } from '#packages/crypto/src/index';
 import {
     createBallotPrivacyProfileSet,
-    deriveBridgeProofProfileDigest,
-    deriveBridgeProofStatementDigest,
-    deriveBridgeProofTargetContractDigest,
+    deriveBridgeProofProfileHash,
+    deriveBridgeProofStatementHash,
+    deriveBridgeProofTargetContractHash,
 } from '#packages/protocol/src/ballot-privacy/index';
 import {
     deriveThresholdProfile,
-    deriveThresholdProfileDigest,
+    deriveThresholdProfileHash,
 } from '#packages/protocol/src/lifecycle/thresholds';
-import type { ProtocolDigest } from '#packages/types/src/index';
+import type { ProtocolHash } from '#packages/types/src/index';
 
 const bridgeProofProfileId = 'EncryptedAggregateBridge-v1';
 const proofBackend = 'SealedLatticeBridgeRelation';
@@ -29,42 +29,42 @@ const maximumRosterSize = 20;
 const minimumRosterSize = 3;
 
 type ShapeStatement = {
-    readonly ballotSetDigest: ProtocolDigest;
+    readonly ballotSetHash: ProtocolHash;
     readonly ceremonyId: string;
-    readonly contributorActionContextDigest: ProtocolDigest;
+    readonly contributorActionContextHash: ProtocolHash;
     readonly contributorIdentity: string;
-    readonly contributorRosterExternalAcceptanceDigest: ProtocolDigest;
+    readonly contributorRosterExternalAcceptanceHash: ProtocolHash;
     readonly contributorRosterPosition: number;
-    readonly encodedShareVectorLayoutDigest: ProtocolDigest;
-    readonly manifestDigest: ProtocolDigest;
+    readonly encodedShareVectorLayoutHash: ProtocolHash;
+    readonly manifestHash: ProtocolHash;
     readonly optionCount: number;
     readonly participantCount: number;
-    readonly pollSpecDigest: ProtocolDigest;
-    readonly postVotingClosedContextDigest: ProtocolDigest;
-    readonly rosterDigest: ProtocolDigest;
-    readonly rosterExternalAcceptanceDigest: ProtocolDigest;
-    readonly shareCommitmentMessageBoundCertDigest: ProtocolDigest;
+    readonly pollSpecHash: ProtocolHash;
+    readonly postVotingClosedContextHash: ProtocolHash;
+    readonly rosterHash: ProtocolHash;
+    readonly rosterExternalAcceptanceHash: ProtocolHash;
+    readonly shareCommitmentMessageBoundCertHash: ProtocolHash;
     readonly shareVectorWidth: number;
-    readonly thresholdProfileDigest: ProtocolDigest;
-    readonly votingClosedBoardHeadDigest: ProtocolDigest;
+    readonly thresholdProfileHash: ProtocolHash;
+    readonly votingClosedBoardHeadHash: ProtocolHash;
 };
 
-const syntheticDigest = (
-    digestType: ProtocolDigestNamespace,
+const syntheticHash = (
+    hashType: ProtocolHashNamespace,
     label: string,
-): ProtocolDigest =>
-    deriveProtocolDigest(digestType, {
+): ProtocolHash =>
+    deriveProtocolHash(hashType, {
         label,
         purpose: 'encrypted-aggregate-bridge-shape-config-matrix',
     });
 
-const thresholdDigestForVariant = (variant: Variant): ProtocolDigest => {
-    const pollSpecDigest = syntheticDigest(
-        'PollSpecDigest',
+const thresholdHashForVariant = (variant: Variant): ProtocolHash => {
+    const pollSpecHash = syntheticHash(
+        'PollSpecHash',
         `poll-spec-${variant.rosterSize}-${variant.optionCount}`,
     );
-    const rosterDigest = syntheticDigest(
-        'RosterDigest',
+    const rosterHash = syntheticHash(
+        'RosterHash',
         `roster-${variant.rosterSize}`,
     );
     const thresholdProfile = deriveThresholdProfile({
@@ -72,11 +72,11 @@ const thresholdDigestForVariant = (variant: Variant): ProtocolDigest => {
         rosterSize: variant.rosterSize,
     });
 
-    return deriveThresholdProfileDigest({
+    return deriveThresholdProfileHash({
         maxRosterSize: maximumRosterSize,
         minRosterSize: minimumRosterSize,
-        pollSpecDigest,
-        rosterDigest,
+        pollSpecHash,
+        rosterHash,
         rosterPolicy: 'OpenLinkPublicRoster',
         smallRosterPolicy:
             variant.rosterSize < 10 ? 'AllowMicroRoster' : 'ForbidMicroRoster',
@@ -90,210 +90,209 @@ const shapeStatementForVariant = (variant: Variant): ShapeStatement => {
         optionCount: variant.optionCount,
     });
     const shareVectorWidth = variant.optionCount * 11;
-    const rosterDigest = syntheticDigest(
-        'RosterDigest',
+    const rosterHash = syntheticHash(
+        'RosterHash',
         `roster-${variant.rosterSize}`,
     );
-    const pollSpecDigest = syntheticDigest(
-        'PollSpecDigest',
+    const pollSpecHash = syntheticHash(
+        'PollSpecHash',
         `poll-spec-${variant.rosterSize}-${variant.optionCount}`,
     );
 
     return {
-        ballotSetDigest: syntheticDigest(
-            'BallotSetDigest',
+        ballotSetHash: syntheticHash(
+            'BallotSetHash',
             `ballot-set-${variant.rosterSize}-${variant.optionCount}`,
         ),
         ceremonyId: `shape-config-ceremony-${variant.rosterSize}`,
-        contributorActionContextDigest: syntheticDigest(
-            'ActionContextDigest',
+        contributorActionContextHash: syntheticHash(
+            'ActionContextHash',
             `action-context-${variant.rosterSize}-${variant.optionCount}`,
         ),
         contributorIdentity: 'receiver-1',
-        contributorRosterExternalAcceptanceDigest: syntheticDigest(
-            'RosterExternalAcceptanceDigest',
+        contributorRosterExternalAcceptanceHash: syntheticHash(
+            'RosterExternalAcceptanceHash',
             `contributor-acceptance-${variant.rosterSize}`,
         ),
         contributorRosterPosition: 1,
-        encodedShareVectorLayoutDigest:
+        encodedShareVectorLayoutHash:
             profileSet.encodedShareVectorLayoutProfile
-                .encodedShareVectorLayoutDigest,
-        manifestDigest: syntheticDigest(
-            'ElectionManifestDigest',
+                .encodedShareVectorLayoutHash,
+        manifestHash: syntheticHash(
+            'ElectionManifestHash',
             `manifest-${variant.rosterSize}-${variant.optionCount}`,
         ),
         optionCount: variant.optionCount,
         participantCount: variant.rosterSize,
-        pollSpecDigest,
-        postVotingClosedContextDigest: syntheticDigest(
-            'PostVotingClosedContextDigest',
+        pollSpecHash,
+        postVotingClosedContextHash: syntheticHash(
+            'PostVotingClosedContextHash',
             `post-voting-closed-${variant.rosterSize}-${variant.optionCount}`,
         ),
-        rosterDigest,
-        rosterExternalAcceptanceDigest: syntheticDigest(
-            'RosterExternalAcceptanceDigest',
+        rosterHash,
+        rosterExternalAcceptanceHash: syntheticHash(
+            'RosterExternalAcceptanceHash',
             `roster-acceptance-${variant.rosterSize}`,
         ),
-        shareCommitmentMessageBoundCertDigest: syntheticDigest(
-            'ShareCommitmentMessageBoundCertDigest',
+        shareCommitmentMessageBoundCertHash: syntheticHash(
+            'ShareCommitmentMessageBoundCertHash',
             `share-commitment-bound-${variant.optionCount}`,
         ),
         shareVectorWidth,
-        thresholdProfileDigest: thresholdDigestForVariant(variant),
-        votingClosedBoardHeadDigest: syntheticDigest(
-            'BoardHeadDigest',
+        thresholdProfileHash: thresholdHashForVariant(variant),
+        votingClosedBoardHeadHash: syntheticHash(
+            'BoardHeadHash',
             `closed-board-head-${variant.rosterSize}-${variant.optionCount}`,
         ),
     };
 };
 
-const syntheticBridgeProofStatementDigest = (input: {
-    readonly aggregateInputLayoutDigest: ProtocolDigest;
-    readonly bridgeProofTargetContractDigest: ProtocolDigest;
+const syntheticBridgeProofStatementHash = (input: {
+    readonly aggregateInputLayoutHash: ProtocolHash;
+    readonly bridgeProofTargetContractHash: ProtocolHash;
     readonly statement: ShapeStatement;
     readonly variant: Variant;
-}): ProtocolDigest => {
+}): ProtocolHash => {
     const profileSet = createBallotPrivacyProfileSet({
         optionCount: input.variant.optionCount,
     });
-    const bridgeProofProfileDigest = deriveBridgeProofProfileDigest({
+    const bridgeProofProfileHash = deriveBridgeProofProfileHash({
         bgvEncryptionProofSubrelation,
         bridgeProofProfileId,
         proofBackend,
     });
 
-    return deriveBridgeProofStatementDigest({
-        aggregateDerivationComponentDigest: syntheticDigest(
-            'AggregateDerivationComponentDigest',
+    return deriveBridgeProofStatementHash({
+        aggregateDerivationComponentHash: syntheticHash(
+            'AggregateDerivationComponentHash',
             `component-${input.variant.rosterSize}-${input.variant.optionCount}`,
         ),
-        aggregateInputEncodingProfileDigest:
+        aggregateInputEncodingProfileHash:
             profileSet.aggregateInputEncodingProfile
-                .aggregateInputEncodingProfileDigest,
+                .aggregateInputEncodingProfileHash,
         aggregateQuotientCoordinateCount: input.statement.shareVectorWidth,
         aggregateReducedCoordinateCount: input.statement.shareVectorWidth,
-        aggregateSelectionPolicyDigest: syntheticDigest(
-            'AggregateSelectionPolicyDigest',
+        aggregateSelectionPolicyHash: syntheticHash(
+            'AggregateSelectionPolicyHash',
             `selection-policy-${input.variant.rosterSize}-${input.variant.optionCount}`,
         ),
-        aggregateShareCommitmentDigest: syntheticDigest(
-            'AggregateShareCommitmentDigest',
+        aggregateShareCommitmentHash: syntheticHash(
+            'AggregateShareCommitmentHash',
             `aggregate-share-commitment-${input.variant.rosterSize}-${input.variant.optionCount}`,
         ),
         aggregateToPlaintextBindingStatus:
             'AggregateToPlaintextBindingProofChecked',
-        ballotScoreEncodingProfileDigest:
+        ballotScoreEncodingProfileHash:
             profileSet.ballotScoreEncodingProfile
-                .ballotScoreEncodingProfileDigest,
-        ballotSetDigest: input.statement.ballotSetDigest,
-        ballotShareLayoutProfileDigest:
-            profileSet.ballotShareLayoutProfile.ballotShareLayoutProfileDigest,
+                .ballotScoreEncodingProfileHash,
+        ballotSetHash: input.statement.ballotSetHash,
+        ballotShareLayoutProfileHash:
+            profileSet.ballotShareLayoutProfile.ballotShareLayoutProfileHash,
         basisId: 'QData',
-        bgvBatchEncoderDigest: syntheticDigest(
-            'BGVBatchEncoderDigest',
+        bgvBatchEncoderHash: syntheticHash(
+            'BGVBatchEncoderHash',
             'shape-config-batch-encoder',
         ),
         bgvEncryptionProofStatus: 'BgvCiphertextEquationChecked',
-        bgvProfileDigest: syntheticDigest(
-            'BGVProfileDigest',
+        bgvProfileHash: syntheticHash(
+            'BGVProfileHash',
             'shape-config-bgv-profile',
         ),
-        bgvPublicKeyRoot: syntheticDigest(
+        bgvPublicKeyRoot: syntheticHash(
             'BGVPublicKeyRoot',
             `bgv-public-key-${input.variant.rosterSize}`,
         ),
         bgvRandomnessBoundProofStatus:
             'BgvRandomnessErrorSupportPolynomialChecked',
         bridgeClaimClosureStatus: 'BridgeProofClaimClosureMissing',
-        bridgeLayoutDigest: input.aggregateInputLayoutDigest,
-        bridgeProofTargetContractDigest: input.bridgeProofTargetContractDigest,
-        bridgeWitnessPrivacyProfileDigest: syntheticDigest(
-            'BridgeWitnessPrivacyProfileDigest',
+        bridgeLayoutHash: input.aggregateInputLayoutHash,
+        bridgeProofTargetContractHash: input.bridgeProofTargetContractHash,
+        bridgeWitnessPrivacyProfileHash: syntheticHash(
+            'BridgeWitnessPrivacyProfileHash',
             `witness-privacy-${input.variant.rosterSize}-${input.variant.optionCount}`,
         ),
         canonicalByteLength: 8_388_608,
         canonicalBytesHash512: 'ab'.repeat(64),
-        canonicalCiphertextConventionDigest: syntheticDigest(
-            'CanonicalCiphertextConventionDigest',
+        canonicalCiphertextConventionHash: syntheticHash(
+            'CanonicalCiphertextConventionHash',
             'shape-config-ciphertext-convention',
         ),
         ceremonyId: input.statement.ceremonyId,
-        ciphertextRoot: syntheticDigest(
+        ciphertextRoot: syntheticHash(
             'CiphertextRoot',
             `ciphertext-${input.variant.rosterSize}-${input.variant.optionCount}`,
         ),
         coefficientCount: 32_768,
         coefficientDomainCanonical: true,
-        collectivePublicKeyRoot: syntheticDigest(
+        collectivePublicKeyRoot: syntheticHash(
             'CollectivePublicKeyRoot',
             `collective-public-key-${input.variant.rosterSize}`,
         ),
-        contributorActionContextDigest:
-            input.statement.contributorActionContextDigest,
+        contributorActionContextHash:
+            input.statement.contributorActionContextHash,
         contributorIdentity: input.statement.contributorIdentity,
-        contributorRosterExternalAcceptanceDigest:
-            input.statement.contributorRosterExternalAcceptanceDigest,
+        contributorRosterExternalAcceptanceHash:
+            input.statement.contributorRosterExternalAcceptanceHash,
         contributorRosterPosition: input.statement.contributorRosterPosition,
-        encodedAggregateLayoutDigest:
-            profileSet.encodedAggregateLayoutProfile
-                .encodedAggregateLayoutDigest,
-        encodedShareVectorLayoutDigest:
-            input.statement.encodedShareVectorLayoutDigest,
-        encryptedAggregateBridgeDigest: syntheticDigest(
-            'EncryptedAggregateBridgeDigest',
+        encodedAggregateLayoutHash:
+            profileSet.encodedAggregateLayoutProfile.encodedAggregateLayoutHash,
+        encodedShareVectorLayoutHash:
+            input.statement.encodedShareVectorLayoutHash,
+        encryptedAggregateBridgeHash: syntheticHash(
+            'EncryptedAggregateBridgeHash',
             `bridge-binding-${input.variant.rosterSize}-${input.variant.optionCount}`,
         ),
-        encryptedAggregateInputLayoutDigest: input.aggregateInputLayoutDigest,
-        encryptedAggregateInputRoot: syntheticDigest(
+        encryptedAggregateInputLayoutHash: input.aggregateInputLayoutHash,
+        encryptedAggregateInputRoot: syntheticHash(
             'EncryptedAggregateInputRoot',
             `aggregate-input-${input.variant.rosterSize}-${input.variant.optionCount}`,
         ),
-        encryptedAggregateReconstructionDigest: syntheticDigest(
-            'EncryptedAggregateReconstructionDigest',
+        encryptedAggregateReconstructionHash: syntheticHash(
+            'EncryptedAggregateReconstructionHash',
             `reconstruction-${input.variant.rosterSize}-${input.variant.optionCount}`,
         ),
-        encryptedAggregateShareCiphertextRoot: syntheticDigest(
+        encryptedAggregateShareCiphertextRoot: syntheticHash(
             'EncryptedAggregateShareCiphertextRoot',
             `aggregate-input-${input.variant.rosterSize}-${input.variant.optionCount}`,
         ),
-        encryptedAggregateTargetBasisDataRoot: syntheticDigest(
-            'EncryptedAggregateTargetBasisDataRoot',
+        encryptedAggregateTargetBasisRoot: syntheticHash(
+            'EncryptedAggregateTargetBasisRoot',
             `target-basis-${input.variant.rosterSize}-${input.variant.optionCount}`,
         ),
-        heParamDigest: syntheticDigest(
-            'HEParamDigest',
+        heParamHash: syntheticHash(
+            'HEParamHash',
             `he-params-${input.variant.rosterSize}-${input.variant.optionCount}`,
         ),
-        hwangPiopStatus: 'DeferredUntilSealedLatticeBgvRnsCompatibilityFreeze',
+        hwangPiopStatus: 'DeferredUntilSealedLatticeBgvRnsProfileFreeze',
         level: 15,
-        manifestDigest: input.statement.manifestDigest,
+        manifestHash: input.statement.manifestHash,
         optionCount: input.statement.optionCount,
         participantCount: input.statement.participantCount,
-        plaintextRoot: syntheticDigest(
+        plaintextRoot: syntheticHash(
             'PlaintextRoot',
             `plaintext-${input.variant.rosterSize}-${input.variant.optionCount}`,
         ),
-        pollSpecDigest: input.statement.pollSpecDigest,
-        postVotingClosedContextDigest:
-            input.statement.postVotingClosedContextDigest,
-        proofProfileDigest: bridgeProofProfileDigest,
+        pollSpecHash: input.statement.pollSpecHash,
+        postVotingClosedContextHash:
+            input.statement.postVotingClosedContextHash,
+        proofProfileHash: bridgeProofProfileHash,
         rnsCrtConsistencyProofStatus: 'RnsCrtConsistencyRelationChecked',
-        rosterDigest: input.statement.rosterDigest,
-        rustBgvBackendProfileDigest: syntheticDigest(
-            'RustBgvBackendProfileDigest',
+        rosterHash: input.statement.rosterHash,
+        rustBgvBackendProfileHash: syntheticHash(
+            'RustBgvBackendProfileHash',
             'shape-config-rust-bgv-backend',
         ),
         sampledOnlyBridgeVerificationAccepted: false,
-        sampledPublicRelationCheckPolicyDigest: syntheticDigest(
-            'BridgeProofRecordDigest',
+        sampledPublicRelationCheckPolicyHash: syntheticHash(
+            'BridgeProofRecordHash',
             'shape-config-sampled-policy',
         ),
-        setupPackageDigest: syntheticDigest(
-            'BGVPassiveSetupPackageDigest',
+        setupPackageHash: syntheticHash(
+            'BGVPassiveSetupPackageHash',
             `setup-package-${input.variant.rosterSize}`,
         ),
-        shareCommitmentMessageBoundCertDigest:
-            input.statement.shareCommitmentMessageBoundCertDigest,
+        shareCommitmentMessageBoundCertHash:
+            input.statement.shareCommitmentMessageBoundCertHash,
         shareVectorWidth: input.statement.shareVectorWidth,
         sharedWitnessBindingRequired: true,
         sharedWitnessBindingStatus: 'SharedWitnessBindingRelationChecked',
@@ -303,13 +302,12 @@ const syntheticBridgeProofStatementDigest = (input: {
         sharedWitnessZeroKnowledgeStatus:
             'SharedWitnessZeroKnowledgeResponseDistributionChecked',
         slotCount: 32_768,
-        thresholdProfileDigest: input.statement.thresholdProfileDigest,
-        topKEvaluatorInputLayoutDigest: syntheticDigest(
-            'TopKEvaluatorInputLayoutDigest',
+        thresholdProfileHash: input.statement.thresholdProfileHash,
+        topKEvaluatorInputLayoutHash: syntheticHash(
+            'TopKEvaluatorInputLayoutHash',
             `top-k-layout-${input.variant.optionCount}`,
         ),
-        votingClosedBoardHeadDigest:
-            input.statement.votingClosedBoardHeadDigest,
+        votingClosedBoardHeadHash: input.statement.votingClosedBoardHeadHash,
     });
 };
 
@@ -378,8 +376,8 @@ export const buildShapeConfigRow = (variant: Variant): ShapeConfigRow => {
             trusteeAggregateThreshold: thresholdProfile.pvssThreshold,
             variant,
         });
-        const aggregateInputLayoutDigest = deriveProtocolDigest(
-            'BridgeLayoutDigest',
+        const aggregateInputLayoutHash = deriveProtocolHash(
+            'BridgeLayoutHash',
             {
                 coordinateOrder:
                     'score, score_bucket_1, ..., score_bucket_10 for each option',
@@ -390,19 +388,19 @@ export const buildShapeConfigRow = (variant: Variant): ShapeConfigRow => {
                 shareVectorWidth: statement.shareVectorWidth,
             },
         );
-        const bridgeProofTargetContractDigest =
-            deriveBridgeProofTargetContractDigest({
+        const bridgeProofTargetContractHash =
+            deriveBridgeProofTargetContractHash({
                 aggregateQuotientCoordinateCount: statement.shareVectorWidth,
                 aggregateReducedCoordinateCount: statement.shareVectorWidth,
             });
-        const bridgeProofStatementDigest = syntheticBridgeProofStatementDigest({
-            aggregateInputLayoutDigest,
-            bridgeProofTargetContractDigest,
+        const bridgeProofStatementHash = syntheticBridgeProofStatementHash({
+            aggregateInputLayoutHash,
+            bridgeProofTargetContractHash,
             statement,
             variant,
         });
-        const statementDimensionDigest = deriveProtocolDigest(
-            'BridgeProofRecordDigest',
+        const statementDimensionHash = deriveProtocolHash(
+            'BridgeProofRecordHash',
             {
                 aggregateQuotientCoordinateCount: statement.shareVectorWidth,
                 aggregateReducedCoordinateCount: statement.shareVectorWidth,
@@ -417,18 +415,18 @@ export const buildShapeConfigRow = (variant: Variant): ShapeConfigRow => {
         );
 
         return {
-            aggregateInputLayoutDigest,
-            bridgeProofStatementDigest,
-            bridgeProofTargetContractDigest,
+            aggregateInputLayoutHash,
+            bridgeProofStatementHash,
+            bridgeProofTargetContractHash,
             claimTier: claimTierForRosterSize(variant.rosterSize),
             failureReason: null,
             optionCount: variant.optionCount,
             rosterSize: variant.rosterSize,
             selectedContributionCount,
             shareVectorWidth: statement.shareVectorWidth,
-            statementDimensionDigest,
+            statementDimensionHash,
             status: 'passed',
-            thresholdProfileHash: statement.thresholdProfileDigest,
+            thresholdProfileHash: statement.thresholdProfileHash,
             trusteeAggregateThreshold: thresholdProfile.pvssThreshold,
         };
     } catch (error) {
@@ -438,13 +436,13 @@ export const buildShapeConfigRow = (variant: Variant): ShapeConfigRow => {
         });
 
         return {
-            aggregateInputLayoutDigest: lowerHexDigest(
+            aggregateInputLayoutHash: lowerHexHash(
                 `shape-config-layout-failed-${variant.rosterSize}-${variant.optionCount}`,
             ),
-            bridgeProofStatementDigest: lowerHexDigest(
+            bridgeProofStatementHash: lowerHexHash(
                 `shape-config-statement-failed-${variant.rosterSize}-${variant.optionCount}`,
             ),
-            bridgeProofTargetContractDigest: lowerHexDigest(
+            bridgeProofTargetContractHash: lowerHexHash(
                 `shape-config-target-contract-failed-${variant.rosterSize}-${variant.optionCount}`,
             ),
             claimTier: claimTierForRosterSize(variant.rosterSize),
@@ -454,11 +452,11 @@ export const buildShapeConfigRow = (variant: Variant): ShapeConfigRow => {
             rosterSize: variant.rosterSize,
             selectedContributionCount: thresholdProfile.pvssThreshold,
             shareVectorWidth: variant.optionCount * 11,
-            statementDimensionDigest: lowerHexDigest(
+            statementDimensionHash: lowerHexHash(
                 `shape-config-dimensions-failed-${variant.rosterSize}-${variant.optionCount}`,
             ),
             status: 'failed',
-            thresholdProfileHash: lowerHexDigest(
+            thresholdProfileHash: lowerHexHash(
                 `shape-config-threshold-failed-${variant.rosterSize}-${variant.optionCount}`,
             ),
             trusteeAggregateThreshold: thresholdProfile.pvssThreshold,

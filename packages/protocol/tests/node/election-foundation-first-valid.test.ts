@@ -4,10 +4,10 @@ import {
     type FirstValidOrderingInput,
     type RecoveryEpochMapEntry,
     type ValidatedFirstValidObject,
-    contextDigest,
-    deriveProtocolDigest,
+    contextHash,
+    deriveProtocolHash,
     deriveValidatedFirstValidOrder,
-    manifestPolicyDigests,
+    manifestPolicyHashes,
 } from './election-foundation-test-helpers';
 
 describe('first-valid ordering shells', () => {
@@ -19,7 +19,7 @@ describe('first-valid ordering shells', () => {
         };
         const objects: ValidatedFirstValidObject[] = [
             {
-                objectDigest: 'object-b',
+                objectHash: 'object-b',
                 objectType: 'TargetFinalityRecord',
                 boardSequence: 2,
                 boardPosition: 1,
@@ -27,11 +27,11 @@ describe('first-valid ordering shells', () => {
                 recoveryEpoch: 0,
                 deviceEpoch: 0,
                 actionSequence: 0,
-                contextDigest,
+                contextHash,
                 isByteIdenticalRetransmission: false,
             },
             {
-                objectDigest: 'object-a',
+                objectHash: 'object-a',
                 objectType: 'TargetFinalityRecord',
                 boardSequence: 1,
                 boardPosition: 0,
@@ -39,11 +39,11 @@ describe('first-valid ordering shells', () => {
                 recoveryEpoch: 0,
                 deviceEpoch: 0,
                 actionSequence: 0,
-                contextDigest,
+                contextHash,
                 isByteIdenticalRetransmission: false,
             },
             {
-                objectDigest: 'object-a',
+                objectHash: 'object-a',
                 objectType: 'TargetFinalityRecord',
                 boardSequence: 3,
                 boardPosition: 0,
@@ -51,16 +51,16 @@ describe('first-valid ordering shells', () => {
                 recoveryEpoch: 0,
                 deviceEpoch: 0,
                 actionSequence: 0,
-                contextDigest,
+                contextHash,
                 isByteIdenticalRetransmission: true,
             },
         ];
         const input: FirstValidOrderingInput = {
             objects,
-            requiredContextDigest: contextDigest,
-            selectionPolicyDigest: manifestPolicyDigests.firstValidPolicyDigest,
-            expectedSelectionPolicyDigest:
-                manifestPolicyDigests.firstValidPolicyDigest,
+            requiredContextHash: contextHash,
+            selectionPolicyHash: manifestPolicyHashes.firstValidPolicyHash,
+            expectedSelectionPolicyHash:
+                manifestPolicyHashes.firstValidPolicyHash,
             currentRecoveryEpochMap: {
                 'participant-1': recoveryEpochState,
                 'participant-2': {
@@ -74,34 +74,33 @@ describe('first-valid ordering shells', () => {
         expect(deriveValidatedFirstValidOrder(input)).toMatchObject({
             ok: true,
             orderedObjects: [
-                expect.objectContaining({ objectDigest: 'object-a' }),
-                expect.objectContaining({ objectDigest: 'object-b' }),
+                expect.objectContaining({ objectHash: 'object-a' }),
+                expect.objectContaining({ objectHash: 'object-b' }),
             ],
         });
 
         const badInput: FirstValidOrderingInput = {
             ...input,
-            selectionPolicyDigest: deriveProtocolDigest(
-                'FirstValidPolicyDigest',
-                { policy: 'wrong' },
-            ),
+            selectionPolicyHash: deriveProtocolHash('FirstValidPolicyHash', {
+                policy: 'wrong',
+            }),
             objects: [
                 {
                     ...objects[0],
-                    contextDigest: deriveProtocolDigest('ActionContextDigest', {
+                    contextHash: deriveProtocolHash('ActionContextHash', {
                         context: 'wrong',
                     }),
                 },
                 objects[1],
                 {
                     ...objects[1],
-                    objectDigest: 'object-stale',
+                    objectHash: 'object-stale',
                     recoveryEpoch: 9,
                     actionSequence: 1,
                 },
                 {
                     ...objects[1],
-                    objectDigest: 'object-c',
+                    objectHash: 'object-c',
                 },
             ],
         };
@@ -121,11 +120,10 @@ describe('first-valid ordering shells', () => {
     it('rejects same-identity first-valid conflicts across action sequences', () => {
         expect(
             deriveValidatedFirstValidOrder({
-                requiredContextDigest: contextDigest,
-                selectionPolicyDigest:
-                    manifestPolicyDigests.firstValidPolicyDigest,
-                expectedSelectionPolicyDigest:
-                    manifestPolicyDigests.firstValidPolicyDigest,
+                requiredContextHash: contextHash,
+                selectionPolicyHash: manifestPolicyHashes.firstValidPolicyHash,
+                expectedSelectionPolicyHash:
+                    manifestPolicyHashes.firstValidPolicyHash,
                 currentRecoveryEpochMap: {
                     'participant-1': {
                         signerIdentity: 'participant-1',
@@ -135,7 +133,7 @@ describe('first-valid ordering shells', () => {
                 },
                 objects: [
                     {
-                        objectDigest: 'object-a',
+                        objectHash: 'object-a',
                         objectType: 'TargetFinalityRecord',
                         boardSequence: 1,
                         boardPosition: 0,
@@ -143,11 +141,11 @@ describe('first-valid ordering shells', () => {
                         recoveryEpoch: 0,
                         deviceEpoch: 0,
                         actionSequence: 0,
-                        contextDigest,
+                        contextHash,
                         isByteIdenticalRetransmission: false,
                     },
                     {
-                        objectDigest: 'object-b',
+                        objectHash: 'object-b',
                         objectType: 'TargetFinalityRecord',
                         boardSequence: 1,
                         boardPosition: 1,
@@ -155,7 +153,7 @@ describe('first-valid ordering shells', () => {
                         recoveryEpoch: 0,
                         deviceEpoch: 0,
                         actionSequence: 1,
-                        contextDigest,
+                        contextHash,
                         isByteIdenticalRetransmission: false,
                     },
                 ],
@@ -171,7 +169,7 @@ describe('first-valid ordering shells', () => {
 
     it('rejects malformed first-valid candidate shape before ordering', () => {
         const baseCandidate: ValidatedFirstValidObject = {
-            objectDigest: 'object-a',
+            objectHash: 'object-a',
             objectType: 'TargetFinalityRecord',
             boardSequence: 1,
             boardPosition: 0,
@@ -179,14 +177,14 @@ describe('first-valid ordering shells', () => {
             recoveryEpoch: 0,
             deviceEpoch: 0,
             actionSequence: 0,
-            contextDigest,
+            contextHash,
             isByteIdenticalRetransmission: false,
         };
         const result = deriveValidatedFirstValidOrder({
-            requiredContextDigest: contextDigest,
-            selectionPolicyDigest: manifestPolicyDigests.firstValidPolicyDigest,
-            expectedSelectionPolicyDigest:
-                manifestPolicyDigests.firstValidPolicyDigest,
+            requiredContextHash: contextHash,
+            selectionPolicyHash: manifestPolicyHashes.firstValidPolicyHash,
+            expectedSelectionPolicyHash:
+                manifestPolicyHashes.firstValidPolicyHash,
             currentRecoveryEpochMap: {
                 'participant-1': {
                     signerIdentity: 'participant-1',
@@ -197,21 +195,21 @@ describe('first-valid ordering shells', () => {
             objects: [
                 {
                     ...baseCandidate,
-                    objectDigest: 'negative-position',
+                    objectHash: 'negative-position',
                     boardPosition: -1,
                 },
                 {
                     ...baseCandidate,
-                    objectDigest: 'unsafe-action-sequence',
+                    objectHash: 'unsafe-action-sequence',
                     actionSequence: Number.MAX_SAFE_INTEGER + 1,
                 },
                 {
                     ...baseCandidate,
-                    objectDigest: '',
+                    objectHash: '',
                 },
                 {
                     ...baseCandidate,
-                    objectDigest: 'malformed-retransmission-flag',
+                    objectHash: 'malformed-retransmission-flag',
                     isByteIdenticalRetransmission: 'yes' as unknown as boolean,
                 },
             ],

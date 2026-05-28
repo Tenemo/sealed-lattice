@@ -5,16 +5,16 @@ sidebar:
     order: 2
 ---
 
-The repo is a private workspace with one published package and five private internal packages.
+The repo is a private workspace with one published package, four private TypeScript packages, and one private Rust crate.
 
 ## Package map
 
 - `packages/sdk`: the only published package directory, with the public package name `sealed-lattice`
 - `packages/types`: canonical shared type definitions inlined into the published package during SDK builds
 - `packages/protocol`: deterministic election model and transcript verification helpers
-- `packages/crypto`: internal Hash512, digest, ML-DSA-65 profile, fixture signing, and signed-root verification wrappers
-- `packages/wasm`: typed Rust/WASM loader for transcript-core analysis, protocol digest derivation, ballot privacy proof verification, and kernel field checks
-- `crates/sealed-lattice-kernel`: Rust transcript-core and ballot privacy proof crate that exports the WASM command path for transcript fixtures, reserved digest derivation, proof verification, and `GF(65537)` checks
+- `packages/crypto`: internal Hash512, hash, ML-DSA-65 profile, fixture signing, and signed-root verification wrappers
+- `packages/wasm`: typed Rust/WASM loader for transcript-core analysis, protocol hash derivation, ballot privacy proof verification, and kernel field checks
+- `crates/sealed-lattice-kernel`: Rust transcript-core and ballot privacy proof crate that exports the WASM command path for transcript fixtures, reserved hash derivation, proof verification, and `GF(65537)` checks
 
 ## Dependency direction
 

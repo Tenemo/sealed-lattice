@@ -2,7 +2,7 @@ use super::*;
 use super::{
     dimensions::bridge_variant_dimensions,
     target_contract::{
-        bridge_proof_target_contract_digest, bridge_proof_target_contract_value,
+        bridge_proof_target_contract_hash, bridge_proof_target_contract_value,
         validate_bridge_proof_target_contract,
     },
     validation::{
@@ -11,9 +11,9 @@ use super::{
     },
 };
 
-pub(super) fn bridge_proof_profile_digest() -> CanonicalResult<String> {
-    derive_protocol_digest(
-        "BridgeProofProfileDigest",
+pub(super) fn bridge_proof_profile_hash() -> CanonicalResult<String> {
+    derive_protocol_hash(
+        "BridgeProofProfileHash",
         &json!({
             "purpose": "sealed-lattice-aggregate-bridge-proof-profile-v1",
             "bridgeProofProfileId": BRIDGE_PROOF_PROFILE_ID,
@@ -27,10 +27,10 @@ pub(super) fn build_bridge_proof_statement(
     component: &Value,
     setup_package: &Value,
     bridge_encryption: &Value,
-    bridge_proof_profile_digest: &str,
-    aggregate_selection_policy_digest: &str,
-    bridge_witness_privacy_profile_digest: &str,
-    he_param_digest: &str,
+    bridge_proof_profile_hash: &str,
+    aggregate_selection_policy_hash: &str,
+    bridge_witness_privacy_profile_hash: &str,
+    he_param_hash: &str,
 ) -> CanonicalResult<Value> {
     let component_statement =
         required_json_field(component, "statement", "aggregateDerivationComponent")?;
@@ -48,59 +48,59 @@ pub(super) fn build_bridge_proof_statement(
         "shareCommitmentMessageBoundCert",
         "aggregateDerivationComponent",
     )?;
-    let aggregate_derivation_component_digest = required_string_field(
+    let aggregate_derivation_component_hash = required_string_field(
         component,
-        "aggregateDerivationComponentDigest",
+        "aggregateDerivationComponentHash",
         "aggregateDerivationComponent",
     )?;
-    let aggregate_derivation_statement_digest = required_string_field(
+    let aggregate_derivation_statement_hash = required_string_field(
         component_statement,
-        "aggregateDerivationStatementDigest",
+        "aggregateDerivationStatementHash",
         "aggregateDerivationComponent.statement",
     )?;
-    let aggregate_share_commitment_digest = required_string_field(
+    let aggregate_share_commitment_hash = required_string_field(
         aggregate_commitment,
-        "aggregateShareCommitmentDigest",
+        "aggregateShareCommitmentHash",
         "aggregateDerivationComponent.aggregateCommitment",
     )?;
     require_matching_string_field(
         component_statement,
-        "aggregateShareCommitmentDigest",
-        aggregate_share_commitment_digest,
-        "aggregate share commitment digest",
+        "aggregateShareCommitmentHash",
+        aggregate_share_commitment_hash,
+        "aggregate share commitment hash",
     )?;
-    let share_commitment_message_bound_cert_digest = required_string_field(
+    let share_commitment_message_bound_cert_hash = required_string_field(
         share_commitment_message_bound_cert,
-        "shareCommitmentMessageBoundCertDigest",
+        "shareCommitmentMessageBoundCertHash",
         "aggregateDerivationComponent.shareCommitmentMessageBoundCert",
     )?;
     require_matching_string_field(
         component_statement,
-        "shareCommitmentMessageBoundCertDigest",
-        share_commitment_message_bound_cert_digest,
-        "share commitment message-bound certificate digest",
+        "shareCommitmentMessageBoundCertHash",
+        share_commitment_message_bound_cert_hash,
+        "share commitment message-bound certificate hash",
     )?;
     validate_bridge_share_commitment_bound_cert(
         share_commitment_message_bound_cert,
         component_statement,
     )?;
-    let setup_manifest_digest = required_string_at_path(
+    let setup_manifest_hash = required_string_at_path(
         setup_package,
-        &["setupInputs", "manifestDigest"],
+        &["setupInputs", "manifestHash"],
         "setupPackage",
     )?;
-    let setup_roster_digest = required_string_at_path(
+    let setup_roster_hash = required_string_at_path(
         setup_package,
-        &["setupInputs", "rosterDigest"],
+        &["setupInputs", "rosterHash"],
         "setupPackage",
     )?;
-    let setup_threshold_profile_digest = required_string_at_path(
+    let setup_threshold_profile_hash = required_string_at_path(
         setup_package,
-        &["setupInputs", "thresholdProfileDigest"],
+        &["setupInputs", "thresholdProfileHash"],
         "setupPackage",
     )?;
-    let setup_package_digest =
-        required_string_field(setup_package, "setupPackageDigest", "setupPackage")?;
+    let setup_package_hash =
+        required_string_field(setup_package, "setupPackageHash", "setupPackage")?;
     let setup_participant_count = read_u64_at_path(
         setup_package,
         &["setupInputs", "participantCount"],
@@ -115,30 +115,30 @@ pub(super) fn build_bridge_proof_statement(
     }
     require_matching_string_field(
         component_statement,
-        "manifestDigest",
-        setup_manifest_digest,
-        "manifest digest",
+        "manifestHash",
+        setup_manifest_hash,
+        "manifest hash",
     )?;
     require_matching_string_field(
         component_statement,
-        "rosterDigest",
-        setup_roster_digest,
-        "roster digest",
+        "rosterHash",
+        setup_roster_hash,
+        "roster hash",
     )?;
     require_matching_string_field(
         component_statement,
-        "thresholdProfileDigest",
-        setup_threshold_profile_digest,
-        "threshold profile digest",
+        "thresholdProfileHash",
+        setup_threshold_profile_hash,
+        "threshold profile hash",
     )?;
     let share_vector_width = read_u64_object_field(
         component_statement,
         "shareVectorWidth",
         "aggregateDerivationComponent.statement",
     )?;
-    let encrypted_aggregate_input_layout_digest = required_string_at_path(
+    let encrypted_aggregate_input_layout_hash = required_string_at_path(
         setup_package,
-        &["profileBindings", "encryptedAggregateInputLayoutDigest"],
+        &["profileBindings", "encryptedAggregateInputLayoutHash"],
         "setupPackage",
     )?;
     let encrypted_aggregate_share_ciphertext_root = required_string_field(
@@ -157,69 +157,69 @@ pub(super) fn build_bridge_proof_statement(
             "M9 bridge encrypted aggregate input root does not match the aggregate-share ciphertext root for the current prototype layout",
         ));
     }
-    let encrypted_aggregate_bridge_digest = required_string_at_path(
+    let encrypted_aggregate_bridge_hash = required_string_at_path(
         setup_package,
-        &["profileBindings", "encryptedAggregateBridgeDigest"],
+        &["profileBindings", "encryptedAggregateBridgeHash"],
         "setupPackage",
     )?;
-    let encrypted_aggregate_target_basis_data_root = required_string_at_path(
+    let encrypted_aggregate_target_basis_root = required_string_at_path(
         setup_package,
-        &["profileBindings", "encryptedAggregateTargetBasisDataRoot"],
+        &["profileBindings", "encryptedAggregateTargetBasisRoot"],
         "setupPackage",
     )?;
-    let encrypted_aggregate_reconstruction_digest = required_string_at_path(
+    let encrypted_aggregate_reconstruction_hash = required_string_at_path(
         setup_package,
-        &["profileBindings", "encryptedAggregateReconstructionDigest"],
+        &["profileBindings", "encryptedAggregateReconstructionHash"],
         "setupPackage",
     )?;
-    let bgv_batch_encoder_digest = required_string_at_path(
+    let bgv_batch_encoder_hash = required_string_at_path(
         setup_package,
-        &["profileBindings", "batchEncoderDigest"],
+        &["profileBindings", "batchEncoderHash"],
         "setupPackage",
     )?;
-    let ballot_score_encoding_profile_digest = required_string_at_path(
+    let ballot_score_encoding_profile_hash = required_string_at_path(
         setup_package,
-        &["profileBindings", "ballotScoreEncodingProfileDigest"],
+        &["profileBindings", "ballotScoreEncodingProfileHash"],
         "setupPackage",
     )?;
-    let ballot_share_layout_profile_digest = required_string_at_path(
+    let ballot_share_layout_profile_hash = required_string_at_path(
         setup_package,
-        &["profileBindings", "ballotShareLayoutProfileDigest"],
+        &["profileBindings", "ballotShareLayoutProfileHash"],
         "setupPackage",
     )?;
-    let aggregate_input_encoding_profile_digest = required_string_at_path(
+    let aggregate_input_encoding_profile_hash = required_string_at_path(
         setup_package,
-        &["profileBindings", "aggregateInputEncodingProfileDigest"],
+        &["profileBindings", "aggregateInputEncodingProfileHash"],
         "setupPackage",
     )?;
-    let encoded_share_vector_layout_digest = required_string_field(
+    let encoded_share_vector_layout_hash = required_string_field(
         component_statement,
-        "encodedShareVectorLayoutDigest",
+        "encodedShareVectorLayoutHash",
         "aggregateDerivationComponent.statement",
     )?;
-    let encoded_aggregate_layout_digest = required_string_at_path(
+    let encoded_aggregate_layout_hash = required_string_at_path(
         setup_package,
-        &["profileBindings", "encodedAggregateLayoutDigest"],
+        &["profileBindings", "encodedAggregateLayoutHash"],
         "setupPackage",
     )?;
-    let top_k_evaluator_input_layout_digest = required_string_at_path(
+    let top_k_evaluator_input_layout_hash = required_string_at_path(
         setup_package,
-        &["profileBindings", "topKEvaluatorInputLayoutDigest"],
+        &["profileBindings", "topKEvaluatorInputLayoutHash"],
         "setupPackage",
     )?;
-    let bgv_profile_digest = required_string_at_path(
+    let bgv_profile_hash = required_string_at_path(
         setup_package,
-        &["profileBindings", "profileDigest"],
+        &["profileBindings", "profileHash"],
         "setupPackage",
     )?;
-    let rust_bgv_backend_profile_digest = required_string_at_path(
+    let rust_bgv_backend_profile_hash = required_string_at_path(
         setup_package,
-        &["profileBindings", "backendProfileDigest"],
+        &["profileBindings", "backendProfileHash"],
         "setupPackage",
     )?;
-    let canonical_ciphertext_convention_digest = required_string_at_path(
+    let canonical_ciphertext_convention_hash = required_string_at_path(
         setup_package,
-        &["profileBindings", "canonicalCiphertextConventionDigest"],
+        &["profileBindings", "canonicalCiphertextConventionHash"],
         "setupPackage",
     )?;
     let collective_public_key_root = required_string_at_path(
@@ -233,16 +233,16 @@ pub(super) fn build_bridge_proof_statement(
         "setupPackage",
     )?;
     let component_binding = json!({
-        "aggregateDerivationStatementDigest": aggregate_derivation_statement_digest,
-        "shareCommitmentMessageBoundCertDigest": share_commitment_message_bound_cert_digest,
-        "componentProofStatementDigest": required_string_field(
+        "aggregateDerivationStatementHash": aggregate_derivation_statement_hash,
+        "shareCommitmentMessageBoundCertHash": share_commitment_message_bound_cert_hash,
+        "componentProofStatementHash": required_string_field(
             component_proof_input,
-            "componentProofStatementDigest",
+            "componentProofStatementHash",
             "aggregateDerivationComponent.proofInput",
         )?,
-        "componentProofBytesDigest": required_string_field(
+        "componentProofBytesHash": required_string_field(
             aggregate_proof_record,
-            "proofBytesDigest",
+            "proofBytesHash",
             "aggregateDerivationComponent.proofRecord",
         )?,
         "participantCount": dimensions.participant_count,
@@ -250,21 +250,21 @@ pub(super) fn build_bridge_proof_statement(
         "shareVectorWidth": share_vector_width,
     });
     let setup_binding = json!({
-        "setupPackageDigest": setup_package_digest,
-        "encryptedAggregateBridgeDigest": encrypted_aggregate_bridge_digest,
-        "encryptedAggregateTargetBasisDataRoot": encrypted_aggregate_target_basis_data_root,
-        "encryptedAggregateReconstructionDigest": encrypted_aggregate_reconstruction_digest,
-        "bgvBatchEncoderDigest": bgv_batch_encoder_digest,
-        "bridgeLayoutDigest": encrypted_aggregate_input_layout_digest,
-        "ballotScoreEncodingProfileDigest": ballot_score_encoding_profile_digest,
-        "ballotShareLayoutProfileDigest": ballot_share_layout_profile_digest,
-        "aggregateInputEncodingProfileDigest": aggregate_input_encoding_profile_digest,
-        "encodedShareVectorLayoutDigest": encoded_share_vector_layout_digest,
-        "encodedAggregateLayoutDigest": encoded_aggregate_layout_digest,
-        "topKEvaluatorInputLayoutDigest": top_k_evaluator_input_layout_digest,
-        "bgvProfileDigest": bgv_profile_digest,
-        "rustBgvBackendProfileDigest": rust_bgv_backend_profile_digest,
-        "canonicalCiphertextConventionDigest": canonical_ciphertext_convention_digest,
+        "setupPackageHash": setup_package_hash,
+        "encryptedAggregateBridgeHash": encrypted_aggregate_bridge_hash,
+        "encryptedAggregateTargetBasisRoot": encrypted_aggregate_target_basis_root,
+        "encryptedAggregateReconstructionHash": encrypted_aggregate_reconstruction_hash,
+        "bgvBatchEncoderHash": bgv_batch_encoder_hash,
+        "bridgeLayoutHash": encrypted_aggregate_input_layout_hash,
+        "ballotScoreEncodingProfileHash": ballot_score_encoding_profile_hash,
+        "ballotShareLayoutProfileHash": ballot_share_layout_profile_hash,
+        "aggregateInputEncodingProfileHash": aggregate_input_encoding_profile_hash,
+        "encodedShareVectorLayoutHash": encoded_share_vector_layout_hash,
+        "encodedAggregateLayoutHash": encoded_aggregate_layout_hash,
+        "topKEvaluatorInputLayoutHash": top_k_evaluator_input_layout_hash,
+        "bgvProfileHash": bgv_profile_hash,
+        "rustBgvBackendProfileHash": rust_bgv_backend_profile_hash,
+        "canonicalCiphertextConventionHash": canonical_ciphertext_convention_hash,
         "setupParticipantCount": setup_participant_count,
     });
     let context_binding = json!({
@@ -273,20 +273,20 @@ pub(super) fn build_bridge_proof_statement(
             "ceremonyId",
             "aggregateDerivationComponent.statement",
         )?,
-        "pollSpecDigest": required_string_field(
+        "pollSpecHash": required_string_field(
             component_statement,
-            "pollSpecDigest",
+            "pollSpecHash",
             "aggregateDerivationComponent.statement",
         )?,
-        "thresholdProfileDigest": setup_threshold_profile_digest,
-        "ballotSetDigest": required_string_field(
+        "thresholdProfileHash": setup_threshold_profile_hash,
+        "ballotSetHash": required_string_field(
             component_statement,
-            "ballotSetDigest",
+            "ballotSetHash",
             "aggregateDerivationComponent.statement",
         )?,
-        "votingClosedBoardHeadDigest": required_string_field(
+        "votingClosedBoardHeadHash": required_string_field(
             component_statement,
-            "votingClosedBoardHeadDigest",
+            "votingClosedBoardHeadHash",
             "aggregateDerivationComponent.statement",
         )?,
         "contributorIdentity": required_string_field(
@@ -299,14 +299,14 @@ pub(super) fn build_bridge_proof_statement(
             "contributorRosterPosition",
             "aggregateDerivationComponent.statement",
         )?,
-        "contributorRosterExternalAcceptanceDigest": required_string_field(
+        "contributorRosterExternalAcceptanceHash": required_string_field(
             component_statement,
-            "contributorRosterExternalAcceptanceDigest",
+            "contributorRosterExternalAcceptanceHash",
             "aggregateDerivationComponent.statement",
         )?,
-        "contributorActionContextDigest": required_string_field(
+        "contributorActionContextHash": required_string_field(
             component_statement,
-            "contributorActionContextDigest",
+            "contributorActionContextHash",
             "aggregateDerivationComponent.statement",
         )?,
     });
@@ -337,8 +337,8 @@ pub(super) fn build_bridge_proof_statement(
         "sampledPublicRelationCheckPolicy",
         "bridgeEncryption",
     )?;
-    let sampled_public_relation_check_policy_digest =
-        sampled_public_relation_check_policy_digest(sampled_public_relation_check_policy)?;
+    let sampled_public_relation_check_policy_hash =
+        sampled_public_relation_check_policy_hash(sampled_public_relation_check_policy)?;
     let relation_requirements = json!({
         "aggregateReducedCoordinateCount": share_vector_width,
         "aggregateQuotientCoordinateCount": share_vector_width,
@@ -359,8 +359,8 @@ pub(super) fn build_bridge_proof_statement(
     });
     let bridge_proof_target_contract =
         bridge_proof_target_contract_value(share_vector_width, share_vector_width)?;
-    let bridge_proof_target_contract_digest =
-        bridge_proof_target_contract_digest(&bridge_proof_target_contract)?;
+    let bridge_proof_target_contract_hash =
+        bridge_proof_target_contract_hash(&bridge_proof_target_contract)?;
 
     let mut bridge_statement = Map::new();
     bridge_statement.insert(
@@ -373,8 +373,8 @@ pub(super) fn build_bridge_proof_statement(
         Value::String(BRIDGE_PROOF_PROFILE_ID.to_string()),
     );
     bridge_statement.insert(
-        "bridgeProofProfileDigest".to_string(),
-        Value::String(bridge_proof_profile_digest.to_string()),
+        "bridgeProofProfileHash".to_string(),
+        Value::String(bridge_proof_profile_hash.to_string()),
     );
     bridge_statement.insert(
         "proofBackend".to_string(),
@@ -385,32 +385,32 @@ pub(super) fn build_bridge_proof_statement(
         Value::String(BGV_ENCRYPTION_PROOF_SUBRELATION.to_string()),
     );
     bridge_statement.insert(
-        "aggregateDerivationComponentDigest".to_string(),
-        Value::String(aggregate_derivation_component_digest.to_string()),
+        "aggregateDerivationComponentHash".to_string(),
+        Value::String(aggregate_derivation_component_hash.to_string()),
     );
     bridge_statement.insert(
-        "aggregateShareCommitmentDigest".to_string(),
-        Value::String(aggregate_share_commitment_digest.to_string()),
+        "aggregateShareCommitmentHash".to_string(),
+        Value::String(aggregate_share_commitment_hash.to_string()),
     );
     bridge_statement.insert(
-        "shareCommitmentMessageBoundCertDigest".to_string(),
-        Value::String(share_commitment_message_bound_cert_digest.to_string()),
+        "shareCommitmentMessageBoundCertHash".to_string(),
+        Value::String(share_commitment_message_bound_cert_hash.to_string()),
     );
     bridge_statement.insert(
-        "encryptedAggregateBridgeDigest".to_string(),
-        Value::String(encrypted_aggregate_bridge_digest.to_string()),
+        "encryptedAggregateBridgeHash".to_string(),
+        Value::String(encrypted_aggregate_bridge_hash.to_string()),
     );
     bridge_statement.insert(
-        "encryptedAggregateTargetBasisDataRoot".to_string(),
-        Value::String(encrypted_aggregate_target_basis_data_root.to_string()),
+        "encryptedAggregateTargetBasisRoot".to_string(),
+        Value::String(encrypted_aggregate_target_basis_root.to_string()),
     );
     bridge_statement.insert(
-        "encryptedAggregateReconstructionDigest".to_string(),
-        Value::String(encrypted_aggregate_reconstruction_digest.to_string()),
+        "encryptedAggregateReconstructionHash".to_string(),
+        Value::String(encrypted_aggregate_reconstruction_hash.to_string()),
     );
     bridge_statement.insert(
-        "encryptedAggregateInputLayoutDigest".to_string(),
-        Value::String(encrypted_aggregate_input_layout_digest.to_string()),
+        "encryptedAggregateInputLayoutHash".to_string(),
+        Value::String(encrypted_aggregate_input_layout_hash.to_string()),
     );
     bridge_statement.insert(
         "encryptedAggregateInputRoot".to_string(),
@@ -421,64 +421,64 @@ pub(super) fn build_bridge_proof_statement(
         Value::String(encrypted_aggregate_share_ciphertext_root.to_string()),
     );
     bridge_statement.insert(
-        "bridgeWitnessPrivacyProfileDigest".to_string(),
-        Value::String(bridge_witness_privacy_profile_digest.to_string()),
+        "bridgeWitnessPrivacyProfileHash".to_string(),
+        Value::String(bridge_witness_privacy_profile_hash.to_string()),
     );
     bridge_statement.insert(
-        "sampledPublicRelationCheckPolicyDigest".to_string(),
-        Value::String(sampled_public_relation_check_policy_digest),
+        "sampledPublicRelationCheckPolicyHash".to_string(),
+        Value::String(sampled_public_relation_check_policy_hash),
     );
     bridge_statement.insert(
-        "bridgeProofTargetContractDigest".to_string(),
-        Value::String(bridge_proof_target_contract_digest),
+        "bridgeProofTargetContractHash".to_string(),
+        Value::String(bridge_proof_target_contract_hash),
     );
     bridge_statement.insert(
-        "bgvBatchEncoderDigest".to_string(),
-        Value::String(bgv_batch_encoder_digest.to_string()),
+        "bgvBatchEncoderHash".to_string(),
+        Value::String(bgv_batch_encoder_hash.to_string()),
     );
     bridge_statement.insert(
-        "bridgeLayoutDigest".to_string(),
-        Value::String(encrypted_aggregate_input_layout_digest.to_string()),
+        "bridgeLayoutHash".to_string(),
+        Value::String(encrypted_aggregate_input_layout_hash.to_string()),
     );
     bridge_statement.insert(
-        "ballotScoreEncodingProfileDigest".to_string(),
-        Value::String(ballot_score_encoding_profile_digest.to_string()),
+        "ballotScoreEncodingProfileHash".to_string(),
+        Value::String(ballot_score_encoding_profile_hash.to_string()),
     );
     bridge_statement.insert(
-        "ballotShareLayoutProfileDigest".to_string(),
-        Value::String(ballot_share_layout_profile_digest.to_string()),
+        "ballotShareLayoutProfileHash".to_string(),
+        Value::String(ballot_share_layout_profile_hash.to_string()),
     );
     bridge_statement.insert(
-        "aggregateInputEncodingProfileDigest".to_string(),
-        Value::String(aggregate_input_encoding_profile_digest.to_string()),
+        "aggregateInputEncodingProfileHash".to_string(),
+        Value::String(aggregate_input_encoding_profile_hash.to_string()),
     );
     bridge_statement.insert(
-        "encodedShareVectorLayoutDigest".to_string(),
-        Value::String(encoded_share_vector_layout_digest.to_string()),
+        "encodedShareVectorLayoutHash".to_string(),
+        Value::String(encoded_share_vector_layout_hash.to_string()),
     );
     bridge_statement.insert(
-        "encodedAggregateLayoutDigest".to_string(),
-        Value::String(encoded_aggregate_layout_digest.to_string()),
+        "encodedAggregateLayoutHash".to_string(),
+        Value::String(encoded_aggregate_layout_hash.to_string()),
     );
     bridge_statement.insert(
-        "topKEvaluatorInputLayoutDigest".to_string(),
-        Value::String(top_k_evaluator_input_layout_digest.to_string()),
+        "topKEvaluatorInputLayoutHash".to_string(),
+        Value::String(top_k_evaluator_input_layout_hash.to_string()),
     );
     bridge_statement.insert(
-        "heParamDigest".to_string(),
-        Value::String(he_param_digest.to_string()),
+        "heParamHash".to_string(),
+        Value::String(he_param_hash.to_string()),
     );
     bridge_statement.insert(
-        "bgvProfileDigest".to_string(),
-        Value::String(bgv_profile_digest.to_string()),
+        "bgvProfileHash".to_string(),
+        Value::String(bgv_profile_hash.to_string()),
     );
     bridge_statement.insert(
-        "rustBgvBackendProfileDigest".to_string(),
-        Value::String(rust_bgv_backend_profile_digest.to_string()),
+        "rustBgvBackendProfileHash".to_string(),
+        Value::String(rust_bgv_backend_profile_hash.to_string()),
     );
     bridge_statement.insert(
-        "canonicalCiphertextConventionDigest".to_string(),
-        Value::String(canonical_ciphertext_convention_digest.to_string()),
+        "canonicalCiphertextConventionHash".to_string(),
+        Value::String(canonical_ciphertext_convention_hash.to_string()),
     );
     bridge_statement.insert(
         "collectivePublicKeyRoot".to_string(),
@@ -489,8 +489,8 @@ pub(super) fn build_bridge_proof_statement(
         Value::String(bgv_public_key_root.to_string()),
     );
     bridge_statement.insert(
-        "aggregateSelectionPolicyDigest".to_string(),
-        Value::String(aggregate_selection_policy_digest.to_string()),
+        "aggregateSelectionPolicyHash".to_string(),
+        Value::String(aggregate_selection_policy_hash.to_string()),
     );
     bridge_statement.insert(
         "ceremonyId".to_string(),
@@ -504,31 +504,31 @@ pub(super) fn build_bridge_proof_statement(
         ),
     );
     bridge_statement.insert(
-        "manifestDigest".to_string(),
-        Value::String(setup_manifest_digest.to_string()),
+        "manifestHash".to_string(),
+        Value::String(setup_manifest_hash.to_string()),
     );
     bridge_statement.insert(
-        "rosterDigest".to_string(),
-        Value::String(setup_roster_digest.to_string()),
+        "rosterHash".to_string(),
+        Value::String(setup_roster_hash.to_string()),
     );
     bridge_statement.insert(
-        "pollSpecDigest".to_string(),
+        "pollSpecHash".to_string(),
         Value::String(
             required_string_field(
                 component_statement,
-                "pollSpecDigest",
+                "pollSpecHash",
                 "aggregateDerivationComponent.statement",
             )?
             .to_string(),
         ),
     );
     bridge_statement.insert(
-        "thresholdProfileDigest".to_string(),
-        Value::String(setup_threshold_profile_digest.to_string()),
+        "thresholdProfileHash".to_string(),
+        Value::String(setup_threshold_profile_hash.to_string()),
     );
     bridge_statement.insert(
-        "setupPackageDigest".to_string(),
-        Value::String(setup_package_digest.to_string()),
+        "setupPackageHash".to_string(),
+        Value::String(setup_package_hash.to_string()),
     );
     bridge_statement.insert(
         "participantCount".to_string(),
@@ -537,33 +537,33 @@ pub(super) fn build_bridge_proof_statement(
     bridge_statement.insert("optionCount".to_string(), json!(dimensions.option_count));
     bridge_statement.insert("shareVectorWidth".to_string(), json!(share_vector_width));
     bridge_statement.insert(
-        "ballotSetDigest".to_string(),
+        "ballotSetHash".to_string(),
         Value::String(
             required_string_field(
                 component_statement,
-                "ballotSetDigest",
+                "ballotSetHash",
                 "aggregateDerivationComponent.statement",
             )?
             .to_string(),
         ),
     );
     bridge_statement.insert(
-        "votingClosedBoardHeadDigest".to_string(),
+        "votingClosedBoardHeadHash".to_string(),
         Value::String(
             required_string_field(
                 component_statement,
-                "votingClosedBoardHeadDigest",
+                "votingClosedBoardHeadHash",
                 "aggregateDerivationComponent.statement",
             )?
             .to_string(),
         ),
     );
     bridge_statement.insert(
-        "postVotingClosedContextDigest".to_string(),
+        "postVotingClosedContextHash".to_string(),
         Value::String(
             required_string_field(
                 component_statement,
-                "postVotingClosedContextDigest",
+                "postVotingClosedContextHash",
                 "aggregateDerivationComponent.statement",
             )?
             .to_string(),
@@ -589,22 +589,22 @@ pub(super) fn build_bridge_proof_statement(
         )?),
     );
     bridge_statement.insert(
-        "contributorRosterExternalAcceptanceDigest".to_string(),
+        "contributorRosterExternalAcceptanceHash".to_string(),
         Value::String(
             required_string_field(
                 component_statement,
-                "contributorRosterExternalAcceptanceDigest",
+                "contributorRosterExternalAcceptanceHash",
                 "aggregateDerivationComponent.statement",
             )?
             .to_string(),
         ),
     );
     bridge_statement.insert(
-        "contributorActionContextDigest".to_string(),
+        "contributorActionContextHash".to_string(),
         Value::String(
             required_string_field(
                 component_statement,
-                "contributorActionContextDigest",
+                "contributorActionContextHash",
                 "aggregateDerivationComponent.statement",
             )?
             .to_string(),
@@ -686,61 +686,61 @@ pub(super) fn build_bridge_proof_statement(
     Ok(Value::Object(bridge_statement))
 }
 
-pub(super) fn bridge_proof_statement_digest(
+pub(super) fn bridge_proof_statement_hash(
     bridge_proof_statement: &Value,
 ) -> CanonicalResult<String> {
-    let mut digest_input = Map::new();
-    digest_input.insert(
+    let mut hash_input = Map::new();
+    hash_input.insert(
         "purpose".to_string(),
         Value::String("sealed-lattice-aggregate-bridge-proof-statement-v1".to_string()),
     );
 
     for field_name in [
-        "aggregateDerivationComponentDigest",
-        "aggregateInputEncodingProfileDigest",
-        "aggregateSelectionPolicyDigest",
-        "aggregateShareCommitmentDigest",
-        "ballotScoreEncodingProfileDigest",
-        "ballotSetDigest",
-        "ballotShareLayoutProfileDigest",
+        "aggregateDerivationComponentHash",
+        "aggregateInputEncodingProfileHash",
+        "aggregateSelectionPolicyHash",
+        "aggregateShareCommitmentHash",
+        "ballotScoreEncodingProfileHash",
+        "ballotSetHash",
+        "ballotShareLayoutProfileHash",
         "basisId",
-        "bgvBatchEncoderDigest",
-        "bgvProfileDigest",
+        "bgvBatchEncoderHash",
+        "bgvProfileHash",
         "bgvPublicKeyRoot",
-        "bridgeLayoutDigest",
-        "bridgeProofTargetContractDigest",
-        "bridgeWitnessPrivacyProfileDigest",
+        "bridgeLayoutHash",
+        "bridgeProofTargetContractHash",
+        "bridgeWitnessPrivacyProfileHash",
         "canonicalBytesHash512",
-        "canonicalCiphertextConventionDigest",
+        "canonicalCiphertextConventionHash",
         "ceremonyId",
         "ciphertextRoot",
         "collectivePublicKeyRoot",
-        "contributorActionContextDigest",
+        "contributorActionContextHash",
         "contributorIdentity",
-        "contributorRosterExternalAcceptanceDigest",
-        "encodedAggregateLayoutDigest",
-        "encodedShareVectorLayoutDigest",
-        "encryptedAggregateBridgeDigest",
-        "encryptedAggregateInputLayoutDigest",
+        "contributorRosterExternalAcceptanceHash",
+        "encodedAggregateLayoutHash",
+        "encodedShareVectorLayoutHash",
+        "encryptedAggregateBridgeHash",
+        "encryptedAggregateInputLayoutHash",
         "encryptedAggregateInputRoot",
-        "encryptedAggregateReconstructionDigest",
+        "encryptedAggregateReconstructionHash",
         "encryptedAggregateShareCiphertextRoot",
-        "encryptedAggregateTargetBasisDataRoot",
-        "heParamDigest",
-        "manifestDigest",
+        "encryptedAggregateTargetBasisRoot",
+        "heParamHash",
+        "manifestHash",
         "plaintextRoot",
-        "pollSpecDigest",
-        "postVotingClosedContextDigest",
-        "rosterDigest",
-        "rustBgvBackendProfileDigest",
-        "sampledPublicRelationCheckPolicyDigest",
-        "setupPackageDigest",
-        "shareCommitmentMessageBoundCertDigest",
-        "thresholdProfileDigest",
-        "topKEvaluatorInputLayoutDigest",
-        "votingClosedBoardHeadDigest",
+        "pollSpecHash",
+        "postVotingClosedContextHash",
+        "rosterHash",
+        "rustBgvBackendProfileHash",
+        "sampledPublicRelationCheckPolicyHash",
+        "setupPackageHash",
+        "shareCommitmentMessageBoundCertHash",
+        "thresholdProfileHash",
+        "topKEvaluatorInputLayoutHash",
+        "votingClosedBoardHeadHash",
     ] {
-        digest_input.insert(
+        hash_input.insert(
             field_name.to_string(),
             Value::String(
                 required_string_field(bridge_proof_statement, field_name, "bridgeProofStatement")?
@@ -748,12 +748,12 @@ pub(super) fn bridge_proof_statement_digest(
             ),
         );
     }
-    digest_input.insert(
-        "proofProfileDigest".to_string(),
+    hash_input.insert(
+        "proofProfileHash".to_string(),
         Value::String(
             required_string_field(
                 bridge_proof_statement,
-                "bridgeProofProfileDigest",
+                "bridgeProofProfileHash",
                 "bridgeProofStatement",
             )?
             .to_string(),
@@ -769,7 +769,7 @@ pub(super) fn bridge_proof_statement_digest(
         "shareVectorWidth",
         "slotCount",
     ] {
-        digest_input.insert(
+        hash_input.insert(
             field_name.to_string(),
             json!(read_u64_object_field(
                 bridge_proof_statement,
@@ -794,7 +794,7 @@ pub(super) fn bridge_proof_statement_digest(
         "bridgeClaimClosureStatus",
         "hwangPiopStatus",
     ] {
-        digest_input.insert(
+        hash_input.insert(
             field_name.to_string(),
             Value::String(
                 required_string_field(
@@ -813,7 +813,7 @@ pub(super) fn bridge_proof_statement_digest(
         "sharedWitnessCheckCount",
         "sharedWitnessSoundnessBits",
     ] {
-        digest_input.insert(
+        hash_input.insert(
             field_name.to_string(),
             json!(read_u64_object_field(
                 relation_requirements,
@@ -827,7 +827,7 @@ pub(super) fn bridge_proof_statement_digest(
         "sampledOnlyBridgeVerificationAccepted",
         "coefficientDomainCanonical",
     ] {
-        digest_input.insert(
+        hash_input.insert(
             field_name.to_string(),
             json!(read_bool_object_field(
                 relation_requirements,
@@ -837,7 +837,7 @@ pub(super) fn bridge_proof_statement_digest(
         );
     }
 
-    derive_protocol_digest("BridgeProofRecordDigest", &Value::Object(digest_input))
+    derive_protocol_hash("BridgeProofRecordHash", &Value::Object(hash_input))
 }
 
 fn validate_bridge_share_commitment_bound_cert(
@@ -851,17 +851,17 @@ fn validate_bridge_share_commitment_bound_cert(
         )
     })?;
     let mut certificate_payload = certificate_object.clone();
-    let certificate_digest = certificate_payload
-        .remove("shareCommitmentMessageBoundCertDigest")
+    let certificate_hash = certificate_payload
+        .remove("shareCommitmentMessageBoundCertHash")
         .and_then(|value| value.as_str().map(ToOwned::to_owned))
         .ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
-                "M9 bridge share-commitment message-bound certificate digest is missing",
+                "M9 bridge share-commitment message-bound certificate hash is missing",
             )
         })?;
-    let expected_certificate_digest = derive_protocol_digest(
-        "ShareCommitmentMessageBoundCertDigest",
+    let expected_certificate_hash = derive_protocol_hash(
+        "ShareCommitmentMessageBoundCertHash",
         &Value::Object(certificate_payload),
     )?;
     let maximum_canonical_turnout = read_u64_object_field(
@@ -929,20 +929,20 @@ fn validate_bridge_share_commitment_bound_cert(
             "objectVersion",
             "shareCommitmentMessageBoundCert",
         )? != 1
-        || certificate_digest != expected_certificate_digest
-        || certificate_digest
+        || certificate_hash != expected_certificate_hash
+        || certificate_hash
             != required_string_field(
                 statement,
-                "shareCommitmentMessageBoundCertDigest",
+                "shareCommitmentMessageBoundCertHash",
                 "aggregateDerivationComponent.statement",
             )?
         || required_string_field(
             certificate,
-            "shareCommitmentProfileDigest",
+            "shareCommitmentProfileHash",
             "shareCommitmentMessageBoundCert",
         )? != required_string_field(
             statement,
-            "shareCommitmentProfileDigest",
+            "shareCommitmentProfileHash",
             "aggregateDerivationComponent.statement",
         )?
         || read_u64_object_field(
@@ -984,9 +984,9 @@ fn validate_bridge_share_commitment_bound_cert(
     Ok(())
 }
 
-fn sampled_public_relation_check_policy_digest(policy: &Value) -> CanonicalResult<String> {
-    derive_protocol_digest(
-        "BridgeProofRecordDigest",
+fn sampled_public_relation_check_policy_hash(policy: &Value) -> CanonicalResult<String> {
+    derive_protocol_hash(
+        "BridgeProofRecordHash",
         &json!({
             "purpose": "sealed-lattice-aggregate-bridge-sampled-public-relation-check-policy-v1",
             "policy": policy,

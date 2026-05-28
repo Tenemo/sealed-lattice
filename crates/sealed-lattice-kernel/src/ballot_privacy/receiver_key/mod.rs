@@ -7,7 +7,7 @@ mod vectors;
 
 pub(crate) use package_refusals::{
     collect_receiver_key_proof_refusals, collect_receiver_key_proof_root_evidence_refusals,
-    derive_claim_bearing_ballot_package_digest,
+    derive_claim_bearing_ballot_package_hash,
 };
 #[cfg(test)]
 pub(crate) use polynomial_helpers::{

@@ -17,7 +17,7 @@ const ERROR_EXPANSION_COEFFICIENT_COUNT: usize = 5;
 const BGV_BOUND_SUPPORT_MODULUS_COUNT: usize = 4;
 
 pub(super) struct BridgeBgvRandomnessBoundCommitmentInput<'value> {
-    pub(super) bridge_proof_statement_digest: &'value str,
+    pub(super) bridge_proof_statement_hash: &'value str,
     pub(super) check_index: usize,
     pub(super) randomizer_masks: &'value [BigInt],
     pub(super) randomizer_witness: &'value [BigInt],
@@ -28,8 +28,8 @@ pub(super) struct BridgeBgvRandomnessBoundCommitmentInput<'value> {
 }
 
 pub(super) fn bridge_bgv_randomness_bound_status(
-    bridge_proof_statement_digest: &str,
-    bridge_shared_witness_proof_digest: &str,
+    bridge_proof_statement_hash: &str,
+    bridge_shared_witness_proof_hash: &str,
     encrypted_aggregate_share_ciphertext_root: &str,
     collective_public_key_root: &str,
     bgv_public_key_root: &str,
@@ -45,8 +45,8 @@ pub(super) fn bridge_bgv_randomness_bound_status(
         "objectVersion": 1,
         "statusModel": BGV_RANDOMNESS_BOUND_STATUS_MODEL,
         "proofModel": BGV_RANDOMNESS_BOUND_PROOF_MODEL,
-        "bridgeProofStatementDigest": bridge_proof_statement_digest,
-        "bridgeSharedWitnessProofDigest": bridge_shared_witness_proof_digest,
+        "bridgeProofStatementHash": bridge_proof_statement_hash,
+        "bridgeSharedWitnessProofHash": bridge_shared_witness_proof_hash,
         "encryptedAggregateShareCiphertextRoot": encrypted_aggregate_share_ciphertext_root,
         "collectivePublicKeyRoot": collective_public_key_root,
         "bgvPublicKeyRoot": bgv_public_key_root,
@@ -66,11 +66,11 @@ pub(super) fn bridge_bgv_randomness_bound_status(
     })
 }
 
-pub(super) fn bridge_bgv_randomness_bound_status_digest(
+pub(super) fn bridge_bgv_randomness_bound_status_hash(
     status_evidence: &Value,
 ) -> CanonicalResult<String> {
-    derive_protocol_digest(
-        "BridgeProofRecordDigest",
+    derive_protocol_hash(
+        "BridgeProofRecordHash",
         &json!({
             "purpose": "sealed-lattice-aggregate-bridge-bgv-randomness-bound-status-v1",
             "bgvRandomnessBoundProofStatusEvidence": status_evidence,
@@ -80,8 +80,8 @@ pub(super) fn bridge_bgv_randomness_bound_status_digest(
 
 pub(super) fn validate_bridge_bgv_randomness_bound_status(
     proof_value: &Value,
-    bridge_proof_statement_digest: &str,
-    bridge_shared_witness_proof_digest: &str,
+    bridge_proof_statement_hash: &str,
+    bridge_shared_witness_proof_hash: &str,
     bridge_encryption: &Value,
 ) -> CanonicalResult<String> {
     let status_evidence = required_json_field(
@@ -95,8 +95,8 @@ pub(super) fn validate_bridge_bgv_randomness_bound_status(
     )?;
 
     let expected_status = bridge_bgv_randomness_bound_status(
-        bridge_proof_statement_digest,
-        bridge_shared_witness_proof_digest,
+        bridge_proof_statement_hash,
+        bridge_shared_witness_proof_hash,
         required_string_field(
             bridge_encryption,
             "encryptedAggregateShareCiphertextRoot",
@@ -116,15 +116,15 @@ pub(super) fn validate_bridge_bgv_randomness_bound_status(
         ));
     }
 
-    let status_digest = bridge_bgv_randomness_bound_status_digest(status_evidence)?;
+    let status_hash = bridge_bgv_randomness_bound_status_hash(status_evidence)?;
     require_equal_string(
         proof_value,
-        "bgvRandomnessBoundProofStatusDigest",
-        &status_digest,
-        "BGV randomness-bound status digest",
+        "bgvRandomnessBoundProofStatusHash",
+        &status_hash,
+        "BGV randomness-bound status hash",
     )?;
 
-    Ok(status_digest)
+    Ok(status_hash)
 }
 
 pub(super) fn bridge_bgv_randomness_bound_commitment(
@@ -143,7 +143,7 @@ pub(super) fn bridge_bgv_randomness_bound_commitment(
         .enumerate()
         .map(|(modulus_index, modulus)| {
             support_expansion_commitment_for_role(
-                input.bridge_proof_statement_digest,
+                input.bridge_proof_statement_hash,
                 input.check_index,
                 "cipher-randomizer",
                 modulus_index,
@@ -159,7 +159,7 @@ pub(super) fn bridge_bgv_randomness_bound_commitment(
         .enumerate()
         .map(|(modulus_index, modulus)| {
             support_expansion_commitment_for_role(
-                input.bridge_proof_statement_digest,
+                input.bridge_proof_statement_hash,
                 input.check_index,
                 "bounded-perturbation-zero",
                 modulus_index,
@@ -175,7 +175,7 @@ pub(super) fn bridge_bgv_randomness_bound_commitment(
         .enumerate()
         .map(|(modulus_index, modulus)| {
             support_expansion_commitment_for_role(
-                input.bridge_proof_statement_digest,
+                input.bridge_proof_statement_hash,
                 input.check_index,
                 "bounded-perturbation-one",
                 modulus_index,
@@ -191,7 +191,7 @@ pub(super) fn bridge_bgv_randomness_bound_commitment(
         "objectType": "AggregateBridgeBgvRandomnessBoundCommitment",
         "objectVersion": 1,
         "proofModel": BGV_RANDOMNESS_BOUND_PROOF_MODEL,
-        "bridgeProofStatementDigest": input.bridge_proof_statement_digest,
+        "bridgeProofStatementHash": input.bridge_proof_statement_hash,
         "checkIndex": input.check_index,
         "weightModel": BGV_BOUND_WEIGHT_MODEL,
         "supportModuli": support_moduli(),
@@ -205,11 +205,11 @@ pub(super) fn bridge_bgv_randomness_bound_commitment(
     }))
 }
 
-pub(super) fn bridge_bgv_randomness_bound_commitment_digest(
+pub(super) fn bridge_bgv_randomness_bound_commitment_hash(
     commitment: &Value,
 ) -> CanonicalResult<String> {
-    derive_protocol_digest(
-        "BridgeProofRecordDigest",
+    derive_protocol_hash(
+        "BridgeProofRecordHash",
         &json!({
             "purpose": "sealed-lattice-aggregate-bridge-bgv-randomness-bound-commitment-v1",
             "bgvRandomnessBoundCommitment": commitment,
@@ -219,7 +219,7 @@ pub(super) fn bridge_bgv_randomness_bound_commitment_digest(
 
 pub(super) fn validate_bridge_bgv_randomness_bound_commitment(
     check: &Value,
-    bridge_proof_statement_digest: &str,
+    bridge_proof_statement_hash: &str,
     check_index: usize,
     challenge_scalar: u64,
     randomizer_response: &[BigInt],
@@ -235,7 +235,7 @@ pub(super) fn validate_bridge_bgv_randomness_bound_commitment(
         commitment,
         "bridgeSharedWitnessProof.check.bgvRandomnessBoundCommitment",
     )?;
-    validate_bgv_bound_commitment_shell(commitment, bridge_proof_statement_digest, check_index)?;
+    validate_bgv_bound_commitment_shell(commitment, bridge_proof_statement_hash, check_index)?;
     let randomizer_commitments = read_expansion_commitments_by_modulus(
         commitment,
         "randomizerExpansionCommitmentsByModulus",
@@ -259,7 +259,7 @@ pub(super) fn validate_bridge_bgv_randomness_bound_commitment(
 
     for (modulus_index, modulus) in support_moduli().iter().enumerate() {
         validate_support_polynomial_for_role(
-            bridge_proof_statement_digest,
+            bridge_proof_statement_hash,
             check_index,
             "cipher-randomizer",
             modulus_index,
@@ -270,7 +270,7 @@ pub(super) fn validate_bridge_bgv_randomness_bound_commitment(
             &randomizer_commitments[modulus_index],
         )?;
         validate_support_polynomial_for_role(
-            bridge_proof_statement_digest,
+            bridge_proof_statement_hash,
             check_index,
             "bounded-perturbation-zero",
             modulus_index,
@@ -281,7 +281,7 @@ pub(super) fn validate_bridge_bgv_randomness_bound_commitment(
             &error_zero_commitments[modulus_index],
         )?;
         validate_support_polynomial_for_role(
-            bridge_proof_statement_digest,
+            bridge_proof_statement_hash,
             check_index,
             "bounded-perturbation-one",
             modulus_index,
@@ -293,15 +293,15 @@ pub(super) fn validate_bridge_bgv_randomness_bound_commitment(
         )?;
     }
 
-    let commitment_digest = bridge_bgv_randomness_bound_commitment_digest(commitment)?;
+    let commitment_hash = bridge_bgv_randomness_bound_commitment_hash(commitment)?;
     require_equal_string(
         check,
-        "bgvRandomnessBoundCommitmentDigest",
-        &commitment_digest,
-        "BGV randomness-bound commitment digest",
+        "bgvRandomnessBoundCommitmentHash",
+        &commitment_hash,
+        "BGV randomness-bound commitment hash",
     )?;
 
-    Ok(commitment_digest)
+    Ok(commitment_hash)
 }
 
 #[derive(Clone, Copy)]
@@ -354,7 +354,7 @@ fn validate_bgv_support_response_dimensions(
 
 #[allow(clippy::too_many_arguments)]
 fn support_expansion_commitment_for_role(
-    bridge_proof_statement_digest: &str,
+    bridge_proof_statement_hash: &str,
     check_index: usize,
     role: &str,
     modulus_index: usize,
@@ -367,7 +367,7 @@ fn support_expansion_commitment_for_role(
     let mut commitments = vec![0_u64; coefficient_count];
     let modulus_bigint = BigInt::from(modulus);
     let weight_seed = support_weight_seed(
-        bridge_proof_statement_digest,
+        bridge_proof_statement_hash,
         check_index,
         role,
         modulus_index,
@@ -394,7 +394,7 @@ fn support_expansion_commitment_for_role(
 
 #[allow(clippy::too_many_arguments)]
 fn validate_support_polynomial_for_role(
-    bridge_proof_statement_digest: &str,
+    bridge_proof_statement_hash: &str,
     check_index: usize,
     role: &str,
     modulus_index: usize,
@@ -414,7 +414,7 @@ fn validate_support_polynomial_for_role(
     let modulus_bigint = BigInt::from(modulus);
     let mut expected_weighted_support_sum = 0_u64;
     let weight_seed = support_weight_seed(
-        bridge_proof_statement_digest,
+        bridge_proof_statement_hash,
         check_index,
         role,
         modulus_index,
@@ -454,7 +454,7 @@ fn validate_support_polynomial_for_role(
 
 fn validate_bgv_bound_commitment_shell(
     commitment: &Value,
-    bridge_proof_statement_digest: &str,
+    bridge_proof_statement_hash: &str,
     check_index: usize,
 ) -> CanonicalResult<()> {
     if string_field(commitment, "objectType") != Some("AggregateBridgeBgvRandomnessBoundCommitment")
@@ -474,9 +474,9 @@ fn validate_bgv_bound_commitment_shell(
     }
     require_equal_string(
         commitment,
-        "bridgeProofStatementDigest",
-        bridge_proof_statement_digest,
-        "BGV boundedness statement digest",
+        "bridgeProofStatementHash",
+        bridge_proof_statement_hash,
+        "BGV boundedness statement hash",
     )?;
     if read_u64_object_field(commitment, "checkIndex", "bgvRandomnessBoundCommitment")?
         != check_index as u64
@@ -691,7 +691,7 @@ fn powers(value: u64, highest_power: usize, modulus: u64) -> Vec<u64> {
 }
 
 fn support_weight_seed(
-    bridge_proof_statement_digest: &str,
+    bridge_proof_statement_hash: &str,
     check_index: usize,
     role: &str,
     modulus_index: usize,
@@ -699,17 +699,17 @@ fn support_weight_seed(
 ) -> u64 {
     let check_index_bytes = (check_index as u64).to_le_bytes();
     let modulus_index_bytes = (modulus_index as u64).to_le_bytes();
-    let digest = hash512(
+    let hash = hash512(
         "sealed-lattice-root/aggregate-bridge-bgv-randomness-bound-weight-seed-v1",
         &[
-            bridge_proof_statement_digest.as_bytes(),
+            bridge_proof_statement_hash.as_bytes(),
             role.as_bytes(),
             &check_index_bytes,
             &modulus_index_bytes,
         ],
     );
     let mut bytes = [0_u8; 8];
-    bytes.copy_from_slice(&digest[..8]);
+    bytes.copy_from_slice(&hash[..8]);
     let seed = u64::from_le_bytes(bytes) % modulus;
     if seed == 0 { 1 } else { seed }
 }

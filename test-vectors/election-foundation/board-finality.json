@@ -154,55 +154,55 @@
       ]
     }
   ],
-  "requiredDigestNamespaces": [
-    "RosterExternalAcceptanceDigest",
-    "FirstValidOrderDigest",
-    "FirstValidPolicyDigest",
-    "WitnessEquivocationEvidenceDigest",
-    "HEParamDigest",
-    "BGVProfileDigest",
-    "CanonicalCiphertextConventionDigest",
+  "requiredHashNamespaces": [
+    "RosterExternalAcceptanceHash",
+    "FirstValidOrderHash",
+    "FirstValidPolicyHash",
+    "WitnessEquivocationEvidenceHash",
+    "HEParamHash",
+    "BGVProfileHash",
+    "CanonicalCiphertextConventionHash",
     "BGVPublicKeyRoot",
     "CollectivePublicKeyRoot",
-    "BGVBatchEncoderDigest",
-    "EncryptedAggregateBridgeDigest",
+    "BGVBatchEncoderHash",
+    "EncryptedAggregateBridgeHash",
     "EncryptedAggregateInputRoot",
     "EncryptedAggregateShareCiphertextRoot",
-    "EncryptedAggregateReconstructionDigest",
-    "BridgeWitnessPrivacyProfileDigest",
-    "ScoreBitDerivationCircuitDigest",
-    "EncryptedScoreBitInputDigest",
-    "ComparisonInputDerivationCircuitDigest",
-    "EncryptedComparisonInputDigest",
-    "EvaluationNoiseProfileDigest",
-    "HEEvaluationNoiseCertDigest",
-    "AllowedEvaluatorOpsDigest",
-    "EvaluatorProgramDigest",
-    "BridgeLayoutDigest",
-    "TargetProposalDigest",
-    "TargetFinalityCheckpointDigest",
-    "EvaluationProofRecordDigest",
-    "EvaluationProofProfileDigest",
-    "TargetAcceptedRecordDigest",
-    "TargetPreimageDigest",
-    "TargetContextDigest",
-    "LocalReplayRecordDigest",
-    "CPADProfileDigest",
-    "ThresholdDecryptionProfileDigest",
+    "EncryptedAggregateReconstructionHash",
+    "BridgeWitnessPrivacyProfileHash",
+    "ScoreBitDerivationCircuitHash",
+    "EncryptedScoreBitInputHash",
+    "ComparisonInputDerivationCircuitHash",
+    "EncryptedComparisonInputHash",
+    "EvaluationNoiseProfileHash",
+    "HEEvaluationNoiseCertHash",
+    "AllowedEvaluatorOpsHash",
+    "EvaluatorProgramHash",
+    "BridgeLayoutHash",
+    "TargetProposalHash",
+    "TargetFinalityCheckpointHash",
+    "EvaluationProofRecordHash",
+    "EvaluationProofProfileHash",
+    "TargetAcceptedRecordHash",
+    "TargetPreimageHash",
+    "TargetContextHash",
+    "LocalReplayRecordHash",
+    "CPADProfileHash",
+    "ThresholdDecryptionProfileHash",
     "ThresholdShareVerificationKeyRoot",
-    "ThresholdShareVerificationKeyDigest",
-    "TrusteeThresholdVerificationKeyDigest",
-    "TargetDecryptionPreparationRecordDigest",
-    "TargetDecryptionCiphertextDigest",
-    "ShareReplayEvidenceDigest",
-    "ShareReplayRefusalDigest",
-    "KllpsTargetDecryptionProfileDigest",
-    "TargetBasisDigest"
+    "ThresholdShareVerificationKeyHash",
+    "TrusteeThresholdVerificationKeyHash",
+    "TargetDecryptionPreparationRecordHash",
+    "TargetDecryptionCiphertextHash",
+    "ShareReplayEvidenceHash",
+    "ShareReplayRefusalHash",
+    "KllpsTargetDecryptionProfileHash",
+    "TargetBasisHash"
   ],
   "firstValidOrdering": {
     "objects": [
       {
-        "objectDigest": "object-b",
+        "objectHash": "object-b",
         "objectType": "TargetFinalityRecord",
         "boardSequence": 2,
         "boardPosition": 1,
@@ -210,11 +210,11 @@
         "recoveryEpoch": 0,
         "deviceEpoch": 0,
         "actionSequence": 0,
-        "contextDigest": "5a26f4e0d3f67e33f69766521e3e573104d273ad9eafeafbdba2499d9b38d58fd7c47ead554f03f6ec8cb358356d8572b539b03012d1043e28c6be7231724ec0",
+        "contextHash": "5a26f4e0d3f67e33f69766521e3e573104d273ad9eafeafbdba2499d9b38d58fd7c47ead554f03f6ec8cb358356d8572b539b03012d1043e28c6be7231724ec0",
         "isByteIdenticalRetransmission": false
       },
       {
-        "objectDigest": "object-a",
+        "objectHash": "object-a",
         "objectType": "TargetFinalityRecord",
         "boardSequence": 1,
         "boardPosition": 0,
@@ -222,11 +222,11 @@
         "recoveryEpoch": 0,
         "deviceEpoch": 0,
         "actionSequence": 0,
-        "contextDigest": "5a26f4e0d3f67e33f69766521e3e573104d273ad9eafeafbdba2499d9b38d58fd7c47ead554f03f6ec8cb358356d8572b539b03012d1043e28c6be7231724ec0",
+        "contextHash": "5a26f4e0d3f67e33f69766521e3e573104d273ad9eafeafbdba2499d9b38d58fd7c47ead554f03f6ec8cb358356d8572b539b03012d1043e28c6be7231724ec0",
         "isByteIdenticalRetransmission": false
       },
       {
-        "objectDigest": "object-a",
+        "objectHash": "object-a",
         "objectType": "TargetFinalityRecord",
         "boardSequence": 3,
         "boardPosition": 0,
@@ -234,13 +234,13 @@
         "recoveryEpoch": 0,
         "deviceEpoch": 0,
         "actionSequence": 0,
-        "contextDigest": "5a26f4e0d3f67e33f69766521e3e573104d273ad9eafeafbdba2499d9b38d58fd7c47ead554f03f6ec8cb358356d8572b539b03012d1043e28c6be7231724ec0",
+        "contextHash": "5a26f4e0d3f67e33f69766521e3e573104d273ad9eafeafbdba2499d9b38d58fd7c47ead554f03f6ec8cb358356d8572b539b03012d1043e28c6be7231724ec0",
         "isByteIdenticalRetransmission": true
       }
     ],
-    "requiredContextDigest": "5a26f4e0d3f67e33f69766521e3e573104d273ad9eafeafbdba2499d9b38d58fd7c47ead554f03f6ec8cb358356d8572b539b03012d1043e28c6be7231724ec0",
-    "selectionPolicyDigest": "bcf7f07eab3987510aefb37ed92bf1304824e34bcea4e706867f93b53f9e8f36d2dba2c3419f9a937c72a152727f79764d47e7805feab18fde21b3662f4be317",
-    "expectedSelectionPolicyDigest": "bcf7f07eab3987510aefb37ed92bf1304824e34bcea4e706867f93b53f9e8f36d2dba2c3419f9a937c72a152727f79764d47e7805feab18fde21b3662f4be317",
+    "requiredContextHash": "5a26f4e0d3f67e33f69766521e3e573104d273ad9eafeafbdba2499d9b38d58fd7c47ead554f03f6ec8cb358356d8572b539b03012d1043e28c6be7231724ec0",
+    "selectionPolicyHash": "bcf7f07eab3987510aefb37ed92bf1304824e34bcea4e706867f93b53f9e8f36d2dba2c3419f9a937c72a152727f79764d47e7805feab18fde21b3662f4be317",
+    "expectedSelectionPolicyHash": "bcf7f07eab3987510aefb37ed92bf1304824e34bcea4e706867f93b53f9e8f36d2dba2c3419f9a937c72a152727f79764d47e7805feab18fde21b3662f4be317",
     "currentRecoveryEpochMap": {
       "participant-1": {
         "signerIdentity": "participant-1",
@@ -253,7 +253,7 @@
         "currentDeviceEpoch": 0
       }
     },
-    "expectedOrderedObjectDigests": [
+    "expectedOrderedObjectHashes": [
       "object-a",
       "object-b"
     ]
@@ -263,7 +263,7 @@
       "caseName": "policy-mismatch",
       "objects": [
         {
-          "objectDigest": "object-b",
+          "objectHash": "object-b",
           "objectType": "TargetFinalityRecord",
           "boardSequence": 2,
           "boardPosition": 1,
@@ -271,11 +271,11 @@
           "recoveryEpoch": 0,
           "deviceEpoch": 0,
           "actionSequence": 0,
-          "contextDigest": "5a26f4e0d3f67e33f69766521e3e573104d273ad9eafeafbdba2499d9b38d58fd7c47ead554f03f6ec8cb358356d8572b539b03012d1043e28c6be7231724ec0",
+          "contextHash": "5a26f4e0d3f67e33f69766521e3e573104d273ad9eafeafbdba2499d9b38d58fd7c47ead554f03f6ec8cb358356d8572b539b03012d1043e28c6be7231724ec0",
           "isByteIdenticalRetransmission": false
         },
         {
-          "objectDigest": "object-a",
+          "objectHash": "object-a",
           "objectType": "TargetFinalityRecord",
           "boardSequence": 1,
           "boardPosition": 0,
@@ -283,11 +283,11 @@
           "recoveryEpoch": 0,
           "deviceEpoch": 0,
           "actionSequence": 0,
-          "contextDigest": "5a26f4e0d3f67e33f69766521e3e573104d273ad9eafeafbdba2499d9b38d58fd7c47ead554f03f6ec8cb358356d8572b539b03012d1043e28c6be7231724ec0",
+          "contextHash": "5a26f4e0d3f67e33f69766521e3e573104d273ad9eafeafbdba2499d9b38d58fd7c47ead554f03f6ec8cb358356d8572b539b03012d1043e28c6be7231724ec0",
           "isByteIdenticalRetransmission": false
         },
         {
-          "objectDigest": "object-a",
+          "objectHash": "object-a",
           "objectType": "TargetFinalityRecord",
           "boardSequence": 3,
           "boardPosition": 0,
@@ -295,13 +295,13 @@
           "recoveryEpoch": 0,
           "deviceEpoch": 0,
           "actionSequence": 0,
-          "contextDigest": "5a26f4e0d3f67e33f69766521e3e573104d273ad9eafeafbdba2499d9b38d58fd7c47ead554f03f6ec8cb358356d8572b539b03012d1043e28c6be7231724ec0",
+          "contextHash": "5a26f4e0d3f67e33f69766521e3e573104d273ad9eafeafbdba2499d9b38d58fd7c47ead554f03f6ec8cb358356d8572b539b03012d1043e28c6be7231724ec0",
           "isByteIdenticalRetransmission": true
         }
       ],
-      "requiredContextDigest": "5a26f4e0d3f67e33f69766521e3e573104d273ad9eafeafbdba2499d9b38d58fd7c47ead554f03f6ec8cb358356d8572b539b03012d1043e28c6be7231724ec0",
-      "selectionPolicyDigest": "e15080b957c722a401ec25ddc902686c2c8cef37a0eb36999d6d82baa59456ef61f0eedba2b54d1a698638549f03ada592ff250c43ed4ee5a4ac8f42b4aa19fb",
-      "expectedSelectionPolicyDigest": "bcf7f07eab3987510aefb37ed92bf1304824e34bcea4e706867f93b53f9e8f36d2dba2c3419f9a937c72a152727f79764d47e7805feab18fde21b3662f4be317",
+      "requiredContextHash": "5a26f4e0d3f67e33f69766521e3e573104d273ad9eafeafbdba2499d9b38d58fd7c47ead554f03f6ec8cb358356d8572b539b03012d1043e28c6be7231724ec0",
+      "selectionPolicyHash": "e15080b957c722a401ec25ddc902686c2c8cef37a0eb36999d6d82baa59456ef61f0eedba2b54d1a698638549f03ada592ff250c43ed4ee5a4ac8f42b4aa19fb",
+      "expectedSelectionPolicyHash": "bcf7f07eab3987510aefb37ed92bf1304824e34bcea4e706867f93b53f9e8f36d2dba2c3419f9a937c72a152727f79764d47e7805feab18fde21b3662f4be317",
       "currentRecoveryEpochMap": {
         "participant-1": {
           "signerIdentity": "participant-1",
@@ -322,7 +322,7 @@
       "caseName": "context-stale-and-conflict",
       "objects": [
         {
-          "objectDigest": "object-b",
+          "objectHash": "object-b",
           "objectType": "TargetFinalityRecord",
           "boardSequence": 2,
           "boardPosition": 1,
@@ -330,11 +330,11 @@
           "recoveryEpoch": 0,
           "deviceEpoch": 0,
           "actionSequence": 0,
-          "contextDigest": "35d7b655cd19fa558700d99f3993a229ef5e6f8ccc4a25cc86c87c1cfb01bbd82b57d524cdf0260abb7ba01bf933e657a49451c8a0b184646e1f0258ebf6284f",
+          "contextHash": "35d7b655cd19fa558700d99f3993a229ef5e6f8ccc4a25cc86c87c1cfb01bbd82b57d524cdf0260abb7ba01bf933e657a49451c8a0b184646e1f0258ebf6284f",
           "isByteIdenticalRetransmission": false
         },
         {
-          "objectDigest": "object-a",
+          "objectHash": "object-a",
           "objectType": "TargetFinalityRecord",
           "boardSequence": 1,
           "boardPosition": 0,
@@ -342,11 +342,11 @@
           "recoveryEpoch": 0,
           "deviceEpoch": 0,
           "actionSequence": 0,
-          "contextDigest": "5a26f4e0d3f67e33f69766521e3e573104d273ad9eafeafbdba2499d9b38d58fd7c47ead554f03f6ec8cb358356d8572b539b03012d1043e28c6be7231724ec0",
+          "contextHash": "5a26f4e0d3f67e33f69766521e3e573104d273ad9eafeafbdba2499d9b38d58fd7c47ead554f03f6ec8cb358356d8572b539b03012d1043e28c6be7231724ec0",
           "isByteIdenticalRetransmission": false
         },
         {
-          "objectDigest": "object-stale",
+          "objectHash": "object-stale",
           "objectType": "TargetFinalityRecord",
           "boardSequence": 1,
           "boardPosition": 0,
@@ -354,11 +354,11 @@
           "recoveryEpoch": 9,
           "deviceEpoch": 0,
           "actionSequence": 1,
-          "contextDigest": "5a26f4e0d3f67e33f69766521e3e573104d273ad9eafeafbdba2499d9b38d58fd7c47ead554f03f6ec8cb358356d8572b539b03012d1043e28c6be7231724ec0",
+          "contextHash": "5a26f4e0d3f67e33f69766521e3e573104d273ad9eafeafbdba2499d9b38d58fd7c47ead554f03f6ec8cb358356d8572b539b03012d1043e28c6be7231724ec0",
           "isByteIdenticalRetransmission": false
         },
         {
-          "objectDigest": "object-c",
+          "objectHash": "object-c",
           "objectType": "TargetFinalityRecord",
           "boardSequence": 1,
           "boardPosition": 0,
@@ -366,13 +366,13 @@
           "recoveryEpoch": 0,
           "deviceEpoch": 0,
           "actionSequence": 0,
-          "contextDigest": "5a26f4e0d3f67e33f69766521e3e573104d273ad9eafeafbdba2499d9b38d58fd7c47ead554f03f6ec8cb358356d8572b539b03012d1043e28c6be7231724ec0",
+          "contextHash": "5a26f4e0d3f67e33f69766521e3e573104d273ad9eafeafbdba2499d9b38d58fd7c47ead554f03f6ec8cb358356d8572b539b03012d1043e28c6be7231724ec0",
           "isByteIdenticalRetransmission": false
         }
       ],
-      "requiredContextDigest": "5a26f4e0d3f67e33f69766521e3e573104d273ad9eafeafbdba2499d9b38d58fd7c47ead554f03f6ec8cb358356d8572b539b03012d1043e28c6be7231724ec0",
-      "selectionPolicyDigest": "bcf7f07eab3987510aefb37ed92bf1304824e34bcea4e706867f93b53f9e8f36d2dba2c3419f9a937c72a152727f79764d47e7805feab18fde21b3662f4be317",
-      "expectedSelectionPolicyDigest": "bcf7f07eab3987510aefb37ed92bf1304824e34bcea4e706867f93b53f9e8f36d2dba2c3419f9a937c72a152727f79764d47e7805feab18fde21b3662f4be317",
+      "requiredContextHash": "5a26f4e0d3f67e33f69766521e3e573104d273ad9eafeafbdba2499d9b38d58fd7c47ead554f03f6ec8cb358356d8572b539b03012d1043e28c6be7231724ec0",
+      "selectionPolicyHash": "bcf7f07eab3987510aefb37ed92bf1304824e34bcea4e706867f93b53f9e8f36d2dba2c3419f9a937c72a152727f79764d47e7805feab18fde21b3662f4be317",
+      "expectedSelectionPolicyHash": "bcf7f07eab3987510aefb37ed92bf1304824e34bcea4e706867f93b53f9e8f36d2dba2c3419f9a937c72a152727f79764d47e7805feab18fde21b3662f4be317",
       "currentRecoveryEpochMap": {
         "participant-1": {
           "signerIdentity": "participant-1",

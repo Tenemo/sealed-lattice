@@ -2,7 +2,7 @@ use crate::{
     bgv::{
         base_conversion::lift_plaintext_coefficients_to_basis,
         ntt::{forward_negacyclic_ntt, inverse_negacyclic_ntt},
-        profile::{BgvBasisKind, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE, layout_digest},
+        profile::{BgvBasisKind, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE, layout_hash},
         rns::RnsPolynomial,
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
@@ -37,7 +37,7 @@ pub(crate) fn encode_batch_plaintext_slots(
         &coefficients_mod_plaintext,
         BgvBasisKind::Data,
         target_level,
-        layout_digest()?,
+        layout_hash()?,
     )?;
 
     Ok(EncodedBatchPlaintext {

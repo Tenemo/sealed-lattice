@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Emit public-only LaZer linear proof compatibility vectors."""
+"""Emit public-only LaZer linear proof vectors."""
 
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ from lazer_bindings import (
 )
 from proof_trace import build_trace, bytes_hex
 
-VECTOR_PROFILE_ID = "lazer-linear-demo-compatibility-v1"
+VECTOR_PROFILE_ID = "lazer-linear-demo-proof-parameter-v1"
 REQUIRED_CASE_NAMES = [
     "valid-small-linear-proof",
     "mutated-statement-matrix",
@@ -53,12 +53,12 @@ def run_command(command: list[str], cwd: Path | None = None) -> str:
 
 
 def sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
+    hash = hashlib.sha256()
     with path.open("rb") as handle:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
+            hash.update(chunk)
 
-    return digest.hexdigest()
+    return hash.hexdigest()
 
 
 def build_case(
@@ -141,7 +141,7 @@ def emit_vectors(repo_root: Path, lazer_root: Path, out_path: Path) -> None:
         "expectedProofSizeBytes": len(proof),
     }
     proof_encoding = {
-        "profileId": "lazer-demo-linear-proof-encoding-v1",
+        "profileId": "demo-linear-proof-encoding-v1",
         "ringDegree": 64,
         "coefficientModulus": "36028797018964597",
         "fullSizeCoefficientBitLength": 56,

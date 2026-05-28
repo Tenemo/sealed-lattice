@@ -14,9 +14,9 @@ import {
     polynomialCoefficient,
 } from '../ballot-proof-linear-statement/statement-contracts.js';
 import {
-    deriveSparseStatementMatrixDigest,
-    deriveSparseTargetVectorDigest,
-} from '../ballot-proof-linear-statement/statement-digests.js';
+    deriveSparseStatementMatrixHash,
+    deriveSparseTargetVectorHash,
+} from '../ballot-proof-linear-statement/statement-hashes.js';
 import {
     deriveShareCommitmentMessageMatrix,
     deriveShareCommitmentRandomnessMatrix,
@@ -41,7 +41,7 @@ import {
     aggregateDerivationSourceRingDegree,
     aggregateDerivationWitnessL2BoundSquared,
 } from './constants.js';
-import { deriveAggregateSparseLinearStatementDigest } from './digests.js';
+import { deriveAggregateSparseLinearStatementHash } from './hashes.js';
 import type {
     AggregateDerivationProofBuildInput,
     AggregateDerivationProofBuildOutput,
@@ -264,10 +264,10 @@ export const buildAggregateDerivationProofInput = (
     const matrixEntries: SparseMatrixEntry[] = [];
     const targetEntries: SparseTargetVectorEntry[] = [];
     const messageMatrix = deriveShareCommitmentMessageMatrix(
-        statement.shareCommitmentProfileDigest,
+        statement.shareCommitmentProfileHash,
     );
     const randomnessMatrix = deriveShareCommitmentRandomnessMatrix(
-        statement.shareCommitmentProfileDigest,
+        statement.shareCommitmentProfileHash,
     );
 
     for (
@@ -362,17 +362,17 @@ export const buildAggregateDerivationProofInput = (
         );
     }
 
-    const sparseStatementMatrixDigest =
-        deriveSparseStatementMatrixDigest(matrixEntries);
-    const targetVectorDigest = deriveSparseTargetVectorDigest(targetEntries);
+    const sparseStatementMatrixHash =
+        deriveSparseStatementMatrixHash(matrixEntries);
+    const targetVectorHash = deriveSparseTargetVectorHash(targetEntries);
     const proofStatementPayload: Omit<
         AggregateDerivationProofStatement,
-        'statementDigest'
+        'statementHash'
     > = {
-        aggregateDerivationStatementDigest:
-            statement.aggregateDerivationStatementDigest,
-        aggregateShareCommitmentDigest:
-            input.aggregateCommitment.aggregateShareCommitmentDigest,
+        aggregateDerivationStatementHash:
+            statement.aggregateDerivationStatementHash,
+        aggregateShareCommitmentHash:
+            input.aggregateCommitment.aggregateShareCommitmentHash,
         coefficientModulus: shareCommitmentModulusDecimal,
         componentId: aggregateDerivationComponentId,
         matrixCoefficientRepresentation: 'centeredSignedSourceModulus',
@@ -383,20 +383,20 @@ export const buildAggregateDerivationProofInput = (
         projectionCoverage: 'aggregate-derivation-full-encoded-layout',
         relation: linearProofRelation,
         sourceRingDegree: aggregateDerivationSourceRingDegree,
-        sparseStatementMatrixDigest,
+        sparseStatementMatrixHash,
         sparseStatementMatrixEntries: matrixEntries,
         sparseStatementTermCount: String(matrixEntries.length),
         statementColumns: proofParameterSet.statementColumns,
         statementRows: proofParameterSet.statementRows,
         targetCoefficientRepresentation: 'centeredSignedSourceModulus',
-        targetVectorDigest,
+        targetVectorHash,
         targetVectorEntries: targetEntries,
         targetVectorEntryCount: String(targetEntries.length),
         witnessL2BoundSquared: String(aggregateDerivationWitnessL2BoundSquared),
     };
     const proofStatement: AggregateDerivationProofStatement = {
         ...proofStatementPayload,
-        statementDigest: deriveAggregateSparseLinearStatementDigest(
+        statementHash: deriveAggregateSparseLinearStatementHash(
             proofStatementPayload,
         ),
     };
@@ -437,13 +437,13 @@ export const buildAggregateDerivationProofInput = (
     };
     const proofInput = {
         componentId: aggregateDerivationComponentId,
-        componentProofStatementDigest: proofStatement.statementDigest,
+        componentProofStatementHash: proofStatement.statementHash,
         proofEncoding,
         proofParameterSet,
         proofStatement,
         proofStatementFormat: 'sparse-polynomial-matrix-linear-proof-v1',
-        publicRandomnessHex: statement.challengeDomainDigest.slice(0, 64),
-        statementDigest: statement.aggregateDerivationStatementDigest,
+        publicRandomnessHex: statement.challengeDomainHash.slice(0, 64),
+        statementHash: statement.aggregateDerivationStatementHash,
     } satisfies Omit<
         AggregateDerivationProofVerificationInput,
         'proofBytesHex'

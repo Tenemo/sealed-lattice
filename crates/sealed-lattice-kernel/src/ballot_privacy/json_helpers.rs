@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 use serde_json::{Map, Value};
 use unicode_normalization::UnicodeNormalization;
 
-use crate::hashing::derive_protocol_digest;
+use crate::hashing::derive_protocol_hash;
 
 use super::backend_status::structural_refusal;
 
@@ -41,7 +41,7 @@ pub(crate) fn required_string_field<'value>(
         .ok_or_else(|| invalid_json_field(format!("{object_name}.{field_name} must be a string")))
 }
 
-pub(crate) fn is_protocol_digest(value: &str) -> bool {
+pub(crate) fn is_protocol_hash(value: &str) -> bool {
     value.len() == 128
         && value.bytes().any(|byte| byte != b'0')
         && value
@@ -91,8 +91,8 @@ pub(crate) fn value_without_fields(value: &Value, field_names: &[&str]) -> Optio
     Some(Value::Object(copied_object))
 }
 
-pub(crate) fn derive_digest(namespace: &str, value: &Value) -> Option<String> {
-    derive_protocol_digest(namespace, value).ok()
+pub(crate) fn derive_hash(namespace: &str, value: &Value) -> Option<String> {
+    derive_protocol_hash(namespace, value).ok()
 }
 
 pub(crate) fn receiver_reference_key(value: &Value) -> Option<String> {
@@ -110,7 +110,7 @@ pub(crate) fn receiver_reference_key(value: &Value) -> Option<String> {
 
 pub(crate) fn collect_receiver_reference_refusals(
     references: Option<&Vec<Value>>,
-    object_digest: Option<&str>,
+    object_hash: Option<&str>,
     label: &str,
 ) -> Vec<Value> {
     let mut refused_objects = Vec::new();
@@ -118,7 +118,7 @@ pub(crate) fn collect_receiver_reference_refusals(
     let Some(references) = references else {
         refused_objects.push(structural_refusal(
             format!("{label} must be an array."),
-            object_digest,
+            object_hash,
         ));
 
         return refused_objects;
@@ -128,14 +128,14 @@ pub(crate) fn collect_receiver_reference_refusals(
         let Some(receiver_reference_key) = receiver_reference_key(receiver_reference) else {
             refused_objects.push(structural_refusal(
                 format!("{label} contains an invalid receiver identity or roster position."),
-                object_digest,
+                object_hash,
             ));
             continue;
         };
         if !seen_receiver_references.insert(receiver_reference_key) {
             refused_objects.push(structural_refusal(
                 format!("{label} contains a duplicate receiver reference."),
-                object_digest,
+                object_hash,
             ));
         }
     }
@@ -147,13 +147,13 @@ pub(crate) fn collect_receiver_reference_refusals(
 mod tests {
     use serde_json::json;
 
-    use super::{collect_receiver_reference_refusals, is_protocol_digest, receiver_reference_key};
+    use super::{collect_receiver_reference_refusals, is_protocol_hash, receiver_reference_key};
 
     #[test]
-    fn protocol_digest_rejects_all_zero_placeholder() {
-        assert!(!is_protocol_digest(&"0".repeat(128)));
-        assert!(is_protocol_digest(&"1".repeat(128)));
-        assert!(!is_protocol_digest(&"g".repeat(128)));
+    fn protocol_hash_rejects_all_zero_placeholder() {
+        assert!(!is_protocol_hash(&"0".repeat(128)));
+        assert!(is_protocol_hash(&"1".repeat(128)));
+        assert!(!is_protocol_hash(&"g".repeat(128)));
     }
 
     #[test]

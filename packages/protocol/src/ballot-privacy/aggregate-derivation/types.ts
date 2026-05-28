@@ -4,7 +4,7 @@ import {
     type AggregateDerivationProofVerificationInput,
     type AggregateDerivationStatement,
     type AggregateShareCommitment,
-    type ProtocolDigest,
+    type ProtocolHash,
 } from '@sealed-lattice/types';
 
 import type {
@@ -53,8 +53,8 @@ export type AggregateDerivationProofEncoding = {
 };
 
 export type AggregateDerivationProofStatement = {
-    readonly aggregateDerivationStatementDigest: ProtocolDigest;
-    readonly aggregateShareCommitmentDigest: ProtocolDigest;
+    readonly aggregateDerivationStatementHash: ProtocolHash;
+    readonly aggregateShareCommitmentHash: ProtocolHash;
     readonly coefficientModulus: string;
     readonly componentId: typeof aggregateDerivationComponentId;
     readonly matrixCoefficientRepresentation: 'centeredSignedSourceModulus';
@@ -65,14 +65,14 @@ export type AggregateDerivationProofStatement = {
     readonly projectionCoverage: 'aggregate-derivation-full-encoded-layout';
     readonly relation: 'A*w + t = 0';
     readonly sourceRingDegree: 256;
-    readonly sparseStatementMatrixDigest: ProtocolDigest;
+    readonly sparseStatementMatrixHash: ProtocolHash;
     readonly sparseStatementMatrixEntries: readonly SparseMatrixEntry[];
     readonly sparseStatementTermCount: string;
     readonly statementColumns: number;
-    readonly statementDigest: ProtocolDigest;
+    readonly statementHash: ProtocolHash;
     readonly statementRows: number;
     readonly targetCoefficientRepresentation: 'centeredSignedSourceModulus';
-    readonly targetVectorDigest: ProtocolDigest;
+    readonly targetVectorHash: ProtocolHash;
     readonly targetVectorEntries: readonly SparseTargetVectorEntry[];
     readonly targetVectorEntryCount: string;
     readonly witnessL2BoundSquared: string;

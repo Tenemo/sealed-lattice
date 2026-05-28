@@ -30,7 +30,7 @@ describe('plaintext oracle in browsers', () => {
             pollSpec: pollSpec.normalized,
         });
         const decoding = decodeSparseTopKTarget({
-            expectedLayoutDigest: oracle.sparseTarget.layoutDigest,
+            expectedLayoutHash: oracle.sparseTarget.layoutHash,
             target: oracle.sparseTarget,
         });
 

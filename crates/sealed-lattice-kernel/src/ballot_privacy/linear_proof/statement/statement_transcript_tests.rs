@@ -104,7 +104,7 @@ mod tests {
         let mutated_target_case = generated_vector_case("mutated-target-vector");
         let wrong_randomness_case = generated_vector_case("wrong-public-randomness");
 
-        let derive_digest = |vector_case: &serde_json::Value| {
+        let derive_hash = |vector_case: &serde_json::Value| {
             let parameter_set: LinearProofParameterSet =
                 serde_json::from_value(vector_case["parameterSet"].clone())
                     .expect("parameter set should deserialize");
@@ -136,11 +136,11 @@ mod tests {
             .public_parameters_and_statement_hash_hex
         };
 
-        let valid_digest = derive_digest(&valid_case);
+        let valid_hash = derive_hash(&valid_case);
 
-        assert_ne!(valid_digest, derive_digest(&mutated_statement_case));
-        assert_ne!(valid_digest, derive_digest(&mutated_target_case));
-        assert_ne!(valid_digest, derive_digest(&wrong_randomness_case));
+        assert_ne!(valid_hash, derive_hash(&mutated_statement_case));
+        assert_ne!(valid_hash, derive_hash(&mutated_target_case));
+        assert_ne!(valid_hash, derive_hash(&wrong_randomness_case));
     }
 
     #[test]

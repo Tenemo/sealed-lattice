@@ -1,4 +1,4 @@
-import { deriveProtocolDigest } from '@sealed-lattice/crypto';
+import { deriveProtocolHash } from '@sealed-lattice/crypto';
 import type {
     DecodedSparseTopKSelection,
     FieldElement,
@@ -18,11 +18,11 @@ import { assertCanonicalFieldElement } from './field.js';
 const sparseTopKTargetLayoutId = 'WinnerRankTopK-v1' as const;
 const forbiddenSemanticSlotCount = 4;
 
-const deriveSparseTopKTargetLayoutDigest = (input: {
+const deriveSparseTopKTargetLayoutHash = (input: {
     readonly optionCount: number;
     readonly topOptionCount: number;
 }): string =>
-    deriveProtocolDigest('TargetLayoutDigest', {
+    deriveProtocolHash('TargetLayoutHash', {
         forbiddenSemanticSlotCount,
         layoutId: sparseTopKTargetLayoutId,
         optionCount: input.optionCount,
@@ -34,12 +34,12 @@ const deriveSparseTopKTargetLayoutDigest = (input: {
         zeroReserved: true,
     });
 
-export const deriveSparseTopKTargetDigest = (
-    target: Omit<SparseTopKTarget, 'targetDigest'>,
+export const deriveSparseTopKTargetHash = (
+    target: Omit<SparseTopKTarget, 'targetHash'>,
 ): string =>
-    deriveProtocolDigest('SparseTopKTargetDigest', {
+    deriveProtocolHash('SparseTopKTargetHash', {
         forbiddenSemanticSlots: target.forbiddenSemanticSlots,
-        layoutDigest: target.layoutDigest,
+        layoutHash: target.layoutHash,
         layoutId: target.layoutId,
         optionCount: target.optionCount,
         targetIdSlots: target.targetIdSlots,
@@ -156,36 +156,36 @@ export const deriveSparseTopKTarget = (input: {
             return rank < input.topOptionCount ? rank + 1 : 0;
         },
     );
-    const layoutDigest = deriveSparseTopKTargetLayoutDigest({
+    const layoutHash = deriveSparseTopKTargetLayoutHash({
         optionCount: input.optionCount,
         topOptionCount: input.topOptionCount,
     });
-    const targetWithoutDigest = {
+    const targetWithoutHash = {
         forbiddenSemanticSlots: Array.from(
             { length: forbiddenSemanticSlotCount },
             () => 0 as FieldElement,
         ),
-        layoutDigest,
+        layoutHash,
         layoutId: sparseTopKTargetLayoutId,
         optionCount: input.optionCount,
         targetIdSlots,
         targetOrderSlots,
         topOptionCount: input.topOptionCount,
-    } satisfies Omit<SparseTopKTarget, 'targetDigest'>;
+    } satisfies Omit<SparseTopKTarget, 'targetHash'>;
 
     return {
-        ...targetWithoutDigest,
-        targetDigest: deriveSparseTopKTargetDigest(targetWithoutDigest),
+        ...targetWithoutHash,
+        targetHash: deriveSparseTopKTargetHash(targetWithoutHash),
     };
 };
 
 const addSparseTargetRefusal = (
     refusedObjects: RefusalRecord[],
     message: string,
-    objectDigest?: string,
+    objectHash?: string,
 ): void => {
     refusedObjects.push(
-        createRefusal('SparseTargetInvalid', message, objectDigest),
+        createRefusal('SparseTargetInvalid', message, objectHash),
     );
 };
 
@@ -193,7 +193,7 @@ const validateSlotElement = (
     refusedObjects: RefusalRecord[],
     value: FieldElement,
     fieldName: string,
-    targetDigest: string,
+    targetHash: string,
 ): boolean => {
     try {
         assertCanonicalFieldElement(value, fieldName);
@@ -202,23 +202,23 @@ const validateSlotElement = (
         addSparseTargetRefusal(
             refusedObjects,
             `${fieldName} is not a canonical field element.`,
-            targetDigest,
+            targetHash,
         );
         return false;
     }
 };
 
 const createSparseTargetDecodingFailure = (
-    targetDigest?: string,
+    targetHash?: string,
 ): SparseTopKTargetDecoding => ({
-    acceptedDigests: [],
+    acceptedHashes: [],
     decodedSelections: [],
     ok: false,
     refusedObjects: [
         createRefusal(
             'SparseTargetInvalid',
             'Sparse target could not be canonicalized or validated.',
-            targetDigest,
+            targetHash,
         ),
     ],
     selectedOptionOrdinals: [],
@@ -226,14 +226,14 @@ const createSparseTargetDecodingFailure = (
 });
 
 const decodeSparseTopKTargetUnchecked = (input: {
-    readonly expectedLayoutDigest: string;
+    readonly expectedLayoutHash: string;
     readonly target: SparseTopKTarget;
 }): SparseTopKTargetDecoding => {
     const { target } = input;
     const refusedObjects: RefusalRecord[] = [];
-    const recomputedDigest = deriveSparseTopKTargetDigest({
+    const recomputedHash = deriveSparseTopKTargetHash({
         forbiddenSemanticSlots: target.forbiddenSemanticSlots,
-        layoutDigest: target.layoutDigest,
+        layoutHash: target.layoutHash,
         layoutId: target.layoutId,
         optionCount: target.optionCount,
         targetIdSlots: target.targetIdSlots,
@@ -241,25 +241,25 @@ const decodeSparseTopKTargetUnchecked = (input: {
         topOptionCount: target.topOptionCount,
     });
 
-    if (target.targetDigest !== recomputedDigest) {
+    if (target.targetHash !== recomputedHash) {
         addSparseTargetRefusal(
             refusedObjects,
-            'Sparse target digest does not match its canonical payload.',
-            target.targetDigest,
+            'Sparse target hash does not match its canonical payload.',
+            target.targetHash,
         );
     }
     if (target.layoutId !== sparseTopKTargetLayoutId) {
         addSparseTargetRefusal(
             refusedObjects,
             'Sparse target layout ID is not supported.',
-            target.targetDigest,
+            target.targetHash,
         );
     }
-    if (target.layoutDigest !== input.expectedLayoutDigest) {
+    if (target.layoutHash !== input.expectedLayoutHash) {
         addSparseTargetRefusal(
             refusedObjects,
-            'Sparse target layout digest does not match the expected layout.',
-            target.targetDigest,
+            'Sparse target layout hash does not match the expected layout.',
+            target.targetHash,
         );
     }
     if (
@@ -273,7 +273,7 @@ const decodeSparseTopKTargetUnchecked = (input: {
         addSparseTargetRefusal(
             refusedObjects,
             'Sparse target option and top-k counts are invalid.',
-            target.targetDigest,
+            target.targetHash,
         );
     }
     if (
@@ -283,14 +283,14 @@ const decodeSparseTopKTargetUnchecked = (input: {
         addSparseTargetRefusal(
             refusedObjects,
             'Sparse target slot arrays must match optionCount.',
-            target.targetDigest,
+            target.targetHash,
         );
     }
     if (target.forbiddenSemanticSlots.length !== forbiddenSemanticSlotCount) {
         addSparseTargetRefusal(
             refusedObjects,
             'Sparse target forbidden semantic slot count must match the layout.',
-            target.targetDigest,
+            target.targetHash,
         );
     }
 
@@ -304,14 +304,14 @@ const decodeSparseTopKTargetUnchecked = (input: {
                 refusedObjects,
                 value,
                 'forbidden semantic slot',
-                target.targetDigest,
+                target.targetHash,
             ) &&
             value !== 0
         ) {
             addSparseTargetRefusal(
                 refusedObjects,
                 'Sparse target forbidden semantic slots must be zero.',
-                target.targetDigest,
+                target.targetHash,
             );
         }
     });
@@ -327,13 +327,13 @@ const decodeSparseTopKTargetUnchecked = (input: {
             refusedObjects,
             optionOrdinal,
             'target ID slot',
-            target.targetDigest,
+            target.targetHash,
         );
         const orderIsCanonical = validateSlotElement(
             refusedObjects,
             orderPosition,
             'target order slot',
-            target.targetDigest,
+            target.targetHash,
         );
         if (!idIsCanonical || !orderIsCanonical) {
             continue;
@@ -346,7 +346,7 @@ const decodeSparseTopKTargetUnchecked = (input: {
             addSparseTargetRefusal(
                 refusedObjects,
                 'Sparse target selected ID and order slots must both be nonzero.',
-                target.targetDigest,
+                target.targetHash,
             );
             continue;
         }
@@ -358,28 +358,28 @@ const decodeSparseTopKTargetUnchecked = (input: {
             addSparseTargetRefusal(
                 refusedObjects,
                 'Sparse target option ordinal is out of range or in the wrong slot.',
-                target.targetDigest,
+                target.targetHash,
             );
         }
         if (orderPosition < 1 || orderPosition > target.topOptionCount) {
             addSparseTargetRefusal(
                 refusedObjects,
                 'Sparse target order position is out of range.',
-                target.targetDigest,
+                target.targetHash,
             );
         }
         if (seenOptionOrdinals.has(optionOrdinal)) {
             addSparseTargetRefusal(
                 refusedObjects,
                 'Sparse target selected option IDs must be distinct.',
-                target.targetDigest,
+                target.targetHash,
             );
         }
         if (seenOrderPositions.has(orderPosition)) {
             addSparseTargetRefusal(
                 refusedObjects,
                 'Sparse target order positions must be distinct.',
-                target.targetDigest,
+                target.targetHash,
             );
         }
 
@@ -396,7 +396,7 @@ const decodeSparseTopKTargetUnchecked = (input: {
         addSparseTargetRefusal(
             refusedObjects,
             'Sparse target must contain exactly topOptionCount selected option IDs.',
-            target.targetDigest,
+            target.targetHash,
         );
     }
 
@@ -409,7 +409,7 @@ const decodeSparseTopKTargetUnchecked = (input: {
             addSparseTargetRefusal(
                 refusedObjects,
                 'Sparse target order positions must be exactly 1..topOptionCount.',
-                target.targetDigest,
+                target.targetHash,
             );
             break;
         }
@@ -420,9 +420,9 @@ const decodeSparseTopKTargetUnchecked = (input: {
     );
 
     return {
-        acceptedDigests:
+        acceptedHashes:
             refusedObjects.length === 0
-                ? uniqueStrings([target.targetDigest, target.layoutDigest])
+                ? uniqueStrings([target.targetHash, target.layoutHash])
                 : [],
         decodedSelections: refusedObjects.length === 0 ? sortedSelections : [],
         ok: refusedObjects.length === 0,
@@ -432,26 +432,25 @@ const decodeSparseTopKTargetUnchecked = (input: {
                 ? sortedSelections.map((selection) => selection.optionOrdinal)
                 : [],
         statusLabels: [],
-        targetDigest:
-            refusedObjects.length === 0 ? target.targetDigest : undefined,
+        targetHash: refusedObjects.length === 0 ? target.targetHash : undefined,
     };
 };
 
 export const decodeSparseTopKTarget = (input: {
-    readonly expectedLayoutDigest: string;
+    readonly expectedLayoutHash: string;
     readonly target: SparseTopKTarget;
 }): SparseTopKTargetDecoding => {
     try {
         return decodeSparseTopKTargetUnchecked(input);
     } catch {
-        const targetDigest = (
+        const targetHash = (
             input as
                 | Partial<{
                       readonly target: Partial<SparseTopKTarget>;
                   }>
                 | undefined
-        )?.target?.targetDigest;
+        )?.target?.targetHash;
 
-        return createSparseTargetDecodingFailure(targetDigest);
+        return createSparseTargetDecodingFailure(targetHash);
     }
 };

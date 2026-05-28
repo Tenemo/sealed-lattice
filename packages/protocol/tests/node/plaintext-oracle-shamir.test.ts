@@ -121,7 +121,7 @@ describe('plaintext oracle Shamir and interpolation', () => {
             maxCenteredAbsCoefficient:
                 shamirVectors.selectedContributorReport
                     .maxCenteredAbsCoefficient,
-            reportDigest: shamirVectors.selectedContributorReport.reportDigest,
+            reportHash: shamirVectors.selectedContributorReport.reportHash,
         });
 
         const worstCaseReport = deriveWorstCaseInterpolationCoefficientReport({

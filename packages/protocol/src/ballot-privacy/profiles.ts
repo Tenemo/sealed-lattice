@@ -1,4 +1,4 @@
-import { deriveProtocolDigest } from '@sealed-lattice/crypto';
+import { deriveProtocolHash } from '@sealed-lattice/crypto';
 import {
     aggregateInputEncodingProfileId,
     ballotProofProfileId,
@@ -14,12 +14,12 @@ import {
     type AggregateInputEncodingProfile,
     type BallotScoreEncodingProfile,
     type BallotShareLayoutProfile,
-    type BallotPrivacyProfileDigests,
+    type BallotPrivacyProfileHashes,
     type BallotPrivacyProfileSet,
     type BallotProofProfile,
     type EncodedAggregateLayoutProfile,
     type EncodedShareVectorLayoutProfile,
-    type ProtocolDigest,
+    type ProtocolHash,
     type ReceiverEncryptionProfile,
     type RefusalRecord,
     type ScoreMembershipProfile,
@@ -58,35 +58,35 @@ const decimalIntegerPattern = /^(0|[1-9][0-9]*)$/u;
 
 type ReceiverEncryptionProfilePayload = Omit<
     ReceiverEncryptionProfile,
-    'receiverEncryptionProfileDigest'
+    'receiverEncryptionProfileHash'
 >;
 type ShareCommitmentProfilePayload = Omit<
     ShareCommitmentProfile,
-    'shareCommitmentProfileDigest'
+    'shareCommitmentProfileHash'
 >;
 type ScoreMembershipProfilePayload = Omit<
     ScoreMembershipProfile,
-    'scoreMembershipProfileDigest'
+    'scoreMembershipProfileHash'
 >;
 type BallotScoreEncodingProfilePayload = Omit<
     BallotScoreEncodingProfile,
-    'ballotScoreEncodingProfileDigest'
+    'ballotScoreEncodingProfileHash'
 >;
 type BallotShareLayoutProfilePayload = Omit<
     BallotShareLayoutProfile,
-    'ballotShareLayoutProfileDigest'
+    'ballotShareLayoutProfileHash'
 >;
 type AggregateInputEncodingProfilePayload = Omit<
     AggregateInputEncodingProfile,
-    'aggregateInputEncodingProfileDigest'
+    'aggregateInputEncodingProfileHash'
 >;
 type EncodedShareVectorLayoutProfilePayload = Omit<
     EncodedShareVectorLayoutProfile,
-    'encodedShareVectorLayoutDigest'
+    'encodedShareVectorLayoutHash'
 >;
 type EncodedAggregateLayoutProfilePayload = Omit<
     EncodedAggregateLayoutProfile,
-    'encodedAggregateLayoutDigest'
+    'encodedAggregateLayoutHash'
 >;
 
 type BallotPrivacyProfileSetInput = {
@@ -110,11 +110,11 @@ const normalizeProfileOptionCount = (optionCount: number): number => {
 };
 type BallotProofProfilePayload = Omit<
     BallotProofProfile,
-    'ballotProofProfileDigest'
+    'ballotProofProfileHash'
 >;
 type ShareCommitmentMessageBoundCertPayload = Omit<
     ShareCommitmentMessageBoundCert,
-    'shareCommitmentMessageBoundCertDigest'
+    'shareCommitmentMessageBoundCertHash'
 >;
 
 const compareDecimalIntegerStrings = (left: string, right: string): number => {
@@ -140,54 +140,48 @@ const compareDecimalIntegerStrings = (left: string, right: string): number => {
     return 0;
 };
 
-const deriveReceiverEncryptionProfileDigest = (
+const deriveReceiverEncryptionProfileHash = (
     profile: ReceiverEncryptionProfilePayload,
-): ProtocolDigest =>
-    deriveProtocolDigest('ReceiverEncryptionProfileDigest', profile);
+): ProtocolHash => deriveProtocolHash('ReceiverEncryptionProfileHash', profile);
 
-const deriveShareCommitmentProfileDigest = (
+const deriveShareCommitmentProfileHash = (
     profile: ShareCommitmentProfilePayload,
-): ProtocolDigest =>
-    deriveProtocolDigest('ShareCommitmentProfileDigest', profile);
+): ProtocolHash => deriveProtocolHash('ShareCommitmentProfileHash', profile);
 
-const deriveScoreMembershipProfileDigest = (
+const deriveScoreMembershipProfileHash = (
     profile: ScoreMembershipProfilePayload,
-): ProtocolDigest =>
-    deriveProtocolDigest('ScoreMembershipProfileDigest', profile);
+): ProtocolHash => deriveProtocolHash('ScoreMembershipProfileHash', profile);
 
-const deriveBallotScoreEncodingProfileDigest = (
+const deriveBallotScoreEncodingProfileHash = (
     profile: BallotScoreEncodingProfilePayload,
-): ProtocolDigest =>
-    deriveProtocolDigest('BallotScoreEncodingProfileDigest', profile);
+): ProtocolHash =>
+    deriveProtocolHash('BallotScoreEncodingProfileHash', profile);
 
-const deriveBallotShareLayoutProfileDigest = (
+const deriveBallotShareLayoutProfileHash = (
     profile: BallotShareLayoutProfilePayload,
-): ProtocolDigest =>
-    deriveProtocolDigest('BallotShareLayoutProfileDigest', profile);
+): ProtocolHash => deriveProtocolHash('BallotShareLayoutProfileHash', profile);
 
-const deriveAggregateInputEncodingProfileDigest = (
+const deriveAggregateInputEncodingProfileHash = (
     profile: AggregateInputEncodingProfilePayload,
-): ProtocolDigest =>
-    deriveProtocolDigest('AggregateInputEncodingProfileDigest', profile);
+): ProtocolHash =>
+    deriveProtocolHash('AggregateInputEncodingProfileHash', profile);
 
-const deriveEncodedShareVectorLayoutDigest = (
+const deriveEncodedShareVectorLayoutHash = (
     profile: EncodedShareVectorLayoutProfilePayload,
-): ProtocolDigest =>
-    deriveProtocolDigest('EncodedShareVectorLayoutDigest', profile);
+): ProtocolHash => deriveProtocolHash('EncodedShareVectorLayoutHash', profile);
 
-const deriveEncodedAggregateLayoutDigest = (
+const deriveEncodedAggregateLayoutHash = (
     profile: EncodedAggregateLayoutProfilePayload,
-): ProtocolDigest =>
-    deriveProtocolDigest('EncodedAggregateLayoutDigest', profile);
+): ProtocolHash => deriveProtocolHash('EncodedAggregateLayoutHash', profile);
 
-const deriveBallotProofProfileDigest = (
+const deriveBallotProofProfileHash = (
     profile: BallotProofProfilePayload,
-): ProtocolDigest => deriveProtocolDigest('BallotProofProfileDigest', profile);
+): ProtocolHash => deriveProtocolHash('BallotProofProfileHash', profile);
 
-export const deriveShareCommitmentMessageBoundCertDigest = (
+export const deriveShareCommitmentMessageBoundCertHash = (
     certificate: ShareCommitmentMessageBoundCertPayload,
-): ProtocolDigest =>
-    deriveProtocolDigest('ShareCommitmentMessageBoundCertDigest', certificate);
+): ProtocolHash =>
+    deriveProtocolHash('ShareCommitmentMessageBoundCertHash', certificate);
 
 const createReceiverEncryptionProfile = (): ReceiverEncryptionProfile => {
     const profilePayload: ReceiverEncryptionProfilePayload = {
@@ -215,19 +209,19 @@ const createReceiverEncryptionProfile = (): ReceiverEncryptionProfile => {
             encryptsShareCommitmentOpening: true,
             bindsReceiverIdentity: true,
             bindsReceiverRosterPosition: true,
-            bindsManifestDigest: true,
-            bindsRosterDigest: true,
-            bindsPollSpecDigest: true,
-            bindsVoterIdentityDigest: true,
-            bindsActionContextDigest: true,
+            bindsManifestHash: true,
+            bindsRosterHash: true,
+            bindsPollSpecHash: true,
+            bindsVoterIdentityHash: true,
+            bindsActionContextHash: true,
         },
         decryptionFailureTarget: '2^-128',
     };
 
     return {
         ...profilePayload,
-        receiverEncryptionProfileDigest:
-            deriveReceiverEncryptionProfileDigest(profilePayload),
+        receiverEncryptionProfileHash:
+            deriveReceiverEncryptionProfileHash(profilePayload),
     };
 };
 
@@ -265,8 +259,8 @@ const createShareCommitmentProfile = (
 
     return {
         ...profilePayload,
-        shareCommitmentProfileDigest:
-            deriveShareCommitmentProfileDigest(profilePayload),
+        shareCommitmentProfileHash:
+            deriveShareCommitmentProfileHash(profilePayload),
     };
 };
 
@@ -288,8 +282,8 @@ const createScoreMembershipProfile = (): ScoreMembershipProfile => {
 
     return {
         ...profilePayload,
-        scoreMembershipProfileDigest:
-            deriveScoreMembershipProfileDigest(profilePayload),
+        scoreMembershipProfileHash:
+            deriveScoreMembershipProfileHash(profilePayload),
     };
 };
 
@@ -313,8 +307,8 @@ const createBallotScoreEncodingProfile = (): BallotScoreEncodingProfile => {
 
     return {
         ...profilePayload,
-        ballotScoreEncodingProfileDigest:
-            deriveBallotScoreEncodingProfileDigest(profilePayload),
+        ballotScoreEncodingProfileHash:
+            deriveBallotScoreEncodingProfileHash(profilePayload),
     };
 };
 
@@ -336,8 +330,8 @@ const createBallotShareLayoutProfile = (
 
     return {
         ...profilePayload,
-        ballotShareLayoutProfileDigest:
-            deriveBallotShareLayoutProfileDigest(profilePayload),
+        ballotShareLayoutProfileHash:
+            deriveBallotShareLayoutProfileHash(profilePayload),
     };
 };
 
@@ -356,8 +350,8 @@ const createAggregateInputEncodingProfile =
 
         return {
             ...profilePayload,
-            aggregateInputEncodingProfileDigest:
-                deriveAggregateInputEncodingProfileDigest(profilePayload),
+            aggregateInputEncodingProfileHash:
+                deriveAggregateInputEncodingProfileHash(profilePayload),
         };
     };
 
@@ -378,8 +372,8 @@ const createEncodedShareVectorLayoutProfile = (
 
     return {
         ...profilePayload,
-        encodedShareVectorLayoutDigest:
-            deriveEncodedShareVectorLayoutDigest(profilePayload),
+        encodedShareVectorLayoutHash:
+            deriveEncodedShareVectorLayoutHash(profilePayload),
     };
 };
 
@@ -400,8 +394,8 @@ const createEncodedAggregateLayoutProfile = (
 
     return {
         ...profilePayload,
-        encodedAggregateLayoutDigest:
-            deriveEncodedAggregateLayoutDigest(profilePayload),
+        encodedAggregateLayoutHash:
+            deriveEncodedAggregateLayoutHash(profilePayload),
     };
 };
 
@@ -432,8 +426,7 @@ const createBallotProofProfile = (): BallotProofProfile => {
 
     return {
         ...profilePayload,
-        ballotProofProfileDigest:
-            deriveBallotProofProfileDigest(profilePayload),
+        ballotProofProfileHash: deriveBallotProofProfileHash(profilePayload),
     };
 };
 
@@ -462,35 +455,35 @@ export const createBallotPrivacyProfileSet = (
     };
 };
 
-export const deriveBallotPrivacyProfileDigests =
-    (): BallotPrivacyProfileDigests => {
+export const deriveBallotPrivacyProfileHashes =
+    (): BallotPrivacyProfileHashes => {
         const profileSet = createBallotPrivacyProfileSet();
 
         return {
-            receiverEncryptionProfileDigest:
+            receiverEncryptionProfileHash:
                 profileSet.receiverEncryptionProfile
-                    .receiverEncryptionProfileDigest,
-            shareCommitmentProfileDigest:
-                profileSet.shareCommitmentProfile.shareCommitmentProfileDigest,
-            scoreMembershipProfileDigest:
-                profileSet.scoreMembershipProfile.scoreMembershipProfileDigest,
-            ballotScoreEncodingProfileDigest:
+                    .receiverEncryptionProfileHash,
+            shareCommitmentProfileHash:
+                profileSet.shareCommitmentProfile.shareCommitmentProfileHash,
+            scoreMembershipProfileHash:
+                profileSet.scoreMembershipProfile.scoreMembershipProfileHash,
+            ballotScoreEncodingProfileHash:
                 profileSet.ballotScoreEncodingProfile
-                    .ballotScoreEncodingProfileDigest,
-            ballotShareLayoutProfileDigest:
+                    .ballotScoreEncodingProfileHash,
+            ballotShareLayoutProfileHash:
                 profileSet.ballotShareLayoutProfile
-                    .ballotShareLayoutProfileDigest,
-            aggregateInputEncodingProfileDigest:
+                    .ballotShareLayoutProfileHash,
+            aggregateInputEncodingProfileHash:
                 profileSet.aggregateInputEncodingProfile
-                    .aggregateInputEncodingProfileDigest,
-            encodedShareVectorLayoutDigest:
+                    .aggregateInputEncodingProfileHash,
+            encodedShareVectorLayoutHash:
                 profileSet.encodedShareVectorLayoutProfile
-                    .encodedShareVectorLayoutDigest,
-            encodedAggregateLayoutDigest:
+                    .encodedShareVectorLayoutHash,
+            encodedAggregateLayoutHash:
                 profileSet.encodedAggregateLayoutProfile
-                    .encodedAggregateLayoutDigest,
-            ballotProofProfileDigest:
-                profileSet.ballotProofProfile.ballotProofProfileDigest,
+                    .encodedAggregateLayoutHash,
+            ballotProofProfileHash:
+                profileSet.ballotProofProfile.ballotProofProfileHash,
         };
     };
 
@@ -519,22 +512,22 @@ export const createShareCommitmentMessageBoundCert = (input: {
     const openingRandomnessAggregateBound =
         maximumCanonicalTurnout *
         shareCommitmentProfile.openingRandomnessInfinityNormBound;
-    const profileDigest = deriveProtocolDigest(
-        'ShareCommitmentMessageBoundCertDigest',
+    const profileHash = deriveProtocolHash(
+        'ShareCommitmentMessageBoundCertHash',
         {
             fieldEncodingProfileId,
             profileId: shareCommitmentMessageBoundProfileId,
-            shareCommitmentProfileDigest:
-                shareCommitmentProfile.shareCommitmentProfileDigest,
+            shareCommitmentProfileHash:
+                shareCommitmentProfile.shareCommitmentProfileHash,
         },
     );
     const certificatePayload: ShareCommitmentMessageBoundCertPayload = {
         objectType: 'ShareCommitmentMessageBoundCert',
         objectVersion: 1,
         profileId: shareCommitmentMessageBoundProfileId,
-        profileDigest,
-        shareCommitmentProfileDigest:
-            shareCommitmentProfile.shareCommitmentProfileDigest,
+        profileHash,
+        shareCommitmentProfileHash:
+            shareCommitmentProfile.shareCommitmentProfileHash,
         fieldModulus,
         shareVectorWidth: shareCommitmentProfile.shareVectorWidth,
         perBallotShareRepresentativeRange: [0, maximumCanonicalFieldElement],
@@ -553,42 +546,40 @@ export const createShareCommitmentMessageBoundCert = (input: {
 
     return {
         ...certificatePayload,
-        shareCommitmentMessageBoundCertDigest:
-            deriveShareCommitmentMessageBoundCertDigest(certificatePayload),
+        shareCommitmentMessageBoundCertHash:
+            deriveShareCommitmentMessageBoundCertHash(certificatePayload),
     };
 };
 
-const verifyCanonicalDigest = (input: {
+const verifyCanonicalHash = (input: {
     readonly certificate: ShareCommitmentMessageBoundCert;
     readonly refusedObjects: RefusalRecord[];
 }): void => {
-    const {
-        shareCommitmentMessageBoundCertDigest,
-        ...certificateWithoutDigest
-    } = input.certificate;
-    let expectedDigest: ProtocolDigest;
+    const { shareCommitmentMessageBoundCertHash, ...certificateWithoutHash } =
+        input.certificate;
+    let expectedHash: ProtocolHash;
     try {
-        expectedDigest = deriveShareCommitmentMessageBoundCertDigest(
-            certificateWithoutDigest,
+        expectedHash = deriveShareCommitmentMessageBoundCertHash(
+            certificateWithoutHash,
         );
     } catch {
         input.refusedObjects.push(
             createRefusal(
                 'BallotPrivacyProfileInvalid',
                 'Share commitment message-bound certificate payload is not canonical.',
-                shareCommitmentMessageBoundCertDigest,
+                shareCommitmentMessageBoundCertHash,
             ),
         );
 
         return;
     }
 
-    if (shareCommitmentMessageBoundCertDigest !== expectedDigest) {
+    if (shareCommitmentMessageBoundCertHash !== expectedHash) {
         input.refusedObjects.push(
             createRefusal(
                 'BallotPrivacyProfileInvalid',
-                'Share commitment message-bound certificate digest does not match its canonical payload.',
-                shareCommitmentMessageBoundCertDigest,
+                'Share commitment message-bound certificate hash does not match its canonical payload.',
+                shareCommitmentMessageBoundCertHash,
             ),
         );
     }
@@ -597,12 +588,12 @@ const verifyCanonicalDigest = (input: {
 export const verifyShareCommitmentMessageBoundCert = (input: {
     readonly certificate: ShareCommitmentMessageBoundCert;
     readonly expectedMaximumCanonicalTurnout?: number;
-    readonly expectedShareCommitmentProfileDigest?: ProtocolDigest;
+    readonly expectedShareCommitmentProfileHash?: ProtocolHash;
 }): ShareCommitmentMessageBoundCertVerification => {
     const refusedObjects: RefusalRecord[] = [];
     const certificate = input.certificate;
 
-    verifyCanonicalDigest({ certificate, refusedObjects });
+    verifyCanonicalHash({ certificate, refusedObjects });
 
     const expectedOpeningRandomnessAggregateBound =
         certificate.maximumCanonicalTurnout *
@@ -622,7 +613,7 @@ export const verifyShareCommitmentMessageBoundCert = (input: {
             createRefusal(
                 'BallotPrivacyProfileInvalid',
                 'Share commitment message-bound certificate shape is not canonical.',
-                certificate.shareCommitmentMessageBoundCertDigest,
+                certificate.shareCommitmentMessageBoundCertHash,
             ),
         );
     }
@@ -635,20 +626,20 @@ export const verifyShareCommitmentMessageBoundCert = (input: {
             createRefusal(
                 'BallotPrivacyProfileInvalid',
                 'Share commitment message-bound certificate turnout does not match the expected profile.',
-                certificate.shareCommitmentMessageBoundCertDigest,
+                certificate.shareCommitmentMessageBoundCertHash,
             ),
         );
     }
     if (
-        input.expectedShareCommitmentProfileDigest !== undefined &&
-        certificate.shareCommitmentProfileDigest !==
-            input.expectedShareCommitmentProfileDigest
+        input.expectedShareCommitmentProfileHash !== undefined &&
+        certificate.shareCommitmentProfileHash !==
+            input.expectedShareCommitmentProfileHash
     ) {
         refusedObjects.push(
             createRefusal(
                 'BallotPrivacyProfileInvalid',
                 'Share commitment message-bound certificate is not bound to the expected share commitment profile.',
-                certificate.shareCommitmentMessageBoundCertDigest,
+                certificate.shareCommitmentMessageBoundCertHash,
             ),
         );
     }
@@ -664,7 +655,7 @@ export const verifyShareCommitmentMessageBoundCert = (input: {
             createRefusal(
                 'BallotPrivacyProfileInvalid',
                 'Share commitment message-bound certificate bounds are inconsistent.',
-                certificate.shareCommitmentMessageBoundCertDigest,
+                certificate.shareCommitmentMessageBoundCertHash,
             ),
         );
     }
@@ -684,7 +675,7 @@ export const verifyShareCommitmentMessageBoundCert = (input: {
             createRefusal(
                 'BallotPrivacyProfileInvalid',
                 'Share commitment message-bound certificate permits aggregate share wraparound.',
-                certificate.shareCommitmentMessageBoundCertDigest,
+                certificate.shareCommitmentMessageBoundCertHash,
             ),
         );
     }
@@ -698,7 +689,7 @@ export const verifyShareCommitmentMessageBoundCert = (input: {
             createRefusal(
                 'BallotPrivacyProfileInvalid',
                 'Share commitment message-bound certificate no-wraparound flags are not satisfied.',
-                certificate.shareCommitmentMessageBoundCertDigest,
+                certificate.shareCommitmentMessageBoundCertHash,
             ),
         );
     }
@@ -707,7 +698,7 @@ export const verifyShareCommitmentMessageBoundCert = (input: {
         return {
             ok: false,
             statusLabels: [],
-            acceptedDigests: [],
+            acceptedHashes: [],
             refusedObjects,
             unresolvedReason: 'BallotPrivacyProfileInvalid',
         };
@@ -716,9 +707,9 @@ export const verifyShareCommitmentMessageBoundCert = (input: {
     return {
         ok: true,
         statusLabels: [],
-        acceptedDigests: [certificate.shareCommitmentMessageBoundCertDigest],
+        acceptedHashes: [certificate.shareCommitmentMessageBoundCertHash],
         refusedObjects: [],
-        shareCommitmentMessageBoundCertDigest:
-            certificate.shareCommitmentMessageBoundCertDigest,
+        shareCommitmentMessageBoundCertHash:
+            certificate.shareCommitmentMessageBoundCertHash,
     };
 };

@@ -2,16 +2,16 @@ use super::*;
 
 pub(super) fn validate_participant_setup_records(
     setup_package: &Value,
-    profile_digest: &str,
-    backend_profile_digest: &str,
-    threshold_decryption_profile_digest: &str,
-    kllps_target_decryption_profile_digest: &str,
+    profile_hash: &str,
+    backend_profile_hash: &str,
+    threshold_decryption_profile_hash: &str,
+    kllps_target_decryption_profile_hash: &str,
 ) -> CanonicalResult<Vec<VerifiedParticipantSetupBinding>> {
     let ceremony_id = string_at_path(setup_package, &["setupInputs", "ceremonyId"])?;
-    let manifest_digest = digest_at_path(setup_package, &["setupInputs", "manifestDigest"])?;
-    let roster_digest = digest_at_path(setup_package, &["setupInputs", "rosterDigest"])?;
-    let threshold_profile_digest =
-        digest_at_path(setup_package, &["setupInputs", "thresholdProfileDigest"])?;
+    let manifest_hash = hash_at_path(setup_package, &["setupInputs", "manifestHash"])?;
+    let roster_hash = hash_at_path(setup_package, &["setupInputs", "rosterHash"])?;
+    let threshold_profile_hash =
+        hash_at_path(setup_package, &["setupInputs", "thresholdProfileHash"])?;
     let participants = array_at_path(setup_package, &["participants"])?;
     let participant_identities =
         array_at_path(setup_package, &["setupInputs", "participantIdentities"])?;
@@ -50,35 +50,35 @@ pub(super) fn validate_participant_setup_records(
             ceremony_id,
             "participant ceremony id",
         )?;
-        compare_digest_at_path(
+        compare_hash_at_path(
             participant_record,
-            &["manifestDigest"],
-            manifest_digest,
-            "participant manifest digest",
+            &["manifestHash"],
+            manifest_hash,
+            "participant manifest hash",
         )?;
-        compare_digest_at_path(
+        compare_hash_at_path(
             participant_record,
-            &["rosterDigest"],
-            roster_digest,
-            "participant roster digest",
+            &["rosterHash"],
+            roster_hash,
+            "participant roster hash",
         )?;
-        compare_digest_at_path(
+        compare_hash_at_path(
             participant_record,
-            &["thresholdProfileDigest"],
-            threshold_profile_digest,
-            "participant threshold profile digest",
+            &["thresholdProfileHash"],
+            threshold_profile_hash,
+            "participant threshold profile hash",
         )?;
-        compare_digest_at_path(
+        compare_hash_at_path(
             participant_record,
-            &["profileDigest"],
-            profile_digest,
-            "participant profile digest",
+            &["profileHash"],
+            profile_hash,
+            "participant profile hash",
         )?;
-        compare_digest_at_path(
+        compare_hash_at_path(
             participant_record,
-            &["backendProfileDigest"],
-            backend_profile_digest,
-            "participant backend profile digest",
+            &["backendProfileHash"],
+            backend_profile_hash,
+            "participant backend profile hash",
         )?;
         let trustee_identity = string_at_path(participant_record, &["trusteeIdentity"])?;
         ensure_nfc_identity(trustee_identity, "participant trusteeIdentity")?;
@@ -112,18 +112,16 @@ pub(super) fn validate_participant_setup_records(
         }
         let recovery_epoch = unsigned_at_path(participant_record, &["recoveryEpoch"])?;
         let device_epoch = unsigned_at_path(participant_record, &["deviceEpoch"])?;
-        let public_key_share_root = digest_at_path(participant_record, &["publicKeyShareRoot"])?;
-        let participant_setup_record_digest =
-            digest_at_path(participant_record, &["participantSetupRecordDigest"])?;
-        let trustee_threshold_verification_key_digest = digest_at_path(
-            participant_record,
-            &["trusteeThresholdVerificationKeyDigest"],
-        )?;
-        digest_at_path(participant_record, &["localSecretShareCommitmentDigest"])?;
-        digest_at_path(participant_record, &["localErrorCommitmentDigest"])?;
+        let public_key_share_root = hash_at_path(participant_record, &["publicKeyShareRoot"])?;
+        let participant_setup_record_hash =
+            hash_at_path(participant_record, &["participantSetupRecordHash"])?;
+        let trustee_threshold_verification_key_hash =
+            hash_at_path(participant_record, &["trusteeThresholdVerificationKeyHash"])?;
+        hash_at_path(participant_record, &["localSecretShareCommitmentHash"])?;
+        hash_at_path(participant_record, &["localErrorCommitmentHash"])?;
 
-        let mut participant_record_without_digest = participant_record.clone();
-        participant_record_without_digest
+        let mut participant_record_without_hash = participant_record.clone();
+        participant_record_without_hash
             .as_object_mut()
             .ok_or_else(|| {
                 CanonicalError::new(
@@ -131,12 +129,12 @@ pub(super) fn validate_participant_setup_records(
                     "participant setup record must be an object",
                 )
             })?
-            .remove("participantSetupRecordDigest");
-        compare_derived_digest(
-            "ParticipantBgvSetupRecordDigest",
-            &participant_record_without_digest,
-            participant_setup_record_digest,
-            "participant setup record digest",
+            .remove("participantSetupRecordHash");
+        compare_derived_hash(
+            "ParticipantBgvSetupRecordHash",
+            &participant_record_without_hash,
+            participant_setup_record_hash,
+            "participant setup record hash",
         )?;
 
         let trustee_threshold_verification_key = json!({
@@ -144,10 +142,10 @@ pub(super) fn validate_participant_setup_records(
             "objectVersion": 1,
             "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
             "thresholdDecryptionProfileId": THRESHOLD_DECRYPTION_PROFILE_ID,
-            "thresholdDecryptionProfileDigest": threshold_decryption_profile_digest,
-            "kllpsTargetDecryptionProfileDigest": kllps_target_decryption_profile_digest,
+            "thresholdDecryptionProfileHash": threshold_decryption_profile_hash,
+            "kllpsTargetDecryptionProfileHash": kllps_target_decryption_profile_hash,
             "ceremonyId": ceremony_id,
-            "rosterDigest": roster_digest,
+            "rosterHash": roster_hash,
             "trusteeIdentity": trustee_identity,
             "rosterPosition": roster_position,
             "recoveryEpoch": recovery_epoch,
@@ -156,11 +154,11 @@ pub(super) fn validate_participant_setup_records(
             "verificationStatement": "passive-transcript-identity-profile-and-share-domain-binding",
             "maliciousDkgProofIncluded": false,
         });
-        compare_derived_digest(
-            "TrusteeThresholdVerificationKeyDigest",
+        compare_derived_hash(
+            "TrusteeThresholdVerificationKeyHash",
             &trustee_threshold_verification_key,
-            trustee_threshold_verification_key_digest,
-            "trustee threshold verification key digest",
+            trustee_threshold_verification_key_hash,
+            "trustee threshold verification key hash",
         )?;
 
         verified_participants.push(VerifiedParticipantSetupBinding {
@@ -169,8 +167,8 @@ pub(super) fn validate_participant_setup_records(
             recovery_epoch,
             device_epoch,
             public_key_share_root: public_key_share_root.to_string(),
-            participant_setup_record_digest: participant_setup_record_digest.to_string(),
-            trustee_threshold_verification_key_digest: trustee_threshold_verification_key_digest
+            participant_setup_record_hash: participant_setup_record_hash.to_string(),
+            trustee_threshold_verification_key_hash: trustee_threshold_verification_key_hash
                 .to_string(),
         });
     }

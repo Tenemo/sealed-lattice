@@ -1,4 +1,4 @@
-import type { ProtocolDigest, RefusalRecord } from '@sealed-lattice/types';
+import type { ProtocolHash, RefusalRecord } from '@sealed-lattice/types';
 
 import {
     createAggregateRefusal,
@@ -10,7 +10,7 @@ const maximumPublicObjectTraversalObjects = 10_000;
 
 export const collectForbiddenWitnessFieldRefusals = (
     value: unknown,
-    objectDigest: ProtocolDigest | undefined,
+    objectHash: ProtocolHash | undefined,
     path: string,
     options: {
         readonly publicObjectDescription: string;
@@ -40,7 +40,7 @@ export const collectForbiddenWitnessFieldRefusals = (
             refusedObjects.push(
                 createAggregateRefusal(
                     `${options.publicObjectDescription} must not contain cyclic object references at ${currentValue.path}.`,
-                    objectDigest,
+                    objectHash,
                 ),
             );
             continue;
@@ -51,7 +51,7 @@ export const collectForbiddenWitnessFieldRefusals = (
             refusedObjects.push(
                 createAggregateRefusal(
                     `${options.publicObjectDescription} traversal exceeded the maximum object count.`,
-                    objectDigest,
+                    objectHash,
                 ),
             );
             break;
@@ -60,7 +60,7 @@ export const collectForbiddenWitnessFieldRefusals = (
             refusedObjects.push(
                 createAggregateRefusal(
                     `${options.publicObjectDescription} nesting is too deep at ${currentValue.path}.`,
-                    objectDigest,
+                    objectHash,
                 ),
             );
             continue;
@@ -98,7 +98,7 @@ export const collectForbiddenWitnessFieldRefusals = (
                 refusedObjects.push(
                     createAggregateRefusal(
                         `${options.publicObjectDescription} must not expose witness field ${fieldPath}.`,
-                        objectDigest,
+                        objectHash,
                     ),
                 );
                 continue;

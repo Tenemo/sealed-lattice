@@ -7,8 +7,8 @@
       "context": {
         "pollSpecValid": true,
         "localRosterAccepted": true,
-        "rosterExternalAcceptanceDigest": "accepted-roster-digest",
-        "actionContextRosterExternalAcceptanceDigest": "accepted-roster-digest",
+        "rosterExternalAcceptanceHash": "accepted-roster-hash",
+        "actionContextRosterExternalAcceptanceHash": "accepted-roster-hash",
         "lifecycleState": "votingOpen"
       },
       "expected": {
@@ -23,8 +23,8 @@
       "context": {
         "pollSpecValid": true,
         "localRosterAccepted": true,
-        "rosterExternalAcceptanceDigest": "accepted-roster-digest",
-        "actionContextRosterExternalAcceptanceDigest": "accepted-roster-digest",
+        "rosterExternalAcceptanceHash": "accepted-roster-hash",
+        "actionContextRosterExternalAcceptanceHash": "accepted-roster-hash",
         "lifecycleState": "votingClosed",
         "setupCompleteCount": 20,
         "turnoutCount": 13
@@ -41,8 +41,8 @@
       "context": {
         "pollSpecValid": true,
         "localRosterAccepted": true,
-        "rosterExternalAcceptanceDigest": "accepted-roster-digest",
-        "actionContextRosterExternalAcceptanceDigest": "accepted-roster-digest",
+        "rosterExternalAcceptanceHash": "accepted-roster-hash",
+        "actionContextRosterExternalAcceptanceHash": "accepted-roster-hash",
         "lifecycleState": "evaluationProofPending",
         "targetFinalityAccepted": true,
         "bridgeBenchmarkReportPresent": true
@@ -60,12 +60,12 @@
         "pollSpecValid": true,
         "localRosterAccepted": true,
         "lifecycleState": "votingOpen",
-        "rosterExternalAcceptanceDigest": "accepted-roster-digest"
+        "rosterExternalAcceptanceHash": "accepted-roster-hash"
       },
       "expected": {
         "allowed": false,
         "action": "SubmitVote",
-        "reason": "RosterExternalAcceptanceDigestMissing"
+        "reason": "RosterExternalAcceptanceHashMissing"
       }
     },
     {
@@ -75,13 +75,13 @@
         "pollSpecValid": true,
         "localRosterAccepted": true,
         "lifecycleState": "votingOpen",
-        "rosterExternalAcceptanceDigest": "accepted-roster-digest",
-        "actionContextRosterExternalAcceptanceDigest": "different-roster-digest"
+        "rosterExternalAcceptanceHash": "accepted-roster-hash",
+        "actionContextRosterExternalAcceptanceHash": "different-roster-hash"
       },
       "expected": {
         "allowed": false,
         "action": "SubmitVote",
-        "reason": "RosterExternalAcceptanceDigestMismatch"
+        "reason": "RosterExternalAcceptanceHashMismatch"
       }
     },
     {
@@ -90,8 +90,8 @@
       "context": {
         "pollSpecValid": true,
         "localRosterAccepted": true,
-        "rosterExternalAcceptanceDigest": "accepted-roster-digest",
-        "actionContextRosterExternalAcceptanceDigest": "accepted-roster-digest",
+        "rosterExternalAcceptanceHash": "accepted-roster-hash",
+        "actionContextRosterExternalAcceptanceHash": "accepted-roster-hash",
         "lifecycleState": "evaluationProofVerified",
         "targetFinalityAccepted": true,
         "evaluationProofVerified": true,
@@ -109,9 +109,9 @@
         "rosterSize": 20,
         "targetBoundShareSelectionProfile": {
           "profileId": "target-bound-first-valid-share-selection-v1",
-          "certificateDigest": "target-bound-certificate-digest",
+          "certificateHash": "target-bound-certificate-hash",
           "cpadProfileId": "KLLPS26-AsyncLagrangeTarget-CPAD-v1",
-          "targetBasisDigest": "target-basis-digest",
+          "targetBasisHash": "target-basis-hash",
           "decryptionShareQuorum": 9,
           "minimumSharesForInterpolation": 7,
           "minimumArrivalsForRobustDecode": 9,
@@ -122,8 +122,8 @@
       "context": {
         "pollSpecValid": true,
         "localRosterAccepted": true,
-        "rosterExternalAcceptanceDigest": "accepted-roster-digest",
-        "actionContextRosterExternalAcceptanceDigest": "accepted-roster-digest",
+        "rosterExternalAcceptanceHash": "accepted-roster-hash",
+        "actionContextRosterExternalAcceptanceHash": "accepted-roster-hash",
         "lifecycleState": "targetAccepted",
         "targetFinalityAccepted": true,
         "targetAccepted": true,
@@ -144,8 +144,8 @@
       "context": {
         "pollSpecValid": true,
         "localRosterAccepted": true,
-        "rosterExternalAcceptanceDigest": "accepted-roster-digest",
-        "actionContextRosterExternalAcceptanceDigest": "accepted-roster-digest",
+        "rosterExternalAcceptanceHash": "accepted-roster-hash",
+        "actionContextRosterExternalAcceptanceHash": "accepted-roster-hash",
         "lifecycleState": "targetAccepted",
         "targetFinalityAccepted": true,
         "targetAccepted": true,
@@ -164,9 +164,9 @@
         "rosterSize": 20,
         "targetBoundShareSelectionProfile": {
           "profileId": "target-bound-first-valid-share-selection-v1",
-          "certificateDigest": "target-bound-certificate-digest",
+          "certificateHash": "target-bound-certificate-hash",
           "cpadProfileId": "KLLPS26-AsyncLagrangeTarget-CPAD-v1",
-          "targetBasisDigest": "target-basis-digest",
+          "targetBasisHash": "target-basis-hash",
           "decryptionShareQuorum": 9,
           "minimumSharesForInterpolation": 7,
           "minimumArrivalsForRobustDecode": 9,
@@ -177,8 +177,8 @@
       "context": {
         "pollSpecValid": true,
         "localRosterAccepted": true,
-        "rosterExternalAcceptanceDigest": "accepted-roster-digest",
-        "actionContextRosterExternalAcceptanceDigest": "accepted-roster-digest",
+        "rosterExternalAcceptanceHash": "accepted-roster-hash",
+        "actionContextRosterExternalAcceptanceHash": "accepted-roster-hash",
         "lifecycleState": "fullyVerified",
         "decryptionShareCount": 9
       },
@@ -193,13 +193,13 @@
       "action": "AcceptTarget",
       "thresholdProfileInput": {
         "rosterSize": 21,
-        "dynamicRosterProfileCertificateDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        "dynamicRosterProfileCertificateHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
       },
       "context": {
         "pollSpecValid": true,
         "localRosterAccepted": true,
-        "rosterExternalAcceptanceDigest": "accepted-roster-digest",
-        "actionContextRosterExternalAcceptanceDigest": "accepted-roster-digest",
+        "rosterExternalAcceptanceHash": "accepted-roster-hash",
+        "actionContextRosterExternalAcceptanceHash": "accepted-roster-hash",
         "lifecycleState": "evaluationProofVerified",
         "targetFinalityAccepted": true,
         "evaluationProofVerified": true,
@@ -216,8 +216,8 @@
       "context": {
         "pollSpecValid": true,
         "localRosterAccepted": true,
-        "rosterExternalAcceptanceDigest": "accepted-roster-digest",
-        "actionContextRosterExternalAcceptanceDigest": "accepted-roster-digest",
+        "rosterExternalAcceptanceHash": "accepted-roster-hash",
+        "actionContextRosterExternalAcceptanceHash": "accepted-roster-hash",
         "lifecycleState": "evaluationProofVerified",
         "targetFinalityAccepted": true,
         "evaluationProofVerified": true,
@@ -236,8 +236,8 @@
       "context": {
         "pollSpecValid": true,
         "localRosterAccepted": true,
-        "rosterExternalAcceptanceDigest": "accepted-roster-digest",
-        "actionContextRosterExternalAcceptanceDigest": "accepted-roster-digest",
+        "rosterExternalAcceptanceHash": "accepted-roster-hash",
+        "actionContextRosterExternalAcceptanceHash": "accepted-roster-hash",
         "lifecycleState": "votingClosed",
         "setupCompleteCount": 20,
         "turnoutCount": 14,
@@ -257,9 +257,9 @@
         "rosterSize": 20,
         "targetBoundShareSelectionProfile": {
           "profileId": "target-bound-first-valid-share-selection-v1",
-          "certificateDigest": "target-bound-certificate-digest",
+          "certificateHash": "target-bound-certificate-hash",
           "cpadProfileId": "KLLPS26-AsyncLagrangeTarget-CPAD-v1",
-          "targetBasisDigest": "target-basis-digest",
+          "targetBasisHash": "target-basis-hash",
           "decryptionShareQuorum": 9,
           "minimumSharesForInterpolation": 7,
           "minimumArrivalsForRobustDecode": 9,
@@ -270,8 +270,8 @@
       "context": {
         "pollSpecValid": true,
         "localRosterAccepted": true,
-        "rosterExternalAcceptanceDigest": "accepted-roster-digest",
-        "actionContextRosterExternalAcceptanceDigest": "accepted-roster-digest",
+        "rosterExternalAcceptanceHash": "accepted-roster-hash",
+        "actionContextRosterExternalAcceptanceHash": "accepted-roster-hash",
         "lifecycleState": "decryptionSharesReady",
         "kllpsCpadCertificatePresent": false,
         "thresholdDecryptionCertificatePresent": true

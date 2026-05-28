@@ -1,6 +1,6 @@
 use super::boundedness::{
     BridgeBgvRandomnessBoundCommitmentInput, bridge_bgv_randomness_bound_commitment,
-    bridge_bgv_randomness_bound_commitment_digest, validate_bridge_bgv_randomness_bound_commitment,
+    bridge_bgv_randomness_bound_commitment_hash, validate_bridge_bgv_randomness_bound_commitment,
 };
 use super::validation::{
     read_u64_object_field, read_usize_object_field, reject_forbidden_public_bridge_fields,
@@ -14,9 +14,9 @@ pub(super) struct BridgeSharedWitnessProverInput<'value> {
     pub(super) setup_package: &'value Value,
     pub(super) bridge_encryption: &'value Value,
     pub(super) proof_input: &'value Value,
-    pub(super) bridge_proof_statement_digest: &'value str,
+    pub(super) bridge_proof_statement_hash: &'value str,
     pub(super) contributor_identity: &'value str,
-    pub(super) aggregate_derivation_statement_digest: &'value str,
+    pub(super) aggregate_derivation_statement_hash: &'value str,
     pub(super) aggregate_integer_share_vector: &'value [u64],
     pub(super) aggregate_opening_randomness: &'value [i64],
     pub(super) aggregate_reduced_coordinates: &'value [u64],
@@ -50,7 +50,7 @@ const BRIDGE_SHARED_WITNESS_MASK_RANDOM_BIT_LENGTH: usize =
     BRIDGE_SHARED_WITNESS_MASK_BIT_LENGTH + 1;
 const BRIDGE_SHARED_WITNESS_RESPONSE_BYTE_LENGTH: usize = 32;
 const BRIDGE_SHARED_WITNESS_MASK_BYTES_PER_COORDINATE: usize = 31;
-const BRIDGE_SHARED_WITNESS_MASK_COORDINATES_PER_DIGEST: usize = 2;
+const BRIDGE_SHARED_WITNESS_MASK_COORDINATES_PER_HASH: usize = 2;
 const BRIDGE_SHARED_WITNESS_REJECTION_ATTEMPT_LIMIT: usize = 64;
 
 pub(super) fn generate_bridge_shared_witness_proof(
@@ -79,7 +79,7 @@ pub(super) fn generate_bridge_shared_witness_proof(
         let mut accepted_check = None;
         for rejection_attempt_index in 0..BRIDGE_SHARED_WITNESS_REJECTION_ATTEMPT_LIMIT {
             let aggregate_integer_mask = sample_bridge_mask_vector(
-                input.bridge_proof_statement_digest,
+                input.bridge_proof_statement_hash,
                 input.prover_randomness_hex,
                 check_index,
                 rejection_attempt_index,
@@ -88,7 +88,7 @@ pub(super) fn generate_bridge_shared_witness_proof(
                 &mask_absolute_bound,
             );
             let aggregate_opening_mask = sample_bridge_mask_vector(
-                input.bridge_proof_statement_digest,
+                input.bridge_proof_statement_hash,
                 input.prover_randomness_hex,
                 check_index,
                 rejection_attempt_index,
@@ -97,7 +97,7 @@ pub(super) fn generate_bridge_shared_witness_proof(
                 &mask_absolute_bound,
             );
             let aggregate_reduced_mask = sample_bridge_mask_vector(
-                input.bridge_proof_statement_digest,
+                input.bridge_proof_statement_hash,
                 input.prover_randomness_hex,
                 check_index,
                 rejection_attempt_index,
@@ -106,7 +106,7 @@ pub(super) fn generate_bridge_shared_witness_proof(
                 &mask_absolute_bound,
             );
             let aggregate_quotient_mask = sample_bridge_mask_vector(
-                input.bridge_proof_statement_digest,
+                input.bridge_proof_statement_hash,
                 input.prover_randomness_hex,
                 check_index,
                 rejection_attempt_index,
@@ -115,7 +115,7 @@ pub(super) fn generate_bridge_shared_witness_proof(
                 &mask_absolute_bound,
             );
             let plaintext_coefficient_mask = sample_bridge_mask_vector(
-                input.bridge_proof_statement_digest,
+                input.bridge_proof_statement_hash,
                 input.prover_randomness_hex,
                 check_index,
                 rejection_attempt_index,
@@ -124,7 +124,7 @@ pub(super) fn generate_bridge_shared_witness_proof(
                 &mask_absolute_bound,
             );
             let randomizer_mask = sample_bridge_mask_vector(
-                input.bridge_proof_statement_digest,
+                input.bridge_proof_statement_hash,
                 input.prover_randomness_hex,
                 check_index,
                 rejection_attempt_index,
@@ -133,7 +133,7 @@ pub(super) fn generate_bridge_shared_witness_proof(
                 &mask_absolute_bound,
             );
             let perturbation_zero_mask = sample_bridge_mask_vector(
-                input.bridge_proof_statement_digest,
+                input.bridge_proof_statement_hash,
                 input.prover_randomness_hex,
                 check_index,
                 rejection_attempt_index,
@@ -142,7 +142,7 @@ pub(super) fn generate_bridge_shared_witness_proof(
                 &mask_absolute_bound,
             );
             let perturbation_one_mask = sample_bridge_mask_vector(
-                input.bridge_proof_statement_digest,
+                input.bridge_proof_statement_hash,
                 input.prover_randomness_hex,
                 check_index,
                 rejection_attempt_index,
@@ -150,7 +150,7 @@ pub(super) fn generate_bridge_shared_witness_proof(
                 perturbation_one_witness.len(),
                 &mask_absolute_bound,
             );
-            let aggregate_commitment_digest = aggregate_relation_commitment_digest_from_responses(
+            let aggregate_commitment_hash = aggregate_relation_commitment_hash_from_responses(
                 &aggregate_relation_context,
                 &aggregate_integer_mask,
                 &aggregate_opening_mask,
@@ -158,16 +158,16 @@ pub(super) fn generate_bridge_shared_witness_proof(
                 &aggregate_quotient_mask,
                 0,
             )?;
-            let batch_commitment_digest =
-                crate::bgv::commands::m9_bridge_batch_encoding_commitment_digest_from_responses(
+            let batch_commitment_hash =
+                crate::bgv::commands::m9_bridge_batch_encoding_commitment_hash_from_responses(
                     &aggregate_reduced_mask,
                     &plaintext_coefficient_mask,
                 )?;
-            let bgv_commitment_digest =
-                crate::bgv::commands::m9_bridge_ciphertext_commitment_digest_from_responses(
+            let bgv_commitment_hash =
+                crate::bgv::commands::m9_bridge_ciphertext_commitment_hash_from_responses(
                     input.setup_package,
                     input.contributor_identity,
-                    input.aggregate_derivation_statement_digest,
+                    input.aggregate_derivation_statement_hash,
                     input.bridge_encryption,
                     0,
                     &plaintext_coefficient_mask,
@@ -177,7 +177,7 @@ pub(super) fn generate_bridge_shared_witness_proof(
                 )?;
             let bgv_randomness_bound_commitment =
                 bridge_bgv_randomness_bound_commitment(BridgeBgvRandomnessBoundCommitmentInput {
-                    bridge_proof_statement_digest: input.bridge_proof_statement_digest,
+                    bridge_proof_statement_hash: input.bridge_proof_statement_hash,
                     check_index,
                     randomizer_masks: &randomizer_mask,
                     randomizer_witness: &randomizer_witness,
@@ -186,15 +186,15 @@ pub(super) fn generate_bridge_shared_witness_proof(
                     perturbation_one_masks: &perturbation_one_mask,
                     perturbation_one_witness: &perturbation_one_witness,
                 })?;
-            let bgv_randomness_bound_commitment_digest =
-                bridge_bgv_randomness_bound_commitment_digest(&bgv_randomness_bound_commitment)?;
+            let bgv_randomness_bound_commitment_hash =
+                bridge_bgv_randomness_bound_commitment_hash(&bgv_randomness_bound_commitment)?;
             let challenge_scalar = bridge_shared_witness_challenge_scalar(
-                input.bridge_proof_statement_digest,
+                input.bridge_proof_statement_hash,
                 check_index,
-                &aggregate_commitment_digest,
-                &batch_commitment_digest,
-                &bgv_commitment_digest,
-                &bgv_randomness_bound_commitment_digest,
+                &aggregate_commitment_hash,
+                &batch_commitment_hash,
+                &bgv_commitment_hash,
+                &bgv_randomness_bound_commitment_hash,
             );
             let challenge = BigInt::from(challenge_scalar);
             let aggregate_share_response = response_vector(
@@ -264,11 +264,11 @@ pub(super) fn generate_bridge_shared_witness_proof(
                 "checkIndex": check_index,
                 "rejectionAttemptIndex": rejection_attempt_index,
                 "challengeScalarHex": check_challenge_hex,
-                "aggregateRelationCommitmentDigest": aggregate_commitment_digest,
-                "batchEncodingCommitmentDigest": batch_commitment_digest,
-                "bgvCiphertextCommitmentDigest": bgv_commitment_digest,
+                "aggregateRelationCommitmentHash": aggregate_commitment_hash,
+                "batchEncodingCommitmentHash": batch_commitment_hash,
+                "bgvCiphertextCommitmentHash": bgv_commitment_hash,
                 "bgvRandomnessBoundCommitment": bgv_randomness_bound_commitment,
-                "bgvRandomnessBoundCommitmentDigest": bgv_randomness_bound_commitment_digest,
+                "bgvRandomnessBoundCommitmentHash": bgv_randomness_bound_commitment_hash,
                 "aggregateShareResponseHex": signed_i256_vector_hex(&aggregate_share_response)?,
                 "aggregateOpeningResponseHex": signed_i256_vector_hex(&aggregate_opening_response)?,
                 "aggregateReducedResponseHex": signed_i256_vector_hex(&aggregate_reduced_response)?,
@@ -302,7 +302,7 @@ pub(super) fn generate_bridge_shared_witness_proof(
         "objectType": "AggregateBridgeSharedWitnessProof",
         "objectVersion": 1,
         "proofModel": BRIDGE_SHARED_WITNESS_PROOF_MODEL,
-        "bridgeProofStatementDigest": input.bridge_proof_statement_digest,
+        "bridgeProofStatementHash": input.bridge_proof_statement_hash,
         "relationCheckCount": BRIDGE_SHARED_WITNESS_CHECK_COUNT,
         "challengeHex": challenge_hex,
         "sharedResponseScalarCount": shared_response_scalar_count,
@@ -319,28 +319,28 @@ pub(super) fn generate_bridge_shared_witness_proof(
     }))
 }
 
-pub(super) fn bridge_shared_witness_proof_digest(
+pub(super) fn bridge_shared_witness_proof_hash(
     shared_witness_proof: &Value,
 ) -> CanonicalResult<String> {
-    derive_protocol_digest(
-        "BridgeProofRecordDigest",
+    derive_protocol_hash(
+        "BridgeProofRecordHash",
         &json!({
-            "purpose": "sealed-lattice-aggregate-bridge-shared-witness-proof-digest-v1",
+            "purpose": "sealed-lattice-aggregate-bridge-shared-witness-proof-hash-v1",
             "bridgeSharedWitnessProof": shared_witness_proof,
         }),
     )
 }
 
 pub(super) fn bridge_shared_witness_zero_knowledge_status(
-    bridge_proof_statement_digest: &str,
-    shared_witness_proof_digest: &str,
+    bridge_proof_statement_hash: &str,
+    shared_witness_proof_hash: &str,
 ) -> Value {
     json!({
         "objectType": "AggregateBridgeSharedWitnessZeroKnowledgeStatus",
         "objectVersion": 1,
         "statusModel": "shared-witness-zero-knowledge-response-distribution-status-v1",
-        "bridgeProofStatementDigest": bridge_proof_statement_digest,
-        "bridgeSharedWitnessProofDigest": shared_witness_proof_digest,
+        "bridgeProofStatementHash": bridge_proof_statement_hash,
+        "bridgeSharedWitnessProofHash": shared_witness_proof_hash,
         "responseBoundModel": BRIDGE_SHARED_WITNESS_RESPONSE_BOUND_MODEL,
         "maskAbsoluteBoundExclusive": bridge_shared_witness_mask_absolute_bound_exclusive_decimal(),
         "responseAbsoluteBoundExclusive": bridge_shared_witness_response_absolute_bound_exclusive_decimal(),
@@ -353,11 +353,11 @@ pub(super) fn bridge_shared_witness_zero_knowledge_status(
     })
 }
 
-pub(super) fn bridge_shared_witness_zero_knowledge_status_digest(
+pub(super) fn bridge_shared_witness_zero_knowledge_status_hash(
     status_evidence: &Value,
 ) -> CanonicalResult<String> {
-    derive_protocol_digest(
-        "BridgeProofRecordDigest",
+    derive_protocol_hash(
+        "BridgeProofRecordHash",
         &json!({
             "purpose": "sealed-lattice-aggregate-bridge-shared-witness-zero-knowledge-status-v1",
             "sharedWitnessZeroKnowledgeStatusEvidence": status_evidence,
@@ -367,8 +367,8 @@ pub(super) fn bridge_shared_witness_zero_knowledge_status_digest(
 
 pub(super) fn validate_bridge_shared_witness_zero_knowledge_status(
     proof_value: &Value,
-    bridge_proof_statement_digest: &str,
-    shared_witness_proof_digest: &str,
+    bridge_proof_statement_hash: &str,
+    shared_witness_proof_hash: &str,
 ) -> CanonicalResult<String> {
     let status_evidence = required_json_field(
         proof_value,
@@ -380,8 +380,8 @@ pub(super) fn validate_bridge_shared_witness_zero_knowledge_status(
         "bridgeProof.sharedWitnessZeroKnowledgeStatusEvidence",
     )?;
     let expected_status = bridge_shared_witness_zero_knowledge_status(
-        bridge_proof_statement_digest,
-        shared_witness_proof_digest,
+        bridge_proof_statement_hash,
+        shared_witness_proof_hash,
     );
     if status_evidence != &expected_status {
         return Err(CanonicalError::new(
@@ -390,15 +390,15 @@ pub(super) fn validate_bridge_shared_witness_zero_knowledge_status(
         ));
     }
 
-    let status_digest = bridge_shared_witness_zero_knowledge_status_digest(status_evidence)?;
+    let status_hash = bridge_shared_witness_zero_knowledge_status_hash(status_evidence)?;
     require_equal_string(
         proof_value,
-        "sharedWitnessZeroKnowledgeStatusDigest",
-        &status_digest,
-        "shared-witness zero-knowledge status digest",
+        "sharedWitnessZeroKnowledgeStatusHash",
+        &status_hash,
+        "shared-witness zero-knowledge status hash",
     )?;
 
-    Ok(status_digest)
+    Ok(status_hash)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -407,9 +407,9 @@ pub(super) fn verify_bridge_shared_witness_proof(
     component: &Value,
     setup_package: &Value,
     bridge_encryption: &Value,
-    bridge_proof_statement_digest: &str,
+    bridge_proof_statement_hash: &str,
     contributor_identity: &str,
-    aggregate_derivation_statement_digest: &str,
+    aggregate_derivation_statement_hash: &str,
     aggregate_reduced_coordinate_count: u64,
     aggregate_quotient_coordinate_count: u64,
 ) -> CanonicalResult<BridgeSharedWitnessProofVerification> {
@@ -439,9 +439,9 @@ pub(super) fn verify_bridge_shared_witness_proof(
     }
     require_equal_string(
         shared_proof,
-        "bridgeProofStatementDigest",
-        bridge_proof_statement_digest,
-        "shared-witness proof statement digest",
+        "bridgeProofStatementHash",
+        bridge_proof_statement_hash,
+        "shared-witness proof statement hash",
     )?;
     require_equal_string(
         shared_proof,
@@ -616,7 +616,7 @@ pub(super) fn verify_bridge_shared_witness_proof(
         ] {
             validate_response_vector_bounds_with_bound(role, responses, &response_bound)?;
         }
-        let aggregate_commitment_digest = aggregate_relation_commitment_digest_from_responses(
+        let aggregate_commitment_hash = aggregate_relation_commitment_hash_from_responses(
             &aggregate_relation_context,
             &aggregate_share_response,
             &aggregate_opening_response,
@@ -624,16 +624,16 @@ pub(super) fn verify_bridge_shared_witness_proof(
             &aggregate_quotient_response,
             challenge_scalar,
         )?;
-        let batch_commitment_digest =
-            crate::bgv::commands::m9_bridge_batch_encoding_commitment_digest_from_responses(
+        let batch_commitment_hash =
+            crate::bgv::commands::m9_bridge_batch_encoding_commitment_hash_from_responses(
                 &aggregate_reduced_response,
                 &batch_coefficient_response,
             )?;
-        let bgv_commitment_digest =
-            crate::bgv::commands::m9_bridge_ciphertext_commitment_digest_from_responses(
+        let bgv_commitment_hash =
+            crate::bgv::commands::m9_bridge_ciphertext_commitment_hash_from_responses(
                 setup_package,
                 contributor_identity,
-                aggregate_derivation_statement_digest,
+                aggregate_derivation_statement_hash,
                 bridge_encryption,
                 challenge_scalar,
                 &batch_coefficient_response,
@@ -641,41 +641,40 @@ pub(super) fn verify_bridge_shared_witness_proof(
                 &bounded_perturbation_zero_response,
                 &bounded_perturbation_one_response,
             )?;
-        let bgv_randomness_bound_commitment_digest =
-            validate_bridge_bgv_randomness_bound_commitment(
-                check,
-                bridge_proof_statement_digest,
-                check_index,
-                challenge_scalar,
-                &cipher_randomizer_response,
-                &bounded_perturbation_zero_response,
-                &bounded_perturbation_one_response,
-            )?;
-        require_equal_string(
+        let bgv_randomness_bound_commitment_hash = validate_bridge_bgv_randomness_bound_commitment(
             check,
-            "aggregateRelationCommitmentDigest",
-            &aggregate_commitment_digest,
-            "shared-witness aggregate relation commitment digest",
+            bridge_proof_statement_hash,
+            check_index,
+            challenge_scalar,
+            &cipher_randomizer_response,
+            &bounded_perturbation_zero_response,
+            &bounded_perturbation_one_response,
         )?;
         require_equal_string(
             check,
-            "batchEncodingCommitmentDigest",
-            &batch_commitment_digest,
-            "shared-witness batch encoding commitment digest",
+            "aggregateRelationCommitmentHash",
+            &aggregate_commitment_hash,
+            "shared-witness aggregate relation commitment hash",
         )?;
         require_equal_string(
             check,
-            "bgvCiphertextCommitmentDigest",
-            &bgv_commitment_digest,
-            "shared-witness BGV ciphertext commitment digest",
+            "batchEncodingCommitmentHash",
+            &batch_commitment_hash,
+            "shared-witness batch encoding commitment hash",
+        )?;
+        require_equal_string(
+            check,
+            "bgvCiphertextCommitmentHash",
+            &bgv_commitment_hash,
+            "shared-witness BGV ciphertext commitment hash",
         )?;
         let recomputed_challenge_scalar = bridge_shared_witness_challenge_scalar(
-            bridge_proof_statement_digest,
+            bridge_proof_statement_hash,
             check_index,
-            &aggregate_commitment_digest,
-            &batch_commitment_digest,
-            &bgv_commitment_digest,
-            &bgv_randomness_bound_commitment_digest,
+            &aggregate_commitment_hash,
+            &batch_commitment_hash,
+            &bgv_commitment_hash,
+            &bgv_randomness_bound_commitment_hash,
         );
         if challenge_scalar != recomputed_challenge_scalar {
             return Err(CanonicalError::new(
@@ -714,7 +713,7 @@ fn bridge_aggregate_relation_commitment_context(
     })
 }
 
-fn aggregate_relation_commitment_digest_from_responses(
+fn aggregate_relation_commitment_hash_from_responses(
     context: &BridgeAggregateRelationCommitmentContext,
     aggregate_share_response: &[BigInt],
     aggregate_opening_response: &[BigInt],
@@ -752,8 +751,8 @@ fn aggregate_relation_commitment_digest_from_responses(
     let scaled_target = PolynomialVector::new(ring, scaled_target_entries)?;
     let commitment_vector = response_image.add(&scaled_target)?;
 
-    derive_protocol_digest(
-        "BridgeProofRecordDigest",
+    derive_protocol_hash(
+        "BridgeProofRecordHash",
         &json!({
             "purpose": "sealed-lattice-aggregate-bridge-relation-commitment-v1",
             "commitmentVector": canonical_polynomial_vector_response(commitment_vector.entries()),
@@ -762,7 +761,7 @@ fn aggregate_relation_commitment_digest_from_responses(
 }
 
 fn sample_bridge_mask_vector(
-    statement_digest: &str,
+    statement_hash: &str,
     prover_randomness_hex: &str,
     check_index: usize,
     rejection_attempt_index: usize,
@@ -777,10 +776,10 @@ fn sample_bridge_mask_vector(
 
     while masks.len() < length {
         let block_index_bytes = block_index.to_le_bytes();
-        let digest = hash512(
+        let hash = hash512(
             "sealed-lattice-root/aggregate-bridge-shared-witness-mask-rejection-sampled-v1",
             &[
-                statement_digest.as_bytes(),
+                statement_hash.as_bytes(),
                 prover_randomness_hex.as_bytes(),
                 role.as_bytes(),
                 &check_index_bytes,
@@ -788,13 +787,13 @@ fn sample_bridge_mask_vector(
                 &block_index_bytes,
             ],
         );
-        for lane_index in 0..BRIDGE_SHARED_WITNESS_MASK_COORDINATES_PER_DIGEST {
+        for lane_index in 0..BRIDGE_SHARED_WITNESS_MASK_COORDINATES_PER_HASH {
             if masks.len() == length {
                 break;
             }
             let lane_start = lane_index * BRIDGE_SHARED_WITNESS_MASK_BYTES_PER_COORDINATE;
             let lane_end = lane_start + BRIDGE_SHARED_WITNESS_MASK_BYTES_PER_COORDINATE;
-            let lane = &digest[lane_start..lane_end];
+            let lane = &hash[lane_start..lane_end];
             masks.push(mask_from_uniform_lane(lane, mask_absolute_bound));
         }
         block_index = block_index
@@ -821,45 +820,45 @@ fn mask_from_uniform_lane(lane: &[u8], mask_absolute_bound: &BigInt) -> BigInt {
 }
 
 fn bridge_shared_witness_challenge_scalar(
-    statement_digest: &str,
+    statement_hash: &str,
     check_index: usize,
-    aggregate_commitment_digest: &str,
-    batch_commitment_digest: &str,
-    bgv_commitment_digest: &str,
-    bgv_randomness_bound_commitment_digest: &str,
+    aggregate_commitment_hash: &str,
+    batch_commitment_hash: &str,
+    bgv_commitment_hash: &str,
+    bgv_randomness_bound_commitment_hash: &str,
 ) -> u64 {
     let check_index_bytes = (check_index as u64).to_le_bytes();
-    let digest = hash512(
+    let hash = hash512(
         "sealed-lattice-root/aggregate-bridge-shared-witness-challenge-v1",
         &[
-            statement_digest.as_bytes(),
+            statement_hash.as_bytes(),
             &check_index_bytes,
-            aggregate_commitment_digest.as_bytes(),
-            batch_commitment_digest.as_bytes(),
-            bgv_commitment_digest.as_bytes(),
-            bgv_randomness_bound_commitment_digest.as_bytes(),
+            aggregate_commitment_hash.as_bytes(),
+            batch_commitment_hash.as_bytes(),
+            bgv_commitment_hash.as_bytes(),
+            bgv_randomness_bound_commitment_hash.as_bytes(),
         ],
     );
-    if let Some(challenge) = first_nonzero_u64_chunk(&digest) {
+    if let Some(challenge) = first_nonzero_u64_chunk(&hash) {
         return challenge;
     }
 
     let mut retry_index = 1_u64;
     loop {
         let retry_index_bytes = retry_index.to_le_bytes();
-        let retry_digest = hash512(
+        let retry_hash = hash512(
             "sealed-lattice-root/aggregate-bridge-shared-witness-challenge-retry-v1",
             &[
-                statement_digest.as_bytes(),
+                statement_hash.as_bytes(),
                 &check_index_bytes,
-                aggregate_commitment_digest.as_bytes(),
-                batch_commitment_digest.as_bytes(),
-                bgv_commitment_digest.as_bytes(),
-                bgv_randomness_bound_commitment_digest.as_bytes(),
+                aggregate_commitment_hash.as_bytes(),
+                batch_commitment_hash.as_bytes(),
+                bgv_commitment_hash.as_bytes(),
+                bgv_randomness_bound_commitment_hash.as_bytes(),
                 &retry_index_bytes,
             ],
         );
-        if let Some(challenge) = first_nonzero_u64_chunk(&retry_digest) {
+        if let Some(challenge) = first_nonzero_u64_chunk(&retry_hash) {
             return challenge;
         }
         retry_index = retry_index
@@ -868,8 +867,8 @@ fn bridge_shared_witness_challenge_scalar(
     }
 }
 
-fn first_nonzero_u64_chunk(digest: &[u8]) -> Option<u64> {
-    for chunk in digest.chunks_exact(8) {
+fn first_nonzero_u64_chunk(hash: &[u8]) -> Option<u64> {
+    for chunk in hash.chunks_exact(8) {
         let mut bytes = [0_u8; 8];
         bytes.copy_from_slice(chunk);
         let challenge = u64::from_le_bytes(bytes);
@@ -1192,16 +1191,16 @@ mod tests {
         BigInt::one() << 240_u32
     }
 
-    fn mask_from_digest_lane(digest: &[u8], lane_index: usize) -> BigInt {
+    fn mask_from_hash_lane(hash: &[u8], lane_index: usize) -> BigInt {
         let lane_start = lane_index * BRIDGE_SHARED_WITNESS_MASK_BYTES_PER_COORDINATE;
         let lane_end = lane_start + BRIDGE_SHARED_WITNESS_MASK_BYTES_PER_COORDINATE;
         let mask_absolute_bound = bridge_mask_absolute_bound();
-        mask_from_uniform_lane(&digest[lane_start..lane_end], &mask_absolute_bound)
+        mask_from_uniform_lane(&hash[lane_start..lane_end], &mask_absolute_bound)
     }
 
     #[test]
-    fn bridge_mask_sampler_consumes_two_wide_coordinates_per_digest() {
-        let statement_digest = "statement-digest";
+    fn bridge_mask_sampler_consumes_two_wide_coordinates_per_hash() {
+        let statement_hash = "statement-hash";
         let prover_randomness_hex = "001122";
         let role = "aggregate-share";
         let check_index_bytes = 3_u64.to_le_bytes();
@@ -1209,10 +1208,10 @@ mod tests {
         let first_block_index_bytes = 0_u64.to_le_bytes();
         let second_block_index_bytes = 1_u64.to_le_bytes();
         let third_block_index_bytes = 2_u64.to_le_bytes();
-        let first_digest = hash512(
+        let first_hash = hash512(
             "sealed-lattice-root/aggregate-bridge-shared-witness-mask-rejection-sampled-v1",
             &[
-                statement_digest.as_bytes(),
+                statement_hash.as_bytes(),
                 prover_randomness_hex.as_bytes(),
                 role.as_bytes(),
                 &check_index_bytes,
@@ -1220,10 +1219,10 @@ mod tests {
                 &first_block_index_bytes,
             ],
         );
-        let second_digest = hash512(
+        let second_hash = hash512(
             "sealed-lattice-root/aggregate-bridge-shared-witness-mask-rejection-sampled-v1",
             &[
-                statement_digest.as_bytes(),
+                statement_hash.as_bytes(),
                 prover_randomness_hex.as_bytes(),
                 role.as_bytes(),
                 &check_index_bytes,
@@ -1231,10 +1230,10 @@ mod tests {
                 &second_block_index_bytes,
             ],
         );
-        let third_digest = hash512(
+        let third_hash = hash512(
             "sealed-lattice-root/aggregate-bridge-shared-witness-mask-rejection-sampled-v1",
             &[
-                statement_digest.as_bytes(),
+                statement_hash.as_bytes(),
                 prover_randomness_hex.as_bytes(),
                 role.as_bytes(),
                 &check_index_bytes,
@@ -1245,7 +1244,7 @@ mod tests {
 
         let mask_absolute_bound = bridge_mask_absolute_bound();
         let masks = sample_bridge_mask_vector(
-            statement_digest,
+            statement_hash,
             prover_randomness_hex,
             3,
             2,
@@ -1257,17 +1256,17 @@ mod tests {
         assert_eq!(
             masks,
             vec![
-                mask_from_digest_lane(&first_digest, 0),
-                mask_from_digest_lane(&first_digest, 1),
-                mask_from_digest_lane(&second_digest, 0),
-                mask_from_digest_lane(&second_digest, 1),
-                mask_from_digest_lane(&third_digest, 0),
+                mask_from_hash_lane(&first_hash, 0),
+                mask_from_hash_lane(&first_hash, 1),
+                mask_from_hash_lane(&second_hash, 0),
+                mask_from_hash_lane(&second_hash, 1),
+                mask_from_hash_lane(&third_hash, 0),
             ]
         );
         assert_ne!(
             masks,
             sample_bridge_mask_vector(
-                statement_digest,
+                statement_hash,
                 prover_randomness_hex,
                 4,
                 2,
@@ -1279,7 +1278,7 @@ mod tests {
         assert_ne!(
             masks,
             sample_bridge_mask_vector(
-                statement_digest,
+                statement_hash,
                 prover_randomness_hex,
                 3,
                 3,
@@ -1325,11 +1324,11 @@ mod tests {
 
     #[test]
     fn bridge_challenge_scanner_returns_first_nonzero_chunk() {
-        let mut digest = [0_u8; 64];
-        digest[16..24].copy_from_slice(&37_u64.to_le_bytes());
-        digest[24..32].copy_from_slice(&41_u64.to_le_bytes());
+        let mut hash = [0_u8; 64];
+        hash[16..24].copy_from_slice(&37_u64.to_le_bytes());
+        hash[24..32].copy_from_slice(&41_u64.to_le_bytes());
 
-        assert_eq!(first_nonzero_u64_chunk(&digest), Some(37));
+        assert_eq!(first_nonzero_u64_chunk(&hash), Some(37));
         assert_eq!(first_nonzero_u64_chunk(&[0_u8; 64]), None);
     }
 }

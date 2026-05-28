@@ -15,7 +15,7 @@ This page collects the stable rules of the current `sealed-lattice` release boun
 
 ## Private workspace surface
 
-- `@sealed-lattice/protocol`, `@sealed-lattice/crypto`, and `@sealed-lattice/wasm` are workspace-internal only.
+- `@sealed-lattice/types`, `@sealed-lattice/protocol`, `@sealed-lattice/crypto`, and `@sealed-lattice/wasm` are workspace-internal only.
 - `crates/sealed-lattice-kernel` is workspace-internal only.
 - No private package may leak through the public package facade.
 
@@ -31,4 +31,4 @@ This page collects the stable rules of the current `sealed-lattice` release boun
 - Node tests, browser tests, public package behavior checks, vector manifest verification, docs verification, pack smoke checks, and release-smoke checks must all continue to pass.
 - The Rust transcript-core must keep building for native tests and `wasm32-unknown-unknown`.
 - The internal WASM loader must keep loading the transcript-core artifact in both Node and browser tests.
-- Reserved protocol digest derivation, ballot privacy proof verification, and `GF(65537)` field checks exposed through the internal WASM loader must remain covered by Node and browser tests.
+- Reserved protocol hash derivation, ballot privacy proof verification, and `GF(65537)` field checks exposed through the internal WASM loader must remain covered by Node and browser tests.

@@ -258,7 +258,7 @@ pub(crate) fn verify_sparse_linear_proof_components(
             "vectorAvailable": true,
             "expectedOutcome": "accept",
             "statusLabels": verified_status_labels,
-            "acceptedDigests": [],
+            "acceptedHashes": [],
             "refusedObjects": [],
             "unresolvedReason": null
         }),
@@ -270,7 +270,7 @@ pub(crate) fn verify_sparse_linear_proof_components(
             "vectorAvailable": true,
             "expectedOutcome": "accept",
             "statusLabels": [],
-            "acceptedDigests": [],
+            "acceptedHashes": [],
             "refusedObjects": [
                 {
                     "code": error.code.as_str(),
@@ -297,7 +297,7 @@ where
             "vectorAvailable": true,
             "expectedOutcome": "accept",
             "statusLabels": verified_status_labels,
-            "acceptedDigests": [],
+            "acceptedHashes": [],
             "refusedObjects": [],
             "unresolvedReason": null
         }),
@@ -309,7 +309,7 @@ where
             "vectorAvailable": true,
             "expectedOutcome": "accept",
             "statusLabels": [],
-            "acceptedDigests": [],
+            "acceptedHashes": [],
             "refusedObjects": [
                 {
                     "code": error.code.as_str(),
@@ -495,7 +495,7 @@ where
         "AbdlopLinearOpeningRecovered",
         "TboxZ34ChallengeUpdated",
         "TboxGeneratorChallengeUpdated",
-        "StructuredLinearStatementDigestTranscript",
+        "StructuredLinearStatementHashTranscript",
         "QuadraticAccumulatorHelpersChecked",
         "TboxRelationBuildersChecked",
         "TboxResponseRelationBuildersChecked",

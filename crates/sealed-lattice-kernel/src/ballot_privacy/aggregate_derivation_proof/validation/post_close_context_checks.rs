@@ -5,7 +5,7 @@ pub(in crate::ballot_privacy::aggregate_derivation_proof) fn collect_aggregate_p
     contributor_action_context: Option<&Value>,
     component: &Value,
 ) -> Vec<Value> {
-    let object_digest = string_field(component, "aggregateDerivationComponentDigest");
+    let object_hash = string_field(component, "aggregateDerivationComponentHash");
     let mut refused_objects = Vec::new();
     let Some(statement) = component.get("statement") else {
         return refused_objects;
@@ -15,12 +15,12 @@ pub(in crate::ballot_privacy::aggregate_derivation_proof) fn collect_aggregate_p
         refused_objects.extend(collect_aggregate_close_record_refusals(
             close_record_value,
             statement,
-            object_digest,
+            object_hash,
         ));
     } else {
         refused_objects.push(structural_refusal(
             "Aggregate derivation verification requires closeRecord evidence for the voting-closed board head.",
-            object_digest,
+            object_hash,
         ));
     }
 
@@ -28,28 +28,28 @@ pub(in crate::ballot_privacy::aggregate_derivation_proof) fn collect_aggregate_p
         refused_objects.extend(collect_aggregate_action_context_refusals(
             action_context_value,
             statement,
-            object_digest,
+            object_hash,
         ));
     } else {
         refused_objects.push(structural_refusal(
             "Aggregate derivation verification requires contributorActionContext evidence.",
-            object_digest,
+            object_hash,
         ));
     }
 
     refused_objects
 }
 
-fn derive_close_record_digest_from_value(close_record: &Value) -> Option<String> {
-    derive_digest(
-        "CloseRecordDigest",
+fn derive_close_record_hash_from_value(close_record: &Value) -> Option<String> {
+    derive_hash(
+        "CloseRecordHash",
         &json!({
             "boardPosition": u64_object_field(close_record, "boardPosition")?,
             "boardSequence": u64_object_field(close_record, "boardSequence")?,
             "ceremonyId": string_field(close_record, "ceremonyId")?,
             "closeKind": string_field(close_record, "closeKind")?,
-            "closedBoardHeadDigest": string_field(close_record, "closedBoardHeadDigest")?,
-            "electionManifestDigest": string_field(close_record, "electionManifestDigest")?,
+            "closedBoardHeadHash": string_field(close_record, "closedBoardHeadHash")?,
+            "electionManifestHash": string_field(close_record, "electionManifestHash")?,
             "objectType": string_field(close_record, "objectType")?,
             "objectVersion": u64_object_field(close_record, "objectVersion")?,
             "organizerIdentity": string_field(close_record, "organizerIdentity")?
@@ -57,14 +57,14 @@ fn derive_close_record_digest_from_value(close_record: &Value) -> Option<String>
     )
 }
 
-fn derive_post_voting_closed_context_digest_from_value(close_record: &Value) -> Option<String> {
-    derive_digest(
-        "PostVotingClosedContextDigest",
+fn derive_post_voting_closed_context_hash_from_value(close_record: &Value) -> Option<String> {
+    derive_hash(
+        "PostVotingClosedContextHash",
         &json!({
             "ceremonyId": string_field(close_record, "ceremonyId")?,
-            "closeRecordDigest": string_field(close_record, "closeRecordDigest")?,
-            "electionManifestDigest": string_field(close_record, "electionManifestDigest")?,
-            "votingClosedBoardHeadDigest": string_field(close_record, "closedBoardHeadDigest")?
+            "closeRecordHash": string_field(close_record, "closeRecordHash")?,
+            "electionManifestHash": string_field(close_record, "electionManifestHash")?,
+            "votingClosedBoardHeadHash": string_field(close_record, "closedBoardHeadHash")?
         }),
     )
 }
@@ -72,79 +72,79 @@ fn derive_post_voting_closed_context_digest_from_value(close_record: &Value) -> 
 fn collect_aggregate_close_record_refusals(
     close_record: &Value,
     statement: &Value,
-    object_digest: Option<&str>,
+    object_hash: Option<&str>,
 ) -> Vec<Value> {
-    let close_record_digest = string_field(close_record, "closeRecordDigest");
+    let close_record_hash = string_field(close_record, "closeRecordHash");
     let mut refused_objects = Vec::new();
     let close_record_shape_is_valid = string_field(close_record, "objectType")
         == Some("CloseRecord")
         && u64_object_field(close_record, "objectVersion") == Some(1)
         && string_field(close_record, "closeKind") == Some("VotingClosed")
         && string_field(close_record, "ceremonyId").is_some_and(|value| !value.is_empty())
-        && string_field(close_record, "electionManifestDigest").is_some()
-        && string_field(close_record, "closedBoardHeadDigest").is_some()
-        && string_field(close_record, "postVotingClosedContextDigest").is_some()
+        && string_field(close_record, "electionManifestHash").is_some()
+        && string_field(close_record, "closedBoardHeadHash").is_some()
+        && string_field(close_record, "postVotingClosedContextHash").is_some()
         && u64_object_field(close_record, "boardSequence").is_some()
         && u64_object_field(close_record, "boardPosition").is_some()
         && string_field(close_record, "organizerIdentity").is_some_and(|value| !value.is_empty());
     if !close_record_shape_is_valid {
         refused_objects.push(structural_refusal(
             "Aggregate derivation closeRecord evidence must be a canonical VotingClosed close record.",
-            close_record_digest.or(object_digest),
+            close_record_hash.or(object_hash),
         ));
 
         return refused_objects;
     }
 
-    if derive_close_record_digest_from_value(close_record).as_deref() != close_record_digest {
+    if derive_close_record_hash_from_value(close_record).as_deref() != close_record_hash {
         refused_objects.push(structural_refusal(
-            "Aggregate derivation closeRecord digest does not match its canonical payload.",
-            close_record_digest.or(object_digest),
+            "Aggregate derivation closeRecord hash does not match its canonical payload.",
+            close_record_hash.or(object_hash),
         ));
     }
-    let expected_post_context_digest =
-        derive_post_voting_closed_context_digest_from_value(close_record);
-    if expected_post_context_digest.as_deref()
-        != string_field(close_record, "postVotingClosedContextDigest")
+    let expected_post_context_hash =
+        derive_post_voting_closed_context_hash_from_value(close_record);
+    if expected_post_context_hash.as_deref()
+        != string_field(close_record, "postVotingClosedContextHash")
     {
         refused_objects.push(structural_refusal(
-            "Aggregate derivation closeRecord does not bind the canonical post-voting closed context digest.",
-            close_record_digest.or(object_digest),
+            "Aggregate derivation closeRecord does not bind the canonical post-voting closed context hash.",
+            close_record_hash.or(object_hash),
         ));
     }
     if string_field(close_record, "ceremonyId") != string_field(statement, "ceremonyId")
-        || string_field(close_record, "electionManifestDigest")
-            != string_field(statement, "manifestDigest")
-        || close_record_digest != string_field(statement, "closeRecordDigest")
-        || string_field(close_record, "closedBoardHeadDigest")
-            != string_field(statement, "votingClosedBoardHeadDigest")
-        || string_field(close_record, "postVotingClosedContextDigest")
-            != string_field(statement, "postVotingClosedContextDigest")
+        || string_field(close_record, "electionManifestHash")
+            != string_field(statement, "manifestHash")
+        || close_record_hash != string_field(statement, "closeRecordHash")
+        || string_field(close_record, "closedBoardHeadHash")
+            != string_field(statement, "votingClosedBoardHeadHash")
+        || string_field(close_record, "postVotingClosedContextHash")
+            != string_field(statement, "postVotingClosedContextHash")
     {
         refused_objects.push(structural_refusal(
             "Aggregate derivation closeRecord evidence is not bound to the aggregate statement voting-closed context.",
-            close_record_digest.or(object_digest),
+            close_record_hash.or(object_hash),
         ));
     }
 
     refused_objects
 }
 
-fn derive_action_context_digest_from_value(action_context: &Value) -> Option<String> {
-    derive_digest(
-        "ActionContextDigest",
+fn derive_action_context_hash_from_value(action_context: &Value) -> Option<String> {
+    derive_hash(
+        "ActionContextHash",
         &json!({
-            "acceptedRecoveryEpochUpdateDigest": action_context.get("acceptedRecoveryEpochUpdateDigest")?.clone(),
+            "acceptedRecoveryEpochUpdateHash": action_context.get("acceptedRecoveryEpochUpdateHash")?.clone(),
             "actionSequence": u64_object_field(action_context, "actionSequence")?,
-            "boardHeadDigest": string_field(action_context, "boardHeadDigest")?,
+            "boardHeadHash": string_field(action_context, "boardHeadHash")?,
             "boardSequence": u64_object_field(action_context, "boardSequence")?,
             "ceremonyId": string_field(action_context, "ceremonyId")?,
-            "contextDigest": string_field(action_context, "contextDigest")?,
+            "contextHash": string_field(action_context, "contextHash")?,
             "deviceEpoch": u64_object_field(action_context, "deviceEpoch")?,
-            "electionManifestDigest": string_field(action_context, "electionManifestDigest")?,
+            "electionManifestHash": string_field(action_context, "electionManifestHash")?,
             "recoveryEpoch": u64_object_field(action_context, "recoveryEpoch")?,
-            "recoveryPolicyDigest": string_field(action_context, "recoveryPolicyDigest")?,
-            "rosterExternalAcceptanceDigest": action_context.get("rosterExternalAcceptanceDigest")?.clone(),
+            "recoveryPolicyHash": string_field(action_context, "recoveryPolicyHash")?,
+            "rosterExternalAcceptanceHash": action_context.get("rosterExternalAcceptanceHash")?.clone(),
             "signerIdentity": string_field(action_context, "signerIdentity")?
         }),
     )
@@ -153,60 +153,58 @@ fn derive_action_context_digest_from_value(action_context: &Value) -> Option<Str
 fn collect_aggregate_action_context_refusals(
     action_context: &Value,
     statement: &Value,
-    object_digest: Option<&str>,
+    object_hash: Option<&str>,
 ) -> Vec<Value> {
-    let action_context_digest = string_field(action_context, "actionContextDigest");
+    let action_context_hash = string_field(action_context, "actionContextHash");
     let mut refused_objects = Vec::new();
-    let action_context_shape_is_valid = action_context_digest.is_some()
+    let action_context_shape_is_valid = action_context_hash.is_some()
         && string_field(action_context, "ceremonyId").is_some_and(|value| !value.is_empty())
-        && string_field(action_context, "electionManifestDigest").is_some()
+        && string_field(action_context, "electionManifestHash").is_some()
         && string_field(action_context, "signerIdentity").is_some_and(|value| !value.is_empty())
-        && string_field(action_context, "boardHeadDigest").is_some()
+        && string_field(action_context, "boardHeadHash").is_some()
         && u64_object_field(action_context, "boardSequence").is_some()
         && u64_object_field(action_context, "recoveryEpoch").is_some()
         && u64_object_field(action_context, "deviceEpoch").is_some()
         && u64_object_field(action_context, "actionSequence").is_some()
-        && string_field(action_context, "recoveryPolicyDigest").is_some()
+        && string_field(action_context, "recoveryPolicyHash").is_some()
         && action_context
-            .get("acceptedRecoveryEpochUpdateDigest")
+            .get("acceptedRecoveryEpochUpdateHash")
             .is_some()
-        && action_context
-            .get("rosterExternalAcceptanceDigest")
-            .is_some()
-        && string_field(action_context, "contextDigest").is_some();
+        && action_context.get("rosterExternalAcceptanceHash").is_some()
+        && string_field(action_context, "contextHash").is_some();
     if !action_context_shape_is_valid {
         refused_objects.push(structural_refusal(
             "Aggregate derivation contributorActionContext evidence must be canonical.",
-            action_context_digest.or(object_digest),
+            action_context_hash.or(object_hash),
         ));
 
         return refused_objects;
     }
 
-    if derive_action_context_digest_from_value(action_context).as_deref() != action_context_digest {
+    if derive_action_context_hash_from_value(action_context).as_deref() != action_context_hash {
         refused_objects.push(structural_refusal(
-            "Aggregate derivation contributorActionContext digest does not match its canonical payload.",
-            action_context_digest.or(object_digest),
+            "Aggregate derivation contributorActionContext hash does not match its canonical payload.",
+            action_context_hash.or(object_hash),
         ));
     }
-    if action_context_digest != string_field(statement, "contributorActionContextDigest")
+    if action_context_hash != string_field(statement, "contributorActionContextHash")
         || string_field(action_context, "ceremonyId") != string_field(statement, "ceremonyId")
-        || string_field(action_context, "electionManifestDigest")
-            != string_field(statement, "manifestDigest")
+        || string_field(action_context, "electionManifestHash")
+            != string_field(statement, "manifestHash")
         || string_field(action_context, "signerIdentity")
             != string_field(statement, "contributorIdentity")
-        || string_field(action_context, "boardHeadDigest")
-            != string_field(statement, "votingClosedBoardHeadDigest")
-        || string_field(action_context, "contextDigest")
-            != string_field(statement, "postVotingClosedContextDigest")
+        || string_field(action_context, "boardHeadHash")
+            != string_field(statement, "votingClosedBoardHeadHash")
+        || string_field(action_context, "contextHash")
+            != string_field(statement, "postVotingClosedContextHash")
         || action_context
-            .get("rosterExternalAcceptanceDigest")
+            .get("rosterExternalAcceptanceHash")
             .and_then(Value::as_str)
-            != string_field(statement, "contributorRosterExternalAcceptanceDigest")
+            != string_field(statement, "contributorRosterExternalAcceptanceHash")
     {
         refused_objects.push(structural_refusal(
             "Aggregate derivation contributorActionContext evidence is not bound to the aggregate statement contributor and post-close context.",
-            action_context_digest.or(object_digest),
+            action_context_hash.or(object_hash),
         ));
     }
 

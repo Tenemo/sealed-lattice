@@ -12,9 +12,9 @@ import {
 
 const targetBoundShareSelectionProfile = {
     profileId: targetBoundShareSelectionProfileId,
-    certificateDigest: 'target-bound-certificate-digest',
+    certificateHash: 'target-bound-certificate-hash',
     cpadProfileId,
-    targetBasisDigest: 'target-basis-digest',
+    targetBasisHash: 'target-basis-hash',
     decryptionShareQuorum: 9,
     minimumSharesForInterpolation: 7,
     minimumArrivalsForRobustDecode: 9,
@@ -22,7 +22,7 @@ const targetBoundShareSelectionProfile = {
     selectedShareRule: 'FirstValidSharesInCanonicalBoardOrder',
 } as const;
 
-const dynamicRosterProfileCertificateDigest = 'a'.repeat(128);
+const dynamicRosterProfileCertificateHash = 'a'.repeat(128);
 const thresholdProfile = deriveThresholdProfile({ rosterSize: 20 });
 const certifiedThresholdProfile = deriveThresholdProfile({
     rosterSize: 20,
@@ -36,8 +36,8 @@ const createContext = (
     thresholdProfile,
     pollSpecValid: true,
     localRosterAccepted: true,
-    rosterExternalAcceptanceDigest: 'accepted-roster-digest',
-    actionContextRosterExternalAcceptanceDigest: 'accepted-roster-digest',
+    rosterExternalAcceptanceHash: 'accepted-roster-hash',
+    actionContextRosterExternalAcceptanceHash: 'accepted-roster-hash',
     ...overrides,
 });
 
@@ -71,18 +71,18 @@ describe('election foundation capability evaluator', () => {
         ).toMatchObject({ reason: 'LocalRosterNotAccepted' });
     });
 
-    it('requires claim-bearing action contexts to bind the local roster acceptance digest', () => {
+    it('requires claim-bearing action contexts to bind the local roster acceptance hash', () => {
         expect(
             evaluateActionCapability(
                 'SubmitVote',
                 createContext({
                     lifecycleState: 'votingOpen',
-                    rosterExternalAcceptanceDigest: undefined,
-                    actionContextRosterExternalAcceptanceDigest: undefined,
+                    rosterExternalAcceptanceHash: undefined,
+                    actionContextRosterExternalAcceptanceHash: undefined,
                 }),
             ),
         ).toMatchObject({
-            reason: 'RosterExternalAcceptanceDigestMissing',
+            reason: 'RosterExternalAcceptanceHashMissing',
         });
 
         expect(
@@ -90,12 +90,12 @@ describe('election foundation capability evaluator', () => {
                 'SubmitVote',
                 createContext({
                     lifecycleState: 'votingOpen',
-                    rosterExternalAcceptanceDigest: 'accepted-roster-digest',
-                    actionContextRosterExternalAcceptanceDigest: undefined,
+                    rosterExternalAcceptanceHash: 'accepted-roster-hash',
+                    actionContextRosterExternalAcceptanceHash: undefined,
                 }),
             ),
         ).toMatchObject({
-            reason: 'RosterExternalAcceptanceDigestMissing',
+            reason: 'RosterExternalAcceptanceHashMissing',
         });
 
         expect(
@@ -103,13 +103,13 @@ describe('election foundation capability evaluator', () => {
                 'SubmitVote',
                 createContext({
                     lifecycleState: 'votingOpen',
-                    rosterExternalAcceptanceDigest: 'accepted-roster-digest',
-                    actionContextRosterExternalAcceptanceDigest:
-                        'different-roster-digest',
+                    rosterExternalAcceptanceHash: 'accepted-roster-hash',
+                    actionContextRosterExternalAcceptanceHash:
+                        'different-roster-hash',
                 }),
             ),
         ).toMatchObject({
-            reason: 'RosterExternalAcceptanceDigestMismatch',
+            reason: 'RosterExternalAcceptanceHashMismatch',
         });
 
         expect(
@@ -117,9 +117,9 @@ describe('election foundation capability evaluator', () => {
                 'SubmitVote',
                 createContext({
                     lifecycleState: 'votingOpen',
-                    rosterExternalAcceptanceDigest: 'accepted-roster-digest',
-                    actionContextRosterExternalAcceptanceDigest:
-                        'accepted-roster-digest',
+                    rosterExternalAcceptanceHash: 'accepted-roster-hash',
+                    actionContextRosterExternalAcceptanceHash:
+                        'accepted-roster-hash',
                 }),
             ),
         ).toEqual({ allowed: true, action: 'SubmitVote' });
@@ -142,8 +142,8 @@ describe('election foundation capability evaluator', () => {
                 createContext({
                     ballotProofProfileFrozen: true,
                     kllpsCpadProfileReferencePresent: true,
-                    finalRosterDigest: 'final-roster-digest',
-                    frozenRosterProfileDigest: 'threshold-profile-digest',
+                    finalRosterHash: 'final-roster-hash',
+                    frozenRosterProfileHash: 'threshold-profile-hash',
                     lifecycleState: 'rosterFrozen',
                     receiverKeyCoverageComplete: true,
                     setupCompleteCount: thresholdProfile.setupCompletionQuorum,
@@ -562,7 +562,7 @@ describe('election foundation capability evaluator', () => {
                 rosterSize,
             });
             const dynamicThresholdProfile = deriveThresholdProfile({
-                dynamicRosterProfileCertificateDigest,
+                dynamicRosterProfileCertificateHash,
                 rosterSize: 16,
             });
 

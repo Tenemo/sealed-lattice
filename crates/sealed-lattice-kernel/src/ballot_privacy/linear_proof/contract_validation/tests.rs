@@ -1,27 +1,27 @@
 use super::*;
 
-fn digest(label: &str) -> String {
-    derive_digest(
-        "ChallengeDomainDigest",
+fn hash(label: &str) -> String {
+    derive_hash(
+        "ChallengeDomainHash",
         &json!({
             "label": label,
             "purpose": "linear-proof-contract-validation-test",
         }),
     )
-    .expect("test digest should derive")
+    .expect("test hash should derive")
 }
 
 fn full_binding_linear_statement() -> Value {
     json!({
-        "ballotProofStatementDigest": digest("ballot-proof-statement"),
+        "ballotProofStatementHash": hash("ballot-proof-statement"),
         "coefficientModulus": "65537",
-        "componentBundleStatementDigest": digest("component-bundle-statement"),
+        "componentBundleStatementHash": hash("component-bundle-statement"),
         "objectType": "BallotProofLinearProofStatement",
         "objectVersion": 1,
         "parameterProfileId": FULL_BALLOT_PROOF_PARAMETER_PROFILE_ID,
         "projectionCoverage": FULL_BALLOT_PROOF_PROJECTION_COVERAGE,
         "relation": "A*w + t = 0",
-        "relationBindingDigest": digest("relation-binding"),
+        "relationBindingHash": hash("relation-binding"),
         "relationBindingKind": "component-bundle-and-lowered-relation",
         "ringDegree": 64,
         "statementColumns": 1,
@@ -44,10 +44,10 @@ fn constant_polynomial(constant: u64) -> Value {
     )
 }
 
-fn test_component_statement(component_id: &str, component_digest_label: &str) -> Value {
+fn test_component_statement(component_id: &str, component_hash_label: &str) -> Value {
     json!({
         "coefficientModulus": "65537",
-        "componentDigest": digest(component_digest_label),
+        "componentHash": hash(component_hash_label),
         "componentId": component_id,
         "proofLoweringStatus": "Lowered",
         "rowBatchNames": ["test rows"],
@@ -60,8 +60,8 @@ fn test_component_statement(component_id: &str, component_digest_label: &str) ->
 
 fn full_relation_component_bundle_statement() -> Value {
     let mut component_bundle_statement = json!({
-        "backendStatementDigest": digest("backend-statement"),
-        "ballotProofStatementDigest": digest("ballot-proof-statement"),
+        "backendStatementHash": hash("backend-statement"),
+        "ballotProofStatementHash": hash("ballot-proof-statement"),
         "bundleCoverage": FULL_BALLOT_PROOF_PROJECTION_COVERAGE,
         "componentStatements": [
             test_component_statement("score-and-shamir-field-component", "score-component"),
@@ -73,18 +73,18 @@ fn full_relation_component_bundle_statement() -> Value {
         "objectType": "BallotProofComponentBundleStatement",
         "objectVersion": 1,
         "relationLabel": "BallotPrivacyPvssRelation",
-        "relationStatementDigest": digest("relation-statement"),
+        "relationStatementHash": hash("relation-statement"),
         "requiredComponentIds": REQUIRED_BALLOT_PROOF_COMPONENT_IDS,
     });
-    let component_bundle_statement_digest =
-        derive_ballot_component_bundle_statement_digest(&component_bundle_statement)
-            .expect("component bundle statement digest should derive");
+    let component_bundle_statement_hash =
+        derive_ballot_component_bundle_statement_hash(&component_bundle_statement)
+            .expect("component bundle statement hash should derive");
     component_bundle_statement
         .as_object_mut()
         .expect("component bundle statement should be an object")
         .insert(
-            "componentBundleStatementDigest".to_string(),
-            json!(component_bundle_statement_digest),
+            "componentBundleStatementHash".to_string(),
+            json!(component_bundle_statement_hash),
         );
 
     component_bundle_statement
@@ -92,25 +92,25 @@ fn full_relation_component_bundle_statement() -> Value {
 
 fn full_relation_bound_linear_statement(component_bundle_statement: &Value) -> Value {
     let mut linear_statement = full_binding_linear_statement();
-    let relation_binding_digest = derive_full_relation_binding_digest(component_bundle_statement)
-        .expect("full relation binding digest should derive");
-    let binding_scalar = binding_scalar_from_digest(&relation_binding_digest)
-        .expect("binding scalar should derive from digest");
+    let relation_binding_hash = derive_full_relation_binding_hash(component_bundle_statement)
+        .expect("full relation binding hash should derive");
+    let binding_scalar = binding_scalar_from_hash(&relation_binding_hash)
+        .expect("binding scalar should derive from hash");
     let target_constant = FULL_BALLOT_BINDING_COEFFICIENT_MODULUS - binding_scalar;
 
     let linear_statement_object = linear_statement
         .as_object_mut()
         .expect("linear statement should be an object");
     linear_statement_object.insert(
-        "componentBundleStatementDigest".to_string(),
+        "componentBundleStatementHash".to_string(),
         json!(
-            string_field(component_bundle_statement, "componentBundleStatementDigest")
-                .expect("component bundle statement should have a digest")
+            string_field(component_bundle_statement, "componentBundleStatementHash")
+                .expect("component bundle statement should have a hash")
         ),
     );
     linear_statement_object.insert(
-        "relationBindingDigest".to_string(),
-        json!(relation_binding_digest),
+        "relationBindingHash".to_string(),
+        json!(relation_binding_hash),
     );
     linear_statement_object.insert(
         "statementMatrixCoefficients".to_string(),
@@ -172,7 +172,7 @@ fn statement_with_dimensions(option_count: u128, participant_count: usize) -> Va
         "receiverPublicKeys": vec![json!({}); participant_count],
         "shareCommitments": vec![json!({}); participant_count],
         "shareVectorWidth": option_count * u128::from(BALLOT_PRIVACY_ENCODED_COORDINATES_PER_OPTION),
-        "thresholdProfileDigest": digest("threshold-profile"),
+        "thresholdProfileHash": hash("threshold-profile"),
     });
 
     statement
@@ -180,7 +180,7 @@ fn statement_with_dimensions(option_count: u128, participant_count: usize) -> Va
 
 fn dynamic_roster_profile_evidence(statement: &Value) -> Value {
     let mut evidence = json!({
-        "dynamicRosterProfileCertificateDigest": digest("dynamic-roster-certificate"),
+        "dynamicRosterProfileCertificateHash": hash("dynamic-roster-certificate"),
         "frozenRosterSize": array_field(statement, "receiverPublicKeys")
             .expect("receiver keys should exist")
             .len(),
@@ -191,31 +191,31 @@ fn dynamic_roster_profile_evidence(statement: &Value) -> Value {
         "profileFamily": "BalancedDefault",
         "proofStatementShape": "EncodedScoreBallotProof-v1",
         "receiverCoverageProfile": "AllFrozenRosterReceivers",
-        "thresholdProfileDigest": string_field(statement, "thresholdProfileDigest")
-            .expect("threshold profile digest should exist"),
+        "thresholdProfileHash": string_field(statement, "thresholdProfileHash")
+            .expect("threshold profile hash should exist"),
     });
-    let evidence_digest = derive_digest("BallotPrivacyRosterProfileEvidenceDigest", &evidence)
-        .expect("dynamic roster evidence digest should derive");
+    let evidence_hash = derive_hash("BallotPrivacyRosterProfileEvidenceHash", &evidence)
+        .expect("dynamic roster evidence hash should derive");
     evidence
         .as_object_mut()
         .expect("dynamic roster evidence should be an object")
         .insert(
-            "rosterProfileEvidenceDigest".to_string(),
-            json!(evidence_digest),
+            "rosterProfileEvidenceHash".to_string(),
+            json!(evidence_hash),
         );
 
     evidence
 }
 
 #[test]
-fn binding_scalar_is_a_small_compatibility_coefficient_not_a_soundness_challenge() {
+fn binding_scalar_is_a_small_binding_coefficient_not_a_soundness_challenge() {
     assert_eq!(
-        binding_scalar_from_digest(&format!("{}{}", "0".repeat(16), "1".repeat(112))),
+        binding_scalar_from_hash(&format!("{}{}", "0".repeat(16), "1".repeat(112))),
         Some(1)
     );
     assert_eq!(
-        binding_scalar_from_digest(&format!("{}{}", "ffffffffffffffff", "1".repeat(112))),
-        Some(1 + (u64::MAX % FULL_BALLOT_BINDING_COMPATIBILITY_SCALAR_COUNT))
+        binding_scalar_from_hash(&format!("{}{}", "ffffffffffffffff", "1".repeat(112))),
+        Some(1 + (u64::MAX % FULL_BALLOT_BINDING_SCALAR_COUNT))
     );
 }
 
@@ -225,7 +225,7 @@ fn supported_ballot_privacy_dimensions_accept_mandatory_range() {
     assert!(
         collect_supported_ballot_privacy_dimension_refusals(
             &statement,
-            Some(&digest("package")),
+            Some(&hash("package")),
             None,
             false,
             false,
@@ -240,7 +240,7 @@ fn supported_ballot_privacy_dimensions_require_casual_micro_roster_acknowledgeme
         let statement = statement_with_dimensions(20, participant_count);
         let refused_objects = collect_supported_ballot_privacy_dimension_refusals(
             &statement,
-            Some(&digest("package")),
+            Some(&hash("package")),
             None,
             false,
             false,
@@ -256,7 +256,7 @@ fn supported_ballot_privacy_dimensions_require_casual_micro_roster_acknowledgeme
         assert!(
             collect_supported_ballot_privacy_dimension_refusals(
                 &statement,
-                Some(&digest("package")),
+                Some(&hash("package")),
                 None,
                 false,
                 true,
@@ -267,7 +267,7 @@ fn supported_ballot_privacy_dimensions_require_casual_micro_roster_acknowledgeme
 
         let refused_objects = collect_supported_ballot_privacy_dimension_refusals(
             &statement,
-            Some(&digest("package")),
+            Some(&hash("package")),
             None,
             true,
             true,
@@ -287,7 +287,7 @@ fn supported_ballot_privacy_dimensions_require_dynamic_roster_evidence() {
     let statement = statement_with_dimensions(20, 16);
     let refused_objects = collect_supported_ballot_privacy_dimension_refusals(
         &statement,
-        Some(&digest("package")),
+        Some(&hash("package")),
         None,
         false,
         false,
@@ -303,7 +303,7 @@ fn supported_ballot_privacy_dimensions_require_dynamic_roster_evidence() {
     let dynamic_roster_evidence = dynamic_roster_profile_evidence(&statement);
     let refused_objects = collect_supported_ballot_privacy_dimension_refusals(
         &statement,
-        Some(&digest("package")),
+        Some(&hash("package")),
         Some(&dynamic_roster_evidence),
         true,
         false,
@@ -337,7 +337,7 @@ fn supported_ballot_privacy_dimensions_reject_out_of_range_values() {
         }
         let refused_objects = collect_supported_ballot_privacy_dimension_refusals(
             &statement,
-            Some(&digest("package")),
+            Some(&hash("package")),
             None,
             false,
             true,
@@ -356,7 +356,7 @@ fn supported_ballot_privacy_dimensions_reject_out_of_range_values() {
     statement["shareVectorWidth"] = json!(219);
     let refused_objects = collect_supported_ballot_privacy_dimension_refusals(
         &statement,
-        Some(&digest("package")),
+        Some(&hash("package")),
         None,
         false,
         false,
@@ -382,7 +382,7 @@ fn full_binding_contract_rejects_mutated_profile_source() {
         &parameter_set,
         &proof_encoding,
         Some(10),
-        Some(&digest("proof-record")),
+        Some(&hash("proof-record")),
     );
 
     assert!(
@@ -409,7 +409,7 @@ fn full_binding_contract_requires_component_bundle_binding() {
         &parameter_set,
         &proof_encoding,
         Some(10),
-        Some(&digest("proof-record")),
+        Some(&hash("proof-record")),
     );
 
     assert!(
@@ -430,36 +430,36 @@ fn full_relation_binding_accepts_derived_component_bundle_binding() {
         collect_full_ballot_relation_binding_refusals(
             &linear_statement,
             Some(&component_bundle_statement),
-            Some(&digest("proof-record")),
+            Some(&hash("proof-record")),
         )
         .is_empty()
     );
 }
 
 #[test]
-fn full_relation_binding_rejects_mutated_relation_binding_digest() {
+fn full_relation_binding_rejects_mutated_relation_binding_hash() {
     let component_bundle_statement = full_relation_component_bundle_statement();
     let mut linear_statement = full_relation_bound_linear_statement(&component_bundle_statement);
     linear_statement
         .as_object_mut()
         .expect("linear statement should be an object")
         .insert(
-            "relationBindingDigest".to_string(),
-            json!(digest("wrong-relation-binding")),
+            "relationBindingHash".to_string(),
+            json!(hash("wrong-relation-binding")),
         );
 
     let refused_objects = collect_full_ballot_relation_binding_refusals(
         &linear_statement,
         Some(&component_bundle_statement),
-        Some(&digest("proof-record")),
+        Some(&hash("proof-record")),
     );
 
     assert!(
         refused_objects
             .iter()
             .any(|refusal| string_field(refusal, "message")
-                .is_some_and(|message| message.contains("relation binding digest"))),
-        "mutated relation binding digest must be rejected: {refused_objects:?}"
+                .is_some_and(|message| message.contains("relation binding hash"))),
+        "mutated relation binding hash must be rejected: {refused_objects:?}"
     );
 }
 
@@ -472,7 +472,7 @@ fn full_relation_binding_rejects_mutated_derived_target() {
     let refused_objects = collect_full_ballot_relation_binding_refusals(
         &linear_statement,
         Some(&component_bundle_statement),
-        Some(&digest("proof-record")),
+        Some(&hash("proof-record")),
     );
 
     assert!(

@@ -21,19 +21,19 @@ pub(crate) fn structural_rejection(operation: &str, refused_objects: Vec<Value>)
         "backendStatus": describe_proof_backend(),
         "operation": operation,
         "statusLabels": [],
-        "acceptedDigests": [],
+        "acceptedHashes": [],
         "refusedObjects": refused_objects,
         "unresolvedReason": "BallotPackageInvalid"
     })
 }
 
-pub(crate) fn structural_refusal(message: impl Into<String>, object_digest: Option<&str>) -> Value {
+pub(crate) fn structural_refusal(message: impl Into<String>, object_hash: Option<&str>) -> Value {
     let message = message.into();
-    match object_digest {
-        Some(object_digest) => json!({
+    match object_hash {
+        Some(object_hash) => json!({
             "code": "BallotPackageInvalid",
             "message": message,
-            "objectDigest": object_digest
+            "objectHash": object_hash
         }),
         None => json!({
             "code": "BallotPackageInvalid",

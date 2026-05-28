@@ -28,7 +28,7 @@ fn aggregate_derivation_repeats_field_challenges_to_reach_target_soundness() {
     );
     assert!(computed_challenge_soundness_bits >= 128);
     let first_challenge = aggregate_relation_challenge_scalar(
-        "statement-digest",
+        "statement-hash",
         "11",
         &[vec![0, 1, 2]],
         AGGREGATE_DERIVATION_PROOF_MODULUS,
@@ -36,7 +36,7 @@ fn aggregate_derivation_repeats_field_challenges_to_reach_target_soundness() {
     )
     .expect("first aggregate derivation challenge should derive");
     let second_challenge = aggregate_relation_challenge_scalar(
-        "statement-digest",
+        "statement-hash",
         "11",
         &[vec![0, 1, 2]],
         AGGREGATE_DERIVATION_PROOF_MODULUS,

@@ -2,7 +2,7 @@
 
 These files are generated public-only regression fixtures. They are not runtime assets and must not be shipped in the published runtime package.
 
-The vector files intentionally contain only public proof, statement, profile, digest, and rejection-case data. They must not contain witnesses, secret keys, private keys, prover randomness, receiver state, decrypted payloads, aggregate openings, bridge witnesses, or decrypted ballots.
+The vector files intentionally contain only public proof, statement, profile, hash, and rejection-case data. They must not contain witnesses, secret keys, private keys, prover randomness, receiver state, decrypted payloads, aggregate openings, bridge witnesses, or decrypted ballots.
 
 The JSON files are minified intentionally. They are marked as generated and non-diffable in `.gitattributes` so pull requests stay reviewable while the fixtures remain committed and reproducible.
 

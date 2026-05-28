@@ -147,7 +147,7 @@ export const validateVectorManifest = (
         }
         if (!sha256Pattern.test(entry.sha256)) {
             failures.push(
-                `Vector manifest entry ${entry.path} must use a lowercase SHA-256 digest`,
+                `Vector manifest entry ${entry.path} must use a lowercase SHA-256 hash`,
             );
         }
         if (manifestPaths.has(entry.path)) {
@@ -174,7 +174,7 @@ export const validateVectorManifest = (
         }
         if (expectedSha256 !== actualEntry.sha256) {
             failures.push(
-                `Vector digest drift detected for ${actualEntry.path}: expected ${expectedSha256}, received ${actualEntry.sha256}`,
+                `Vector hash drift detected for ${actualEntry.path}: expected ${expectedSha256}, received ${actualEntry.sha256}`,
             );
         }
     }

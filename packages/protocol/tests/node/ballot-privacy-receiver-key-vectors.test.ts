@@ -7,23 +7,23 @@ type ReceiverKeyVectorCase = {
     readonly expectedOutcome: 'accept' | 'reject';
     readonly proofConstructionAccepted: boolean;
     readonly receiverPublicKey?: {
-        readonly receiverPublicKeyDigest: string;
+        readonly receiverPublicKeyHash: string;
     };
     readonly receiverKeyProof?: {
         readonly proofRoot: string;
         readonly receiverKeyProofRoot: string;
     };
     readonly backendStatement?: {
-        readonly backendStatementDigest: string;
+        readonly backendStatementHash: string;
         readonly backendStatementFormat: string;
         readonly bounds: readonly unknown[];
         readonly columnCount: number;
-        readonly digestExpandedRowCount: number;
+        readonly hashExpandedRowCount: number;
         readonly explicitRowCount: number;
-        readonly keyMaterialDigest: string;
-        readonly matrixDigest: string;
+        readonly keyMaterialHash: string;
+        readonly matrixHash: string;
         readonly objectType: string;
-        readonly receiverPublicKeyDigest: string;
+        readonly receiverPublicKeyHash: string;
         readonly relationLabel: string;
         readonly rowBatches: readonly {
             readonly batchKind: string;
@@ -33,7 +33,7 @@ type ReceiverKeyVectorCase = {
             readonly rowOffset: number;
         }[];
         readonly rowCount: number;
-        readonly targetVectorDigest: string;
+        readonly targetVectorHash: string;
         readonly variableColumns: readonly unknown[];
     };
     readonly linearStatement?: {
@@ -43,28 +43,28 @@ type ReceiverKeyVectorCase = {
         readonly ringDegree: 256;
         readonly sourceRing: 'Z_q[X]/(X^256 + 1)';
         readonly statementColumns: 8;
-        readonly statementDigest: string;
+        readonly statementHash: string;
         readonly statementMatrixCoefficients: readonly (readonly (readonly number[])[])[];
-        readonly statementMatrixDigest: string;
+        readonly statementMatrixHash: string;
         readonly statementProfileId: 'receiver-key-linear-module-lwe-statement-v1';
         readonly statementRows: 4;
         readonly targetVectorCoefficients: readonly (readonly number[])[];
-        readonly targetVectorDigest: string;
+        readonly targetVectorHash: string;
         readonly witnessInfinityNormBound: 2;
         readonly witnessL2BoundSquared: '8192';
     };
     readonly refusalMessages?: readonly string[];
     readonly trace: {
-        readonly backendStatementDigest?: string;
-        readonly baselineBackendStatementDigest?: string;
-        readonly baselineLinearStatementDigest?: string;
-        readonly expectedDigestChanged?: true;
+        readonly backendStatementHash?: string;
+        readonly baselineBackendStatementHash?: string;
+        readonly baselineLinearStatementHash?: string;
+        readonly expectedHashChanged?: true;
         readonly expectedLogicalRejectionLayer?:
             | 'receiver-key-proof-construction'
             | 'backend-statement-preflight'
             | 'linear-statement-preflight'
             | 'receiver-key-proof-shell';
-        readonly linearStatementDigest?: string;
+        readonly linearStatementHash?: string;
     };
 };
 
@@ -153,8 +153,8 @@ describe('ballot privacy receiver-key proof vectors', () => {
             expectedOutcome: 'accept',
             proofConstructionAccepted: true,
         });
-        expect(vectorCase.receiverPublicKey?.receiverPublicKeyDigest).toBe(
-            vectorCase.backendStatement?.receiverPublicKeyDigest,
+        expect(vectorCase.receiverPublicKey?.receiverPublicKeyHash).toBe(
+            vectorCase.backendStatement?.receiverPublicKeyHash,
         );
         expect(vectorCase.receiverKeyProof?.proofRoot).toMatch(
             /^[a-f0-9]{128}$/u,
@@ -165,14 +165,14 @@ describe('ballot privacy receiver-key proof vectors', () => {
         expect(vectorCase.backendStatement).toMatchObject({
             backendStatementFormat: 'SparseSignedIntegerBackendStatement-v1',
             columnCount: 2_048,
-            digestExpandedRowCount: 1_024,
+            hashExpandedRowCount: 1_024,
             explicitRowCount: 0,
             objectType: 'ReceiverKeyProofBackendStatement',
             relationLabel: 'ReceiverKeyWellFormednessRelation',
             rowCount: 1_024,
         });
-        expect(vectorCase.backendStatement?.backendStatementDigest).toBe(
-            vectorCase.trace.backendStatementDigest,
+        expect(vectorCase.backendStatement?.backendStatementHash).toBe(
+            vectorCase.trace.backendStatementHash,
         );
         expect(vectorCase.linearStatement).toMatchObject({
             coefficientModulus: '12289',
@@ -186,8 +186,8 @@ describe('ballot privacy receiver-key proof vectors', () => {
             witnessInfinityNormBound: 2,
             witnessL2BoundSquared: '8192',
         });
-        expect(vectorCase.linearStatement?.statementDigest).toBe(
-            vectorCase.trace.linearStatementDigest,
+        expect(vectorCase.linearStatement?.statementHash).toBe(
+            vectorCase.trace.linearStatementHash,
         );
         expect(
             vectorCase.linearStatement?.statementMatrixCoefficients,
@@ -204,7 +204,7 @@ describe('ballot privacy receiver-key proof vectors', () => {
         expect(vectorCase.backendStatement?.bounds).toHaveLength(2);
         expect(vectorCase.backendStatement?.rowBatches).toEqual([
             expect.objectContaining({
-                batchKind: 'DigestExpandedRows',
+                batchKind: 'HashExpandedRows',
                 modulus: '12289',
                 rowCount: 1_024,
                 rowKind: 'ReceiverKeyEquation',
@@ -215,7 +215,7 @@ describe('ballot privacy receiver-key proof vectors', () => {
 
     it('records context changes, construction refusals, and backend preflight refusals distinctly', () => {
         const changedManifestCase = caseByName(
-            'changed-manifest-changes-backend-statement-digest',
+            'changed-manifest-changes-backend-statement-hash',
         );
         const wrongSeedCase = caseByName('wrong-public-matrix-seed-rejects');
         const oversizeSecretCase = caseByName(
@@ -229,13 +229,13 @@ describe('ballot privacy receiver-key proof vectors', () => {
             'mutated-linear-statement-target-rejects',
         );
 
-        expect(changedManifestCase.trace.expectedDigestChanged).toBe(true);
-        expect(
-            changedManifestCase.trace.baselineBackendStatementDigest,
-        ).not.toBe(changedManifestCase.trace.backendStatementDigest);
-        expect(
-            changedManifestCase.trace.baselineLinearStatementDigest,
-        ).not.toBe(changedManifestCase.trace.linearStatementDigest);
+        expect(changedManifestCase.trace.expectedHashChanged).toBe(true);
+        expect(changedManifestCase.trace.baselineBackendStatementHash).not.toBe(
+            changedManifestCase.trace.backendStatementHash,
+        );
+        expect(changedManifestCase.trace.baselineLinearStatementHash).not.toBe(
+            changedManifestCase.trace.linearStatementHash,
+        );
         expect(wrongSeedCase).toMatchObject({
             expectedOutcome: 'reject',
             proofConstructionAccepted: false,

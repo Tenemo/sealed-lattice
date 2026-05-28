@@ -1,5 +1,5 @@
-import { deriveProtocolDigest } from '@sealed-lattice/crypto';
-import type { ProtocolDigest } from '@sealed-lattice/types';
+import { deriveProtocolHash } from '@sealed-lattice/crypto';
+import type { ProtocolHash } from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -19,10 +19,10 @@ import {
     type ShareCommitmentOpeningWitness,
 } from '../../src/ballot-privacy/lattice-primitives';
 import {
-    deriveProofBytesDigest,
-    deriveReceiverKeyProofEncodingProfileDigest,
-    deriveReceiverKeyProofParameterSetDigest,
-    deriveReceiverKeyProofPublicRandomnessDigest,
+    deriveProofBytesHash,
+    deriveReceiverKeyProofEncodingProfileHash,
+    deriveReceiverKeyProofParameterSetHash,
+    deriveReceiverKeyProofPublicRandomnessHash,
 } from '../../src/ballot-privacy/objects';
 import { createBallotPrivacyProfileSet } from '../../src/ballot-privacy/profiles';
 import { createReceiverKeyProofBackendStatement } from '../../src/ballot-privacy/receiver-key-backend-statement';
@@ -36,8 +36,8 @@ import {
     createReceiverKeyProofMaterial,
 } from '../../src/ballot-privacy/receiver-key-proof-parameters';
 
-const digest = (label: string): ProtocolDigest =>
-    deriveProtocolDigest('ActionContextDigest', { label });
+const hash = (label: string): ProtocolHash =>
+    deriveProtocolHash('ActionContextHash', { label });
 
 const fixtureRandomness = createFixtureRandomnessSource(
     'ballot-privacy-lattice-primitives',
@@ -63,16 +63,16 @@ const createReceiverPlaintext = (
     receiverShareVector: readonly number[],
     shareCommitmentOpening: ShareCommitmentOpeningWitness,
 ): ReceiverPayloadPlaintextWitness => ({
-    ballotPackageContextDigest: digest('ballot-package-context'),
+    ballotPackageContextHash: hash('ballot-package-context'),
     ceremonyId: 'ceremony-1',
-    manifestDigest: digest('manifest'),
-    pollSpecDigest: digest('poll-spec'),
+    manifestHash: hash('manifest'),
+    pollSpecHash: hash('poll-spec'),
     receiverIdentity: 'receiver-1',
     receiverRosterPosition: 1,
     receiverShareVector,
-    rosterDigest: digest('roster'),
+    rosterHash: hash('roster'),
     shareCommitmentOpening,
-    voterIdentityDigest: digest('voter-1'),
+    voterIdentityHash: hash('voter-1'),
 });
 
 describe('ballot privacy lattice primitives', () => {
@@ -80,33 +80,33 @@ describe('ballot privacy lattice primitives', () => {
         const profileSet = createBallotPrivacyProfileSet();
         const firstState = generateReceiverState({
             ceremonyId: 'ceremony-1',
-            manifestDigest: digest('manifest'),
+            manifestHash: hash('manifest'),
             randomnessSource: fixtureRandomness,
             receiverEncryptionProfile: profileSet.receiverEncryptionProfile,
             receiverIdentity: 'receiver-1',
             receiverRosterPosition: 1,
             recoveryEpoch: 0,
-            rosterDigest: digest('roster'),
+            rosterHash: hash('roster'),
         });
         const secondState = generateReceiverState({
             ceremonyId: 'ceremony-1',
-            manifestDigest: digest('manifest'),
+            manifestHash: hash('manifest'),
             randomnessSource: fixtureRandomness,
             receiverEncryptionProfile: profileSet.receiverEncryptionProfile,
             receiverIdentity: 'receiver-1',
             receiverRosterPosition: 1,
             recoveryEpoch: 0,
-            rosterDigest: digest('roster'),
+            rosterHash: hash('roster'),
         });
         const changedState = generateReceiverState({
             ceremonyId: 'ceremony-1',
-            manifestDigest: digest('manifest'),
+            manifestHash: hash('manifest'),
             randomnessSource: fixtureRandomness,
             receiverEncryptionProfile: profileSet.receiverEncryptionProfile,
             receiverIdentity: 'receiver-2',
             receiverRosterPosition: 2,
             recoveryEpoch: 0,
-            rosterDigest: digest('roster'),
+            rosterHash: hash('roster'),
         });
 
         expect(firstState.receiverPublicKey).toEqual(
@@ -116,8 +116,8 @@ describe('ballot privacy lattice primitives', () => {
             secondState.publicKeyMaterial,
         );
         expect(firstState.secretState).toEqual(secondState.secretState);
-        expect(firstState.receiverPublicKey.receiverPublicKeyDigest).not.toBe(
-            changedState.receiverPublicKey.receiverPublicKeyDigest,
+        expect(firstState.receiverPublicKey.receiverPublicKeyHash).not.toBe(
+            changedState.receiverPublicKey.receiverPublicKeyHash,
         );
         expect(firstState.receiverPublicKey).not.toHaveProperty('secretVector');
         expect(firstState.receiverPublicKey).not.toHaveProperty('errorVector');
@@ -127,13 +127,13 @@ describe('ballot privacy lattice primitives', () => {
         const profileSet = createBallotPrivacyProfileSet();
         const receiverState = generateReceiverState({
             ceremonyId: 'ceremony-1',
-            manifestDigest: digest('manifest'),
+            manifestHash: hash('manifest'),
             randomnessSource: fixtureRandomness,
             receiverEncryptionProfile: profileSet.receiverEncryptionProfile,
             receiverIdentity: 'receiver-1',
             receiverRosterPosition: 1,
             recoveryEpoch: 0,
-            rosterDigest: digest('roster'),
+            rosterHash: hash('roster'),
         });
         const backendStatement = createReceiverKeyProofBackendStatement({
             publicKeyMaterial: receiverState.publicKeyMaterial,
@@ -166,15 +166,15 @@ describe('ballot privacy lattice primitives', () => {
         expect(backendStatement).toMatchObject({
             backendStatementFormat: 'SparseSignedIntegerBackendStatement-v1',
             columnCount: 2_048,
-            digestExpandedRowCount: 1_024,
+            hashExpandedRowCount: 1_024,
             explicitRowCount: 0,
             objectType: 'ReceiverKeyProofBackendStatement',
-            receiverPublicKeyDigest:
-                receiverState.receiverPublicKey.receiverPublicKeyDigest,
+            receiverPublicKeyHash:
+                receiverState.receiverPublicKey.receiverPublicKeyHash,
             relationLabel: 'ReceiverKeyWellFormednessRelation',
             rowCount: 1_024,
         });
-        expect(backendStatement.backendStatementDigest).toMatch(
+        expect(backendStatement.backendStatementHash).toMatch(
             /^[a-f0-9]{128}$/u,
         );
         expect(backendStatement.variableColumns).toHaveLength(2_048);
@@ -197,7 +197,7 @@ describe('ballot privacy lattice primitives', () => {
         expect(linearStatement.statementMatrixCoefficients).toHaveLength(4);
         expect(linearStatement.statementMatrixCoefficients[0]).toHaveLength(8);
         expect(linearStatement.targetVectorCoefficients).toHaveLength(4);
-        expect(linearStatement.statementDigest).toMatch(/^[a-f0-9]{128}$/u);
+        expect(linearStatement.statementHash).toMatch(/^[a-f0-9]{128}$/u);
         expect(linearStatement).not.toHaveProperty('secretVector');
         expect(linearStatement).not.toHaveProperty('errorVector');
         expect(
@@ -209,7 +209,7 @@ describe('ballot privacy lattice primitives', () => {
             }),
         ).toMatchObject({
             ok: true,
-            statementDigest: linearStatement.statementDigest,
+            statementHash: linearStatement.statementHash,
         });
         expect(
             verifyReceiverKeyWitness({
@@ -272,13 +272,13 @@ describe('ballot privacy lattice primitives', () => {
         const profileSet = createBallotPrivacyProfileSet();
         const receiverState = generateReceiverState({
             ceremonyId: 'ceremony-1',
-            manifestDigest: digest('manifest'),
+            manifestHash: hash('manifest'),
             randomnessSource: fixtureRandomness,
             receiverEncryptionProfile: profileSet.receiverEncryptionProfile,
             receiverIdentity: 'receiver-1',
             receiverRosterPosition: 1,
             recoveryEpoch: 0,
-            rosterDigest: digest('roster'),
+            rosterHash: hash('roster'),
         });
         const proofBytesHex = '001122aabbcc';
         const publicRandomnessHex = '00'.repeat(32);
@@ -307,34 +307,34 @@ describe('ballot privacy lattice primitives', () => {
             receiverPublicKey: receiverState.receiverPublicKey,
             secretState: receiverState.secretState,
         });
-        const proofBytesDigest = deriveProofBytesDigest({ proofBytesHex });
-        const proofEncodingProfileDigest =
-            deriveReceiverKeyProofEncodingProfileDigest({ proofEncoding });
-        const proofParameterSetDigest =
-            deriveReceiverKeyProofParameterSetDigest({
-                parameterSet: proofParameterSet,
-            });
-        const publicRandomnessDigest =
-            deriveReceiverKeyProofPublicRandomnessDigest({
+        const proofBytesHash = deriveProofBytesHash({ proofBytesHex });
+        const proofEncodingProfileHash =
+            deriveReceiverKeyProofEncodingProfileHash({ proofEncoding });
+        const proofParameterSetHash = deriveReceiverKeyProofParameterSetHash({
+            parameterSet: proofParameterSet,
+        });
+        const publicRandomnessHash = deriveReceiverKeyProofPublicRandomnessHash(
+            {
                 publicRandomnessHex,
-            });
+            },
+        );
 
         expect(proofRecord).toMatchObject({
-            backendStatementDigest: backendStatement.backendStatementDigest,
-            linearStatementDigest: linearStatement.statementDigest,
-            proofBytesDigest,
-            proofEncodingProfileDigest,
-            proofParameterSetDigest,
+            backendStatementHash: backendStatement.backendStatementHash,
+            linearStatementHash: linearStatement.statementHash,
+            proofBytesHash,
+            proofEncodingProfileHash,
+            proofParameterSetHash,
             proofSizeBytes: proofBytesHex.length / 2,
-            publicRandomnessDigest,
+            publicRandomnessHash,
         });
         expect(proofRecord.proofRoot).toBe(
-            deriveProtocolDigest('ReceiverKeyProofRoot', {
-                linearStatementDigest: linearStatement.statementDigest,
-                proofBytesDigest,
-                proofEncodingProfileDigest,
-                proofParameterSetDigest,
-                publicRandomnessDigest,
+            deriveProtocolHash('ReceiverKeyProofRoot', {
+                linearStatementHash: linearStatement.statementHash,
+                proofBytesHash,
+                proofEncodingProfileHash,
+                proofParameterSetHash,
+                publicRandomnessHash,
                 purpose: 'receiver-key-linear-proof-record-root-v1',
             }),
         );
@@ -388,7 +388,7 @@ describe('ballot privacy lattice primitives', () => {
                     proofParameterSet: {
                         ...proofMaterial.proofParameterSet,
                         profileId:
-                            'receiver-key-linear-module-lwe-compatibility-v1',
+                            'receiver-key-linear-module-lwe-unsupported-v1',
                     } as unknown as typeof proofMaterial.proofParameterSet,
                 },
                 publicKeyMaterial: receiverState.publicKeyMaterial,
@@ -405,32 +405,32 @@ describe('ballot privacy lattice primitives', () => {
         const secondOpening = opening(9);
         const firstCommitment = createShareCommitment({
             ceremonyId: 'ceremony-1',
-            manifestDigest: digest('manifest'),
+            manifestHash: hash('manifest'),
             opening: firstOpening,
             receiverIdentity: 'receiver-1',
             receiverRosterPosition: 1,
             receiverShareVector: shareVector(5, 7),
-            rosterDigest: digest('roster'),
+            rosterHash: hash('roster'),
             shareCommitmentProfile: profileSet.shareCommitmentProfile,
         });
         const secondCommitment = createShareCommitment({
             ceremonyId: 'ceremony-1',
-            manifestDigest: digest('manifest'),
+            manifestHash: hash('manifest'),
             opening: secondOpening,
             receiverIdentity: 'receiver-1',
             receiverRosterPosition: 1,
             receiverShareVector: shareVector(11, 13),
-            rosterDigest: digest('roster'),
+            rosterHash: hash('roster'),
             shareCommitmentProfile: profileSet.shareCommitmentProfile,
         });
         const summedCommitment = createShareCommitment({
             ceremonyId: 'ceremony-1',
-            manifestDigest: digest('manifest'),
+            manifestHash: hash('manifest'),
             opening: addShareCommitmentOpenings(firstOpening, secondOpening),
             receiverIdentity: 'receiver-1',
             receiverRosterPosition: 1,
             receiverShareVector: shareVector(16, 20),
-            rosterDigest: digest('roster'),
+            rosterHash: hash('roster'),
             shareCommitmentProfile: profileSet.shareCommitmentProfile,
         });
 
@@ -449,12 +449,12 @@ describe('ballot privacy lattice primitives', () => {
                 expectedCommitmentPolynomialVector:
                     firstCommitment.commitmentPolynomialVector,
                 expectedShareCommitment: firstCommitment.shareCommitment,
-                manifestDigest: digest('manifest'),
+                manifestHash: hash('manifest'),
                 opening: firstOpening,
                 receiverIdentity: 'receiver-1',
                 receiverRosterPosition: 1,
                 receiverShareVector: shareVector(5, 7),
-                rosterDigest: digest('roster'),
+                rosterHash: hash('roster'),
                 shareCommitmentProfile: profileSet.shareCommitmentProfile,
             }),
         ).toEqual([]);
@@ -464,12 +464,12 @@ describe('ballot privacy lattice primitives', () => {
                 expectedCommitmentPolynomialVector:
                     firstCommitment.commitmentPolynomialVector,
                 expectedShareCommitment: firstCommitment.shareCommitment,
-                manifestDigest: digest('manifest'),
+                manifestHash: hash('manifest'),
                 opening: opening(2),
                 receiverIdentity: 'receiver-1',
                 receiverRosterPosition: 1,
                 receiverShareVector: shareVector(5, 7),
-                rosterDigest: digest('roster'),
+                rosterHash: hash('roster'),
                 shareCommitmentProfile: profileSet.shareCommitmentProfile,
             }).map((refusal) => refusal.code),
         ).toContain('BallotPackageInvalid');
@@ -479,22 +479,22 @@ describe('ballot privacy lattice primitives', () => {
         const profileSet = createBallotPrivacyProfileSet();
         const firstCommitment = createShareCommitment({
             ceremonyId: 'ceremony-1',
-            manifestDigest: digest('manifest'),
+            manifestHash: hash('manifest'),
             randomnessSource: fixtureRandomness,
             receiverIdentity: 'receiver-1',
             receiverRosterPosition: 1,
             receiverShareVector: shareVector(5, 7),
-            rosterDigest: digest('roster'),
+            rosterHash: hash('roster'),
             shareCommitmentProfile: profileSet.shareCommitmentProfile,
         });
         const secondCommitment = createShareCommitment({
             ceremonyId: 'ceremony-1',
-            manifestDigest: digest('manifest'),
+            manifestHash: hash('manifest'),
             randomnessSource: fixtureRandomness,
             receiverIdentity: 'receiver-1',
             receiverRosterPosition: 1,
             receiverShareVector: shareVector(5, 7),
-            rosterDigest: digest('roster'),
+            rosterHash: hash('roster'),
             shareCommitmentProfile: profileSet.shareCommitmentProfile,
         });
 
@@ -515,13 +515,13 @@ describe('ballot privacy lattice primitives', () => {
         const profileSet = createBallotPrivacyProfileSet();
         const receiverState = generateReceiverState({
             ceremonyId: 'ceremony-1',
-            manifestDigest: digest('manifest'),
+            manifestHash: hash('manifest'),
             randomnessSource: fixtureRandomness,
             receiverEncryptionProfile: profileSet.receiverEncryptionProfile,
             receiverIdentity: 'receiver-1',
             receiverRosterPosition: 1,
             recoveryEpoch: 0,
-            rosterDigest: digest('roster'),
+            rosterHash: hash('roster'),
         });
         const plaintext = createReceiverPlaintext(
             shareVector(21, 34),
@@ -565,8 +565,8 @@ describe('ballot privacy lattice primitives', () => {
         expect(encryptedPayload.receiverPayload).not.toHaveProperty(
             'shareCommitmentOpening',
         );
-        expect(encryptedPayload.receiverPayload.receiverPayloadDigest).not.toBe(
-            changedPayload.receiverPayload.receiverPayloadDigest,
+        expect(encryptedPayload.receiverPayload.receiverPayloadHash).not.toBe(
+            changedPayload.receiverPayload.receiverPayloadHash,
         );
         expect(
             encodeReceiverPayloadPlaintextForTests({
@@ -604,13 +604,13 @@ describe('ballot privacy lattice primitives', () => {
         const profileSet = createBallotPrivacyProfileSet();
         const receiverState = generateReceiverState({
             ceremonyId: 'ceremony-1',
-            manifestDigest: digest('manifest'),
+            manifestHash: hash('manifest'),
             randomnessSource: fixtureRandomness,
             receiverEncryptionProfile: profileSet.receiverEncryptionProfile,
             receiverIdentity: 'receiver-1',
             receiverRosterPosition: 1,
             recoveryEpoch: 0,
-            rosterDigest: digest('roster'),
+            rosterHash: hash('roster'),
         });
 
         expect(() =>

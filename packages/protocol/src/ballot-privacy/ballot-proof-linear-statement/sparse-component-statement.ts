@@ -1,4 +1,4 @@
-import type { ProtocolDigest } from '@sealed-lattice/types';
+import type { ProtocolHash } from '@sealed-lattice/types';
 
 import { type BallotPrivacyLoweredLinearRelationStatement } from '../relation-backend-lowering.js';
 import type { BallotPrivacyRelationCompilerInput } from '../relation-compiler.js';
@@ -23,10 +23,10 @@ import {
     positiveModuloBigInt,
 } from './statement-contracts.js';
 import {
-    deriveSparseLinearStatementDigest,
-    deriveSparseStatementMatrixDigest,
-    deriveSparseTargetVectorDigest,
-} from './statement-digests.js';
+    deriveSparseLinearStatementHash,
+    deriveSparseStatementMatrixHash,
+    deriveSparseTargetVectorHash,
+} from './statement-hashes.js';
 import {
     componentById,
     decimalBigInt,
@@ -36,7 +36,7 @@ import {
 } from './witness-accessors.js';
 
 export const buildBallotProofSparseComponentLinearProofStatement = (input: {
-    readonly ballotProofStatementDigest?: ProtocolDigest;
+    readonly ballotProofStatementHash?: ProtocolHash;
     readonly componentId:
         | 'score-and-shamir-field-component'
         | 'payload-plaintext-field-component'
@@ -65,7 +65,7 @@ export const buildBallotProofSparseComponentLinearProofStatement = (input: {
         )
     ) {
         return buildStructuredShareCommitmentSparseStatement({
-            ballotProofStatementDigest: input.ballotProofStatementDigest,
+            ballotProofStatementHash: input.ballotProofStatementHash,
             component,
             loweredStatement: input.loweredStatement,
             parameterProfileId: input.parameterProfileId,
@@ -175,11 +175,10 @@ export const buildBallotProofSparseComponentLinearProofStatement = (input: {
                 rowIndex,
             }),
         );
-    const sparseStatementMatrixDigest = deriveSparseStatementMatrixDigest(
+    const sparseStatementMatrixHash = deriveSparseStatementMatrixHash(
         sparseStatementMatrixEntries,
     );
-    const targetVectorDigest =
-        deriveSparseTargetVectorDigest(targetVectorEntries);
+    const targetVectorHash = deriveSparseTargetVectorHash(targetVectorEntries);
     const projectionCoverage = projectionCoverageForComponent(
         input.componentId,
     );
@@ -194,14 +193,14 @@ export const buildBallotProofSparseComponentLinearProofStatement = (input: {
     }
     const statementPayload: Omit<
         BallotProofSparseComponentLinearProofStatement,
-        'statementDigest'
+        'statementHash'
     > = {
-        backendStatementDigest:
-            input.loweredStatement.backendStatement.backendStatementDigest,
-        ...(input.ballotProofStatementDigest === undefined
+        backendStatementHash:
+            input.loweredStatement.backendStatement.backendStatementHash,
+        ...(input.ballotProofStatementHash === undefined
             ? {}
             : {
-                  ballotProofStatementDigest: input.ballotProofStatementDigest,
+                  ballotProofStatementHash: input.ballotProofStatementHash,
               }),
         coefficientModulus: component.coefficientModulus,
         objectType: 'BallotProofSparseComponentLinearProofStatement',
@@ -210,10 +209,10 @@ export const buildBallotProofSparseComponentLinearProofStatement = (input: {
         proofStatementFormat: 'sparse-polynomial-matrix-linear-proof-v1',
         projectionCoverage,
         relation: linearProofRelation,
-        relationStatementDigest: input.loweredStatement.relationStatementDigest,
+        relationStatementHash: input.loweredStatement.relationStatementHash,
         sourceBackendColumnIndices,
         sourceRingDegree: input.sourceRingDegree,
-        sparseStatementMatrixDigest,
+        sparseStatementMatrixHash,
         sparseStatementMatrixEntries,
         sparseStatementTermCount:
             sparseStatementMatrixEntries.length.toString(),
@@ -221,7 +220,7 @@ export const buildBallotProofSparseComponentLinearProofStatement = (input: {
         statementRows: explicitRows.length,
         matrixCoefficientRepresentation: 'centeredSignedSourceModulus',
         targetCoefficientRepresentation: 'centeredSignedSourceModulus',
-        targetVectorDigest,
+        targetVectorHash,
         targetVectorEntries,
         targetVectorEntryCount: targetVectorEntries.length.toString(),
         witnessL2BoundSquared: input.witnessL2BoundSquared,
@@ -229,7 +228,7 @@ export const buildBallotProofSparseComponentLinearProofStatement = (input: {
 
     return {
         ...statementPayload,
-        statementDigest: deriveSparseLinearStatementDigest(statementPayload),
+        statementHash: deriveSparseLinearStatementHash(statementPayload),
     };
 };
 

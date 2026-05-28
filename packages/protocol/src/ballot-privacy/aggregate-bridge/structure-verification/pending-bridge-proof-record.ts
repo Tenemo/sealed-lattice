@@ -1,16 +1,16 @@
-import { deriveProtocolDigest } from '@sealed-lattice/crypto';
+import { deriveProtocolHash } from '@sealed-lattice/crypto';
 import {
     encryptedAggregateBridgeProfileId,
     type BridgeProofRecord,
-    type ProtocolDigest,
+    type ProtocolHash,
 } from '@sealed-lattice/types';
 
 import {
-    deriveBridgeProofProfileDigest,
-    deriveBridgeProofRecordDigest,
-    deriveBridgeProofStatementDigest,
-    deriveBridgeProofTargetContractDigest,
-} from '../digests.js';
+    deriveBridgeProofProfileHash,
+    deriveBridgeProofRecordHash,
+    deriveBridgeProofStatementHash,
+    deriveBridgeProofTargetContractHash,
+} from '../hashes.js';
 
 import {
     aggregateRelationChallengeHexPattern,
@@ -18,47 +18,47 @@ import {
     hash512HexPattern,
     requireMatchingSafeInteger,
     requireMatchingValue,
-    requireProtocolDigest,
-    requireProtocolDigestField,
+    requireProtocolHash,
+    requireProtocolHashField,
     type BridgeEncryptionEvidence,
     type PendingBridgeProofRecordFromEvidenceInput,
 } from './shared.js';
 
-const derivePendingBridgeProofEncodingProfileDigest = (input: {
-    readonly bridgeProofBytesDigest: ProtocolDigest;
-    readonly bridgeProofProfileDigest: ProtocolDigest;
-    readonly bridgeProofStatementDigest: ProtocolDigest;
-}): ProtocolDigest =>
-    deriveProtocolDigest('BridgeProofRecordDigest', {
+const derivePendingBridgeProofEncodingProfileHash = (input: {
+    readonly bridgeProofBytesHash: ProtocolHash;
+    readonly bridgeProofProfileHash: ProtocolHash;
+    readonly bridgeProofStatementHash: ProtocolHash;
+}): ProtocolHash =>
+    deriveProtocolHash('BridgeProofRecordHash', {
         ...input,
         purpose:
             'sealed-lattice-pending-bridge-proof-evidence-encoding-profile-v1',
     });
 
-const derivePendingBridgeProofParameterSetDigest = (input: {
-    readonly bgvProfileDigest: ProtocolDigest;
-    readonly bridgeProofProfileDigest: ProtocolDigest;
-    readonly bridgeProofStatementDigest: ProtocolDigest;
-    readonly collectivePublicKeyRoot: ProtocolDigest;
-}): ProtocolDigest =>
-    deriveProtocolDigest('BridgeProofRecordDigest', {
+const derivePendingBridgeProofParameterSetHash = (input: {
+    readonly bgvProfileHash: ProtocolHash;
+    readonly bridgeProofProfileHash: ProtocolHash;
+    readonly bridgeProofStatementHash: ProtocolHash;
+    readonly collectivePublicKeyRoot: ProtocolHash;
+}): ProtocolHash =>
+    deriveProtocolHash('BridgeProofRecordHash', {
         ...input,
         purpose: 'sealed-lattice-pending-bridge-proof-parameter-set-v1',
     });
 
-const derivePendingBridgeProofPublicRandomnessDigest = (input: {
-    readonly bridgeProofBytesDigest: ProtocolDigest;
-    readonly bridgeProofStatementDigest: ProtocolDigest;
-}): ProtocolDigest =>
-    deriveProtocolDigest('ProofBytesDigest', {
+const derivePendingBridgeProofPublicRandomnessHash = (input: {
+    readonly bridgeProofBytesHash: ProtocolHash;
+    readonly bridgeProofStatementHash: ProtocolHash;
+}): ProtocolHash =>
+    deriveProtocolHash('ProofBytesHash', {
         ...input,
         purpose: 'sealed-lattice-pending-bridge-proof-public-randomness-v1',
     });
 
-const deriveSampledPublicRelationCheckPolicyDigest = (
+const deriveSampledPublicRelationCheckPolicyHash = (
     policy: BridgeEncryptionEvidence['sampledPublicRelationCheckPolicy'],
-): ProtocolDigest =>
-    deriveProtocolDigest('BridgeProofRecordDigest', {
+): ProtocolHash =>
+    deriveProtocolHash('BridgeProofRecordHash', {
         policy,
         purpose:
             'sealed-lattice-aggregate-bridge-sampled-public-relation-check-policy-v1',
@@ -70,30 +70,75 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
     const { aggregateDerivationComponent, bridgeEncryptionEvidence } = input;
     const { statement } = aggregateDerivationComponent;
     const { profileBindings } = input.setupPackage;
-    const bridgeProofProfileDigest = deriveBridgeProofProfileDigest({
+    const bridgeProofProfileHash = deriveBridgeProofProfileHash({
         bgvEncryptionProofSubrelation:
             'SealedLatticeDevelopmentCiphertextEquationRelation',
         bridgeProofProfileId: encryptedAggregateBridgeProfileId,
         proofBackend: 'SealedLatticeBridgeRelation',
     });
-    const profileDigest = requireProtocolDigestField(
+    const profileHash = requireProtocolHashField(
         profileBindings,
-        'profileDigest',
+        'profileHash',
         'setupPackage.profileBindings',
     );
-    const rustBgvBackendProfileDigest = requireProtocolDigestField(
+    const rustBgvBackendProfileHash = requireProtocolHashField(
         profileBindings,
-        'backendProfileDigest',
+        'backendProfileHash',
         'setupPackage.profileBindings',
     );
-    const canonicalCiphertextConventionDigest = requireProtocolDigestField(
+    const canonicalCiphertextConventionHash = requireProtocolHashField(
         profileBindings,
-        'canonicalCiphertextConventionDigest',
+        'canonicalCiphertextConventionHash',
         'setupPackage.profileBindings',
     );
-    const encryptedAggregateInputLayoutDigest = requireProtocolDigestField(
+    const encryptedAggregateInputLayoutHash = requireProtocolHashField(
         profileBindings,
-        'encryptedAggregateInputLayoutDigest',
+        'encryptedAggregateInputLayoutHash',
+        'setupPackage.profileBindings',
+    );
+    const aggregateInputEncodingProfileHash = requireProtocolHashField(
+        profileBindings,
+        'aggregateInputEncodingProfileHash',
+        'setupPackage.profileBindings',
+    );
+    const ballotScoreEncodingProfileHash = requireProtocolHashField(
+        profileBindings,
+        'ballotScoreEncodingProfileHash',
+        'setupPackage.profileBindings',
+    );
+    const ballotShareLayoutProfileHash = requireProtocolHashField(
+        profileBindings,
+        'ballotShareLayoutProfileHash',
+        'setupPackage.profileBindings',
+    );
+    const bgvBatchEncoderHash = requireProtocolHashField(
+        profileBindings,
+        'batchEncoderHash',
+        'setupPackage.profileBindings',
+    );
+    const encodedAggregateLayoutHash = requireProtocolHashField(
+        profileBindings,
+        'encodedAggregateLayoutHash',
+        'setupPackage.profileBindings',
+    );
+    const encryptedAggregateBridgeHash = requireProtocolHashField(
+        profileBindings,
+        'encryptedAggregateBridgeHash',
+        'setupPackage.profileBindings',
+    );
+    const encryptedAggregateReconstructionHash = requireProtocolHashField(
+        profileBindings,
+        'encryptedAggregateReconstructionHash',
+        'setupPackage.profileBindings',
+    );
+    const encryptedAggregateTargetBasisRoot = requireProtocolHashField(
+        profileBindings,
+        'encryptedAggregateTargetBasisRoot',
+        'setupPackage.profileBindings',
+    );
+    const topKEvaluatorInputLayoutHash = requireProtocolHashField(
+        profileBindings,
+        'topKEvaluatorInputLayoutHash',
         'setupPackage.profileBindings',
     );
     const sampledPublicRelationCheckPolicy =
@@ -138,42 +183,39 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
         bridgeEncryptionEvidence.sampledPublicRelationChecks.length,
         'sampled public relation check count',
     );
-    const sampledPublicRelationCheckPolicyDigest =
-        deriveSampledPublicRelationCheckPolicyDigest(
+    const sampledPublicRelationCheckPolicyHash =
+        deriveSampledPublicRelationCheckPolicyHash(
             sampledPublicRelationCheckPolicy,
         );
-    const bridgeProofTargetContractDigest =
-        deriveBridgeProofTargetContractDigest({
-            aggregateQuotientCoordinateCount: statement.shareVectorWidth,
-            aggregateReducedCoordinateCount: statement.shareVectorWidth,
-        });
-    const bridgeSharedWitnessProofDigest = requireProtocolDigest(
-        bridgeEncryptionEvidence.bridgeSharedWitnessProofDigest,
-        'shared-witness proof digest',
+    const bridgeProofTargetContractHash = deriveBridgeProofTargetContractHash({
+        aggregateQuotientCoordinateCount: statement.shareVectorWidth,
+        aggregateReducedCoordinateCount: statement.shareVectorWidth,
+    });
+    const bridgeSharedWitnessProofHash = requireProtocolHash(
+        bridgeEncryptionEvidence.bridgeSharedWitnessProofHash,
+        'shared-witness proof hash',
     );
-    const verifiedBridgeSharedWitnessProofDigest = requireProtocolDigest(
-        input.bridgeEvidenceVerification.bridgeSharedWitnessProofDigest,
-        'verified shared-witness proof digest',
+    const verifiedBridgeSharedWitnessProofHash = requireProtocolHash(
+        input.bridgeEvidenceVerification.bridgeSharedWitnessProofHash,
+        'verified shared-witness proof hash',
     );
-    const sharedWitnessZeroKnowledgeStatusDigest = requireProtocolDigest(
-        bridgeEncryptionEvidence.sharedWitnessZeroKnowledgeStatusDigest,
-        'shared-witness zero-knowledge status digest',
+    const sharedWitnessZeroKnowledgeStatusHash = requireProtocolHash(
+        bridgeEncryptionEvidence.sharedWitnessZeroKnowledgeStatusHash,
+        'shared-witness zero-knowledge status hash',
     );
-    const verifiedSharedWitnessZeroKnowledgeStatusDigest =
-        requireProtocolDigest(
-            input.bridgeEvidenceVerification
-                .sharedWitnessZeroKnowledgeStatusDigest,
-            'verified shared-witness zero-knowledge status digest',
-        );
-    const bgvRandomnessBoundProofStatusDigest = requireProtocolDigest(
-        bridgeEncryptionEvidence.bgvRandomnessBoundProofStatusDigest,
-        'BGV randomness-bound status digest',
+    const verifiedSharedWitnessZeroKnowledgeStatusHash = requireProtocolHash(
+        input.bridgeEvidenceVerification.sharedWitnessZeroKnowledgeStatusHash,
+        'verified shared-witness zero-knowledge status hash',
     );
-    const verifiedBgvRandomnessBoundProofStatusDigest = requireProtocolDigest(
-        input.bridgeEvidenceVerification.bgvRandomnessBoundProofStatusDigest,
-        'verified BGV randomness-bound status digest',
+    const bgvRandomnessBoundProofStatusHash = requireProtocolHash(
+        bridgeEncryptionEvidence.bgvRandomnessBoundProofStatusHash,
+        'BGV randomness-bound status hash',
     );
-    const encryptedAggregateInputRoot = requireProtocolDigest(
+    const verifiedBgvRandomnessBoundProofStatusHash = requireProtocolHash(
+        input.bridgeEvidenceVerification.bgvRandomnessBoundProofStatusHash,
+        'verified BGV randomness-bound status hash',
+    );
+    const encryptedAggregateInputRoot = requireProtocolHash(
         bridgeEncryptionEvidence.encryptedAggregateInputRoot,
         'encrypted aggregate input root',
     );
@@ -182,142 +224,99 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
         bridgeEncryptionEvidence.encryptedAggregateShareCiphertextRoot,
         'prototype encrypted aggregate input root',
     );
-    const expectedBridgeProofStatementDigest = deriveBridgeProofStatementDigest(
-        {
-            aggregateDerivationComponentDigest:
-                aggregateDerivationComponent.aggregateDerivationComponentDigest,
-            aggregateInputEncodingProfileDigest: requireProtocolDigestField(
-                profileBindings,
-                'aggregateInputEncodingProfileDigest',
-                'setupPackage.profileBindings',
-            ),
-            aggregateQuotientCoordinateCount: statement.shareVectorWidth,
-            aggregateReducedCoordinateCount: statement.shareVectorWidth,
-            aggregateSelectionPolicyDigest: requireProtocolDigest(
-                input.aggregateSelectionPolicyDigest,
-                'aggregate selection policy digest',
-            ),
-            aggregateShareCommitmentDigest:
-                aggregateDerivationComponent.aggregateCommitment
-                    .aggregateShareCommitmentDigest,
-            aggregateToPlaintextBindingStatus:
-                'AggregateToPlaintextBindingProofChecked',
-            ballotScoreEncodingProfileDigest: requireProtocolDigestField(
-                profileBindings,
-                'ballotScoreEncodingProfileDigest',
-                'setupPackage.profileBindings',
-            ),
-            ballotSetDigest: statement.ballotSetDigest,
-            ballotShareLayoutProfileDigest: requireProtocolDigestField(
-                profileBindings,
-                'ballotShareLayoutProfileDigest',
-                'setupPackage.profileBindings',
-            ),
-            basisId: bridgeEncryptionEvidence.basisId,
-            bgvBatchEncoderDigest: requireProtocolDigestField(
-                profileBindings,
-                'batchEncoderDigest',
-                'setupPackage.profileBindings',
-            ),
-            bgvEncryptionProofStatus: 'BgvCiphertextEquationChecked',
-            bgvProfileDigest: profileDigest,
-            bgvPublicKeyRoot:
-                input.setupPackage.collectivePublicKey.bgvPublicKeyRoot,
-            bgvRandomnessBoundProofStatus:
-                'BgvRandomnessErrorSupportPolynomialChecked',
-            bridgeClaimClosureStatus: 'BridgeProofClaimClosureMissing',
-            bridgeLayoutDigest: encryptedAggregateInputLayoutDigest,
-            bridgeProofTargetContractDigest,
-            bridgeWitnessPrivacyProfileDigest: requireProtocolDigest(
-                input.bridgeWitnessPrivacyProfileDigest,
-                'bridge witness privacy profile digest',
-            ),
-            canonicalByteLength: bridgeEncryptionEvidence.canonicalByteLength,
-            canonicalBytesHash512:
-                bridgeEncryptionEvidence.canonicalBytesHash512,
-            canonicalCiphertextConventionDigest,
-            ceremonyId: statement.ceremonyId,
-            ciphertextRoot: bridgeEncryptionEvidence.ciphertextRoot,
-            coefficientDomainCanonical: true,
-            coefficientCount: bridgeEncryptionEvidence.coefficientCount,
-            collectivePublicKeyRoot:
-                input.setupPackage.collectivePublicKey.collectivePublicKeyRoot,
-            contributorActionContextDigest:
-                statement.contributorActionContextDigest,
-            contributorIdentity: statement.contributorIdentity,
-            contributorRosterExternalAcceptanceDigest:
-                statement.contributorRosterExternalAcceptanceDigest,
-            contributorRosterPosition: statement.contributorRosterPosition,
-            optionCount: statement.optionCount,
-            participantCount: statement.participantCount,
-            encodedAggregateLayoutDigest: requireProtocolDigestField(
-                profileBindings,
-                'encodedAggregateLayoutDigest',
-                'setupPackage.profileBindings',
-            ),
-            encodedShareVectorLayoutDigest:
-                statement.encodedShareVectorLayoutDigest,
-            encryptedAggregateBridgeDigest: requireProtocolDigestField(
-                profileBindings,
-                'encryptedAggregateBridgeDigest',
-                'setupPackage.profileBindings',
-            ),
-            encryptedAggregateInputLayoutDigest,
-            encryptedAggregateInputRoot,
-            encryptedAggregateReconstructionDigest: requireProtocolDigestField(
-                profileBindings,
-                'encryptedAggregateReconstructionDigest',
-                'setupPackage.profileBindings',
-            ),
-            encryptedAggregateShareCiphertextRoot:
-                bridgeEncryptionEvidence.encryptedAggregateShareCiphertextRoot,
-            encryptedAggregateTargetBasisDataRoot: requireProtocolDigestField(
-                profileBindings,
-                'encryptedAggregateTargetBasisDataRoot',
-                'setupPackage.profileBindings',
-            ),
-            heParamDigest: requireProtocolDigest(
-                input.heParamDigest,
-                'HE parameter digest',
-            ),
-            hwangPiopStatus:
-                'DeferredUntilSealedLatticeBgvRnsCompatibilityFreeze',
-            level: bridgeEncryptionEvidence.level,
-            manifestDigest: statement.manifestDigest,
-            plaintextRoot: bridgeEncryptionEvidence.plaintextRoot,
-            pollSpecDigest: statement.pollSpecDigest,
-            postVotingClosedContextDigest:
-                statement.postVotingClosedContextDigest,
-            proofProfileDigest: bridgeProofProfileDigest,
-            rnsCrtConsistencyProofStatus: 'RnsCrtConsistencyRelationChecked',
-            rosterDigest: statement.rosterDigest,
-            rustBgvBackendProfileDigest,
-            sampledPublicRelationCheckPolicyDigest,
-            sampledOnlyBridgeVerificationAccepted: false,
-            setupPackageDigest: requireProtocolDigest(
-                input.setupPackage.setupPackageDigest,
-                'setup package digest',
-            ),
-            shareCommitmentMessageBoundCertDigest:
-                statement.shareCommitmentMessageBoundCertDigest,
-            shareVectorWidth: statement.shareVectorWidth,
-            sharedWitnessBindingRequired: true,
-            sharedWitnessBindingStatus: 'SharedWitnessBindingRelationChecked',
-            sharedWitnessChallengeBitsPerCheck: 64,
-            sharedWitnessCheckCount: 2,
-            sharedWitnessSoundnessBits: 128,
-            sharedWitnessZeroKnowledgeStatus:
-                'SharedWitnessZeroKnowledgeResponseDistributionChecked',
-            slotCount: bridgeEncryptionEvidence.slotCount,
-            thresholdProfileDigest: statement.thresholdProfileDigest,
-            topKEvaluatorInputLayoutDigest: requireProtocolDigestField(
-                profileBindings,
-                'topKEvaluatorInputLayoutDigest',
-                'setupPackage.profileBindings',
-            ),
-            votingClosedBoardHeadDigest: statement.votingClosedBoardHeadDigest,
-        },
-    );
+    const expectedBridgeProofStatementHash = deriveBridgeProofStatementHash({
+        aggregateDerivationComponentHash:
+            aggregateDerivationComponent.aggregateDerivationComponentHash,
+        aggregateInputEncodingProfileHash,
+        aggregateQuotientCoordinateCount: statement.shareVectorWidth,
+        aggregateReducedCoordinateCount: statement.shareVectorWidth,
+        aggregateSelectionPolicyHash: requireProtocolHash(
+            input.aggregateSelectionPolicyHash,
+            'aggregate selection policy hash',
+        ),
+        aggregateShareCommitmentHash:
+            aggregateDerivationComponent.aggregateCommitment
+                .aggregateShareCommitmentHash,
+        aggregateToPlaintextBindingStatus:
+            'AggregateToPlaintextBindingProofChecked',
+        ballotScoreEncodingProfileHash,
+        ballotSetHash: statement.ballotSetHash,
+        ballotShareLayoutProfileHash,
+        basisId: bridgeEncryptionEvidence.basisId,
+        bgvBatchEncoderHash,
+        bgvEncryptionProofStatus: 'BgvCiphertextEquationChecked',
+        bgvProfileHash: profileHash,
+        bgvPublicKeyRoot:
+            input.setupPackage.collectivePublicKey.bgvPublicKeyRoot,
+        bgvRandomnessBoundProofStatus:
+            'BgvRandomnessErrorSupportPolynomialChecked',
+        bridgeClaimClosureStatus: 'BridgeProofClaimClosureMissing',
+        bridgeLayoutHash: encryptedAggregateInputLayoutHash,
+        bridgeProofTargetContractHash,
+        bridgeWitnessPrivacyProfileHash: requireProtocolHash(
+            input.bridgeWitnessPrivacyProfileHash,
+            'bridge witness privacy profile hash',
+        ),
+        canonicalByteLength: bridgeEncryptionEvidence.canonicalByteLength,
+        canonicalBytesHash512: bridgeEncryptionEvidence.canonicalBytesHash512,
+        canonicalCiphertextConventionHash,
+        ceremonyId: statement.ceremonyId,
+        ciphertextRoot: bridgeEncryptionEvidence.ciphertextRoot,
+        coefficientDomainCanonical: true,
+        coefficientCount: bridgeEncryptionEvidence.coefficientCount,
+        collectivePublicKeyRoot:
+            input.setupPackage.collectivePublicKey.collectivePublicKeyRoot,
+        contributorActionContextHash: statement.contributorActionContextHash,
+        contributorIdentity: statement.contributorIdentity,
+        contributorRosterExternalAcceptanceHash:
+            statement.contributorRosterExternalAcceptanceHash,
+        contributorRosterPosition: statement.contributorRosterPosition,
+        optionCount: statement.optionCount,
+        participantCount: statement.participantCount,
+        encodedAggregateLayoutHash,
+        encodedShareVectorLayoutHash: statement.encodedShareVectorLayoutHash,
+        encryptedAggregateBridgeHash,
+        encryptedAggregateInputLayoutHash,
+        encryptedAggregateInputRoot,
+        encryptedAggregateReconstructionHash,
+        encryptedAggregateShareCiphertextRoot:
+            bridgeEncryptionEvidence.encryptedAggregateShareCiphertextRoot,
+        encryptedAggregateTargetBasisRoot,
+        heParamHash: requireProtocolHash(
+            input.heParamHash,
+            'HE parameter hash',
+        ),
+        hwangPiopStatus: 'DeferredUntilSealedLatticeBgvRnsProfileFreeze',
+        level: bridgeEncryptionEvidence.level,
+        manifestHash: statement.manifestHash,
+        plaintextRoot: bridgeEncryptionEvidence.plaintextRoot,
+        pollSpecHash: statement.pollSpecHash,
+        postVotingClosedContextHash: statement.postVotingClosedContextHash,
+        proofProfileHash: bridgeProofProfileHash,
+        rnsCrtConsistencyProofStatus: 'RnsCrtConsistencyRelationChecked',
+        rosterHash: statement.rosterHash,
+        rustBgvBackendProfileHash,
+        sampledPublicRelationCheckPolicyHash,
+        sampledOnlyBridgeVerificationAccepted: false,
+        setupPackageHash: requireProtocolHash(
+            input.setupPackage.setupPackageHash,
+            'setup package hash',
+        ),
+        shareCommitmentMessageBoundCertHash:
+            statement.shareCommitmentMessageBoundCertHash,
+        shareVectorWidth: statement.shareVectorWidth,
+        sharedWitnessBindingRequired: true,
+        sharedWitnessBindingStatus: 'SharedWitnessBindingRelationChecked',
+        sharedWitnessChallengeBitsPerCheck: 64,
+        sharedWitnessCheckCount: 2,
+        sharedWitnessSoundnessBits: 128,
+        sharedWitnessZeroKnowledgeStatus:
+            'SharedWitnessZeroKnowledgeResponseDistributionChecked',
+        slotCount: bridgeEncryptionEvidence.slotCount,
+        thresholdProfileHash: statement.thresholdProfileHash,
+        topKEvaluatorInputLayoutHash,
+        votingClosedBoardHeadHash: statement.votingClosedBoardHeadHash,
+    });
 
     requireMatchingValue(
         input.bridgeEvidenceVerification.ok,
@@ -335,14 +334,14 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
         'bridge evidence verification label',
     );
     requireMatchingValue(
-        bridgeEncryptionEvidence.aggregateDerivationComponentDigest,
-        aggregateDerivationComponent.aggregateDerivationComponentDigest,
-        'aggregate derivation component digest',
+        bridgeEncryptionEvidence.aggregateDerivationComponentHash,
+        aggregateDerivationComponent.aggregateDerivationComponentHash,
+        'aggregate derivation component hash',
     );
     requireMatchingValue(
-        bridgeEncryptionEvidence.aggregateDerivationStatementDigest,
-        statement.aggregateDerivationStatementDigest,
-        'aggregate derivation statement digest',
+        bridgeEncryptionEvidence.aggregateDerivationStatementHash,
+        statement.aggregateDerivationStatementHash,
+        'aggregate derivation statement hash',
     );
     requireMatchingSafeInteger(
         bridgeEncryptionEvidence.aggregateReducedCoordinateCount,
@@ -363,9 +362,9 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
             'Aggregate relation challenge summary must be canonical lowercase hex.',
         );
     }
-    requireProtocolDigest(
-        bridgeEncryptionEvidence.aggregateRelationCommitmentDigest,
-        'aggregate relation commitment digest',
+    requireProtocolHash(
+        bridgeEncryptionEvidence.aggregateRelationCommitmentHash,
+        'aggregate relation commitment hash',
     );
     if (
         !hash512HexPattern.test(bridgeEncryptionEvidence.canonicalBytesHash512)
@@ -394,15 +393,15 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
     }
     requireMatchingValue(
         aggregateDerivationComponent.aggregateCommitment
-            .aggregateShareCommitmentDigest,
-        statement.aggregateShareCommitmentDigest,
-        'aggregate share commitment digest',
+            .aggregateShareCommitmentHash,
+        statement.aggregateShareCommitmentHash,
+        'aggregate share commitment hash',
     );
     requireMatchingValue(
         aggregateDerivationComponent.shareCommitmentMessageBoundCert
-            .shareCommitmentMessageBoundCertDigest,
-        statement.shareCommitmentMessageBoundCertDigest,
-        'share commitment message-bound certificate digest',
+            .shareCommitmentMessageBoundCertHash,
+        statement.shareCommitmentMessageBoundCertHash,
+        'share commitment message-bound certificate hash',
     );
     requireMatchingValue(
         input.setupPackage.setupInputs.ceremonyId,
@@ -410,19 +409,19 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
         'ceremony id',
     );
     requireMatchingValue(
-        input.setupPackage.setupInputs.manifestDigest,
-        statement.manifestDigest,
-        'manifest digest',
+        input.setupPackage.setupInputs.manifestHash,
+        statement.manifestHash,
+        'manifest hash',
     );
     requireMatchingValue(
-        input.setupPackage.setupInputs.rosterDigest,
-        statement.rosterDigest,
-        'roster digest',
+        input.setupPackage.setupInputs.rosterHash,
+        statement.rosterHash,
+        'roster hash',
     );
     requireMatchingValue(
-        input.setupPackage.setupInputs.thresholdProfileDigest,
-        statement.thresholdProfileDigest,
-        'threshold profile digest',
+        input.setupPackage.setupInputs.thresholdProfileHash,
+        statement.thresholdProfileHash,
+        'threshold profile hash',
     );
     requireMatchingSafeInteger(
         input.setupPackage.setupInputs.participantCount,
@@ -440,40 +439,40 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
         'BGV public key root',
     );
     requireMatchingValue(
-        bridgeEncryptionEvidence.profileDigest,
-        profileDigest,
-        'BGV profile digest',
+        bridgeEncryptionEvidence.profileHash,
+        profileHash,
+        'BGV profile hash',
     );
     requireMatchingValue(
-        bridgeEncryptionEvidence.rustBgvBackendProfileDigest,
-        rustBgvBackendProfileDigest,
-        'Rust BGV backend profile digest',
+        bridgeEncryptionEvidence.rustBgvBackendProfileHash,
+        rustBgvBackendProfileHash,
+        'Rust BGV backend profile hash',
     );
     requireMatchingValue(
-        bridgeEncryptionEvidence.canonicalCiphertextConventionDigest,
-        canonicalCiphertextConventionDigest,
-        'canonical ciphertext convention digest',
+        bridgeEncryptionEvidence.canonicalCiphertextConventionHash,
+        canonicalCiphertextConventionHash,
+        'canonical ciphertext convention hash',
     );
     for (const [description, bridgeValue, verificationValue] of [
         [
-            'bridge proof profile digest',
-            bridgeEncryptionEvidence.bridgeProofProfileDigest,
-            input.bridgeEvidenceVerification.bridgeProofProfileDigest,
+            'bridge proof profile hash',
+            bridgeEncryptionEvidence.bridgeProofProfileHash,
+            input.bridgeEvidenceVerification.bridgeProofProfileHash,
         ],
         [
-            'bridge proof statement digest',
-            bridgeEncryptionEvidence.bridgeProofStatementDigest,
-            input.bridgeEvidenceVerification.bridgeProofStatementDigest,
+            'bridge proof statement hash',
+            bridgeEncryptionEvidence.bridgeProofStatementHash,
+            input.bridgeEvidenceVerification.bridgeProofStatementHash,
         ],
         [
-            'bridge proof target contract digest',
-            bridgeEncryptionEvidence.bridgeProofTargetContractDigest,
-            input.bridgeEvidenceVerification.bridgeProofTargetContractDigest,
+            'bridge proof target contract hash',
+            bridgeEncryptionEvidence.bridgeProofTargetContractHash,
+            input.bridgeEvidenceVerification.bridgeProofTargetContractHash,
         ],
         [
-            'bridge proof bytes digest',
-            bridgeEncryptionEvidence.bridgeProofBytesDigest,
-            input.bridgeEvidenceVerification.bridgeProofBytesDigest,
+            'bridge proof bytes hash',
+            bridgeEncryptionEvidence.bridgeProofBytesHash,
+            input.bridgeEvidenceVerification.bridgeProofBytesHash,
         ],
         [
             'bridge proof root',
@@ -481,19 +480,19 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
             input.bridgeEvidenceVerification.bridgeProofRoot,
         ],
         [
-            'shared-witness proof digest',
-            bridgeSharedWitnessProofDigest,
-            verifiedBridgeSharedWitnessProofDigest,
+            'shared-witness proof hash',
+            bridgeSharedWitnessProofHash,
+            verifiedBridgeSharedWitnessProofHash,
         ],
         [
-            'shared-witness zero-knowledge status digest',
-            sharedWitnessZeroKnowledgeStatusDigest,
-            verifiedSharedWitnessZeroKnowledgeStatusDigest,
+            'shared-witness zero-knowledge status hash',
+            sharedWitnessZeroKnowledgeStatusHash,
+            verifiedSharedWitnessZeroKnowledgeStatusHash,
         ],
         [
-            'BGV randomness-bound status digest',
-            bgvRandomnessBoundProofStatusDigest,
-            verifiedBgvRandomnessBoundProofStatusDigest,
+            'BGV randomness-bound status hash',
+            bgvRandomnessBoundProofStatusHash,
+            verifiedBgvRandomnessBoundProofStatusHash,
         ],
         [
             'encrypted aggregate-share ciphertext root',
@@ -512,9 +511,9 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
             input.bridgeEvidenceVerification.aggregateRelationChallengeHex,
         ],
         [
-            'aggregate relation commitment digest',
-            bridgeEncryptionEvidence.aggregateRelationCommitmentDigest,
-            input.bridgeEvidenceVerification.aggregateRelationCommitmentDigest,
+            'aggregate relation commitment hash',
+            bridgeEncryptionEvidence.aggregateRelationCommitmentHash,
+            input.bridgeEvidenceVerification.aggregateRelationCommitmentHash,
         ],
     ] as const) {
         requireMatchingValue(bridgeValue, verificationValue, description);
@@ -539,19 +538,19 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
         requireMatchingSafeInteger(bridgeValue, verificationValue, description);
     }
     requireMatchingValue(
-        bridgeEncryptionEvidence.bridgeProofProfileDigest,
-        bridgeProofProfileDigest,
-        'canonical bridge proof profile digest',
+        bridgeEncryptionEvidence.bridgeProofProfileHash,
+        bridgeProofProfileHash,
+        'canonical bridge proof profile hash',
     );
     requireMatchingValue(
-        bridgeEncryptionEvidence.bridgeProofStatementDigest,
-        expectedBridgeProofStatementDigest,
-        'canonical bridge proof statement digest',
+        bridgeEncryptionEvidence.bridgeProofStatementHash,
+        expectedBridgeProofStatementHash,
+        'canonical bridge proof statement hash',
     );
     requireMatchingValue(
-        bridgeEncryptionEvidence.bridgeProofTargetContractDigest,
-        bridgeProofTargetContractDigest,
-        'canonical bridge proof target contract digest',
+        bridgeEncryptionEvidence.bridgeProofTargetContractHash,
+        bridgeProofTargetContractHash,
+        'canonical bridge proof target contract hash',
     );
     requireMatchingValue(
         input.bridgeEvidenceVerification.bridgeProofVerificationStatus,
@@ -559,161 +558,123 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
         'verification bridge proof status',
     );
 
-    const proofEncodingProfileDigest = requireProtocolDigest(
-        input.proofEncodingProfileDigest ??
-            derivePendingBridgeProofEncodingProfileDigest({
-                bridgeProofBytesDigest:
-                    bridgeEncryptionEvidence.bridgeProofBytesDigest,
-                bridgeProofProfileDigest,
-                bridgeProofStatementDigest: expectedBridgeProofStatementDigest,
+    const proofEncodingProfileHash = requireProtocolHash(
+        input.proofEncodingProfileHash ??
+            derivePendingBridgeProofEncodingProfileHash({
+                bridgeProofBytesHash:
+                    bridgeEncryptionEvidence.bridgeProofBytesHash,
+                bridgeProofProfileHash,
+                bridgeProofStatementHash: expectedBridgeProofStatementHash,
             }),
-        'proof encoding profile digest',
+        'proof encoding profile hash',
     );
-    const proofParameterSetDigest = requireProtocolDigest(
-        input.proofParameterSetDigest ??
-            derivePendingBridgeProofParameterSetDigest({
-                bgvProfileDigest: profileDigest,
-                bridgeProofProfileDigest,
-                bridgeProofStatementDigest: expectedBridgeProofStatementDigest,
+    const proofParameterSetHash = requireProtocolHash(
+        input.proofParameterSetHash ??
+            derivePendingBridgeProofParameterSetHash({
+                bgvProfileHash: profileHash,
+                bridgeProofProfileHash,
+                bridgeProofStatementHash: expectedBridgeProofStatementHash,
                 collectivePublicKeyRoot:
                     bridgeEncryptionEvidence.collectivePublicKeyRoot,
             }),
-        'proof parameter set digest',
+        'proof parameter set hash',
     );
-    const publicRandomnessDigest = requireProtocolDigest(
-        input.publicRandomnessDigest ??
-            derivePendingBridgeProofPublicRandomnessDigest({
-                bridgeProofBytesDigest:
-                    bridgeEncryptionEvidence.bridgeProofBytesDigest,
-                bridgeProofStatementDigest: expectedBridgeProofStatementDigest,
+    const publicRandomnessHash = requireProtocolHash(
+        input.publicRandomnessHash ??
+            derivePendingBridgeProofPublicRandomnessHash({
+                bridgeProofBytesHash:
+                    bridgeEncryptionEvidence.bridgeProofBytesHash,
+                bridgeProofStatementHash: expectedBridgeProofStatementHash,
             }),
-        'public randomness digest',
+        'public randomness hash',
     );
     const bridgeProofRecordPayload: Omit<
         BridgeProofRecord,
-        'bridgeProofRecordDigest'
+        'bridgeProofRecordHash'
     > = {
-        aggregateDerivationComponentDigest:
-            aggregateDerivationComponent.aggregateDerivationComponentDigest,
-        aggregateSelectionPolicyDigest: requireProtocolDigest(
-            input.aggregateSelectionPolicyDigest,
-            'aggregate selection policy digest',
+        aggregateDerivationComponentHash:
+            aggregateDerivationComponent.aggregateDerivationComponentHash,
+        aggregateSelectionPolicyHash: requireProtocolHash(
+            input.aggregateSelectionPolicyHash,
+            'aggregate selection policy hash',
         ),
-        aggregateShareCommitmentDigest:
+        aggregateShareCommitmentHash:
             aggregateDerivationComponent.aggregateCommitment
-                .aggregateShareCommitmentDigest,
-        aggregateInputEncodingProfileDigest: requireProtocolDigestField(
-            profileBindings,
-            'aggregateInputEncodingProfileDigest',
-            'setupPackage.profileBindings',
-        ),
-        ballotScoreEncodingProfileDigest: requireProtocolDigestField(
-            profileBindings,
-            'ballotScoreEncodingProfileDigest',
-            'setupPackage.profileBindings',
-        ),
-        ballotSetDigest: statement.ballotSetDigest,
-        ballotShareLayoutProfileDigest: requireProtocolDigestField(
-            profileBindings,
-            'ballotShareLayoutProfileDigest',
-            'setupPackage.profileBindings',
-        ),
-        bgvBatchEncoderDigest: requireProtocolDigestField(
-            profileBindings,
-            'batchEncoderDigest',
-            'setupPackage.profileBindings',
-        ),
+                .aggregateShareCommitmentHash,
+        aggregateInputEncodingProfileHash,
+        ballotScoreEncodingProfileHash,
+        ballotSetHash: statement.ballotSetHash,
+        ballotShareLayoutProfileHash,
+        bgvBatchEncoderHash,
         bgvEncryptionProofSubrelation:
             'SealedLatticeDevelopmentCiphertextEquationRelation',
-        bgvProfileDigest: profileDigest,
+        bgvProfileHash: profileHash,
         bgvPublicKeyRoot: bridgeEncryptionEvidence.bgvPublicKeyRoot,
-        bridgeLayoutDigest: encryptedAggregateInputLayoutDigest,
-        bridgeProofProfileDigest,
+        bridgeLayoutHash: encryptedAggregateInputLayoutHash,
+        bridgeProofProfileHash,
         bridgeProofProfileId: encryptedAggregateBridgeProfileId,
-        bridgeProofTargetContractDigest,
+        bridgeProofTargetContractHash,
         bridgeProofVerificationStatus: 'BridgeProofRelationChecked',
-        bridgeWitnessPrivacyProfileDigest: requireProtocolDigest(
-            input.bridgeWitnessPrivacyProfileDigest,
-            'bridge witness privacy profile digest',
+        bridgeWitnessPrivacyProfileHash: requireProtocolHash(
+            input.bridgeWitnessPrivacyProfileHash,
+            'bridge witness privacy profile hash',
         ),
-        canonicalCiphertextConventionDigest,
+        canonicalCiphertextConventionHash,
         ceremonyId: statement.ceremonyId,
         collectivePublicKeyRoot:
             bridgeEncryptionEvidence.collectivePublicKeyRoot,
         contributorIdentity: statement.contributorIdentity,
-        contributorActionContextDigest:
-            statement.contributorActionContextDigest,
-        contributorRosterExternalAcceptanceDigest:
-            statement.contributorRosterExternalAcceptanceDigest,
+        contributorActionContextHash: statement.contributorActionContextHash,
+        contributorRosterExternalAcceptanceHash:
+            statement.contributorRosterExternalAcceptanceHash,
         contributorRosterPosition: statement.contributorRosterPosition,
-        encodedAggregateLayoutDigest: requireProtocolDigestField(
-            profileBindings,
-            'encodedAggregateLayoutDigest',
-            'setupPackage.profileBindings',
-        ),
-        encodedShareVectorLayoutDigest:
-            statement.encodedShareVectorLayoutDigest,
-        encryptedAggregateBridgeDigest: requireProtocolDigestField(
-            profileBindings,
-            'encryptedAggregateBridgeDigest',
-            'setupPackage.profileBindings',
-        ),
-        encryptedAggregateInputLayoutDigest,
+        encodedAggregateLayoutHash,
+        encodedShareVectorLayoutHash: statement.encodedShareVectorLayoutHash,
+        encryptedAggregateBridgeHash,
+        encryptedAggregateInputLayoutHash,
         encryptedAggregateInputRoot,
-        encryptedAggregateReconstructionDigest: requireProtocolDigestField(
-            profileBindings,
-            'encryptedAggregateReconstructionDigest',
-            'setupPackage.profileBindings',
-        ),
+        encryptedAggregateReconstructionHash,
         encryptedAggregateShareCiphertextRoot:
             bridgeEncryptionEvidence.encryptedAggregateShareCiphertextRoot,
-        encryptedAggregateTargetBasisDataRoot: requireProtocolDigestField(
-            profileBindings,
-            'encryptedAggregateTargetBasisDataRoot',
-            'setupPackage.profileBindings',
+        encryptedAggregateTargetBasisRoot,
+        heParamHash: requireProtocolHash(
+            input.heParamHash,
+            'HE parameter hash',
         ),
-        heParamDigest: requireProtocolDigest(
-            input.heParamDigest,
-            'HE parameter digest',
-        ),
-        manifestDigest: statement.manifestDigest,
+        manifestHash: statement.manifestHash,
         objectType: 'BridgeProofRecord',
         objectVersion: 1,
-        pollSpecDigest: statement.pollSpecDigest,
-        postVotingClosedContextDigest: statement.postVotingClosedContextDigest,
+        pollSpecHash: statement.pollSpecHash,
+        postVotingClosedContextHash: statement.postVotingClosedContextHash,
         participantCount: statement.participantCount,
         optionCount: statement.optionCount,
         proofBackend: 'SealedLatticeBridgeRelation',
-        proofBytesDigest: bridgeEncryptionEvidence.bridgeProofBytesDigest,
-        proofEncodingProfileDigest,
-        proofParameterSetDigest,
+        proofBytesHash: bridgeEncryptionEvidence.bridgeProofBytesHash,
+        proofEncodingProfileHash,
+        proofParameterSetHash,
         proofRoot: bridgeEncryptionEvidence.bridgeProofRoot,
         proofSizeBytes: bridgeProofByteLength(
             bridgeEncryptionEvidence.bridgeProofBytesHex,
         ),
-        proofStatementDigest: expectedBridgeProofStatementDigest,
-        publicRandomnessDigest,
-        rosterDigest: statement.rosterDigest,
-        rustBgvBackendProfileDigest,
-        setupPackageDigest: requireProtocolDigest(
-            input.setupPackage.setupPackageDigest,
-            'setup package digest',
+        proofStatementHash: expectedBridgeProofStatementHash,
+        publicRandomnessHash,
+        rosterHash: statement.rosterHash,
+        rustBgvBackendProfileHash,
+        setupPackageHash: requireProtocolHash(
+            input.setupPackage.setupPackageHash,
+            'setup package hash',
         ),
-        shareCommitmentMessageBoundCertDigest:
-            statement.shareCommitmentMessageBoundCertDigest,
+        shareCommitmentMessageBoundCertHash:
+            statement.shareCommitmentMessageBoundCertHash,
         shareVectorWidth: statement.shareVectorWidth,
-        thresholdProfileDigest: statement.thresholdProfileDigest,
-        topKEvaluatorInputLayoutDigest: requireProtocolDigestField(
-            profileBindings,
-            'topKEvaluatorInputLayoutDigest',
-            'setupPackage.profileBindings',
-        ),
-        votingClosedBoardHeadDigest: statement.votingClosedBoardHeadDigest,
+        thresholdProfileHash: statement.thresholdProfileHash,
+        topKEvaluatorInputLayoutHash,
+        votingClosedBoardHeadHash: statement.votingClosedBoardHeadHash,
     };
 
     return {
         ...bridgeProofRecordPayload,
-        bridgeProofRecordDigest: deriveBridgeProofRecordDigest(
+        bridgeProofRecordHash: deriveBridgeProofRecordHash(
             bridgeProofRecordPayload,
         ),
     };

@@ -1,4 +1,4 @@
-import { deriveProtocolDigest } from '@sealed-lattice/crypto';
+import { deriveProtocolHash } from '@sealed-lattice/crypto';
 import type {
     FieldElement,
     InterpolationCoefficientReport,
@@ -285,8 +285,8 @@ export const deriveInterpolationCoefficientReport = (input: {
 
     return {
         ...reportPayload,
-        reportDigest: deriveProtocolDigest(
-            'InterpolationCoefficientReportDigest',
+        reportHash: deriveProtocolHash(
+            'InterpolationCoefficientReportHash',
             reportPayload,
         ),
     };
@@ -403,8 +403,8 @@ export const deriveWorstCaseInterpolationCoefficientReport = (input: {
 
     return {
         ...reportPayload,
-        reportDigest: deriveProtocolDigest(
-            'WorstCaseInterpolationCoefficientReportDigest',
+        reportHash: deriveProtocolHash(
+            'WorstCaseInterpolationCoefficientReportHash',
             reportPayload,
         ),
     };

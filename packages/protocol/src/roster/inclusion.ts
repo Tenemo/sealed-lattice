@@ -1,6 +1,6 @@
 import type {
     InclusionProof,
-    ProtocolDigest,
+    ProtocolHash,
     RefusalRecord,
     SignedBoardHead,
 } from '@sealed-lattice/types';
@@ -8,38 +8,36 @@ import type {
 import { verifyInclusionProof } from '../board/index.js';
 import { createRefusal } from '../common/verification-helpers.js';
 
-export const mapInclusionProofsByObjectDigest = (
+export const mapInclusionProofsByObjectHash = (
     inclusionProofs: readonly InclusionProof[],
-): Map<ProtocolDigest, InclusionProof> =>
-    new Map(
-        inclusionProofs.map((proof) => [proof.includedObjectDigest, proof]),
-    );
+): Map<ProtocolHash, InclusionProof> =>
+    new Map(inclusionProofs.map((proof) => [proof.includedObjectHash, proof]));
 
 export const verifyRequiredIncludedObjectPlacement = (input: {
     readonly expectedObjectType: InclusionProof['includedObjectType'];
-    readonly headsByDigest: ReadonlyMap<ProtocolDigest, SignedBoardHead>;
+    readonly headsByHash: ReadonlyMap<ProtocolHash, SignedBoardHead>;
     readonly objectBoardPosition: number;
     readonly objectBoardSequence: number;
-    readonly objectDigest: ProtocolDigest;
-    readonly proofByDigest: ReadonlyMap<ProtocolDigest, InclusionProof>;
+    readonly objectHash: ProtocolHash;
+    readonly proofByHash: ReadonlyMap<ProtocolHash, InclusionProof>;
     readonly rosterFreezeBoardSequence?: number;
 }): readonly RefusalRecord[] => {
     const {
         expectedObjectType,
-        headsByDigest,
+        headsByHash,
         objectBoardPosition,
         objectBoardSequence,
-        objectDigest,
-        proofByDigest,
+        objectHash,
+        proofByHash,
         rosterFreezeBoardSequence,
     } = input;
-    const proof = proofByDigest.get(objectDigest);
+    const proof = proofByHash.get(objectHash);
     if (proof === undefined) {
         return [
             createRefusal(
                 'InclusionProofInvalid',
                 'Required transcript object has no supplied board inclusion proof.',
-                objectDigest,
+                objectHash,
                 expectedObjectType,
             ),
         ];
@@ -47,19 +45,19 @@ export const verifyRequiredIncludedObjectPlacement = (input: {
     const refusedObjects: RefusalRecord[] = [];
     const proofBindsExpectedObject =
         proof.includedObjectType === expectedObjectType &&
-        proof.includedObjectDigest === objectDigest;
+        proof.includedObjectHash === objectHash;
 
     if (!proofBindsExpectedObject) {
         refusedObjects.push(
             createRefusal(
                 'InclusionProofInvalid',
                 'Board inclusion proof does not bind the expected object.',
-                proof.inclusionProofDigest,
+                proof.inclusionProofHash,
                 expectedObjectType,
             ),
         );
     }
-    refusedObjects.push(...verifyInclusionProof(proof, headsByDigest));
+    refusedObjects.push(...verifyInclusionProof(proof, headsByHash));
 
     if (!proofBindsExpectedObject) {
         return refusedObjects;
@@ -72,7 +70,7 @@ export const verifyRequiredIncludedObjectPlacement = (input: {
             createRefusal(
                 'InclusionProofInvalid',
                 'Transcript object board position must match its inclusion proof.',
-                objectDigest,
+                objectHash,
                 expectedObjectType,
             ),
         );
@@ -85,7 +83,7 @@ export const verifyRequiredIncludedObjectPlacement = (input: {
             createRefusal(
                 'LateRegistration',
                 'Roster object inclusion must appear before the roster freeze board sequence.',
-                objectDigest,
+                objectHash,
                 expectedObjectType,
             ),
         );

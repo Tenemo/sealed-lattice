@@ -94,15 +94,14 @@ pub(crate) fn verify_ballot_linear_proof_bytes(
     let component_proof_bundle = backend_inputs.component_proof_bundle;
     let component_proof_inputs = backend_inputs.component_proof_inputs;
     let mut refused_objects = Vec::new();
-    let ballot_proof_record_digest = string_field(ballot_proof, "ballotProofRecordDigest");
-    let linear_statement_digest = string_field(linear_statement, "statementDigest");
-    let expected_proof_encoding_digest =
-        derive_ballot_proof_encoding_profile_digest(proof_encoding);
-    let expected_parameter_set_digest = derive_ballot_proof_parameter_set_digest(parameter_set);
-    let expected_public_randomness_digest =
-        derive_ballot_proof_public_randomness_digest(public_randomness_hex);
-    let expected_linear_statement_digest =
-        derive_ballot_proof_linear_statement_digest(linear_statement);
+    let ballot_proof_record_hash = string_field(ballot_proof, "ballotProofRecordHash");
+    let linear_statement_hash = string_field(linear_statement, "statementHash");
+    let expected_proof_encoding_hash = derive_ballot_proof_encoding_profile_hash(proof_encoding);
+    let expected_parameter_set_hash = derive_ballot_proof_parameter_set_hash(parameter_set);
+    let expected_public_randomness_hash =
+        derive_ballot_proof_public_randomness_hash(public_randomness_hex);
+    let expected_linear_statement_hash =
+        derive_ballot_proof_linear_statement_hash(linear_statement);
     let supplied_parameter_profile_id = string_field(parameter_set, "profileId");
     let linear_statement_parameter_profile_id =
         string_field(linear_statement, "parameterProfileId");
@@ -115,7 +114,7 @@ pub(crate) fn verify_ballot_linear_proof_bytes(
     if linear_statement_parameter_profile_id != supplied_parameter_profile_id {
         refused_objects.push(structural_refusal(
             "Ballot proof linear statement parameter profile does not match the supplied proof parameter set.",
-            ballot_proof_record_digest,
+            ballot_proof_record_hash,
         ));
     }
     let requires_full_profile =
@@ -126,11 +125,11 @@ pub(crate) fn verify_ballot_linear_proof_bytes(
             linear_statement,
             parameter_set,
             proof_encoding,
-            expected_linear_statement_digest,
-            expected_parameter_set_digest,
-            expected_proof_encoding_digest,
-            expected_public_randomness_digest,
-            object_digest: ballot_proof_record_digest,
+            expected_linear_statement_hash,
+            expected_parameter_set_hash,
+            expected_proof_encoding_hash,
+            expected_public_randomness_hash,
+            object_hash: ballot_proof_record_hash,
             parameter_profile_requirement: requires_full_profile.then_some(
                 LinearProofProfileRequirement {
                     profile_id: FULL_BALLOT_PROOF_PARAMETER_PROFILE_ID,
@@ -146,15 +145,15 @@ pub(crate) fn verify_ballot_linear_proof_bytes(
                 },
             ),
             messages: LinearProofBindingValidationMessages {
-                canonical_statement_digest_mismatch:
-                    "Ballot proof linear statement digest does not match its canonical payload.",
+                canonical_statement_hash_mismatch:
+                    "Ballot proof linear statement hash does not match its canonical payload.",
                 proof_record_statement_mismatch:
                     "Ballot proof record is not bound to the supplied linear statement.",
-                proof_encoding_digest_mismatch:
+                proof_encoding_hash_mismatch:
                     "Ballot proof record is not bound to the supplied proof encoding profile.",
-                parameter_set_digest_mismatch:
+                parameter_set_hash_mismatch:
                     "Ballot proof record is not bound to the supplied proof parameter set.",
-                public_randomness_digest_mismatch:
+                public_randomness_hash_mismatch:
                     "Ballot proof record is not bound to the supplied public randomness.",
                 parameter_set_size_mismatch:
                     "Ballot proof parameter set is not bound to the proof record byte length.",
@@ -171,56 +170,56 @@ pub(crate) fn verify_ballot_linear_proof_bytes(
             parameter_set,
             proof_encoding,
             proof_size_bytes,
-            ballot_proof_record_digest,
+            ballot_proof_record_hash,
         ));
         refused_objects.extend(collect_full_ballot_relation_binding_refusals(
             linear_statement,
             component_bundle_statement,
-            ballot_proof_record_digest,
+            ballot_proof_record_hash,
         ));
     }
-    if string_field(ballot_proof, "backendStatementDigest")
-        != string_field(linear_statement, "backendStatementDigest")
+    if string_field(ballot_proof, "backendStatementHash")
+        != string_field(linear_statement, "backendStatementHash")
     {
         refused_objects.push(structural_refusal(
             "Ballot proof record is not bound to the supplied backend statement.",
-            ballot_proof_record_digest,
+            ballot_proof_record_hash,
         ));
     }
-    if string_field(ballot_proof, "statementMatrixDigest")
-        != string_field(linear_statement, "statementMatrixDigest")
+    if string_field(ballot_proof, "statementMatrixHash")
+        != string_field(linear_statement, "statementMatrixHash")
     {
         refused_objects.push(structural_refusal(
             "Ballot proof record is not bound to the supplied statement matrix.",
-            ballot_proof_record_digest,
+            ballot_proof_record_hash,
         ));
     }
-    if string_field(ballot_proof, "targetVectorDigest")
-        != string_field(linear_statement, "targetVectorDigest")
+    if string_field(ballot_proof, "targetVectorHash")
+        != string_field(linear_statement, "targetVectorHash")
     {
         refused_objects.push(structural_refusal(
             "Ballot proof record is not bound to the supplied target vector.",
-            ballot_proof_record_digest,
+            ballot_proof_record_hash,
         ));
     }
-    if string_field(linear_statement, "relationStatementDigest")
-        .is_none_or(|digest| !is_protocol_digest(digest))
-        || string_field(ballot_proof, "relationStatementDigest")
-            != string_field(linear_statement, "relationStatementDigest")
+    if string_field(linear_statement, "relationStatementHash")
+        .is_none_or(|hash| !is_protocol_hash(hash))
+        || string_field(ballot_proof, "relationStatementHash")
+            != string_field(linear_statement, "relationStatementHash")
     {
         refused_objects.push(structural_refusal(
             "Ballot proof record is not bound to the relation statement used by the supplied linear statement.",
-            ballot_proof_record_digest,
+            ballot_proof_record_hash,
         ));
     }
-    if string_field(linear_statement, "ballotProofStatementDigest")
-        .is_none_or(|digest| !is_protocol_digest(digest))
-        || string_field(statement, "ballotProofStatementDigest")
-            != string_field(linear_statement, "ballotProofStatementDigest")
+    if string_field(linear_statement, "ballotProofStatementHash")
+        .is_none_or(|hash| !is_protocol_hash(hash))
+        || string_field(statement, "ballotProofStatementHash")
+            != string_field(linear_statement, "ballotProofStatementHash")
     {
         refused_objects.push(structural_refusal(
             "Ballot proof linear statement is not bound to the supplied ballot proof statement.",
-            ballot_proof_record_digest,
+            ballot_proof_record_hash,
         ));
     }
     refused_objects.extend(collect_ballot_component_bundle_refusals(
@@ -260,7 +259,7 @@ pub(crate) fn verify_ballot_linear_proof_bytes(
             .unwrap_or(Value::Null)
     });
     let proof_verification =
-        linear_proof::verifier::verify_linear_proof_vector_case_value(&vector_case);
+        linear_proof_verifier::verify_linear_proof_vector_case_value(&vector_case);
     if proof_verification
         .as_object()
         .and_then(|object| object.get("ok"))
@@ -273,7 +272,7 @@ pub(crate) fn verify_ballot_linear_proof_bytes(
             "backendStatus": describe_proof_backend(),
             "operation": "verifyBallotProof",
             "statusLabels": [],
-            "acceptedDigests": [],
+            "acceptedHashes": [],
             "refusedObjects": proof_verification
                 .as_object()
                 .and_then(|object| object.get("refusedObjects"))
@@ -298,7 +297,7 @@ pub(crate) fn verify_ballot_linear_proof_bytes(
             "verifyBallotProof",
             vec![structural_refusal(
                 "Ballot proof linear statement does not cover the full encoded-score ballot relation.",
-                ballot_proof_record_digest,
+                ballot_proof_record_hash,
             )],
         );
     }
@@ -309,7 +308,7 @@ pub(crate) fn verify_ballot_linear_proof_bytes(
         && let Some(component_proof_bundle) = component_proof_bundle
         && let Some(component_backend_result) = verify_component_proof_bundle_backend(
             "verifyBallotProof",
-            ballot_proof_record_digest,
+            ballot_proof_record_hash,
             component_proof_bundle,
             component_proof_inputs,
         )
@@ -324,8 +323,8 @@ pub(crate) fn verify_ballot_linear_proof_bytes(
     }
 
     let mut status_labels = vec![
-        json!("BallotProofRecordDigestRecomputed"),
-        json!("BallotProofBytesDigestChecked"),
+        json!("BallotProofRecordHashRecomputed"),
+        json!("BallotProofBytesHashChecked"),
         json!("BallotProofLinearStatementBound"),
         json!("BallotProofLinearProofVerified"),
     ];
@@ -345,11 +344,11 @@ pub(crate) fn verify_ballot_linear_proof_bytes(
     {
         status_labels.extend(proof_status_labels.iter().cloned());
     }
-    let accepted_digests = [
-        ballot_proof_record_digest,
-        string_field(ballot_proof, "proofBytesDigest"),
-        linear_statement_digest,
-        string_field(ballot_proof, "backendStatementDigest"),
+    let accepted_hashes = [
+        ballot_proof_record_hash,
+        string_field(ballot_proof, "proofBytesHash"),
+        linear_statement_hash,
+        string_field(ballot_proof, "backendStatementHash"),
     ]
     .into_iter()
     .flatten()
@@ -362,7 +361,7 @@ pub(crate) fn verify_ballot_linear_proof_bytes(
         "backendStatus": describe_proof_backend(),
         "operation": "verifyBallotProof",
         "statusLabels": status_labels,
-        "acceptedDigests": accepted_digests,
+        "acceptedHashes": accepted_hashes,
         "refusedObjects": [],
         "unresolvedReason": Value::Null
     })
@@ -382,11 +381,11 @@ pub(crate) fn verify_ballot_proof(
     );
     refused_objects.extend(collect_proof_bytes_refusals(
         backend_inputs.proof_bytes_hex,
-        string_field(ballot_proof, "proofBytesDigest"),
+        string_field(ballot_proof, "proofBytesHash"),
         object_map(ballot_proof)
             .and_then(|object| object.get("proofSizeBytes"))
             .and_then(Value::as_u64),
-        string_field(ballot_proof, "ballotProofRecordDigest"),
+        string_field(ballot_proof, "ballotProofRecordHash"),
         "Ballot",
         false,
     ));
@@ -442,7 +441,7 @@ pub(crate) fn verify_ballot_proof(
                 "verifyBallotProof",
                 vec![structural_refusal(
                     "Ballot proof verification requires proof bytes, public randomness, proof parameters, proof encoding, and the public linear statement together.",
-                    string_field(ballot_proof, "ballotProofRecordDigest"),
+                    string_field(ballot_proof, "ballotProofRecordHash"),
                 )],
             );
         }
@@ -452,7 +451,7 @@ pub(crate) fn verify_ballot_proof(
         "verifyBallotProof",
         vec![structural_refusal(
             "Ballot proof verification requires proof bytes, public randomness, proof parameters, proof encoding, and the public linear statement.",
-            string_field(ballot_proof, "ballotProofRecordDigest"),
+            string_field(ballot_proof, "ballotProofRecordHash"),
         )],
     )
 }

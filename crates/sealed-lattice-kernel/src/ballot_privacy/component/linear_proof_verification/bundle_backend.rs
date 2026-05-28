@@ -2,7 +2,7 @@ use super::*;
 
 pub(crate) fn verify_component_proof_bundle_backend(
     operation: &str,
-    _accepted_object_digest: Option<&str>,
+    _accepted_object_hash: Option<&str>,
     component_proof_bundle: &Value,
     component_proof_inputs: Option<&Value>,
 ) -> Option<Value> {
@@ -86,7 +86,7 @@ pub(crate) fn verify_component_proof_bundle_backend(
                 "component-proof-bundle",
                 vec![component_backend_refusal(
                     "Ballot proof component backend proof record is missing componentId.",
-                    string_field(component_proof, "componentProofRecordDigest"),
+                    string_field(component_proof, "componentProofRecordHash"),
                 )],
                 json!("BallotPackageInvalid"),
             ));
@@ -99,7 +99,7 @@ pub(crate) fn verify_component_proof_bundle_backend(
                     format!(
                         "Ballot proof component backend proof record for {component_id} has no matching proof input."
                     ),
-                    string_field(component_proof, "componentProofRecordDigest"),
+                    string_field(component_proof, "componentProofRecordHash"),
                 )],
                 json!("BallotPackageInvalid"),
             ));

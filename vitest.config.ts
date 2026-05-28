@@ -2,74 +2,51 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { playwright } from '@vitest/browser-playwright';
-import { defineConfig } from 'vitest/config';
+import type { PluginOption } from 'vite';
+import { defineConfig, type UserWorkspaceConfig } from 'vitest/config';
 import type { BrowserInstanceOption } from 'vitest/node';
+
+import {
+    browserTestLaneDefinitions,
+    nodeHookTimeoutMs,
+    nodeTestProjectDefinitions,
+    proofBenchmarkLaneDefinitions,
+} from './tools/ci/test-lanes.js';
 
 const repoRoot = path.dirname(fileURLToPath(import.meta.url));
 const resolveFromRepoRoot = (...segments: string[]): string =>
     path.resolve(repoRoot, ...segments);
-const resolveAliasDirectoryFromRepoRoot = (...segments: string[]): string =>
-    `${resolveFromRepoRoot(...segments).replace(/\\/g, '/')}/`;
 
-const nodeTestTimeoutMs = 60_000;
-const nodeKernelHeavyTestTimeoutMs = 15 * 60_000;
-const proofBenchmarkTestTimeoutMs = 60 * 60_000;
-const nodeHookTimeoutMs = 240_000;
-const browserApiHost = '127.0.0.1';
-const desktopBrowserApiPort = 64_115;
-const mobileBrowserApiPort = 64_116;
-const desktopProofBenchmarkBrowserApiPort = 64_117;
-const mobileThrottledProofBenchmarkBrowserApiPort = 64_118;
-const nodeTestIncludes = [
-    'packages/*/tests/node/**/*.test.ts',
-    'tests/node/**/*.test.ts',
-] satisfies string[];
-const nodeProofBenchmarkTestIncludes = [
-    'packages/wasm/tests/node/ballot-privacy-proof-benchmarks.benchmark.ts',
-    'packages/wasm/tests/node/transcript-core-kernel/mandatory-profile-proof-record.test.ts',
-] satisfies string[];
-const browserProofBenchmarkTestIncludes = [
-    'packages/wasm/tests/browser/ballot-privacy-proof-benchmarks.browser.benchmark.ts',
-] satisfies string[];
-const nodeProtocolTestIncludes = [
-    'packages/protocol/tests/node/ballot-privacy-proof-record-generation-input.test.ts',
-    'packages/protocol/tests/node/ballot-privacy-relation-backend-lowering/**/*.test.ts',
-] satisfies string[];
-const nodeKernelTestIncludes = [
-    'packages/wasm/tests/node/transcript-core-kernel/aggregate-derivation-proof.test.ts',
-    'packages/wasm/tests/node/transcript-core-kernel/ballot-proof-generation.test.ts',
-    'packages/wasm/tests/node/transcript-core-kernel/ballot-proof-rejection.test.ts',
-    'packages/wasm/tests/node/transcript-core-kernel/component-bundle-rejection.test.ts',
-    'packages/wasm/tests/node/transcript-core-kernel/core-kernel-and-fixtures.test.ts',
-    'packages/wasm/tests/node/transcript-core-kernel/kernel-memory-and-loader.test.ts',
-    'packages/wasm/tests/node/transcript-core-kernel/receiver-key-proofs.test.ts',
-    'packages/wasm/tests/node/canonical-error-codes-parity.test.ts',
-    'tests/node/digest-namespace-parity.test.ts',
-] satisfies string[];
-const nodeProject = {
-    environment: 'node',
-    testTimeout: nodeTestTimeoutMs,
-    hookTimeout: nodeHookTimeoutMs,
+const browserServerHost = '127.0.0.1';
+
+const publicPackageEntryPoint = resolveFromRepoRoot(
+    'packages',
+    'sdk',
+    'dist',
+    'index.js',
+);
+
+const publicPackageAlias = {
+    find: 'sealed-lattice',
+    replacement: publicPackageEntryPoint,
 } as const;
 
-const nodeKernelHeavyProject = {
-    environment: 'node',
-    fileParallelism: false,
-    testTimeout: nodeKernelHeavyTestTimeoutMs,
-    hookTimeout: nodeHookTimeoutMs,
+const publicPackageTestResolve = {
+    alias: [publicPackageAlias],
+    tsconfigPaths: true,
 } as const;
 
-const nodeProtocolProject = {
-    environment: 'node',
-    testTimeout: nodeKernelHeavyTestTimeoutMs,
-    hookTimeout: nodeHookTimeoutMs,
-} as const;
+const createPublicPackageResolutionPlugin = (): PluginOption => ({
+    name: 'sealed-lattice-public-package-resolution',
+    enforce: 'pre' as const,
+    resolveId(source: string): string | null {
+        return source === publicPackageAlias.find
+            ? publicPackageEntryPoint
+            : null;
+    },
+});
 
-const nodeProofBenchmarkProject = {
-    environment: 'node',
-    testTimeout: proofBenchmarkTestTimeoutMs,
-    hookTimeout: nodeHookTimeoutMs,
-} as const;
+const copyGlobs = (globs: readonly string[]): string[] => [...globs];
 
 const mobileContextOptions = {
     'Pixel 5': {
@@ -153,63 +130,6 @@ const desktopProofBenchmarkBrowserInstances: BrowserInstanceOption[] = [
     },
 ];
 
-const repoRootAliases = [
-    {
-        find: 'sealed-lattice',
-        replacement: resolveFromRepoRoot('packages', 'sdk', 'dist', 'index.js'),
-    },
-    {
-        find: '@sealed-lattice/types',
-        replacement: resolveFromRepoRoot(
-            'packages',
-            'types',
-            'src',
-            'index.ts',
-        ),
-    },
-    {
-        find: '@sealed-lattice/protocol',
-        replacement: resolveFromRepoRoot(
-            'packages',
-            'protocol',
-            'src',
-            'index.ts',
-        ),
-    },
-    {
-        find: '@sealed-lattice/crypto',
-        replacement: resolveFromRepoRoot(
-            'packages',
-            'crypto',
-            'src',
-            'index.ts',
-        ),
-    },
-    {
-        find: '@sealed-lattice/wasm',
-        replacement: resolveFromRepoRoot('packages', 'wasm', 'src', 'index.ts'),
-    },
-    {
-        find: /^#packages\/(.*)$/,
-        replacement: `${resolveAliasDirectoryFromRepoRoot('packages')}$1`,
-    },
-    {
-        find: /^#test-vectors\/(.*)$/,
-        replacement: `${resolveAliasDirectoryFromRepoRoot('test-vectors')}$1`,
-    },
-    {
-        find: /^#tests\/(.*)$/,
-        replacement: `${resolveAliasDirectoryFromRepoRoot('tests')}$1`,
-    },
-    {
-        find: /^#tools\/(.*)$/,
-        replacement: `${resolveAliasDirectoryFromRepoRoot('tools')}$1`,
-    },
-];
-const repoRootResolve = {
-    alias: repoRootAliases,
-};
-
 const mobileThrottledProofBenchmarkBrowserInstances: BrowserInstanceOption[] = [
     {
         browser: 'chromium',
@@ -220,61 +140,65 @@ const mobileThrottledProofBenchmarkBrowserInstances: BrowserInstanceOption[] = [
     },
 ];
 
-type BrowserProjectInput = {
-    readonly name: string;
-    readonly include: string[];
-    readonly apiPort: number;
-    readonly instances: BrowserInstanceOption[];
-    readonly provider?: ReturnType<typeof playwright>;
+type NodeProjectInput = {
+    readonly exclude?: readonly string[];
     readonly fileParallelism?: boolean;
-    readonly testTimeout?: number;
-    readonly hookTimeout?: number;
+    readonly include: readonly string[];
+    readonly projectName: string;
+    readonly testTimeout: number;
 };
 
-type BrowserProject = {
-    readonly resolve: typeof repoRootResolve;
-    readonly test: {
-        readonly name: string;
-        readonly include: string[];
-        readonly fileParallelism?: boolean;
-        readonly testTimeout?: number;
-        readonly hookTimeout?: number;
-        readonly browser: {
-            readonly enabled: true;
-            readonly api: {
-                readonly host: string;
-                readonly port: number;
-                readonly strictPort: false;
-            };
-            readonly provider: ReturnType<typeof playwright>;
-            readonly headless: true;
-            readonly instances: BrowserInstanceOption[];
-        };
-    };
+const makeNodeProject = ({
+    exclude,
+    fileParallelism,
+    include,
+    projectName,
+    testTimeout,
+}: NodeProjectInput): UserWorkspaceConfig => ({
+    plugins: [createPublicPackageResolutionPlugin()],
+    resolve: publicPackageTestResolve,
+    test: {
+        name: projectName,
+        include: copyGlobs(include),
+        ...(exclude === undefined ? {} : { exclude: copyGlobs(exclude) }),
+        environment: 'node',
+        ...(fileParallelism === undefined ? {} : { fileParallelism }),
+        testTimeout,
+        hookTimeout: nodeHookTimeoutMs,
+    },
+});
+
+type BrowserProjectInput = {
+    readonly fileParallelism?: boolean;
+    readonly hookTimeout?: number;
+    readonly include: readonly string[];
+    readonly instances: BrowserInstanceOption[];
+    readonly projectName: string;
+    readonly provider?: ReturnType<typeof playwright>;
+    readonly testTimeout?: number;
 };
 
 const makeBrowserProject = ({
-    name,
-    include,
-    apiPort,
-    instances,
-    provider = playwright(),
     fileParallelism,
-    testTimeout,
     hookTimeout,
-}: BrowserProjectInput): BrowserProject => ({
-    resolve: repoRootResolve,
+    include,
+    instances,
+    projectName,
+    provider = playwright(),
+    testTimeout,
+}: BrowserProjectInput): UserWorkspaceConfig => ({
+    plugins: [createPublicPackageResolutionPlugin()],
+    resolve: publicPackageTestResolve,
     test: {
-        name,
-        include,
+        name: projectName,
+        include: copyGlobs(include),
         ...(fileParallelism === undefined ? {} : { fileParallelism }),
         ...(testTimeout === undefined ? {} : { testTimeout }),
         ...(hookTimeout === undefined ? {} : { hookTimeout }),
         browser: {
             enabled: true,
             api: {
-                host: browserApiHost,
-                port: apiPort,
+                host: browserServerHost,
                 strictPort: false,
             },
             provider,
@@ -285,11 +209,10 @@ const makeBrowserProject = ({
 });
 
 export default defineConfig({
-    resolve: {
-        alias: repoRootAliases,
-    },
+    plugins: [createPublicPackageResolutionPlugin()],
+    resolve: publicPackageTestResolve,
     test: {
-        alias: repoRootAliases,
+        alias: [publicPackageAlias],
         coverage: {
             provider: 'v8',
             reporter: ['text', 'json-summary', 'lcov'],
@@ -303,71 +226,26 @@ export default defineConfig({
             exclude: ['packages/*/src/**/*.d.ts'],
         },
         projects: [
-            {
-                resolve: repoRootResolve,
-                test: {
-                    name: 'node',
-                    include: nodeTestIncludes,
-                    exclude: [
-                        ...nodeProtocolTestIncludes,
-                        ...nodeKernelTestIncludes,
-                        ...nodeProofBenchmarkTestIncludes,
-                    ],
-                    ...nodeProject,
-                },
-            },
-            {
-                resolve: repoRootResolve,
-                test: {
-                    name: 'node-protocol',
-                    include: nodeProtocolTestIncludes,
-                    ...nodeProtocolProject,
-                },
-            },
-            {
-                resolve: repoRootResolve,
-                test: {
-                    name: 'node-kernel',
-                    include: nodeKernelTestIncludes,
-                    ...nodeKernelHeavyProject,
-                },
-            },
-            {
-                resolve: repoRootResolve,
-                test: {
-                    name: 'node-proof-benchmark',
-                    include: nodeProofBenchmarkTestIncludes,
-                    ...nodeProofBenchmarkProject,
-                },
-            },
+            ...nodeTestProjectDefinitions.map((projectDefinition) =>
+                makeNodeProject(projectDefinition),
+            ),
+            makeNodeProject(proofBenchmarkLaneDefinitions.node),
             makeBrowserProject({
-                name: 'browser-desktop',
-                include: ['packages/*/tests/browser/**/*.browser.test.ts'],
-                apiPort: desktopBrowserApiPort,
+                ...browserTestLaneDefinitions.desktop,
                 instances: desktopBrowserInstances,
             }),
             makeBrowserProject({
-                name: 'browser-mobile',
-                include: ['packages/*/tests/browser/**/*.browser.test.ts'],
-                apiPort: mobileBrowserApiPort,
+                ...browserTestLaneDefinitions.mobile,
                 instances: mobileBrowserInstances,
             }),
             makeBrowserProject({
-                name: 'browser-desktop-proof-benchmark',
-                include: browserProofBenchmarkTestIncludes,
-                apiPort: desktopProofBenchmarkBrowserApiPort,
+                ...proofBenchmarkLaneDefinitions.desktop,
                 instances: desktopProofBenchmarkBrowserInstances,
-                fileParallelism: false,
-                testTimeout: proofBenchmarkTestTimeoutMs,
                 hookTimeout: nodeHookTimeoutMs,
             }),
             makeBrowserProject({
-                name: 'browser-mobile-throttled-proof-benchmark',
-                include: browserProofBenchmarkTestIncludes,
-                apiPort: mobileThrottledProofBenchmarkBrowserApiPort,
+                ...proofBenchmarkLaneDefinitions['mobile-throttled'],
                 instances: mobileThrottledProofBenchmarkBrowserInstances,
-                fileParallelism: false,
-                testTimeout: proofBenchmarkTestTimeoutMs,
                 hookTimeout: nodeHookTimeoutMs,
             }),
         ],

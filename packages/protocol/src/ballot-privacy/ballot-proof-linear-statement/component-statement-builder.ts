@@ -1,4 +1,4 @@
-import type { ProtocolDigest } from '@sealed-lattice/types';
+import type { ProtocolHash } from '@sealed-lattice/types';
 
 import type {
     BallotPrivacyBackendProofComponent,
@@ -10,10 +10,10 @@ import type {
     BallotProofComponentStatement,
 } from './statement-contracts.js';
 import {
-    deriveComponentMatrixDigest,
-    deriveComponentStatementDigest,
-    deriveComponentTargetVectorDigest,
-} from './statement-digests.js';
+    deriveComponentMatrixHash,
+    deriveComponentStatementHash,
+    deriveComponentTargetVectorHash,
+} from './statement-hashes.js';
 
 const rowBatchesForComponent = (input: {
     readonly component: BallotPrivacyBackendProofComponent;
@@ -39,58 +39,57 @@ const rowBatchesForComponent = (input: {
 };
 
 const buildComponentStatement = (input: {
-    readonly ballotProofStatementDigest?: ProtocolDigest;
+    readonly ballotProofStatementHash?: ProtocolHash;
     readonly component: BallotPrivacyBackendProofComponent;
     readonly loweredStatement: BallotPrivacyLoweredLinearRelationStatement;
 }): BallotProofComponentStatement => {
     const componentRowBatches = rowBatchesForComponent(input);
-    const rowBatchMatrixDigests = componentRowBatches.map(
-        (rowBatch) => rowBatch.matrixDigest,
+    const rowBatchMatrixHashes = componentRowBatches.map(
+        (rowBatch) => rowBatch.matrixHash,
     );
-    const rowBatchTargetVectorDigests = componentRowBatches.map(
-        (rowBatch) => rowBatch.targetVectorDigest,
+    const rowBatchTargetVectorHashes = componentRowBatches.map(
+        (rowBatch) => rowBatch.targetVectorHash,
     );
-    const matrixDigest = deriveComponentMatrixDigest({
+    const matrixHash = deriveComponentMatrixHash({
         componentId: input.component.componentId,
-        rowBatchMatrixDigests,
+        rowBatchMatrixHashes,
     });
-    const targetVectorDigest = deriveComponentTargetVectorDigest({
+    const targetVectorHash = deriveComponentTargetVectorHash({
         componentId: input.component.componentId,
-        rowBatchTargetVectorDigests,
+        rowBatchTargetVectorHashes,
     });
     const statementPayload: Omit<
         BallotProofComponentStatement,
-        'componentStatementDigest'
+        'componentStatementHash'
     > = {
-        backendStatementDigest:
-            input.loweredStatement.backendStatement.backendStatementDigest,
-        ...(input.ballotProofStatementDigest === undefined
+        backendStatementHash:
+            input.loweredStatement.backendStatement.backendStatementHash,
+        ...(input.ballotProofStatementHash === undefined
             ? {}
             : {
-                  ballotProofStatementDigest: input.ballotProofStatementDigest,
+                  ballotProofStatementHash: input.ballotProofStatementHash,
               }),
         coefficientModulus: input.component.coefficientModulus,
-        componentDigest: input.component.componentDigest,
+        componentHash: input.component.componentHash,
         componentId: input.component.componentId,
-        matrixDigest,
+        matrixHash,
         objectType: 'BallotProofComponentStatement',
         objectVersion: 1,
         proofLoweringStatus: input.component.proofLoweringStatus,
-        relationStatementDigest: input.loweredStatement.relationStatementDigest,
-        rowBatchMatrixDigests,
+        relationStatementHash: input.loweredStatement.relationStatementHash,
+        rowBatchMatrixHashes,
         rowBatchNames: input.component.rowBatchNames,
-        rowBatchTargetVectorDigests,
+        rowBatchTargetVectorHashes,
         rowCount: input.component.rowCount,
         rowKinds: input.component.rowKinds,
-        targetVectorDigest,
+        targetVectorHash,
         variableColumnCount: input.component.variableColumnCount,
         variableColumnIndices: input.component.variableColumnIndices,
     };
 
     return {
         ...statementPayload,
-        componentStatementDigest:
-            deriveComponentStatementDigest(statementPayload),
+        componentStatementHash: deriveComponentStatementHash(statementPayload),
     };
 };
 

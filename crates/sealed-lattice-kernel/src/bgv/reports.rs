@@ -6,51 +6,50 @@ use crate::{
         profile::{
             BACKEND_PROFILE_ID, BATCH_ENCODER_ID, BgvBasisKind, CANONICAL_CIPHERTEXT_CONVENTION_ID,
             DATA_PRIMES, OPERATION_REGISTRY_ID, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE, PROFILE_ID,
-            SPECIAL_PRIME, aggregate_input_encoding_profile_digest,
-            allowed_operation_registry_digest, allowed_operation_registry_value,
-            backend_profile_digest, ballot_score_encoding_profile_digest,
-            ballot_share_layout_profile_digest, batch_encoder_digest, batch_layout_binding_digest,
-            batch_layout_binding_value, canonical_ciphertext_convention_digest,
-            data_basis_modulus_bits, data_prime_bit_length, encoded_aggregate_layout_digest,
-            extended_basis_modulus_bits, layout_digest, profile_digest,
-            security_estimator_input_digest, selected_profile_value,
-            top_k_evaluator_input_layout_digest,
+            SPECIAL_PRIME, aggregate_input_encoding_profile_hash, allowed_operation_registry_hash,
+            allowed_operation_registry_value, backend_profile_hash,
+            ballot_score_encoding_profile_hash, ballot_share_layout_profile_hash,
+            batch_encoder_hash, batch_layout_binding_hash, batch_layout_binding_value,
+            canonical_ciphertext_convention_hash, data_basis_modulus_bits, data_prime_bit_length,
+            encoded_aggregate_layout_hash, extended_basis_modulus_bits, layout_hash, profile_hash,
+            security_estimator_input_hash, selected_profile_value,
+            top_k_evaluator_input_layout_hash,
         },
     },
     encoding::CanonicalResult,
-    hashing::derive_protocol_digest,
+    hashing::derive_protocol_hash,
 };
 
 pub(crate) fn describe_profile_report() -> CanonicalResult<Value> {
-    let profile_digest = profile_digest()?;
-    let backend_profile_digest = backend_profile_digest()?;
-    let batch_encoder_digest = batch_encoder_digest()?;
+    let profile_hash = profile_hash()?;
+    let backend_profile_hash = backend_profile_hash()?;
+    let batch_encoder_hash = batch_encoder_hash()?;
     let batch_layout_binding = batch_layout_binding_value()?;
-    let batch_layout_binding_digest = batch_layout_binding_digest()?;
-    let layout_digest = layout_digest()?;
-    let canonical_ciphertext_convention_digest = canonical_ciphertext_convention_digest()?;
-    let allowed_operation_registry_digest = allowed_operation_registry_digest()?;
-    let estimator_input_digest = security_estimator_input_digest()?;
+    let batch_layout_binding_hash = batch_layout_binding_hash()?;
+    let layout_hash = layout_hash()?;
+    let canonical_ciphertext_convention_hash = canonical_ciphertext_convention_hash()?;
+    let allowed_operation_registry_hash = allowed_operation_registry_hash()?;
+    let estimator_input_hash = security_estimator_input_hash()?;
     let big_integer_reference_vectors = big_integer_reference_vectors()?;
     let big_integer_reference_vector_root =
-        derive_protocol_digest("ReferenceOracleVectorRoot", &big_integer_reference_vectors)?;
+        derive_protocol_hash("ReferenceOracleVectorRoot", &big_integer_reference_vectors)?;
 
     Ok(json!({
         "profile": selected_profile_value(),
-        "profileDigest": profile_digest,
-        "backendProfileDigest": backend_profile_digest,
-        "batchEncoderDigest": batch_encoder_digest,
+        "profileHash": profile_hash,
+        "backendProfileHash": backend_profile_hash,
+        "batchEncoderHash": batch_encoder_hash,
         "batchLayoutBinding": batch_layout_binding,
-        "batchLayoutBindingDigest": batch_layout_binding_digest,
-        "encryptedAggregateInputLayoutDigest": layout_digest,
-        "ballotScoreEncodingProfileDigest": ballot_score_encoding_profile_digest()?,
-        "ballotShareLayoutProfileDigest": ballot_share_layout_profile_digest()?,
-        "aggregateInputEncodingProfileDigest": aggregate_input_encoding_profile_digest()?,
-        "encodedAggregateLayoutDigest": encoded_aggregate_layout_digest()?,
-        "topKEvaluatorInputLayoutDigest": top_k_evaluator_input_layout_digest()?,
-        "canonicalCiphertextConventionDigest": canonical_ciphertext_convention_digest,
-        "allowedEvaluatorOpsDigest": allowed_operation_registry_digest,
-        "securityEstimatorInputDigest": estimator_input_digest,
+        "batchLayoutBindingHash": batch_layout_binding_hash,
+        "encryptedAggregateInputLayoutHash": layout_hash,
+        "ballotScoreEncodingProfileHash": ballot_score_encoding_profile_hash()?,
+        "ballotShareLayoutProfileHash": ballot_share_layout_profile_hash()?,
+        "aggregateInputEncodingProfileHash": aggregate_input_encoding_profile_hash()?,
+        "encodedAggregateLayoutHash": encoded_aggregate_layout_hash()?,
+        "topKEvaluatorInputLayoutHash": top_k_evaluator_input_layout_hash()?,
+        "canonicalCiphertextConventionHash": canonical_ciphertext_convention_hash,
+        "allowedEvaluatorOpsHash": allowed_operation_registry_hash,
+        "securityEstimatorInputHash": estimator_input_hash,
         "bigIntegerReferenceVectors": big_integer_reference_vectors,
         "bigIntegerReferenceVectorRoot": big_integer_reference_vector_root,
         "basisReports": [
@@ -79,7 +78,7 @@ pub(crate) fn describe_profile_report() -> CanonicalResult<Value> {
 pub(crate) fn operation_registry_report() -> CanonicalResult<Value> {
     Ok(json!({
         "registry": allowed_operation_registry_value()?,
-        "allowedEvaluatorOpsDigest": allowed_operation_registry_digest()?,
+        "allowedEvaluatorOpsHash": allowed_operation_registry_hash()?,
         "forbiddenOperationRejectionFixtures": [
             bgv_profile_rejection_fixture(
                 "validateBgvEvaluatorOperation",
@@ -105,7 +104,7 @@ pub(crate) fn operation_registry_report() -> CanonicalResult<Value> {
 }
 
 pub(crate) fn backend_parameter_certificate_report() -> CanonicalResult<Value> {
-    let profile_digest = profile_digest()?;
+    let profile_hash = profile_hash()?;
     let data_prime_bits = usize::try_from(data_prime_bit_length()).unwrap_or(0);
     let q_data_bits = data_basis_modulus_bits();
     let qp_public_bits = extended_basis_modulus_bits();
@@ -113,7 +112,7 @@ pub(crate) fn backend_parameter_certificate_report() -> CanonicalResult<Value> {
         "parameterCertificateId": "m7-bgv-rns-backend-parameter-certificate-v1",
         "profileId": PROFILE_ID,
         "backendProfileId": BACKEND_PROFILE_ID,
-        "profileDigest": profile_digest,
+        "profileHash": profile_hash,
         "polynomialDegree": POLYNOMIAL_DEGREE,
         "plaintextModulus": PLAINTEXT_MODULUS,
         "dataPrimeCount": DATA_PRIMES.len(),
@@ -165,11 +164,11 @@ pub(crate) fn backend_parameter_certificate_report() -> CanonicalResult<Value> {
                 "status": "pending-Appendix-C-Q-target"
             }
         ],
-        "securityEstimatorInputDigest": security_estimator_input_digest()?,
+        "securityEstimatorInputHash": security_estimator_input_hash()?,
         "noiseBudgetHook": {
             "status": "hook-only-for-M8-through-M10",
             "owner": "sealed-lattice-rust-wasm",
-            "mustBindProfileDigest": true
+            "mustBindProfileHash": true
         },
         "referenceOracleBoundary": {
             "lattigoRuntimeDependency": false,
@@ -181,11 +180,11 @@ pub(crate) fn backend_parameter_certificate_report() -> CanonicalResult<Value> {
             "bridgePath": "EncryptedAggregateBridge-v1",
             "inputWitnessCustody": "each contributor keeps aggregate witness private",
             "encryptedAggregateInputLayoutId": "encrypted-aggregate-input-layout-v1",
-            "encryptedAggregateInputLayoutDigest": layout_digest()?,
+            "encryptedAggregateInputLayoutHash": layout_hash()?,
             "batchLayoutBinding": batch_layout_binding_value()?,
-            "batchLayoutBindingDigest": batch_layout_binding_digest()?,
+            "batchLayoutBindingHash": batch_layout_binding_hash()?,
             "batchEncoderId": BATCH_ENCODER_ID,
-            "batchEncoderDigest": batch_encoder_digest()?,
+            "batchEncoderHash": batch_encoder_hash()?,
             "plaintextModulus": PLAINTEXT_MODULUS,
             "slotCount": POLYNOMIAL_DEGREE,
             "forbiddenCentralization": [
@@ -200,11 +199,11 @@ pub(crate) fn backend_parameter_certificate_report() -> CanonicalResult<Value> {
             "plaintextRootNamespace": "PlaintextRoot",
             "ciphertextRootNamespace": "CiphertextRoot",
             "canonicalCiphertextConventionId": CANONICAL_CIPHERTEXT_CONVENTION_ID,
-            "canonicalCiphertextConventionDigest": canonical_ciphertext_convention_digest()?,
+            "canonicalCiphertextConventionHash": canonical_ciphertext_convention_hash()?,
             "canonicalBytesHashDomain": "sealed-lattice-bgv-rns/canonical-bytes-v1"
         },
         "allowedOperationRegistryId": OPERATION_REGISTRY_ID,
-        "allowedEvaluatorOpsDigest": allowed_operation_registry_digest()?,
+        "allowedEvaluatorOpsHash": allowed_operation_registry_hash()?,
         "centeredRepresentativeExamples": [
             {
                 "modulus": DATA_PRIMES[0],
@@ -221,8 +220,8 @@ pub(crate) fn backend_parameter_certificate_report() -> CanonicalResult<Value> {
 
     Ok(json!({
         "parameterCertificate": parameter_certificate_value,
-        "parameterCertificateDigest": derive_protocol_digest(
-            "BGVSetupParameterCertificateDigest",
+        "parameterCertificateHash": derive_protocol_hash(
+            "BGVSetupParameterCertificateHash",
             &parameter_certificate_value,
         )?,
         "bgvProfileRejectionFixtures": bgv_profile_rejection_fixtures(),
@@ -256,7 +255,7 @@ fn bgv_profile_rejection_fixture(operation: &str, reason_code: &str, message: &s
     json!({
         "ok": false,
         "operation": operation,
-        "acceptedDigests": [],
+        "acceptedHashes": [],
         "refusedObjects": [
             {
                 "code": "BGVProfileRejected",
@@ -445,8 +444,8 @@ mod tests {
                 .any(|fixture| fixture["refusedObjects"][0]["reasonCode"] == "MissingEstimatorRow")
         );
         assert_eq!(
-            backend_parameter_certificate_report().expect("backend report")["parameterCertificateDigest"],
-            "1af357fdb1330b3d0c1c41a8eb97ecc150e847f9ce14eedf039e22b74a4b773d8f1d13d87fab48790289baa3bb0f6a7f2e52bfcec8d0a6849aab7d89e98d2ecd"
+            backend_parameter_certificate_report().expect("backend report")["parameterCertificateHash"],
+            "0e4bce3bef50a414016cb96cea5647d33a9518e70fced360c1a079b8bb81e186aaec0ca92d87933263f79131fb664a1dc7a4fbac9547388dbcb407111a262591"
         );
     }
 }

@@ -41,10 +41,10 @@ pub(crate) fn parse_structured_receiver_encryption_statement(
             "Structured receiver-encryption proof statement modulus is not supported.",
         ));
     }
-    let statement_digest = string_field(structured_statement, "statementDigest")
+    let statement_hash = string_field(structured_statement, "statementHash")
         .ok_or_else(|| {
             ComponentProofBackendError::invalid(
-                "Structured receiver-encryption proof statement is missing statementDigest.",
+                "Structured receiver-encryption proof statement is missing statementHash.",
             )
         })?
         .to_string();
@@ -60,13 +60,13 @@ pub(crate) fn parse_structured_receiver_encryption_statement(
                 "Structured receiver-encryption proof statement is missing statementColumns.",
             )
         })?;
-    let receiver_encryption_profile_digest = string_field(
+    let receiver_encryption_profile_hash = string_field(
         structured_statement,
-        "receiverEncryptionProfileDigest",
+        "receiverEncryptionProfileHash",
     )
     .ok_or_else(|| {
         ComponentProofBackendError::invalid(
-            "Structured receiver-encryption proof statement is missing receiverEncryptionProfileDigest.",
+            "Structured receiver-encryption proof statement is missing receiverEncryptionProfileHash.",
         )
     })?;
     let receiver_rows = object_map(structured_statement)
@@ -165,10 +165,10 @@ pub(crate) fn parse_structured_receiver_encryption_statement(
             )
         })?;
 
-        let public_matrix_seed_digest = string_field(receiver_row, "publicMatrixSeedDigest")
+        let public_matrix_seed_hash = string_field(receiver_row, "publicMatrixSeedHash")
             .ok_or_else(|| {
                 ComponentProofBackendError::invalid(
-                    "Structured receiver-encryption receiver row is missing publicMatrixSeedDigest.",
+                    "Structured receiver-encryption receiver row is missing publicMatrixSeedHash.",
                 )
             })?;
         let public_key_vector = parse_receiver_polynomial_vector(
@@ -180,8 +180,8 @@ pub(crate) fn parse_structured_receiver_encryption_statement(
             "Structured receiver-encryption public key vector",
         )?;
         let public_matrix = derive_receiver_encryption_public_matrix(
-            receiver_encryption_profile_digest,
-            public_matrix_seed_digest,
+            receiver_encryption_profile_hash,
+            public_matrix_seed_hash,
         )
         .map_err(|error| {
             ComponentProofBackendError::invalid(format!(
@@ -349,7 +349,7 @@ pub(crate) fn parse_structured_receiver_encryption_statement(
     })?;
 
     Ok(ParsedStructuredReceiverEncryptionStatement {
-        statement_digest,
+        statement_hash,
         statement_rows,
         statement_columns,
         source_statement_matrix,

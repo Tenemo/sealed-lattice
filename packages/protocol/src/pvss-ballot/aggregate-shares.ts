@@ -1,4 +1,4 @@
-import { canonicalJson, deriveProtocolDigest } from '@sealed-lattice/crypto';
+import { canonicalJson, deriveProtocolHash } from '@sealed-lattice/crypto';
 import type {
     BallotPackageWitness,
     CanonicalBallotSet,
@@ -21,8 +21,8 @@ import {
 } from '../plaintext-oracle/field.js';
 import { interpolateShamirConstantTerm } from '../plaintext-oracle/shamir.js';
 
-import { deriveBallotPolynomialSetDigest } from './ballot-polynomials.js';
-import { deriveBallotSetDigestFromCanonicalSet } from './ballot-set.js';
+import { deriveBallotPolynomialSetHash } from './ballot-polynomials.js';
+import { deriveBallotSetHashFromCanonicalSet } from './ballot-set.js';
 import {
     pvssBallotShareVectorWidth,
     requireNoRefusals,
@@ -34,12 +34,12 @@ import {
     deriveReceiverShareVectors,
 } from './receiver-shares.js';
 import {
-    deriveTestReceiverShareOpeningPayloadDigest,
-    deriveTestShareCommitmentDigest,
+    deriveTestReceiverShareOpeningPayloadHash,
+    deriveTestShareCommitmentHash,
     verifyTestShareCommitmentOpening,
 } from './test-share-commitments.js';
 
-const protocolDigestPattern = /^[0-9a-f]{128}$/u;
+const protocolHashPattern = /^[0-9a-f]{128}$/u;
 
 const zeroShareVector = (): readonly FieldElement[] =>
     Array.from({ length: pvssBallotShareVectorWidth }, () => 0 as FieldElement);
@@ -85,20 +85,19 @@ const assertPolynomialSetMatchesPackage = (
     thresholdProfile: ThresholdProfile,
 ): void => {
     const polynomialSet = witness.polynomialSet;
-    const recomputedPolynomialSetDigest = deriveBallotPolynomialSetDigest({
+    const recomputedPolynomialSetHash = deriveBallotPolynomialSetHash({
         normalizedBallot: polynomialSet.normalizedBallot,
         optionPolynomials: polynomialSet.optionPolynomials,
         pvssThreshold: polynomialSet.pvssThreshold,
     });
 
     if (
-        polynomialSet.ballotPolynomialSetDigest !==
-            recomputedPolynomialSetDigest ||
-        polynomialSet.ballotPolynomialSetDigest !==
-            candidate.ballotPackage.ballotPolynomialSetDigest
+        polynomialSet.ballotPolynomialSetHash !== recomputedPolynomialSetHash ||
+        polynomialSet.ballotPolynomialSetHash !==
+            candidate.ballotPackage.ballotPolynomialSetHash
     ) {
         throw new RangeError(
-            'Counted ballot witness polynomial set does not match the counted package digest.',
+            'Counted ballot witness polynomial set does not match the counted package hash.',
         );
     }
     if (
@@ -179,14 +178,14 @@ const assertReceiverWitnessesMatchPackage = (input: {
                 ),
             'Counted ballot witness receiver payloads must be unique.',
         );
-    const digestContext = {
+    const hashContext = {
         ceremonyId: candidate.ballotPackage.ceremonyId,
-        duplicateBallotPolicyDigest:
-            candidate.ballotPackage.duplicateBallotPolicyDigest,
-        electionManifestDigest: candidate.ballotPackage.electionManifestDigest,
-        pollSpecDigest: candidate.ballotPackage.pollSpecDigest,
-        rosterDigest: candidate.ballotPackage.rosterDigest,
-        thresholdProfileDigest: candidate.ballotPackage.thresholdProfileDigest,
+        duplicateBallotPolicyHash:
+            candidate.ballotPackage.duplicateBallotPolicyHash,
+        electionManifestHash: candidate.ballotPackage.electionManifestHash,
+        pollSpecHash: candidate.ballotPackage.pollSpecHash,
+        rosterHash: candidate.ballotPackage.rosterHash,
+        thresholdProfileHash: candidate.ballotPackage.thresholdProfileHash,
         voterIdentity: candidate.ballotPackage.voterIdentity,
         voterRosterPosition: candidate.ballotPackage.voterRosterPosition,
     };
@@ -214,7 +213,7 @@ const assertReceiverWitnessesMatchPackage = (input: {
             const commitmentReference =
                 candidate.ballotPackage.receiverShareCommitments[receiverIndex];
             const payloadReference =
-                candidate.ballotPackage.receiverPayloadDigests[receiverIndex];
+                candidate.ballotPackage.receiverPayloadHashes[receiverIndex];
 
             if (
                 shareVector === undefined ||
@@ -255,14 +254,14 @@ const assertReceiverWitnessesMatchPackage = (input: {
                 );
             }
 
-            const commitmentWithoutDigest = {
+            const commitmentWithoutHash = {
                 objectType: commitmentWitness.commitment.objectType,
                 receiverIdentity: commitmentWitness.commitment.receiverIdentity,
                 receiverRosterPosition:
                     commitmentWitness.commitment.receiverRosterPosition,
                 commitmentValues: commitmentWitness.commitment.commitmentValues,
             };
-            const payloadWithoutDigest = {
+            const payloadWithoutHash = {
                 objectType: payload.objectType,
                 receiverIdentity: payload.receiverIdentity,
                 receiverRosterPosition: payload.receiverRosterPosition,
@@ -274,21 +273,21 @@ const assertReceiverWitnessesMatchPackage = (input: {
                 commitmentWitness.commitment.objectType !==
                     'TestShareCommitment' ||
                 payload.objectType !== 'TestReceiverShareOpeningPayload' ||
-                commitmentWitness.commitment.shareCommitmentDigest !==
-                    deriveTestShareCommitmentDigest({
-                        commitment: commitmentWithoutDigest,
-                        context: digestContext,
-                        ballotPolynomialSetDigest:
-                            witness.polynomialSet.ballotPolynomialSetDigest,
+                commitmentWitness.commitment.shareCommitmentHash !==
+                    deriveTestShareCommitmentHash({
+                        commitment: commitmentWithoutHash,
+                        context: hashContext,
+                        ballotPolynomialSetHash:
+                            witness.polynomialSet.ballotPolynomialSetHash,
                     }) ||
-                payload.payloadDigest !==
-                    deriveTestReceiverShareOpeningPayloadDigest({
-                        context: digestContext,
-                        payload: payloadWithoutDigest,
+                payload.payloadHash !==
+                    deriveTestReceiverShareOpeningPayloadHash({
+                        context: hashContext,
+                        payload: payloadWithoutHash,
                     }) ||
-                commitmentWitness.commitment.shareCommitmentDigest !==
-                    commitmentReference.shareCommitmentDigest ||
-                payload.payloadDigest !== payloadReference.payloadDigest ||
+                commitmentWitness.commitment.shareCommitmentHash !==
+                    commitmentReference.shareCommitmentHash ||
+                payload.payloadHash !== payloadReference.payloadHash ||
                 !fieldVectorsEqual(
                     commitmentWitness.shareVector,
                     shareVector.shareVector,
@@ -304,7 +303,7 @@ const assertReceiverWitnessesMatchPackage = (input: {
                 !verifyTestShareCommitmentOpening(commitmentWitness)
             ) {
                 throw new RangeError(
-                    'Counted ballot witness receiver commitment material does not match the counted package digest references.',
+                    'Counted ballot witness receiver commitment material does not match the counted package hash references.',
                 );
             }
         },
@@ -318,8 +317,8 @@ const assertCountedWitnessMatchesPackage = (input: {
     readonly thresholdProfile: ThresholdProfile;
 }): void => {
     if (
-        input.witness.ballotPackage.ballotPackageDigest !==
-            input.candidate.ballotPackage.ballotPackageDigest ||
+        input.witness.ballotPackage.ballotPackageHash !==
+            input.candidate.ballotPackage.ballotPackageHash ||
         !sameCanonicalObject(
             input.witness.ballotPackage,
             input.candidate.ballotPackage,
@@ -338,70 +337,70 @@ const assertCountedWitnessMatchesPackage = (input: {
     assertReceiverWitnessesMatchPackage(input);
 };
 
-const buildWitnessByDigest = (
+const buildWitnessByHash = (
     ballotWitnesses: readonly BallotPackageWitness[],
 ): Map<string, BallotPackageWitness> => {
-    const witnessByDigest = new Map<string, BallotPackageWitness>();
-    const canonicalShellByDigest = new Map<string, string>();
+    const witnessByHash = new Map<string, BallotPackageWitness>();
+    const canonicalShellByHash = new Map<string, string>();
 
     for (const witness of ballotWitnesses) {
-        const ballotPackageDigest = witness.ballotPackage.ballotPackageDigest;
+        const ballotPackageHash = witness.ballotPackage.ballotPackageHash;
         const canonicalShell = canonicalJson(witness.ballotPackage);
         const previousCanonicalShell =
-            canonicalShellByDigest.get(ballotPackageDigest);
+            canonicalShellByHash.get(ballotPackageHash);
 
         if (
             previousCanonicalShell !== undefined &&
             previousCanonicalShell !== canonicalShell
         ) {
             throw new RangeError(
-                'Aggregate share derivation rejects non-identical witness package shells with the same digest.',
+                'Aggregate share derivation rejects non-identical witness package shells with the same hash.',
             );
         }
-        canonicalShellByDigest.set(ballotPackageDigest, canonicalShell);
-        if (!witnessByDigest.has(ballotPackageDigest)) {
-            witnessByDigest.set(ballotPackageDigest, witness);
+        canonicalShellByHash.set(ballotPackageHash, canonicalShell);
+        if (!witnessByHash.has(ballotPackageHash)) {
+            witnessByHash.set(ballotPackageHash, witness);
         }
     }
 
-    return witnessByDigest;
+    return witnessByHash;
 };
 
-const deriveAggregateShareCommitmentDigest = (input: {
+const deriveAggregateShareCommitmentHash = (input: {
     readonly aggregateShare: Omit<
         TestAggregateShare,
-        'aggregateShareCommitmentDigest'
+        'aggregateShareCommitmentHash'
     >;
-    readonly ballotSetDigest: string;
+    readonly ballotSetHash: string;
 }): string =>
-    deriveProtocolDigest('AggregateShareCommitmentDigest', {
+    deriveProtocolHash('AggregateShareCommitmentHash', {
         aggregateCommitmentValues:
             input.aggregateShare.aggregateCommitmentValues,
         aggregateShareVector: input.aggregateShare.aggregateShareVector,
-        ballotSetDigest: input.ballotSetDigest,
+        ballotSetHash: input.ballotSetHash,
         objectType: input.aggregateShare.objectType,
         shareVectorWidth: input.aggregateShare.shareVectorWidth,
         trusteeIdentity: input.aggregateShare.trusteeIdentity,
         trusteeRosterPosition: input.aggregateShare.trusteeRosterPosition,
     });
 
-const assertAcceptedBallotSetDigestMatchesPayload = (
+const assertAcceptedBallotSetHashMatchesPayload = (
     ballotSet: CanonicalBallotSet,
 ): string => {
-    if (!ballotSet.ok || ballotSet.ballotSetDigest === undefined) {
+    if (!ballotSet.ok || ballotSet.ballotSetHash === undefined) {
         throw new RangeError(
             'Aggregate share derivation requires an accepted canonical ballot set.',
         );
     }
 
-    const expectedDigest = deriveBallotSetDigestFromCanonicalSet(ballotSet);
-    if (ballotSet.ballotSetDigest !== expectedDigest) {
+    const expectedHash = deriveBallotSetHashFromCanonicalSet(ballotSet);
+    if (ballotSet.ballotSetHash !== expectedHash) {
         throw new RangeError(
-            'Aggregate share derivation requires the counted ballots to match the canonical ballot-set digest.',
+            'Aggregate share derivation requires the counted ballots to match the canonical ballot-set hash.',
         );
     }
 
-    return ballotSet.ballotSetDigest;
+    return ballotSet.ballotSetHash;
 };
 
 export const deriveTestAggregateShares = (input: {
@@ -413,14 +412,14 @@ export const deriveTestAggregateShares = (input: {
     requireNoRefusals(
         validateRosterEntries(input.rosterEntries, input.thresholdProfile),
     );
-    const ballotSetDigest = assertAcceptedBallotSetDigestMatchesPayload(
+    const ballotSetHash = assertAcceptedBallotSetHashMatchesPayload(
         input.ballotSet,
     );
 
-    const witnessByDigest = buildWitnessByDigest(input.ballotWitnesses);
+    const witnessByHash = buildWitnessByHash(input.ballotWitnesses);
     const countedWitnesses = input.ballotSet.countedBallots.map((candidate) => {
-        const witness = witnessByDigest.get(
-            candidate.ballotPackage.ballotPackageDigest,
+        const witness = witnessByHash.get(
+            candidate.ballotPackage.ballotPackageHash,
         );
         if (witness === undefined) {
             throw new RangeError(
@@ -485,9 +484,9 @@ export const deriveTestAggregateShares = (input: {
                 );
             }
 
-            const aggregateShareWithoutDigest = {
+            const aggregateShareWithoutHash = {
                 objectType: 'TestAggregateShare' as const,
-                ballotSetDigest,
+                ballotSetHash,
                 trusteeIdentity: entry.participantIdentity,
                 trusteeRosterPosition: entry.rosterPosition,
                 shareVectorWidth: pvssBallotShareVectorWidth,
@@ -498,11 +497,11 @@ export const deriveTestAggregateShares = (input: {
             return {
                 aggregateOpeningVector,
                 aggregateShare: {
-                    ...aggregateShareWithoutDigest,
-                    aggregateShareCommitmentDigest:
-                        deriveAggregateShareCommitmentDigest({
-                            aggregateShare: aggregateShareWithoutDigest,
-                            ballotSetDigest,
+                    ...aggregateShareWithoutHash,
+                    aggregateShareCommitmentHash:
+                        deriveAggregateShareCommitmentHash({
+                            aggregateShare: aggregateShareWithoutHash,
+                            ballotSetHash,
                         }),
                 },
             };
@@ -510,7 +509,7 @@ export const deriveTestAggregateShares = (input: {
     );
 
     return {
-        ballotSetDigest,
+        ballotSetHash,
         aggregateShares,
     };
 };
@@ -520,9 +519,9 @@ export const verifyTestAggregateShareOpening = (
 ): boolean => {
     if (
         witness.aggregateShare.objectType !== 'TestAggregateShare' ||
-        !protocolDigestPattern.test(witness.aggregateShare.ballotSetDigest) ||
-        !protocolDigestPattern.test(
-            witness.aggregateShare.aggregateShareCommitmentDigest,
+        !protocolHashPattern.test(witness.aggregateShare.ballotSetHash) ||
+        !protocolHashPattern.test(
+            witness.aggregateShare.aggregateShareCommitmentHash,
         ) ||
         witness.aggregateOpeningVector.length !== pvssBallotShareVectorWidth ||
         witness.aggregateShare.aggregateShareVector.length !==
@@ -569,7 +568,7 @@ export const verifyTestAggregateShareOpening = (
 
 export const reconstructAggregateTallyFromShares = (input: {
     readonly aggregateShares: readonly TestAggregateShare[];
-    readonly ballotSetDigest?: string;
+    readonly ballotSetHash?: string;
     readonly optionCount: number;
     readonly thresholdProfile: ThresholdProfile;
 }): readonly FieldElement[] => {
@@ -579,11 +578,11 @@ export const reconstructAggregateTallyFromShares = (input: {
         );
     }
     if (
-        input.ballotSetDigest !== undefined &&
-        !protocolDigestPattern.test(input.ballotSetDigest)
+        input.ballotSetHash !== undefined &&
+        !protocolHashPattern.test(input.ballotSetHash)
     ) {
         throw new RangeError(
-            'Aggregate reconstruction requires a canonical expected ballot-set digest.',
+            'Aggregate reconstruction requires a canonical expected ballot-set hash.',
         );
     }
     if (
@@ -596,22 +595,22 @@ export const reconstructAggregateTallyFromShares = (input: {
     }
 
     const seenRosterPositions = new Set<number>();
-    const ballotSetDigests = new Set<string>();
+    const ballotSetHashes = new Set<string>();
     for (const aggregateShare of input.aggregateShares) {
         if (
             aggregateShare.objectType !== 'TestAggregateShare' ||
-            !protocolDigestPattern.test(aggregateShare.ballotSetDigest) ||
-            !protocolDigestPattern.test(
-                aggregateShare.aggregateShareCommitmentDigest,
+            !protocolHashPattern.test(aggregateShare.ballotSetHash) ||
+            !protocolHashPattern.test(
+                aggregateShare.aggregateShareCommitmentHash,
             )
         ) {
             throw new RangeError(
-                'Aggregate reconstruction requires shares bound to a canonical ballot set digest.',
+                'Aggregate reconstruction requires shares bound to a canonical ballot set hash.',
             );
         }
-        const aggregateShareWithoutDigest = {
+        const aggregateShareWithoutHash = {
             objectType: aggregateShare.objectType,
-            ballotSetDigest: aggregateShare.ballotSetDigest,
+            ballotSetHash: aggregateShare.ballotSetHash,
             trusteeIdentity: aggregateShare.trusteeIdentity,
             trusteeRosterPosition: aggregateShare.trusteeRosterPosition,
             shareVectorWidth: aggregateShare.shareVectorWidth,
@@ -619,20 +618,20 @@ export const reconstructAggregateTallyFromShares = (input: {
             aggregateCommitmentValues: aggregateShare.aggregateCommitmentValues,
         };
         if (
-            aggregateShare.aggregateShareCommitmentDigest !==
-            deriveAggregateShareCommitmentDigest({
-                aggregateShare: aggregateShareWithoutDigest,
-                ballotSetDigest: aggregateShare.ballotSetDigest,
+            aggregateShare.aggregateShareCommitmentHash !==
+            deriveAggregateShareCommitmentHash({
+                aggregateShare: aggregateShareWithoutHash,
+                ballotSetHash: aggregateShare.ballotSetHash,
             })
         ) {
             throw new RangeError(
-                'Aggregate reconstruction requires canonical aggregate share commitment digests.',
+                'Aggregate reconstruction requires canonical aggregate share commitment Hashes.',
             );
         }
-        ballotSetDigests.add(aggregateShare.ballotSetDigest);
+        ballotSetHashes.add(aggregateShare.ballotSetHash);
         if (
-            input.ballotSetDigest !== undefined &&
-            aggregateShare.ballotSetDigest !== input.ballotSetDigest
+            input.ballotSetHash !== undefined &&
+            aggregateShare.ballotSetHash !== input.ballotSetHash
         ) {
             throw new RangeError(
                 'Aggregate reconstruction requires shares for the expected ballot set.',
@@ -680,7 +679,7 @@ export const reconstructAggregateTallyFromShares = (input: {
             );
         }
     }
-    if (ballotSetDigests.size !== 1) {
+    if (ballotSetHashes.size !== 1) {
         throw new RangeError(
             'Aggregate reconstruction requires all shares to bind the same ballot set.',
         );

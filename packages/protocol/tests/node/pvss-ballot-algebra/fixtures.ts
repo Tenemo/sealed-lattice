@@ -1,4 +1,4 @@
-import { deriveProtocolDigest } from '@sealed-lattice/crypto';
+import { deriveProtocolHash } from '@sealed-lattice/crypto';
 import type {
     BallotPackageCandidate,
     BallotPackageShell,
@@ -8,7 +8,7 @@ import type {
     TestAggregateShare,
 } from '@sealed-lattice/types';
 
-import { derivePollSpecDigest } from '../../../src/lifecycle/poll-spec';
+import { derivePollSpecHash } from '../../../src/lifecycle/poll-spec';
 import { deriveFrozenRosterProfile } from '../../../src/lifecycle/thresholds';
 import { deriveTestBallotPackage } from '../../../src/pvss-ballot/index';
 import {
@@ -19,8 +19,8 @@ import {
 import {
     ceremonyId,
     createSignature,
-    getParticipantSigningPublicKeyDigest,
-    manifestPolicyDigests,
+    getParticipantSigningPublicKeyHash,
+    manifestPolicyHashes,
 } from '../election-foundation-fixture-constants';
 
 import aggregateSharesVectorJson from '#test-vectors/pvss-ballot/aggregate-shares.json' with { type: 'json' };
@@ -53,54 +53,50 @@ export const rosterEntries = Array.from(
         return {
             participantIdentity,
             rosterPosition: rosterIndex + 1,
-            signingPublicKeyDigest:
-                getParticipantSigningPublicKeyDigest(participantIdentity),
+            signingPublicKeyHash:
+                getParticipantSigningPublicKeyHash(participantIdentity),
         };
     },
 );
-export const pollSpecDigest = derivePollSpecDigest(pollSpec);
-export const rosterDigest = deriveProtocolDigest('RosterDigest', {
+export const pollSpecHash = derivePollSpecHash(pollSpec);
+export const rosterHash = deriveProtocolHash('RosterHash', {
     rosterEntries,
 });
 const frozenRosterProfile = deriveFrozenRosterProfile({
     pollSpec,
-    rosterDigest,
+    rosterHash,
     rosterSize: rosterEntries.length,
 });
 export const thresholdProfile = frozenRosterProfile.thresholdProfile;
-export const thresholdProfileDigest =
-    frozenRosterProfile.thresholdProfileDigest;
-export const electionManifestDigest = deriveProtocolDigest(
-    'ElectionManifestDigest',
-    {
-        ceremonyId,
-        pollSpecDigest,
-        rosterDigest,
-        thresholdProfileDigest,
-    },
-);
-export const closeRecordDigest = deriveProtocolDigest('CloseRecordDigest', {
+export const thresholdProfileHash = frozenRosterProfile.thresholdProfileHash;
+export const electionManifestHash = deriveProtocolHash('ElectionManifestHash', {
+    ceremonyId,
+    pollSpecHash,
+    rosterHash,
+    thresholdProfileHash,
+});
+export const closeRecordHash = deriveProtocolHash('CloseRecordHash', {
     ceremonyId,
     closeKind: 'VotingClosed',
 });
 export const ballotAlgebraVector = ballotAlgebraVectorJson as {
-    readonly ballotPackageDigest: string;
-    readonly ballotPolynomialSetDigest: string;
-    readonly firstReceiverPayloadDigest: string;
+    readonly ballotPackageHash: string;
+    readonly ballotPolynomialSetHash: string;
+    readonly firstReceiverPayloadHash: string;
     readonly firstReceiverShareVector: readonly number[];
-    readonly firstShareCommitmentDigest: string;
+    readonly firstShareCommitmentHash: string;
     readonly normalizedScores: readonly number[];
     readonly schemaVersion: 1;
 };
 export const canonicalBallotSetVector = canonicalBallotSetVectorJson as {
-    readonly ballotSetDigest: string;
-    readonly countedBallotPackageDigests: readonly string[];
+    readonly ballotSetHash: string;
+    readonly countedBallotPackageHashes: readonly string[];
     readonly rejectedCandidates: readonly unknown[];
     readonly schemaVersion: 1;
 };
 export const aggregateSharesVector = aggregateSharesVectorJson as {
-    readonly ballotSetDigest: string;
-    readonly firstAggregateShareCommitmentDigest: string;
+    readonly ballotSetHash: string;
+    readonly firstAggregateShareCommitmentHash: string;
     readonly firstAggregateShareVector: readonly number[];
     readonly reconstructedTally: readonly number[];
     readonly schemaVersion: 1;
@@ -112,19 +108,19 @@ export const createBallotWitness = (
     fixtureEntropy = `entropy-${String(voterRosterPosition)}`,
 ): BallotPackageWitness => {
     const voterIdentity = `participant-${String(voterRosterPosition)}`;
-    const publicKeyDigest = getParticipantSigningPublicKeyDigest(voterIdentity);
+    const publicKeyHash = getParticipantSigningPublicKeyHash(voterIdentity);
 
     return deriveTestBallotPackage(
         {
             ceremonyId,
             voterIdentity,
             voterRosterPosition,
-            electionManifestDigest,
-            rosterDigest,
-            pollSpecDigest,
-            duplicateBallotPolicyDigest:
-                manifestPolicyDigests.duplicateBallotPolicyDigest,
-            thresholdProfileDigest,
+            electionManifestHash,
+            rosterHash,
+            pollSpecHash,
+            duplicateBallotPolicyHash:
+                manifestPolicyHashes.duplicateBallotPolicyHash,
+            thresholdProfileHash,
             pollSpec,
             thresholdProfile,
             rosterEntries,
@@ -134,16 +130,16 @@ export const createBallotWitness = (
             },
             fixtureEntropy,
         },
-        (ballotPackageDigest) =>
+        (ballotPackageHash) =>
             createSignature(
                 'BallotPackage',
                 'Voter',
                 voterIdentity,
-                publicKeyDigest,
-                ballotPackageDigest,
+                publicKeyHash,
+                ballotPackageHash,
                 {
-                    manifestDigest: electionManifestDigest,
-                    boardHeadDigest: null,
+                    manifestHash: electionManifestHash,
+                    boardHeadHash: null,
                 },
             ),
     );
@@ -156,21 +152,21 @@ export const createBallotSetInput = (
     const genesisHead = createBoardHead(0, null, 'vector-genesis');
     const ballotHeadWithProofs = createBoardHeadWithObjects(
         1,
-        genesisHead.headDigest,
+        genesisHead.headHash,
         witnesses.map((witness, boardPosition) => ({
             objectType: 'BallotPackage' as const,
-            objectDigest: witness.ballotPackage.ballotPackageDigest,
+            objectHash: witness.ballotPackage.ballotPackageHash,
             boardPosition,
         })),
         'vector-ballots',
     );
     const closeHeadWithProofs = createBoardHeadWithObjects(
         2,
-        ballotHeadWithProofs.head.headDigest,
+        ballotHeadWithProofs.head.headHash,
         [
             {
                 objectType: 'CloseRecord' as const,
-                objectDigest: closeRecordDigest,
+                objectHash: closeRecordHash,
                 boardPosition: 0,
             },
         ],
@@ -179,10 +175,10 @@ export const createBallotSetInput = (
     const closeHead = closeHeadWithProofs.head;
     const lateHeadWithProofs = createBoardHeadWithObjects(
         3,
-        closeHead.headDigest,
+        closeHead.headHash,
         afterCloseWitnesses.map((witness, boardPosition) => ({
             objectType: 'BallotPackage' as const,
-            objectDigest: witness.ballotPackage.ballotPackageDigest,
+            objectHash: witness.ballotPackage.ballotPackageHash,
             boardPosition,
         })),
         'vector-late',
@@ -206,24 +202,24 @@ export const createBallotSetInput = (
             lateHeadWithProofs.head,
         ]),
         ceremonyId,
-        electionManifestDigest,
-        rosterDigest,
-        pollSpecDigest,
-        thresholdProfileDigest,
-        duplicateBallotPolicyDigest:
-            manifestPolicyDigests.duplicateBallotPolicyDigest,
+        electionManifestHash,
+        rosterHash,
+        pollSpecHash,
+        thresholdProfileHash,
+        duplicateBallotPolicyHash:
+            manifestPolicyHashes.duplicateBallotPolicyHash,
         pollSpec,
         thresholdProfile,
         rosterEntries,
-        votingClosedBoardHeadDigest: closeHead.headDigest,
-        closeRecordDigest,
+        votingClosedBoardHeadHash: closeHead.headHash,
+        closeRecordHash,
         closeRecordBoardOrder: {
             boardSequence: 2,
             boardPosition: 0,
         },
         closeRecordInclusionProof: closeHeadWithProofs.inclusionProofs[0],
         candidateBallots,
-        includeRejectedCandidateSummariesInDigest: true,
+        includeRejectedCandidateSummariesInHash: true,
     };
 };
 
@@ -235,101 +231,95 @@ export const mutateBallotPackage = (
     ...overrides,
 });
 
-export const deriveBallotPackageDigestForTest = (
-    ballotPackage: Omit<
-        BallotPackageShell,
-        'ballotPackageDigest' | 'signature'
-    >,
+export const deriveBallotPackageHashForTest = (
+    ballotPackage: Omit<BallotPackageShell, 'ballotPackageHash' | 'signature'>,
 ): string =>
-    deriveProtocolDigest('BallotPackageDigest', {
-        ballotPolynomialSetDigest: ballotPackage.ballotPolynomialSetDigest,
+    deriveProtocolHash('BallotPackageHash', {
+        ballotPolynomialSetHash: ballotPackage.ballotPolynomialSetHash,
         ceremonyId: ballotPackage.ceremonyId,
-        duplicateBallotPolicyDigest: ballotPackage.duplicateBallotPolicyDigest,
-        electionManifestDigest: ballotPackage.electionManifestDigest,
+        duplicateBallotPolicyHash: ballotPackage.duplicateBallotPolicyHash,
+        electionManifestHash: ballotPackage.electionManifestHash,
         objectType: ballotPackage.objectType,
         objectVersion: ballotPackage.objectVersion,
         optionCount: ballotPackage.optionCount,
-        pollSpecDigest: ballotPackage.pollSpecDigest,
-        receiverPayloadDigests: ballotPackage.receiverPayloadDigests,
+        pollSpecHash: ballotPackage.pollSpecHash,
+        receiverPayloadHashes: ballotPackage.receiverPayloadHashes,
         receiverShareCommitments: ballotPackage.receiverShareCommitments,
-        rosterDigest: ballotPackage.rosterDigest,
+        rosterHash: ballotPackage.rosterHash,
         shareVectorWidth: ballotPackage.shareVectorWidth,
-        thresholdProfileDigest: ballotPackage.thresholdProfileDigest,
+        thresholdProfileHash: ballotPackage.thresholdProfileHash,
         voterIdentity: ballotPackage.voterIdentity,
         voterRosterPosition: ballotPackage.voterRosterPosition,
     });
 
 export const stripBallotPackageSignatureForTest = (
     ballotPackage: BallotPackageShell,
-): Omit<BallotPackageShell, 'ballotPackageDigest' | 'signature'> => ({
+): Omit<BallotPackageShell, 'ballotPackageHash' | 'signature'> => ({
     objectType: ballotPackage.objectType,
     objectVersion: ballotPackage.objectVersion,
     ceremonyId: ballotPackage.ceremonyId,
-    electionManifestDigest: ballotPackage.electionManifestDigest,
-    rosterDigest: ballotPackage.rosterDigest,
-    pollSpecDigest: ballotPackage.pollSpecDigest,
-    thresholdProfileDigest: ballotPackage.thresholdProfileDigest,
-    duplicateBallotPolicyDigest: ballotPackage.duplicateBallotPolicyDigest,
+    electionManifestHash: ballotPackage.electionManifestHash,
+    rosterHash: ballotPackage.rosterHash,
+    pollSpecHash: ballotPackage.pollSpecHash,
+    thresholdProfileHash: ballotPackage.thresholdProfileHash,
+    duplicateBallotPolicyHash: ballotPackage.duplicateBallotPolicyHash,
     voterIdentity: ballotPackage.voterIdentity,
     voterRosterPosition: ballotPackage.voterRosterPosition,
     optionCount: ballotPackage.optionCount,
     shareVectorWidth: ballotPackage.shareVectorWidth,
-    ballotPolynomialSetDigest: ballotPackage.ballotPolynomialSetDigest,
+    ballotPolynomialSetHash: ballotPackage.ballotPolynomialSetHash,
     receiverShareCommitments: ballotPackage.receiverShareCommitments,
-    receiverPayloadDigests: ballotPackage.receiverPayloadDigests,
+    receiverPayloadHashes: ballotPackage.receiverPayloadHashes,
 });
 
 export const resignBallotPackageForTest = (
-    ballotPackage: Omit<
-        BallotPackageShell,
-        'ballotPackageDigest' | 'signature'
-    >,
+    ballotPackage: Omit<BallotPackageShell, 'ballotPackageHash' | 'signature'>,
 ): BallotPackageShell => {
-    const ballotPackageDigest = deriveBallotPackageDigestForTest(ballotPackage);
+    const ballotPackageHash = deriveBallotPackageHashForTest(ballotPackage);
 
     return {
         ...ballotPackage,
-        ballotPackageDigest,
+        ballotPackageHash,
         signature: createSignature(
             'BallotPackage',
             'Voter',
             ballotPackage.voterIdentity,
-            getParticipantSigningPublicKeyDigest(ballotPackage.voterIdentity),
-            ballotPackageDigest,
+            getParticipantSigningPublicKeyHash(ballotPackage.voterIdentity),
+            ballotPackageHash,
             {
-                manifestDigest: ballotPackage.electionManifestDigest,
-                boardHeadDigest: null,
+                manifestHash: ballotPackage.electionManifestHash,
+                boardHeadHash: null,
             },
         ),
     };
 };
 
-export const deriveAggregateShareCommitmentDigestForTest = (
-    aggregateShare: Omit<TestAggregateShare, 'aggregateShareCommitmentDigest'>,
+export const deriveAggregateShareCommitmentHashForTest = (
+    aggregateShare: Omit<TestAggregateShare, 'aggregateShareCommitmentHash'>,
 ): string =>
-    deriveProtocolDigest('AggregateShareCommitmentDigest', {
+    deriveProtocolHash('AggregateShareCommitmentHash', {
         aggregateCommitmentValues: aggregateShare.aggregateCommitmentValues,
         aggregateShareVector: aggregateShare.aggregateShareVector,
-        ballotSetDigest: aggregateShare.ballotSetDigest,
+        ballotSetHash: aggregateShare.ballotSetHash,
         objectType: aggregateShare.objectType,
         shareVectorWidth: aggregateShare.shareVectorWidth,
         trusteeIdentity: aggregateShare.trusteeIdentity,
         trusteeRosterPosition: aggregateShare.trusteeRosterPosition,
     });
 
-export const rehashAggregateShareForTest = (
-    aggregateShare: Omit<TestAggregateShare, 'aggregateShareCommitmentDigest'>,
+export const reHashAggregateShareForTest = (
+    aggregateShare: Omit<TestAggregateShare, 'aggregateShareCommitmentHash'>,
 ): TestAggregateShare => ({
     ...aggregateShare,
-    aggregateShareCommitmentDigest:
-        deriveAggregateShareCommitmentDigestForTest(aggregateShare),
+    aggregateShareCommitmentHash:
+        deriveAggregateShareCommitmentHashForTest(aggregateShare),
 });
 
-export const stripAggregateShareCommitmentDigestForTest = (
+export const stripAggregateShareCommitmentHashForTest = (
     aggregateShare: TestAggregateShare,
-): Omit<TestAggregateShare, 'aggregateShareCommitmentDigest'> => ({
+): Omit<TestAggregateShare, 'aggregateShareCommitmentHash'> => ({
     objectType: aggregateShare.objectType,
-    ballotSetDigest: aggregateShare.ballotSetDigest,
+    ballotSetHash: aggregateShare.ballotSetHash,
     trusteeIdentity: aggregateShare.trusteeIdentity,
     trusteeRosterPosition: aggregateShare.trusteeRosterPosition,
     shareVectorWidth: aggregateShare.shareVectorWidth,

@@ -20,7 +20,7 @@ import { runTimedTestStep, type TimedTestStepMetric } from './timed-test-steps';
 
 export { verifyMandatoryBallotProofBenchmarkShape };
 
-import { deriveProtocolDigest } from '#packages/crypto/src/index';
+import { deriveProtocolHash } from '#packages/crypto/src/index';
 import {
     aggregateWitnessFromReceiverPlaintext,
     buildAggregateDerivationProofInput,
@@ -45,7 +45,7 @@ import {
 } from '#packages/protocol/src/ballot-privacy/receiver-key-proof-parameters';
 import type {
     ClaimBearingBallotPackage,
-    ProtocolDigest,
+    ProtocolHash,
     ReceiverEncryptionProfile,
     ReceiverEncryptionPublicKey,
     ShareCommitmentMessageBoundCert,
@@ -59,7 +59,7 @@ import type {
 
 type ReceiverEncryptionPublicKeyMaterialForBenchmark = {
     readonly publicKeyVector: readonly (readonly number[])[];
-    readonly publicMatrixSeedDigest: ProtocolDigest;
+    readonly publicMatrixSeedHash: ProtocolHash;
 };
 
 export type RuntimeBenchmarkContext = {
@@ -153,8 +153,8 @@ export type ReceiverKeyProofBenchmarkInput = {
     readonly secretState: ReceiverEncryptionSecretState;
 };
 
-const digest = (label: string): ProtocolDigest =>
-    deriveProtocolDigest('ChallengeDomainDigest', {
+const hash = (label: string): ProtocolHash =>
+    deriveProtocolHash('ChallengeDomainHash', {
         label,
         purpose: 'ballot-privacy-proof-benchmark',
     });
@@ -164,7 +164,7 @@ export const createReceiverKeyProofBenchmarkInput =
         const profileSet = createBallotPrivacyProfileSet();
         const receiverState = generateReceiverState({
             ceremonyId: 'ceremony-proof-benchmark',
-            manifestDigest: digest('manifest'),
+            manifestHash: hash('manifest'),
             randomnessSource: createFixtureRandomnessSource(
                 'receiver-key-proof-benchmark',
             ),
@@ -172,7 +172,7 @@ export const createReceiverKeyProofBenchmarkInput =
             receiverIdentity: 'receiver-1',
             receiverRosterPosition: 1,
             recoveryEpoch: 0,
-            rosterDigest: digest('roster'),
+            rosterHash: hash('roster'),
         });
 
         return {
@@ -243,8 +243,7 @@ export const buildClaimBearingBallotPackageForBenchmark = (input: {
     readonly generation: BallotPrivacyProofGeneration;
 }): ClaimBearingBallotPackage =>
     ({
-        ballotPackageDigest:
-            input.fixture.request.statement.ballotPackageDigest,
+        ballotPackageHash: input.fixture.request.statement.ballotPackageHash,
         ballotProof: input.generation.ballotProof,
         ballotProofStatement: input.fixture.request.statement,
         componentBundleStatement:
@@ -310,70 +309,70 @@ const aggregateShareCommitmentMessageBoundCertForBenchmark = (
 const createAggregatePostCloseEvidenceForBenchmark = (input: {
     readonly ceremonyId: string;
     readonly contributorIdentity: string;
-    readonly electionManifestDigest: ProtocolDigest;
-    readonly rosterExternalAcceptanceDigest: ProtocolDigest;
-    readonly votingClosedBoardHeadDigest: ProtocolDigest;
+    readonly electionManifestHash: ProtocolHash;
+    readonly rosterExternalAcceptanceHash: ProtocolHash;
+    readonly votingClosedBoardHeadHash: ProtocolHash;
 }): {
     readonly closeRecord: Record<string, unknown>;
     readonly contributorActionContext: Record<string, unknown>;
-    readonly closeRecordDigest: ProtocolDigest;
-    readonly postVotingClosedContextDigest: ProtocolDigest;
+    readonly closeRecordHash: ProtocolHash;
+    readonly postVotingClosedContextHash: ProtocolHash;
 } => {
     const closeRecordPayload = {
         boardPosition: 0,
         boardSequence: 7,
         ceremonyId: input.ceremonyId,
         closeKind: 'VotingClosed',
-        closedBoardHeadDigest: input.votingClosedBoardHeadDigest,
-        electionManifestDigest: input.electionManifestDigest,
+        closedBoardHeadHash: input.votingClosedBoardHeadHash,
+        electionManifestHash: input.electionManifestHash,
         objectType: 'CloseRecord',
         objectVersion: 1,
         organizerIdentity: 'organizer-1',
     };
-    const closeRecordDigest = deriveProtocolDigest(
-        'CloseRecordDigest',
+    const closeRecordHash = deriveProtocolHash(
+        'CloseRecordHash',
         closeRecordPayload,
     );
-    const postVotingClosedContextDigest = deriveProtocolDigest(
-        'PostVotingClosedContextDigest',
+    const postVotingClosedContextHash = deriveProtocolHash(
+        'PostVotingClosedContextHash',
         {
             ceremonyId: input.ceremonyId,
-            closeRecordDigest,
-            electionManifestDigest: input.electionManifestDigest,
-            votingClosedBoardHeadDigest: input.votingClosedBoardHeadDigest,
+            closeRecordHash,
+            electionManifestHash: input.electionManifestHash,
+            votingClosedBoardHeadHash: input.votingClosedBoardHeadHash,
         },
     );
     const contributorActionContextPayload = {
-        acceptedRecoveryEpochUpdateDigest: null,
+        acceptedRecoveryEpochUpdateHash: null,
         actionSequence: 1,
-        boardHeadDigest: input.votingClosedBoardHeadDigest,
+        boardHeadHash: input.votingClosedBoardHeadHash,
         boardSequence: 7,
         ceremonyId: input.ceremonyId,
-        contextDigest: postVotingClosedContextDigest,
+        contextHash: postVotingClosedContextHash,
         deviceEpoch: 0,
-        electionManifestDigest: input.electionManifestDigest,
+        electionManifestHash: input.electionManifestHash,
         recoveryEpoch: 0,
-        recoveryPolicyDigest: digest('aggregate-recovery-policy'),
-        rosterExternalAcceptanceDigest: input.rosterExternalAcceptanceDigest,
+        recoveryPolicyHash: hash('aggregate-recovery-policy'),
+        rosterExternalAcceptanceHash: input.rosterExternalAcceptanceHash,
         signerIdentity: input.contributorIdentity,
     };
-    const contributorActionContextDigest = deriveProtocolDigest(
-        'ActionContextDigest',
+    const contributorActionContextHash = deriveProtocolHash(
+        'ActionContextHash',
         contributorActionContextPayload,
     );
 
     return {
         closeRecord: {
             ...closeRecordPayload,
-            closeRecordDigest,
-            postVotingClosedContextDigest,
+            closeRecordHash,
+            postVotingClosedContextHash,
         },
-        closeRecordDigest,
+        closeRecordHash,
         contributorActionContext: {
             ...contributorActionContextPayload,
-            actionContextDigest: contributorActionContextDigest,
+            actionContextHash: contributorActionContextHash,
         },
-        postVotingClosedContextDigest,
+        postVotingClosedContextHash,
     };
 };
 
@@ -577,12 +576,12 @@ export const runAggregateDerivationProofBenchmark = (input: {
             createAggregatePostCloseEvidenceForBenchmark({
                 ceremonyId: input.fixture.request.statement.ceremonyId,
                 contributorIdentity: 'receiver-1',
-                electionManifestDigest:
-                    input.fixture.request.statement.manifestDigest,
-                rosterExternalAcceptanceDigest:
+                electionManifestHash:
+                    input.fixture.request.statement.manifestHash,
+                rosterExternalAcceptanceHash:
                     input.fixture.request.statement
-                        .rosterExternalAcceptanceDigest,
-                votingClosedBoardHeadDigest: digest(
+                        .rosterExternalAcceptanceHash,
+                votingClosedBoardHeadHash: hash(
                     'aggregate-voting-closed-board-head',
                 ),
             }),
@@ -593,19 +592,18 @@ export const runAggregateDerivationProofBenchmark = (input: {
         () =>
             buildAggregateDerivationStatement({
                 ballotPackages: [input.ballotPackage],
-                closeRecordDigest: postCloseEvidence.closeRecordDigest,
-                contributorActionContextDigest: postCloseEvidence
-                    .contributorActionContext
-                    .actionContextDigest as ProtocolDigest,
+                closeRecordHash: postCloseEvidence.closeRecordHash,
+                contributorActionContextHash: postCloseEvidence
+                    .contributorActionContext.actionContextHash as ProtocolHash,
                 contributorIdentity: 'receiver-1',
-                contributorRosterExternalAcceptanceDigest:
+                contributorRosterExternalAcceptanceHash:
                     input.fixture.request.statement
-                        .rosterExternalAcceptanceDigest,
+                        .rosterExternalAcceptanceHash,
                 contributorRosterPosition: 1,
-                postVotingClosedContextDigest:
-                    postCloseEvidence.postVotingClosedContextDigest,
+                postVotingClosedContextHash:
+                    postCloseEvidence.postVotingClosedContextHash,
                 unsafeSmallRosterAcknowledged: false,
-                votingClosedBoardHeadDigest: digest(
+                votingClosedBoardHeadHash: hash(
                     'aggregate-voting-closed-board-head',
                 ),
             }),

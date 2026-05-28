@@ -2,13 +2,11 @@
 export type BaseClaimProfile = 'fullyVerified';
 
 /** High-level malicious security closure claimed by transcript-core fixtures. */
-export type MheSecurityClosure = 'developmentIntegration' | 'activeMalicious';
+export type TranscriptCoreMheSecurityClosure =
+    | 'developmentIntegration'
+    | 'activeMalicious';
 
-/**
- * Alias retained for backward compatibility with consumers that read
- * the transcript-core fixture shape. Prefer {@link MheSecurityClosure}.
- */
-export type TranscriptCoreMheSecurityClosure = MheSecurityClosure;
+export type MheSecurityClosure = TranscriptCoreMheSecurityClosure;
 
 /** Successful transcript-core status label returned by fixture verification. */
 export type TranscriptCoreStatusLabel = 'TranscriptCoreVerified';
@@ -52,7 +50,7 @@ export type CanonicalError = {
     readonly message: string;
 };
 
-/** Golden transcript-core fixture with expected canonical digests and labels. */
+/** Golden transcript-core fixture with expected canonical Hashes and labels. */
 export type GoldenTranscriptCoreFixture = {
     readonly kind: 'golden-transcript-core';
     readonly fixtureVersion: 1;
@@ -61,7 +59,7 @@ export type GoldenTranscriptCoreFixture = {
     readonly objectType: 'TranscriptCore';
     readonly objectVersion: 1;
     readonly baseClaimProfile: BaseClaimProfile;
-    readonly mheSecurityClosure: MheSecurityClosure;
+    readonly mheSecurityClosure: TranscriptCoreMheSecurityClosure;
     readonly baseClaimProfileId: string;
     readonly mheSecurityProfileId: string;
     readonly heSetupProofProfileId: string;
@@ -101,7 +99,7 @@ export type TranscriptCoreAnalysis = {
     readonly objectType: 'TranscriptCore';
     readonly objectVersion: 1;
     readonly baseClaimProfile: BaseClaimProfile;
-    readonly mheSecurityClosure: MheSecurityClosure;
+    readonly mheSecurityClosure: TranscriptCoreMheSecurityClosure;
     readonly baseClaimProfileId: string;
     readonly mheSecurityProfileId: string;
     readonly heSetupProofProfileId: string;

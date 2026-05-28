@@ -1,11 +1,11 @@
-import { deriveProtocolDigest } from '@sealed-lattice/crypto';
+import { deriveProtocolHash } from '@sealed-lattice/crypto';
 import type {
     PollSpec,
     ProtocolSignatureEnvelope,
 } from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
-import { derivePollSpecDigest } from '../../src/lifecycle/poll-spec';
+import { derivePollSpecHash } from '../../src/lifecycle/poll-spec';
 import { deriveFrozenRosterProfile } from '../../src/lifecycle/thresholds';
 import {
     deriveTestBallotPackage,
@@ -36,35 +36,35 @@ const rosterEntries = Array.from({ length: 20 }, (_unused, rosterIndex) => ({
     participantIdentity: `participant-${String(rosterIndex + 1)}`,
     rosterPosition: rosterIndex + 1,
 }));
-const pollSpecDigest = derivePollSpecDigest(pollSpec);
-const rosterDigest = deriveProtocolDigest('RosterDigest', { rosterEntries });
+const pollSpecHash = derivePollSpecHash(pollSpec);
+const rosterHash = deriveProtocolHash('RosterHash', { rosterEntries });
 const frozenRosterProfile = deriveFrozenRosterProfile({
     pollSpec,
-    rosterDigest,
+    rosterHash,
     rosterSize: rosterEntries.length,
 });
 const thresholdProfile = frozenRosterProfile.thresholdProfile;
-const thresholdProfileDigest = frozenRosterProfile.thresholdProfileDigest;
-const electionManifestDigest = deriveProtocolDigest('ElectionManifestDigest', {
+const thresholdProfileHash = frozenRosterProfile.thresholdProfileHash;
+const electionManifestHash = deriveProtocolHash('ElectionManifestHash', {
     ceremonyId,
-    pollSpecDigest,
-    rosterDigest,
-    thresholdProfileDigest,
+    pollSpecHash,
+    rosterHash,
+    thresholdProfileHash,
 });
-const duplicateBallotPolicyDigest = deriveProtocolDigest(
-    'DuplicateBallotPolicyDigest',
+const duplicateBallotPolicyHash = deriveProtocolHash(
+    'DuplicateBallotPolicyHash',
     { policy: 'first-valid-before-close' },
 );
 
 const createDummySignature = (
-    ballotPackageDigest: string,
+    ballotPackageHash: string,
 ): ProtocolSignatureEnvelope => ({
     profile: {
         algorithm: 'ML-DSA-65',
         mode: 'PureMLDSA',
         providerName: 'browser-fixture',
         providerVersion: '1',
-        providerBuildDigest: deriveProtocolDigest('ProviderBuildDigest', {
+        providerBuildHash: deriveProtocolHash('ProviderBuildHash', {
             providerName: 'browser-fixture',
         }),
         fips204Version: 'FIPS 204',
@@ -72,7 +72,7 @@ const createDummySignature = (
         contextString: 'sealed-lattice:v1',
         contextStringByteLength: 17,
     },
-    publicKeyDigest: deriveProtocolDigest('PublicKeyDigest', {
+    publicKeyHash: deriveProtocolHash('PublicKeyHash', {
         publicKey: 'browser-fixture',
     }),
     publicKeyBytesHex: '',
@@ -80,22 +80,22 @@ const createDummySignature = (
         objectType: 'BallotPackage',
         objectVersion: 1,
         ceremonyId,
-        manifestDigest: electionManifestDigest,
-        boardHeadDigest: null,
-        objectRoot: ballotPackageDigest,
+        manifestHash: electionManifestHash,
+        boardHeadHash: null,
+        objectRoot: ballotPackageHash,
         chunkMerkleRoot: null,
         byteLength: 0,
         signerRole: 'Voter',
         signerIdentity: 'participant-1',
         recoveryEpoch: 0,
         deviceEpoch: 0,
-        contextDigest: deriveProtocolDigest('ActionContextDigest', {
+        contextHash: deriveProtocolHash('ActionContextHash', {
             context: 'browser-fixture',
         }),
     },
     signatureBytesHex: '',
-    signatureDigest: deriveProtocolDigest('ProtocolSignatureEnvelopeDigest', {
-        ballotPackageDigest,
+    signatureHash: deriveProtocolHash('ProtocolSignatureEnvelopeHash', {
+        ballotPackageHash,
     }),
 });
 
@@ -106,11 +106,11 @@ describe('browser PVSS ballot algebra', () => {
                 ceremonyId,
                 voterIdentity: 'participant-1',
                 voterRosterPosition: 1,
-                electionManifestDigest,
-                rosterDigest,
-                pollSpecDigest,
-                duplicateBallotPolicyDigest,
-                thresholdProfileDigest,
+                electionManifestHash,
+                rosterHash,
+                pollSpecHash,
+                duplicateBallotPolicyHash,
+                thresholdProfileHash,
                 pollSpec,
                 thresholdProfile,
                 rosterEntries,
@@ -123,7 +123,7 @@ describe('browser PVSS ballot algebra', () => {
             createDummySignature,
         );
 
-        expect(witness.ballotPackage.ballotPackageDigest).toMatch(
+        expect(witness.ballotPackage.ballotPackageHash).toMatch(
             /^[a-f0-9]{128}$/u,
         );
         expect(witness.receiverShareVectors).toHaveLength(20);
@@ -139,11 +139,11 @@ describe('browser PVSS ballot algebra', () => {
             verifyBallotPackageShell({
                 ballotPackage: witness.ballotPackage,
                 ceremonyId,
-                electionManifestDigest,
-                rosterDigest,
-                pollSpecDigest,
-                thresholdProfileDigest,
-                duplicateBallotPolicyDigest,
+                electionManifestHash,
+                rosterHash,
+                pollSpecHash,
+                thresholdProfileHash,
+                duplicateBallotPolicyHash,
                 optionCount: pollSpec.options.length,
                 rosterEntries,
                 thresholdProfile,

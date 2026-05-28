@@ -1,5 +1,5 @@
 use crate::{
-    bgv::profile::{BgvBasisKind, POLYNOMIAL_DEGREE, layout_digest, profile_digest},
+    bgv::profile::{BgvBasisKind, POLYNOMIAL_DEGREE, layout_hash, profile_hash},
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
 };
 
@@ -28,12 +28,12 @@ impl PolynomialDomain {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RnsPolynomial {
-    pub(crate) profile_digest: String,
+    pub(crate) profile_hash: String,
     pub(crate) basis_id: String,
     pub(crate) level: usize,
     pub(crate) coefficient_count: usize,
     pub(crate) domain: PolynomialDomain,
-    pub(crate) layout_digest: String,
+    pub(crate) layout_hash: String,
     pub(crate) moduli: Vec<u64>,
     pub(crate) residues_by_modulus: Vec<Vec<u64>>,
 }
@@ -42,7 +42,7 @@ impl RnsPolynomial {
     pub(crate) fn coefficient_domain(
         basis_kind: BgvBasisKind,
         level: usize,
-        layout_digest: String,
+        layout_hash: String,
         residues_by_modulus: Vec<Vec<u64>>,
     ) -> CanonicalResult<Self> {
         let moduli = basis_kind.moduli_for_level(level).ok_or_else(|| {
@@ -52,12 +52,12 @@ impl RnsPolynomial {
             )
         })?;
         let polynomial = Self {
-            profile_digest: profile_digest()?,
+            profile_hash: profile_hash()?,
             basis_id: basis_kind.basis_id().to_string(),
             level,
             coefficient_count: POLYNOMIAL_DEGREE,
             domain: PolynomialDomain::Coefficient,
-            layout_digest,
+            layout_hash,
             moduli,
             residues_by_modulus,
         };
@@ -67,10 +67,10 @@ impl RnsPolynomial {
     }
 
     pub(crate) fn validate(&self) -> CanonicalResult<()> {
-        if self.profile_digest != profile_digest()? {
+        if self.profile_hash != profile_hash()? {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::ProfileComponentMismatch,
-                "BGV-RNS object profile digest does not match the selected profile",
+                "BGV-RNS object profile hash does not match the selected profile",
             ));
         }
         let basis_kind = BgvBasisKind::from_basis_id(&self.basis_id).ok_or_else(|| {
@@ -103,10 +103,10 @@ impl RnsPolynomial {
                 "claim-path BGV-RNS objects must be coefficient-domain canonical objects",
             ));
         }
-        if self.layout_digest != layout_digest()? {
+        if self.layout_hash != layout_hash()? {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::ProfileComponentMismatch,
-                "BGV-RNS object layout digest does not match the selected encrypted aggregate layout",
+                "BGV-RNS object layout hash does not match the selected encrypted aggregate layout",
             ));
         }
         if self.residues_by_modulus.len() != self.moduli.len() {
@@ -139,7 +139,7 @@ impl RnsPolynomial {
 mod tests {
     use super::{PolynomialDomain, RnsPolynomial};
     use crate::bgv::profile::{
-        BgvBasisKind, DATA_PRIMES, POLYNOMIAL_DEGREE, SPECIAL_PRIME, layout_digest,
+        BgvBasisKind, DATA_PRIMES, POLYNOMIAL_DEGREE, SPECIAL_PRIME, layout_hash,
     };
 
     #[test]
@@ -148,7 +148,7 @@ mod tests {
         let object = RnsPolynomial::coefficient_domain(
             BgvBasisKind::Data,
             0,
-            layout_digest().expect("layout digest"),
+            layout_hash().expect("layout hash"),
             residues_by_modulus,
         )
         .expect("object should validate");
@@ -159,11 +159,11 @@ mod tests {
 
     #[test]
     fn rns_validation_binds_each_selected_basis_and_level() {
-        let layout_digest = layout_digest().expect("layout digest");
+        let layout_hash = layout_hash().expect("layout hash");
         let data = RnsPolynomial::coefficient_domain(
             BgvBasisKind::Data,
             DATA_PRIMES.len() - 1,
-            layout_digest.clone(),
+            layout_hash.clone(),
             DATA_PRIMES
                 .iter()
                 .map(|modulus| vec![modulus - 1; POLYNOMIAL_DEGREE])
@@ -175,7 +175,7 @@ mod tests {
         let extended = RnsPolynomial::coefficient_domain(
             BgvBasisKind::Extended,
             DATA_PRIMES.len(),
-            layout_digest.clone(),
+            layout_hash.clone(),
             DATA_PRIMES
                 .iter()
                 .chain([SPECIAL_PRIME].iter())
@@ -188,7 +188,7 @@ mod tests {
         let special = RnsPolynomial::coefficient_domain(
             BgvBasisKind::Special,
             0,
-            layout_digest,
+            layout_hash,
             vec![vec![SPECIAL_PRIME - 1; POLYNOMIAL_DEGREE]],
         )
         .expect("special basis object");
@@ -200,7 +200,7 @@ mod tests {
         let mut object = RnsPolynomial::coefficient_domain(
             BgvBasisKind::Data,
             0,
-            layout_digest().expect("layout digest"),
+            layout_hash().expect("layout hash"),
             vec![vec![0_u64; POLYNOMIAL_DEGREE]],
         )
         .expect("object should build");
@@ -213,7 +213,7 @@ mod tests {
 
         let mut wrong_profile = object.clone();
         wrong_profile.residues_by_modulus[0][0] = 0;
-        wrong_profile.profile_digest = "0".repeat(128);
+        wrong_profile.profile_hash = "0".repeat(128);
         assert!(wrong_profile.validate().is_err());
 
         let mut wrong_basis = object.clone();
@@ -228,7 +228,7 @@ mod tests {
 
         let mut wrong_layout = object.clone();
         wrong_layout.residues_by_modulus[0][0] = 0;
-        wrong_layout.layout_digest = "0".repeat(128);
+        wrong_layout.layout_hash = "0".repeat(128);
         assert!(wrong_layout.validate().is_err());
 
         let mut wrong_limb_count = object;

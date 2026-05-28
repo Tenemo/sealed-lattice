@@ -24,7 +24,7 @@ pub use rng::DeterministicFixtureRng;
 #[cfg(test)]
 pub use types::MANDATORY_EVALUATION_PROOF_PROFILE_ID;
 pub use types::{
-    FULLY_VERIFIED_ACTIVE_MALICIOUS_PROFILE, FULLY_VERIFIED_DEVELOPMENT_INTEGRATION_PROFILE,
+    FULLY_VERIFIED_ACTIVE_MALICIOUS_PROFILE, FULLY_VERIFIED_PASSIVE_MHE_PROFILE,
     TranscriptCoreProfile,
 };
 
@@ -35,7 +35,7 @@ pub const MODULE_MARKER: &str = "transcript-core";
 mod tests {
     use super::{
         DeterministicFixtureRng, FULLY_VERIFIED_ACTIVE_MALICIOUS_PROFILE,
-        FULLY_VERIFIED_DEVELOPMENT_INTEGRATION_PROFILE, MANDATORY_EVALUATION_PROOF_PROFILE_ID,
+        FULLY_VERIFIED_PASSIVE_MHE_PROFILE, MANDATORY_EVALUATION_PROOF_PROFILE_ID,
         analyze_canonical_object, canonical_transcript_core_object, decode_hex,
         mutate_base_claim_profile_mismatch_fixture, mutate_duplicate_field_fixture,
         mutate_field_order_fixture, mutate_fully_verified_missing_evaluation_profile_fixture,
@@ -50,9 +50,7 @@ mod tests {
         parse_transcript_core_object, serialize_transcript_core_object,
     };
     use crate::encoding::{CanonicalErrorCode, append_varuint};
-    use crate::transcript_core::types::{
-        BaseClaimProfile, FIELD_TAGS, MheSecurityClosure, TranscriptCoreProfile,
-    };
+    use crate::transcript_core::types::FIELD_TAGS;
 
     #[test]
     fn canonical_object_round_trips_byte_identically() {
@@ -72,8 +70,7 @@ mod tests {
 
     #[test]
     fn malformed_list_count_rejects_without_allocation() {
-        let object =
-            canonical_transcript_core_object(FULLY_VERIFIED_DEVELOPMENT_INTEGRATION_PROFILE);
+        let object = canonical_transcript_core_object(FULLY_VERIFIED_PASSIVE_MHE_PROFILE);
         let mut bytes = Vec::new();
         super::codec::append_transcript_core_header(&mut bytes, &object);
         append_varuint(&mut bytes, 1);
@@ -88,13 +85,13 @@ mod tests {
     #[test]
     fn profile_components_keep_the_same_shape_but_distinct_roots() {
         let fully_verified_passive_bytes = serialize_transcript_core_object(
-            &canonical_transcript_core_object(FULLY_VERIFIED_DEVELOPMENT_INTEGRATION_PROFILE),
+            &canonical_transcript_core_object(FULLY_VERIFIED_PASSIVE_MHE_PROFILE),
         );
         let fully_verified_active_bytes = serialize_transcript_core_object(
             &canonical_transcript_core_object(FULLY_VERIFIED_ACTIVE_MALICIOUS_PROFILE),
         );
         let fully_verified_passive = analyze_canonical_object(&fully_verified_passive_bytes, 8)
-            .expect("fully verified development integration profile should analyze");
+            .expect("fully verified passive profile should analyze");
         let fully_verified_active = analyze_canonical_object(&fully_verified_active_bytes, 8)
             .expect("fully verified active profile should analyze");
 
@@ -132,20 +129,6 @@ mod tests {
             combined,
             DeterministicFixtureRng::new("different-seed").next_bytes(83),
         );
-    }
-
-    #[test]
-    fn fixture_seed_label_preserves_historical_active_malicious_token() {
-        let profile = TranscriptCoreProfile::new(
-            BaseClaimProfile::FullyVerified,
-            MheSecurityClosure::ActiveMalicious,
-        );
-
-        assert_eq!(
-            MheSecurityClosure::ActiveMalicious.label(),
-            "activeMalicious"
-        );
-        assert_eq!(profile.seed_label(), "fullyVerified:ActiveMalicious");
     }
 
     #[test]

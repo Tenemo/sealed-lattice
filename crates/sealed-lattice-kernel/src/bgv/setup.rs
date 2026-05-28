@@ -18,7 +18,7 @@ mod tests;
 
 use sampling::{
     dense_centered_binomial_coefficients, dense_public_residues, dense_small_coefficients,
-    development_fixture_digest, negacyclic_product_mod, sample_centered_binomial_eta2,
+    development_fixture_hash, negacyclic_product_mod, sample_centered_binomial_eta2,
     sample_encryption_relation_checks, sample_positions, sample_public_residues, sample_residue,
     sample_signed_values, sample_small_distribution, sample_values, signed_to_modulus_residue,
 };
@@ -30,13 +30,13 @@ use crate::{
         ntt::{forward_negacyclic_ntt, inverse_negacyclic_ntt},
         profile::{
             BACKEND_PROFILE_ID, BATCH_ENCODER_ID, BgvBasisKind, DATA_PRIMES, PLAINTEXT_MODULUS,
-            POLYNOMIAL_DEGREE, PROFILE_ID, aggregate_input_encoding_profile_digest,
-            allowed_operation_registry_digest, backend_profile_digest,
-            ballot_score_encoding_profile_digest, ballot_share_layout_profile_digest,
-            batch_encoder_digest, batch_layout_binding_digest,
-            canonical_ciphertext_convention_digest, data_basis_modulus_bits,
-            encoded_aggregate_layout_digest, extended_basis_modulus_bits, layout_digest,
-            profile_digest, security_estimator_input_digest, top_k_evaluator_input_layout_digest,
+            POLYNOMIAL_DEGREE, PROFILE_ID, aggregate_input_encoding_profile_hash,
+            allowed_operation_registry_hash, backend_profile_hash,
+            ballot_score_encoding_profile_hash, ballot_share_layout_profile_hash,
+            batch_encoder_hash, batch_layout_binding_hash, canonical_ciphertext_convention_hash,
+            data_basis_modulus_bits, encoded_aggregate_layout_hash, extended_basis_modulus_bits,
+            layout_hash, profile_hash, security_estimator_input_hash,
+            top_k_evaluator_input_layout_hash,
         },
         rns::RnsPolynomial,
         serialization::{
@@ -44,9 +44,9 @@ use crate::{
             parse_bgv_object_hex, plaintext_root, serialize_bgv_object,
         },
         setup_helpers::{
-            array_at_path, bool_at_path, compare_derived_digest, compare_digest_at_path,
-            compare_expected_string, compare_string_at_path, digest_at_path,
-            forbidden_setup_field_names, integer_at_path, read_digest_field, read_non_empty_string,
+            array_at_path, bool_at_path, compare_derived_hash, compare_expected_string,
+            compare_hash_at_path, compare_string_at_path, forbidden_setup_field_names,
+            hash_at_path, integer_at_path, read_hash_field, read_non_empty_string,
             read_optional_u64, read_optional_usize, reject_forbidden_setup_fields,
             reject_forbidden_setup_package_secret_fields, string_at_path, unsigned_at_path,
             usize_at_path, value_at_path,
@@ -54,7 +54,7 @@ use crate::{
         validation::reject_unexpected_bgv_request_fields,
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
-    hashing::{canonical_json, chunk_root, derive_protocol_digest, hash512, hash512_hex},
+    hashing::{canonical_json, chunk_root, derive_protocol_hash, hash512, hash512_hex},
 };
 
 pub(crate) const PASSIVE_SETUP_PROFILE_ID: &str =
@@ -89,19 +89,19 @@ struct SetupParticipant {
 #[derive(Clone)]
 struct PassiveSetupInput {
     ceremony_id: String,
-    manifest_digest: String,
-    roster_digest: String,
-    threshold_profile_digest: String,
+    manifest_hash: String,
+    roster_hash: String,
+    threshold_profile_hash: String,
     setup_seed_provided: bool,
-    setup_seed_digest: String,
+    setup_seed_hash: String,
     participants: Vec<SetupParticipant>,
 }
 
 struct ParticipantSetupMaterial {
     participant_record: Value,
     public_key_share_root: String,
-    participant_setup_record_digest: String,
-    trustee_threshold_verification_key_digest: String,
+    participant_setup_record_hash: String,
+    trustee_threshold_verification_key_hash: String,
 }
 
 struct VerifiedParticipantSetupBinding {
@@ -110,8 +110,8 @@ struct VerifiedParticipantSetupBinding {
     recovery_epoch: u64,
     device_epoch: u64,
     public_key_share_root: String,
-    participant_setup_record_digest: String,
-    trustee_threshold_verification_key_digest: String,
+    participant_setup_record_hash: String,
+    trustee_threshold_verification_key_hash: String,
 }
 
 pub(crate) fn describe_passive_setup_object_model() -> CanonicalResult<Value> {
@@ -138,36 +138,36 @@ pub(crate) fn describe_passive_setup_object_model() -> CanonicalResult<Value> {
             "EvaluationKeySizeCertificate",
             "BgvDevelopmentEncryptionFixture"
         ],
-        "reservedRootsAndDigests": [
-            "BGVPassiveSetupPackageDigest",
-            "ParticipantBgvSetupRecordDigest",
+        "reservedRootsAndHashes": [
+            "BGVPassiveSetupPackageHash",
+            "ParticipantBgvSetupRecordHash",
             "PublicKeyShareRoot",
             "BGVPublicCommonRandomPolynomialRoot",
             "BGVPublicKeyRoot",
             "CollectivePublicKeyRoot",
             "ThresholdShareVerificationKeyRoot",
-            "ThresholdShareVerificationKeyDigest",
-            "TrusteeThresholdVerificationKeyDigest",
+            "ThresholdShareVerificationKeyHash",
+            "TrusteeThresholdVerificationKeyHash",
             "RelinearizationKeyRoot",
             "RotationKeyRoot",
             "KeySwitchKeyRoot",
-            "KeySwitchDecompositionDigest",
+            "KeySwitchDecompositionHash",
             "EvalKeyRoot",
-            "EvaluationKeySizeProfileDigest",
-            "CollectiveSecretDistributionCertificateDigest",
-            "ErrorDistributionCertificateDigest",
-            "BGVSetupParameterCertificateDigest",
-            "BGVDevelopmentEncryptionFixtureDigest",
-            "RotSetDigest",
-            "EncryptedAggregateBridgeDigest",
-            "EncryptedAggregateTargetBasisDataRoot",
-            "EncryptedAggregateReconstructionDigest",
-            "ScoreBitDerivationCircuitDigest",
-            "ComparisonInputDerivationCircuitDigest",
-            "EncryptedScoreBitInputDigest",
-            "EncryptedComparisonInputDigest",
-            "BitSlicedComparatorDigest",
-            "EncryptedSparseTargetProjectionDigest"
+            "EvaluationKeySizeProfileHash",
+            "CollectiveSecretDistributionCertificateHash",
+            "ErrorDistributionCertificateHash",
+            "BGVSetupParameterCertificateHash",
+            "BGVDevelopmentEncryptionFixtureHash",
+            "RotSetHash",
+            "EncryptedAggregateBridgeHash",
+            "EncryptedAggregateTargetBasisRoot",
+            "EncryptedAggregateReconstructionHash",
+            "ScoreBitDerivationCircuitHash",
+            "ComparisonInputDerivationCircuitHash",
+            "EncryptedScoreBitInputHash",
+            "EncryptedComparisonInputHash",
+            "BitSlicedComparatorHash",
+            "EncryptedSparseTargetProjectionHash"
         ],
         "trustedDealerBoundary": {
             "transcriptValidCentralizedSecretReconstruction": false,
@@ -177,7 +177,7 @@ pub(crate) fn describe_passive_setup_object_model() -> CanonicalResult<Value> {
         "statusLabels": [
             "M8CanonicalObjectModelFrozen",
             "PassiveSetupOnly",
-            "KllpsCompatibleSetupMaterialOnly"
+            "KllpsSetupMaterialMatchedOnly"
         ],
     }))
 }
@@ -189,11 +189,11 @@ pub(crate) fn generate_passive_setup_package_from_request(
         request,
         &[
             "ceremonyId",
-            "manifestDigest",
+            "manifestHash",
             "participants",
-            "rosterDigest",
+            "rosterHash",
             "setupSeed",
-            "thresholdProfileDigest",
+            "thresholdProfileHash",
         ],
         "generateBgvPassiveSetup",
     )?;
@@ -209,10 +209,10 @@ pub(crate) fn verify_passive_setup_package_from_request(request: &Value) -> Cano
         &[
             "expectedCollectivePublicKeyRoot",
             "expectedEvaluationKeyRoot",
-            "expectedManifestDigest",
-            "expectedRosterDigest",
-            "expectedRotSetDigest",
-            "expectedSetupPackageDigest",
+            "expectedManifestHash",
+            "expectedRosterHash",
+            "expectedRotSetHash",
+            "expectedSetupPackageHash",
             "setupPackage",
         ],
         "verifyBgvPassiveSetup",
@@ -224,48 +224,48 @@ pub(crate) fn verify_passive_setup_package_from_request(request: &Value) -> Cano
             "setupPackage is required",
         )
     })?;
-    let setup_package_digest = setup_package
-        .get("setupPackageDigest")
+    let setup_package_hash = setup_package
+        .get("setupPackageHash")
         .and_then(Value::as_str)
         .ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
-                "setupPackage.setupPackageDigest must be present",
+                "setupPackage.setupPackageHash must be present",
             )
         })?;
-    let mut digest_input = setup_package.clone();
-    let digest_object = digest_input.as_object_mut().ok_or_else(|| {
+    let mut hash_input = setup_package.clone();
+    let hash_object = hash_input.as_object_mut().ok_or_else(|| {
         CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
             "setupPackage must be an object",
         )
     })?;
-    digest_object.remove("setupPackageDigest");
-    let expected_digest = derive_protocol_digest("BGVPassiveSetupPackageDigest", &digest_input)?;
-    if setup_package_digest != expected_digest {
+    hash_object.remove("setupPackageHash");
+    let expected_hash = derive_protocol_hash("BGVPassiveSetupPackageHash", &hash_input)?;
+    if setup_package_hash != expected_hash {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
-            "BGV passive setup package digest does not match its canonical payload",
+            "BGV passive setup package hash does not match its canonical payload",
         ));
     }
 
     compare_expected_string(
         request,
-        "expectedSetupPackageDigest",
-        setup_package_digest,
-        "setup package digest",
+        "expectedSetupPackageHash",
+        setup_package_hash,
+        "setup package hash",
     )?;
     compare_expected_string(
         request,
-        "expectedManifestDigest",
-        string_at_path(setup_package, &["setupInputs", "manifestDigest"])?,
-        "manifest digest",
+        "expectedManifestHash",
+        string_at_path(setup_package, &["setupInputs", "manifestHash"])?,
+        "manifest hash",
     )?;
     compare_expected_string(
         request,
-        "expectedRosterDigest",
-        string_at_path(setup_package, &["setupInputs", "rosterDigest"])?,
-        "roster digest",
+        "expectedRosterHash",
+        string_at_path(setup_package, &["setupInputs", "rosterHash"])?,
+        "roster hash",
     )?;
     compare_expected_string(
         request,
@@ -278,9 +278,9 @@ pub(crate) fn verify_passive_setup_package_from_request(request: &Value) -> Cano
     )?;
     compare_expected_string(
         request,
-        "expectedRotSetDigest",
-        string_at_path(setup_package, &["evaluationKeys", "rotSetDigest"])?,
-        "rotation set digest",
+        "expectedRotSetHash",
+        string_at_path(setup_package, &["evaluationKeys", "rotSetHash"])?,
+        "rotation set hash",
     )?;
     compare_expected_string(
         request,
@@ -295,14 +295,14 @@ pub(crate) fn verify_passive_setup_package_from_request(request: &Value) -> Cano
     Ok(json!({
         "ok": true,
         "operation": "verifyBgvPassiveSetupPackage",
-        "acceptedDigests": [
-            setup_package_digest,
+        "acceptedHashes": [
+            setup_package_hash,
             string_at_path(setup_package, &["collectivePublicKey", "collectivePublicKeyRoot"])?,
             string_at_path(setup_package, &["collectivePublicKey", "bgvPublicKeyRoot"])?,
             string_at_path(setup_package, &["thresholdVerificationMaterial", "thresholdShareVerificationKeyRoot"])?,
-            string_at_path(setup_package, &["thresholdVerificationMaterial", "thresholdShareVerificationKeyDigest"])?,
+            string_at_path(setup_package, &["thresholdVerificationMaterial", "thresholdShareVerificationKeyHash"])?,
             string_at_path(setup_package, &["evaluationKeys", "evaluationKeyRoot"])?,
-            string_at_path(setup_package, &["evaluationKeys", "rotSetDigest"])?,
+            string_at_path(setup_package, &["evaluationKeys", "rotSetHash"])?,
         ],
         "refusedObjects": [],
         "unresolvedReason": null,
@@ -310,7 +310,7 @@ pub(crate) fn verify_passive_setup_package_from_request(request: &Value) -> Cano
             "M8PassiveSetupPackageVerified",
             "PassiveSetupDevelopmentFixtureOnly",
             "CollectivePublicKeyRootBound",
-            "BgvPublicKeyRootDigestOnly",
+            "BgvPublicKeyRootHashOnly",
             "ThresholdVerificationMaterialBound",
             "EvaluationKeyRootBound",
             "AppendixBSetupInputReady",
@@ -323,8 +323,8 @@ pub(crate) fn verify_passive_setup_package_from_request(request: &Value) -> Cano
 use input::read_passive_setup_input;
 pub(crate) use m9_bridge_trace::{
     M9BridgeCiphertextRelationTrace, generate_m9_bridge_ciphertext_relation_trace_from_slots,
-    m9_bridge_batch_encoding_commitment_digest_from_responses,
-    m9_bridge_ciphertext_commitment_digest_from_responses,
+    m9_bridge_batch_encoding_commitment_hash_from_responses,
+    m9_bridge_ciphertext_commitment_hash_from_responses,
     verify_m9_bridge_ciphertext_public_bindings,
 };
 use package_builder::build_passive_setup_package;

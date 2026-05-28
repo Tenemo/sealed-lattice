@@ -1,12 +1,12 @@
 {
   "schemaVersion": 1,
-  "ballotSetDigest": "35a1e887b00a0dc86838492968be8377a621df5100a01cad009e4f2d1229e13bc9cfbc3d8cfea4fd8b2cfd6d1ebdffb6d2cf342faa2c47b3f1eb433ec355a895",
-  "firstAggregateShareCommitmentDigest": "89ab41e6ae7d61df309e6af621fad22cc2bbcbfc007145b468e2ce1c0f8fd6fa84aefb763b669580237bddfbb190527e097cd54bd205659dca68e5e8cfc85d4e",
+  "ballotSetHash": "64a0ca7734896d802c1a99cf6f1861657525bf7b1b63d351c028f0a9431e2ca74ff8ed0bf5ec8c9665d808762a109a83b4ea51cb22ac2dd7ddb8595e97a9b58d",
+  "firstAggregateShareCommitmentHash": "741e8079dc2c2b940141d398a4074195652955ef27e11d76bff4d814c11a11ac94b9837e25e9d976f3278a0faf5782a91cd524c86623e3908d1cc23cc413d369",
   "firstAggregateShareVector": [
-    64477,
-    61101,
-    27510,
-    37570,
+    15140,
+    53343,
+    64332,
+    64221,
     0,
     0,
     0,

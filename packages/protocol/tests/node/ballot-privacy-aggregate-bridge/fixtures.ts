@@ -2,7 +2,7 @@ import {
     createMlDsaKeyPairFixture,
     createMlDsaSignatureProfileFixture,
     createProtocolSignatureFixture,
-    deriveProtocolDigest,
+    deriveProtocolHash,
 } from '@sealed-lattice/crypto';
 import {
     encryptedAggregateBridgeProfileId,
@@ -10,21 +10,21 @@ import {
     type AggregateContribution,
     type AggregateDerivationComponent,
     type BridgeProofRecord,
-    type ProtocolDigest,
+    type ProtocolHash,
     type ProtocolSignatureEnvelope,
     type RecoveryEpochMapEntry,
 } from '@sealed-lattice/types';
 
 import type { PendingBridgeProofRecordFromEvidenceInput } from '../../../src/ballot-privacy/aggregate-bridge/structure-verification.js';
 import {
-    deriveAggregateContributionDigest,
-    deriveBridgeProofProfileDigest,
-    deriveBridgeProofRecordDigest,
-    deriveBridgeProofStatementDigest,
-    deriveBridgeProofTargetContractDigest,
+    deriveAggregateContributionHash,
+    deriveBridgeProofProfileHash,
+    deriveBridgeProofRecordHash,
+    deriveBridgeProofStatementHash,
+    deriveBridgeProofTargetContractHash,
 } from '../../../src/ballot-privacy/index.js';
-export const digest = (label: string): ProtocolDigest =>
-    deriveProtocolDigest('ActionContextDigest', { label });
+export const hash = (label: string): ProtocolHash =>
+    deriveProtocolHash('ActionContextHash', { label });
 
 export const sampledPublicRelationCheckPolicy = {
     acceptedForBridgeProofVerification: false,
@@ -47,8 +47,8 @@ export const sampledPublicRelationChecks = [
     },
 ] as const;
 
-export const sampledPublicRelationCheckPolicyDigest = deriveProtocolDigest(
-    'BridgeProofRecordDigest',
+export const sampledPublicRelationCheckPolicyHash = deriveProtocolHash(
+    'BridgeProofRecordHash',
     {
         policy: sampledPublicRelationCheckPolicy,
         purpose:
@@ -57,56 +57,52 @@ export const sampledPublicRelationCheckPolicyDigest = deriveProtocolDigest(
 );
 
 export const baseFields = {
-    aggregateInputEncodingProfileDigest: digest('aggregate-input-encoding'),
-    aggregateSelectionPolicyDigest: digest('aggregate-selection-policy'),
-    ballotScoreEncodingProfileDigest: digest('ballot-score-encoding'),
-    ballotSetDigest: digest('ballot-set'),
-    ballotShareLayoutProfileDigest: digest('ballot-share-layout'),
-    bgvBatchEncoderDigest: digest('bgv-batch-encoder'),
-    bgvProfileDigest: digest('bgv-profile'),
-    bgvPublicKeyRoot: digest('bgv-public-key-root'),
-    bridgeLayoutDigest: digest('bridge-layout'),
-    bridgeWitnessPrivacyProfileDigest: digest('bridge-witness-privacy'),
-    canonicalCiphertextConventionDigest: digest('ciphertext-convention'),
+    aggregateInputEncodingProfileHash: hash('aggregate-input-encoding'),
+    aggregateSelectionPolicyHash: hash('aggregate-selection-policy'),
+    ballotScoreEncodingProfileHash: hash('ballot-score-encoding'),
+    ballotSetHash: hash('ballot-set'),
+    ballotShareLayoutProfileHash: hash('ballot-share-layout'),
+    bgvBatchEncoderHash: hash('bgv-batch-encoder'),
+    bgvProfileHash: hash('bgv-profile'),
+    bgvPublicKeyRoot: hash('bgv-public-key-root'),
+    bridgeLayoutHash: hash('bridge-layout'),
+    bridgeWitnessPrivacyProfileHash: hash('bridge-witness-privacy'),
+    canonicalCiphertextConventionHash: hash('ciphertext-convention'),
     ceremonyId: 'ceremony-1',
-    closeRecordDigest: digest('close-record'),
-    collectivePublicKeyRoot: digest('collective-public-key-root'),
-    encodedAggregateLayoutDigest: digest('encoded-aggregate-layout'),
-    encodedShareVectorLayoutDigest: digest('encoded-share-vector-layout'),
-    encryptedAggregateBridgeDigest: digest('encrypted-aggregate-bridge'),
-    encryptedAggregateInputLayoutDigest: digest(
-        'encrypted-aggregate-input-layout',
-    ),
-    encryptedAggregateReconstructionDigest: digest(
+    closeRecordHash: hash('close-record'),
+    collectivePublicKeyRoot: hash('collective-public-key-root'),
+    encodedAggregateLayoutHash: hash('encoded-aggregate-layout'),
+    encodedShareVectorLayoutHash: hash('encoded-share-vector-layout'),
+    encryptedAggregateBridgeHash: hash('encrypted-aggregate-bridge'),
+    encryptedAggregateInputLayoutHash: hash('encrypted-aggregate-input-layout'),
+    encryptedAggregateReconstructionHash: hash(
         'encrypted-aggregate-reconstruction',
     ),
-    encryptedAggregateTargetBasisDataRoot: digest(
-        'encrypted-aggregate-target-basis-data',
-    ),
-    heParamDigest: digest('he-param'),
-    manifestDigest: digest('manifest'),
+    encryptedAggregateTargetBasisRoot: hash('encrypted-aggregate-target-basis'),
+    heParamHash: hash('he-param'),
+    manifestHash: hash('manifest'),
     optionCount: 20,
     participantCount: 20,
-    pollSpecDigest: digest('poll-spec'),
-    postVotingClosedContextDigest: digest('post-voting-closed-context'),
-    rosterDigest: digest('roster'),
-    rustBgvBackendProfileDigest: digest('rust-bgv-backend-profile'),
-    setupPackageDigest: digest('setup-package'),
-    shareCommitmentMessageBoundCertDigest: digest(
+    pollSpecHash: hash('poll-spec'),
+    postVotingClosedContextHash: hash('post-voting-closed-context'),
+    rosterHash: hash('roster'),
+    rustBgvBackendProfileHash: hash('rust-bgv-backend-profile'),
+    setupPackageHash: hash('setup-package'),
+    shareCommitmentMessageBoundCertHash: hash(
         'share-commitment-message-bound-cert',
     ),
     shareVectorWidth: 220,
-    thresholdProfileDigest: digest('threshold-profile'),
-    topKEvaluatorInputLayoutDigest: digest('top-k-evaluator-input-layout'),
-    votingClosedBoardHeadDigest: digest('voting-closed-board-head'),
+    thresholdProfileHash: hash('threshold-profile'),
+    topKEvaluatorInputLayoutHash: hash('top-k-evaluator-input-layout'),
+    votingClosedBoardHeadHash: hash('voting-closed-board-head'),
 } as const;
 
 type ContributionFixtureInput = {
     readonly boardPosition?: number;
     readonly boardSequence?: number;
-    readonly contextDigest?: ProtocolDigest;
+    readonly contextHash?: ProtocolHash;
     readonly deviceEpoch?: number;
-    readonly encryptedAggregateShareCiphertextRoot?: ProtocolDigest;
+    readonly encryptedAggregateShareCiphertextRoot?: ProtocolHash;
     readonly proofStatus?: BridgeProofRecord['bridgeProofVerificationStatus'];
     readonly recoveryEpoch?: number;
     readonly rosterPosition: number;
@@ -115,36 +111,36 @@ type ContributionFixtureInput = {
 const createActionContext = (input: {
     readonly actionSequence: number;
     readonly boardSequence: number;
-    readonly contextDigest: ProtocolDigest;
+    readonly contextHash: ProtocolHash;
     readonly deviceEpoch: number;
     readonly recoveryEpoch: number;
-    readonly rosterExternalAcceptanceDigest: ProtocolDigest;
+    readonly rosterExternalAcceptanceHash: ProtocolHash;
     readonly signerIdentity: string;
 }): ActionContext => ({
-    acceptedRecoveryEpochUpdateDigest: null,
-    actionContextDigest: deriveProtocolDigest('ActionContextDigest', {
+    acceptedRecoveryEpochUpdateHash: null,
+    actionContextHash: deriveProtocolHash('ActionContextHash', {
         actionSequence: input.actionSequence,
         boardSequence: input.boardSequence,
-        contextDigest: input.contextDigest,
+        contextHash: input.contextHash,
         signerIdentity: input.signerIdentity,
     }),
     actionSequence: input.actionSequence,
-    boardHeadDigest: baseFields.votingClosedBoardHeadDigest,
+    boardHeadHash: baseFields.votingClosedBoardHeadHash,
     boardSequence: input.boardSequence,
     ceremonyId: baseFields.ceremonyId,
-    contextDigest: input.contextDigest,
+    contextHash: input.contextHash,
     deviceEpoch: input.deviceEpoch,
-    electionManifestDigest: baseFields.manifestDigest,
+    electionManifestHash: baseFields.manifestHash,
     recoveryEpoch: input.recoveryEpoch,
-    recoveryPolicyDigest: digest('recovery-policy'),
-    rosterExternalAcceptanceDigest: input.rosterExternalAcceptanceDigest,
+    recoveryPolicyHash: hash('recovery-policy'),
+    rosterExternalAcceptanceHash: input.rosterExternalAcceptanceHash,
     signerIdentity: input.signerIdentity,
 });
 
 const createSignatureEnvelope = (input: {
-    readonly contextDigest: ProtocolDigest;
+    readonly contextHash: ProtocolHash;
     readonly deviceEpoch: number;
-    readonly objectRoot: ProtocolDigest;
+    readonly objectRoot: ProtocolHash;
     readonly recoveryEpoch: number;
     readonly signerIdentity: string;
 }): ProtocolSignatureEnvelope => {
@@ -155,16 +151,16 @@ const createSignatureEnvelope = (input: {
     return createProtocolSignatureFixture({
         profile: createMlDsaSignatureProfileFixture(),
         publicKeyBytesHex: keyFixture.publicKeyBytesHex,
-        publicKeyDigest: keyFixture.publicKeyDigest,
+        publicKeyHash: keyFixture.publicKeyHash,
         secretKeyBytesHex: keyFixture.secretKeyBytesHex,
         signedRoot: {
-            boardHeadDigest: baseFields.votingClosedBoardHeadDigest,
+            boardHeadHash: baseFields.votingClosedBoardHeadHash,
             byteLength: 64,
             ceremonyId: baseFields.ceremonyId,
             chunkMerkleRoot: null,
-            contextDigest: input.contextDigest,
+            contextHash: input.contextHash,
             deviceEpoch: input.deviceEpoch,
-            manifestDigest: baseFields.manifestDigest,
+            manifestHash: baseFields.manifestHash,
             objectRoot: input.objectRoot,
             objectType: 'AggregateContribution',
             objectVersion: 1,
@@ -179,7 +175,7 @@ export const createAggregateContributionFixture = (
     input: ContributionFixtureInput,
 ): AggregateContribution => {
     const contributorIdentity = `trustee-${input.rosterPosition}`;
-    const contributorRosterExternalAcceptanceDigest = digest(
+    const contributorRosterExternalAcceptanceHash = hash(
         `acceptance-${input.rosterPosition}`,
     );
     const boardSequence = input.boardSequence ?? input.rosterPosition;
@@ -187,110 +183,104 @@ export const createAggregateContributionFixture = (
     const recoveryEpoch = input.recoveryEpoch ?? 0;
     const deviceEpoch = input.deviceEpoch ?? 0;
     const actionSequence = input.rosterPosition;
-    const postVotingClosedContextDigest =
-        input.contextDigest ?? baseFields.postVotingClosedContextDigest;
-    const bridgeProofProfileDigest = deriveBridgeProofProfileDigest({
+    const postVotingClosedContextHash =
+        input.contextHash ?? baseFields.postVotingClosedContextHash;
+    const bridgeProofProfileHash = deriveBridgeProofProfileHash({
         bgvEncryptionProofSubrelation:
             'SealedLatticeDevelopmentCiphertextEquationRelation',
         bridgeProofProfileId: encryptedAggregateBridgeProfileId,
         proofBackend: 'SealedLatticeBridgeRelation',
     });
-    const aggregateDerivationComponentDigest = digest(
+    const aggregateDerivationComponentHash = hash(
         `aggregate-derivation-${input.rosterPosition}`,
     );
-    const aggregateShareCommitmentDigest = digest(
+    const aggregateShareCommitmentHash = hash(
         `aggregate-share-commitment-${input.rosterPosition}`,
     );
     const encryptedAggregateShareCiphertextRoot =
         input.encryptedAggregateShareCiphertextRoot ??
-        digest(`aggregate-share-ciphertext-${input.rosterPosition}`);
-    const bridgeProofTargetContractDigest =
-        deriveBridgeProofTargetContractDigest({
-            aggregateQuotientCoordinateCount: 220,
-            aggregateReducedCoordinateCount: 220,
-        });
+        hash(`aggregate-share-ciphertext-${input.rosterPosition}`);
+    const bridgeProofTargetContractHash = deriveBridgeProofTargetContractHash({
+        aggregateQuotientCoordinateCount: 220,
+        aggregateReducedCoordinateCount: 220,
+    });
     const actionContext = createActionContext({
         actionSequence,
         boardSequence,
-        contextDigest: postVotingClosedContextDigest,
+        contextHash: postVotingClosedContextHash,
         deviceEpoch,
         recoveryEpoch,
-        rosterExternalAcceptanceDigest:
-            contributorRosterExternalAcceptanceDigest,
+        rosterExternalAcceptanceHash: contributorRosterExternalAcceptanceHash,
         signerIdentity: contributorIdentity,
     });
-    const proofStatementDigest = deriveBridgeProofStatementDigest({
-        aggregateDerivationComponentDigest,
-        aggregateInputEncodingProfileDigest:
-            baseFields.aggregateInputEncodingProfileDigest,
+    const proofStatementHash = deriveBridgeProofStatementHash({
+        aggregateDerivationComponentHash,
+        aggregateInputEncodingProfileHash:
+            baseFields.aggregateInputEncodingProfileHash,
         aggregateQuotientCoordinateCount: 220,
         aggregateReducedCoordinateCount: 220,
-        aggregateSelectionPolicyDigest:
-            baseFields.aggregateSelectionPolicyDigest,
-        aggregateShareCommitmentDigest,
+        aggregateSelectionPolicyHash: baseFields.aggregateSelectionPolicyHash,
+        aggregateShareCommitmentHash,
         aggregateToPlaintextBindingStatus:
             'AggregateToPlaintextBindingProofChecked',
-        ballotScoreEncodingProfileDigest:
-            baseFields.ballotScoreEncodingProfileDigest,
-        ballotSetDigest: baseFields.ballotSetDigest,
-        ballotShareLayoutProfileDigest:
-            baseFields.ballotShareLayoutProfileDigest,
+        ballotScoreEncodingProfileHash:
+            baseFields.ballotScoreEncodingProfileHash,
+        ballotSetHash: baseFields.ballotSetHash,
+        ballotShareLayoutProfileHash: baseFields.ballotShareLayoutProfileHash,
         basisId: 'sealed-lattice-bgv-rns-data-basis-v1',
-        bgvBatchEncoderDigest: baseFields.bgvBatchEncoderDigest,
+        bgvBatchEncoderHash: baseFields.bgvBatchEncoderHash,
         bgvEncryptionProofStatus: 'BgvCiphertextEquationChecked',
-        bgvProfileDigest: baseFields.bgvProfileDigest,
+        bgvProfileHash: baseFields.bgvProfileHash,
         bgvPublicKeyRoot: baseFields.bgvPublicKeyRoot,
         bgvRandomnessBoundProofStatus:
             'BgvRandomnessErrorSupportPolynomialChecked',
         bridgeClaimClosureStatus: 'BridgeProofClaimClosureMissing',
-        bridgeLayoutDigest: baseFields.encryptedAggregateInputLayoutDigest,
-        bridgeProofTargetContractDigest,
-        bridgeWitnessPrivacyProfileDigest:
-            baseFields.bridgeWitnessPrivacyProfileDigest,
+        bridgeLayoutHash: baseFields.encryptedAggregateInputLayoutHash,
+        bridgeProofTargetContractHash,
+        bridgeWitnessPrivacyProfileHash:
+            baseFields.bridgeWitnessPrivacyProfileHash,
         canonicalByteLength: 180_781,
         canonicalBytesHash512: '4'.repeat(128),
-        canonicalCiphertextConventionDigest:
-            baseFields.canonicalCiphertextConventionDigest,
+        canonicalCiphertextConventionHash:
+            baseFields.canonicalCiphertextConventionHash,
         ceremonyId: baseFields.ceremonyId,
-        ciphertextRoot: digest(`bridge-ciphertext-${input.rosterPosition}`),
+        ciphertextRoot: hash(`bridge-ciphertext-${input.rosterPosition}`),
         coefficientDomainCanonical: true,
         coefficientCount: 32_768,
         collectivePublicKeyRoot: baseFields.collectivePublicKeyRoot,
-        contributorActionContextDigest: actionContext.actionContextDigest,
+        contributorActionContextHash: actionContext.actionContextHash,
         contributorIdentity,
-        contributorRosterExternalAcceptanceDigest,
+        contributorRosterExternalAcceptanceHash,
         contributorRosterPosition: input.rosterPosition,
         optionCount: baseFields.optionCount,
         participantCount: baseFields.participantCount,
-        encodedAggregateLayoutDigest: baseFields.encodedAggregateLayoutDigest,
-        encodedShareVectorLayoutDigest:
-            baseFields.encodedShareVectorLayoutDigest,
-        encryptedAggregateBridgeDigest:
-            baseFields.encryptedAggregateBridgeDigest,
-        encryptedAggregateInputLayoutDigest:
-            baseFields.encryptedAggregateInputLayoutDigest,
+        encodedAggregateLayoutHash: baseFields.encodedAggregateLayoutHash,
+        encodedShareVectorLayoutHash: baseFields.encodedShareVectorLayoutHash,
+        encryptedAggregateBridgeHash: baseFields.encryptedAggregateBridgeHash,
+        encryptedAggregateInputLayoutHash:
+            baseFields.encryptedAggregateInputLayoutHash,
         encryptedAggregateInputRoot: encryptedAggregateShareCiphertextRoot,
-        encryptedAggregateReconstructionDigest:
-            baseFields.encryptedAggregateReconstructionDigest,
+        encryptedAggregateReconstructionHash:
+            baseFields.encryptedAggregateReconstructionHash,
         encryptedAggregateShareCiphertextRoot,
-        encryptedAggregateTargetBasisDataRoot:
-            baseFields.encryptedAggregateTargetBasisDataRoot,
-        heParamDigest: baseFields.heParamDigest,
-        hwangPiopStatus: 'DeferredUntilSealedLatticeBgvRnsCompatibilityFreeze',
+        encryptedAggregateTargetBasisRoot:
+            baseFields.encryptedAggregateTargetBasisRoot,
+        heParamHash: baseFields.heParamHash,
+        hwangPiopStatus: 'DeferredUntilSealedLatticeBgvRnsProfileFreeze',
         level: 15,
-        manifestDigest: baseFields.manifestDigest,
-        plaintextRoot: digest(`bridge-plaintext-${input.rosterPosition}`),
-        pollSpecDigest: baseFields.pollSpecDigest,
-        postVotingClosedContextDigest,
-        proofProfileDigest: bridgeProofProfileDigest,
+        manifestHash: baseFields.manifestHash,
+        plaintextRoot: hash(`bridge-plaintext-${input.rosterPosition}`),
+        pollSpecHash: baseFields.pollSpecHash,
+        postVotingClosedContextHash,
+        proofProfileHash: bridgeProofProfileHash,
         rnsCrtConsistencyProofStatus: 'RnsCrtConsistencyRelationChecked',
-        rosterDigest: baseFields.rosterDigest,
-        rustBgvBackendProfileDigest: baseFields.rustBgvBackendProfileDigest,
-        sampledPublicRelationCheckPolicyDigest,
+        rosterHash: baseFields.rosterHash,
+        rustBgvBackendProfileHash: baseFields.rustBgvBackendProfileHash,
+        sampledPublicRelationCheckPolicyHash,
         sampledOnlyBridgeVerificationAccepted: false,
-        setupPackageDigest: baseFields.setupPackageDigest,
-        shareCommitmentMessageBoundCertDigest:
-            baseFields.shareCommitmentMessageBoundCertDigest,
+        setupPackageHash: baseFields.setupPackageHash,
+        shareCommitmentMessageBoundCertHash:
+            baseFields.shareCommitmentMessageBoundCertHash,
         shareVectorWidth: baseFields.shareVectorWidth,
         sharedWitnessBindingRequired: true,
         sharedWitnessBindingStatus: 'SharedWitnessBindingRelationChecked',
@@ -300,88 +290,87 @@ export const createAggregateContributionFixture = (
         sharedWitnessZeroKnowledgeStatus:
             'SharedWitnessZeroKnowledgeResponseDistributionChecked',
         slotCount: 32_768,
-        thresholdProfileDigest: baseFields.thresholdProfileDigest,
-        topKEvaluatorInputLayoutDigest:
-            baseFields.topKEvaluatorInputLayoutDigest,
-        votingClosedBoardHeadDigest: baseFields.votingClosedBoardHeadDigest,
+        thresholdProfileHash: baseFields.thresholdProfileHash,
+        topKEvaluatorInputLayoutHash: baseFields.topKEvaluatorInputLayoutHash,
+        votingClosedBoardHeadHash: baseFields.votingClosedBoardHeadHash,
     });
     const bridgeProofRecordPayload: Omit<
         BridgeProofRecord,
-        'bridgeProofRecordDigest'
+        'bridgeProofRecordHash'
     > = {
         ...baseFields,
-        aggregateDerivationComponentDigest,
-        aggregateShareCommitmentDigest,
+        aggregateDerivationComponentHash,
+        aggregateShareCommitmentHash,
         bgvEncryptionProofSubrelation:
             'SealedLatticeDevelopmentCiphertextEquationRelation',
-        bridgeProofProfileDigest,
+        bridgeProofProfileHash,
         bridgeProofProfileId: encryptedAggregateBridgeProfileId,
-        bridgeProofTargetContractDigest,
+        bridgeProofTargetContractHash,
         bridgeProofVerificationStatus:
             input.proofStatus ?? 'BridgeProofRelationChecked',
-        contributorActionContextDigest: actionContext.actionContextDigest,
+        contributorActionContextHash: actionContext.actionContextHash,
         contributorIdentity,
-        contributorRosterExternalAcceptanceDigest,
+        contributorRosterExternalAcceptanceHash,
         contributorRosterPosition: input.rosterPosition,
         encryptedAggregateInputRoot: encryptedAggregateShareCiphertextRoot,
         encryptedAggregateShareCiphertextRoot,
         objectType: 'BridgeProofRecord',
         objectVersion: 1,
-        postVotingClosedContextDigest,
+        postVotingClosedContextHash,
         proofBackend: 'SealedLatticeBridgeRelation',
-        proofBytesDigest: digest(`bridge-proof-bytes-${input.rosterPosition}`),
-        proofEncodingProfileDigest: digest('bridge-proof-encoding'),
-        proofParameterSetDigest: digest('bridge-proof-parameters'),
-        proofRoot: digest(`bridge-proof-root-${input.rosterPosition}`),
+        proofBytesHash: hash(`bridge-proof-bytes-${input.rosterPosition}`),
+        proofEncodingProfileHash: hash('bridge-proof-encoding'),
+        proofParameterSetHash: hash('bridge-proof-parameters'),
+        proofRoot: hash(`bridge-proof-root-${input.rosterPosition}`),
         proofSizeBytes: 128,
-        proofStatementDigest,
-        publicRandomnessDigest: digest(
+        proofStatementHash,
+        publicRandomnessHash: hash(
             `bridge-proof-randomness-${input.rosterPosition}`,
         ),
     };
     const bridgeProofRecord = {
         ...bridgeProofRecordPayload,
-        bridgeProofRecordDigest: deriveBridgeProofRecordDigest(
+        bridgeProofRecordHash: deriveBridgeProofRecordHash(
             bridgeProofRecordPayload,
         ),
     };
     const unsignedContributionPayload: Omit<
         AggregateContribution,
-        'aggregateContributionDigest' | 'signature'
+        'aggregateContributionHash' | 'signature'
     > = {
         ...baseFields,
         actionContext,
         actionSequence,
-        aggregateDerivationComponentDigest,
-        aggregateShareCommitmentDigest,
+        aggregateDerivationComponentHash,
+        aggregateShareCommitmentHash,
         boardPosition,
         boardSequence,
-        bridgeProofProfileDigest,
+        bridgeProofProfileHash,
         bridgeProofRecord,
-        bridgeProofRecordDigest: bridgeProofRecord.bridgeProofRecordDigest,
+        bridgeProofRecordHash: bridgeProofRecord.bridgeProofRecordHash,
         contributorIdentity,
-        contributorRosterExternalAcceptanceDigest,
+        contributorRosterExternalAcceptanceHash,
         contributorRosterPosition: input.rosterPosition,
         deviceEpoch,
         encryptedAggregateInputRoot: encryptedAggregateShareCiphertextRoot,
         encryptedAggregateShareCiphertextRoot,
         objectType: 'AggregateContribution',
         objectVersion: 1,
-        postVotingClosedContextDigest,
+        postVotingClosedContextHash,
         recoveryEpoch,
     };
-    const aggregateContributionDigest = deriveAggregateContributionDigest(
+    const aggregateContributionHash = deriveAggregateContributionHash(
         unsignedContributionPayload,
     );
     const contributionPayload: Omit<
         AggregateContribution,
-        'aggregateContributionDigest'
+        'aggregateContributionHash'
     > = {
         ...unsignedContributionPayload,
         signature: createSignatureEnvelope({
-            contextDigest: postVotingClosedContextDigest,
+            contextHash: postVotingClosedContextHash,
             deviceEpoch,
-            objectRoot: aggregateContributionDigest,
+            objectRoot: aggregateContributionHash,
             recoveryEpoch,
             signerIdentity: contributorIdentity,
         }),
@@ -389,35 +378,34 @@ export const createAggregateContributionFixture = (
 
     return {
         ...contributionPayload,
-        aggregateContributionDigest,
+        aggregateContributionHash,
     };
 };
 
 export const createAggregateDerivationComponentFixture = (input: {
-    readonly aggregateDerivationComponentDigest: ProtocolDigest;
-    readonly aggregateShareCommitmentDigest: ProtocolDigest;
+    readonly aggregateDerivationComponentHash: ProtocolHash;
+    readonly aggregateShareCommitmentHash: ProtocolHash;
     readonly contributorIdentity: string;
-    readonly contributorRosterExternalAcceptanceDigest: ProtocolDigest;
+    readonly contributorRosterExternalAcceptanceHash: ProtocolHash;
     readonly contributorRosterPosition: number;
 }): AggregateDerivationComponent =>
     ({
         aggregateCommitment: {
-            aggregateShareCommitmentDigest:
-                input.aggregateShareCommitmentDigest,
-            commitmentBodyDigest: digest('commitment-body'),
+            aggregateShareCommitmentHash: input.aggregateShareCommitmentHash,
+            commitmentBodyHash: hash('commitment-body'),
             commitmentPolynomialVector: [['0']],
             contributorIdentity: input.contributorIdentity,
             contributorRosterPosition: input.contributorRosterPosition,
-            manifestDigest: baseFields.manifestDigest,
+            manifestHash: baseFields.manifestHash,
             objectType: 'AggregateShareCommitment',
             objectVersion: 1,
-            pollSpecDigest: baseFields.pollSpecDigest,
-            rosterDigest: baseFields.rosterDigest,
-            shareCommitmentProfileDigest: digest('share-commitment-profile'),
+            pollSpecHash: baseFields.pollSpecHash,
+            rosterHash: baseFields.rosterHash,
+            shareCommitmentProfileHash: hash('share-commitment-profile'),
             shareVectorWidth: 22,
         },
-        aggregateDerivationComponentDigest:
-            input.aggregateDerivationComponentDigest,
+        aggregateDerivationComponentHash:
+            input.aggregateDerivationComponentHash,
         objectType: 'AggregateDerivationComponent',
         objectVersion: 1,
         shareCommitmentMessageBoundCert: {
@@ -434,61 +422,58 @@ export const createAggregateDerivationComponentFixture = (input: {
             openingRandomnessAggregateBound: 10,
             openingRandomnessSingleBound: 1,
             perBallotShareRepresentativeRange: [0, 65536],
-            profileDigest: digest('bound-cert-profile'),
+            profileHash: hash('bound-cert-profile'),
             profileId: 'fixture-bound-cert',
             quotientBoundForAggregateReduction: 10,
-            shareCommitmentMessageBoundCertDigest:
-                baseFields.shareCommitmentMessageBoundCertDigest,
-            shareCommitmentProfileDigest: digest('share-commitment-profile'),
+            shareCommitmentMessageBoundCertHash:
+                baseFields.shareCommitmentMessageBoundCertHash,
+            shareCommitmentProfileHash: hash('share-commitment-profile'),
             shareVectorWidth: 22,
         },
         statement: {
-            aggregateCommitmentDigest: input.aggregateShareCommitmentDigest,
-            aggregateDerivationStatementDigest: digest(
+            aggregateCommitmentHash: input.aggregateShareCommitmentHash,
+            aggregateDerivationStatementHash: hash(
                 'aggregate-derivation-statement',
             ),
-            aggregateInputEncodingProfileDigest:
-                baseFields.aggregateInputEncodingProfileDigest,
-            aggregateShareCommitmentDigest:
-                input.aggregateShareCommitmentDigest,
-            ballotScoreEncodingProfileDigest:
-                baseFields.ballotScoreEncodingProfileDigest,
-            ballotSetDigest: baseFields.ballotSetDigest,
-            ballotShareLayoutProfileDigest:
-                baseFields.ballotShareLayoutProfileDigest,
+            aggregateInputEncodingProfileHash:
+                baseFields.aggregateInputEncodingProfileHash,
+            aggregateShareCommitmentHash: input.aggregateShareCommitmentHash,
+            ballotScoreEncodingProfileHash:
+                baseFields.ballotScoreEncodingProfileHash,
+            ballotSetHash: baseFields.ballotSetHash,
+            ballotShareLayoutProfileHash:
+                baseFields.ballotShareLayoutProfileHash,
             canonicalTurnout: 1,
             ceremonyId: baseFields.ceremonyId,
-            challengeDomainDigest: digest('challenge-domain'),
-            closeRecordDigest: baseFields.closeRecordDigest,
-            contributorActionContextDigest: digest('action-context'),
+            challengeDomainHash: hash('challenge-domain'),
+            closeRecordHash: baseFields.closeRecordHash,
+            contributorActionContextHash: hash('action-context'),
             contributorIdentity: input.contributorIdentity,
-            contributorRosterExternalAcceptanceDigest:
-                input.contributorRosterExternalAcceptanceDigest,
+            contributorRosterExternalAcceptanceHash:
+                input.contributorRosterExternalAcceptanceHash,
             contributorRosterPosition: input.contributorRosterPosition,
-            encodedAggregateLayoutDigest:
-                baseFields.encodedAggregateLayoutDigest,
-            encodedShareVectorLayoutDigest:
-                baseFields.encodedShareVectorLayoutDigest,
-            manifestDigest: baseFields.manifestDigest,
+            encodedAggregateLayoutHash: baseFields.encodedAggregateLayoutHash,
+            encodedShareVectorLayoutHash:
+                baseFields.encodedShareVectorLayoutHash,
+            manifestHash: baseFields.manifestHash,
             objectType: 'AggregateDerivationStatement',
             objectVersion: 1,
             optionCount: 2,
             packageReferences: [],
             participantCount: 20,
-            pollSpecDigest: baseFields.pollSpecDigest,
-            postVotingClosedContextDigest:
-                baseFields.postVotingClosedContextDigest,
+            pollSpecHash: baseFields.pollSpecHash,
+            postVotingClosedContextHash: baseFields.postVotingClosedContextHash,
             proofEncodingProfileId: 'fixture-proof-encoding',
             proofParameterProfileId: 'fixture-proof-parameters',
             proofProfileId: 'fixture-proof',
-            receiverEncryptionProfileDigest: digest('receiver-profile'),
-            rosterDigest: baseFields.rosterDigest,
-            shareCommitmentMessageBoundCertDigest:
-                baseFields.shareCommitmentMessageBoundCertDigest,
-            shareCommitmentProfileDigest: digest('share-commitment-profile'),
+            receiverEncryptionProfileHash: hash('receiver-profile'),
+            rosterHash: baseFields.rosterHash,
+            shareCommitmentMessageBoundCertHash:
+                baseFields.shareCommitmentMessageBoundCertHash,
+            shareCommitmentProfileHash: hash('share-commitment-profile'),
             shareVectorWidth: 22,
-            thresholdProfileDigest: baseFields.thresholdProfileDigest,
-            votingClosedBoardHeadDigest: baseFields.votingClosedBoardHeadDigest,
+            thresholdProfileHash: baseFields.thresholdProfileHash,
+            votingClosedBoardHeadHash: baseFields.votingClosedBoardHeadHash,
         },
     }) as unknown as AggregateDerivationComponent;
 
@@ -499,37 +484,36 @@ export const createSetupEvidenceFixture =
             collectivePublicKeyRoot: baseFields.collectivePublicKeyRoot,
         },
         profileBindings: {
-            aggregateInputEncodingProfileDigest:
-                baseFields.aggregateInputEncodingProfileDigest,
-            backendProfileDigest: baseFields.rustBgvBackendProfileDigest,
-            ballotScoreEncodingProfileDigest:
-                baseFields.ballotScoreEncodingProfileDigest,
-            ballotShareLayoutProfileDigest:
-                baseFields.ballotShareLayoutProfileDigest,
-            batchEncoderDigest: baseFields.bgvBatchEncoderDigest,
-            canonicalCiphertextConventionDigest:
-                baseFields.canonicalCiphertextConventionDigest,
-            encodedAggregateLayoutDigest:
-                baseFields.encodedAggregateLayoutDigest,
-            encryptedAggregateBridgeDigest:
-                baseFields.encryptedAggregateBridgeDigest,
-            encryptedAggregateInputLayoutDigest:
-                baseFields.encryptedAggregateInputLayoutDigest,
-            encryptedAggregateReconstructionDigest:
-                baseFields.encryptedAggregateReconstructionDigest,
-            encryptedAggregateTargetBasisDataRoot:
-                baseFields.encryptedAggregateTargetBasisDataRoot,
-            profileDigest: baseFields.bgvProfileDigest,
-            topKEvaluatorInputLayoutDigest:
-                baseFields.topKEvaluatorInputLayoutDigest,
+            aggregateInputEncodingProfileHash:
+                baseFields.aggregateInputEncodingProfileHash,
+            backendProfileHash: baseFields.rustBgvBackendProfileHash,
+            ballotScoreEncodingProfileHash:
+                baseFields.ballotScoreEncodingProfileHash,
+            ballotShareLayoutProfileHash:
+                baseFields.ballotShareLayoutProfileHash,
+            batchEncoderHash: baseFields.bgvBatchEncoderHash,
+            canonicalCiphertextConventionHash:
+                baseFields.canonicalCiphertextConventionHash,
+            encodedAggregateLayoutHash: baseFields.encodedAggregateLayoutHash,
+            encryptedAggregateBridgeHash:
+                baseFields.encryptedAggregateBridgeHash,
+            encryptedAggregateInputLayoutHash:
+                baseFields.encryptedAggregateInputLayoutHash,
+            encryptedAggregateReconstructionHash:
+                baseFields.encryptedAggregateReconstructionHash,
+            encryptedAggregateTargetBasisRoot:
+                baseFields.encryptedAggregateTargetBasisRoot,
+            profileHash: baseFields.bgvProfileHash,
+            topKEvaluatorInputLayoutHash:
+                baseFields.topKEvaluatorInputLayoutHash,
         },
-        setupPackageDigest: baseFields.setupPackageDigest,
+        setupPackageHash: baseFields.setupPackageHash,
         setupInputs: {
             ceremonyId: baseFields.ceremonyId,
-            manifestDigest: baseFields.manifestDigest,
+            manifestHash: baseFields.manifestHash,
             participantCount: baseFields.participantCount,
-            rosterDigest: baseFields.rosterDigest,
-            thresholdProfileDigest: baseFields.thresholdProfileDigest,
+            rosterHash: baseFields.rosterHash,
+            thresholdProfileHash: baseFields.thresholdProfileHash,
         },
     });
 

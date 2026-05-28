@@ -1,10 +1,10 @@
 export {
-    deriveAggregateContributionDigest,
-    deriveBridgeProofProfileDigest,
-    deriveBridgeProofRecordDigest,
-    deriveBridgeProofStatementDigest,
-    deriveBridgeProofTargetContractDigest,
-} from './aggregate-bridge/digests.js';
+    deriveAggregateContributionHash,
+    deriveBridgeProofProfileHash,
+    deriveBridgeProofRecordHash,
+    deriveBridgeProofStatementHash,
+    deriveBridgeProofTargetContractHash,
+} from './aggregate-bridge/hashes.js';
 export {
     createAggregateContributionFromBridgeProofRecord,
     createAggregateReadyRecord,

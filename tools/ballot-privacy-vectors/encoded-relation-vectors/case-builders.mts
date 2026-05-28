@@ -14,7 +14,7 @@ import type { BallotPrivacyRelationCompilerInput } from "#packages/protocol/src/
 import {
     componentProjectionSummaries,
     componentProofReadinessManifests,
-    digest,
+    hash,
     explicitComponentVerificationSummaries,
     explicitReceiverEncryptionContextForRelation,
     mandatoryRelationInput,
@@ -31,10 +31,10 @@ import { mutatedMiniRelationInputs } from "./case-relation-input-mutations.mjs";
 import type { EncodedBallotRelationVectorCase } from "./vector-case-types.mjs";
 
 const acceptingCase = (input: {
-    readonly baselineRelationStatementDigest?: string;
+    readonly baselineRelationStatementHash?: string;
     readonly caseName: string;
     readonly description: string;
-    readonly expectedDigestChanged?: true;
+    readonly expectedHashChanged?: true;
     readonly includeComponentProjectionSummaries?: boolean;
     readonly includeExplicitComponentVerificationSummaries?: boolean;
     readonly includeFullStatement: boolean;
@@ -54,8 +54,7 @@ const acceptingCase = (input: {
         );
     }
     const componentBundleStatement = buildBallotProofComponentBundleStatement({
-        ballotProofStatementDigest:
-            input.publicContext.ballotProofStatementDigest,
+        ballotProofStatementHash: input.publicContext.ballotProofStatementHash,
         loweredStatement: result.statement,
     });
     const proofReadinessManifests =
@@ -67,8 +66,8 @@ const acceptingCase = (input: {
     const componentProofStatementPlans =
         input.includeExplicitComponentVerificationSummaries
             ? buildBallotProofComponentProofStatementPlans({
-                  ballotProofStatementDigest:
-                      input.publicContext.ballotProofStatementDigest,
+                  ballotProofStatementHash:
+                      input.publicContext.ballotProofStatementHash,
                   componentBundleStatement,
                   loweredStatement: result.statement,
               })
@@ -119,11 +118,10 @@ const acceptingCase = (input: {
                 ? undefined
                 : proofReadinessSummary(proofReadinessManifests),
         trace: {
-            baselineRelationStatementDigest:
-                input.baselineRelationStatementDigest,
-            expectedDigestChanged: input.expectedDigestChanged,
+            baselineRelationStatementHash: input.baselineRelationStatementHash,
+            expectedHashChanged: input.expectedHashChanged,
             ...traceDimensions(input.relationInput),
-            relationStatementDigest: result.statement.relationStatementDigest,
+            relationStatementHash: result.statement.relationStatementHash,
         },
     };
 };
@@ -167,17 +165,17 @@ const backendPreflightRejectingCase = (input: {
     };
 };
 
-const digestChangingPublicContextCases = (input: {
-    readonly baselineRelationStatementDigest: string;
+const hashChangingPublicContextCases = (input: {
+    readonly baselineRelationStatementHash: string;
     readonly publicContext: BallotPrivacyRelationBackendPublicContext;
     readonly relationInput: BallotPrivacyRelationCompilerInput;
 }): readonly EncodedBallotRelationVectorCase[] => [
     acceptingCase({
-        baselineRelationStatementDigest: input.baselineRelationStatementDigest,
-        caseName: "wrong-share-commitment-target-changes-digest",
+        baselineRelationStatementHash: input.baselineRelationStatementHash,
+        caseName: "wrong-share-commitment-target-changes-hash",
         description:
-            "A substituted share commitment target changes the lowered relation digest.",
-        expectedDigestChanged: true,
+            "A substituted share commitment target changes the lowered relation hash.",
+        expectedHashChanged: true,
         includeFullStatement: false,
         mutation: "wrong-share-commitment-target",
         publicContext: {
@@ -187,7 +185,7 @@ const digestChangingPublicContextCases = (input: {
                     shareCommitment.receiverRosterPosition === 2
                         ? {
                               ...shareCommitment,
-                              commitmentBodyDigest: digest(
+                              commitmentBodyHash: hash(
                                   "changed-share-commitment-body",
                               ),
                           }
@@ -197,11 +195,11 @@ const digestChangingPublicContextCases = (input: {
         relationInput: input.relationInput,
     }),
     acceptingCase({
-        baselineRelationStatementDigest: input.baselineRelationStatementDigest,
-        caseName: "wrong-receiver-payload-target-changes-digest",
+        baselineRelationStatementHash: input.baselineRelationStatementHash,
+        caseName: "wrong-receiver-payload-target-changes-hash",
         description:
-            "A substituted receiver payload ciphertext target changes the lowered relation digest.",
-        expectedDigestChanged: true,
+            "A substituted receiver payload ciphertext target changes the lowered relation hash.",
+        expectedHashChanged: true,
         includeFullStatement: false,
         mutation: "wrong-receiver-payload-target",
         publicContext: {
@@ -211,7 +209,7 @@ const digestChangingPublicContextCases = (input: {
                     receiverPayload.receiverRosterPosition === 2
                         ? {
                               ...receiverPayload,
-                              ciphertextChunkDigest: digest(
+                              ciphertextChunkHash: hash(
                                   "changed-receiver-payload-ciphertext-chunk",
                               ),
                           }
@@ -221,11 +219,11 @@ const digestChangingPublicContextCases = (input: {
         relationInput: input.relationInput,
     }),
     acceptingCase({
-        baselineRelationStatementDigest: input.baselineRelationStatementDigest,
-        caseName: "wrong-receiver-key-target-changes-digest",
+        baselineRelationStatementHash: input.baselineRelationStatementHash,
+        caseName: "wrong-receiver-key-target-changes-hash",
         description:
-            "A substituted receiver key target changes the lowered relation digest.",
-        expectedDigestChanged: true,
+            "A substituted receiver key target changes the lowered relation hash.",
+        expectedHashChanged: true,
         includeFullStatement: false,
         mutation: "wrong-receiver-key-target",
         publicContext: {
@@ -235,7 +233,7 @@ const digestChangingPublicContextCases = (input: {
                     receiverPublicKey.receiverRosterPosition === 2
                         ? {
                               ...receiverPublicKey,
-                              keyMaterialDigest: digest(
+                              keyMaterialHash: hash(
                                   "changed-receiver-key-material",
                               ),
                           }
@@ -441,7 +439,7 @@ export const buildEncodedBallotRelationVectorCases =
         const fullExplicitMiniInput = singleOptionRelationInput();
         const mandatoryInput = mandatoryRelationInput();
         const miniPublicContext = publicContextForRoster(miniInput, true);
-        const miniDigestExpandedPublicContext = publicContextForRoster(
+        const miniHashExpandedPublicContext = publicContextForRoster(
             miniInput,
             false,
         );
@@ -454,7 +452,7 @@ export const buildEncodedBallotRelationVectorCases =
             description:
                 "Mini encoded-score ballot relation with three receivers and two options.",
             includeFullStatement: true,
-            publicContext: miniDigestExpandedPublicContext,
+            publicContext: miniHashExpandedPublicContext,
             relationInput: miniInput,
         });
         const miniExplicitShareCommitmentCase = acceptingCase({
@@ -479,8 +477,8 @@ export const buildEncodedBallotRelationVectorCases =
             publicContext: fullExplicitMiniContext.publicContext,
             relationInput: fullExplicitMiniInput,
         });
-        const miniBaselineDigest =
-            miniExplicitShareCommitmentCase.trace.relationStatementDigest ?? "";
+        const miniBaselineHash =
+            miniExplicitShareCommitmentCase.trace.relationStatementHash ?? "";
         const cases: EncodedBallotRelationVectorCase[] = [
             miniAcceptingCase,
             miniExplicitShareCommitmentCase,
@@ -493,13 +491,13 @@ export const buildEncodedBallotRelationVectorCases =
                 publicContext: mandatoryPublicContext,
                 relationInput: mandatoryInput,
             }),
-            ...digestChangingPublicContextCases({
-                baselineRelationStatementDigest: miniBaselineDigest,
+            ...hashChangingPublicContextCases({
+                baselineRelationStatementHash: miniBaselineHash,
                 publicContext: miniPublicContext,
                 relationInput: miniInput,
             }),
             ...backendPreflightMutationCases({
-                publicContext: miniDigestExpandedPublicContext,
+                publicContext: miniHashExpandedPublicContext,
                 relationInput: miniInput,
             }),
             ...mutatedMiniRelationInputs(miniInput).map((mutationCase) =>

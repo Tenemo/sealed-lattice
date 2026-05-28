@@ -9,7 +9,7 @@ import {
     uniqueStrings,
 } from '../../../common/verification-helpers.js';
 import { deriveValidatedFirstValidOrder } from '../../../ordering/index.js';
-import { deriveSelectedAggregateContributionOrderDigest } from '../digests.js';
+import { deriveSelectedAggregateContributionOrderHash } from '../hashes.js';
 
 import { verifyAggregateContributionStructure } from './aggregate-contribution.js';
 
@@ -25,7 +25,7 @@ export const selectFirstValidAggregateContributions = (
             createRefusal(
                 'FirstValidPolicyMismatch',
                 'Aggregate contribution quorum must be a positive safe integer.',
-                input.expectedAggregateSelectionPolicyDigest,
+                input.expectedAggregateSelectionPolicyHash,
             ),
         );
     }
@@ -45,7 +45,7 @@ export const selectFirstValidAggregateContributions = (
                     createRefusal(
                         'OperationUnavailable',
                         'Aggregate contribution is not proof-valid for the supported bridge relation.',
-                        contribution.aggregateContributionDigest,
+                        contribution.aggregateContributionHash,
                         'AggregateContribution',
                     ),
                 );
@@ -57,36 +57,35 @@ export const selectFirstValidAggregateContributions = (
     );
     const firstValidOrdering = deriveValidatedFirstValidOrder({
         currentRecoveryEpochMap: input.currentRecoveryEpochMap,
-        expectedSelectionPolicyDigest:
-            input.expectedAggregateSelectionPolicyDigest,
+        expectedSelectionPolicyHash: input.expectedAggregateSelectionPolicyHash,
         maxPerIdentity: 1,
         objects: structurallyValidContributions.map((contribution) => ({
             actionSequence: contribution.actionSequence,
             boardPosition: contribution.boardPosition,
             boardSequence: contribution.boardSequence,
-            contextDigest: contribution.postVotingClosedContextDigest,
+            contextHash: contribution.postVotingClosedContextHash,
             deviceEpoch: contribution.deviceEpoch,
             isByteIdenticalRetransmission: false,
-            objectDigest: contribution.aggregateContributionDigest,
+            objectHash: contribution.aggregateContributionHash,
             objectType: 'AggregateContribution',
             recoveryEpoch: contribution.recoveryEpoch,
             signerIdentity: contribution.contributorIdentity,
         })),
-        requiredContextDigest: input.requiredPostVotingClosedContextDigest,
-        selectionPolicyDigest: input.expectedAggregateSelectionPolicyDigest,
+        requiredContextHash: input.requiredPostVotingClosedContextHash,
+        selectionPolicyHash: input.expectedAggregateSelectionPolicyHash,
     });
     refusedObjects.push(...firstValidOrdering.refusedObjects);
 
-    const contributionByDigest = new Map(
+    const contributionByHash = new Map(
         structurallyValidContributions.map((contribution) => [
-            contribution.aggregateContributionDigest,
+            contribution.aggregateContributionHash,
             contribution,
         ]),
     );
     const orderedContributions = firstValidOrdering.orderedObjects.flatMap(
         (orderedObject) => {
-            const contribution = contributionByDigest.get(
-                orderedObject.objectDigest,
+            const contribution = contributionByHash.get(
+                orderedObject.objectHash,
             );
 
             return contribution === undefined ? [] : [contribution];
@@ -101,18 +100,18 @@ export const selectFirstValidAggregateContributions = (
             createRefusal(
                 'FirstValidPolicyMismatch',
                 'Not enough proof-valid aggregate contributions exist for the aggregate quorum.',
-                input.expectedAggregateSelectionPolicyDigest,
+                input.expectedAggregateSelectionPolicyHash,
             ),
         );
     }
 
     if (refusedObjects.length > 0) {
         return {
-            acceptedDigests: [],
-            firstValidOrderDigest: undefined,
+            acceptedHashes: [],
+            firstValidOrderHash: undefined,
             ok: false,
-            orderedContributionDigests: orderedContributions.map(
-                (contribution) => contribution.aggregateContributionDigest,
+            orderedContributionHashes: orderedContributions.map(
+                (contribution) => contribution.aggregateContributionHash,
             ),
             refusedObjects,
             selectedContributions: [],
@@ -122,27 +121,26 @@ export const selectFirstValidAggregateContributions = (
         };
     }
 
-    const firstValidOrderDigest =
-        deriveSelectedAggregateContributionOrderDigest({
-            requiredPostVotingClosedContextDigest:
-                input.requiredPostVotingClosedContextDigest,
-            selectedAggregateContributionDigests: selectedContributions.map(
-                (contribution) => contribution.aggregateContributionDigest,
-            ),
-            selectionPolicyDigest: input.expectedAggregateSelectionPolicyDigest,
-        });
+    const firstValidOrderHash = deriveSelectedAggregateContributionOrderHash({
+        requiredPostVotingClosedContextHash:
+            input.requiredPostVotingClosedContextHash,
+        selectedAggregateContributionHashes: selectedContributions.map(
+            (contribution) => contribution.aggregateContributionHash,
+        ),
+        selectionPolicyHash: input.expectedAggregateSelectionPolicyHash,
+    });
 
     return {
-        acceptedDigests: uniqueStrings([
-            firstValidOrderDigest,
+        acceptedHashes: uniqueStrings([
+            firstValidOrderHash,
             ...selectedContributions.map(
-                (contribution) => contribution.aggregateContributionDigest,
+                (contribution) => contribution.aggregateContributionHash,
             ),
         ]),
-        firstValidOrderDigest,
+        firstValidOrderHash,
         ok: true,
-        orderedContributionDigests: orderedContributions.map(
-            (contribution) => contribution.aggregateContributionDigest,
+        orderedContributionHashes: orderedContributions.map(
+            (contribution) => contribution.aggregateContributionHash,
         ),
         refusedObjects: [],
         selectedContributions,

@@ -18,5 +18,5 @@ use ballot_record_rejection_tests::{
 use component_bundle_tests::{component_proof_for_test, component_proof_statement_for_test};
 use component_statement_tests::{
     component_bundle_for_test, component_proof_input_for_test, component_statement_for_test,
-    proof_bytes_digest_for_test, test_digest,
+    proof_bytes_hash_for_test, test_hash,
 };

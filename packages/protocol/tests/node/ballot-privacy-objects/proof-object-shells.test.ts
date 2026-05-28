@@ -9,11 +9,11 @@ import {
     createReceiverKeyProofShell,
     createReceiverPayloadShell,
     createShareCommitmentShell,
-    deriveBallotPrivacyRosterProfileEvidenceDigest,
-    deriveBallotProofEncodingProfileDigest,
-    deriveBallotProofParameterSetDigest,
-    deriveBallotProofPublicRandomnessDigest,
-    deriveProofBytesDigest,
+    deriveBallotPrivacyRosterProfileEvidenceHash,
+    deriveBallotProofEncodingProfileHash,
+    deriveBallotProofParameterSetHash,
+    deriveBallotProofPublicRandomnessHash,
+    deriveProofBytesHash,
     verifyBallotProof,
 } from '../../../src/ballot-privacy/index';
 
@@ -23,18 +23,18 @@ import {
     createComponentProofVerificationInputsFixture,
     createStatement,
     createStructurallyBoundObjects,
-    digest,
+    hash,
     requiredComponentIds,
 } from './shared.js';
 
 const createDynamicRosterProfileEvidence = (
     input: Pick<
         BallotPrivacyRosterProfileEvidence,
-        'frozenRosterSize' | 'optionCount' | 'thresholdProfileDigest'
+        'frozenRosterSize' | 'optionCount' | 'thresholdProfileHash'
     >,
 ): BallotPrivacyRosterProfileEvidence => {
     const payload = {
-        dynamicRosterProfileCertificateDigest: digest(
+        dynamicRosterProfileCertificateHash: hash(
             'dynamic-roster-profile-certificate',
         ),
         frozenRosterSize: input.frozenRosterSize,
@@ -44,13 +44,13 @@ const createDynamicRosterProfileEvidence = (
         profileFamily: 'BalancedDefault' as const,
         proofStatementShape: 'EncodedScoreBallotProof-v1' as const,
         receiverCoverageProfile: 'AllFrozenRosterReceivers' as const,
-        thresholdProfileDigest: input.thresholdProfileDigest,
+        thresholdProfileHash: input.thresholdProfileHash,
     };
 
     return {
         ...payload,
-        rosterProfileEvidenceDigest:
-            deriveBallotPrivacyRosterProfileEvidenceDigest(payload),
+        rosterProfileEvidenceHash:
+            deriveBallotPrivacyRosterProfileEvidenceHash(payload),
     };
 };
 
@@ -61,138 +61,132 @@ describe('ballot privacy proof object boundary', () => {
         const profileSet = createBallotPrivacyProfileSet();
         const receiverPublicKey = createReceiverEncryptionPublicKeyShell({
             ceremonyId: 'ceremony-1',
-            manifestDigest: digest('manifest'),
-            rosterDigest: digest('roster'),
+            manifestHash: hash('manifest'),
+            rosterHash: hash('roster'),
             receiverIdentity: 'receiver-1',
             receiverRosterPosition: 1,
             recoveryEpoch: 0,
-            receiverEncryptionProfileDigest:
+            receiverEncryptionProfileHash:
                 profileSet.receiverEncryptionProfile
-                    .receiverEncryptionProfileDigest,
-            keyMaterialDigest: digest('receiver-key-material'),
+                    .receiverEncryptionProfileHash,
+            keyMaterialHash: hash('receiver-key-material'),
         });
         const receiverKeyProof = createReceiverKeyProofShell({
             ceremonyId: receiverPublicKey.ceremonyId,
-            manifestDigest: receiverPublicKey.manifestDigest,
-            rosterDigest: receiverPublicKey.rosterDigest,
+            manifestHash: receiverPublicKey.manifestHash,
+            rosterHash: receiverPublicKey.rosterHash,
             receiverIdentity: receiverPublicKey.receiverIdentity,
             receiverRosterPosition: receiverPublicKey.receiverRosterPosition,
             recoveryEpoch: receiverPublicKey.recoveryEpoch,
-            receiverPublicKeyDigest: receiverPublicKey.receiverPublicKeyDigest,
-            receiverEncryptionProfileDigest:
-                receiverPublicKey.receiverEncryptionProfileDigest,
+            receiverPublicKeyHash: receiverPublicKey.receiverPublicKeyHash,
+            receiverEncryptionProfileHash:
+                receiverPublicKey.receiverEncryptionProfileHash,
             proofBackend: 'LocalLinearLatticeRelation',
-            proofRoot: digest('receiver-key-proof-root'),
+            proofRoot: hash('receiver-key-proof-root'),
         });
         const receiverPayload = createReceiverPayloadShell({
             ceremonyId: receiverPublicKey.ceremonyId,
-            manifestDigest: receiverPublicKey.manifestDigest,
-            rosterDigest: receiverPublicKey.rosterDigest,
-            pollSpecDigest: digest('poll-spec'),
-            voterIdentityDigest: digest('voter-1'),
+            manifestHash: receiverPublicKey.manifestHash,
+            rosterHash: receiverPublicKey.rosterHash,
+            pollSpecHash: hash('poll-spec'),
+            voterIdentityHash: hash('voter-1'),
             receiverIdentity: receiverPublicKey.receiverIdentity,
             receiverRosterPosition: receiverPublicKey.receiverRosterPosition,
-            receiverPublicKeyDigest: receiverPublicKey.receiverPublicKeyDigest,
-            receiverEncryptionProfileDigest:
-                receiverPublicKey.receiverEncryptionProfileDigest,
-            payloadContextDigest: digest('payload-context'),
-            ciphertextBodyDigest: digest('ciphertext-body'),
+            receiverPublicKeyHash: receiverPublicKey.receiverPublicKeyHash,
+            receiverEncryptionProfileHash:
+                receiverPublicKey.receiverEncryptionProfileHash,
+            payloadContextHash: hash('payload-context'),
+            ciphertextBodyHash: hash('ciphertext-body'),
         });
         const shareCommitment = createShareCommitmentShell({
             ceremonyId: receiverPublicKey.ceremonyId,
-            manifestDigest: receiverPublicKey.manifestDigest,
-            rosterDigest: receiverPublicKey.rosterDigest,
+            manifestHash: receiverPublicKey.manifestHash,
+            rosterHash: receiverPublicKey.rosterHash,
             receiverIdentity: receiverPublicKey.receiverIdentity,
             receiverRosterPosition: receiverPublicKey.receiverRosterPosition,
-            shareCommitmentProfileDigest:
-                profileSet.shareCommitmentProfile.shareCommitmentProfileDigest,
+            shareCommitmentProfileHash:
+                profileSet.shareCommitmentProfile.shareCommitmentProfileHash,
             shareVectorWidth:
                 profileSet.shareCommitmentProfile.shareVectorWidth,
-            commitmentBodyDigest: digest('share-commitment-body'),
+            commitmentBodyHash: hash('share-commitment-body'),
         });
 
-        expect(receiverPublicKey.receiverPublicKeyDigest).toMatch(
+        expect(receiverPublicKey.receiverPublicKeyHash).toMatch(
             /^[a-f0-9]{128}$/u,
         );
         expect(receiverKeyProof.receiverKeyProofRoot).toMatch(
             /^[a-f0-9]{128}$/u,
         );
-        expect(receiverPayload.receiverPayloadDigest).toMatch(
-            /^[a-f0-9]{128}$/u,
-        );
+        expect(receiverPayload.receiverPayloadHash).toMatch(/^[a-f0-9]{128}$/u);
         expect(receiverPayload).not.toHaveProperty('receiverShareVector');
         expect(receiverPayload).not.toHaveProperty('shareCommitmentOpening');
-        expect(shareCommitment.shareCommitmentDigest).toMatch(
-            /^[a-f0-9]{128}$/u,
-        );
+        expect(shareCommitment.shareCommitmentHash).toMatch(/^[a-f0-9]{128}$/u);
         expect(shareCommitment).not.toHaveProperty('openingRandomness');
     });
 
     it('builds a deterministic statement that binds every public transcript input', () => {
         const statement = createStatement();
         const changedStatement = createStatement({
-            manifestDigest: digest('changed-manifest'),
+            manifestHash: hash('changed-manifest'),
         });
 
         expect(statement.objectType).toBe('BallotProofStatement');
         expect(statement.shareVectorWidth).toBe(220);
-        expect(statement.ballotScoreEncodingProfileDigest).toMatch(
+        expect(statement.ballotScoreEncodingProfileHash).toMatch(
             /^[a-f0-9]{128}$/u,
         );
-        expect(statement.ballotShareLayoutProfileDigest).toMatch(
+        expect(statement.ballotShareLayoutProfileHash).toMatch(
             /^[a-f0-9]{128}$/u,
         );
-        expect(statement.aggregateInputEncodingProfileDigest).toMatch(
+        expect(statement.aggregateInputEncodingProfileHash).toMatch(
             /^[a-f0-9]{128}$/u,
         );
-        expect(statement.encodedShareVectorLayoutDigest).toMatch(
+        expect(statement.encodedShareVectorLayoutHash).toMatch(
             /^[a-f0-9]{128}$/u,
         );
-        expect(statement.encodedAggregateLayoutDigest).toMatch(
+        expect(statement.encodedAggregateLayoutHash).toMatch(
             /^[a-f0-9]{128}$/u,
         );
-        expect(statement.ballotProofStatementDigest).toMatch(
-            /^[a-f0-9]{128}$/u,
+        expect(statement.ballotProofStatementHash).toMatch(/^[a-f0-9]{128}$/u);
+        expect(statement.challengeDomainHash).toMatch(/^[a-f0-9]{128}$/u);
+        expect(changedStatement.ballotProofStatementHash).not.toBe(
+            statement.ballotProofStatementHash,
         );
-        expect(statement.challengeDomainDigest).toMatch(/^[a-f0-9]{128}$/u);
-        expect(changedStatement.ballotProofStatementDigest).not.toBe(
-            statement.ballotProofStatementDigest,
-        );
-        expect(changedStatement.challengeDomainDigest).toBe(
-            statement.challengeDomainDigest,
+        expect(changedStatement.challengeDomainHash).toBe(
+            statement.challengeDomainHash,
         );
     });
 
-    it('binds the encoded-score layout digests into the challenge domain and proof record', () => {
+    it('binds the encoded-score layout Hashes into the challenge domain and proof record', () => {
         const statement = createStatement();
         const changedLayoutStatement = createStatement({
-            encodedShareVectorLayoutDigest: digest(
+            encodedShareVectorLayoutHash: hash(
                 'changed-encoded-share-vector-layout',
             ),
         });
         const proofRecord = createBallotProofRecordShell({
             statement,
-            relationStatementDigest: digest('relation-statement'),
-            proofRoot: digest('proof-root'),
-            proofBytesDigest: digest('proof-bytes'),
+            relationStatementHash: hash('relation-statement'),
+            proofRoot: hash('proof-root'),
+            proofBytesHash: hash('proof-bytes'),
             proofSizeBytes: 1_024,
         });
         const changedLayoutProofRecord = createBallotProofRecordShell({
             statement: changedLayoutStatement,
-            relationStatementDigest: digest('changed-relation-statement'),
-            proofRoot: digest('proof-root'),
-            proofBytesDigest: digest('proof-bytes'),
+            relationStatementHash: hash('changed-relation-statement'),
+            proofRoot: hash('proof-root'),
+            proofBytesHash: hash('proof-bytes'),
             proofSizeBytes: 1_024,
         });
 
-        expect(changedLayoutStatement.challengeDomainDigest).not.toBe(
-            statement.challengeDomainDigest,
+        expect(changedLayoutStatement.challengeDomainHash).not.toBe(
+            statement.challengeDomainHash,
         );
-        expect(changedLayoutStatement.ballotProofStatementDigest).not.toBe(
-            statement.ballotProofStatementDigest,
+        expect(changedLayoutStatement.ballotProofStatementHash).not.toBe(
+            statement.ballotProofStatementHash,
         );
-        expect(changedLayoutProofRecord.challengeDigest).not.toBe(
-            proofRecord.challengeDigest,
+        expect(changedLayoutProofRecord.challengeHash).not.toBe(
+            proofRecord.challengeHash,
         );
     });
 
@@ -200,41 +194,41 @@ describe('ballot privacy proof object boundary', () => {
         const statement = createStatement();
         const proofRecord = createBallotProofRecordShell({
             statement,
-            relationStatementDigest: digest('relation-statement'),
-            proofRoot: digest('proof-root'),
-            proofBytesDigest: digest('proof-bytes'),
+            relationStatementHash: hash('relation-statement'),
+            proofRoot: hash('proof-root'),
+            proofBytesHash: hash('proof-bytes'),
             proofSizeBytes: 1_024,
         });
         const changedProofRecord = createBallotProofRecordShell({
             statement,
-            relationStatementDigest: digest('relation-statement'),
-            proofRoot: digest('changed-proof-root'),
-            proofBytesDigest: digest('proof-bytes'),
+            relationStatementHash: hash('relation-statement'),
+            proofRoot: hash('changed-proof-root'),
+            proofBytesHash: hash('proof-bytes'),
             proofSizeBytes: 1_024,
         });
         const changedRelationProofRecord = createBallotProofRecordShell({
             statement,
-            relationStatementDigest: digest('changed-relation-statement'),
-            proofRoot: digest('proof-root'),
-            proofBytesDigest: digest('proof-bytes'),
+            relationStatementHash: hash('changed-relation-statement'),
+            proofRoot: hash('proof-root'),
+            proofBytesHash: hash('proof-bytes'),
             proofSizeBytes: 1_024,
         });
 
         expect(proofRecord.objectType).toBe('BallotProofRecord');
-        expect(proofRecord.ballotProofStatementDigest).toBe(
-            statement.ballotProofStatementDigest,
+        expect(proofRecord.ballotProofStatementHash).toBe(
+            statement.ballotProofStatementHash,
         );
-        expect(proofRecord.relationStatementDigest).toBe(
-            digest('relation-statement'),
+        expect(proofRecord.relationStatementHash).toBe(
+            hash('relation-statement'),
         );
-        expect(proofRecord.challengeDigest).not.toBe(
-            changedProofRecord.challengeDigest,
+        expect(proofRecord.challengeHash).not.toBe(
+            changedProofRecord.challengeHash,
         );
-        expect(proofRecord.challengeDigest).not.toBe(
-            changedRelationProofRecord.challengeDigest,
+        expect(proofRecord.challengeHash).not.toBe(
+            changedRelationProofRecord.challengeHash,
         );
-        expect(proofRecord.ballotProofRecordDigest).not.toBe(
-            changedProofRecord.ballotProofRecordDigest,
+        expect(proofRecord.ballotProofRecordHash).not.toBe(
+            changedProofRecord.ballotProofRecordHash,
         );
     });
 
@@ -249,63 +243,63 @@ describe('ballot privacy proof object boundary', () => {
         };
         const publicRandomnessHex = '00'.repeat(32);
         const proofRecord = createBallotProofRecordShell({
-            backendStatementDigest: digest('ballot-backend-statement'),
-            linearStatementDigest: digest('ballot-linear-statement'),
-            proofBytesDigest: deriveProofBytesDigest({ proofBytesHex }),
-            proofEncodingProfileDigest: deriveBallotProofEncodingProfileDigest({
+            backendStatementHash: hash('ballot-backend-statement'),
+            linearStatementHash: hash('ballot-linear-statement'),
+            proofBytesHash: deriveProofBytesHash({ proofBytesHex }),
+            proofEncodingProfileHash: deriveBallotProofEncodingProfileHash({
                 proofEncoding,
             }),
-            proofParameterSetDigest: deriveBallotProofParameterSetDigest({
+            proofParameterSetHash: deriveBallotProofParameterSetHash({
                 parameterSet,
             }),
-            proofRoot: digest('ballot-proof-root'),
+            proofRoot: hash('ballot-proof-root'),
             proofSizeBytes: proofBytesHex.length / 2,
-            publicRandomnessDigest: deriveBallotProofPublicRandomnessDigest({
+            publicRandomnessHash: deriveBallotProofPublicRandomnessHash({
                 publicRandomnessHex,
             }),
-            relationStatementDigest: digest('relation-statement'),
+            relationStatementHash: hash('relation-statement'),
             statement,
-            statementMatrixDigest: digest('ballot-statement-matrix'),
-            targetVectorDigest: digest('ballot-target-vector'),
+            statementMatrixHash: hash('ballot-statement-matrix'),
+            targetVectorHash: hash('ballot-target-vector'),
         });
         const changedRandomnessProofRecord = createBallotProofRecordShell({
-            backendStatementDigest: digest('ballot-backend-statement'),
-            linearStatementDigest: digest('ballot-linear-statement'),
-            proofBytesDigest: deriveProofBytesDigest({ proofBytesHex }),
-            proofEncodingProfileDigest: deriveBallotProofEncodingProfileDigest({
+            backendStatementHash: hash('ballot-backend-statement'),
+            linearStatementHash: hash('ballot-linear-statement'),
+            proofBytesHash: deriveProofBytesHash({ proofBytesHex }),
+            proofEncodingProfileHash: deriveBallotProofEncodingProfileHash({
                 proofEncoding,
             }),
-            proofParameterSetDigest: deriveBallotProofParameterSetDigest({
+            proofParameterSetHash: deriveBallotProofParameterSetHash({
                 parameterSet,
             }),
-            proofRoot: digest('ballot-proof-root'),
+            proofRoot: hash('ballot-proof-root'),
             proofSizeBytes: proofBytesHex.length / 2,
-            publicRandomnessDigest: deriveBallotProofPublicRandomnessDigest({
+            publicRandomnessHash: deriveBallotProofPublicRandomnessHash({
                 publicRandomnessHex: '11'.repeat(32),
             }),
-            relationStatementDigest: digest('relation-statement'),
+            relationStatementHash: hash('relation-statement'),
             statement,
-            statementMatrixDigest: digest('ballot-statement-matrix'),
-            targetVectorDigest: digest('ballot-target-vector'),
+            statementMatrixHash: hash('ballot-statement-matrix'),
+            targetVectorHash: hash('ballot-target-vector'),
         });
         const incompleteBackendMetadataProofRecord =
             createBallotProofRecordShell({
-                linearStatementDigest: digest('ballot-linear-statement'),
-                proofBytesDigest: deriveProofBytesDigest({ proofBytesHex }),
-                proofRoot: digest('ballot-proof-root'),
+                linearStatementHash: hash('ballot-linear-statement'),
+                proofBytesHash: deriveProofBytesHash({ proofBytesHex }),
+                proofRoot: hash('ballot-proof-root'),
                 proofSizeBytes: proofBytesHex.length / 2,
-                relationStatementDigest: digest('relation-statement'),
+                relationStatementHash: hash('relation-statement'),
                 statement,
             });
 
-        expect(proofRecord.backendStatementDigest).toBe(
-            digest('ballot-backend-statement'),
+        expect(proofRecord.backendStatementHash).toBe(
+            hash('ballot-backend-statement'),
         );
-        expect(proofRecord.proofParameterSetDigest).toBe(
-            deriveBallotProofParameterSetDigest({ parameterSet }),
+        expect(proofRecord.proofParameterSetHash).toBe(
+            deriveBallotProofParameterSetHash({ parameterSet }),
         );
-        expect(proofRecord.challengeDigest).not.toBe(
-            changedRandomnessProofRecord.challengeDigest,
+        expect(proofRecord.challengeHash).not.toBe(
+            changedRandomnessProofRecord.challengeHash,
         );
         expect(
             verifyBallotProof({
@@ -336,23 +330,22 @@ describe('ballot privacy proof object boundary', () => {
         const componentProofInputs =
             createComponentProofVerificationInputsFixture(componentProofBundle);
         const proofRecord = createBallotProofRecordShell({
-            backendStatementDigest: componentProofBundle.backendStatementDigest,
-            componentBundleStatementDigest:
-                componentProofBundle.componentBundleStatementDigest,
-            componentProofBundleDigest:
-                componentProofBundle.componentProofBundleDigest,
-            linearStatementDigest: digest('component-linear-statement'),
-            proofBytesDigest: deriveProofBytesDigest({ proofBytesHex }),
-            proofEncodingProfileDigest: digest('ballot-proof-encoding'),
-            proofParameterSetDigest: digest('ballot-proof-parameters'),
-            proofRoot: digest('ballot-proof-root'),
+            backendStatementHash: componentProofBundle.backendStatementHash,
+            componentBundleStatementHash:
+                componentProofBundle.componentBundleStatementHash,
+            componentProofBundleHash:
+                componentProofBundle.componentProofBundleHash,
+            linearStatementHash: hash('component-linear-statement'),
+            proofBytesHash: deriveProofBytesHash({ proofBytesHex }),
+            proofEncodingProfileHash: hash('ballot-proof-encoding'),
+            proofParameterSetHash: hash('ballot-proof-parameters'),
+            proofRoot: hash('ballot-proof-root'),
             proofSizeBytes: proofBytesHex.length / 2,
-            publicRandomnessDigest: digest('ballot-proof-randomness'),
-            relationStatementDigest:
-                componentProofBundle.relationStatementDigest,
+            publicRandomnessHash: hash('ballot-proof-randomness'),
+            relationStatementHash: componentProofBundle.relationStatementHash,
             statement,
-            statementMatrixDigest: digest('ballot-statement-matrix'),
-            targetVectorDigest: digest('ballot-target-vector'),
+            statementMatrixHash: hash('ballot-statement-matrix'),
+            targetVectorHash: hash('ballot-target-vector'),
         });
         const reorderedComponentProofBundle = createComponentProofBundleFixture(
             statement,
@@ -363,24 +356,24 @@ describe('ballot privacy proof object boundary', () => {
                 reorderedComponentProofBundle,
             );
         const reorderedProofRecord = createBallotProofRecordShell({
-            backendStatementDigest:
-                reorderedComponentProofBundle.backendStatementDigest,
-            componentBundleStatementDigest:
-                reorderedComponentProofBundle.componentBundleStatementDigest,
-            componentProofBundleDigest:
-                reorderedComponentProofBundle.componentProofBundleDigest,
-            linearStatementDigest: digest('component-linear-statement'),
-            proofBytesDigest: deriveProofBytesDigest({ proofBytesHex }),
-            proofEncodingProfileDigest: digest('ballot-proof-encoding'),
-            proofParameterSetDigest: digest('ballot-proof-parameters'),
-            proofRoot: digest('ballot-proof-root'),
+            backendStatementHash:
+                reorderedComponentProofBundle.backendStatementHash,
+            componentBundleStatementHash:
+                reorderedComponentProofBundle.componentBundleStatementHash,
+            componentProofBundleHash:
+                reorderedComponentProofBundle.componentProofBundleHash,
+            linearStatementHash: hash('component-linear-statement'),
+            proofBytesHash: deriveProofBytesHash({ proofBytesHex }),
+            proofEncodingProfileHash: hash('ballot-proof-encoding'),
+            proofParameterSetHash: hash('ballot-proof-parameters'),
+            proofRoot: hash('ballot-proof-root'),
             proofSizeBytes: proofBytesHex.length / 2,
-            publicRandomnessDigest: digest('ballot-proof-randomness'),
-            relationStatementDigest:
-                reorderedComponentProofBundle.relationStatementDigest,
+            publicRandomnessHash: hash('ballot-proof-randomness'),
+            relationStatementHash:
+                reorderedComponentProofBundle.relationStatementHash,
             statement,
-            statementMatrixDigest: digest('ballot-statement-matrix'),
-            targetVectorDigest: digest('ballot-target-vector'),
+            statementMatrixHash: hash('ballot-statement-matrix'),
+            targetVectorHash: hash('ballot-target-vector'),
         });
 
         expect(
@@ -415,7 +408,7 @@ describe('ballot privacy proof object boundary', () => {
             verifyBallotProof({
                 ballotProof: {
                     ...proofRecord,
-                    componentProofBundleDigest: digest(
+                    componentProofBundleHash: hash(
                         'wrong-component-proof-bundle',
                     ),
                 },
@@ -470,7 +463,7 @@ describe('ballot privacy proof object boundary', () => {
                 componentIndex === 0
                     ? {
                           ...componentProofInput,
-                          componentProofStatementDigest: digest(
+                          componentProofStatementHash: hash(
                               'wrong-component-proof-statement',
                           ),
                       }
@@ -497,7 +490,7 @@ describe('ballot privacy proof object boundary', () => {
                 const mutableProofInput: Record<string, unknown> = {
                     ...componentProofInput,
                 };
-                delete mutableProofInput.componentProofStatementDigest;
+                delete mutableProofInput.componentProofStatementHash;
 
                 return mutableProofInput as typeof componentProofInput;
             },
@@ -517,34 +510,31 @@ describe('ballot privacy proof object boundary', () => {
             missingComponentProofStatementResult.refusedObjects.some(
                 (refusal) =>
                     refusal.message.includes(
-                        'must be bound to a component proof statement digest',
+                        'must be bound to a component proof statement hash',
                     ),
             ),
         ).toBe(true);
 
-        const componentProofBundleWithoutStatementDigest = {
+        const componentProofBundleWithoutStatementHash = {
             ...componentProofBundle,
         };
         delete (
-            componentProofBundleWithoutStatementDigest as Record<
-                string,
-                unknown
-            >
-        ).ballotProofStatementDigest;
-        const missingBundleStatementDigestResult = verifyBallotProof({
+            componentProofBundleWithoutStatementHash as Record<string, unknown>
+        ).ballotProofStatementHash;
+        const missingBundleStatementHashResult = verifyBallotProof({
             ballotProof: proofRecord,
             componentProofBundle:
-                componentProofBundleWithoutStatementDigest as typeof componentProofBundle,
+                componentProofBundleWithoutStatementHash as typeof componentProofBundle,
             componentProofInputs,
             proofBytesHex,
             statement,
         });
-        expect(missingBundleStatementDigestResult).toMatchObject({
+        expect(missingBundleStatementHashResult).toMatchObject({
             ok: false,
             unresolvedReason: 'BallotPackageInvalid',
         });
         expect(
-            missingBundleStatementDigestResult.refusedObjects.some((refusal) =>
+            missingBundleStatementHashResult.refusedObjects.some((refusal) =>
                 refusal.message.includes(
                     'component proof bundle has an invalid canonical shape',
                 ),
@@ -617,11 +607,11 @@ describe('ballot privacy proof object boundary', () => {
                           ...componentProofInput,
                           proofStatement: createComponentProofStatementFixture({
                               componentId: componentProofInput.componentId,
-                              componentProofStatementDigest: digest(
-                                  'wrong-supplied-component-proof-statement-canonical-digest',
+                              componentProofStatementHash: hash(
+                                  'wrong-supplied-component-proof-statement-canonical-hash',
                               ),
-                              componentStatementDigest:
-                                  componentProofInput.statementDigest,
+                              componentStatementHash:
+                                  componentProofInput.statementHash,
                               proofStatementFormat:
                                   componentProofInput.proofStatementFormat,
                           }),
@@ -664,17 +654,17 @@ describe('ballot privacy proof object boundary', () => {
         const proofBytesHex = '001122aabbcc';
         const proofRecord = createBallotProofRecordShell({
             statement,
-            relationStatementDigest: digest('relation-statement'),
-            proofRoot: digest('proof-root'),
-            proofBytesDigest: deriveProofBytesDigest({ proofBytesHex }),
+            relationStatementHash: hash('relation-statement'),
+            proofRoot: hash('proof-root'),
+            proofBytesHash: deriveProofBytesHash({ proofBytesHex }),
             proofSizeBytes: proofBytesHex.length / 2,
         });
         const wrongProofBytes = '001122aabbcd';
         const shortProofRecord = createBallotProofRecordShell({
             statement,
-            relationStatementDigest: digest('relation-statement'),
-            proofRoot: digest('proof-root'),
-            proofBytesDigest: deriveProofBytesDigest({ proofBytesHex }),
+            relationStatementHash: hash('relation-statement'),
+            proofRoot: hash('proof-root'),
+            proofBytesHash: deriveProofBytesHash({ proofBytesHex }),
             proofSizeBytes: proofBytesHex.length / 2 + 1,
         });
 
@@ -727,16 +717,16 @@ describe('ballot privacy proof object boundary', () => {
         const proofBytesHex = '001122aabbcc';
         const proofRecord = createBallotProofRecordShell({
             statement,
-            relationStatementDigest: digest('relation-statement'),
-            proofRoot: digest('proof-root'),
-            proofBytesDigest: deriveProofBytesDigest({ proofBytesHex }),
+            relationStatementHash: hash('relation-statement'),
+            proofRoot: hash('proof-root'),
+            proofBytesHash: deriveProofBytesHash({ proofBytesHex }),
             proofSizeBytes: proofBytesHex.length / 2,
         });
         const dynamicRosterProfileEvidence = createDynamicRosterProfileEvidence(
             {
                 frozenRosterSize: statement.receiverPublicKeys.length,
                 optionCount: statement.optionCount,
-                thresholdProfileDigest: statement.thresholdProfileDigest,
+                thresholdProfileHash: statement.thresholdProfileHash,
             },
         );
 
@@ -785,11 +775,11 @@ describe('ballot privacy proof object boundary', () => {
             const proofBytesHex = '001122aabbcc';
             const proofRecord = createBallotProofRecordShell({
                 statement,
-                relationStatementDigest: digest(
+                relationStatementHash: hash(
                     `micro-roster-relation-${rosterSize}`,
                 ),
-                proofRoot: digest(`micro-roster-proof-root-${rosterSize}`),
-                proofBytesDigest: deriveProofBytesDigest({ proofBytesHex }),
+                proofRoot: hash(`micro-roster-proof-root-${rosterSize}`),
+                proofBytesHash: deriveProofBytesHash({ proofBytesHex }),
                 proofSizeBytes: proofBytesHex.length / 2,
             });
 

@@ -50,6 +50,7 @@ use crate::{
     transcript_core::decode_hex,
 };
 
+#[path = "component_verifier/relation.rs"]
 mod relation;
 
 use relation::{

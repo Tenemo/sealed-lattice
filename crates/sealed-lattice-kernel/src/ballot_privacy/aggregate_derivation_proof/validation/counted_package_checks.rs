@@ -4,12 +4,12 @@ pub(in crate::ballot_privacy::aggregate_derivation_proof) fn collect_aggregate_c
     counted_ballot_packages: Option<&Value>,
     component: &Value,
 ) -> Vec<Value> {
-    let object_digest = string_field(component, "aggregateDerivationComponentDigest");
+    let object_hash = string_field(component, "aggregateDerivationComponentHash");
     let mut refused_objects = Vec::new();
     let Some(packages) = counted_ballot_packages.and_then(Value::as_array) else {
         refused_objects.push(structural_refusal(
             "Aggregate derivation verification requires countedBallotPackages so the verifier can route the counted set through accepted M5 package verification.",
-            object_digest,
+            object_hash,
         ));
 
         return refused_objects;
@@ -17,26 +17,26 @@ pub(in crate::ballot_privacy::aggregate_derivation_proof) fn collect_aggregate_c
     if packages.is_empty() {
         refused_objects.push(structural_refusal(
             "Aggregate derivation verification requires at least one counted ballot package.",
-            object_digest,
+            object_hash,
         ));
 
         return refused_objects;
     }
 
-    let mut seen_package_digests = BTreeSet::new();
+    let mut seen_package_hashes = BTreeSet::new();
     for package in packages {
-        let package_digest = string_field(package, "ballotPackageDigest");
-        let Some(package_digest) = package_digest else {
+        let package_hash = string_field(package, "ballotPackageHash");
+        let Some(package_hash) = package_hash else {
             refused_objects.push(structural_refusal(
-                "Aggregate derivation counted package is missing ballotPackageDigest.",
-                object_digest,
+                "Aggregate derivation counted package is missing ballotPackageHash.",
+                object_hash,
             ));
             continue;
         };
-        if !seen_package_digests.insert(package_digest.to_string()) {
+        if !seen_package_hashes.insert(package_hash.to_string()) {
             refused_objects.push(structural_refusal(
                 "Aggregate derivation counted ballot packages must not contain duplicates.",
-                Some(package_digest),
+                Some(package_hash),
             ));
         }
 
@@ -62,7 +62,7 @@ pub(in crate::ballot_privacy::aggregate_derivation_proof) fn collect_aggregate_c
                     "Aggregate derivation counted ballot packages must carry proof-byte-bearing M5 verifier inputs; missing {}.",
                     missing_field_names.join(", ")
                 ),
-                Some(package_digest),
+                Some(package_hash),
             ));
         }
     }
@@ -81,7 +81,7 @@ pub(in crate::ballot_privacy::aggregate_derivation_proof) fn collect_aggregate_c
         return preflight_refusals;
     }
 
-    let object_digest = string_field(component, "aggregateDerivationComponentDigest");
+    let object_hash = string_field(component, "aggregateDerivationComponentHash");
     let mut refused_objects = Vec::new();
     let packages = counted_ballot_packages
         .and_then(Value::as_array)
@@ -96,7 +96,7 @@ pub(in crate::ballot_privacy::aggregate_derivation_proof) fn collect_aggregate_c
 
     let mut ordered_packages = Vec::new();
     for package in packages {
-        let package_digest = string_field(package, "ballotPackageDigest");
+        let package_hash = string_field(package, "ballotPackageHash");
         let dynamic_roster_profile_evidence =
             object_map(package).and_then(|object| object.get("dynamicRosterProfileEvidence"));
         let verification = verify_claim_bearing_ballot_package(
@@ -110,22 +110,22 @@ pub(in crate::ballot_privacy::aggregate_derivation_proof) fn collect_aggregate_c
                     "Aggregate derivation counted package must verify through the accepted M5 Rust/WASM verifier before inclusion. {}",
                     verification_refusal_summary(&verification)
                 ),
-                package_digest.or(object_digest),
+                package_hash.or(object_hash),
             ));
         }
         ordered_packages.push(package);
     }
     ordered_packages.sort_by(|left_package, right_package| {
-        string_field(left_package, "ballotPackageDigest")
+        string_field(left_package, "ballotPackageHash")
             .unwrap_or("")
-            .cmp(string_field(right_package, "ballotPackageDigest").unwrap_or(""))
+            .cmp(string_field(right_package, "ballotPackageHash").unwrap_or(""))
     });
 
     refused_objects.extend(collect_counted_package_binding_refusals(
         &ordered_packages,
         statement,
         aggregate_commitment,
-        object_digest,
+        object_hash,
     ));
 
     refused_objects
@@ -159,13 +159,13 @@ fn collect_counted_package_binding_refusals(
     ordered_packages: &[&Value],
     statement: &Value,
     aggregate_commitment: &Value,
-    object_digest: Option<&str>,
+    object_hash: Option<&str>,
 ) -> Vec<Value> {
     let mut refused_objects = Vec::new();
     let Some(contributor_identity) = string_field(statement, "contributorIdentity") else {
         refused_objects.push(structural_refusal(
             "Aggregate derivation statement is missing contributor identity.",
-            object_digest,
+            object_hash,
         ));
 
         return refused_objects;
@@ -175,23 +175,23 @@ fn collect_counted_package_binding_refusals(
     else {
         refused_objects.push(structural_refusal(
             "Aggregate derivation statement is missing contributor roster position.",
-            object_digest,
+            object_hash,
         ));
 
         return refused_objects;
     };
 
-    let mut package_digests = Vec::new();
+    let mut package_hashes = Vec::new();
     let mut expected_package_references = Vec::new();
     let mut share_commitment_vectors = Vec::new();
     for package in ordered_packages {
-        if let Some(package_digest) = string_field(package, "ballotPackageDigest") {
-            package_digests.push(Value::String(package_digest.to_string()));
+        if let Some(package_hash) = string_field(package, "ballotPackageHash") {
+            package_hashes.push(Value::String(package_hash.to_string()));
         }
         refused_objects.extend(collect_counted_package_context_refusals(
             package,
             statement,
-            object_digest,
+            object_hash,
         ));
         match package_reference_for_contributor(
             package,
@@ -201,7 +201,7 @@ fn collect_counted_package_binding_refusals(
             Some(reference) => expected_package_references.push(reference),
             None => refused_objects.push(structural_refusal(
                 "Aggregate derivation counted package does not address the contributor in both receiver-payload and share-commitment references.",
-                string_field(package, "ballotPackageDigest").or(object_digest),
+                string_field(package, "ballotPackageHash").or(object_hash),
             )),
         }
         match share_commitment_vector_for_contributor(
@@ -212,7 +212,7 @@ fn collect_counted_package_binding_refusals(
             Some(vector) => share_commitment_vectors.push(vector),
             None => refused_objects.push(structural_refusal(
                 "Aggregate derivation counted package does not carry a valid public share commitment polynomial vector for the contributor.",
-                string_field(package, "ballotPackageDigest").or(object_digest),
+                string_field(package, "ballotPackageHash").or(object_hash),
             )),
         }
     }
@@ -221,17 +221,17 @@ fn collect_counted_package_binding_refusals(
     if statement_package_references != Some(&expected_package_references) {
         refused_objects.push(structural_refusal(
             "Aggregate derivation statement package references are not derived from the accepted counted M5 packages.",
-            object_digest,
+            object_hash,
         ));
     }
 
-    if let Some(expected_ballot_set_digest) =
-        derive_counted_package_ballot_set_digest(statement, package_digests)
-        && string_field(statement, "ballotSetDigest") != Some(expected_ballot_set_digest.as_str())
+    if let Some(expected_ballot_set_hash) =
+        derive_counted_package_ballot_set_hash(statement, package_hashes)
+        && string_field(statement, "ballotSetHash") != Some(expected_ballot_set_hash.as_str())
     {
         refused_objects.push(structural_refusal(
-            "Aggregate derivation ballot-set digest is not derived from the accepted counted M5 packages and post-close context.",
-            object_digest,
+            "Aggregate derivation ballot-set hash is not derived from the accepted counted M5 packages and post-close context.",
+            object_hash,
         ));
     }
 
@@ -256,25 +256,25 @@ fn collect_counted_package_binding_refusals(
         {
             refused_objects.push(structural_refusal(
                 "Aggregate share commitment polynomial vector is not the homomorphic sum of the accepted counted package commitments addressed to the contributor.",
-                string_field(aggregate_commitment, "aggregateShareCommitmentDigest").or(object_digest),
+                string_field(aggregate_commitment, "aggregateShareCommitmentHash").or(object_hash),
             ));
         }
-        if let Some(share_commitment_profile_digest) =
-            string_field(statement, "shareCommitmentProfileDigest")
-            && let Some(expected_body_digest) = derive_digest(
-                "AggregateShareCommitmentDigest",
+        if let Some(share_commitment_profile_hash) =
+            string_field(statement, "shareCommitmentProfileHash")
+            && let Some(expected_body_hash) = derive_hash(
+                "AggregateShareCommitmentHash",
                 &json!({
                     "commitmentPolynomialVector": expected_commitment_vector,
-                    "profileDigest": share_commitment_profile_digest,
+                    "profileHash": share_commitment_profile_hash,
                     "purpose": "aggregate-share-commitment-body-v1"
                 }),
             )
-            && string_field(aggregate_commitment, "commitmentBodyDigest")
-                != Some(expected_body_digest.as_str())
+            && string_field(aggregate_commitment, "commitmentBodyHash")
+                != Some(expected_body_hash.as_str())
         {
             refused_objects.push(structural_refusal(
-                "Aggregate share commitment body digest is not derived from the accepted counted package commitment sum.",
-                string_field(aggregate_commitment, "aggregateShareCommitmentDigest").or(object_digest),
+                "Aggregate share commitment body hash is not derived from the accepted counted package commitment sum.",
+                string_field(aggregate_commitment, "aggregateShareCommitmentHash").or(object_hash),
             ));
         }
     }
@@ -285,7 +285,7 @@ fn collect_counted_package_binding_refusals(
 fn collect_counted_package_context_refusals(
     package: &Value,
     statement: &Value,
-    object_digest: Option<&str>,
+    object_hash: Option<&str>,
 ) -> Vec<Value> {
     let mut refused_objects = Vec::new();
     let Some(ballot_statement) = package.get("ballotProofStatement") else {
@@ -293,18 +293,18 @@ fn collect_counted_package_context_refusals(
     };
     let context_fields = [
         "ceremonyId",
-        "manifestDigest",
-        "rosterDigest",
-        "pollSpecDigest",
-        "thresholdProfileDigest",
-        "shareCommitmentProfileDigest",
-        "receiverEncryptionProfileDigest",
-        "ballotScoreEncodingProfileDigest",
-        "ballotShareLayoutProfileDigest",
-        "aggregateInputEncodingProfileDigest",
-        "encodedShareVectorLayoutDigest",
-        "encodedAggregateLayoutDigest",
-        "shareCommitmentMessageBoundCertDigest",
+        "manifestHash",
+        "rosterHash",
+        "pollSpecHash",
+        "thresholdProfileHash",
+        "shareCommitmentProfileHash",
+        "receiverEncryptionProfileHash",
+        "ballotScoreEncodingProfileHash",
+        "ballotShareLayoutProfileHash",
+        "aggregateInputEncodingProfileHash",
+        "encodedShareVectorLayoutHash",
+        "encodedAggregateLayoutHash",
+        "shareCommitmentMessageBoundCertHash",
     ];
     if context_fields.iter().any(|field_name| {
         string_field(ballot_statement, field_name) != string_field(statement, field_name)
@@ -317,7 +317,7 @@ fn collect_counted_package_context_refusals(
     {
         refused_objects.push(structural_refusal(
             "Aggregate derivation counted package context does not match the aggregate statement context.",
-            string_field(package, "ballotPackageDigest").or(object_digest),
+            string_field(package, "ballotPackageHash").or(object_hash),
         ));
     }
 
@@ -346,11 +346,11 @@ fn package_reference_for_contributor(
         })?;
 
     Some(json!({
-        "ballotPackageDigest": string_field(package, "ballotPackageDigest")?,
-        "ballotProofStatementDigest": string_field(ballot_statement, "ballotProofStatementDigest")?,
+        "ballotPackageHash": string_field(package, "ballotPackageHash")?,
+        "ballotProofStatementHash": string_field(ballot_statement, "ballotProofStatementHash")?,
         "receiverPayloadCiphertextRoot": string_field(payload_reference, "receiverPayloadCiphertextRoot")?,
-        "receiverPayloadDigest": string_field(payload_reference, "receiverPayloadDigest")?,
-        "shareCommitmentDigest": string_field(commitment_reference, "shareCommitmentDigest")?
+        "receiverPayloadHash": string_field(payload_reference, "receiverPayloadHash")?,
+        "shareCommitmentHash": string_field(commitment_reference, "shareCommitmentHash")?
     }))
 }
 
@@ -430,22 +430,22 @@ fn summed_share_commitment_vector(vectors: &[Vec<Vec<String>>]) -> Option<Vec<Ve
     Some(summed_vector)
 }
 
-fn derive_counted_package_ballot_set_digest(
+fn derive_counted_package_ballot_set_hash(
     statement: &Value,
-    package_digests: Vec<Value>,
+    package_hashes: Vec<Value>,
 ) -> Option<String> {
-    derive_digest(
-        "BallotSetDigest",
+    derive_hash(
+        "BallotSetHash",
         &json!({
-            "ballotPackageDigests": package_digests,
-            "closeRecordDigest": string_field(statement, "closeRecordDigest")?,
-            "manifestDigest": string_field(statement, "manifestDigest")?,
-            "pollSpecDigest": string_field(statement, "pollSpecDigest")?,
-            "postVotingClosedContextDigest": string_field(statement, "postVotingClosedContextDigest")?,
+            "ballotPackageHashes": package_hashes,
+            "closeRecordHash": string_field(statement, "closeRecordHash")?,
+            "manifestHash": string_field(statement, "manifestHash")?,
+            "pollSpecHash": string_field(statement, "pollSpecHash")?,
+            "postVotingClosedContextHash": string_field(statement, "postVotingClosedContextHash")?,
             "purpose": "m6-post-close-counted-m5-ballot-set-v1",
-            "rosterDigest": string_field(statement, "rosterDigest")?,
-            "thresholdProfileDigest": string_field(statement, "thresholdProfileDigest")?,
-            "votingClosedBoardHeadDigest": string_field(statement, "votingClosedBoardHeadDigest")?
+            "rosterHash": string_field(statement, "rosterHash")?,
+            "thresholdProfileHash": string_field(statement, "thresholdProfileHash")?,
+            "votingClosedBoardHeadHash": string_field(statement, "votingClosedBoardHeadHash")?
         }),
     )
 }

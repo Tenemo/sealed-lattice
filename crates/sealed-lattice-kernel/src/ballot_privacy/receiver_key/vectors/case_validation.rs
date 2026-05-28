@@ -1,9 +1,9 @@
 use super::backend_helpers::{
-    is_protocol_digest as receiver_key_is_protocol_digest,
+    is_protocol_hash as receiver_key_is_protocol_hash,
     value_without_field as receiver_key_value_without_field,
 };
 use super::public_matrix_derivation::{
-    derive_receiver_public_matrix, identity_polynomial, validate_key_material_digest_from_target,
+    derive_receiver_public_matrix, identity_polynomial, validate_key_material_hash_from_target,
 };
 use super::*;
 use serde_json::{Map, Value, json};
@@ -11,27 +11,27 @@ use serde_json::{Map, Value, json};
 use crate::ballot_privacy::protocol_constants::{
     RECEIVER_ENCRYPTION_MODULE_DEGREE, RECEIVER_ENCRYPTION_MODULE_RANK, RECEIVER_ENCRYPTION_MODULUS,
 };
-use crate::hashing::derive_protocol_digest;
+use crate::hashing::derive_protocol_hash;
 
 pub(super) const BACKEND_STATEMENT_FORMAT: &str = "SparseSignedIntegerBackendStatement-v1";
-pub(super) const RECEIVER_KEY_STATEMENT_DIGEST_PURPOSE: &str = "receiver-key-backend-statement-v1";
-pub(super) const RECEIVER_KEY_MATRIX_DIGEST_PURPOSE: &str = "receiver-key-backend-matrix-v1";
-pub(super) const RECEIVER_KEY_TARGET_VECTOR_DIGEST_PURPOSE: &str =
+pub(super) const RECEIVER_KEY_STATEMENT_HASH_PURPOSE: &str = "receiver-key-backend-statement-v1";
+pub(super) const RECEIVER_KEY_MATRIX_HASH_PURPOSE: &str = "receiver-key-backend-matrix-v1";
+pub(super) const RECEIVER_KEY_TARGET_VECTOR_HASH_PURPOSE: &str =
     "receiver-key-backend-target-vector-v1";
-pub(super) const RECEIVER_KEY_BOUNDS_DIGEST_PURPOSE: &str = "receiver-key-backend-bounds-v1";
-pub(super) const RECEIVER_KEY_DIGEST_EXPANDED_MATRIX_DIGEST_PURPOSE: &str =
-    "receiver-key-backend-digest-expanded-matrix-v1";
-pub(super) const RECEIVER_KEY_DIGEST_EXPANDED_TARGET_VECTOR_DIGEST_PURPOSE: &str =
-    "receiver-key-backend-digest-expanded-target-vector-v1";
-pub(super) const RECEIVER_KEY_PUBLIC_CONTEXT_DIGEST_PURPOSE: &str =
+pub(super) const RECEIVER_KEY_BOUNDS_HASH_PURPOSE: &str = "receiver-key-backend-bounds-v1";
+pub(super) const RECEIVER_KEY_HASH_EXPANDED_MATRIX_HASH_PURPOSE: &str =
+    "receiver-key-backend-hash-expanded-matrix-v1";
+pub(super) const RECEIVER_KEY_HASH_EXPANDED_TARGET_VECTOR_HASH_PURPOSE: &str =
+    "receiver-key-backend-hash-expanded-target-vector-v1";
+pub(super) const RECEIVER_KEY_PUBLIC_CONTEXT_HASH_PURPOSE: &str =
     "receiver-key-backend-public-context-v1";
 pub(super) const RECEIVER_KEY_LINEAR_STATEMENT_PROFILE_ID: &str =
     "receiver-key-linear-module-lwe-statement-v1";
-pub(super) const RECEIVER_KEY_LINEAR_STATEMENT_DIGEST_PURPOSE: &str =
+pub(super) const RECEIVER_KEY_LINEAR_STATEMENT_HASH_PURPOSE: &str =
     "receiver-key-linear-proof-statement-v1";
-pub(super) const RECEIVER_KEY_LINEAR_STATEMENT_MATRIX_DIGEST_PURPOSE: &str =
+pub(super) const RECEIVER_KEY_LINEAR_STATEMENT_MATRIX_HASH_PURPOSE: &str =
     "receiver-key-linear-proof-statement-matrix-v1";
-pub(super) const RECEIVER_KEY_LINEAR_TARGET_VECTOR_DIGEST_PURPOSE: &str =
+pub(super) const RECEIVER_KEY_LINEAR_TARGET_VECTOR_HASH_PURPOSE: &str =
     "receiver-key-linear-proof-target-vector-v1";
 pub(super) const RECEIVER_KEY_LINEAR_RELATION: &str = "A*w + t = 0";
 pub(super) const RECEIVER_KEY_LINEAR_SOURCE_RING: &str = "Z_q[X]/(X^256 + 1)";
@@ -66,7 +66,7 @@ pub fn verify_receiver_key_vector_case_value(vector_case: &Value) -> Value {
             "vectorAvailable": true,
             "expectedOutcome": summary.expected_outcome,
             "statusLabels": summary.status_labels,
-            "acceptedDigests": summary.accepted_digests,
+            "acceptedHashes": summary.accepted_hashes,
             "refusedObjects": [],
             "unresolvedReason": Value::Null
         }),
@@ -75,7 +75,7 @@ pub fn verify_receiver_key_vector_case_value(vector_case: &Value) -> Value {
             "backendAvailable": BALLOT_PRIVACY_PROOF_BACKEND_AVAILABLE,
             "backendStatus": describe_proof_backend(),
             "statusLabels": [],
-            "acceptedDigests": [],
+            "acceptedHashes": [],
             "refusedObjects": [
                 {
                     "code": "InvalidFixture",
@@ -88,15 +88,15 @@ pub fn verify_receiver_key_vector_case_value(vector_case: &Value) -> Value {
 }
 
 pub(super) struct ReceiverKeyVectorSummary {
-    accepted_digests: Vec<String>,
+    accepted_hashes: Vec<String>,
     case_name: String,
     expected_outcome: String,
     status_labels: Vec<&'static str>,
 }
 
-pub(super) struct ReceiverKeyAcceptedDigests {
-    pub(super) backend_statement_digest: String,
-    pub(super) linear_statement_digest: String,
+pub(super) struct ReceiverKeyAcceptedHashes {
+    pub(super) backend_statement_hash: String,
+    pub(super) linear_statement_hash: String,
 }
 
 pub(super) fn validate_receiver_key_vector_case(
@@ -116,13 +116,13 @@ pub(super) fn validate_receiver_key_vector_case(
     }
 
     if proof_construction_accepted && expected_outcome == "accept" {
-        let accepted_digests = validate_accepting_case(case_object)?;
-        validate_digest_change_trace(case_object, &accepted_digests)?;
+        let accepted_hashes = validate_accepting_case(case_object)?;
+        validate_hash_change_trace(case_object, &accepted_hashes)?;
 
         Ok(ReceiverKeyVectorSummary {
-            accepted_digests: vec![
-                accepted_digests.backend_statement_digest,
-                accepted_digests.linear_statement_digest,
+            accepted_hashes: vec![
+                accepted_hashes.backend_statement_hash,
+                accepted_hashes.linear_statement_hash,
             ],
             case_name,
             expected_outcome,
@@ -137,7 +137,7 @@ pub(super) fn validate_receiver_key_vector_case(
         validate_preflight_rejecting_case(case_object)?;
 
         Ok(ReceiverKeyVectorSummary {
-            accepted_digests: Vec::new(),
+            accepted_hashes: Vec::new(),
             case_name,
             expected_outcome,
             status_labels: vec![
@@ -149,7 +149,7 @@ pub(super) fn validate_receiver_key_vector_case(
         validate_construction_rejecting_case(case_object, &expected_outcome)?;
 
         Ok(ReceiverKeyVectorSummary {
-            accepted_digests: Vec::new(),
+            accepted_hashes: Vec::new(),
             case_name,
             expected_outcome,
             status_labels: vec![
@@ -162,14 +162,14 @@ pub(super) fn validate_receiver_key_vector_case(
 
 pub(super) fn validate_accepting_case(
     case_object: &Map<String, Value>,
-) -> Result<ReceiverKeyAcceptedDigests, String> {
+) -> Result<ReceiverKeyAcceptedHashes, String> {
     let receiver_public_key = object_property(case_object, "receiverPublicKey")?;
     let receiver_key_proof = object_property(case_object, "receiverKeyProof")?;
     let backend_statement = object_property(case_object, "backendStatement")?;
     let linear_statement = object_property(case_object, "linearStatement")?;
     validate_receiver_public_key(receiver_public_key)?;
-    let backend_statement_digest = validate_backend_statement(backend_statement)?;
-    let linear_statement_digest =
+    let backend_statement_hash = validate_backend_statement(backend_statement)?;
+    let linear_statement_hash =
         validate_linear_statement(receiver_public_key, backend_statement, linear_statement)?;
     validate_proof_shell(
         receiver_public_key,
@@ -178,9 +178,9 @@ pub(super) fn validate_accepting_case(
         linear_statement,
     )?;
 
-    Ok(ReceiverKeyAcceptedDigests {
-        backend_statement_digest,
-        linear_statement_digest,
+    Ok(ReceiverKeyAcceptedHashes {
+        backend_statement_hash,
+        linear_statement_hash,
     })
 }
 
@@ -198,10 +198,10 @@ pub(super) fn validate_preflight_rejecting_case(
                 .to_string(),
         );
     }
-    if let Ok(unexpected_digests) = validate_accepting_case(case_object) {
+    if let Ok(unexpected_hashes) = validate_accepting_case(case_object) {
         return Err(format!(
-            "receiver-key reject vector unexpectedly validated with digests {} and {}",
-            unexpected_digests.backend_statement_digest, unexpected_digests.linear_statement_digest,
+            "receiver-key reject vector unexpectedly validated with Hashes {} and {}",
+            unexpected_hashes.backend_statement_hash, unexpected_hashes.linear_statement_hash,
         ));
     }
 
@@ -250,32 +250,26 @@ pub(super) fn validate_receiver_public_key(
         || u64_property(receiver_public_key, "objectVersion")? != 1
         || string_property(receiver_public_key, "receiverIdentity")?.is_empty()
         || u64_property(receiver_public_key, "receiverRosterPosition")? == 0
-        || !receiver_key_is_protocol_digest(&string_property(
+        || !receiver_key_is_protocol_hash(&string_property(receiver_public_key, "manifestHash")?)
+        || !receiver_key_is_protocol_hash(&string_property(receiver_public_key, "rosterHash")?)
+        || !receiver_key_is_protocol_hash(&string_property(
             receiver_public_key,
-            "manifestDigest",
+            "receiverEncryptionProfileHash",
         )?)
-        || !receiver_key_is_protocol_digest(&string_property(receiver_public_key, "rosterDigest")?)
-        || !receiver_key_is_protocol_digest(&string_property(
-            receiver_public_key,
-            "receiverEncryptionProfileDigest",
-        )?)
-        || !receiver_key_is_protocol_digest(&string_property(
-            receiver_public_key,
-            "keyMaterialDigest",
-        )?)
+        || !receiver_key_is_protocol_hash(&string_property(receiver_public_key, "keyMaterialHash")?)
     {
         return Err("receiver-key public key has an invalid canonical shape".to_string());
     }
     let public_key_payload = receiver_key_value_without_field(
         &Value::Object(receiver_public_key.clone()),
-        "receiverPublicKeyDigest",
+        "receiverPublicKeyHash",
     )?;
-    let expected_digest =
-        derive_protocol_digest("PublicKeyDigest", &public_key_payload).map_err(|error| {
-            format!("receiver-key public key digest could not be recomputed: {error}")
+    let expected_hash =
+        derive_protocol_hash("PublicKeyHash", &public_key_payload).map_err(|error| {
+            format!("receiver-key public key hash could not be recomputed: {error}")
         })?;
-    if string_property(receiver_public_key, "receiverPublicKeyDigest")? != expected_digest {
-        return Err("receiver-key public key digest does not match its payload".to_string());
+    if string_property(receiver_public_key, "receiverPublicKeyHash")? != expected_hash {
+        return Err("receiver-key public key hash does not match its payload".to_string());
     }
 
     Ok(())
@@ -290,17 +284,17 @@ pub(super) fn validate_proof_shell(
     if string_property(receiver_key_proof, "objectType")? != "ReceiverKeyProof"
         || u64_property(receiver_key_proof, "objectVersion")? != 1
         || string_property(receiver_key_proof, "proofBackend")? != "LocalLinearLatticeRelation"
-        || !receiver_key_is_protocol_digest(&string_property(receiver_key_proof, "proofRoot")?)
+        || !receiver_key_is_protocol_hash(&string_property(receiver_key_proof, "proofRoot")?)
     {
         return Err("receiver-key proof shell has an invalid canonical shape".to_string());
     }
     for field_name in [
         "ceremonyId",
-        "manifestDigest",
-        "rosterDigest",
+        "manifestHash",
+        "rosterHash",
         "receiverIdentity",
-        "receiverEncryptionProfileDigest",
-        "receiverPublicKeyDigest",
+        "receiverEncryptionProfileHash",
+        "receiverPublicKeyHash",
     ] {
         if string_property(receiver_key_proof, field_name)?
             != string_property(receiver_public_key, field_name)?
@@ -339,7 +333,7 @@ pub(super) fn validate_proof_shell(
         &Value::Object(receiver_key_proof.clone()),
         "receiverKeyProofRoot",
     )?;
-    let expected_shell_root = derive_protocol_digest("ReceiverKeyProofRoot", &proof_shell_payload)
+    let expected_shell_root = derive_protocol_hash("ReceiverKeyProofRoot", &proof_shell_payload)
         .map_err(|error| {
             format!("receiver-key proof shell root could not be recomputed: {error}")
         })?;
@@ -354,21 +348,21 @@ pub(super) fn expected_receiver_key_proof_root(
     backend_statement: &Map<String, Value>,
     linear_statement: &Map<String, Value>,
 ) -> Result<String, String> {
-    derive_protocol_digest(
+    derive_protocol_hash(
         "ReceiverKeyProofRoot",
         &json!({
-            "backendStatementDigest": string_property(backend_statement, "backendStatementDigest")?,
+            "backendStatementHash": string_property(backend_statement, "backendStatementHash")?,
             "coefficientModulus": RECEIVER_ENCRYPTION_MODULUS,
             "errorInfinityNormBound": RECEIVER_ENCRYPTION_SHORT_VECTOR_INFINITY_NORM_BOUND,
-            "keyMaterialDigest": string_property(backend_statement, "keyMaterialDigest")?,
-            "linearStatementDigest": string_property(linear_statement, "statementDigest")?,
+            "keyMaterialHash": string_property(backend_statement, "keyMaterialHash")?,
+            "linearStatementHash": string_property(linear_statement, "statementHash")?,
             "moduleDegree": RECEIVER_ENCRYPTION_MODULE_DEGREE,
             "moduleRank": RECEIVER_ENCRYPTION_MODULE_RANK,
             "proofRelation": "receiver_public_key_vector = public_matrix * secret_vector + error_vector mod q_receiver",
             "proofRootKind": RECEIVER_KEY_LINEAR_PROOF_ROOT_KIND,
-            "publicMatrixSeedDigest": string_property(backend_statement, "publicMatrixSeedDigest")?,
-            "receiverEncryptionProfileDigest": string_property(backend_statement, "receiverEncryptionProfileDigest")?,
-            "receiverPublicKeyDigest": string_property(backend_statement, "receiverPublicKeyDigest")?,
+            "publicMatrixSeedHash": string_property(backend_statement, "publicMatrixSeedHash")?,
+            "receiverEncryptionProfileHash": string_property(backend_statement, "receiverEncryptionProfileHash")?,
+            "receiverPublicKeyHash": string_property(backend_statement, "receiverPublicKeyHash")?,
             "secretInfinityNormBound": RECEIVER_ENCRYPTION_SHORT_VECTOR_INFINITY_NORM_BOUND,
         }),
     )
@@ -405,12 +399,12 @@ pub(super) fn validate_linear_statement(
 
     for field_name in [
         "ceremonyId",
-        "manifestDigest",
-        "rosterDigest",
+        "manifestHash",
+        "rosterHash",
         "receiverIdentity",
-        "receiverEncryptionProfileDigest",
-        "receiverPublicKeyDigest",
-        "keyMaterialDigest",
+        "receiverEncryptionProfileHash",
+        "receiverPublicKeyHash",
+        "keyMaterialHash",
     ] {
         if string_property(linear_statement, field_name)?
             != string_property(receiver_public_key, field_name)?
@@ -423,28 +417,27 @@ pub(super) fn validate_linear_statement(
             );
         }
     }
-    if string_property(linear_statement, "publicMatrixSeedDigest")?
-        != string_property(backend_statement, "publicMatrixSeedDigest")?
+    if string_property(linear_statement, "publicMatrixSeedHash")?
+        != string_property(backend_statement, "publicMatrixSeedHash")?
     {
         return Err(
             "receiver-key linear statement is not bound to the backend matrix seed".to_string(),
         );
     }
-    for digest_field_name in [
-        "manifestDigest",
-        "rosterDigest",
-        "receiverEncryptionProfileDigest",
-        "receiverPublicKeyDigest",
-        "keyMaterialDigest",
-        "publicMatrixSeedDigest",
-        "statementMatrixDigest",
-        "targetVectorDigest",
-        "statementDigest",
+    for hash_field_name in [
+        "manifestHash",
+        "rosterHash",
+        "receiverEncryptionProfileHash",
+        "receiverPublicKeyHash",
+        "keyMaterialHash",
+        "publicMatrixSeedHash",
+        "statementMatrixHash",
+        "targetVectorHash",
+        "statementHash",
     ] {
-        if !receiver_key_is_protocol_digest(&string_property(linear_statement, digest_field_name)?)
-        {
+        if !receiver_key_is_protocol_hash(&string_property(linear_statement, hash_field_name)?) {
             return Err(format!(
-                "receiver-key linear statement field {digest_field_name} is not a protocol digest"
+                "receiver-key linear statement field {hash_field_name} is not a protocol hash"
             ));
         }
     }
@@ -466,38 +459,38 @@ pub(super) fn validate_linear_statement(
     let target_vector_values = array_property(linear_statement, "targetVectorCoefficients")?;
     let target_vector = validate_target_vector(target_vector_values)?;
     validate_canonical_linear_matrix(linear_statement, &statement_matrix)?;
-    validate_key_material_digest_from_target(linear_statement, &target_vector)?;
+    validate_key_material_hash_from_target(linear_statement, &target_vector)?;
 
-    let statement_matrix_digest = derive_receiver_key_backend_digest(
-        RECEIVER_KEY_LINEAR_STATEMENT_MATRIX_DIGEST_PURPOSE,
+    let statement_matrix_hash = derive_receiver_key_backend_hash(
+        RECEIVER_KEY_LINEAR_STATEMENT_MATRIX_HASH_PURPOSE,
         &Value::Array(statement_matrix_values.clone()),
     )?;
-    if string_property(linear_statement, "statementMatrixDigest")? != statement_matrix_digest {
-        return Err("receiver-key linear matrix digest does not match coefficients".to_string());
+    if string_property(linear_statement, "statementMatrixHash")? != statement_matrix_hash {
+        return Err("receiver-key linear matrix hash does not match coefficients".to_string());
     }
-    let target_vector_digest = derive_receiver_key_backend_digest(
-        RECEIVER_KEY_LINEAR_TARGET_VECTOR_DIGEST_PURPOSE,
+    let target_vector_hash = derive_receiver_key_backend_hash(
+        RECEIVER_KEY_LINEAR_TARGET_VECTOR_HASH_PURPOSE,
         &Value::Array(target_vector_values.clone()),
     )?;
-    if string_property(linear_statement, "targetVectorDigest")? != target_vector_digest {
-        return Err("receiver-key linear target digest does not match coefficients".to_string());
+    if string_property(linear_statement, "targetVectorHash")? != target_vector_hash {
+        return Err("receiver-key linear target hash does not match coefficients".to_string());
     }
 
     let statement_payload = receiver_key_value_without_field(
         &Value::Object(linear_statement.clone()),
-        "statementDigest",
+        "statementHash",
     )?;
-    let statement_digest = derive_receiver_key_backend_digest(
-        RECEIVER_KEY_LINEAR_STATEMENT_DIGEST_PURPOSE,
+    let statement_hash = derive_receiver_key_backend_hash(
+        RECEIVER_KEY_LINEAR_STATEMENT_HASH_PURPOSE,
         &statement_payload,
     )?;
-    if string_property(linear_statement, "statementDigest")? != statement_digest {
+    if string_property(linear_statement, "statementHash")? != statement_hash {
         return Err(
-            "receiver-key linear statement digest does not match its canonical payload".to_string(),
+            "receiver-key linear statement hash does not match its canonical payload".to_string(),
         );
     }
 
-    Ok(statement_digest)
+    Ok(statement_hash)
 }
 
 pub(super) fn validate_backend_statement(
@@ -514,35 +507,34 @@ pub(super) fn validate_backend_statement(
         || u64_property(backend_statement, "moduleDegree")? != RECEIVER_ENCRYPTION_MODULE_DEGREE
         || u64_property(backend_statement, "columnCount")? != RECEIVER_KEY_WITNESS_COLUMN_COUNT
         || u64_property(backend_statement, "rowCount")? != RECEIVER_KEY_EQUATION_ROW_COUNT
-        || u64_property(backend_statement, "digestExpandedRowCount")?
+        || u64_property(backend_statement, "hashExpandedRowCount")?
             != RECEIVER_KEY_EQUATION_ROW_COUNT
         || u64_property(backend_statement, "explicitRowCount")? != 0
     {
         return Err("receiver-key backend statement has an invalid canonical shape".to_string());
     }
-    for digest_field_name in [
-        "manifestDigest",
-        "rosterDigest",
-        "receiverEncryptionProfileDigest",
-        "receiverPublicKeyDigest",
-        "keyMaterialDigest",
-        "publicMatrixSeedDigest",
-        "receiverKeyContextDigest",
-        "matrixDigest",
-        "targetVectorDigest",
-        "boundsDigest",
-        "backendStatementDigest",
+    for hash_field_name in [
+        "manifestHash",
+        "rosterHash",
+        "receiverEncryptionProfileHash",
+        "receiverPublicKeyHash",
+        "keyMaterialHash",
+        "publicMatrixSeedHash",
+        "receiverKeyContextHash",
+        "matrixHash",
+        "targetVectorHash",
+        "boundsHash",
+        "backendStatementHash",
     ] {
-        if !receiver_key_is_protocol_digest(&string_property(backend_statement, digest_field_name)?)
-        {
+        if !receiver_key_is_protocol_hash(&string_property(backend_statement, hash_field_name)?) {
             return Err(format!(
-                "receiver-key backend statement field {digest_field_name} is not a protocol digest"
+                "receiver-key backend statement field {hash_field_name} is not a protocol hash"
             ));
         }
     }
 
     validate_expected_public_matrix_seed(backend_statement)?;
-    validate_receiver_key_context_digest(backend_statement)?;
+    validate_receiver_key_context_hash(backend_statement)?;
     validate_variable_columns(backend_statement)?;
     validate_row_batch(backend_statement)?;
     validate_bounds(backend_statement)?;
@@ -553,14 +545,14 @@ pub(super) fn validate_backend_statement(
             .ok_or_else(|| "receiver-key backend statement has no row batch".to_string())?,
         "rowBatch",
     )?;
-    let matrix_digest = derive_receiver_key_backend_digest(
-        RECEIVER_KEY_MATRIX_DIGEST_PURPOSE,
+    let matrix_hash = derive_receiver_key_backend_hash(
+        RECEIVER_KEY_MATRIX_HASH_PURPOSE,
         &json!({
             "rowBatches": [
                 {
                     "batchKind": string_property(row_batch, "batchKind")?,
                     "batchName": string_property(row_batch, "batchName")?,
-                    "matrixDigest": string_property(row_batch, "matrixDigest")?,
+                    "matrixHash": string_property(row_batch, "matrixHash")?,
                     "rowCount": u64_property(row_batch, "rowCount")?,
                     "rowKind": string_property(row_batch, "rowKind")?,
                     "rowOffset": u64_property(row_batch, "rowOffset")?,
@@ -568,11 +560,11 @@ pub(super) fn validate_backend_statement(
             ]
         }),
     )?;
-    if string_property(backend_statement, "matrixDigest")? != matrix_digest {
-        return Err("receiver-key backend matrix digest does not match row batch".to_string());
+    if string_property(backend_statement, "matrixHash")? != matrix_hash {
+        return Err("receiver-key backend matrix hash does not match row batch".to_string());
     }
-    let target_vector_digest = derive_receiver_key_backend_digest(
-        RECEIVER_KEY_TARGET_VECTOR_DIGEST_PURPOSE,
+    let target_vector_hash = derive_receiver_key_backend_hash(
+        RECEIVER_KEY_TARGET_VECTOR_HASH_PURPOSE,
         &json!({
             "rowBatches": [
                 {
@@ -581,39 +573,34 @@ pub(super) fn validate_backend_statement(
                     "rowCount": u64_property(row_batch, "rowCount")?,
                     "rowKind": string_property(row_batch, "rowKind")?,
                     "rowOffset": u64_property(row_batch, "rowOffset")?,
-                    "targetVectorDigest": string_property(row_batch, "targetVectorDigest")?,
+                    "targetVectorHash": string_property(row_batch, "targetVectorHash")?,
                 }
             ]
         }),
     )?;
-    if string_property(backend_statement, "targetVectorDigest")? != target_vector_digest {
-        return Err(
-            "receiver-key backend target-vector digest does not match row batch".to_string(),
-        );
+    if string_property(backend_statement, "targetVectorHash")? != target_vector_hash {
+        return Err("receiver-key backend target-vector hash does not match row batch".to_string());
     }
-    let bounds_digest = derive_receiver_key_backend_digest(
-        RECEIVER_KEY_BOUNDS_DIGEST_PURPOSE,
+    let bounds_hash = derive_receiver_key_backend_hash(
+        RECEIVER_KEY_BOUNDS_HASH_PURPOSE,
         &json!({ "bounds": array_property(backend_statement, "bounds")? }),
     )?;
-    if string_property(backend_statement, "boundsDigest")? != bounds_digest {
-        return Err("receiver-key backend bounds digest does not match bounds".to_string());
+    if string_property(backend_statement, "boundsHash")? != bounds_hash {
+        return Err("receiver-key backend bounds hash does not match bounds".to_string());
     }
     let statement_payload = receiver_key_value_without_field(
         &Value::Object(backend_statement.clone()),
-        "backendStatementDigest",
+        "backendStatementHash",
     )?;
-    let backend_statement_digest = derive_receiver_key_backend_digest(
-        RECEIVER_KEY_STATEMENT_DIGEST_PURPOSE,
-        &statement_payload,
-    )?;
-    if string_property(backend_statement, "backendStatementDigest")? != backend_statement_digest {
+    let backend_statement_hash =
+        derive_receiver_key_backend_hash(RECEIVER_KEY_STATEMENT_HASH_PURPOSE, &statement_payload)?;
+    if string_property(backend_statement, "backendStatementHash")? != backend_statement_hash {
         return Err(
-            "receiver-key backend statement digest does not match its canonical payload"
-                .to_string(),
+            "receiver-key backend statement hash does not match its canonical payload".to_string(),
         );
     }
 
-    Ok(backend_statement_digest)
+    Ok(backend_statement_hash)
 }
 
 pub(super) fn validate_witness_vector_layout(
@@ -715,8 +702,8 @@ pub(super) fn validate_canonical_linear_matrix(
     statement_matrix: &[Vec<Vec<u64>>],
 ) -> Result<(), String> {
     let expected_public_matrix = derive_receiver_public_matrix(
-        &string_property(linear_statement, "receiverEncryptionProfileDigest")?,
-        &string_property(linear_statement, "publicMatrixSeedDigest")?,
+        &string_property(linear_statement, "receiverEncryptionProfileHash")?,
+        &string_property(linear_statement, "publicMatrixSeedHash")?,
     )?;
 
     for row_index in 0..RECEIVER_ENCRYPTION_MODULE_RANK as usize {

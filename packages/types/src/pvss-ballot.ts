@@ -6,7 +6,7 @@ import type {
     PlaintextScoreBallotInput,
     ShamirPolynomial,
 } from './plaintext-oracle.js';
-import type { ProtocolDigest } from './protocol-digest.js';
+import type { ProtocolHash } from './protocol-hash.js';
 import type {
     ProtocolSignatureEnvelope,
     ProtocolVerificationStatusLabel,
@@ -20,7 +20,7 @@ export type PvssBallotShareVectorWidth = 20;
 export type PvssBallotRosterEntry = {
     readonly participantIdentity: string;
     readonly rosterPosition: number;
-    readonly signingPublicKeyDigest?: ProtocolDigest;
+    readonly signingPublicKeyHash?: ProtocolHash;
 };
 
 /** Deterministic internal input for test-mode ballot algebra. */
@@ -28,11 +28,11 @@ export type PvssBallotAlgebraInput = {
     readonly ceremonyId: string;
     readonly voterIdentity: string;
     readonly voterRosterPosition: number;
-    readonly electionManifestDigest: ProtocolDigest;
-    readonly rosterDigest: ProtocolDigest;
-    readonly pollSpecDigest: ProtocolDigest;
-    readonly duplicateBallotPolicyDigest: ProtocolDigest;
-    readonly thresholdProfileDigest: ProtocolDigest;
+    readonly electionManifestHash: ProtocolHash;
+    readonly rosterHash: ProtocolHash;
+    readonly pollSpecHash: ProtocolHash;
+    readonly duplicateBallotPolicyHash: ProtocolHash;
+    readonly thresholdProfileHash: ProtocolHash;
     readonly pollSpec: PollSpec;
     readonly thresholdProfile: ThresholdProfile;
     readonly rosterEntries: readonly PvssBallotRosterEntry[];
@@ -49,7 +49,7 @@ export type BallotOptionPolynomial = {
 
 /** Deterministic Shamir polynomial set for one normalized score ballot. */
 export type BallotPolynomialSet = {
-    readonly ballotPolynomialSetDigest: ProtocolDigest;
+    readonly ballotPolynomialSetHash: ProtocolHash;
     readonly normalizedBallot: NormalizedPlaintextScoreBallot;
     readonly optionPolynomials: readonly BallotOptionPolynomial[];
     readonly pvssThreshold: number;
@@ -70,7 +70,7 @@ export type TestShareCommitment = {
     readonly receiverIdentity: string;
     readonly receiverRosterPosition: number;
     readonly commitmentValues: readonly FieldElement[];
-    readonly shareCommitmentDigest: ProtocolDigest;
+    readonly shareCommitmentHash: ProtocolHash;
 };
 
 /** Private opening witness for one test share commitment. */
@@ -87,41 +87,41 @@ export type TestReceiverShareOpeningPayload = {
     readonly receiverRosterPosition: number;
     readonly shareVector: readonly FieldElement[];
     readonly openingVector: readonly FieldElement[];
-    readonly payloadDigest: ProtocolDigest;
+    readonly payloadHash: ProtocolHash;
 };
 
-/** Digest reference to one receiver commitment inside a ballot package shell. */
+/** Hash reference to one receiver commitment inside a ballot package shell. */
 export type ReceiverShareCommitmentReference = {
     readonly receiverIdentity: string;
     readonly receiverRosterPosition: number;
-    readonly shareCommitmentDigest: ProtocolDigest;
+    readonly shareCommitmentHash: ProtocolHash;
 };
 
-/** Digest reference to one receiver payload placeholder inside a ballot package shell. */
-export type ReceiverPayloadDigestReference = {
+/** Hash reference to one receiver payload placeholder inside a ballot package shell. */
+export type ReceiverPayloadHashReference = {
     readonly receiverIdentity: string;
     readonly receiverRosterPosition: number;
-    readonly payloadDigest: ProtocolDigest;
+    readonly payloadHash: ProtocolHash;
 };
 
 /** Transcript-facing shell for one internally generated ballot package. */
 export type BallotPackageShell = {
     readonly objectType: 'BallotPackage';
     readonly objectVersion: 1;
-    readonly ballotPackageDigest: ProtocolDigest;
+    readonly ballotPackageHash: ProtocolHash;
     readonly ceremonyId: string;
-    readonly electionManifestDigest: ProtocolDigest;
-    readonly rosterDigest: ProtocolDigest;
-    readonly pollSpecDigest: ProtocolDigest;
-    readonly thresholdProfileDigest: ProtocolDigest;
-    readonly duplicateBallotPolicyDigest: ProtocolDigest;
+    readonly electionManifestHash: ProtocolHash;
+    readonly rosterHash: ProtocolHash;
+    readonly pollSpecHash: ProtocolHash;
+    readonly thresholdProfileHash: ProtocolHash;
+    readonly duplicateBallotPolicyHash: ProtocolHash;
     readonly voterIdentity: string;
     readonly voterRosterPosition: number;
     readonly optionCount: number;
     readonly shareVectorWidth: PvssBallotShareVectorWidth;
-    readonly ballotPolynomialSetDigest: ProtocolDigest;
+    readonly ballotPolynomialSetHash: ProtocolHash;
     readonly receiverShareCommitments: readonly ReceiverShareCommitmentReference[];
-    readonly receiverPayloadDigests: readonly ReceiverPayloadDigestReference[];
+    readonly receiverPayloadHashes: readonly ReceiverPayloadHashReference[];
     readonly signature: ProtocolSignatureEnvelope;
 };
 
@@ -153,7 +153,7 @@ export type CountedBallotPackage = BallotPackageCandidate & {
 
 /** Rejected candidate summary kept separate from fatal derivation refusals. */
 export type RejectedBallotCandidate = {
-    readonly ballotPackageDigest: ProtocolDigest;
+    readonly ballotPackageHash: ProtocolHash;
     readonly voterIdentity?: string;
     readonly signedBoardOrder?: SignedBoardOrder;
     readonly refusalCodes: readonly string[];
@@ -163,52 +163,52 @@ export type RejectedBallotCandidate = {
 export type CanonicalBallotSetInput = {
     readonly boardEvidence: BoardConsistencyInput;
     readonly ceremonyId: string;
-    readonly electionManifestDigest: ProtocolDigest;
-    readonly rosterDigest: ProtocolDigest;
-    readonly pollSpecDigest: ProtocolDigest;
-    readonly thresholdProfileDigest: ProtocolDigest;
-    readonly duplicateBallotPolicyDigest: ProtocolDigest;
+    readonly electionManifestHash: ProtocolHash;
+    readonly rosterHash: ProtocolHash;
+    readonly pollSpecHash: ProtocolHash;
+    readonly thresholdProfileHash: ProtocolHash;
+    readonly duplicateBallotPolicyHash: ProtocolHash;
     readonly pollSpec: PollSpec;
     readonly thresholdProfile: ThresholdProfile;
     readonly rosterEntries: readonly PvssBallotRosterEntry[];
-    readonly votingClosedBoardHeadDigest: ProtocolDigest;
-    readonly closeRecordDigest: ProtocolDigest;
+    readonly votingClosedBoardHeadHash: ProtocolHash;
+    readonly closeRecordHash: ProtocolHash;
     readonly closeRecordBoardOrder: SignedBoardOrder;
     readonly closeRecordInclusionProof: InclusionProof;
     readonly candidateBallots: readonly BallotPackageCandidate[];
-    readonly includeRejectedCandidateSummariesInDigest?: boolean;
+    readonly includeRejectedCandidateSummariesInHash?: boolean;
 };
 
 /** Canonical ballot set selected under the frozen duplicate policy. */
 export type CanonicalBallotSet = {
     readonly ok: boolean;
     readonly statusLabels: readonly ProtocolVerificationStatusLabel[];
-    readonly acceptedDigests: readonly ProtocolDigest[];
+    readonly acceptedHashes: readonly ProtocolHash[];
     readonly refusedObjects: readonly RefusalRecord[];
     readonly ceremonyId: string;
-    readonly electionManifestDigest: ProtocolDigest;
-    readonly rosterDigest: ProtocolDigest;
-    readonly pollSpecDigest: ProtocolDigest;
-    readonly thresholdProfileDigest: ProtocolDigest;
-    readonly duplicateBallotPolicyDigest: ProtocolDigest;
-    readonly votingClosedBoardHeadDigest: ProtocolDigest;
-    readonly closeRecordDigest: ProtocolDigest;
-    readonly includeRejectedCandidateSummariesInDigest: boolean;
+    readonly electionManifestHash: ProtocolHash;
+    readonly rosterHash: ProtocolHash;
+    readonly pollSpecHash: ProtocolHash;
+    readonly thresholdProfileHash: ProtocolHash;
+    readonly duplicateBallotPolicyHash: ProtocolHash;
+    readonly votingClosedBoardHeadHash: ProtocolHash;
+    readonly closeRecordHash: ProtocolHash;
+    readonly includeRejectedCandidateSummariesInHash: boolean;
     readonly countedBallots: readonly CountedBallotPackage[];
     readonly rejectedCandidates: readonly RejectedBallotCandidate[];
-    readonly ballotSetDigest?: ProtocolDigest;
+    readonly ballotSetHash?: ProtocolHash;
 };
 
 /** Aggregate share and commitment for one trustee in the internal fixture path. */
 export type TestAggregateShare = {
     readonly objectType: 'TestAggregateShare';
-    readonly ballotSetDigest: ProtocolDigest;
+    readonly ballotSetHash: ProtocolHash;
     readonly trusteeIdentity: string;
     readonly trusteeRosterPosition: number;
     readonly shareVectorWidth: PvssBallotShareVectorWidth;
     readonly aggregateShareVector: readonly FieldElement[];
     readonly aggregateCommitmentValues: readonly FieldElement[];
-    readonly aggregateShareCommitmentDigest: ProtocolDigest;
+    readonly aggregateShareCommitmentHash: ProtocolHash;
 };
 
 /** Private aggregate opening witness used only by tests. */
@@ -219,6 +219,6 @@ export type TestAggregateShareWitness = {
 
 /** Output of internal test aggregate-share derivation. */
 export type TestAggregateShareSet = {
-    readonly ballotSetDigest: ProtocolDigest;
+    readonly ballotSetHash: ProtocolHash;
     readonly aggregateShares: readonly TestAggregateShareWitness[];
 };

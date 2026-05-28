@@ -54,11 +54,11 @@ pub(crate) fn parse_structured_share_commitment_statement(
             "Structured share-commitment proof statement modulus is not supported.",
         ));
     }
-    if derive_ballot_structured_share_commitment_statement_digest(structured_statement).as_deref()
-        != string_field(structured_statement, "statementDigest")
+    if derive_ballot_structured_share_commitment_statement_hash(structured_statement).as_deref()
+        != string_field(structured_statement, "statementHash")
     {
         return Err(ComponentProofBackendError::invalid(
-            "Structured share-commitment proof statement digest does not match its canonical payload.",
+            "Structured share-commitment proof statement hash does not match its canonical payload.",
         ));
     }
 
@@ -85,18 +85,18 @@ pub(crate) fn parse_structured_share_commitment_statement(
             "Structured share-commitment proof statement shareVectorWidth is not supported.",
         ));
     }
-    let share_commitment_profile_digest = string_field(
+    let share_commitment_profile_hash = string_field(
         structured_statement,
-        "shareCommitmentProfileDigest",
+        "shareCommitmentProfileHash",
     )
     .ok_or_else(|| {
         ComponentProofBackendError::invalid(
-            "Structured share-commitment proof statement is missing shareCommitmentProfileDigest.",
+            "Structured share-commitment proof statement is missing shareCommitmentProfileHash.",
         )
     })?;
-    if !is_protocol_digest(share_commitment_profile_digest) {
+    if !is_protocol_hash(share_commitment_profile_hash) {
         return Err(ComponentProofBackendError::invalid(
-            "Structured share-commitment proof statement profile digest is malformed.",
+            "Structured share-commitment proof statement profile hash is malformed.",
         ));
     }
     let receiver_rows = object_map(structured_statement)
@@ -180,9 +180,9 @@ pub(crate) fn parse_structured_share_commitment_statement(
                 error.message
             ))
         })?;
-    let message_matrix = derive_share_commitment_message_matrix(share_commitment_profile_digest)?;
+    let message_matrix = derive_share_commitment_message_matrix(share_commitment_profile_hash)?;
     let randomness_matrix =
-        derive_share_commitment_randomness_matrix(share_commitment_profile_digest)?;
+        derive_share_commitment_randomness_matrix(share_commitment_profile_hash)?;
     let mut source_statement_entries = Vec::new();
     let mut target_vector_coefficients = vec![vec![0_u64; source_ring_degree]; statement_rows];
     let mut covered_row_count = 0_usize;
@@ -387,13 +387,13 @@ pub(crate) fn structured_receiver_encryption_statement_as_sparse(
                 "Structured receiver-encryption proof statement is missing statementColumns.",
             )
         })?;
-    let receiver_encryption_profile_digest = string_field(
+    let receiver_encryption_profile_hash = string_field(
         structured_statement,
-        "receiverEncryptionProfileDigest",
+        "receiverEncryptionProfileHash",
     )
     .ok_or_else(|| {
         ComponentProofBackendError::invalid(
-            "Structured receiver-encryption proof statement is missing receiverEncryptionProfileDigest.",
+            "Structured receiver-encryption proof statement is missing receiverEncryptionProfileHash.",
         )
     })?;
     let receiver_rows = object_map(structured_statement)
@@ -500,10 +500,10 @@ pub(crate) fn structured_receiver_encryption_statement_as_sparse(
             )
         })?;
 
-        let public_matrix_seed_digest = string_field(receiver_row, "publicMatrixSeedDigest")
+        let public_matrix_seed_hash = string_field(receiver_row, "publicMatrixSeedHash")
             .ok_or_else(|| {
                 ComponentProofBackendError::invalid(
-                    "Structured receiver-encryption receiver row is missing publicMatrixSeedDigest.",
+                    "Structured receiver-encryption receiver row is missing publicMatrixSeedHash.",
                 )
             })?;
         let public_key_vector = parse_receiver_polynomial_vector(
@@ -515,8 +515,8 @@ pub(crate) fn structured_receiver_encryption_statement_as_sparse(
             "Structured receiver-encryption public key vector",
         )?;
         let public_matrix = derive_receiver_encryption_public_matrix(
-            receiver_encryption_profile_digest,
-            public_matrix_seed_digest,
+            receiver_encryption_profile_hash,
+            public_matrix_seed_hash,
         )
         .map_err(|error| {
             ComponentProofBackendError::invalid(format!(

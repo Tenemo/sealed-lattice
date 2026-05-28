@@ -18,8 +18,8 @@ pub(super) fn validate_setup_package_internal_bindings(
     setup_package: &Value,
 ) -> CanonicalResult<()> {
     reject_forbidden_setup_package_secret_fields(setup_package)?;
-    let profile_digest = profile_digest()?;
-    let backend_profile_digest = backend_profile_digest()?;
+    let profile_hash = profile_hash()?;
+    let backend_profile_hash = backend_profile_hash()?;
     compare_string_at_path(
         setup_package,
         &["profileBindings", "profileId"],
@@ -32,94 +32,94 @@ pub(super) fn validate_setup_package_internal_bindings(
         BACKEND_PROFILE_ID,
         "backend profile id",
     )?;
-    compare_digest_at_path(
+    compare_hash_at_path(
         setup_package,
-        &["profileBindings", "profileDigest"],
-        &profile_digest,
-        "profile digest",
+        &["profileBindings", "profileHash"],
+        &profile_hash,
+        "profile hash",
     )?;
-    compare_digest_at_path(
+    compare_hash_at_path(
         setup_package,
-        &["profileBindings", "backendProfileDigest"],
-        &backend_profile_digest,
-        "backend profile digest",
+        &["profileBindings", "backendProfileHash"],
+        &backend_profile_hash,
+        "backend profile hash",
     )?;
-    compare_digest_at_path(
+    compare_hash_at_path(
         setup_package,
-        &["profileBindings", "canonicalCiphertextConventionDigest"],
-        &canonical_ciphertext_convention_digest()?,
-        "canonical ciphertext convention digest",
+        &["profileBindings", "canonicalCiphertextConventionHash"],
+        &canonical_ciphertext_convention_hash()?,
+        "canonical ciphertext convention hash",
     )?;
-    compare_digest_at_path(
+    compare_hash_at_path(
         setup_package,
-        &["profileBindings", "batchEncoderDigest"],
-        &batch_encoder_digest()?,
-        "batch encoder digest",
+        &["profileBindings", "batchEncoderHash"],
+        &batch_encoder_hash()?,
+        "batch encoder hash",
     )?;
-    compare_digest_at_path(
+    compare_hash_at_path(
         setup_package,
-        &["profileBindings", "batchLayoutBindingDigest"],
-        &batch_layout_binding_digest()?,
-        "batch layout binding digest",
+        &["profileBindings", "batchLayoutBindingHash"],
+        &batch_layout_binding_hash()?,
+        "batch layout binding hash",
     )?;
-    compare_digest_at_path(
+    compare_hash_at_path(
         setup_package,
-        &["profileBindings", "allowedEvaluatorOpsDigest"],
-        &allowed_operation_registry_digest()?,
-        "allowed evaluator operation digest",
+        &["profileBindings", "allowedEvaluatorOpsHash"],
+        &allowed_operation_registry_hash()?,
+        "allowed evaluator operation hash",
     )?;
-    compare_digest_at_path(
+    compare_hash_at_path(
         setup_package,
-        &["profileBindings", "encryptedAggregateInputLayoutDigest"],
-        &layout_digest()?,
-        "encrypted aggregate input layout digest",
+        &["profileBindings", "encryptedAggregateInputLayoutHash"],
+        &layout_hash()?,
+        "encrypted aggregate input layout hash",
     )?;
     let expected_evaluator_bindings =
         m8_evaluator_context_bindings(value_at_path(setup_package, &["setupInputs"])?)?;
     for (field_name, description) in [
         (
-            "evaluatorBindingContextDigest",
-            "evaluator binding context digest",
+            "evaluatorBindingContextHash",
+            "evaluator binding context hash",
         ),
         (
-            "encryptedAggregateBridgeDigest",
-            "encrypted aggregate bridge digest",
+            "encryptedAggregateBridgeHash",
+            "encrypted aggregate bridge hash",
         ),
         (
-            "encryptedAggregateTargetBasisDataRoot",
+            "encryptedAggregateTargetBasisRoot",
             "encrypted aggregate target-basis data root",
         ),
         (
-            "encryptedAggregateReconstructionDigest",
-            "encrypted aggregate reconstruction digest",
+            "encryptedAggregateReconstructionHash",
+            "encrypted aggregate reconstruction hash",
         ),
         (
-            "scoreBitDerivationCircuitDigest",
-            "score-bit derivation circuit digest",
+            "scoreBitDerivationCircuitHash",
+            "score-bit derivation circuit hash",
         ),
         (
-            "comparisonInputDerivationCircuitDigest",
-            "comparison-input derivation circuit digest",
+            "comparisonInputDerivationCircuitHash",
+            "comparison-input derivation circuit hash",
         ),
         (
-            "encryptedScoreBitInputDigest",
-            "encrypted score-bit input digest",
+            "encryptedScoreBitInputHash",
+            "encrypted score-bit input hash",
         ),
         (
-            "encryptedComparisonInputDigest",
-            "encrypted comparison input digest",
+            "encryptedComparisonInputHash",
+            "encrypted comparison input hash",
         ),
-        ("bitSlicedComparatorDigest", "bit-sliced comparator digest"),
+        ("bitSlicedComparatorHash", "bit-sliced comparator hash"),
         (
-            "encryptedSparseTargetProjectionDigest",
-            "encrypted sparse target projection digest",
+            "encryptedSparseTargetProjectionHash",
+            "encrypted sparse target projection hash",
         ),
         (
-            "m8EvaluatorContextBindingDigest",
-            "M8 evaluator context binding digest",
+            "m8EvaluatorContextBindingHash",
+            "M8 evaluator context binding hash",
         ),
     ] {
-        compare_digest_at_path(
+        compare_hash_at_path(
             setup_package,
             &["profileBindings", field_name],
             string_at_path(&expected_evaluator_bindings, &[field_name])?,
@@ -127,55 +127,55 @@ pub(super) fn validate_setup_package_internal_bindings(
         )?;
     }
 
-    let threshold_decryption_profile_digest = derive_protocol_digest(
-        "ThresholdDecryptionProfileDigest",
-        &threshold_decryption_profile(&profile_digest)?,
+    let threshold_decryption_profile_hash = derive_protocol_hash(
+        "ThresholdDecryptionProfileHash",
+        &threshold_decryption_profile(&profile_hash)?,
     )?;
-    let kllps_target_decryption_profile_digest = derive_protocol_digest(
-        "KllpsTargetDecryptionProfileDigest",
+    let kllps_target_decryption_profile_hash = derive_protocol_hash(
+        "KllpsTargetDecryptionProfileHash",
         &json!({
             "profileId": THRESHOLD_DECRYPTION_PROFILE_ID,
-            "thresholdDecryptionProfileDigest": threshold_decryption_profile_digest,
+            "thresholdDecryptionProfileHash": threshold_decryption_profile_hash,
             "profileStatus": "future-target-decryption-profile-binding",
         }),
     )?;
     compare_string_at_path(
         setup_package,
-        &["kllpsCompatibility", "thresholdDecryptionProfileId"],
+        &["kllpsStatus", "thresholdDecryptionProfileId"],
         THRESHOLD_DECRYPTION_PROFILE_ID,
         "threshold decryption profile id",
     )?;
-    compare_digest_at_path(
+    compare_hash_at_path(
         setup_package,
-        &["kllpsCompatibility", "thresholdDecryptionProfileDigest"],
-        &threshold_decryption_profile_digest,
-        "threshold decryption profile digest",
+        &["kllpsStatus", "thresholdDecryptionProfileHash"],
+        &threshold_decryption_profile_hash,
+        "threshold decryption profile hash",
     )?;
-    compare_digest_at_path(
+    compare_hash_at_path(
         setup_package,
-        &["kllpsCompatibility", "kllpsTargetDecryptionProfileDigest"],
-        &kllps_target_decryption_profile_digest,
-        "KLLPS target decryption profile digest",
+        &["kllpsStatus", "kllpsTargetDecryptionProfileHash"],
+        &kllps_target_decryption_profile_hash,
+        "KLLPS target decryption profile hash",
     )?;
 
     let participant_bindings = validate_participant_setup_records(
         setup_package,
-        &profile_digest,
-        &backend_profile_digest,
-        &threshold_decryption_profile_digest,
-        &kllps_target_decryption_profile_digest,
+        &profile_hash,
+        &backend_profile_hash,
+        &threshold_decryption_profile_hash,
+        &kllps_target_decryption_profile_hash,
     )?;
     validate_collective_public_key(
         setup_package,
         &participant_bindings,
-        &profile_digest,
-        &backend_profile_digest,
+        &profile_hash,
+        &backend_profile_hash,
     )?;
     validate_threshold_verification_material(
         setup_package,
         &participant_bindings,
-        &threshold_decryption_profile_digest,
-        &kllps_target_decryption_profile_digest,
+        &threshold_decryption_profile_hash,
+        &kllps_target_decryption_profile_hash,
     )?;
     validate_evaluation_keys(setup_package)?;
     validate_setup_certificates(setup_package)?;
@@ -194,19 +194,16 @@ pub(super) fn validate_setup_package_shape(setup_package: &Value) -> CanonicalRe
             "setupPackage is not an M8 passive BGV setup package",
         ));
     }
-    if !bool_at_path(
-        setup_package,
-        &["kllpsCompatibility", "setupMaterialCompatibleWithKLLPS"],
-    )? {
+    if !bool_at_path(setup_package, &["kllpsStatus", "setupMaterialMatchesKLLPS"])? {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
-            "M8 setup package must be marked KLLPS-compatible",
+            "M8 setup package must mark KLLPS material matching",
         ));
     }
     if bool_at_path(
         setup_package,
-        &["kllpsCompatibility", "KLLPSPartDecImplemented"],
-    )? || bool_at_path(setup_package, &["kllpsCompatibility", "KLLPSC1C4Certified"])?
+        &["kllpsStatus", "KLLPSPartDecStatusImplemented"],
+    )? || bool_at_path(setup_package, &["kllpsStatus", "KLLPSC1C4StatusAccepted"])?
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,

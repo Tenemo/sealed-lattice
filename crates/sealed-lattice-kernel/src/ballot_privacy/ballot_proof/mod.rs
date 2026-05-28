@@ -1,7 +1,7 @@
 use super::*;
 
-mod digest_helpers;
 mod generation_core;
+mod hash_helpers;
 mod linear_verifier;
 mod package_verifier;
 mod record_builders;
@@ -9,15 +9,15 @@ mod record_generation;
 mod record_inputs;
 mod refusals;
 
-pub(crate) use digest_helpers::{
-    derive_ballot_component_bundle_statement_digest, derive_ballot_component_proof_bundle_digest,
-    derive_ballot_component_proof_record_digest, derive_ballot_component_proof_root,
-    derive_ballot_component_statement_digest, derive_ballot_proof_challenge_digest,
-};
 pub(crate) use generation_core::{
     BallotComponentProofGenerationInput, BallotProofGenerationInput,
     generate_ballot_component_proof_from_command_request, generate_ballot_component_proof_inner,
     generate_ballot_proof_from_command_request, generate_ballot_proof_inner,
+};
+pub(crate) use hash_helpers::{
+    derive_ballot_component_bundle_statement_hash, derive_ballot_component_proof_bundle_hash,
+    derive_ballot_component_proof_record_hash, derive_ballot_component_proof_root,
+    derive_ballot_component_statement_hash, derive_ballot_proof_challenge_hash,
 };
 pub(crate) use linear_verifier::{
     BallotProofVerificationInputs, ComponentProofVerificationMode, verify_ballot_proof,

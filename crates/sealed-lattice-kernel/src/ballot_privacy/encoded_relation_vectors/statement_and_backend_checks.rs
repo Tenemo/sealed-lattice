@@ -1,4 +1,4 @@
-use super::backend_digest_helpers::value_without_field as encoded_relation_value_without_field;
+use super::backend_hash_helpers::value_without_field as encoded_relation_value_without_field;
 use super::case_validation::ENCODED_COORDINATES_PER_OPTION as ENCODED_RELATION_COORDINATES_PER_OPTION;
 use super::*;
 use crate::ballot_privacy::protocol_constants::{
@@ -180,38 +180,40 @@ pub(super) fn validate_component_proof_statement_plans(
             "structuredReceiverCount",
             expected_structured_receiver_count,
         )?;
-        for digest_field_name in [
-            "backendStatementDigest",
-            "componentProofStatementDigest",
-            "componentStatementDigest",
-            "matrixDigest",
-            "relationStatementDigest",
-            "targetVectorDigest",
+        for hash_field_name in [
+            "backendStatementHash",
+            "componentProofStatementHash",
+            "componentStatementHash",
+            "matrixHash",
+            "relationStatementHash",
+            "targetVectorHash",
         ] {
-            validate_digest_string(&string_property(plan, digest_field_name)?)?;
+            validate_hash_string(&string_property(plan, hash_field_name)?)?;
         }
-        for digest_array_field_name in [
-            "rowBatchMatrixDigests",
-            "rowBatchTargetVectorDigests",
+        for hash_array_field_name in [
+            "rowBatchMatrixHashes",
+            "rowBatchTargetVectorHashes",
             "variableColumnIndices",
         ] {
-            let values = array_property(plan, digest_array_field_name)?;
-            if digest_array_field_name == "variableColumnIndices" {
+            let values = array_property(plan, hash_array_field_name)?;
+            if hash_array_field_name == "variableColumnIndices" {
                 continue;
             }
             for value in values {
-                validate_digest_string(value.as_str().ok_or_else(|| {
-                    format!("{digest_array_field_name} entries must be strings")
-                })?)?;
+                validate_hash_string(
+                    value.as_str().ok_or_else(|| {
+                        format!("{hash_array_field_name} entries must be strings")
+                    })?,
+                )?;
             }
         }
-        let expected_digest = derive_backend_digest(
+        let expected_hash = derive_backend_hash(
             "ballot-proof-component-proof-statement-plan-v1",
-            encoded_relation_value_without_field(plan_value, "componentProofStatementDigest")?,
+            encoded_relation_value_without_field(plan_value, "componentProofStatementHash")?,
         )?;
-        if string_property(plan, "componentProofStatementDigest")? != expected_digest {
+        if string_property(plan, "componentProofStatementHash")? != expected_hash {
             return Err(
-                "encoded relation component proof statement plan digest is invalid".to_string(),
+                "encoded relation component proof statement plan hash is invalid".to_string(),
             );
         }
     }
@@ -267,7 +269,7 @@ pub(super) fn validate_statement_dimensions(
     if dimensions.algebraic_row_count != expected_algebraic_rows {
         return Err("encoded relation algebraic row count does not match dimensions".to_string());
     }
-    let expected_digest_expanded_variable_count = dimensions.encoded_coordinate_count
+    let expected_hash_expanded_variable_count = dimensions.encoded_coordinate_count
         * (dimensions.pvss_threshold + 2 * dimensions.roster_size)
         + dimensions.roster_size
             * (dimensions.encoded_coordinate_count
@@ -289,7 +291,7 @@ pub(super) fn validate_statement_dimensions(
                 + 2 * OPENING_VARIABLES_PER_RECEIVER
                 + receiver_payload_bit_count
                 + receiver_encryption_witness_variables_per_receiver);
-    if dimensions.variable_count != expected_digest_expanded_variable_count
+    if dimensions.variable_count != expected_hash_expanded_variable_count
         && dimensions.variable_count != expected_full_explicit_variable_count
     {
         return Err("encoded relation variable count does not match dimensions".to_string());
@@ -304,7 +306,7 @@ pub(super) fn validate_statement_dimensions(
 
 pub(super) struct BackendSummaryCounts {
     pub(super) backend_column_count: u64,
-    pub(super) backend_digest_expanded_row_count: u64,
+    pub(super) backend_hash_expanded_row_count: u64,
     pub(super) backend_explicit_row_count: u64,
     pub(super) backend_proof_component_count: u64,
     pub(super) backend_row_batch_count: u64,
@@ -312,7 +314,7 @@ pub(super) struct BackendSummaryCounts {
     pub(super) dimensions: EncodedRelationDimensions,
 }
 
-pub(super) fn expected_digest_expanded_backend_rows(dimensions: EncodedRelationDimensions) -> u64 {
+pub(super) fn expected_hash_expanded_backend_rows(dimensions: EncodedRelationDimensions) -> u64 {
     dimensions.roster_size
         * (SHARE_COMMITMENT_EQUATION_ROWS
             + RECEIVER_ENCRYPTION_EQUATION_ROWS
@@ -366,20 +368,20 @@ pub(super) fn validate_backend_summary_counts(counts: BackendSummaryCounts) -> R
             "encoded relation backend explicit row count does not match the explicit component coverage".to_string(),
         );
     }
-    let expected_digest_expanded_rows =
+    let expected_hash_expanded_rows =
         if explicit_algebraic_rows == expected_full_explicit_algebraic_rows {
             0
         } else {
-            expected_digest_expanded_backend_rows(counts.dimensions) - explicit_algebraic_rows
+            expected_hash_expanded_backend_rows(counts.dimensions) - explicit_algebraic_rows
         };
-    if counts.backend_digest_expanded_row_count != expected_digest_expanded_rows {
+    if counts.backend_hash_expanded_row_count != expected_hash_expanded_rows {
         return Err(
-            "encoded relation backend digest-expanded row count does not match dimensions"
+            "encoded relation backend hash-expanded row count does not match dimensions"
                 .to_string(),
         );
     }
     if counts.backend_row_count
-        != counts.backend_explicit_row_count + counts.backend_digest_expanded_row_count
+        != counts.backend_explicit_row_count + counts.backend_hash_expanded_row_count
     {
         return Err("encoded relation backend row count is inconsistent".to_string());
     }
@@ -416,22 +418,22 @@ pub(super) fn validate_backend_summary_counts(counts: BackendSummaryCounts) -> R
     Ok(())
 }
 
-pub(super) fn validate_digest_change_trace(
+pub(super) fn validate_hash_change_trace(
     case_object: &serde_json::Map<String, Value>,
-    relation_statement_digest: &str,
+    relation_statement_hash: &str,
 ) -> Result<(), String> {
     let trace = object_property(case_object, "trace")?;
-    let expected_digest_changed = trace
-        .get("expectedDigestChanged")
+    let expected_hash_changed = trace
+        .get("expectedHashChanged")
         .and_then(Value::as_bool)
         .unwrap_or(false);
-    if !expected_digest_changed {
+    if !expected_hash_changed {
         return Ok(());
     }
-    let baseline_digest = string_property(trace, "baselineRelationStatementDigest")?;
-    validate_digest_string(&baseline_digest)?;
-    if baseline_digest == relation_statement_digest {
-        return Err("encoded relation digest-change vector did not change the digest".to_string());
+    let baseline_hash = string_property(trace, "baselineRelationStatementHash")?;
+    validate_hash_string(&baseline_hash)?;
+    if baseline_hash == relation_statement_hash {
+        return Err("encoded relation hash-change vector did not change the hash".to_string());
     }
 
     Ok(())
@@ -477,8 +479,8 @@ pub(super) fn validate_algebraic_row_kinds(algebraic_rows: &[Value]) -> Result<(
             if u64_property(row_object, "equationCount")? == 0 {
                 return Err("encoded relation algebraic row equation count is zero".to_string());
             }
-            let target_digest = string_property(row_object, "targetDigest")?;
-            validate_digest_string(&target_digest)?;
+            let target_hash = string_property(row_object, "targetHash")?;
+            validate_hash_string(&target_hash)?;
         }
     }
 
@@ -513,7 +515,7 @@ pub(super) fn validate_backend_statement(
 
     let column_count = u64_property(backend_statement, "columnCount")?;
     let explicit_row_count = u64_property(backend_statement, "explicitRowCount")?;
-    let digest_expanded_row_count = u64_property(backend_statement, "digestExpandedRowCount")?;
+    let hash_expanded_row_count = u64_property(backend_statement, "hashExpandedRowCount")?;
     let row_count = u64_property(backend_statement, "rowCount")?;
     let row_batches = array_property(backend_statement, "rowBatches")?;
     let variable_columns = array_property(backend_statement, "variableColumns")?;
@@ -522,7 +524,7 @@ pub(super) fn validate_backend_statement(
 
     validate_backend_summary_counts(BackendSummaryCounts {
         backend_column_count: column_count,
-        backend_digest_expanded_row_count: digest_expanded_row_count,
+        backend_hash_expanded_row_count: hash_expanded_row_count,
         backend_explicit_row_count: explicit_row_count,
         backend_proof_component_count: proof_components.len() as u64,
         backend_row_batch_count: row_batches.len() as u64,
@@ -534,69 +536,66 @@ pub(super) fn validate_backend_statement(
     validate_backend_bounds(backend_bounds, column_count, dimensions.bound_count)?;
     validate_backend_proof_components(proof_components, row_batches, column_count)?;
 
-    let matrix_digest = string_property(backend_statement, "matrixDigest")?;
-    let target_vector_digest = string_property(backend_statement, "targetVectorDigest")?;
-    let bounds_digest = string_property(backend_statement, "boundsDigest")?;
-    let proof_components_digest = string_property(backend_statement, "proofComponentsDigest")?;
-    let backend_statement_digest = string_property(backend_statement, "backendStatementDigest")?;
-    validate_digest_string(&matrix_digest)?;
-    validate_digest_string(&target_vector_digest)?;
-    validate_digest_string(&bounds_digest)?;
-    validate_digest_string(&proof_components_digest)?;
-    validate_digest_string(&backend_statement_digest)?;
+    let matrix_hash = string_property(backend_statement, "matrixHash")?;
+    let target_vector_hash = string_property(backend_statement, "targetVectorHash")?;
+    let bounds_hash = string_property(backend_statement, "boundsHash")?;
+    let proof_components_hash = string_property(backend_statement, "proofComponentsHash")?;
+    let backend_statement_hash = string_property(backend_statement, "backendStatementHash")?;
+    validate_hash_string(&matrix_hash)?;
+    validate_hash_string(&target_vector_hash)?;
+    validate_hash_string(&bounds_hash)?;
+    validate_hash_string(&proof_components_hash)?;
+    validate_hash_string(&backend_statement_hash)?;
 
-    let expected_matrix_digest = derive_backend_digest(
-        BACKEND_MATRIX_DIGEST_PURPOSE,
+    let expected_matrix_hash = derive_backend_hash(
+        BACKEND_MATRIX_HASH_PURPOSE,
         json!({
             "rowBatches": row_batches.iter().map(backend_batch_matrix_summary).collect::<Result<Vec<_>, _>>()?
         }),
     )?;
-    let expected_target_vector_digest = derive_backend_digest(
-        BACKEND_TARGET_VECTOR_DIGEST_PURPOSE,
+    let expected_target_vector_hash = derive_backend_hash(
+        BACKEND_TARGET_VECTOR_HASH_PURPOSE,
         json!({
             "rowBatches": row_batches.iter().map(backend_batch_target_summary).collect::<Result<Vec<_>, _>>()?
         }),
     )?;
-    let expected_bounds_digest = derive_backend_digest(
-        BACKEND_BOUNDS_DIGEST_PURPOSE,
+    let expected_bounds_hash = derive_backend_hash(
+        BACKEND_BOUNDS_HASH_PURPOSE,
         json!({
             "bounds": backend_bounds
         }),
     )?;
-    let expected_proof_components_digest = derive_backend_digest(
-        BACKEND_PROOF_COMPONENTS_DIGEST_PURPOSE,
+    let expected_proof_components_hash = derive_backend_hash(
+        BACKEND_PROOF_COMPONENTS_HASH_PURPOSE,
         json!({
             "proofComponents": proof_components
         }),
     )?;
     let backend_statement_value = Value::Object(backend_statement.clone());
     let backend_statement_payload =
-        encoded_relation_value_without_field(&backend_statement_value, "backendStatementDigest")?;
-    let expected_backend_statement_digest =
-        derive_backend_digest(BACKEND_STATEMENT_DIGEST_PURPOSE, backend_statement_payload)?;
+        encoded_relation_value_without_field(&backend_statement_value, "backendStatementHash")?;
+    let expected_backend_statement_hash =
+        derive_backend_hash(BACKEND_STATEMENT_HASH_PURPOSE, backend_statement_payload)?;
 
-    if matrix_digest != expected_matrix_digest {
+    if matrix_hash != expected_matrix_hash {
+        return Err("encoded relation backend matrix hash does not match row batches".to_string());
+    }
+    if target_vector_hash != expected_target_vector_hash {
         return Err(
-            "encoded relation backend matrix digest does not match row batches".to_string(),
+            "encoded relation backend target-vector hash does not match row batches".to_string(),
         );
     }
-    if target_vector_digest != expected_target_vector_digest {
+    if bounds_hash != expected_bounds_hash {
+        return Err("encoded relation backend bounds hash does not match bounds".to_string());
+    }
+    if proof_components_hash != expected_proof_components_hash {
         return Err(
-            "encoded relation backend target-vector digest does not match row batches".to_string(),
+            "encoded relation backend proof-components hash does not match components".to_string(),
         );
     }
-    if bounds_digest != expected_bounds_digest {
-        return Err("encoded relation backend bounds digest does not match bounds".to_string());
-    }
-    if proof_components_digest != expected_proof_components_digest {
+    if backend_statement_hash != expected_backend_statement_hash {
         return Err(
-            "encoded relation backend proof-components digest does not match components"
-                .to_string(),
-        );
-    }
-    if backend_statement_digest != expected_backend_statement_digest {
-        return Err(
-            "encoded relation backend statement digest does not match its canonical payload"
+            "encoded relation backend statement hash does not match its canonical payload"
                 .to_string(),
         );
     }
@@ -682,13 +681,13 @@ pub(super) fn validate_backend_row_batches(
                 dimensions,
             )?;
         } else {
-            validate_digest_expanded_backend_row_batch(batch_object, column_count, dimensions)?;
+            validate_hash_expanded_backend_row_batch(batch_object, column_count, dimensions)?;
         }
         if batch_kind == "ExplicitSparseRows"
             && (batch_index > 1 && !(batch_index == 2 && has_explicit_share_commitment_batch))
         {
             return Err(
-                "encoded relation backend explicit rows must precede digest-expanded rows"
+                "encoded relation backend explicit rows must precede hash-expanded rows"
                     .to_string(),
             );
         }
@@ -701,7 +700,7 @@ pub(super) fn validate_backend_row_batches(
     };
     let expected_row_count = dimensions.linear_row_count
         + explicit_share_commitment_rows
-        + expected_digest_expanded_backend_rows(dimensions)
+        + expected_hash_expanded_backend_rows(dimensions)
         - explicit_share_commitment_rows;
     if expected_row_offset != expected_row_count {
         return Err("encoded relation backend row count does not match dimensions".to_string());
@@ -739,10 +738,10 @@ pub(super) fn validate_score_explicit_backend_row_batch(
             "ShamirEvaluationQuotient",
         ],
     )?;
-    validate_batch_digest_pair(
+    validate_batch_hash_pair(
         batch_object,
-        EXPLICIT_BACKEND_MATRIX_DIGEST_PURPOSE,
-        EXPLICIT_BACKEND_TARGET_VECTOR_DIGEST_PURPOSE,
+        EXPLICIT_BACKEND_MATRIX_HASH_PURPOSE,
+        EXPLICIT_BACKEND_TARGET_VECTOR_HASH_PURPOSE,
         explicit_backend_matrix_payload(rows)?,
         explicit_backend_target_payload(rows)?,
     )
@@ -778,10 +777,10 @@ pub(super) fn validate_payload_explicit_backend_row_batch(
             "ReceiverPayloadOpeningPlaintextBinding",
         ],
     )?;
-    validate_batch_digest_pair(
+    validate_batch_hash_pair(
         batch_object,
-        EXPLICIT_BACKEND_MATRIX_DIGEST_PURPOSE,
-        EXPLICIT_BACKEND_TARGET_VECTOR_DIGEST_PURPOSE,
+        EXPLICIT_BACKEND_MATRIX_HASH_PURPOSE,
+        EXPLICIT_BACKEND_TARGET_VECTOR_HASH_PURPOSE,
         explicit_backend_matrix_payload(rows)?,
         explicit_backend_target_payload(rows)?,
     )
@@ -816,10 +815,10 @@ pub(super) fn validate_share_commitment_explicit_backend_row_batch(
         "18446744069414584321",
         &["ShareCommitmentEquation"],
     )?;
-    validate_batch_digest_pair(
+    validate_batch_hash_pair(
         batch_object,
-        EXPLICIT_BACKEND_MATRIX_DIGEST_PURPOSE,
-        EXPLICIT_BACKEND_TARGET_VECTOR_DIGEST_PURPOSE,
+        EXPLICIT_BACKEND_MATRIX_HASH_PURPOSE,
+        EXPLICIT_BACKEND_TARGET_VECTOR_HASH_PURPOSE,
         explicit_backend_matrix_payload(rows)?,
         explicit_backend_target_payload(rows)?,
     )

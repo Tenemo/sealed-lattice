@@ -1,4 +1,4 @@
-import { deriveProtocolDigest } from '@sealed-lattice/crypto';
+import { deriveProtocolHash } from '@sealed-lattice/crypto';
 import {
     aggregateDerivationProofEncodingProfileId,
     aggregateDerivationProofParameterProfileId,
@@ -10,27 +10,27 @@ import {
     type AggregateDerivationStatement,
     type AggregateShareCommitment,
     type ClaimBearingBallotPackage,
-    type ProtocolDigest,
+    type ProtocolHash,
     type ShareCommitment,
     type ShareCommitmentMessageBoundCert,
 } from '@sealed-lattice/types';
 
 import { aggregateDerivationComponentId } from './aggregate-derivation/constants.js';
 import {
-    deriveAggregateCommitmentBodyDigest,
-    deriveAggregateDerivationBallotSetDigest,
-    deriveAggregateDerivationComponentDigest,
-    deriveAggregateDerivationProofRecordDigest,
+    deriveAggregateCommitmentBodyHash,
+    deriveAggregateDerivationBallotSetHash,
+    deriveAggregateDerivationComponentHash,
+    deriveAggregateDerivationProofRecordHash,
     deriveAggregateDerivationProofRoot,
-    deriveAggregateDerivationStatementDigest,
-    deriveAggregateShareCommitmentDigest,
-} from './aggregate-derivation/digests.js';
+    deriveAggregateDerivationStatementHash,
+    deriveAggregateShareCommitmentHash,
+} from './aggregate-derivation/hashes.js';
 import { modBigInt } from './lattice-primitives/primitive-contracts.js';
 import {
-    deriveProofBytesDigest,
-    deriveBallotProofEncodingProfileDigest,
-    deriveBallotProofParameterSetDigest,
-    deriveBallotProofPublicRandomnessDigest,
+    deriveProofBytesHash,
+    deriveBallotProofEncodingProfileHash,
+    deriveBallotProofParameterSetHash,
+    deriveBallotProofPublicRandomnessHash,
     verifyClaimBearingBallotPackage,
 } from './objects.js';
 import {
@@ -113,13 +113,13 @@ const packageReferenceForContributor = (input: {
     }
 
     return {
-        ballotPackageDigest: input.ballotPackage.ballotPackageDigest,
-        ballotProofStatementDigest:
-            input.ballotPackage.ballotProofStatement.ballotProofStatementDigest,
+        ballotPackageHash: input.ballotPackage.ballotPackageHash,
+        ballotProofStatementHash:
+            input.ballotPackage.ballotProofStatement.ballotProofStatementHash,
         receiverPayloadCiphertextRoot:
             payloadReference.receiverPayloadCiphertextRoot,
-        receiverPayloadDigest: payloadReference.receiverPayloadDigest,
-        shareCommitmentDigest: commitmentReference.shareCommitmentDigest,
+        receiverPayloadHash: payloadReference.receiverPayloadHash,
+        shareCommitmentHash: commitmentReference.shareCommitmentHash,
     };
 };
 
@@ -144,15 +144,15 @@ const shareCommitmentForContributor = (input: {
 };
 
 const createAggregateShareCommitment = (input: {
-    readonly ballotSetDigest: ProtocolDigest;
+    readonly ballotSetHash: ProtocolHash;
     readonly ceremonyId: string;
     readonly contributorIdentity: string;
     readonly contributorRosterPosition: number;
-    readonly manifestDigest: ProtocolDigest;
-    readonly pollSpecDigest: ProtocolDigest;
-    readonly rosterDigest: ProtocolDigest;
+    readonly manifestHash: ProtocolHash;
+    readonly pollSpecHash: ProtocolHash;
+    readonly rosterHash: ProtocolHash;
     readonly shareCommitments: readonly ShareCommitment[];
-    readonly shareCommitmentProfileDigest: ProtocolDigest;
+    readonly shareCommitmentProfileHash: ProtocolHash;
     readonly shareVectorWidth: number;
 }): AggregateShareCommitment => {
     let commitmentPolynomialVector = zeroCommitmentPolynomialVector();
@@ -162,8 +162,8 @@ const createAggregateShareCommitment = (input: {
             shareCommitment.receiverIdentity !== input.contributorIdentity ||
             shareCommitment.receiverRosterPosition !==
                 input.contributorRosterPosition ||
-            shareCommitment.shareCommitmentProfileDigest !==
-                input.shareCommitmentProfileDigest ||
+            shareCommitment.shareCommitmentProfileHash !==
+                input.shareCommitmentProfileHash ||
             shareCommitment.shareVectorWidth !== input.shareVectorWidth ||
             shareCommitment.commitmentPolynomialVector === undefined
         ) {
@@ -177,32 +177,32 @@ const createAggregateShareCommitment = (input: {
         );
     }
 
-    const commitmentBodyDigest = deriveAggregateCommitmentBodyDigest({
+    const commitmentBodyHash = deriveAggregateCommitmentBodyHash({
         commitmentPolynomialVector,
-        shareCommitmentProfileDigest: input.shareCommitmentProfileDigest,
+        shareCommitmentProfileHash: input.shareCommitmentProfileHash,
     });
     const aggregateCommitmentPayload: Omit<
         AggregateShareCommitment,
-        'aggregateShareCommitmentDigest'
+        'aggregateShareCommitmentHash'
     > = {
         objectType: 'AggregateShareCommitment',
         objectVersion: 1,
-        ballotSetDigest: input.ballotSetDigest,
+        ballotSetHash: input.ballotSetHash,
         ceremonyId: input.ceremonyId,
-        commitmentBodyDigest,
+        commitmentBodyHash,
         commitmentPolynomialVector,
         contributorIdentity: input.contributorIdentity,
         contributorRosterPosition: input.contributorRosterPosition,
-        manifestDigest: input.manifestDigest,
-        pollSpecDigest: input.pollSpecDigest,
-        rosterDigest: input.rosterDigest,
-        shareCommitmentProfileDigest: input.shareCommitmentProfileDigest,
+        manifestHash: input.manifestHash,
+        pollSpecHash: input.pollSpecHash,
+        rosterHash: input.rosterHash,
+        shareCommitmentProfileHash: input.shareCommitmentProfileHash,
         shareVectorWidth: input.shareVectorWidth,
     };
 
     return {
         ...aggregateCommitmentPayload,
-        aggregateShareCommitmentDigest: deriveAggregateShareCommitmentDigest(
+        aggregateShareCommitmentHash: deriveAggregateShareCommitmentHash(
             aggregateCommitmentPayload,
         ),
     };
@@ -259,25 +259,25 @@ const requireProofBearingPackageShell = (input: {
     }
 };
 
-const orderedBallotPackagesByDigest = (
+const orderedBallotPackagesByHash = (
     ballotPackages: readonly ClaimBearingBallotPackage[],
 ): readonly ClaimBearingBallotPackage[] =>
     [...ballotPackages].sort((leftPackage, rightPackage) =>
-        leftPackage.ballotPackageDigest.localeCompare(
-            rightPackage.ballotPackageDigest,
+        leftPackage.ballotPackageHash.localeCompare(
+            rightPackage.ballotPackageHash,
         ),
     );
 
 export const buildAggregateDerivationStatement = (input: {
     readonly ballotPackages: readonly ClaimBearingBallotPackage[];
-    readonly closeRecordDigest: ProtocolDigest;
-    readonly contributorActionContextDigest: ProtocolDigest;
+    readonly closeRecordHash: ProtocolHash;
+    readonly contributorActionContextHash: ProtocolHash;
     readonly contributorIdentity: string;
-    readonly contributorRosterExternalAcceptanceDigest: ProtocolDigest;
+    readonly contributorRosterExternalAcceptanceHash: ProtocolHash;
     readonly contributorRosterPosition: number;
-    readonly postVotingClosedContextDigest: ProtocolDigest;
+    readonly postVotingClosedContextHash: ProtocolHash;
     readonly unsafeSmallRosterAcknowledged?: boolean;
-    readonly votingClosedBoardHeadDigest: ProtocolDigest;
+    readonly votingClosedBoardHeadHash: ProtocolHash;
 }): {
     readonly aggregateCommitment: AggregateShareCommitment;
     readonly statement: AggregateDerivationStatement;
@@ -293,15 +293,15 @@ export const buildAggregateDerivationStatement = (input: {
             unsafeSmallRosterAcknowledged: input.unsafeSmallRosterAcknowledged,
         });
     }
-    const orderedBallotPackages = orderedBallotPackagesByDigest(
+    const orderedBallotPackages = orderedBallotPackagesByHash(
         input.ballotPackages,
     );
     const firstStatement = orderedBallotPackages[0].ballotProofStatement;
-    const ballotPackageDigests = orderedBallotPackages.map(
-        (ballotPackage) => ballotPackage.ballotPackageDigest,
+    const ballotPackageHashes = orderedBallotPackages.map(
+        (ballotPackage) => ballotPackage.ballotPackageHash,
     );
-    const uniquePackageDigests = new Set(ballotPackageDigests);
-    if (uniquePackageDigests.size !== ballotPackageDigests.length) {
+    const uniquePackageHashes = new Set(ballotPackageHashes);
+    if (uniquePackageHashes.size !== ballotPackageHashes.length) {
         throw new RangeError(
             'Aggregate derivation counted ballot packages must not contain duplicates.',
         );
@@ -310,15 +310,15 @@ export const buildAggregateDerivationStatement = (input: {
         const statement = ballotPackage.ballotProofStatement;
         if (
             statement.ceremonyId !== firstStatement.ceremonyId ||
-            statement.manifestDigest !== firstStatement.manifestDigest ||
-            statement.rosterDigest !== firstStatement.rosterDigest ||
-            statement.pollSpecDigest !== firstStatement.pollSpecDigest ||
-            statement.thresholdProfileDigest !==
-                firstStatement.thresholdProfileDigest ||
+            statement.manifestHash !== firstStatement.manifestHash ||
+            statement.rosterHash !== firstStatement.rosterHash ||
+            statement.pollSpecHash !== firstStatement.pollSpecHash ||
+            statement.thresholdProfileHash !==
+                firstStatement.thresholdProfileHash ||
             statement.optionCount !== firstStatement.optionCount ||
             statement.shareVectorWidth !== firstStatement.shareVectorWidth ||
-            statement.shareCommitmentProfileDigest !==
-                firstStatement.shareCommitmentProfileDigest
+            statement.shareCommitmentProfileHash !==
+                firstStatement.shareCommitmentProfileHash
         ) {
             throw new RangeError(
                 'Aggregate derivation counted ballot packages must share one canonical context.',
@@ -326,15 +326,15 @@ export const buildAggregateDerivationStatement = (input: {
         }
     }
 
-    const ballotSetDigest = deriveAggregateDerivationBallotSetDigest({
-        ballotPackageDigests,
-        closeRecordDigest: input.closeRecordDigest,
-        manifestDigest: firstStatement.manifestDigest,
-        pollSpecDigest: firstStatement.pollSpecDigest,
-        postVotingClosedContextDigest: input.postVotingClosedContextDigest,
-        rosterDigest: firstStatement.rosterDigest,
-        thresholdProfileDigest: firstStatement.thresholdProfileDigest,
-        votingClosedBoardHeadDigest: input.votingClosedBoardHeadDigest,
+    const ballotSetHash = deriveAggregateDerivationBallotSetHash({
+        ballotPackageHashes,
+        closeRecordHash: input.closeRecordHash,
+        manifestHash: firstStatement.manifestHash,
+        pollSpecHash: firstStatement.pollSpecHash,
+        postVotingClosedContextHash: input.postVotingClosedContextHash,
+        rosterHash: firstStatement.rosterHash,
+        thresholdProfileHash: firstStatement.thresholdProfileHash,
+        votingClosedBoardHeadHash: input.votingClosedBoardHeadHash,
     });
     const shareCommitments = orderedBallotPackages.map((ballotPackage) =>
         shareCommitmentForContributor({
@@ -344,32 +344,28 @@ export const buildAggregateDerivationStatement = (input: {
         }),
     );
     const aggregateCommitment = createAggregateShareCommitment({
-        ballotSetDigest,
+        ballotSetHash,
         ceremonyId: firstStatement.ceremonyId,
         contributorIdentity: input.contributorIdentity,
         contributorRosterPosition: input.contributorRosterPosition,
-        manifestDigest: firstStatement.manifestDigest,
-        pollSpecDigest: firstStatement.pollSpecDigest,
-        rosterDigest: firstStatement.rosterDigest,
+        manifestHash: firstStatement.manifestHash,
+        pollSpecHash: firstStatement.pollSpecHash,
+        rosterHash: firstStatement.rosterHash,
         shareCommitments,
-        shareCommitmentProfileDigest:
-            firstStatement.shareCommitmentProfileDigest,
+        shareCommitmentProfileHash: firstStatement.shareCommitmentProfileHash,
         shareVectorWidth: firstStatement.shareVectorWidth,
     });
-    const challengeDomainDigest = deriveProtocolDigest(
-        'ChallengeDomainDigest',
-        {
-            aggregateDerivationProofEncodingProfileId,
-            aggregateDerivationProofParameterProfileId,
-            aggregateDerivationProofProfileId,
-            aggregateShareCommitmentDigest:
-                aggregateCommitment.aggregateShareCommitmentDigest,
-            ballotSetDigest,
-            purpose: 'aggregate-derivation-proof-challenge-v1',
-            shareCommitmentMessageBoundCertDigest:
-                firstStatement.shareCommitmentMessageBoundCertDigest,
-        },
-    );
+    const challengeDomainHash = deriveProtocolHash('ChallengeDomainHash', {
+        aggregateDerivationProofEncodingProfileId,
+        aggregateDerivationProofParameterProfileId,
+        aggregateDerivationProofProfileId,
+        aggregateShareCommitmentHash:
+            aggregateCommitment.aggregateShareCommitmentHash,
+        ballotSetHash,
+        purpose: 'aggregate-derivation-proof-challenge-v1',
+        shareCommitmentMessageBoundCertHash:
+            firstStatement.shareCommitmentMessageBoundCertHash,
+    });
     const participantCount = firstStatement.receiverPublicKeys.length;
     if (
         participantCount < ballotPrivacyMinimumSafeParticipantCount &&
@@ -389,35 +385,34 @@ export const buildAggregateDerivationStatement = (input: {
     }
     const statementPayload: Omit<
         AggregateDerivationStatement,
-        'aggregateDerivationStatementDigest'
+        'aggregateDerivationStatementHash'
     > = {
         objectType: 'AggregateDerivationStatement',
         objectVersion: 1,
-        aggregateCommitmentDigest:
-            aggregateCommitment.aggregateShareCommitmentDigest,
-        aggregateInputEncodingProfileDigest:
-            firstStatement.aggregateInputEncodingProfileDigest,
-        aggregateShareCommitmentDigest:
-            aggregateCommitment.aggregateShareCommitmentDigest,
-        ballotScoreEncodingProfileDigest:
-            firstStatement.ballotScoreEncodingProfileDigest,
-        ballotSetDigest,
-        ballotShareLayoutProfileDigest:
-            firstStatement.ballotShareLayoutProfileDigest,
+        aggregateCommitmentHash:
+            aggregateCommitment.aggregateShareCommitmentHash,
+        aggregateInputEncodingProfileHash:
+            firstStatement.aggregateInputEncodingProfileHash,
+        aggregateShareCommitmentHash:
+            aggregateCommitment.aggregateShareCommitmentHash,
+        ballotScoreEncodingProfileHash:
+            firstStatement.ballotScoreEncodingProfileHash,
+        ballotSetHash,
+        ballotShareLayoutProfileHash:
+            firstStatement.ballotShareLayoutProfileHash,
         canonicalTurnout: orderedBallotPackages.length,
         ceremonyId: firstStatement.ceremonyId,
-        challengeDomainDigest,
-        closeRecordDigest: input.closeRecordDigest,
-        contributorActionContextDigest: input.contributorActionContextDigest,
+        challengeDomainHash,
+        closeRecordHash: input.closeRecordHash,
+        contributorActionContextHash: input.contributorActionContextHash,
         contributorIdentity: input.contributorIdentity,
-        contributorRosterExternalAcceptanceDigest:
-            input.contributorRosterExternalAcceptanceDigest,
+        contributorRosterExternalAcceptanceHash:
+            input.contributorRosterExternalAcceptanceHash,
         contributorRosterPosition: input.contributorRosterPosition,
-        encodedAggregateLayoutDigest:
-            firstStatement.encodedAggregateLayoutDigest,
-        encodedShareVectorLayoutDigest:
-            firstStatement.encodedShareVectorLayoutDigest,
-        manifestDigest: firstStatement.manifestDigest,
+        encodedAggregateLayoutHash: firstStatement.encodedAggregateLayoutHash,
+        encodedShareVectorLayoutHash:
+            firstStatement.encodedShareVectorLayoutHash,
+        manifestHash: firstStatement.manifestHash,
         optionCount: firstStatement.optionCount,
         participantCount,
         packageReferences: orderedBallotPackages.map((ballotPackage) =>
@@ -427,32 +422,31 @@ export const buildAggregateDerivationStatement = (input: {
                 contributorRosterPosition: input.contributorRosterPosition,
             }),
         ),
-        pollSpecDigest: firstStatement.pollSpecDigest,
-        postVotingClosedContextDigest: input.postVotingClosedContextDigest,
+        pollSpecHash: firstStatement.pollSpecHash,
+        postVotingClosedContextHash: input.postVotingClosedContextHash,
         proofEncodingProfileId: aggregateDerivationProofEncodingProfileId,
         proofParameterProfileId: aggregateDerivationProofParameterProfileId,
         proofProfileId: aggregateDerivationProofProfileId,
-        receiverEncryptionProfileDigest:
-            firstStatement.receiverEncryptionProfileDigest,
-        rosterDigest: firstStatement.rosterDigest,
-        shareCommitmentMessageBoundCertDigest:
-            firstStatement.shareCommitmentMessageBoundCertDigest,
-        shareCommitmentProfileDigest:
-            firstStatement.shareCommitmentProfileDigest,
+        receiverEncryptionProfileHash:
+            firstStatement.receiverEncryptionProfileHash,
+        rosterHash: firstStatement.rosterHash,
+        shareCommitmentMessageBoundCertHash:
+            firstStatement.shareCommitmentMessageBoundCertHash,
+        shareCommitmentProfileHash: firstStatement.shareCommitmentProfileHash,
         shareVectorWidth: firstStatement.shareVectorWidth,
-        thresholdProfileDigest: firstStatement.thresholdProfileDigest,
+        thresholdProfileHash: firstStatement.thresholdProfileHash,
         ...(input.unsafeSmallRosterAcknowledged === true
             ? { unsafeSmallRosterAcknowledged: true as const }
             : {}),
-        votingClosedBoardHeadDigest: input.votingClosedBoardHeadDigest,
+        votingClosedBoardHeadHash: input.votingClosedBoardHeadHash,
     };
 
     return {
         aggregateCommitment,
         statement: {
             ...statementPayload,
-            aggregateDerivationStatementDigest:
-                deriveAggregateDerivationStatementDigest(statementPayload),
+            aggregateDerivationStatementHash:
+                deriveAggregateDerivationStatementHash(statementPayload),
         },
     };
 };
@@ -465,53 +459,53 @@ const createAggregateDerivationProofRecord = (input: {
     >;
     readonly statement: AggregateDerivationStatement;
 }): AggregateDerivationProofRecord => {
-    const proofBytesDigest = deriveProofBytesDigest({
+    const proofBytesHash = deriveProofBytesHash({
         proofBytesHex: input.proofBytesHex,
     });
-    const proofEncodingProfileDigest = deriveBallotProofEncodingProfileDigest({
+    const proofEncodingProfileHash = deriveBallotProofEncodingProfileHash({
         proofEncoding: input.proofInput.proofEncoding,
     });
-    const proofParameterSetDigest = deriveBallotProofParameterSetDigest({
+    const proofParameterSetHash = deriveBallotProofParameterSetHash({
         parameterSet: input.proofInput.proofParameterSet,
     });
-    const publicRandomnessDigest = deriveBallotProofPublicRandomnessDigest({
+    const publicRandomnessHash = deriveBallotProofPublicRandomnessHash({
         publicRandomnessHex: input.proofInput.publicRandomnessHex,
     });
     const proofRoot = deriveAggregateDerivationProofRoot({
-        componentProofStatementDigest:
-            input.proofInput.componentProofStatementDigest,
-        proofBytesDigest,
-        proofEncodingProfileDigest,
-        proofParameterSetDigest,
-        publicRandomnessDigest,
-        statementDigest: input.statement.aggregateDerivationStatementDigest,
+        componentProofStatementHash:
+            input.proofInput.componentProofStatementHash,
+        proofBytesHash,
+        proofEncodingProfileHash,
+        proofParameterSetHash,
+        publicRandomnessHash,
+        statementHash: input.statement.aggregateDerivationStatementHash,
     });
     const proofRecordPayload: Omit<
         AggregateDerivationProofRecord,
-        'aggregateDerivationProofRecordDigest'
+        'aggregateDerivationProofRecordHash'
     > = {
         objectType: 'AggregateDerivationProofRecord',
         objectVersion: 1,
-        aggregateDerivationStatementDigest:
-            input.statement.aggregateDerivationStatementDigest,
-        aggregateShareCommitmentDigest:
-            input.statement.aggregateShareCommitmentDigest,
+        aggregateDerivationStatementHash:
+            input.statement.aggregateDerivationStatementHash,
+        aggregateShareCommitmentHash:
+            input.statement.aggregateShareCommitmentHash,
         componentId: aggregateDerivationComponentId,
-        componentProofStatementDigest:
-            input.proofInput.componentProofStatementDigest,
+        componentProofStatementHash:
+            input.proofInput.componentProofStatementHash,
         proofBackend: 'LocalLinearLatticeRelation',
-        proofBytesDigest,
-        proofEncodingProfileDigest,
-        proofParameterSetDigest,
+        proofBytesHash,
+        proofEncodingProfileHash,
+        proofParameterSetHash,
         proofRoot,
         proofSizeBytes: input.proofBytesHex.length / 2,
-        publicRandomnessDigest,
+        publicRandomnessHash,
     };
 
     return {
         ...proofRecordPayload,
-        aggregateDerivationProofRecordDigest:
-            deriveAggregateDerivationProofRecordDigest(proofRecordPayload),
+        aggregateDerivationProofRecordHash:
+            deriveAggregateDerivationProofRecordHash(proofRecordPayload),
     };
 };
 
@@ -532,7 +526,7 @@ export const createAggregateDerivationComponent = (input: {
     });
     const componentPayload: Omit<
         AggregateDerivationComponent,
-        'aggregateDerivationComponentDigest'
+        'aggregateDerivationComponentHash'
     > = {
         objectType: 'AggregateDerivationComponent',
         objectVersion: 1,
@@ -548,7 +542,7 @@ export const createAggregateDerivationComponent = (input: {
 
     return {
         ...componentPayload,
-        aggregateDerivationComponentDigest:
-            deriveAggregateDerivationComponentDigest(componentPayload),
+        aggregateDerivationComponentHash:
+            deriveAggregateDerivationComponentHash(componentPayload),
     };
 };

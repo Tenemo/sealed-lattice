@@ -21,7 +21,7 @@ jobs:
                   components: clippy, rustfmt
                   targets: wasm32-unknown-unknown
             - uses: Swatinem/rust-cache@aa7c1c80a07a27a84c0aa76d0cef0aad3830e330
-            - run: cargo fmt --check
+            - run: cargo fmt --check -p sealed-lattice-kernel
             - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
             - run: cargo test --workspace
 
@@ -124,6 +124,9 @@ jobs:
         name: coverage
         runs-on: ubuntu-latest
         timeout-minutes: 25
+        permissions:
+            contents: read
+            id-token: write
         steps:
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
             - uses: ./.github/actions/bootstrap-pnpm
@@ -133,6 +136,13 @@ jobs:
                   targets: wasm32-unknown-unknown
             - uses: Swatinem/rust-cache@aa7c1c80a07a27a84c0aa76d0cef0aad3830e330
             - run: pnpm run coverage:node
+            - uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354
+              with:
+                  disable_search: true
+                  fail_ci_if_error: true
+                  files: ./coverage/lcov.info
+                  flags: node
+                  use_oidc: true
 
     browser:
         name: browser

@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 
 use crate::{
     fixtures::{TranscriptCoreFixture, verify_fixture},
-    hashing::{RESERVED_ROOT_NAMESPACES, chunk_root, derive_protocol_digest, hash512_hex},
+    hashing::{RESERVED_ROOT_NAMESPACES, chunk_root, derive_protocol_hash, hash512_hex},
     ring::{
         MAXIMUM_SHAMIR_INTERPOLATION_POINTS, ShamirSharePoint, evaluate_plaintext_comparison,
         interpolate_shamir_constant_term,
@@ -15,8 +15,6 @@ use crate::{
 pub const MODULE_MARKER: &str = "encoding";
 pub const TRANSCRIPT_CORE_COMMAND_CONTRACT_VERSION: &str =
     "sealed-lattice-transcript-core-command-v1";
-const MAX_TRANSCRIPT_CORE_COMMAND_INPUT_BYTES: usize = 256 * 1024 * 1024;
-const MAX_RAW_HEX_INPUT_BYTES: usize = 48 * 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
@@ -291,14 +289,15 @@ pub fn run_transcript_core_command(input: &[u8]) -> Vec<u8> {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(tag = "command")]
 enum TranscriptCoreCommand {
     ListCanonicalErrorCodes,
     ListReservedRootNamespaces,
     AnalyzeCanonicalObject,
     ComputeChunkRoot,
     HashRaw,
-    DeriveProtocolDigest,
+    DeriveProtocolHash,
     InterpolateShamirConstantTerm,
     EvaluatePlaintextComparison,
     VerifyFixture,
@@ -317,12 +316,12 @@ enum TranscriptCoreCommand {
     GenerateAggregateDerivationProof,
     VerifyAggregateDerivationProof,
     GenerateAggregateBridgeEncryption,
-    EvaluateAggregateBridgeRelation,
     VerifyAggregateBridgeEncryption,
+    EvaluateAggregateBridgeRelation,
     DescribeBgvRnsProfile,
     DescribeBgvOperationRegistry,
-    ValidateBgvEvaluatorOperation,
     GenerateBgvBackendReport,
+    ValidateBgvEvaluatorOperation,
     DescribeBgvPassiveSetupObjectModel,
     GenerateBgvPassiveSetup,
     VerifyBgvPassiveSetup,
@@ -336,87 +335,15 @@ enum TranscriptCoreCommand {
 }
 
 fn parse_transcript_core_command(command_name: &str) -> CanonicalResult<TranscriptCoreCommand> {
-    let command = match command_name {
-        "ListCanonicalErrorCodes" => TranscriptCoreCommand::ListCanonicalErrorCodes,
-        "ListReservedRootNamespaces" => TranscriptCoreCommand::ListReservedRootNamespaces,
-        "AnalyzeCanonicalObject" => TranscriptCoreCommand::AnalyzeCanonicalObject,
-        "ComputeChunkRoot" => TranscriptCoreCommand::ComputeChunkRoot,
-        "HashRaw" => TranscriptCoreCommand::HashRaw,
-        "DeriveProtocolDigest" => TranscriptCoreCommand::DeriveProtocolDigest,
-        "InterpolateShamirConstantTerm" => TranscriptCoreCommand::InterpolateShamirConstantTerm,
-        "EvaluatePlaintextComparison" => TranscriptCoreCommand::EvaluatePlaintextComparison,
-        "VerifyFixture" => TranscriptCoreCommand::VerifyFixture,
-        "DescribeBallotPrivacyProofBackend" => {
-            TranscriptCoreCommand::DescribeBallotPrivacyProofBackend
-        }
-        "VerifyBallotPrivacyLinearProofVector" => {
-            TranscriptCoreCommand::VerifyBallotPrivacyLinearProofVector
-        }
-        "VerifyBallotPrivacyEncodedRelationVector" => {
-            TranscriptCoreCommand::VerifyBallotPrivacyEncodedRelationVector
-        }
-        "VerifyBallotPrivacyReceiverKeyVector" => {
-            TranscriptCoreCommand::VerifyBallotPrivacyReceiverKeyVector
-        }
-        "VerifyReceiverKeyProof" => TranscriptCoreCommand::VerifyReceiverKeyProof,
-        "PrepareReceiverKeyProofGeneration" => {
-            TranscriptCoreCommand::PrepareReceiverKeyProofGeneration
-        }
-        "GenerateReceiverKeyProof" => TranscriptCoreCommand::GenerateReceiverKeyProof,
-        "GenerateBallotProof" => TranscriptCoreCommand::GenerateBallotProof,
-        "GenerateBallotComponentProof" => TranscriptCoreCommand::GenerateBallotComponentProof,
-        "GenerateBallotProofRecord" => TranscriptCoreCommand::GenerateBallotProofRecord,
-        "VerifyBallotProof" => TranscriptCoreCommand::VerifyBallotProof,
-        "VerifyClaimBearingBallotPackage" => TranscriptCoreCommand::VerifyClaimBearingBallotPackage,
-        "GenerateAggregateDerivationProof" => {
-            TranscriptCoreCommand::GenerateAggregateDerivationProof
-        }
-        "VerifyAggregateDerivationProof" => TranscriptCoreCommand::VerifyAggregateDerivationProof,
-        "GenerateAggregateBridgeEncryption" => {
-            TranscriptCoreCommand::GenerateAggregateBridgeEncryption
-        }
-        "EvaluateAggregateBridgeRelation" => TranscriptCoreCommand::EvaluateAggregateBridgeRelation,
-        "VerifyAggregateBridgeEncryption" => TranscriptCoreCommand::VerifyAggregateBridgeEncryption,
-        "DescribeBgvRnsProfile" => TranscriptCoreCommand::DescribeBgvRnsProfile,
-        "DescribeBgvOperationRegistry" => TranscriptCoreCommand::DescribeBgvOperationRegistry,
-        "ValidateBgvEvaluatorOperation" => TranscriptCoreCommand::ValidateBgvEvaluatorOperation,
-        "GenerateBgvBackendReport" => TranscriptCoreCommand::GenerateBgvBackendReport,
-        "DescribeBgvPassiveSetupObjectModel" => {
-            TranscriptCoreCommand::DescribeBgvPassiveSetupObjectModel
-        }
-        "GenerateBgvPassiveSetup" => TranscriptCoreCommand::GenerateBgvPassiveSetup,
-        "VerifyBgvPassiveSetup" => TranscriptCoreCommand::VerifyBgvPassiveSetup,
-        "EncodeBgvBatchPlaintext" => TranscriptCoreCommand::EncodeBgvBatchPlaintext,
-        "ValidateBgvPlaintextObject" => TranscriptCoreCommand::ValidateBgvPlaintextObject,
-        "ValidateBgvCiphertextObject" => TranscriptCoreCommand::ValidateBgvCiphertextObject,
-        "GenerateBgvCiphertextConventionFixture" => {
-            TranscriptCoreCommand::GenerateBgvCiphertextConventionFixture
-        }
-        "GenerateBgvBaseConversionFixture" => {
-            TranscriptCoreCommand::GenerateBgvBaseConversionFixture
-        }
-        "AnalyzeBgvCanonicalObject" => TranscriptCoreCommand::AnalyzeBgvCanonicalObject,
-        "RejectBgvReferenceOracleArtifact" => {
-            TranscriptCoreCommand::RejectBgvReferenceOracleArtifact
-        }
-        _ => {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                format!("unsupported command: {command_name}"),
-            ));
-        }
-    };
-
-    Ok(command)
+    serde_json::from_value(json!({ "command": command_name })).map_err(|_| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            format!("unsupported command: {command_name}"),
+        )
+    })
 }
 
 fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult<Value> {
-    if input.len() > MAX_TRANSCRIPT_CORE_COMMAND_INPUT_BYTES {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "transcript-core command input exceeds the supported byte limit",
-        ));
-    }
     let request: Value = serde_json::from_slice(input).map_err(|error| {
         CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
@@ -460,12 +387,7 @@ fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult<Value> {
             let chunk_size = request
                 .get("chunkSize")
                 .and_then(Value::as_u64)
-                .ok_or_else(|| {
-                    CanonicalError::new(
-                        CanonicalErrorCode::InvalidFixture,
-                        "chunkSize must be an integer",
-                    )
-                })?;
+                .unwrap_or(16);
 
             analyze_canonical_object_hex(canonical_bytes_hex, chunk_size)
         }
@@ -479,12 +401,6 @@ fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult<Value> {
                         "inputHex must be a string",
                     )
                 })?;
-            if input_hex.len() / 2 > MAX_RAW_HEX_INPUT_BYTES {
-                return Err(CanonicalError::new(
-                    CanonicalErrorCode::MalformedLength,
-                    "inputHex exceeds the supported chunk-root byte limit",
-                ));
-            }
             let chunk_size = request
                 .get("chunkSize")
                 .and_then(Value::as_u64)
@@ -519,19 +435,13 @@ fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult<Value> {
                         "inputHex must be a string",
                     )
                 })?;
-            if input_hex.len() / 2 > MAX_RAW_HEX_INPUT_BYTES {
-                return Err(CanonicalError::new(
-                    CanonicalErrorCode::MalformedLength,
-                    "inputHex exceeds the supported raw hash byte limit",
-                ));
-            }
             let bytes = crate::transcript_core::decode_hex(input_hex)?;
 
             Ok(json!({
                 "hash512": hash512_hex("transcript-core/raw", &[&bytes]),
             }))
         }
-        TranscriptCoreCommand::DeriveProtocolDigest => {
+        TranscriptCoreCommand::DeriveProtocolHash => {
             let namespace = read_string_field(&request, "namespace")?;
             let value = request.get("value").ok_or_else(|| {
                 CanonicalError::new(
@@ -541,7 +451,7 @@ fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult<Value> {
             })?;
 
             Ok(json!({
-                "protocolDigest": derive_protocol_digest(namespace, value)?,
+                "protocolHash": derive_protocol_hash(namespace, value)?,
             }))
         }
         TranscriptCoreCommand::InterpolateShamirConstantTerm => {
@@ -593,14 +503,14 @@ fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult<Value> {
         | TranscriptCoreCommand::GenerateAggregateDerivationProof
         | TranscriptCoreCommand::VerifyAggregateDerivationProof
         | TranscriptCoreCommand::GenerateAggregateBridgeEncryption
-        | TranscriptCoreCommand::EvaluateAggregateBridgeRelation
-        | TranscriptCoreCommand::VerifyAggregateBridgeEncryption => {
+        | TranscriptCoreCommand::VerifyAggregateBridgeEncryption
+        | TranscriptCoreCommand::EvaluateAggregateBridgeRelation => {
             run_ballot_privacy_command(command, &request)
         }
         TranscriptCoreCommand::DescribeBgvRnsProfile
         | TranscriptCoreCommand::DescribeBgvOperationRegistry
-        | TranscriptCoreCommand::ValidateBgvEvaluatorOperation
         | TranscriptCoreCommand::GenerateBgvBackendReport
+        | TranscriptCoreCommand::ValidateBgvEvaluatorOperation
         | TranscriptCoreCommand::DescribeBgvPassiveSetupObjectModel
         | TranscriptCoreCommand::GenerateBgvPassiveSetup
         | TranscriptCoreCommand::VerifyBgvPassiveSetup
@@ -710,16 +620,13 @@ fn run_ballot_privacy_command(
                 request,
             ),
         ),
-        TranscriptCoreCommand::EvaluateAggregateBridgeRelation => Ok(
-            crate::ballot_privacy::evaluate_aggregate_bridge_relation_from_command_request(request),
-        ),
         TranscriptCoreCommand::VerifyAggregateBridgeEncryption => Ok(
             crate::ballot_privacy::verify_aggregate_bridge_encryption_from_command_request(request),
         ),
-        _ => Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "non-ballot command dispatched to ballot privacy handler",
-        )),
+        TranscriptCoreCommand::EvaluateAggregateBridgeRelation => Ok(
+            crate::ballot_privacy::evaluate_aggregate_bridge_relation_from_command_request(request),
+        ),
+        _ => unreachable!("non-ballot command dispatched to ballot privacy handler"),
     }
 }
 
@@ -731,14 +638,11 @@ fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> Canonical
         TranscriptCoreCommand::DescribeBgvOperationRegistry => {
             crate::bgv::commands::describe_bgv_operation_registry()
         }
-        TranscriptCoreCommand::ValidateBgvEvaluatorOperation => {
-            Ok(crate::bgv::commands::bgv_input_result(
-                "validateBgvEvaluatorOperation",
-                crate::bgv::commands::validate_bgv_evaluator_operation_from_request(request),
-            ))
-        }
         TranscriptCoreCommand::GenerateBgvBackendReport => {
             crate::bgv::commands::generate_bgv_backend_report()
+        }
+        TranscriptCoreCommand::ValidateBgvEvaluatorOperation => {
+            crate::bgv::commands::validate_bgv_evaluator_operation_from_request(request)
         }
         TranscriptCoreCommand::DescribeBgvPassiveSetupObjectModel => {
             crate::bgv::commands::describe_bgv_passive_setup_object_model()
@@ -750,50 +654,27 @@ fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> Canonical
             crate::bgv::commands::verify_bgv_passive_setup_from_request(request)
         }
         TranscriptCoreCommand::EncodeBgvBatchPlaintext => {
-            Ok(crate::bgv::commands::bgv_input_result(
-                "encodeBgvBatchPlaintext",
-                crate::bgv::commands::encode_bgv_batch_plaintext_from_request(request),
-            ))
+            crate::bgv::commands::encode_bgv_batch_plaintext_from_request(request)
         }
         TranscriptCoreCommand::ValidateBgvPlaintextObject => {
-            Ok(crate::bgv::commands::bgv_input_result(
-                "validateBgvPlaintextObject",
-                crate::bgv::commands::validate_bgv_plaintext_from_request(request),
-            ))
+            crate::bgv::commands::validate_bgv_plaintext_from_request(request)
         }
         TranscriptCoreCommand::ValidateBgvCiphertextObject => {
-            Ok(crate::bgv::commands::bgv_input_result(
-                "validateBgvCiphertextObject",
-                crate::bgv::commands::validate_bgv_ciphertext_from_request(request),
-            ))
+            crate::bgv::commands::validate_bgv_ciphertext_from_request(request)
         }
         TranscriptCoreCommand::GenerateBgvCiphertextConventionFixture => {
-            Ok(crate::bgv::commands::bgv_input_result(
-                "generateBgvCiphertextConventionFixture",
-                crate::bgv::commands::generate_bgv_ciphertext_convention_fixture_from_request(
-                    request,
-                ),
-            ))
+            crate::bgv::commands::generate_bgv_ciphertext_convention_fixture_from_request(request)
         }
         TranscriptCoreCommand::GenerateBgvBaseConversionFixture => {
-            Ok(crate::bgv::commands::bgv_input_result(
-                "generateBgvBaseConversionFixture",
-                crate::bgv::commands::generate_bgv_base_conversion_fixture_from_request(request),
-            ))
+            crate::bgv::commands::generate_bgv_base_conversion_fixture_from_request(request)
         }
         TranscriptCoreCommand::AnalyzeBgvCanonicalObject => {
-            Ok(crate::bgv::commands::bgv_input_result(
-                "analyzeBgvCanonicalObject",
-                crate::bgv::commands::analyze_bgv_canonical_object_from_request(request),
-            ))
+            crate::bgv::commands::analyze_bgv_canonical_object_from_request(request)
         }
         TranscriptCoreCommand::RejectBgvReferenceOracleArtifact => {
             Ok(crate::bgv::commands::reject_bgv_reference_oracle_artifact_from_request(request))
         }
-        _ => Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "non-BGV command dispatched to BGV handler",
-        )),
+        _ => unreachable!("non-BGV command dispatched to BGV handler"),
     }
 }
 
@@ -869,4 +750,170 @@ fn read_share_points(request: &Value) -> CanonicalResult<Vec<ShamirSharePoint>> 
 }
 
 #[cfg(test)]
-mod tests;
+mod tests {
+    use super::{
+        CanonicalErrorCode, CanonicalReader, append_varuint, encode_error, encode_varuint,
+    };
+
+    #[test]
+    fn varuint_round_trips_boundary_values() {
+        for value in [0, 1, 2, 127, 128, 255, 16_384, u32::MAX as u64, u64::MAX] {
+            let encoded = encode_varuint(value);
+            let mut reader = CanonicalReader::new(&encoded);
+
+            assert_eq!(reader.read_varuint().expect("value should decode"), value);
+            assert!(reader.is_finished());
+        }
+    }
+
+    #[test]
+    fn rejects_non_canonical_varuint() {
+        let mut reader = CanonicalReader::new(&[0x80, 0x00]);
+        let error = reader
+            .read_varuint()
+            .expect_err("redundant varuint should fail");
+
+        assert_eq!(error.code, CanonicalErrorCode::NonCanonicalVarUint);
+    }
+
+    #[test]
+    fn append_varuint_uses_canonical_encoding() {
+        let mut output = Vec::new();
+        append_varuint(&mut output, 128);
+
+        assert_eq!(output, vec![0x80, 0x01]);
+    }
+
+    #[test]
+    fn command_errors_are_json_encoded() {
+        let encoded = encode_error(super::CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "bad command",
+        ));
+        let response = String::from_utf8(encoded).expect("error should be UTF-8 JSON");
+
+        assert!(response.contains("\"success\":false"));
+        assert!(response.contains("\"InvalidFixture\""));
+    }
+
+    #[test]
+    fn command_rejects_missing_command_with_stable_message() {
+        let error = super::run_transcript_core_command_inner(br#"{}"#)
+            .expect_err("missing command should fail");
+
+        assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
+        assert_eq!(error.message, "command must be a string");
+    }
+
+    #[test]
+    fn command_rejects_unknown_command_with_stable_message() {
+        let error = super::run_transcript_core_command_inner(
+            serde_json::json!({
+                "command": "NotACommand"
+            })
+            .to_string()
+            .as_bytes(),
+        )
+        .expect_err("unknown command should fail");
+
+        assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
+        assert_eq!(error.message, "unsupported command: NotACommand");
+    }
+
+    #[test]
+    fn command_derives_protocol_hash_with_kernel_canonical_json() {
+        let response = super::run_transcript_core_command_inner(
+            serde_json::json!({
+                "command": "DeriveProtocolHash",
+                "namespace": "PollSpecHash",
+                "value": {
+                    "poll": "main"
+                }
+            })
+            .to_string()
+            .as_bytes(),
+        )
+        .expect("protocol hash command should succeed");
+
+        assert_eq!(
+            response["protocolHash"],
+            "43b28c9a3dcb3e34d75c9936a9930b68fb9f2010b87d43a6a61cbaa85d343d9fd0be2b312a90f404367b9c68793b0dcf02c4dae7351f6e96ded894b92f898cb4"
+        );
+    }
+
+    #[test]
+    fn command_exposes_kernel_field_interpolation() {
+        let response = super::run_transcript_core_command_inner(
+            serde_json::json!({
+                "command": "InterpolateShamirConstantTerm",
+                "sharePoints": [
+                    { "rosterPosition": 1, "value": 15 },
+                    { "rosterPosition": 2, "value": 25 }
+                ]
+            })
+            .to_string()
+            .as_bytes(),
+        )
+        .expect("field interpolation command should succeed");
+
+        assert_eq!(response["fieldElement"], 5);
+    }
+
+    #[test]
+    fn command_exposes_plaintext_comparison() {
+        let response = super::run_transcript_core_command_inner(
+            serde_json::json!({
+                "command": "EvaluatePlaintextComparison",
+                "leftTotalScore": 41,
+                "rightTotalScore": 40,
+                "rosterSize": 5
+            })
+            .to_string()
+            .as_bytes(),
+        )
+        .expect("plaintext comparison command should succeed");
+
+        assert_eq!(response["greaterThan"], 1);
+        assert_eq!(response["equal"], 0);
+        assert_eq!(response["scoreDifference"], 1);
+    }
+
+    #[test]
+    fn all_canonical_error_codes_is_exhaustive() {
+        // The compiler enforces exhaustiveness here. If a new variant is added
+        // to `CanonicalErrorCode`, this match fails and the dev must extend
+        // both the match arm and `ALL_CANONICAL_ERROR_CODES`.
+        fn ensure_exhaustive(code: CanonicalErrorCode) {
+            match code {
+                CanonicalErrorCode::DuplicateField
+                | CanonicalErrorCode::FieldOrder
+                | CanonicalErrorCode::FixtureMismatch
+                | CanonicalErrorCode::InvalidChunkSize
+                | CanonicalErrorCode::InvalidEnum
+                | CanonicalErrorCode::InvalidFixture
+                | CanonicalErrorCode::InvalidHex
+                | CanonicalErrorCode::InvalidUtf8
+                | CanonicalErrorCode::MalformedLength
+                | CanonicalErrorCode::MalformedMagic
+                | CanonicalErrorCode::MalformedVarUint
+                | CanonicalErrorCode::MissingField
+                | CanonicalErrorCode::NonCanonicalVarUint
+                | CanonicalErrorCode::ProfileComponentMismatch
+                | CanonicalErrorCode::TrailingBytes
+                | CanonicalErrorCode::UnknownField
+                | CanonicalErrorCode::UnknownBaseClaimProfile
+                | CanonicalErrorCode::UnknownMheSecurityClosure
+                | CanonicalErrorCode::UnknownProofProfile
+                | CanonicalErrorCode::UnsupportedCanonicalEnvelopeVersion
+                | CanonicalErrorCode::UnsupportedObjectType
+                | CanonicalErrorCode::UnsupportedObjectVersion => {}
+            }
+        }
+
+        for code in super::ALL_CANONICAL_ERROR_CODES {
+            ensure_exhaustive(code.clone());
+        }
+
+        assert_eq!(super::ALL_CANONICAL_ERROR_CODES.len(), 22);
+    }
+}

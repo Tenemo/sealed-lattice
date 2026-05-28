@@ -2,15 +2,15 @@ import {
     encryptedAggregateBridgeProfileId,
     type AggregateContribution,
     type AggregateReadyRecord,
-    type ProtocolDigest,
+    type ProtocolHash,
     type ProtocolSignatureEnvelope,
 } from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
 import {
-    deriveAggregateReadyRecordDigest,
+    deriveAggregateReadyRecordHash,
     deriveEncryptedAggregateReconstructionRoot,
-} from '../../src/ballot-privacy/aggregate-bridge/digests.js';
+} from '../../src/ballot-privacy/aggregate-bridge/hashes.js';
 import {
     createPendingBridgeProofRecordFromBridgeEvidence,
     type PendingBridgeProofRecordFromEvidenceInput,
@@ -19,9 +19,9 @@ import { forbiddenPublicWitnessFieldNames } from '../../src/ballot-privacy/aggre
 import {
     createAggregateContributionFromBridgeProofRecord,
     createAggregateReadyRecord,
-    deriveBridgeProofProfileDigest,
-    deriveBridgeProofStatementDigest,
-    deriveBridgeProofTargetContractDigest,
+    deriveBridgeProofProfileHash,
+    deriveBridgeProofStatementHash,
+    deriveBridgeProofTargetContractHash,
     selectFirstValidAggregateContributions,
     verifyAggregateContributionStructure,
     verifyAggregateReadyRecordStructure,
@@ -33,130 +33,124 @@ import {
     createAggregateContributionFixture,
     createAggregateDerivationComponentFixture,
     createSetupEvidenceFixture,
-    digest,
+    hash,
     recoveryMapFor,
     sampledPublicRelationCheckPolicy,
     sampledPublicRelationChecks,
-    sampledPublicRelationCheckPolicyDigest,
+    sampledPublicRelationCheckPolicyHash,
 } from './ballot-privacy-aggregate-bridge/fixtures.js';
 describe('encrypted aggregate bridge objects', () => {
     it('creates checked bridge proof records from checked kernel bridge evidence', () => {
         const contributorIdentity = 'trustee-1';
-        const contributorRosterExternalAcceptanceDigest =
-            digest('acceptance-1');
-        const aggregateDerivationComponentDigest = digest(
-            'aggregate-derivation-1',
-        );
-        const aggregateShareCommitmentDigest = digest(
+        const contributorRosterExternalAcceptanceHash = hash('acceptance-1');
+        const aggregateDerivationComponentHash = hash('aggregate-derivation-1');
+        const aggregateShareCommitmentHash = hash(
             'aggregate-share-commitment-1',
         );
         const aggregateDerivationComponent =
             createAggregateDerivationComponentFixture({
-                aggregateDerivationComponentDigest,
-                aggregateShareCommitmentDigest,
+                aggregateDerivationComponentHash,
+                aggregateShareCommitmentHash,
                 contributorIdentity,
-                contributorRosterExternalAcceptanceDigest,
+                contributorRosterExternalAcceptanceHash,
                 contributorRosterPosition: 1,
             });
         const setupPackage = createSetupEvidenceFixture();
-        const bridgeProofProfileDigest = deriveBridgeProofProfileDigest({
+        const bridgeProofProfileHash = deriveBridgeProofProfileHash({
             bgvEncryptionProofSubrelation:
                 'SealedLatticeDevelopmentCiphertextEquationRelation',
             bridgeProofProfileId: encryptedAggregateBridgeProfileId,
             proofBackend: 'SealedLatticeBridgeRelation',
         });
-        const encryptedAggregateShareCiphertextRoot = digest(
+        const encryptedAggregateShareCiphertextRoot = hash(
             'aggregate-share-ciphertext-1',
         );
         const canonicalBytesHash512 = '4'.repeat(128);
         const canonicalByteLength = 180_781;
-        const bridgeProofTargetContractDigest =
-            deriveBridgeProofTargetContractDigest({
+        const bridgeProofTargetContractHash =
+            deriveBridgeProofTargetContractHash({
                 aggregateQuotientCoordinateCount:
                     aggregateDerivationComponent.statement.shareVectorWidth,
                 aggregateReducedCoordinateCount:
                     aggregateDerivationComponent.statement.shareVectorWidth,
             });
-        const bridgeProofStatementDigest = deriveBridgeProofStatementDigest({
-            aggregateDerivationComponentDigest,
-            aggregateInputEncodingProfileDigest:
-                baseFields.aggregateInputEncodingProfileDigest,
+        const bridgeProofStatementHash = deriveBridgeProofStatementHash({
+            aggregateDerivationComponentHash,
+            aggregateInputEncodingProfileHash:
+                baseFields.aggregateInputEncodingProfileHash,
             aggregateQuotientCoordinateCount:
                 aggregateDerivationComponent.statement.shareVectorWidth,
             aggregateReducedCoordinateCount:
                 aggregateDerivationComponent.statement.shareVectorWidth,
-            aggregateSelectionPolicyDigest:
-                baseFields.aggregateSelectionPolicyDigest,
-            aggregateShareCommitmentDigest,
+            aggregateSelectionPolicyHash:
+                baseFields.aggregateSelectionPolicyHash,
+            aggregateShareCommitmentHash,
             aggregateToPlaintextBindingStatus:
                 'AggregateToPlaintextBindingProofChecked',
-            ballotScoreEncodingProfileDigest:
-                baseFields.ballotScoreEncodingProfileDigest,
-            ballotSetDigest: baseFields.ballotSetDigest,
-            ballotShareLayoutProfileDigest:
-                baseFields.ballotShareLayoutProfileDigest,
+            ballotScoreEncodingProfileHash:
+                baseFields.ballotScoreEncodingProfileHash,
+            ballotSetHash: baseFields.ballotSetHash,
+            ballotShareLayoutProfileHash:
+                baseFields.ballotShareLayoutProfileHash,
             basisId: 'sealed-lattice-bgv-rns-data-basis-v1',
-            bgvBatchEncoderDigest: baseFields.bgvBatchEncoderDigest,
+            bgvBatchEncoderHash: baseFields.bgvBatchEncoderHash,
             bgvEncryptionProofStatus: 'BgvCiphertextEquationChecked',
-            bgvProfileDigest: baseFields.bgvProfileDigest,
+            bgvProfileHash: baseFields.bgvProfileHash,
             bgvPublicKeyRoot: baseFields.bgvPublicKeyRoot,
             bgvRandomnessBoundProofStatus:
                 'BgvRandomnessErrorSupportPolynomialChecked',
             bridgeClaimClosureStatus: 'BridgeProofClaimClosureMissing',
-            bridgeLayoutDigest: baseFields.encryptedAggregateInputLayoutDigest,
-            bridgeProofTargetContractDigest,
-            bridgeWitnessPrivacyProfileDigest:
-                baseFields.bridgeWitnessPrivacyProfileDigest,
+            bridgeLayoutHash: baseFields.encryptedAggregateInputLayoutHash,
+            bridgeProofTargetContractHash,
+            bridgeWitnessPrivacyProfileHash:
+                baseFields.bridgeWitnessPrivacyProfileHash,
             canonicalByteLength,
             canonicalBytesHash512,
-            canonicalCiphertextConventionDigest:
-                baseFields.canonicalCiphertextConventionDigest,
+            canonicalCiphertextConventionHash:
+                baseFields.canonicalCiphertextConventionHash,
             ceremonyId: baseFields.ceremonyId,
-            ciphertextRoot: digest('bridge-ciphertext-1'),
+            ciphertextRoot: hash('bridge-ciphertext-1'),
             coefficientDomainCanonical: true,
             coefficientCount: 32_768,
             collectivePublicKeyRoot: baseFields.collectivePublicKeyRoot,
-            contributorActionContextDigest:
+            contributorActionContextHash:
                 aggregateDerivationComponent.statement
-                    .contributorActionContextDigest,
+                    .contributorActionContextHash,
             contributorIdentity,
-            contributorRosterExternalAcceptanceDigest,
+            contributorRosterExternalAcceptanceHash,
             contributorRosterPosition: 1,
             optionCount: aggregateDerivationComponent.statement.optionCount,
             participantCount:
                 aggregateDerivationComponent.statement.participantCount,
-            encodedAggregateLayoutDigest:
-                baseFields.encodedAggregateLayoutDigest,
-            encodedShareVectorLayoutDigest:
-                baseFields.encodedShareVectorLayoutDigest,
-            encryptedAggregateBridgeDigest:
-                baseFields.encryptedAggregateBridgeDigest,
-            encryptedAggregateInputLayoutDigest:
-                baseFields.encryptedAggregateInputLayoutDigest,
+            encodedAggregateLayoutHash: baseFields.encodedAggregateLayoutHash,
+            encodedShareVectorLayoutHash:
+                baseFields.encodedShareVectorLayoutHash,
+            encryptedAggregateBridgeHash:
+                baseFields.encryptedAggregateBridgeHash,
+            encryptedAggregateInputLayoutHash:
+                baseFields.encryptedAggregateInputLayoutHash,
             encryptedAggregateInputRoot: encryptedAggregateShareCiphertextRoot,
-            encryptedAggregateReconstructionDigest:
-                baseFields.encryptedAggregateReconstructionDigest,
+            encryptedAggregateReconstructionHash:
+                baseFields.encryptedAggregateReconstructionHash,
             encryptedAggregateShareCiphertextRoot,
-            encryptedAggregateTargetBasisDataRoot:
-                baseFields.encryptedAggregateTargetBasisDataRoot,
-            heParamDigest: baseFields.heParamDigest,
-            hwangPiopStatus:
-                'DeferredUntilSealedLatticeBgvRnsCompatibilityFreeze',
+            encryptedAggregateTargetBasisRoot:
+                baseFields.encryptedAggregateTargetBasisRoot,
+            heParamHash: baseFields.heParamHash,
+            hwangPiopStatus: 'DeferredUntilSealedLatticeBgvRnsProfileFreeze',
             level: 15,
-            manifestDigest: baseFields.manifestDigest,
-            plaintextRoot: digest('bridge-plaintext-1'),
-            pollSpecDigest: baseFields.pollSpecDigest,
-            postVotingClosedContextDigest:
-                baseFields.postVotingClosedContextDigest,
-            proofProfileDigest: bridgeProofProfileDigest,
+            manifestHash: baseFields.manifestHash,
+            plaintextRoot: hash('bridge-plaintext-1'),
+            pollSpecHash: baseFields.pollSpecHash,
+            postVotingClosedContextHash: baseFields.postVotingClosedContextHash,
+            proofProfileHash: bridgeProofProfileHash,
             rnsCrtConsistencyProofStatus: 'RnsCrtConsistencyRelationChecked',
-            rosterDigest: baseFields.rosterDigest,
-            rustBgvBackendProfileDigest: baseFields.rustBgvBackendProfileDigest,
-            sampledPublicRelationCheckPolicyDigest,
+            rosterHash: baseFields.rosterHash,
+            rustBgvBackendProfileHash: baseFields.rustBgvBackendProfileHash,
+            sampledPublicRelationCheckPolicyHash,
             sampledOnlyBridgeVerificationAccepted: false,
-            setupPackageDigest: baseFields.setupPackageDigest,
-            shareCommitmentMessageBoundCertDigest:
-                baseFields.shareCommitmentMessageBoundCertDigest,
+            setupPackageHash: baseFields.setupPackageHash,
+            shareCommitmentMessageBoundCertHash:
+                baseFields.shareCommitmentMessageBoundCertHash,
             shareVectorWidth:
                 aggregateDerivationComponent.statement.shareVectorWidth,
             sharedWitnessBindingRequired: true,
@@ -167,69 +161,68 @@ describe('encrypted aggregate bridge objects', () => {
             sharedWitnessZeroKnowledgeStatus:
                 'SharedWitnessZeroKnowledgeResponseDistributionChecked',
             slotCount: 32_768,
-            thresholdProfileDigest: baseFields.thresholdProfileDigest,
-            topKEvaluatorInputLayoutDigest:
-                baseFields.topKEvaluatorInputLayoutDigest,
-            votingClosedBoardHeadDigest: baseFields.votingClosedBoardHeadDigest,
+            thresholdProfileHash: baseFields.thresholdProfileHash,
+            topKEvaluatorInputLayoutHash:
+                baseFields.topKEvaluatorInputLayoutHash,
+            votingClosedBoardHeadHash: baseFields.votingClosedBoardHeadHash,
         });
         const aggregateRelationChallengeHex = '1'.repeat(48);
-        const aggregateRelationCommitmentDigest = digest(
+        const aggregateRelationCommitmentHash = hash(
             'aggregate-relation-commitment-1',
         );
         const aggregateRelationSubproofSizeBytes = 384;
-        const bridgeProofBytesDigest = digest('bridge-proof-bytes-1');
+        const bridgeProofBytesHash = hash('bridge-proof-bytes-1');
         const bridgeProofBytesHex = 'ab'.repeat(512);
-        const bridgeProofRoot = digest('bridge-proof-root-1');
-        const bridgeSharedWitnessProofDigest = digest(
+        const bridgeProofRoot = hash('bridge-proof-root-1');
+        const bridgeSharedWitnessProofHash = hash(
             'bridge-shared-witness-proof-1',
         );
-        const sharedWitnessZeroKnowledgeStatusDigest = digest(
+        const sharedWitnessZeroKnowledgeStatusHash = hash(
             'bridge-shared-witness-zk-status-1',
         );
-        const bgvRandomnessBoundProofStatusDigest = digest(
+        const bgvRandomnessBoundProofStatusHash = hash(
             'bridge-bgv-randomness-bound-status-1',
         );
         const bridgeEncryptionEvidence: PendingBridgeProofRecordFromEvidenceInput['bridgeEncryptionEvidence'] =
             {
-                aggregateDerivationComponentDigest,
-                aggregateDerivationStatementDigest:
+                aggregateDerivationComponentHash,
+                aggregateDerivationStatementHash:
                     aggregateDerivationComponent.statement
-                        .aggregateDerivationStatementDigest,
+                        .aggregateDerivationStatementHash,
                 aggregateQuotientCoordinateCount:
                     aggregateDerivationComponent.statement.shareVectorWidth,
                 aggregateReducedCoordinateCount:
                     aggregateDerivationComponent.statement.shareVectorWidth,
                 aggregateRelationChallengeHex,
-                aggregateRelationCommitmentDigest,
+                aggregateRelationCommitmentHash,
                 aggregateRelationSubproofSizeBytes,
                 basisId: 'sealed-lattice-bgv-rns-data-basis-v1',
                 bgvPublicKeyRoot: baseFields.bgvPublicKeyRoot,
-                bridgeProofBytesDigest,
+                bridgeProofBytesHash,
                 bridgeProofBytesHex,
-                bridgeProofProfileDigest,
+                bridgeProofProfileHash,
                 bridgeProofRoot,
-                bridgeSharedWitnessProofDigest,
-                bridgeProofStatementDigest,
-                bridgeProofTargetContractDigest,
+                bridgeSharedWitnessProofHash,
+                bridgeProofStatementHash,
+                bridgeProofTargetContractHash,
                 bridgeProofVerificationStatus:
                     'BridgeProofRelationChecked' as const,
-                sharedWitnessZeroKnowledgeStatusDigest,
-                bgvRandomnessBoundProofStatusDigest,
+                sharedWitnessZeroKnowledgeStatusHash,
+                bgvRandomnessBoundProofStatusHash,
                 canonicalByteLength,
                 canonicalBytesHash512,
-                canonicalCiphertextConventionDigest:
-                    baseFields.canonicalCiphertextConventionDigest,
-                ciphertextRoot: digest('bridge-ciphertext-1'),
+                canonicalCiphertextConventionHash:
+                    baseFields.canonicalCiphertextConventionHash,
+                ciphertextRoot: hash('bridge-ciphertext-1'),
                 coefficientCount: 32_768,
                 collectivePublicKeyRoot: baseFields.collectivePublicKeyRoot,
                 encryptedAggregateShareCiphertextRoot,
                 encryptedAggregateInputRoot:
                     encryptedAggregateShareCiphertextRoot,
                 level: 15,
-                plaintextRoot: digest('bridge-plaintext-1'),
-                profileDigest: baseFields.bgvProfileDigest,
-                rustBgvBackendProfileDigest:
-                    baseFields.rustBgvBackendProfileDigest,
+                plaintextRoot: hash('bridge-plaintext-1'),
+                profileHash: baseFields.bgvProfileHash,
+                rustBgvBackendProfileHash: baseFields.rustBgvBackendProfileHash,
                 sampledPublicRelationCheckPolicy,
                 sampledPublicRelationChecks,
                 slotCount: 32_768,
@@ -241,20 +234,20 @@ describe('encrypted aggregate bridge objects', () => {
                 aggregateReducedCoordinateCount:
                     aggregateDerivationComponent.statement.shareVectorWidth,
                 aggregateRelationChallengeHex,
-                aggregateRelationCommitmentDigest,
+                aggregateRelationCommitmentHash,
                 aggregateRelationSubproofSizeBytes,
                 bridgeEvidenceVerificationStatus:
                     'BridgeProofEvidenceChecked' as const,
-                bridgeProofBytesDigest,
-                bridgeProofProfileDigest,
+                bridgeProofBytesHash,
+                bridgeProofProfileHash,
                 bridgeProofRoot,
-                bridgeSharedWitnessProofDigest,
-                bridgeProofStatementDigest,
-                bridgeProofTargetContractDigest,
+                bridgeSharedWitnessProofHash,
+                bridgeProofStatementHash,
+                bridgeProofTargetContractHash,
                 bridgeProofVerificationStatus:
                     'BridgeProofRelationChecked' as const,
-                sharedWitnessZeroKnowledgeStatusDigest,
-                bgvRandomnessBoundProofStatusDigest,
+                sharedWitnessZeroKnowledgeStatusHash,
+                bgvRandomnessBoundProofStatusHash,
                 encryptedAggregateInputRoot:
                     encryptedAggregateShareCiphertextRoot,
                 encryptedAggregateShareCiphertextRoot,
@@ -264,24 +257,24 @@ describe('encrypted aggregate bridge objects', () => {
         const bridgeProofRecord =
             createPendingBridgeProofRecordFromBridgeEvidence({
                 aggregateDerivationComponent,
-                aggregateSelectionPolicyDigest:
-                    baseFields.aggregateSelectionPolicyDigest,
+                aggregateSelectionPolicyHash:
+                    baseFields.aggregateSelectionPolicyHash,
                 bridgeEncryptionEvidence,
                 bridgeEvidenceVerification,
-                bridgeWitnessPrivacyProfileDigest:
-                    baseFields.bridgeWitnessPrivacyProfileDigest,
-                heParamDigest: baseFields.heParamDigest,
+                bridgeWitnessPrivacyProfileHash:
+                    baseFields.bridgeWitnessPrivacyProfileHash,
+                heParamHash: baseFields.heParamHash,
                 setupPackage,
             });
 
         expect(bridgeProofRecord).toMatchObject({
-            aggregateDerivationComponentDigest,
-            aggregateShareCommitmentDigest,
+            aggregateDerivationComponentHash,
+            aggregateShareCommitmentHash,
             bridgeProofVerificationStatus: 'BridgeProofRelationChecked',
             encryptedAggregateShareCiphertextRoot,
             proofSizeBytes: bridgeProofBytesHex.length / 2,
-            proofStatementDigest: bridgeProofStatementDigest,
-            bridgeProofTargetContractDigest,
+            proofStatementHash: bridgeProofStatementHash,
+            bridgeProofTargetContractHash,
         });
         expect(bridgeProofRecord.proofSizeBytes).toBeGreaterThan(
             aggregateRelationSubproofSizeBytes,
@@ -302,103 +295,103 @@ describe('encrypted aggregate bridge objects', () => {
         expect(() =>
             createPendingBridgeProofRecordFromBridgeEvidence({
                 aggregateDerivationComponent,
-                aggregateSelectionPolicyDigest:
-                    baseFields.aggregateSelectionPolicyDigest,
+                aggregateSelectionPolicyHash:
+                    baseFields.aggregateSelectionPolicyHash,
                 bridgeEncryptionEvidence,
                 bridgeEvidenceVerification: {
                     ...bridgeEvidenceVerification,
-                    bridgeProofRoot: digest('wrong-bridge-proof-root'),
+                    bridgeProofRoot: hash('wrong-bridge-proof-root'),
                 },
-                bridgeWitnessPrivacyProfileDigest:
-                    baseFields.bridgeWitnessPrivacyProfileDigest,
-                heParamDigest: baseFields.heParamDigest,
+                bridgeWitnessPrivacyProfileHash:
+                    baseFields.bridgeWitnessPrivacyProfileHash,
+                heParamHash: baseFields.heParamHash,
                 setupPackage,
             }),
         ).toThrow(/bridge proof root/u);
         expect(() =>
             createPendingBridgeProofRecordFromBridgeEvidence({
                 aggregateDerivationComponent,
-                aggregateSelectionPolicyDigest:
-                    baseFields.aggregateSelectionPolicyDigest,
+                aggregateSelectionPolicyHash:
+                    baseFields.aggregateSelectionPolicyHash,
                 bridgeEncryptionEvidence: {
                     ...bridgeEncryptionEvidence,
-                    bridgeProofStatementDigest: digest(
+                    bridgeProofStatementHash: hash(
                         'wrong-bridge-proof-statement',
                     ),
                 },
                 bridgeEvidenceVerification: {
                     ...bridgeEvidenceVerification,
-                    bridgeProofStatementDigest: digest(
+                    bridgeProofStatementHash: hash(
                         'wrong-bridge-proof-statement',
                     ),
                 },
-                bridgeWitnessPrivacyProfileDigest:
-                    baseFields.bridgeWitnessPrivacyProfileDigest,
-                heParamDigest: baseFields.heParamDigest,
+                bridgeWitnessPrivacyProfileHash:
+                    baseFields.bridgeWitnessPrivacyProfileHash,
+                heParamHash: baseFields.heParamHash,
                 setupPackage,
             }),
-        ).toThrow(/canonical bridge proof statement digest/u);
+        ).toThrow(/canonical bridge proof statement hash/u);
         expect(() =>
             createPendingBridgeProofRecordFromBridgeEvidence({
                 aggregateDerivationComponent,
-                aggregateSelectionPolicyDigest:
-                    baseFields.aggregateSelectionPolicyDigest,
+                aggregateSelectionPolicyHash:
+                    baseFields.aggregateSelectionPolicyHash,
                 bridgeEncryptionEvidence: {
                     ...bridgeEncryptionEvidence,
-                    bridgeProofTargetContractDigest: digest(
+                    bridgeProofTargetContractHash: hash(
                         'wrong-bridge-proof-target-contract',
                     ),
                 },
                 bridgeEvidenceVerification: {
                     ...bridgeEvidenceVerification,
-                    bridgeProofTargetContractDigest: digest(
+                    bridgeProofTargetContractHash: hash(
                         'wrong-bridge-proof-target-contract',
                     ),
                 },
-                bridgeWitnessPrivacyProfileDigest:
-                    baseFields.bridgeWitnessPrivacyProfileDigest,
-                heParamDigest: baseFields.heParamDigest,
+                bridgeWitnessPrivacyProfileHash:
+                    baseFields.bridgeWitnessPrivacyProfileHash,
+                heParamHash: baseFields.heParamHash,
                 setupPackage,
             }),
-        ).toThrow(/canonical bridge proof target contract digest/u);
+        ).toThrow(/canonical bridge proof target contract hash/u);
         expect(() =>
             createPendingBridgeProofRecordFromBridgeEvidence({
                 aggregateDerivationComponent,
-                aggregateSelectionPolicyDigest:
-                    baseFields.aggregateSelectionPolicyDigest,
+                aggregateSelectionPolicyHash:
+                    baseFields.aggregateSelectionPolicyHash,
                 bridgeEncryptionEvidence: {
                     ...bridgeEncryptionEvidence,
                     aggregateRelationChallengeHex: '0'.repeat(48),
                 },
                 bridgeEvidenceVerification,
-                bridgeWitnessPrivacyProfileDigest:
-                    baseFields.bridgeWitnessPrivacyProfileDigest,
-                heParamDigest: baseFields.heParamDigest,
+                bridgeWitnessPrivacyProfileHash:
+                    baseFields.bridgeWitnessPrivacyProfileHash,
+                heParamHash: baseFields.heParamHash,
                 setupPackage,
             }),
         ).toThrow(/aggregate relation challenge summary/u);
         expect(() =>
             createPendingBridgeProofRecordFromBridgeEvidence({
                 aggregateDerivationComponent,
-                aggregateSelectionPolicyDigest:
-                    baseFields.aggregateSelectionPolicyDigest,
+                aggregateSelectionPolicyHash:
+                    baseFields.aggregateSelectionPolicyHash,
                 bridgeEncryptionEvidence: {
                     ...bridgeEncryptionEvidence,
                     aggregateRelationSubproofSizeBytes:
                         aggregateRelationSubproofSizeBytes + 1,
                 },
                 bridgeEvidenceVerification,
-                bridgeWitnessPrivacyProfileDigest:
-                    baseFields.bridgeWitnessPrivacyProfileDigest,
-                heParamDigest: baseFields.heParamDigest,
+                bridgeWitnessPrivacyProfileHash:
+                    baseFields.bridgeWitnessPrivacyProfileHash,
+                heParamHash: baseFields.heParamHash,
                 setupPackage,
             }),
         ).toThrow(/aggregate relation subproof size/u);
         expect(() =>
             createPendingBridgeProofRecordFromBridgeEvidence({
                 aggregateDerivationComponent,
-                aggregateSelectionPolicyDigest:
-                    baseFields.aggregateSelectionPolicyDigest,
+                aggregateSelectionPolicyHash:
+                    baseFields.aggregateSelectionPolicyHash,
                 bridgeEncryptionEvidence: {
                     ...bridgeEncryptionEvidence,
                     aggregateReducedCoordinateCount:
@@ -406,69 +399,69 @@ describe('encrypted aggregate bridge objects', () => {
                             .shareVectorWidth - 1,
                 },
                 bridgeEvidenceVerification,
-                bridgeWitnessPrivacyProfileDigest:
-                    baseFields.bridgeWitnessPrivacyProfileDigest,
-                heParamDigest: baseFields.heParamDigest,
+                bridgeWitnessPrivacyProfileHash:
+                    baseFields.bridgeWitnessPrivacyProfileHash,
+                heParamHash: baseFields.heParamHash,
                 setupPackage,
             }),
         ).toThrow(/aggregate reduced coordinate count/u);
         expect(() =>
             createPendingBridgeProofRecordFromBridgeEvidence({
                 aggregateDerivationComponent,
-                aggregateSelectionPolicyDigest:
-                    baseFields.aggregateSelectionPolicyDigest,
+                aggregateSelectionPolicyHash:
+                    baseFields.aggregateSelectionPolicyHash,
                 bridgeEncryptionEvidence: {
                     ...bridgeEncryptionEvidence,
                     canonicalBytesHash512: '5'.repeat(128),
                 },
                 bridgeEvidenceVerification,
-                bridgeWitnessPrivacyProfileDigest:
-                    baseFields.bridgeWitnessPrivacyProfileDigest,
-                heParamDigest: baseFields.heParamDigest,
+                bridgeWitnessPrivacyProfileHash:
+                    baseFields.bridgeWitnessPrivacyProfileHash,
+                heParamHash: baseFields.heParamHash,
                 setupPackage,
             }),
-        ).toThrow(/canonical bridge proof statement digest/u);
+        ).toThrow(/canonical bridge proof statement hash/u);
         expect(() =>
             createPendingBridgeProofRecordFromBridgeEvidence({
                 aggregateDerivationComponent,
-                aggregateSelectionPolicyDigest: digest(
+                aggregateSelectionPolicyHash: hash(
                     'wrong-aggregate-selection-policy',
                 ),
                 bridgeEncryptionEvidence,
                 bridgeEvidenceVerification,
-                bridgeWitnessPrivacyProfileDigest:
-                    baseFields.bridgeWitnessPrivacyProfileDigest,
-                heParamDigest: baseFields.heParamDigest,
+                bridgeWitnessPrivacyProfileHash:
+                    baseFields.bridgeWitnessPrivacyProfileHash,
+                heParamHash: baseFields.heParamHash,
                 setupPackage,
             }),
-        ).toThrow(/canonical bridge proof statement digest/u);
+        ).toThrow(/canonical bridge proof statement hash/u);
         expect(() =>
             createPendingBridgeProofRecordFromBridgeEvidence({
                 aggregateDerivationComponent,
-                aggregateSelectionPolicyDigest:
-                    baseFields.aggregateSelectionPolicyDigest,
+                aggregateSelectionPolicyHash:
+                    baseFields.aggregateSelectionPolicyHash,
                 bridgeEncryptionEvidence,
                 bridgeEvidenceVerification,
-                bridgeWitnessPrivacyProfileDigest: digest(
+                bridgeWitnessPrivacyProfileHash: hash(
                     'wrong-bridge-witness-privacy',
                 ),
-                heParamDigest: baseFields.heParamDigest,
+                heParamHash: baseFields.heParamHash,
                 setupPackage,
             }),
-        ).toThrow(/canonical bridge proof statement digest/u);
+        ).toThrow(/canonical bridge proof statement hash/u);
         expect(() =>
             createPendingBridgeProofRecordFromBridgeEvidence({
                 aggregateDerivationComponent,
-                aggregateSelectionPolicyDigest:
-                    baseFields.aggregateSelectionPolicyDigest,
+                aggregateSelectionPolicyHash:
+                    baseFields.aggregateSelectionPolicyHash,
                 bridgeEncryptionEvidence,
                 bridgeEvidenceVerification,
-                bridgeWitnessPrivacyProfileDigest:
-                    baseFields.bridgeWitnessPrivacyProfileDigest,
-                heParamDigest: digest('wrong-he-param'),
+                bridgeWitnessPrivacyProfileHash:
+                    baseFields.bridgeWitnessPrivacyProfileHash,
+                heParamHash: hash('wrong-he-param'),
                 setupPackage,
             }),
-        ).toThrow(/canonical bridge proof statement digest/u);
+        ).toThrow(/canonical bridge proof statement hash/u);
     });
 
     it('creates proof-checked aggregate contributions from checked bridge proof records', () => {
@@ -480,7 +473,7 @@ describe('encrypted aggregate bridge objects', () => {
             actionContext: expectedContribution.actionContext,
             boardPosition: expectedContribution.boardPosition,
             bridgeProofRecord: expectedContribution.bridgeProofRecord,
-            closeRecordDigest: expectedContribution.closeRecordDigest,
+            closeRecordHash: expectedContribution.closeRecordHash,
             signature: expectedContribution.signature,
         });
 
@@ -492,8 +485,8 @@ describe('encrypted aggregate bridge objects', () => {
             ok: true,
             unresolvedReason: null,
         });
-        expect(contribution.bridgeProofRecordDigest).toBe(
-            contribution.bridgeProofRecord.bridgeProofRecordDigest,
+        expect(contribution.bridgeProofRecordHash).toBe(
+            contribution.bridgeProofRecord.bridgeProofRecordHash,
         );
         expect(contribution.contributorIdentity).toBe('trustee-1');
         expect(contribution.encryptedAggregateShareCiphertextRoot).toBe(
@@ -516,7 +509,7 @@ describe('encrypted aggregate bridge objects', () => {
                 actionContext: pendingContribution.actionContext,
                 boardPosition: pendingContribution.boardPosition,
                 bridgeProofRecord: pendingContribution.bridgeProofRecord,
-                closeRecordDigest: pendingContribution.closeRecordDigest,
+                closeRecordHash: pendingContribution.closeRecordHash,
                 signature: pendingContribution.signature,
             }),
         ).toThrow(/proof-checked bridge proof record/u);
@@ -529,7 +522,7 @@ describe('encrypted aggregate bridge objects', () => {
                 },
                 boardPosition: checkedContribution.boardPosition,
                 bridgeProofRecord: checkedContribution.bridgeProofRecord,
-                closeRecordDigest: checkedContribution.closeRecordDigest,
+                closeRecordHash: checkedContribution.closeRecordHash,
                 signature: checkedContribution.signature,
             }),
         ).toThrow(/action context/u);
@@ -538,7 +531,7 @@ describe('encrypted aggregate bridge objects', () => {
             createAggregateContributionFromBridgeProofRecord({
                 actionContext: {
                     ...checkedContribution.actionContext,
-                    actionContextDigest: digest('replayed-action-context'),
+                    actionContextHash: hash('replayed-action-context'),
                     actionSequence:
                         checkedContribution.actionContext.actionSequence + 1,
                     boardSequence:
@@ -546,7 +539,7 @@ describe('encrypted aggregate bridge objects', () => {
                 },
                 boardPosition: checkedContribution.boardPosition,
                 bridgeProofRecord: checkedContribution.bridgeProofRecord,
-                closeRecordDigest: checkedContribution.closeRecordDigest,
+                closeRecordHash: checkedContribution.closeRecordHash,
                 signature: checkedContribution.signature,
             }),
         ).toThrow(/action context/u);
@@ -556,10 +549,10 @@ describe('encrypted aggregate bridge objects', () => {
                 actionContext: checkedContribution.actionContext,
                 boardPosition: checkedContribution.boardPosition,
                 bridgeProofRecord: checkedContribution.bridgeProofRecord,
-                closeRecordDigest: 'not-a-digest' as ProtocolDigest,
+                closeRecordHash: 'not-a-hash' as ProtocolHash,
                 signature: checkedContribution.signature,
             }),
-        ).toThrow(/close-record digest/u);
+        ).toThrow(/close-record hash/u);
     });
 
     it('rejects aggregate contribution creation when the signature context does not bind the contribution', () => {
@@ -572,7 +565,7 @@ describe('encrypted aggregate bridge objects', () => {
                 actionContext: contribution.actionContext,
                 boardPosition: contribution.boardPosition,
                 bridgeProofRecord: contribution.bridgeProofRecord,
-                closeRecordDigest: contribution.closeRecordDigest,
+                closeRecordHash: contribution.closeRecordHash,
                 signature: {
                     ...contribution.signature,
                     signedRoot: {
@@ -588,7 +581,7 @@ describe('encrypted aggregate bridge objects', () => {
                 actionContext: contribution.actionContext,
                 boardPosition: contribution.boardPosition,
                 bridgeProofRecord: contribution.bridgeProofRecord,
-                closeRecordDigest: contribution.closeRecordDigest,
+                closeRecordHash: contribution.closeRecordHash,
                 signature: {
                     ...contribution.signature,
                     signedRoot: {
@@ -604,12 +597,12 @@ describe('encrypted aggregate bridge objects', () => {
                 actionContext: contribution.actionContext,
                 boardPosition: contribution.boardPosition,
                 bridgeProofRecord: contribution.bridgeProofRecord,
-                closeRecordDigest: contribution.closeRecordDigest,
+                closeRecordHash: contribution.closeRecordHash,
                 signature: {
                     ...contribution.signature,
                     signedRoot: {
                         ...contribution.signature.signedRoot,
-                        objectRoot: digest('wrong-contribution-root'),
+                        objectRoot: hash('wrong-contribution-root'),
                     },
                 },
             }),
@@ -637,10 +630,10 @@ describe('encrypted aggregate bridge objects', () => {
             currentRecoveryEpochMap: recoveryMapFor([
                 substitutedSignatureContribution,
             ]),
-            expectedAggregateSelectionPolicyDigest:
-                baseFields.aggregateSelectionPolicyDigest,
-            requiredPostVotingClosedContextDigest:
-                baseFields.postVotingClosedContextDigest,
+            expectedAggregateSelectionPolicyHash:
+                baseFields.aggregateSelectionPolicyHash,
+            requiredPostVotingClosedContextHash:
+                baseFields.postVotingClosedContextHash,
         });
 
         expect(verification.ok).toBe(false);
@@ -658,14 +651,14 @@ describe('encrypted aggregate bridge objects', () => {
             rosterPosition: 1,
         });
         const changedContribution = createAggregateContributionFixture({
-            encryptedAggregateShareCiphertextRoot: digest(
+            encryptedAggregateShareCiphertextRoot: hash(
                 'changed-share-ciphertext',
             ),
             rosterPosition: 1,
         });
         const staleContribution = {
             ...contribution,
-            encryptedAggregateShareCiphertextRoot: digest(
+            encryptedAggregateShareCiphertextRoot: hash(
                 'stale-share-ciphertext',
             ),
         };
@@ -677,8 +670,8 @@ describe('encrypted aggregate bridge objects', () => {
             ok: true,
             unresolvedReason: null,
         });
-        expect(contribution.aggregateContributionDigest).not.toBe(
-            changedContribution.aggregateContributionDigest,
+        expect(contribution.aggregateContributionHash).not.toBe(
+            changedContribution.aggregateContributionHash,
         );
         expect(contribution).not.toHaveProperty('bridgeWitness');
         expect(contribution).not.toHaveProperty('bgvPlaintext');
@@ -778,10 +771,10 @@ describe('encrypted aggregate bridge objects', () => {
                 earlyContribution,
             ],
             currentRecoveryEpochMap: recoveryMap,
-            expectedAggregateSelectionPolicyDigest:
-                baseFields.aggregateSelectionPolicyDigest,
-            requiredPostVotingClosedContextDigest:
-                baseFields.postVotingClosedContextDigest,
+            expectedAggregateSelectionPolicyHash:
+                baseFields.aggregateSelectionPolicyHash,
+            requiredPostVotingClosedContextHash:
+                baseFields.postVotingClosedContextHash,
         });
         const selectionWithLateExtra = selectFirstValidAggregateContributions({
             aggregateContributionQuorum: 2,
@@ -792,10 +785,10 @@ describe('encrypted aggregate bridge objects', () => {
                 earlyContribution,
             ],
             currentRecoveryEpochMap: recoveryMap,
-            expectedAggregateSelectionPolicyDigest:
-                baseFields.aggregateSelectionPolicyDigest,
-            requiredPostVotingClosedContextDigest:
-                baseFields.postVotingClosedContextDigest,
+            expectedAggregateSelectionPolicyHash:
+                baseFields.aggregateSelectionPolicyHash,
+            requiredPostVotingClosedContextHash:
+                baseFields.postVotingClosedContextHash,
         });
 
         expect(selection.ok).toBe(true);
@@ -804,8 +797,8 @@ describe('encrypted aggregate bridge objects', () => {
                 (contribution) => contribution.contributorRosterPosition,
             ),
         ).toEqual([1, 2]);
-        expect(selectionWithLateExtra.firstValidOrderDigest).toBe(
-            selection.firstValidOrderDigest,
+        expect(selectionWithLateExtra.firstValidOrderHash).toBe(
+            selection.firstValidOrderHash,
         );
     });
 
@@ -815,7 +808,7 @@ describe('encrypted aggregate bridge objects', () => {
         });
         const duplicateIdentityContribution =
             createAggregateContributionFixture({
-                encryptedAggregateShareCiphertextRoot: digest(
+                encryptedAggregateShareCiphertextRoot: hash(
                     'duplicate-identity-ciphertext',
                 ),
                 rosterPosition: 1,
@@ -825,7 +818,7 @@ describe('encrypted aggregate bridge objects', () => {
             rosterPosition: 2,
         });
         const wrongContextContribution = createAggregateContributionFixture({
-            contextDigest: digest('wrong-post-voting-context'),
+            contextHash: hash('wrong-post-voting-context'),
             rosterPosition: 3,
         });
 
@@ -834,10 +827,10 @@ describe('encrypted aggregate bridge objects', () => {
                 aggregateContributionQuorum: 1,
                 contributions: [contribution, duplicateIdentityContribution],
                 currentRecoveryEpochMap: recoveryMapFor([contribution]),
-                expectedAggregateSelectionPolicyDigest:
-                    baseFields.aggregateSelectionPolicyDigest,
-                requiredPostVotingClosedContextDigest:
-                    baseFields.postVotingClosedContextDigest,
+                expectedAggregateSelectionPolicyHash:
+                    baseFields.aggregateSelectionPolicyHash,
+                requiredPostVotingClosedContextHash:
+                    baseFields.postVotingClosedContextHash,
             }).refusedObjects.some(
                 (refusal) => refusal.code === 'ConflictingFirstValidObject',
             ),
@@ -855,10 +848,10 @@ describe('encrypted aggregate bridge objects', () => {
                             staleRecoveryContribution.contributorIdentity,
                     },
                 },
-                expectedAggregateSelectionPolicyDigest:
-                    baseFields.aggregateSelectionPolicyDigest,
-                requiredPostVotingClosedContextDigest:
-                    baseFields.postVotingClosedContextDigest,
+                expectedAggregateSelectionPolicyHash:
+                    baseFields.aggregateSelectionPolicyHash,
+                requiredPostVotingClosedContextHash:
+                    baseFields.postVotingClosedContextHash,
             }).refusedObjects.some(
                 (refusal) => refusal.code === 'StaleRecoveryEpoch',
             ),
@@ -871,10 +864,10 @@ describe('encrypted aggregate bridge objects', () => {
                 currentRecoveryEpochMap: recoveryMapFor([
                     wrongContextContribution,
                 ]),
-                expectedAggregateSelectionPolicyDigest:
-                    baseFields.aggregateSelectionPolicyDigest,
-                requiredPostVotingClosedContextDigest:
-                    baseFields.postVotingClosedContextDigest,
+                expectedAggregateSelectionPolicyHash:
+                    baseFields.aggregateSelectionPolicyHash,
+                requiredPostVotingClosedContextHash:
+                    baseFields.postVotingClosedContextHash,
             }).refusedObjects.some(
                 (refusal) => refusal.code === 'FirstValidContextMismatch',
             ),
@@ -890,10 +883,10 @@ describe('encrypted aggregate bridge objects', () => {
             aggregateContributionQuorum: 2,
             contributions: selectedContributions,
             currentRecoveryEpochMap: recoveryMapFor(selectedContributions),
-            expectedAggregateSelectionPolicyDigest:
-                baseFields.aggregateSelectionPolicyDigest,
-            requiredPostVotingClosedContextDigest:
-                baseFields.postVotingClosedContextDigest,
+            expectedAggregateSelectionPolicyHash:
+                baseFields.aggregateSelectionPolicyHash,
+            requiredPostVotingClosedContextHash:
+                baseFields.postVotingClosedContextHash,
         });
         const coefficientReport = deriveInterpolationCoefficientReport({
             contributorRosterPositions: [1, 2],
@@ -902,21 +895,21 @@ describe('encrypted aggregate bridge objects', () => {
         });
         const record = createAggregateReadyRecord({
             aggregateContributionQuorum: 2,
-            firstValidOrderDigest:
-                selection.firstValidOrderDigest ?? digest('missing'),
+            firstValidOrderHash:
+                selection.firstValidOrderHash ?? hash('missing'),
             rosterSize: 20,
             selectedContributions: selection.selectedContributions,
             suppliedInterpolationCoefficientReport: coefficientReport,
         });
         const repeatedRecord = createAggregateReadyRecord({
             aggregateContributionQuorum: 2,
-            firstValidOrderDigest:
-                selection.firstValidOrderDigest ?? digest('missing'),
+            firstValidOrderHash:
+                selection.firstValidOrderHash ?? hash('missing'),
             rosterSize: 20,
             selectedContributions: selection.selectedContributions,
         });
         const changedContribution = createAggregateContributionFixture({
-            encryptedAggregateShareCiphertextRoot: digest(
+            encryptedAggregateShareCiphertextRoot: hash(
                 'changed-ready-ciphertext',
             ),
             rosterPosition: 2,
@@ -928,15 +921,15 @@ describe('encrypted aggregate bridge objects', () => {
                 selectedContributions[0],
                 changedContribution,
             ]),
-            expectedAggregateSelectionPolicyDigest:
-                baseFields.aggregateSelectionPolicyDigest,
-            requiredPostVotingClosedContextDigest:
-                baseFields.postVotingClosedContextDigest,
+            expectedAggregateSelectionPolicyHash:
+                baseFields.aggregateSelectionPolicyHash,
+            requiredPostVotingClosedContextHash:
+                baseFields.postVotingClosedContextHash,
         });
         const changedRecord = createAggregateReadyRecord({
             aggregateContributionQuorum: 2,
-            firstValidOrderDigest:
-                changedSelection.firstValidOrderDigest ?? digest('missing'),
+            firstValidOrderHash:
+                changedSelection.firstValidOrderHash ?? hash('missing'),
             rosterSize: 20,
             selectedContributions: changedSelection.selectedContributions,
         });
@@ -954,29 +947,29 @@ describe('encrypted aggregate bridge objects', () => {
         };
 
         expect(selection.ok).toBe(true);
-        expect(record.interpolationCoefficientReportDigest).toBe(
-            coefficientReport.reportDigest,
+        expect(record.interpolationCoefficientReportHash).toBe(
+            coefficientReport.reportHash,
         );
         expect(record.selectedContributorRosterPositions).toEqual([1, 2]);
-        expect(record.aggregateReadyRecordDigest).toBe(
-            repeatedRecord.aggregateReadyRecordDigest,
+        expect(record.aggregateReadyRecordHash).toBe(
+            repeatedRecord.aggregateReadyRecordHash,
         );
-        expect(changedRecord.aggregateReadyRecordDigest).not.toBe(
-            record.aggregateReadyRecordDigest,
+        expect(changedRecord.aggregateReadyRecordHash).not.toBe(
+            record.aggregateReadyRecordHash,
         );
         expect(() =>
             createAggregateReadyRecord({
                 aggregateContributionQuorum: 2,
-                firstValidOrderDigest: digest('forged-first-valid-order'),
+                firstValidOrderHash: hash('forged-first-valid-order'),
                 rosterSize: 20,
                 selectedContributions: selection.selectedContributions,
             }),
-        ).toThrow(/first-valid order digest/u);
+        ).toThrow(/first-valid order hash/u);
         expect(() =>
             createAggregateReadyRecord({
                 aggregateContributionQuorum: 2,
-                firstValidOrderDigest:
-                    selection.firstValidOrderDigest ?? digest('missing'),
+                firstValidOrderHash:
+                    selection.firstValidOrderHash ?? hash('missing'),
                 rosterSize: 20,
                 selectedContributions: selection.selectedContributions,
                 suppliedInterpolationCoefficientReport: mismatchedReport,
@@ -984,38 +977,38 @@ describe('encrypted aggregate bridge objects', () => {
         ).toThrow(/does not match recomputation/u);
 
         const {
-            aggregateReadyRecordDigest: originalAggregateReadyRecordDigest,
-            ...recordWithoutDigest
+            aggregateReadyRecordHash: originalAggregateReadyRecordHash,
+            ...recordWithoutHash
         } = record;
-        void originalAggregateReadyRecordDigest;
-        const forgedFirstValidOrderDigest = digest(
+        void originalAggregateReadyRecordHash;
+        const forgedFirstValidOrderHash = hash(
             'forged-verifier-first-valid-order',
         );
         const forgedRecordPayload: Omit<
             AggregateReadyRecord,
-            'aggregateReadyRecordDigest'
+            'aggregateReadyRecordHash'
         > = {
-            ...recordWithoutDigest,
+            ...recordWithoutHash,
             encryptedAggregateReconstructionRoot:
                 deriveEncryptedAggregateReconstructionRoot({
-                    aggregateSelectionPolicyDigest:
-                        record.aggregateSelectionPolicyDigest,
-                    encryptedAggregateReconstructionDigest:
-                        record.encryptedAggregateReconstructionDigest,
+                    aggregateSelectionPolicyHash:
+                        record.aggregateSelectionPolicyHash,
+                    encryptedAggregateReconstructionHash:
+                        record.encryptedAggregateReconstructionHash,
                     encryptedAggregateShareCiphertextRoots:
                         record.encryptedAggregateShareCiphertextRoots,
-                    firstValidOrderDigest: forgedFirstValidOrderDigest,
-                    interpolationCoefficientReportDigest:
-                        record.interpolationCoefficientReportDigest,
-                    selectedAggregateContributionDigests:
-                        record.selectedAggregateContributionDigests,
+                    firstValidOrderHash: forgedFirstValidOrderHash,
+                    interpolationCoefficientReportHash:
+                        record.interpolationCoefficientReportHash,
+                    selectedAggregateContributionHashes:
+                        record.selectedAggregateContributionHashes,
                 }),
-            firstValidOrderDigest: forgedFirstValidOrderDigest,
+            firstValidOrderHash: forgedFirstValidOrderHash,
         };
         const forgedRecord = {
             ...forgedRecordPayload,
-            aggregateReadyRecordDigest:
-                deriveAggregateReadyRecordDigest(forgedRecordPayload),
+            aggregateReadyRecordHash:
+                deriveAggregateReadyRecordHash(forgedRecordPayload),
         };
 
         expect(verifyAggregateReadyRecordStructure(forgedRecord).ok).toBe(

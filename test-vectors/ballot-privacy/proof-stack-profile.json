@@ -11,26 +11,26 @@
     "encodedAggregateLayoutProfileId": "encoded-aggregate-layout-score-histogram-v1",
     "ballotProofProfileId": "linear-lattice-ballot-privacy-proof-v1"
   },
-  "profileDigests": {
-    "receiverEncryptionProfileDigest": "b4eb24f24283a8b16e94ed876107f273503630f80429ac3bdd51ad0222126fef14fbf896b453ac70312b7b07138771518f5806c27cb07724f4e8888a684c6d71",
-    "shareCommitmentProfileDigest": "b9d5a90cc57d3f4716dc547f458279a63341b47e1ac8a5badd3a0db5a764d1a3e83297bd1253c1b9593f9a5f07e4e273dd3c668232c66e0fceefe30b0570948a",
-    "scoreMembershipProfileDigest": "d2c6448460e46c81b849d8a2a7391830d0ffbe908fb0916a5a687a9f1bc9400c6d9af6bc668dcc98d081953a50059c00a3ed41c528fe0311cafac8ef1608b548",
-    "ballotScoreEncodingProfileDigest": "d7d68c4149c276c1b3515c3299c2fb68b73ac8633e7cec36820523aa2dc4697e5f29e72f8065c784c68476ff0d9b153834d5981d64ae9e95ed37c399a4dd68d7",
-    "ballotShareLayoutProfileDigest": "68228b3714181a2ae29660f1c175140a387a25d05c63b3ee865c419a37d956438bd6b3856133b96b05f7a60eb5b4da943506a1599e0fb8940062d0e1e34cb9fd",
-    "aggregateInputEncodingProfileDigest": "8423aa20ac82748accbf934e3de76133e1fdce7f051325f6df8517d7ab3903f2eda9506c7ff428e70e960af283bd9280541f7252a78f3fa402733c668f377abe",
-    "encodedShareVectorLayoutDigest": "3b6b66db7f63fa714926e26d45c5c7cbb0a48524bf59561261e22023a34c18146962c067a13548ae67234594e9155a3a2c9a9e04c7e13edcf892627f9bab7b41",
-    "encodedAggregateLayoutDigest": "ebc1c40c2d6d0e8ce9c580d13045233d510b2457d05c9000834f2390eb47e780f8d631dd3a59900962fc46e5ab583d7dad2a86d02df9b85aa11c0736758e6b2f",
-    "ballotProofProfileDigest": "a690b5dbb09037f365ca7fba55b77acddcc12f3793ab83d410e02543d8fb616e4b6fcf9ee7a4f5de26c4b413e27ad964a7189e3b835987686bafb2b59cdfdbe4"
+  "profileHashes": {
+    "receiverEncryptionProfileHash": "a52a5884547418514df469383f980c94c161c62a98158dfd3fa443abf5ec52b6238f0eeb6df799a3c884d7d2dfd69cb242f67fccf78d74b1beb6202851dc383b",
+    "shareCommitmentProfileHash": "c37ea7392aa87601fef132488e8e1de3b9dacb907c149668f14e7009c3d062fd35795f909875182729bfd6ba9431fa85f685b1026a9933cc7ffa499ca4f81896",
+    "scoreMembershipProfileHash": "4d3e1bd04f34ca5c32e5567919a5145d338115f7d4f1d29dc7950e41252eebe23fe1892fa29218c8a835b5ba49d227b3f724b706597a6a2d390ff7abfbbb1e17",
+    "ballotScoreEncodingProfileHash": "746aa2564900fa466cbdb8ad921aea12d40be4ff03c2eee19dfb7462acfcb3aa30a13ccbaaeee3ae60e329fce8572491af0fa75e5671d203c5456d414a066f4f",
+    "ballotShareLayoutProfileHash": "4eb25ae124ad29d568350e57c741bc7d94797390e9a263788f6d935b53364c64206903001673acc4306a0afdf8af8ab3d1ece1b19c1e1f5fcf31765a41195885",
+    "aggregateInputEncodingProfileHash": "97d19f9b2ee1f85146eb06cfe8a4d2cf7bda6835ef6a7461d1b653e3bdf48143e95d5141e65dc0cb3f916c8eb1b4b9ef0e358b2da891bbbd8819081f727555a9",
+    "encodedShareVectorLayoutHash": "4a890b25936092a45a948b8bbae4e60de4df78dbd80183722458bf9fdba2baa0817574f644727e26e15fd5cfbae215bafd829c11f599ed4ffb4396ae21a00b08",
+    "encodedAggregateLayoutHash": "2d9ff4dbf23dd4d532c54f298704e8a93ae53286210a5cf1d919508f017b8ffdde862c2359d1f873e1b48906d7eed88448a838d9d68d65268b1a3e041237f9a7",
+    "ballotProofProfileHash": "acb1be12d21cc796a13b5792f5a8debe15f3b38bfe55377cd67ce992cb32c01b50fc1e87eb0be0f494d12dfa72e113c31ed9dcdd6b2b01ecb7db1e8280a351df"
   },
   "mandatoryBoundCert": {
-    "shareCommitmentMessageBoundCertDigest": "4173571100c99c306b57116f8e706799194f32531e44ab0dd265ce7cd7696d53be10b424a19c062abf17f923a6a9f55c549dba85ce408ed9d830499fad4c4b6d",
+    "shareCommitmentMessageBoundCertHash": "6f75c383848d6d454c36981dd400b7f3559b35c46f625fea8dbce0bec72675d82c8e72ecbc14f2af5c1782c12299c7cb3f2e86bd30732e5ed689b935a9adbb43",
     "maximumCanonicalTurnout": 20,
     "maximumAggregateInteger": 1310720,
     "openingRandomnessAggregateBound": 20480,
     "shareVectorWidth": 220
   },
   "certificateGatedBoundCert": {
-    "shareCommitmentMessageBoundCertDigest": "50fe187a86a99ca94e2e8cfb39a5b2aac446252de687dde7b53207a67d29286868468dd074fa6926d4a6de06472039dae8e28f409bc0ffaa9cdc82b5725c2c10",
+    "shareCommitmentMessageBoundCertHash": "466d5fee93d8024ca40534245b705b61a7822d8e223eaca78890be83740a052fa2d5f77d379476c1ff97f4f87b834b5a39ae8efb72f2e3171ad95c3f43952123",
     "maximumCanonicalTurnout": 50,
     "maximumAggregateInteger": 3276800,
     "openingRandomnessAggregateBound": 51200,

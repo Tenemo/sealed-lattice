@@ -1,5 +1,5 @@
 import {
-    lowerHexDigest,
+    lowerHexHash,
     measure,
     type ContributionBuild,
     type TranscriptCoreKernel,
@@ -11,18 +11,18 @@ import {
     createMlDsaKeyPairFixture,
     createMlDsaSignatureProfileFixture,
     createProtocolSignatureFixture,
-    deriveProtocolDigest,
+    deriveProtocolHash,
 } from '#packages/crypto/src/index';
 import {
     createPendingBridgeProofRecordFromBridgeEvidence,
     type PendingBridgeProofRecordFromEvidenceInput,
 } from '#packages/protocol/src/ballot-privacy/aggregate-bridge/structure-verification.js';
 import {
-    deriveAggregateCommitmentBodyDigest,
-    deriveAggregateDerivationBallotSetDigest,
-    deriveAggregateDerivationStatementDigest,
-    deriveAggregateShareCommitmentDigest,
-} from '#packages/protocol/src/ballot-privacy/aggregate-derivation/digests';
+    deriveAggregateCommitmentBodyHash,
+    deriveAggregateDerivationBallotSetHash,
+    deriveAggregateDerivationStatementHash,
+    deriveAggregateShareCommitmentHash,
+} from '#packages/protocol/src/ballot-privacy/aggregate-derivation/hashes';
 import {
     aggregateWitnessFromReceiverPlaintext,
     buildAggregateDerivationProofInput,
@@ -44,7 +44,7 @@ import {
     type AggregateDerivationStatement,
     type AggregateShareCommitment,
     type ClaimBearingBallotPackage,
-    type ProtocolDigest,
+    type ProtocolHash,
     type ProtocolSignatureEnvelope,
     type RecoveryEpochMapEntry,
     type ShareCommitment,
@@ -52,33 +52,33 @@ import {
 
 const actionContextForContributor = (input: {
     readonly contributorIdentity: string;
-    readonly contributorRosterExternalAcceptanceDigest: ProtocolDigest;
-    readonly postVotingClosedContextDigest: ProtocolDigest;
+    readonly contributorRosterExternalAcceptanceHash: ProtocolHash;
+    readonly postVotingClosedContextHash: ProtocolHash;
     readonly statement: ClaimBearingBallotPackage['ballotProofStatement'];
 }): ActionContext => {
     const contributorRosterPosition = Number(
         input.contributorIdentity.replace('receiver-', ''),
     );
     const actionContextPayload = {
-        acceptedRecoveryEpochUpdateDigest: null,
+        acceptedRecoveryEpochUpdateHash: null,
         actionSequence: contributorRosterPosition,
-        boardHeadDigest: lowerHexDigest('closed-board-head'),
+        boardHeadHash: lowerHexHash('closed-board-head'),
         boardSequence: 7,
         ceremonyId: input.statement.ceremonyId,
-        contextDigest: input.postVotingClosedContextDigest,
+        contextHash: input.postVotingClosedContextHash,
         deviceEpoch: 0,
-        electionManifestDigest: input.statement.manifestDigest,
+        electionManifestHash: input.statement.manifestHash,
         recoveryEpoch: 0,
-        recoveryPolicyDigest: lowerHexDigest('recovery-policy'),
-        rosterExternalAcceptanceDigest:
-            input.contributorRosterExternalAcceptanceDigest,
+        recoveryPolicyHash: lowerHexHash('recovery-policy'),
+        rosterExternalAcceptanceHash:
+            input.contributorRosterExternalAcceptanceHash,
         signerIdentity: input.contributorIdentity,
     };
 
     return {
         ...actionContextPayload,
-        actionContextDigest: deriveProtocolDigest(
-            'ActionContextDigest',
+        actionContextHash: deriveProtocolHash(
+            'ActionContextHash',
             actionContextPayload,
         ),
     };
@@ -86,7 +86,7 @@ const actionContextForContributor = (input: {
 
 const signatureForContributor = (input: {
     readonly actionContext: ActionContext;
-    readonly objectRoot: ProtocolDigest;
+    readonly objectRoot: ProtocolHash;
     readonly statement: ClaimBearingBallotPackage['ballotProofStatement'];
 }): ProtocolSignatureEnvelope => {
     const keyFixture = createMlDsaKeyPairFixture(
@@ -96,16 +96,16 @@ const signatureForContributor = (input: {
     return createProtocolSignatureFixture({
         profile: createMlDsaSignatureProfileFixture(),
         publicKeyBytesHex: keyFixture.publicKeyBytesHex,
-        publicKeyDigest: keyFixture.publicKeyDigest,
+        publicKeyHash: keyFixture.publicKeyHash,
         secretKeyBytesHex: keyFixture.secretKeyBytesHex,
         signedRoot: {
-            boardHeadDigest: input.actionContext.boardHeadDigest,
+            boardHeadHash: input.actionContext.boardHeadHash,
             byteLength: 64,
             ceremonyId: input.statement.ceremonyId,
             chunkMerkleRoot: null,
-            contextDigest: input.actionContext.contextDigest,
+            contextHash: input.actionContext.contextHash,
             deviceEpoch: input.actionContext.deviceEpoch,
-            manifestDigest: input.statement.manifestDigest,
+            manifestHash: input.statement.manifestHash,
             objectRoot: input.objectRoot,
             objectType: 'AggregateContribution',
             objectVersion: 1,
@@ -122,41 +122,37 @@ export const createSyntheticBallotPackageShell = (input: {
     >;
 }): ClaimBearingBallotPackage =>
     ({
-        ballotPackageDigest: input.fixture.statement.ballotPackageDigest,
+        ballotPackageHash: input.fixture.statement.ballotPackageHash,
         ballotProof: {
-            ballotProofRecordDigest: lowerHexDigest(
-                `ballot-proof-record-${input.fixture.statement.ballotProofStatementDigest}`,
+            ballotProofRecordHash: lowerHexHash(
+                `ballot-proof-record-${input.fixture.statement.ballotProofStatementHash}`,
             ),
-            ballotProofStatementDigest:
-                input.fixture.statement.ballotProofStatementDigest,
+            ballotProofStatementHash:
+                input.fixture.statement.ballotProofStatementHash,
             objectType: 'BallotProofRecord',
             objectVersion: 1,
             proofBackend: 'LocalLinearLatticeRelation',
-            proofBytesDigest: lowerHexDigest('ballot-proof-bytes'),
-            proofRoot: lowerHexDigest('ballot-proof-root'),
+            proofBytesHash: lowerHexHash('ballot-proof-bytes'),
+            proofRoot: lowerHexHash('ballot-proof-root'),
             proofSizeBytes: 1,
-            relationStatementDigest: lowerHexDigest(
-                'ballot-relation-statement',
-            ),
+            relationStatementHash: lowerHexHash('ballot-relation-statement'),
         },
         ballotProofStatement: input.fixture.statement,
         componentBundleStatement:
             input.fixture.request.componentBundleStatement,
         componentProofBundle: {
-            backendStatementDigest: lowerHexDigest('component-backend'),
-            ballotProofStatementDigest:
-                input.fixture.statement.ballotProofStatementDigest,
+            backendStatementHash: lowerHexHash('component-backend'),
+            ballotProofStatementHash:
+                input.fixture.statement.ballotProofStatementHash,
             bundleCoverage: 'full-encoded-score-ballot-relation',
-            componentBundleStatementDigest: lowerHexDigest(
+            componentBundleStatementHash: lowerHexHash(
                 'component-bundle-statement',
             ),
-            componentProofBundleDigest: lowerHexDigest(
-                'component-proof-bundle',
-            ),
+            componentProofBundleHash: lowerHexHash('component-proof-bundle'),
             componentProofs: [],
             objectType: 'BallotProofComponentProofBundle',
             objectVersion: 1,
-            relationStatementDigest: lowerHexDigest('component-relation'),
+            relationStatementHash: lowerHexHash('component-relation'),
             requiredComponentIds: [],
         },
         componentProofInputs: input.fixture.request.componentProofInputs,
@@ -219,13 +215,13 @@ const packageReferenceForContributor = (input: {
     }
 
     return {
-        ballotPackageDigest: input.ballotPackage.ballotPackageDigest,
-        ballotProofStatementDigest:
-            input.ballotPackage.ballotProofStatement.ballotProofStatementDigest,
+        ballotPackageHash: input.ballotPackage.ballotPackageHash,
+        ballotProofStatementHash:
+            input.ballotPackage.ballotProofStatement.ballotProofStatementHash,
         receiverPayloadCiphertextRoot:
             payloadReference.receiverPayloadCiphertextRoot,
-        receiverPayloadDigest: payloadReference.receiverPayloadDigest,
-        shareCommitmentDigest: commitmentReference.shareCommitmentDigest,
+        receiverPayloadHash: payloadReference.receiverPayloadHash,
+        shareCommitmentHash: commitmentReference.shareCommitmentHash,
     };
 };
 
@@ -265,16 +261,16 @@ const createAggregateComponentForContributor = (input: {
     readonly certificate: ReturnType<
         typeof createShareCommitmentMessageBoundCert
     >;
-    readonly closeRecordDigest: ProtocolDigest;
-    readonly contributorActionContextDigest: ProtocolDigest;
+    readonly closeRecordHash: ProtocolHash;
+    readonly contributorActionContextHash: ProtocolHash;
     readonly contributorIdentity: string;
-    readonly contributorRosterExternalAcceptanceDigest: ProtocolDigest;
+    readonly contributorRosterExternalAcceptanceHash: ProtocolHash;
     readonly contributorRosterPosition: number;
     readonly kernel: TranscriptCoreKernel;
-    readonly postVotingClosedContextDigest: ProtocolDigest;
+    readonly postVotingClosedContextHash: ProtocolHash;
     readonly proverRandomnessHex: string;
     readonly unsafeSmallRosterAcknowledged: boolean;
-    readonly votingClosedBoardHeadDigest: ProtocolDigest;
+    readonly votingClosedBoardHeadHash: ProtocolHash;
     readonly witness: AggregateDerivationWitnessInput;
 }): AggregateDerivationComponent => {
     const statement = input.ballotPackage.ballotProofStatement;
@@ -283,85 +279,80 @@ const createAggregateComponentForContributor = (input: {
         contributorIdentity: input.contributorIdentity,
         contributorRosterPosition: input.contributorRosterPosition,
     });
-    const ballotSetDigest = deriveAggregateDerivationBallotSetDigest({
-        ballotPackageDigests: [input.ballotPackage.ballotPackageDigest],
-        closeRecordDigest: input.closeRecordDigest,
-        manifestDigest: statement.manifestDigest,
-        pollSpecDigest: statement.pollSpecDigest,
-        postVotingClosedContextDigest: input.postVotingClosedContextDigest,
-        rosterDigest: statement.rosterDigest,
-        thresholdProfileDigest: statement.thresholdProfileDigest,
-        votingClosedBoardHeadDigest: input.votingClosedBoardHeadDigest,
+    const ballotSetHash = deriveAggregateDerivationBallotSetHash({
+        ballotPackageHashes: [input.ballotPackage.ballotPackageHash],
+        closeRecordHash: input.closeRecordHash,
+        manifestHash: statement.manifestHash,
+        pollSpecHash: statement.pollSpecHash,
+        postVotingClosedContextHash: input.postVotingClosedContextHash,
+        rosterHash: statement.rosterHash,
+        thresholdProfileHash: statement.thresholdProfileHash,
+        votingClosedBoardHeadHash: input.votingClosedBoardHeadHash,
     });
-    const commitmentBodyDigest = deriveAggregateCommitmentBodyDigest({
+    const commitmentBodyHash = deriveAggregateCommitmentBodyHash({
         commitmentPolynomialVector: shareCommitment.commitmentPolynomialVector,
-        shareCommitmentProfileDigest: statement.shareCommitmentProfileDigest,
+        shareCommitmentProfileHash: statement.shareCommitmentProfileHash,
     });
     const commitmentPayload: Omit<
         AggregateShareCommitment,
-        'aggregateShareCommitmentDigest'
+        'aggregateShareCommitmentHash'
     > = {
-        ballotSetDigest,
+        ballotSetHash,
         ceremonyId: statement.ceremonyId,
-        commitmentBodyDigest,
+        commitmentBodyHash,
         commitmentPolynomialVector: shareCommitment.commitmentPolynomialVector,
         contributorIdentity: input.contributorIdentity,
         contributorRosterPosition: input.contributorRosterPosition,
-        manifestDigest: statement.manifestDigest,
+        manifestHash: statement.manifestHash,
         objectType: 'AggregateShareCommitment',
         objectVersion: 1,
-        pollSpecDigest: statement.pollSpecDigest,
-        rosterDigest: statement.rosterDigest,
-        shareCommitmentProfileDigest: statement.shareCommitmentProfileDigest,
+        pollSpecHash: statement.pollSpecHash,
+        rosterHash: statement.rosterHash,
+        shareCommitmentProfileHash: statement.shareCommitmentProfileHash,
         shareVectorWidth: statement.shareVectorWidth,
     };
     const aggregateCommitment: AggregateShareCommitment = {
         ...commitmentPayload,
-        aggregateShareCommitmentDigest:
-            deriveAggregateShareCommitmentDigest(commitmentPayload),
+        aggregateShareCommitmentHash:
+            deriveAggregateShareCommitmentHash(commitmentPayload),
     };
-    const challengeDomainDigest = deriveProtocolDigest(
-        'ChallengeDomainDigest',
-        {
-            aggregateDerivationProofEncodingProfileId,
-            aggregateDerivationProofParameterProfileId,
-            aggregateDerivationProofProfileId,
-            aggregateShareCommitmentDigest:
-                aggregateCommitment.aggregateShareCommitmentDigest,
-            ballotSetDigest,
-            purpose: 'aggregate-derivation-proof-challenge-v1',
-            shareCommitmentMessageBoundCertDigest:
-                input.certificate.shareCommitmentMessageBoundCertDigest,
-        },
-    );
+    const challengeDomainHash = deriveProtocolHash('ChallengeDomainHash', {
+        aggregateDerivationProofEncodingProfileId,
+        aggregateDerivationProofParameterProfileId,
+        aggregateDerivationProofProfileId,
+        aggregateShareCommitmentHash:
+            aggregateCommitment.aggregateShareCommitmentHash,
+        ballotSetHash,
+        purpose: 'aggregate-derivation-proof-challenge-v1',
+        shareCommitmentMessageBoundCertHash:
+            input.certificate.shareCommitmentMessageBoundCertHash,
+    });
     const statementPayload: Omit<
         AggregateDerivationStatement,
-        'aggregateDerivationStatementDigest'
+        'aggregateDerivationStatementHash'
     > = {
-        aggregateCommitmentDigest:
-            aggregateCommitment.aggregateShareCommitmentDigest,
-        aggregateInputEncodingProfileDigest:
-            statement.aggregateInputEncodingProfileDigest,
-        aggregateShareCommitmentDigest:
-            aggregateCommitment.aggregateShareCommitmentDigest,
-        ballotScoreEncodingProfileDigest:
-            statement.ballotScoreEncodingProfileDigest,
-        ballotSetDigest,
-        ballotShareLayoutProfileDigest:
-            statement.ballotShareLayoutProfileDigest,
+        aggregateCommitmentHash:
+            aggregateCommitment.aggregateShareCommitmentHash,
+        aggregateInputEncodingProfileHash:
+            statement.aggregateInputEncodingProfileHash,
+        aggregateShareCommitmentHash:
+            aggregateCommitment.aggregateShareCommitmentHash,
+        ballotScoreEncodingProfileHash:
+            statement.ballotScoreEncodingProfileHash,
+        ballotSetHash,
+        ballotShareLayoutProfileHash: statement.ballotShareLayoutProfileHash,
         canonicalTurnout: 1,
         ceremonyId: statement.ceremonyId,
-        challengeDomainDigest,
-        closeRecordDigest: input.closeRecordDigest,
-        contributorActionContextDigest: input.contributorActionContextDigest,
+        challengeDomainHash,
+        closeRecordHash: input.closeRecordHash,
+        contributorActionContextHash: input.contributorActionContextHash,
         contributorIdentity: input.contributorIdentity,
-        contributorRosterExternalAcceptanceDigest:
-            input.contributorRosterExternalAcceptanceDigest,
+        contributorRosterExternalAcceptanceHash:
+            input.contributorRosterExternalAcceptanceHash,
         contributorRosterPosition: input.contributorRosterPosition,
-        encodedAggregateLayoutDigest: statement.encodedAggregateLayoutDigest,
-        encodedShareVectorLayoutDigest:
-            statement.encodedShareVectorLayoutDigest,
-        manifestDigest: statement.manifestDigest,
+        encodedAggregateLayoutHash: statement.encodedAggregateLayoutHash,
+        encodedShareVectorLayoutHash: statement.encodedShareVectorLayoutHash,
+        manifestHash: statement.manifestHash,
         objectType: 'AggregateDerivationStatement',
         objectVersion: 1,
         optionCount: statement.optionCount,
@@ -373,28 +364,27 @@ const createAggregateComponentForContributor = (input: {
             }),
         ],
         participantCount: statement.receiverPublicKeys.length,
-        pollSpecDigest: statement.pollSpecDigest,
-        postVotingClosedContextDigest: input.postVotingClosedContextDigest,
+        pollSpecHash: statement.pollSpecHash,
+        postVotingClosedContextHash: input.postVotingClosedContextHash,
         proofEncodingProfileId: aggregateDerivationProofEncodingProfileId,
         proofParameterProfileId: aggregateDerivationProofParameterProfileId,
         proofProfileId: aggregateDerivationProofProfileId,
-        receiverEncryptionProfileDigest:
-            statement.receiverEncryptionProfileDigest,
-        rosterDigest: statement.rosterDigest,
-        shareCommitmentMessageBoundCertDigest:
-            input.certificate.shareCommitmentMessageBoundCertDigest,
-        shareCommitmentProfileDigest: statement.shareCommitmentProfileDigest,
+        receiverEncryptionProfileHash: statement.receiverEncryptionProfileHash,
+        rosterHash: statement.rosterHash,
+        shareCommitmentMessageBoundCertHash:
+            input.certificate.shareCommitmentMessageBoundCertHash,
+        shareCommitmentProfileHash: statement.shareCommitmentProfileHash,
         shareVectorWidth: statement.shareVectorWidth,
-        thresholdProfileDigest: statement.thresholdProfileDigest,
+        thresholdProfileHash: statement.thresholdProfileHash,
         ...(input.unsafeSmallRosterAcknowledged
             ? { unsafeSmallRosterAcknowledged: true as const }
             : {}),
-        votingClosedBoardHeadDigest: input.votingClosedBoardHeadDigest,
+        votingClosedBoardHeadHash: input.votingClosedBoardHeadHash,
     };
     const aggregateStatement = {
         ...statementPayload,
-        aggregateDerivationStatementDigest:
-            deriveAggregateDerivationStatementDigest(statementPayload),
+        aggregateDerivationStatementHash:
+            deriveAggregateDerivationStatementHash(statementPayload),
     };
     const proofBuild = buildAggregateDerivationProofInput({
         aggregateCommitment,
@@ -435,14 +425,14 @@ export const setupParticipants = (
     }));
 
 export const createContribution = (input: {
-    readonly aggregateSelectionPolicyDigest: ProtocolDigest;
+    readonly aggregateSelectionPolicyHash: ProtocolHash;
     readonly ballotPackage: ClaimBearingBallotPackage;
-    readonly bridgeWitnessPrivacyProfileDigest: ProtocolDigest;
+    readonly bridgeWitnessPrivacyProfileHash: ProtocolHash;
     readonly certificate: ReturnType<
         typeof createShareCommitmentMessageBoundCert
     >;
     readonly contributorRosterPosition: number;
-    readonly heParamDigest: ProtocolDigest;
+    readonly heParamHash: ProtocolHash;
     readonly kernel: TranscriptCoreKernel;
     readonly setupPackage: Record<string, unknown>;
     readonly unsafeSmallRosterAcknowledged: boolean;
@@ -450,26 +440,26 @@ export const createContribution = (input: {
 }): ContributionBuild => {
     const statement = input.ballotPackage.ballotProofStatement;
     const contributorIdentity = `receiver-${input.contributorRosterPosition}`;
-    const contributorRosterExternalAcceptanceDigest =
-        statement.rosterExternalAcceptanceDigest;
-    const closeRecordDigest = deriveProtocolDigest('CloseRecordDigest', {
+    const contributorRosterExternalAcceptanceHash =
+        statement.rosterExternalAcceptanceHash;
+    const closeRecordHash = deriveProtocolHash('CloseRecordHash', {
         ceremonyId: statement.ceremonyId,
         closeKind: 'VotingClosed',
-        votingClosedBoardHeadDigest: lowerHexDigest('closed-board-head'),
+        votingClosedBoardHeadHash: lowerHexHash('closed-board-head'),
     });
-    const postVotingClosedContextDigest = deriveProtocolDigest(
-        'PostVotingClosedContextDigest',
+    const postVotingClosedContextHash = deriveProtocolHash(
+        'PostVotingClosedContextHash',
         {
             ceremonyId: statement.ceremonyId,
-            closeRecordDigest,
-            electionManifestDigest: statement.manifestDigest,
-            votingClosedBoardHeadDigest: lowerHexDigest('closed-board-head'),
+            closeRecordHash,
+            electionManifestHash: statement.manifestHash,
+            votingClosedBoardHeadHash: lowerHexHash('closed-board-head'),
         },
     );
     const actionContext = actionContextForContributor({
         contributorIdentity,
-        contributorRosterExternalAcceptanceDigest,
-        postVotingClosedContextDigest,
+        contributorRosterExternalAcceptanceHash,
+        postVotingClosedContextHash,
         statement,
     });
     const aggregateWitness = aggregateWitnessForContributor({
@@ -483,28 +473,27 @@ export const createContribution = (input: {
         {
             ballotPackage: input.ballotPackage,
             certificate: input.certificate,
-            closeRecordDigest,
-            contributorActionContextDigest: actionContext.actionContextDigest,
+            closeRecordHash,
+            contributorActionContextHash: actionContext.actionContextHash,
             contributorIdentity,
-            contributorRosterExternalAcceptanceDigest,
+            contributorRosterExternalAcceptanceHash,
             contributorRosterPosition: input.contributorRosterPosition,
             kernel: input.kernel,
-            postVotingClosedContextDigest,
+            postVotingClosedContextHash,
             proverRandomnessHex: '66'.repeat(32),
             unsafeSmallRosterAcknowledged: input.unsafeSmallRosterAcknowledged,
-            votingClosedBoardHeadDigest: lowerHexDigest('closed-board-head'),
+            votingClosedBoardHeadHash: lowerHexHash('closed-board-head'),
             witness: aggregateWitness,
         },
     );
     const bridgeGeneration = measure(() =>
         input.kernel.generateAggregateBridgeEncryption({
             aggregateDerivationComponent,
-            aggregateSelectionPolicyDigest:
-                input.aggregateSelectionPolicyDigest,
+            aggregateSelectionPolicyHash: input.aggregateSelectionPolicyHash,
             aggregateWitness,
-            bridgeWitnessPrivacyProfileDigest:
-                input.bridgeWitnessPrivacyProfileDigest,
-            heParamDigest: input.heParamDigest,
+            bridgeWitnessPrivacyProfileHash:
+                input.bridgeWitnessPrivacyProfileHash,
+            heParamHash: input.heParamHash,
             includeCanonicalBytesHex: true,
             proverRandomnessHex: '77'.repeat(32),
             setupPackage: input.setupPackage,
@@ -519,12 +508,11 @@ export const createContribution = (input: {
     const bridgeVerification = measure(() =>
         input.kernel.verifyAggregateBridgeEncryption({
             aggregateDerivationComponent,
-            aggregateSelectionPolicyDigest:
-                input.aggregateSelectionPolicyDigest,
+            aggregateSelectionPolicyHash: input.aggregateSelectionPolicyHash,
             bridgeEncryption,
-            bridgeWitnessPrivacyProfileDigest:
-                input.bridgeWitnessPrivacyProfileDigest,
-            heParamDigest: input.heParamDigest,
+            bridgeWitnessPrivacyProfileHash:
+                input.bridgeWitnessPrivacyProfileHash,
+            heParamHash: input.heParamHash,
             setupPackage: input.setupPackage,
         }),
     );
@@ -539,14 +527,13 @@ export const createContribution = (input: {
     }
     const bridgeProofRecord = createPendingBridgeProofRecordFromBridgeEvidence({
         aggregateDerivationComponent,
-        aggregateSelectionPolicyDigest: input.aggregateSelectionPolicyDigest,
+        aggregateSelectionPolicyHash: input.aggregateSelectionPolicyHash,
         bridgeEncryptionEvidence:
             bridgeEncryption as PendingBridgeProofRecordFromEvidenceInput['bridgeEncryptionEvidence'],
         bridgeEvidenceVerification:
             bridgeVerificationResult as PendingBridgeProofRecordFromEvidenceInput['bridgeEvidenceVerification'],
-        bridgeWitnessPrivacyProfileDigest:
-            input.bridgeWitnessPrivacyProfileDigest,
-        heParamDigest: input.heParamDigest,
+        bridgeWitnessPrivacyProfileHash: input.bridgeWitnessPrivacyProfileHash,
+        heParamHash: input.heParamHash,
         setupPackage:
             input.setupPackage as PendingBridgeProofRecordFromEvidenceInput['setupPackage'],
     });
@@ -555,11 +542,11 @@ export const createContribution = (input: {
             actionContext,
             boardPosition: input.contributorRosterPosition,
             bridgeProofRecord,
-            closeRecordDigest,
-            signature: ({ aggregateContributionDigest }) =>
+            closeRecordHash,
+            signature: ({ aggregateContributionHash }) =>
                 signatureForContributor({
                     actionContext,
-                    objectRoot: aggregateContributionDigest,
+                    objectRoot: aggregateContributionHash,
                     statement,
                 }),
         });

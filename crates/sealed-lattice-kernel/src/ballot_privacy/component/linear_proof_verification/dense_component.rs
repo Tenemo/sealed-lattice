@@ -16,14 +16,14 @@ pub(super) fn verify_dense_component_proof(
                     vec![json!({
                         "code": error.code,
                         "message": error.message,
-                        "objectDigest": string_field(component_proof, "componentProofRecordDigest")
+                        "objectHash": string_field(component_proof, "componentProofRecordHash")
                     })],
                     json!(error.code),
                 );
             }
         };
     let proof_verification =
-        linear_proof::verifier::verify_linear_proof_vector_case_value(&vector_case);
+        linear_proof_verifier::verify_linear_proof_vector_case_value(&vector_case);
     if proof_verification
         .as_object()
         .and_then(|object| object.get("ok"))
@@ -71,11 +71,11 @@ pub(super) fn verify_dense_component_proof(
         "operation": operation,
         "componentId": component_id,
         "statusLabels": status_labels,
-        "acceptedDigests": [
-            string_field(component_proof, "componentProofRecordDigest"),
-            string_field(component_proof, "proofBytesDigest"),
-            string_field(proof_input, "componentProofStatementDigest"),
-            string_field(proof_input, "statementDigest")
+        "acceptedHashes": [
+            string_field(component_proof, "componentProofRecordHash"),
+            string_field(component_proof, "proofBytesHash"),
+            string_field(proof_input, "componentProofStatementHash"),
+            string_field(proof_input, "statementHash")
         ],
         "refusedObjects": [],
         "unresolvedReason": Value::Null

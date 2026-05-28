@@ -19,9 +19,13 @@ The workspace is only in a good state when the checks, docs, smoke tests, and Ru
 ```bash
 pnpm install
 pnpm run build
+pnpm run build:api
+pnpm run api:report
+pnpm run api:check
 pnpm run check
 pnpm run check:static
 pnpm run check:rust
+pnpm run check:wasm
 pnpm run vectors
 pnpm exec playwright install chromium firefox webkit
 pnpm run test:node:fast
@@ -40,10 +44,14 @@ pnpm run smoke:pack:npm
 
 ## What each command proves
 
-- `pnpm run build`: every package builds, the private crypto/runtime bridge is vendored into the SDK, the WASM transcript-core artifact is copied into the internal loader package, and the published SDK loader is pinned to the packaged kernel digest
-- `pnpm run check`: builds every package, then runs the static and Rust verification lanes below
-- `pnpm run check:static`: runs repo lint, TypeScript project typechecking, dependency-boundary checks, API Extractor, public package policy verification, vector manifest verification, and dead-code analysis without invoking Rust or the WASM build
+- `pnpm run build`: every package builds, the private crypto/runtime bridge is vendored into the SDK, the WASM transcript-core artifact is copied into the internal loader package, and the published SDK loader is pinned to the packaged kernel hash
+- `pnpm run build:api`: builds the TypeScript project graph and SDK runtime facade needed by public API checks without copying the packaged WASM kernel
+- `pnpm run api:report`: rebuilds the public SDK facade and updates the compact public API snapshot
+- `pnpm run api:check`: rebuilds the public SDK facade and verifies it against the compact public API snapshot
+- `pnpm run check`: builds every package, then runs the static verification lane and the Rust verification lane
+- `pnpm run check:static`: runs repo lint, builds the public API facade, verifies the public API snapshot, checks dependency boundaries, verifies public package policy, verifies the vector manifest, and runs dead-code analysis
 - `pnpm run check:rust`: runs Rust formatting, Rust clippy, and Rust tests
+- `pnpm run check:wasm`: builds the Rust workspace libraries for `wasm32-unknown-unknown` in release mode
 - `pnpm run vectors`: committed test vector files match `test-vectors/manifest.json`
 - `pnpm run test:node:fast`: pre-commit-friendly Node tests, excluding slow protocol, kernel-heavy WASM, and proof-benchmark suites
 - `pnpm run test:node:protocol`: slow protocol relation and proof-record generation input tests that remain part of the default Node gate without running under coverage instrumentation

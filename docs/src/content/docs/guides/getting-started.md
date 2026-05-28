@@ -58,11 +58,11 @@ import {
 } from "sealed-lattice";
 ```
 
-These helpers verify structured public evidence and return accepted digests, status labels, and refusal records where applicable.
+These helpers verify structured public evidence and return accepted Hashes, status labels, and refusal records where applicable.
 
 ## What you can use today
 
-- poll specification validation and canonical digest derivation
+- poll specification validation and canonical hash derivation
 - threshold and frozen roster profile derivation
 - lifecycle label, lifecycle transition, and action capability checks
 - board consistency, cast receipt, close record, target finality, roster manifest, recovery epoch, and first-valid ordering checks

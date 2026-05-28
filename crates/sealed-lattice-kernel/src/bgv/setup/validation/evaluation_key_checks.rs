@@ -4,69 +4,64 @@ pub(super) fn validate_evaluation_keys(setup_package: &Value) -> CanonicalResult
     let evaluation_keys = value_at_path(setup_package, &["evaluationKeys"])?;
     let evaluation_key_record = value_at_path(evaluation_keys, &["record"])?;
     let rot_set = value_at_path(evaluation_keys, &["rotSet"])?;
-    let rot_set_digest = digest_at_path(evaluation_keys, &["rotSetDigest"])?;
-    compare_derived_digest(
-        "RotSetDigest",
-        rot_set,
-        rot_set_digest,
-        "rotation set digest",
-    )?;
-    let key_switch_decomposition_digest =
-        digest_at_path(evaluation_keys, &["keySwitchDecompositionDigest"])?;
-    compare_digest_at_path(
+    let rot_set_hash = hash_at_path(evaluation_keys, &["rotSetHash"])?;
+    compare_derived_hash("RotSetHash", rot_set, rot_set_hash, "rotation set hash")?;
+    let key_switch_decomposition_hash =
+        hash_at_path(evaluation_keys, &["keySwitchDecompositionHash"])?;
+    compare_hash_at_path(
         evaluation_key_record,
-        &["keySwitchDecompositionDigest"],
-        key_switch_decomposition_digest,
-        "evaluation key decomposition digest",
+        &["keySwitchDecompositionHash"],
+        key_switch_decomposition_hash,
+        "evaluation key decomposition hash",
     )?;
-    compare_digest_at_path(
+    compare_hash_at_path(
         setup_package,
-        &["certificates", "keySwitchDecompositionDigest"],
-        key_switch_decomposition_digest,
-        "certificate key-switch decomposition digest",
+        &["certificates", "keySwitchDecompositionHash"],
+        key_switch_decomposition_hash,
+        "certificate key-switch decomposition hash",
     )?;
     let collective_public_key_root =
-        digest_at_path(evaluation_key_record, &["collectivePublicKeyRoot"])?;
-    let bgv_public_key_root = digest_at_path(evaluation_key_record, &["bgvPublicKeyRoot"])?;
-    compare_digest_at_path(
+        hash_at_path(evaluation_key_record, &["collectivePublicKeyRoot"])?;
+    let bgv_public_key_root = hash_at_path(evaluation_key_record, &["bgvPublicKeyRoot"])?;
+    compare_hash_at_path(
         setup_package,
         &["collectivePublicKey", "collectivePublicKeyRoot"],
         collective_public_key_root,
         "evaluation key collective public key root",
     )?;
-    compare_digest_at_path(
+    compare_hash_at_path(
         setup_package,
         &["collectivePublicKey", "bgvPublicKeyRoot"],
         bgv_public_key_root,
         "evaluation key BGV public key root",
     )?;
-    compare_digest_at_path(
+    compare_hash_at_path(
         evaluation_key_record,
-        &["rotSetDigest"],
-        rot_set_digest,
-        "evaluation key rotation set digest",
+        &["rotSetHash"],
+        rot_set_hash,
+        "evaluation key rotation set hash",
     )?;
-    let relinearization_arithmetic_fixture_digest = validate_development_key_arithmetic_fixture(
+    let relinearization_arithmetic_fixture_hash = validate_development_key_arithmetic_fixture(
         value_at_path(evaluation_keys, &["relinearizationArithmeticFixture"])?,
         DEVELOPMENT_RELINEARIZATION_ARITHMETIC_FIXTURE_ID,
-        key_switch_decomposition_digest,
+        key_switch_decomposition_hash,
     )?;
-    let key_switch_arithmetic_fixture_digest = validate_development_key_arithmetic_fixture(
+    let key_switch_arithmetic_fixture_hash = validate_development_key_arithmetic_fixture(
         value_at_path(evaluation_keys, &["keySwitchArithmeticFixture"])?,
         DEVELOPMENT_KEY_SWITCH_ARITHMETIC_FIXTURE_ID,
-        key_switch_decomposition_digest,
+        key_switch_decomposition_hash,
     )?;
-    compare_digest_at_path(
+    compare_hash_at_path(
         evaluation_key_record,
-        &["relinearizationArithmeticFixtureDigest"],
-        &relinearization_arithmetic_fixture_digest,
-        "evaluation key relinearization arithmetic fixture digest",
+        &["relinearizationArithmeticFixtureHash"],
+        &relinearization_arithmetic_fixture_hash,
+        "evaluation key relinearization arithmetic fixture hash",
     )?;
-    compare_digest_at_path(
+    compare_hash_at_path(
         evaluation_key_record,
-        &["keySwitchArithmeticFixtureDigest"],
-        &key_switch_arithmetic_fixture_digest,
-        "evaluation key key-switch arithmetic fixture digest",
+        &["keySwitchArithmeticFixtureHash"],
+        &key_switch_arithmetic_fixture_hash,
+        "evaluation key key-switch arithmetic fixture hash",
     )?;
 
     let relinearization_key_record = json!({
@@ -74,23 +69,23 @@ pub(super) fn validate_evaluation_keys(setup_package: &Value) -> CanonicalResult
         "objectVersion": 1,
         "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
         "ceremonyId": string_at_path(evaluation_key_record, &["ceremonyId"])?,
-        "rosterDigest": digest_at_path(evaluation_key_record, &["rosterDigest"])?,
+        "rosterHash": hash_at_path(evaluation_key_record, &["rosterHash"])?,
         "collectivePublicKeyRoot": collective_public_key_root,
         "bgvPublicKeyRoot": bgv_public_key_root,
-        "keySwitchDecompositionDigest": key_switch_decomposition_digest,
+        "keySwitchDecompositionHash": key_switch_decomposition_hash,
         "publicBasisId": BgvBasisKind::Extended.basis_id(),
         "publicRlweSampleCount": 2,
-        "arithmeticFixtureDigest": relinearization_arithmetic_fixture_digest,
+        "arithmeticFixtureHash": relinearization_arithmetic_fixture_hash,
         "maliciousEvaluationKeyProofIncluded": false,
     });
-    let relinearization_key_root = digest_at_path(evaluation_keys, &["relinearizationKeyRoot"])?;
-    compare_derived_digest(
+    let relinearization_key_root = hash_at_path(evaluation_keys, &["relinearizationKeyRoot"])?;
+    compare_derived_hash(
         "RelinearizationKeyRoot",
         &relinearization_key_record,
         relinearization_key_root,
         "relinearization key root",
     )?;
-    compare_digest_at_path(
+    compare_hash_at_path(
         evaluation_key_record,
         &["relinearizationKeyRoot"],
         relinearization_key_root,
@@ -119,19 +114,19 @@ pub(super) fn validate_evaluation_keys(setup_package: &Value) -> CanonicalResult
             "objectVersion": 1,
             "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
             "ceremonyId": string_at_path(evaluation_key_record, &["ceremonyId"])?,
-            "rosterDigest": digest_at_path(evaluation_key_record, &["rosterDigest"])?,
+            "rosterHash": hash_at_path(evaluation_key_record, &["rosterHash"])?,
             "collectivePublicKeyRoot": collective_public_key_root,
-            "rotSetDigest": rot_set_digest,
+            "rotSetHash": rot_set_hash,
             "rotation": rotations[rotation_index].clone(),
-            "keySwitchDecompositionDigest": key_switch_decomposition_digest,
+            "keySwitchDecompositionHash": key_switch_decomposition_hash,
             "publicBasisId": BgvBasisKind::Extended.basis_id(),
             "publicRlweSampleCount": 1,
             "maliciousEvaluationKeyProofIncluded": false,
         });
-        compare_derived_digest(
+        compare_derived_hash(
             "RotationKeyRoot",
             &rotation_key_record,
-            digest_at_path(rotation_key_root_record, &["rotationKeyRoot"])?,
+            hash_at_path(rotation_key_root_record, &["rotationKeyRoot"])?,
             "rotation key root",
         )?;
     }
@@ -148,31 +143,31 @@ pub(super) fn validate_evaluation_keys(setup_package: &Value) -> CanonicalResult
         "objectVersion": 1,
         "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
         "ceremonyId": string_at_path(evaluation_key_record, &["ceremonyId"])?,
-        "rosterDigest": digest_at_path(evaluation_key_record, &["rosterDigest"])?,
+        "rosterHash": hash_at_path(evaluation_key_record, &["rosterHash"])?,
         "collectivePublicKeyRoot": collective_public_key_root,
-        "keySwitchDecompositionDigest": key_switch_decomposition_digest,
+        "keySwitchDecompositionHash": key_switch_decomposition_hash,
         "publicBasisId": BgvBasisKind::Extended.basis_id(),
         "publicRlweSampleCount": 1,
-        "arithmeticFixtureDigest": key_switch_arithmetic_fixture_digest,
+        "arithmeticFixtureHash": key_switch_arithmetic_fixture_hash,
         "genericKeySwitchApiExported": false,
         "maliciousEvaluationKeyProofIncluded": false,
     });
-    let key_switch_key_root = digest_at_path(evaluation_keys, &["keySwitchKeyRoot"])?;
-    compare_derived_digest(
+    let key_switch_key_root = hash_at_path(evaluation_keys, &["keySwitchKeyRoot"])?;
+    compare_derived_hash(
         "KeySwitchKeyRoot",
         &key_switch_key_record,
         key_switch_key_root,
         "key-switch key root",
     )?;
-    compare_digest_at_path(
+    compare_hash_at_path(
         evaluation_key_record,
         &["keySwitchKeyRoot"],
         key_switch_key_root,
         "evaluation key key-switch root",
     )?;
 
-    let evaluation_key_root = digest_at_path(evaluation_keys, &["evaluationKeyRoot"])?;
-    compare_derived_digest(
+    let evaluation_key_root = hash_at_path(evaluation_keys, &["evaluationKeyRoot"])?;
+    compare_derived_hash(
         "EvalKeyRoot",
         evaluation_key_record,
         evaluation_key_root,
@@ -278,7 +273,7 @@ fn expected_required_rotation_group(purpose: &str) -> Option<BTreeSet<i64>> {
 fn validate_development_key_arithmetic_fixture(
     wrapped_fixture: &Value,
     expected_fixture_id: &str,
-    expected_key_switch_decomposition_digest: &str,
+    expected_key_switch_decomposition_hash: &str,
 ) -> CanonicalResult<String> {
     let fixture_record = value_at_path(wrapped_fixture, &["fixture"])?;
     compare_string_at_path(
@@ -293,11 +288,11 @@ fn validate_development_key_arithmetic_fixture(
         expected_fixture_id,
         "development key arithmetic fixture id",
     )?;
-    compare_digest_at_path(
+    compare_hash_at_path(
         fixture_record,
-        &["keySwitchDecompositionDigest"],
-        expected_key_switch_decomposition_digest,
-        "development key arithmetic fixture decomposition digest",
+        &["keySwitchDecompositionHash"],
+        expected_key_switch_decomposition_hash,
+        "development key arithmetic fixture decomposition hash",
     )?;
     compare_string_at_path(
         fixture_record,
@@ -353,13 +348,13 @@ fn validate_development_key_arithmetic_fixture(
         }
     }
 
-    let fixture_digest = development_fixture_digest(fixture_record)?;
-    compare_digest_at_path(
+    let fixture_hash = development_fixture_hash(fixture_record)?;
+    compare_hash_at_path(
         wrapped_fixture,
-        &["fixtureDigest"],
-        &fixture_digest,
-        "development key arithmetic fixture digest",
+        &["fixtureHash"],
+        &fixture_hash,
+        "development key arithmetic fixture hash",
     )?;
 
-    Ok(fixture_digest)
+    Ok(fixture_hash)
 }

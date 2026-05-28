@@ -2,65 +2,65 @@ use super::*;
 
 pub(super) fn validate_setup_certificates(setup_package: &Value) -> CanonicalResult<()> {
     let certificates = value_at_path(setup_package, &["certificates"])?;
-    compare_derived_digest(
-        "CollectiveSecretDistributionCertificateDigest",
+    compare_derived_hash(
+        "CollectiveSecretDistributionCertificateHash",
         value_at_path(certificates, &["collectiveSecretDistributionCertificate"])?,
-        digest_at_path(
+        hash_at_path(
             certificates,
-            &["collectiveSecretDistributionCertificateDigest"],
+            &["collectiveSecretDistributionCertificateHash"],
         )?,
-        "collective secret distribution certificate digest",
+        "collective secret distribution certificate hash",
     )?;
-    compare_derived_digest(
-        "ErrorDistributionCertificateDigest",
+    compare_derived_hash(
+        "ErrorDistributionCertificateHash",
         value_at_path(certificates, &["errorDistributionCertificate"])?,
-        digest_at_path(certificates, &["errorDistributionCertificateDigest"])?,
-        "error distribution certificate digest",
+        hash_at_path(certificates, &["errorDistributionCertificateHash"])?,
+        "error distribution certificate hash",
     )?;
-    compare_derived_digest(
-        "KeySwitchDecompositionDigest",
+    compare_derived_hash(
+        "KeySwitchDecompositionHash",
         value_at_path(certificates, &["keySwitchDecomposition"])?,
-        digest_at_path(certificates, &["keySwitchDecompositionDigest"])?,
-        "key-switch decomposition digest",
+        hash_at_path(certificates, &["keySwitchDecompositionHash"])?,
+        "key-switch decomposition hash",
     )?;
-    compare_derived_digest(
-        "EvaluationKeySizeProfileDigest",
+    compare_derived_hash(
+        "EvaluationKeySizeProfileHash",
         value_at_path(certificates, &["evaluationKeySizeCertificate"])?,
-        digest_at_path(certificates, &["evaluationKeySizeProfileDigest"])?,
-        "evaluation key size profile digest",
+        hash_at_path(certificates, &["evaluationKeySizeProfileHash"])?,
+        "evaluation key size profile hash",
     )?;
-    let evaluation_key_streaming_fixture_digest =
+    let evaluation_key_streaming_fixture_hash =
         validate_evaluation_key_streaming_fixture(certificates)?;
-    compare_digest_at_path(
+    compare_hash_at_path(
         value_at_path(certificates, &["setupParameterCertificate"])?,
-        &["evaluationKeyStreamingFixtureDigest"],
-        &evaluation_key_streaming_fixture_digest,
-        "setup parameter evaluation key streaming fixture digest",
+        &["evaluationKeyStreamingFixtureHash"],
+        &evaluation_key_streaming_fixture_hash,
+        "setup parameter evaluation key streaming fixture hash",
     )?;
-    compare_derived_digest(
-        "BGVSetupParameterCertificateDigest",
+    compare_derived_hash(
+        "BGVSetupParameterCertificateHash",
         value_at_path(certificates, &["setupParameterCertificate"])?,
-        digest_at_path(certificates, &["setupParameterCertificateDigest"])?,
-        "setup parameter certificate digest",
+        hash_at_path(certificates, &["setupParameterCertificateHash"])?,
+        "setup parameter certificate hash",
     )?;
-    compare_derived_digest(
-        "BGVDevelopmentEncryptionFixtureDigest",
+    compare_derived_hash(
+        "BGVDevelopmentEncryptionFixtureHash",
         value_at_path(setup_package, &["developmentEncryptionFixture", "fixture"])?,
-        digest_at_path(
+        hash_at_path(
             setup_package,
-            &["developmentEncryptionFixture", "fixtureDigest"],
+            &["developmentEncryptionFixture", "fixtureHash"],
         )?,
-        "development encryption fixture digest",
+        "development encryption fixture hash",
     )?;
     validate_development_encryption_fixture(setup_package)?;
-    compare_digest_at_path(
+    compare_hash_at_path(
         certificates,
-        &["developmentEncryptionFixtureDigest"],
-        digest_at_path(
+        &["developmentEncryptionFixtureHash"],
+        hash_at_path(
             setup_package,
-            &["developmentEncryptionFixture", "fixtureDigest"],
+            &["developmentEncryptionFixture", "fixtureHash"],
         )?,
-        "certificate development encryption fixture digest",
+        "certificate development encryption fixture hash",
     )
 }
 
@@ -93,7 +93,7 @@ fn validate_evaluation_key_streaming_fixture(certificates: &Value) -> CanonicalR
             "evaluation key streaming fixture byte length does not match its stream record",
         ));
     }
-    compare_digest_at_path(
+    compare_hash_at_path(
         fixture_record,
         &["chunkRoot"],
         &chunk_root(&stream_bytes, EVALUATION_KEY_CHUNK_SIZE_BYTES)?,
@@ -111,15 +111,15 @@ fn validate_evaluation_key_streaming_fixture(certificates: &Value) -> CanonicalR
             "evaluation key streaming fixture storage quota decision is inconsistent",
         ));
     }
-    let fixture_digest = development_fixture_digest(fixture_record)?;
-    compare_digest_at_path(
+    let fixture_hash = development_fixture_hash(fixture_record)?;
+    compare_hash_at_path(
         wrapped_fixture,
-        &["fixtureDigest"],
-        &fixture_digest,
-        "evaluation key streaming fixture digest",
+        &["fixtureHash"],
+        &fixture_hash,
+        "evaluation key streaming fixture hash",
     )?;
 
-    Ok(fixture_digest)
+    Ok(fixture_hash)
 }
 
 fn validate_development_encryption_fixture(setup_package: &Value) -> CanonicalResult<()> {
@@ -139,26 +139,26 @@ fn validate_development_encryption_fixture(setup_package: &Value) -> CanonicalRe
             "development encryption fixture must not claim M9 bridge or M10 evaluator closure",
         ));
     }
-    compare_digest_at_path(
+    compare_hash_at_path(
         fixture_record,
         &["collectivePublicKeyRoot"],
-        digest_at_path(
+        hash_at_path(
             setup_package,
             &["collectivePublicKey", "collectivePublicKeyRoot"],
         )?,
         "development encryption collective public key root",
     )?;
-    compare_digest_at_path(
+    compare_hash_at_path(
         fixture_record,
         &["bgvPublicKeyRoot"],
-        digest_at_path(setup_package, &["collectivePublicKey", "bgvPublicKeyRoot"])?,
+        hash_at_path(setup_package, &["collectivePublicKey", "bgvPublicKeyRoot"])?,
         "development encryption BGV public key root",
     )?;
-    digest_at_path(fixture_record, &["publicKeyMaterialRoot"])?;
-    digest_at_path(fixture_record, &["randomnessRoot"])?;
-    digest_at_path(fixture_record, &["plaintextRoot"])?;
-    digest_at_path(fixture_record, &["ciphertextRoot"])?;
-    digest_at_path(fixture_record, &["canonicalBytesHash512"])?;
+    hash_at_path(fixture_record, &["publicKeyMaterialRoot"])?;
+    hash_at_path(fixture_record, &["randomnessRoot"])?;
+    hash_at_path(fixture_record, &["plaintextRoot"])?;
+    hash_at_path(fixture_record, &["ciphertextRoot"])?;
+    hash_at_path(fixture_record, &["canonicalBytesHash512"])?;
     if unsigned_at_path(fixture_record, &["canonicalByteLength"])? == 0 {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,

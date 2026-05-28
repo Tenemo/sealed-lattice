@@ -3,25 +3,25 @@ import type {
     AggregateReadyRecord,
     AggregateReadyRecordBuildInput,
     InterpolationCoefficientReport,
-    ProtocolDigest,
+    ProtocolHash,
     RefusalRecord,
 } from '@sealed-lattice/types';
 
 import { deriveInterpolationCoefficientReport } from '../../../plaintext-oracle/index.js';
 import {
     createAggregateRefusal,
-    protocolDigestPattern,
+    protocolHashPattern,
 } from '../../aggregate-derivation/constants.js';
 import {
-    deriveAggregateReadyRecordDigest,
+    deriveAggregateReadyRecordHash,
     deriveEncryptedAggregateReconstructionRoot,
-    deriveSelectedAggregateContributionOrderDigest,
-} from '../digests.js';
+    deriveSelectedAggregateContributionOrderHash,
+} from '../hashes.js';
 
 import { verifyAggregateContributionStructure } from './aggregate-contribution.js';
 import {
-    aggregateReadyDigestFieldNames,
-    collectDigestShapeRefusals,
+    aggregateReadyHashFieldNames,
+    collectHashShapeRefusals,
     collectForbiddenWitnessFieldRefusals,
 } from './shared.js';
 
@@ -29,7 +29,7 @@ const interpolationReportsMatch = (
     leftReport: InterpolationCoefficientReport,
     rightReport: InterpolationCoefficientReport,
 ): boolean =>
-    leftReport.reportDigest === rightReport.reportDigest &&
+    leftReport.reportHash === rightReport.reportHash &&
     leftReport.centeredL1CoefficientSum ===
         rightReport.centeredL1CoefficientSum &&
     leftReport.maxCenteredAbsCoefficient ===
@@ -65,27 +65,27 @@ const requireSameSelectedContext = (
     }
     const sharedFields = [
         'ceremonyId',
-        'manifestDigest',
-        'rosterDigest',
-        'pollSpecDigest',
-        'thresholdProfileDigest',
-        'setupPackageDigest',
+        'manifestHash',
+        'rosterHash',
+        'pollSpecHash',
+        'thresholdProfileHash',
+        'setupPackageHash',
         'participantCount',
         'optionCount',
         'shareVectorWidth',
-        'ballotSetDigest',
-        'votingClosedBoardHeadDigest',
-        'postVotingClosedContextDigest',
-        'aggregateSelectionPolicyDigest',
-        'encryptedAggregateBridgeDigest',
-        'encryptedAggregateTargetBasisDataRoot',
-        'encryptedAggregateReconstructionDigest',
-        'bridgeWitnessPrivacyProfileDigest',
-        'bgvBatchEncoderDigest',
-        'bridgeLayoutDigest',
-        'encryptedAggregateInputLayoutDigest',
-        'topKEvaluatorInputLayoutDigest',
-        'bgvProfileDigest',
+        'ballotSetHash',
+        'votingClosedBoardHeadHash',
+        'postVotingClosedContextHash',
+        'aggregateSelectionPolicyHash',
+        'encryptedAggregateBridgeHash',
+        'encryptedAggregateTargetBasisRoot',
+        'encryptedAggregateReconstructionHash',
+        'bridgeWitnessPrivacyProfileHash',
+        'bgvBatchEncoderHash',
+        'bridgeLayoutHash',
+        'encryptedAggregateInputLayoutHash',
+        'topKEvaluatorInputLayoutHash',
+        'bgvProfileHash',
         'collectivePublicKeyRoot',
     ] as const;
 
@@ -154,21 +154,19 @@ export const createAggregateReadyRecord = (
             'Supplied aggregate interpolation coefficient report does not match recomputation.',
         );
     }
-    const selectedAggregateContributionDigests =
-        input.selectedContributions.map(
-            (contribution) => contribution.aggregateContributionDigest,
-        );
-    const expectedFirstValidOrderDigest =
-        deriveSelectedAggregateContributionOrderDigest({
-            requiredPostVotingClosedContextDigest:
-                firstContribution.postVotingClosedContextDigest,
-            selectedAggregateContributionDigests,
-            selectionPolicyDigest:
-                firstContribution.aggregateSelectionPolicyDigest,
+    const selectedAggregateContributionHashes = input.selectedContributions.map(
+        (contribution) => contribution.aggregateContributionHash,
+    );
+    const expectedFirstValidOrderHash =
+        deriveSelectedAggregateContributionOrderHash({
+            requiredPostVotingClosedContextHash:
+                firstContribution.postVotingClosedContextHash,
+            selectedAggregateContributionHashes,
+            selectionPolicyHash: firstContribution.aggregateSelectionPolicyHash,
         });
-    if (input.firstValidOrderDigest !== expectedFirstValidOrderDigest) {
+    if (input.firstValidOrderHash !== expectedFirstValidOrderHash) {
         throw new RangeError(
-            'Aggregate-ready record first-valid order digest does not match the selected contribution order.',
+            'Aggregate-ready record first-valid order hash does not match the selected contribution order.',
         );
     }
     const encryptedAggregateShareCiphertextRoots =
@@ -178,117 +176,114 @@ export const createAggregateReadyRecord = (
         );
     const encryptedAggregateReconstructionRoot =
         deriveEncryptedAggregateReconstructionRoot({
-            aggregateSelectionPolicyDigest:
-                firstContribution.aggregateSelectionPolicyDigest,
-            encryptedAggregateReconstructionDigest:
-                firstContribution.encryptedAggregateReconstructionDigest,
+            aggregateSelectionPolicyHash:
+                firstContribution.aggregateSelectionPolicyHash,
+            encryptedAggregateReconstructionHash:
+                firstContribution.encryptedAggregateReconstructionHash,
             encryptedAggregateShareCiphertextRoots,
-            firstValidOrderDigest: expectedFirstValidOrderDigest,
-            interpolationCoefficientReportDigest:
-                interpolationCoefficientReport.reportDigest,
-            selectedAggregateContributionDigests,
+            firstValidOrderHash: expectedFirstValidOrderHash,
+            interpolationCoefficientReportHash:
+                interpolationCoefficientReport.reportHash,
+            selectedAggregateContributionHashes,
         });
     const recordPayload: Omit<
         AggregateReadyRecord,
-        'aggregateReadyRecordDigest'
+        'aggregateReadyRecordHash'
     > = {
         aggregateContributionQuorum: input.aggregateContributionQuorum,
-        aggregateSelectionPolicyDigest:
-            firstContribution.aggregateSelectionPolicyDigest,
-        ballotSetDigest: firstContribution.ballotSetDigest,
-        bgvBatchEncoderDigest: firstContribution.bgvBatchEncoderDigest,
-        bgvProfileDigest: firstContribution.bgvProfileDigest,
-        bridgeLayoutDigest: firstContribution.bridgeLayoutDigest,
-        bridgeWitnessPrivacyProfileDigest:
-            firstContribution.bridgeWitnessPrivacyProfileDigest,
+        aggregateSelectionPolicyHash:
+            firstContribution.aggregateSelectionPolicyHash,
+        ballotSetHash: firstContribution.ballotSetHash,
+        bgvBatchEncoderHash: firstContribution.bgvBatchEncoderHash,
+        bgvProfileHash: firstContribution.bgvProfileHash,
+        bridgeLayoutHash: firstContribution.bridgeLayoutHash,
+        bridgeWitnessPrivacyProfileHash:
+            firstContribution.bridgeWitnessPrivacyProfileHash,
         centeredL1CoefficientSum:
             interpolationCoefficientReport.centeredL1CoefficientSum,
         ceremonyId: firstContribution.ceremonyId,
         collectivePublicKeyRoot: firstContribution.collectivePublicKeyRoot,
-        encryptedAggregateBridgeDigest:
-            firstContribution.encryptedAggregateBridgeDigest,
-        encryptedAggregateInputLayoutDigest:
-            firstContribution.encryptedAggregateInputLayoutDigest,
-        encryptedAggregateReconstructionDigest:
-            firstContribution.encryptedAggregateReconstructionDigest,
+        encryptedAggregateBridgeHash:
+            firstContribution.encryptedAggregateBridgeHash,
+        encryptedAggregateInputLayoutHash:
+            firstContribution.encryptedAggregateInputLayoutHash,
+        encryptedAggregateReconstructionHash:
+            firstContribution.encryptedAggregateReconstructionHash,
         encryptedAggregateReconstructionRoot,
         encryptedAggregateShareCiphertextRoots,
-        encryptedAggregateTargetBasisDataRoot:
-            firstContribution.encryptedAggregateTargetBasisDataRoot,
-        firstValidOrderDigest: expectedFirstValidOrderDigest,
-        interpolationCoefficientReportDigest:
-            interpolationCoefficientReport.reportDigest,
+        encryptedAggregateTargetBasisRoot:
+            firstContribution.encryptedAggregateTargetBasisRoot,
+        firstValidOrderHash: expectedFirstValidOrderHash,
+        interpolationCoefficientReportHash:
+            interpolationCoefficientReport.reportHash,
         interpolationCoefficients: interpolationCoefficientReport.coefficients,
-        manifestDigest: firstContribution.manifestDigest,
+        manifestHash: firstContribution.manifestHash,
         maxCenteredAbsCoefficient:
             interpolationCoefficientReport.maxCenteredAbsCoefficient,
         objectType: 'AggregateReadyRecord',
         objectVersion: 1,
         optionCount: firstContribution.optionCount,
-        pollSpecDigest: firstContribution.pollSpecDigest,
-        postVotingClosedContextDigest:
-            firstContribution.postVotingClosedContextDigest,
+        pollSpecHash: firstContribution.pollSpecHash,
+        postVotingClosedContextHash:
+            firstContribution.postVotingClosedContextHash,
         rosterSize: input.rosterSize,
-        rosterDigest: firstContribution.rosterDigest,
-        selectedAggregateContributionDigests,
+        rosterHash: firstContribution.rosterHash,
+        selectedAggregateContributionHashes,
         selectedContributorIdentities: input.selectedContributions.map(
             (contribution) => contribution.contributorIdentity,
         ),
         selectedContributorInterpolationPoints:
             interpolationCoefficientReport.contributorRosterPositions,
         selectedContributorRosterPositions,
-        setupPackageDigest: firstContribution.setupPackageDigest,
+        setupPackageHash: firstContribution.setupPackageHash,
         shareVectorWidth: firstContribution.shareVectorWidth,
-        thresholdProfileDigest: firstContribution.thresholdProfileDigest,
-        topKEvaluatorInputLayoutDigest:
-            firstContribution.topKEvaluatorInputLayoutDigest,
-        votingClosedBoardHeadDigest:
-            firstContribution.votingClosedBoardHeadDigest,
+        thresholdProfileHash: firstContribution.thresholdProfileHash,
+        topKEvaluatorInputLayoutHash:
+            firstContribution.topKEvaluatorInputLayoutHash,
+        votingClosedBoardHeadHash: firstContribution.votingClosedBoardHeadHash,
     };
 
     return {
         ...recordPayload,
-        aggregateReadyRecordDigest:
-            deriveAggregateReadyRecordDigest(recordPayload),
+        aggregateReadyRecordHash: deriveAggregateReadyRecordHash(recordPayload),
     };
 };
 
 export const verifyAggregateReadyRecordStructure = (
     record: AggregateReadyRecord,
 ): {
-    readonly acceptedDigests: readonly ProtocolDigest[];
-    readonly aggregateReadyRecordDigest?: ProtocolDigest;
+    readonly acceptedHashes: readonly ProtocolHash[];
+    readonly aggregateReadyRecordHash?: ProtocolHash;
     readonly ok: boolean;
     readonly refusedObjects: readonly RefusalRecord[];
     readonly statusLabels: readonly string[];
     readonly unresolvedReason: string | null;
 } => {
-    const recordDigest = record.aggregateReadyRecordDigest;
-    const { aggregateReadyRecordDigest, ...recordWithoutDigest } = record;
-    void aggregateReadyRecordDigest;
-    let expectedRecordDigest: string | undefined;
+    const recordHash = record.aggregateReadyRecordHash;
+    const { aggregateReadyRecordHash, ...recordWithoutHash } = record;
+    void aggregateReadyRecordHash;
+    let expectedRecordHash: string | undefined;
     const refusedObjects: RefusalRecord[] = [
         ...collectForbiddenWitnessFieldRefusals(
             record,
-            recordDigest,
+            recordHash,
             'aggregateReadyRecord',
         ),
-        ...collectDigestShapeRefusals(
+        ...collectHashShapeRefusals(
             record as unknown as Record<string, unknown>,
-            aggregateReadyDigestFieldNames,
-            recordDigest,
+            aggregateReadyHashFieldNames,
+            recordHash,
         ),
     ];
     try {
-        expectedRecordDigest =
-            deriveAggregateReadyRecordDigest(recordWithoutDigest);
+        expectedRecordHash = deriveAggregateReadyRecordHash(recordWithoutHash);
     } catch (error) {
         refusedObjects.push(
             createAggregateRefusal(
-                `Aggregate-ready record digest could not be canonicalized: ${
+                `Aggregate-ready record hash could not be canonicalized: ${
                     error instanceof Error ? error.message : String(error)
                 }.`,
-                recordDigest,
+                recordHash,
             ),
         );
     }
@@ -297,30 +292,29 @@ export const verifyAggregateReadyRecordStructure = (
         rosterSize: record.rosterSize,
         threshold: record.aggregateContributionQuorum,
     });
-    const recomputedFirstValidOrderDigest =
-        deriveSelectedAggregateContributionOrderDigest({
-            requiredPostVotingClosedContextDigest:
-                record.postVotingClosedContextDigest,
-            selectedAggregateContributionDigests:
-                record.selectedAggregateContributionDigests,
-            selectionPolicyDigest: record.aggregateSelectionPolicyDigest,
+    const recomputedFirstValidOrderHash =
+        deriveSelectedAggregateContributionOrderHash({
+            requiredPostVotingClosedContextHash:
+                record.postVotingClosedContextHash,
+            selectedAggregateContributionHashes:
+                record.selectedAggregateContributionHashes,
+            selectionPolicyHash: record.aggregateSelectionPolicyHash,
         });
     const recomputedReconstructionRoot =
         deriveEncryptedAggregateReconstructionRoot({
-            aggregateSelectionPolicyDigest:
-                record.aggregateSelectionPolicyDigest,
-            encryptedAggregateReconstructionDigest:
-                record.encryptedAggregateReconstructionDigest,
+            aggregateSelectionPolicyHash: record.aggregateSelectionPolicyHash,
+            encryptedAggregateReconstructionHash:
+                record.encryptedAggregateReconstructionHash,
             encryptedAggregateShareCiphertextRoots:
                 record.encryptedAggregateShareCiphertextRoots,
-            firstValidOrderDigest: record.firstValidOrderDigest,
-            interpolationCoefficientReportDigest:
-                recomputedInterpolationReport.reportDigest,
-            selectedAggregateContributionDigests:
-                record.selectedAggregateContributionDigests,
+            firstValidOrderHash: record.firstValidOrderHash,
+            interpolationCoefficientReportHash:
+                recomputedInterpolationReport.reportHash,
+            selectedAggregateContributionHashes:
+                record.selectedAggregateContributionHashes,
         });
     const selectedLengths = [
-        record.selectedAggregateContributionDigests.length,
+        record.selectedAggregateContributionHashes.length,
         record.selectedContributorIdentities.length,
         record.selectedContributorRosterPositions.length,
         record.selectedContributorInterpolationPoints.length,
@@ -330,16 +324,16 @@ export const verifyAggregateReadyRecordStructure = (
     const arraysMatchQuorum = selectedLengths.every(
         (length) => length === record.aggregateContributionQuorum,
     );
-    const allSelectedDigestsAreCanonical = [
-        ...record.selectedAggregateContributionDigests,
+    const allSelectedHashesAreCanonical = [
+        ...record.selectedAggregateContributionHashes,
         ...record.encryptedAggregateShareCiphertextRoots,
-    ].every((digestValue) => protocolDigestPattern.test(digestValue));
+    ].every((HashValue) => protocolHashPattern.test(HashValue));
 
     if (
         record.objectType !== 'AggregateReadyRecord' ||
         record.objectVersion !== 1 ||
-        expectedRecordDigest === undefined ||
-        record.aggregateReadyRecordDigest !== expectedRecordDigest ||
+        expectedRecordHash === undefined ||
+        record.aggregateReadyRecordHash !== expectedRecordHash ||
         !Number.isSafeInteger(record.rosterSize) ||
         record.rosterSize < 3 ||
         record.rosterSize > 20 ||
@@ -352,15 +346,15 @@ export const verifyAggregateReadyRecordStructure = (
         record.aggregateContributionQuorum <= 0 ||
         record.aggregateContributionQuorum > record.rosterSize ||
         !arraysMatchQuorum ||
-        !allSelectedDigestsAreCanonical ||
+        !allSelectedHashesAreCanonical ||
         record.selectedContributorInterpolationPoints.some(
             (position, positionIndex) =>
                 position !==
                 record.selectedContributorRosterPositions[positionIndex],
         ) ||
-        record.firstValidOrderDigest !== recomputedFirstValidOrderDigest ||
-        record.interpolationCoefficientReportDigest !==
-            recomputedInterpolationReport.reportDigest ||
+        record.firstValidOrderHash !== recomputedFirstValidOrderHash ||
+        record.interpolationCoefficientReportHash !==
+            recomputedInterpolationReport.reportHash ||
         record.centeredL1CoefficientSum !==
             recomputedInterpolationReport.centeredL1CoefficientSum ||
         record.maxCenteredAbsCoefficient !==
@@ -372,7 +366,7 @@ export const verifyAggregateReadyRecordStructure = (
                 contributorRosterPositions:
                     record.selectedContributorRosterPositions,
                 maxCenteredAbsCoefficient: record.maxCenteredAbsCoefficient,
-                reportDigest: record.interpolationCoefficientReportDigest,
+                reportHash: record.interpolationCoefficientReportHash,
                 rosterSize: record.rosterSize,
                 threshold: record.aggregateContributionQuorum,
             },
@@ -383,16 +377,16 @@ export const verifyAggregateReadyRecordStructure = (
     ) {
         refusedObjects.push(
             createAggregateRefusal(
-                'Aggregate-ready record digest, variant dimensions, interpolation coefficients, or reconstruction root is invalid.',
-                recordDigest,
+                'Aggregate-ready record hash, variant dimensions, interpolation coefficients, or reconstruction root is invalid.',
+                recordHash,
             ),
         );
     }
 
     if (refusedObjects.length > 0) {
         return {
-            acceptedDigests: [],
-            aggregateReadyRecordDigest: recordDigest,
+            acceptedHashes: [],
+            aggregateReadyRecordHash: recordHash,
             ok: false,
             refusedObjects,
             statusLabels: [],
@@ -402,12 +396,12 @@ export const verifyAggregateReadyRecordStructure = (
     }
 
     return {
-        acceptedDigests: [
-            record.aggregateReadyRecordDigest,
+        acceptedHashes: [
+            record.aggregateReadyRecordHash,
             record.encryptedAggregateReconstructionRoot,
-            record.interpolationCoefficientReportDigest,
+            record.interpolationCoefficientReportHash,
         ],
-        aggregateReadyRecordDigest: recordDigest,
+        aggregateReadyRecordHash: recordHash,
         ok: true,
         refusedObjects: [],
         statusLabels: ['AggregateReadyRecordVerified'],

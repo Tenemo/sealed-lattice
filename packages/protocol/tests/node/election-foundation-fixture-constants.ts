@@ -2,8 +2,8 @@ import {
     createMlDsaKeyPairFixture,
     createMlDsaSignatureProfileFixture,
     createProtocolSignatureFixture,
-    deriveProtocolDigest,
-    deriveProtocolSignatureDigest,
+    deriveProtocolHash,
+    deriveProtocolSignatureHash,
 } from '@sealed-lattice/crypto';
 import {
     bgvPassiveSetupProfileId,
@@ -18,7 +18,7 @@ import {
 import type {
     CanonicalSignedRootObject,
     ManifestOpaqueBindings,
-    ManifestPolicyDigests,
+    ManifestPolicyHashes,
     ProtocolSignatureEnvelope,
     SignedObjectType,
     SignerRole,
@@ -26,20 +26,20 @@ import type {
 } from '@sealed-lattice/types';
 
 import {
-    deriveTargetFinalityPolicyDigest,
-    deriveWitnessPolicyDigest,
+    deriveTargetFinalityPolicyHash,
+    deriveWitnessPolicyHash,
 } from '../../src/finality/index';
 
 export const ceremonyId = 'ceremony-main';
-export const boardPolicyDigest = deriveProtocolDigest('BoardPolicyDigest', {
+export const boardPolicyHash = deriveProtocolHash('BoardPolicyHash', {
     policy: 'signed-head-chain-v1',
 });
-export const contextDigest = deriveProtocolDigest('ActionContextDigest', {
+export const contextHash = deriveProtocolHash('ActionContextHash', {
     context: 'default',
 });
 export const profile = createMlDsaSignatureProfileFixture();
 
-export const keyFixturesByDigest = new Map<
+export const keyFixturesByHash = new Map<
     string,
     ReturnType<typeof createMlDsaKeyPairFixture>
 >();
@@ -47,7 +47,7 @@ export const createKeyFixture = (
     seedLabel: string,
 ): ReturnType<typeof createMlDsaKeyPairFixture> => {
     const keyFixture = createMlDsaKeyPairFixture(seedLabel);
-    keyFixturesByDigest.set(keyFixture.publicKeyDigest, keyFixture);
+    keyFixturesByHash.set(keyFixture.publicKeyHash, keyFixture);
 
     return keyFixture;
 };
@@ -64,14 +64,14 @@ export const getWitnessKeyFixture = (
     witnessIdentity: string,
 ): ReturnType<typeof createMlDsaKeyPairFixture> =>
     createKeyFixture(`witness:${witnessIdentity}`);
-export const boardPublicKeyDigest = boardKeyFixture.publicKeyDigest;
-export const organizerPublicKeyDigest = organizerKeyFixture.publicKeyDigest;
-export const getParticipantSigningPublicKeyDigest = (
+export const boardPublicKeyHash = boardKeyFixture.publicKeyHash;
+export const organizerPublicKeyHash = organizerKeyFixture.publicKeyHash;
+export const getParticipantSigningPublicKeyHash = (
     participantIdentity: string,
 ): string =>
     participantIdentity === 'organizer'
-        ? organizerPublicKeyDigest
-        : getParticipantKeyFixture(participantIdentity).publicKeyDigest;
+        ? organizerPublicKeyHash
+        : getParticipantKeyFixture(participantIdentity).publicKeyHash;
 export const witnessIdentities = [
     'witness-1',
     'witness-2',
@@ -81,171 +81,167 @@ export const witnessIdentities = [
     'witness-6',
     'witness-7',
 ] as const;
-export const witnessPolicyDigest = deriveWitnessPolicyDigest({
+export const witnessPolicyHash = deriveWitnessPolicyHash({
     witnessIdentities,
     witnessQuorum: 5,
     totalWitnesses: 7,
 });
-export const targetFinalityPolicyDigest = deriveTargetFinalityPolicyDigest({
+export const targetFinalityPolicyHash = deriveTargetFinalityPolicyHash({
     targetFinalityScope: 'target',
     witnessQuorum: 5,
     totalWitnesses: 7,
 });
-export const defaultTopKEvaluationRecordDigest = deriveProtocolDigest(
-    'TopKEvaluationRecordDigest',
+export const defaultTopKEvaluationRecordHash = deriveProtocolHash(
+    'TopKEvaluationRecordHash',
     { proposal: 'top-k' },
 );
-export const defaultThresholdProfileDigest = deriveProtocolDigest(
-    'ThresholdProfileDigest',
+export const defaultThresholdProfileHash = deriveProtocolHash(
+    'ThresholdProfileHash',
     { profile: 'default-target-finality-threshold-profile' },
 );
-export const witnessPublicKeyDigests = Object.fromEntries(
+export const witnessPublicKeyHashes = Object.fromEntries(
     witnessIdentities.map((witnessIdentity) => [
         witnessIdentity,
-        getWitnessKeyFixture(witnessIdentity).publicKeyDigest,
+        getWitnessKeyFixture(witnessIdentity).publicKeyHash,
     ]),
 );
 export const witnessPolicy: WitnessPolicy = {
-    witnessPolicyDigest,
+    witnessPolicyHash,
     witnessIdentities,
     witnessQuorum: 5,
     totalWitnesses: 7,
 };
 export const targetFinalityPolicy = {
-    targetFinalityPolicyDigest,
+    targetFinalityPolicyHash,
     targetFinalityScope: 'target',
     witnessQuorum: 5,
     totalWitnesses: 7,
 };
 
-export const manifestPolicyDigests: ManifestPolicyDigests = {
-    aggregateSelectionPolicyDigest: deriveProtocolDigest(
-        'AggregateSelectionPolicyDigest',
+export const manifestPolicyHashes: ManifestPolicyHashes = {
+    aggregateSelectionPolicyHash: deriveProtocolHash(
+        'AggregateSelectionPolicyHash',
         { policy: 'first-valid-aggregate-contributors' },
     ),
-    duplicateBallotPolicyDigest: deriveProtocolDigest(
-        'DuplicateBallotPolicyDigest',
-        { policy: 'first-valid-before-close' },
-    ),
-    firstValidPolicyDigest: deriveProtocolDigest('FirstValidPolicyDigest', {
+    duplicateBallotPolicyHash: deriveProtocolHash('DuplicateBallotPolicyHash', {
+        policy: 'first-valid-before-close',
+    }),
+    firstValidPolicyHash: deriveProtocolHash('FirstValidPolicyHash', {
         policy: 'canonical-signed-board-order-current-epoch',
     }),
-    recoveryPolicyDigest: deriveProtocolDigest('RecoveryPolicyDigest', {
+    recoveryPolicyHash: deriveProtocolHash('RecoveryPolicyHash', {
         policy: 'same-slot-recovery-v1',
     }),
-    targetFinalityPolicyDigest,
-    witnessPolicyDigest,
+    targetFinalityPolicyHash,
+    witnessPolicyHash,
 };
 export const manifestOpaqueBindings: ManifestOpaqueBindings = {
     encryptedAggregateBridgeProfileId,
     bgvPassiveSetupProfileId,
     bridgeWitnessPrivacyProfileId,
-    heParamDigest: deriveProtocolDigest('HEParamDigest', {
+    heParamHash: deriveProtocolHash('HEParamHash', {
         profile: 'BGV-RNS-v1',
     }),
-    bgvPassiveSetupPackageDigest: deriveProtocolDigest(
-        'BGVPassiveSetupPackageDigest',
+    bgvPassiveSetupPackageHash: deriveProtocolHash(
+        'BGVPassiveSetupPackageHash',
         {
             setup: 'passive-full-roster-bgv',
         },
     ),
-    bgvSetupParameterCertificateDigest: deriveProtocolDigest(
-        'BGVSetupParameterCertificateDigest',
+    bgvSetupParameterCertificateHash: deriveProtocolHash(
+        'BGVSetupParameterCertificateHash',
         {
             setup: 'parameter-certificate',
         },
     ),
-    bgvProfileDigest: deriveProtocolDigest('BGVProfileDigest', {
+    bgvProfileHash: deriveProtocolHash('BGVProfileHash', {
         profile: 'BGV-RNS-v1',
     }),
-    rustBgvBackendProfileDigest: deriveProtocolDigest(
-        'RustBgvBackendProfileDigest',
-        {
-            backend: 'sealed-lattice-rust-wasm-bgv-rns-v1',
-        },
-    ),
-    bgvPublicKeyRoot: deriveProtocolDigest('BGVPublicKeyRoot', {
+    rustBgvBackendProfileHash: deriveProtocolHash('RustBgvBackendProfileHash', {
+        backend: 'sealed-lattice-rust-wasm-bgv-rns-v1',
+    }),
+    bgvPublicKeyRoot: deriveProtocolHash('BGVPublicKeyRoot', {
         key: 'bgv-collective',
     }),
-    collectivePublicKeyRoot: deriveProtocolDigest('CollectivePublicKeyRoot', {
+    collectivePublicKeyRoot: deriveProtocolHash('CollectivePublicKeyRoot', {
         key: 'bgv-collective',
     }),
-    collectiveSecretDistributionCertificateDigest: deriveProtocolDigest(
-        'CollectiveSecretDistributionCertificateDigest',
+    collectiveSecretDistributionCertificateHash: deriveProtocolHash(
+        'CollectiveSecretDistributionCertificateHash',
         {
             setup: 'secret-distribution',
         },
     ),
-    errorDistributionCertificateDigest: deriveProtocolDigest(
-        'ErrorDistributionCertificateDigest',
+    errorDistributionCertificateHash: deriveProtocolHash(
+        'ErrorDistributionCertificateHash',
         {
             setup: 'error-distribution',
         },
     ),
-    keySwitchDecompositionDigest: deriveProtocolDigest(
-        'KeySwitchDecompositionDigest',
+    keySwitchDecompositionHash: deriveProtocolHash(
+        'KeySwitchDecompositionHash',
         {
             profile: 'key-switch-decomposition',
         },
     ),
-    canonicalCiphertextConventionDigest: deriveProtocolDigest(
-        'CanonicalCiphertextConventionDigest',
+    canonicalCiphertextConventionHash: deriveProtocolHash(
+        'CanonicalCiphertextConventionHash',
         { convention: 'bgv-rns-coefficient-domain-c0-plus-c1-s' },
     ),
-    encryptedAggregateBridgeDigest: deriveProtocolDigest(
-        'EncryptedAggregateBridgeDigest',
+    encryptedAggregateBridgeHash: deriveProtocolHash(
+        'EncryptedAggregateBridgeHash',
         {
             profile: encryptedAggregateBridgeProfileId,
         },
     ),
-    bridgeWitnessPrivacyProfileDigest: deriveProtocolDigest(
-        'BridgeWitnessPrivacyProfileDigest',
+    bridgeWitnessPrivacyProfileHash: deriveProtocolHash(
+        'BridgeWitnessPrivacyProfileHash',
         {
             profile: bridgeWitnessPrivacyProfileId,
         },
     ),
-    bgvBatchEncoderDigest: deriveProtocolDigest('BGVBatchEncoderDigest', {
+    bgvBatchEncoderHash: deriveProtocolHash('BGVBatchEncoderHash', {
         layout: 'WinnerRankTopK-v1',
     }),
-    bridgeLayoutDigest: deriveProtocolDigest('BridgeLayoutDigest', {
+    bridgeLayoutHash: deriveProtocolHash('BridgeLayoutHash', {
         layout: 'encrypted-aggregate-input-layout-v1',
     }),
-    encryptedAggregateInputRoot: deriveProtocolDigest(
+    encryptedAggregateInputRoot: deriveProtocolHash(
         'EncryptedAggregateInputRoot',
         {
             layout: 'encrypted-aggregate-input-v1',
         },
     ),
-    encryptedAggregateShareCiphertextRoot: deriveProtocolDigest(
+    encryptedAggregateShareCiphertextRoot: deriveProtocolHash(
         'EncryptedAggregateShareCiphertextRoot',
         {
             layout: 'encrypted-aggregate-share-ciphertexts-v1',
         },
     ),
-    encryptedAggregateReconstructionDigest: deriveProtocolDigest(
-        'EncryptedAggregateReconstructionDigest',
+    encryptedAggregateReconstructionHash: deriveProtocolHash(
+        'EncryptedAggregateReconstructionHash',
         {
             circuit: 'encrypted-aggregate-reconstruction-v1',
         },
     ),
-    scoreBitDerivationCircuitDigest: deriveProtocolDigest(
-        'ScoreBitDerivationCircuitDigest',
+    scoreBitDerivationCircuitHash: deriveProtocolHash(
+        'ScoreBitDerivationCircuitHash',
         {
             circuit: 'score-bit-derivation-circuit-v1',
             selectedEvaluatorPath:
                 'encrypted-aggregate-score-bit-derivation-v1',
         },
     ),
-    encryptedScoreBitInputDigest: deriveProtocolDigest(
-        'EncryptedScoreBitInputDigest',
+    encryptedScoreBitInputHash: deriveProtocolHash(
+        'EncryptedScoreBitInputHash',
         {
             layout: 'encrypted-score-bit-inputs-v1',
             selectedEvaluatorPath:
                 'encrypted-aggregate-score-bit-derivation-v1',
         },
     ),
-    comparisonInputDerivationCircuitDigest: deriveProtocolDigest(
-        'ComparisonInputDerivationCircuitDigest',
+    comparisonInputDerivationCircuitHash: deriveProtocolHash(
+        'ComparisonInputDerivationCircuitHash',
         {
             circuit: 'comparison-input-derivation-circuit-v1',
             futureRdrRequired: true,
@@ -253,8 +249,8 @@ export const manifestOpaqueBindings: ManifestOpaqueBindings = {
                 'inactive-future-direct-comparison-input-profile',
         },
     ),
-    encryptedComparisonInputDigest: deriveProtocolDigest(
-        'EncryptedComparisonInputDigest',
+    encryptedComparisonInputHash: deriveProtocolHash(
+        'EncryptedComparisonInputHash',
         {
             futureRdrRequired: true,
             layout: 'encrypted-comparison-inputs-v1',
@@ -262,68 +258,66 @@ export const manifestOpaqueBindings: ManifestOpaqueBindings = {
                 'inactive-future-direct-comparison-input-profile',
         },
     ),
-    evaluationNoiseProfileDigest: deriveProtocolDigest(
-        'EvaluationNoiseProfileDigest',
+    evaluationNoiseProfileHash: deriveProtocolHash(
+        'EvaluationNoiseProfileHash',
         {
             profile: evaluationNoiseProfileId,
         },
     ),
-    heEvaluationNoiseCertDigest: deriveProtocolDigest(
-        'HEEvaluationNoiseCertDigest',
-        { certificate: 'he-evaluation-noise-v1' },
-    ),
-    allowedEvaluatorOpsDigest: deriveProtocolDigest(
-        'AllowedEvaluatorOpsDigest',
-        { operations: 'packed-bit-sliced-bgv-top-k-v1' },
-    ),
-    rotSetDigest: deriveProtocolDigest('RotSetDigest', {
+    heEvaluationNoiseCertHash: deriveProtocolHash('HEEvaluationNoiseCertHash', {
+        certificate: 'he-evaluation-noise-v1',
+    }),
+    allowedEvaluatorOpsHash: deriveProtocolHash('AllowedEvaluatorOpsHash', {
+        operations: 'packed-bit-sliced-bgv-top-k-v1',
+    }),
+    rotSetHash: deriveProtocolHash('RotSetHash', {
         rotations: 'provisional-m10-top-k',
     }),
-    evaluationKeyRoot: deriveProtocolDigest('EvalKeyRoot', {
+    evaluationKeyRoot: deriveProtocolHash('EvalKeyRoot', {
         keys: 'provisional-m10-top-k',
     }),
-    evaluationKeySizeProfileDigest: deriveProtocolDigest(
-        'EvaluationKeySizeProfileDigest',
+    evaluationKeySizeProfileHash: deriveProtocolHash(
+        'EvaluationKeySizeProfileHash',
         {
             profile: 'm8-evaluation-key-size',
         },
     ),
-    thresholdShareVerificationKeyRoot: deriveProtocolDigest(
+    thresholdShareVerificationKeyRoot: deriveProtocolHash(
         'ThresholdShareVerificationKeyRoot',
         {
             setup: 'threshold-share-verification-key-set',
         },
     ),
-    thresholdShareVerificationKeyDigest: deriveProtocolDigest(
-        'ThresholdShareVerificationKeyDigest',
+    thresholdShareVerificationKeyHash: deriveProtocolHash(
+        'ThresholdShareVerificationKeyHash',
         {
             setup: 'threshold-share-verification-key-set',
         },
     ),
     evaluationProofProfileId,
-    evaluationProofProfileDigest: deriveProtocolDigest(
-        'EvaluationProofProfileDigest',
+    evaluationProofProfileHash: deriveProtocolHash(
+        'EvaluationProofProfileHash',
         { profile: evaluationProofProfileId },
     ),
     thresholdDecryptionProfileId,
-    thresholdDecryptionProfileDigest: deriveProtocolDigest(
-        'ThresholdDecryptionProfileDigest',
+    thresholdDecryptionProfileHash: deriveProtocolHash(
+        'ThresholdDecryptionProfileHash',
         { profile: thresholdDecryptionProfileId },
     ),
-    kllpsTargetDecryptionProfileDigest: deriveProtocolDigest(
-        'KllpsTargetDecryptionProfileDigest',
+    kllpsTargetDecryptionProfileHash: deriveProtocolHash(
+        'KllpsTargetDecryptionProfileHash',
         { profile: thresholdDecryptionProfileId },
     ),
     cpadProfileId,
-    cpadProfileDigest: deriveProtocolDigest('CPADProfileDigest', {
+    cpadProfileHash: deriveProtocolHash('CPADProfileHash', {
         profile: cpadProfileId,
     }),
-    targetBasisDigest: deriveProtocolDigest('TargetBasisDigest', {
+    targetBasisHash: deriveProtocolHash('TargetBasisHash', {
         profile: 'target-basis-v1',
     }),
     mobileProfileId,
-    bridgeBenchmarkReportPolicyDigest: deriveProtocolDigest(
-        'BridgeBenchmarkReportPolicyDigest',
+    bridgeBenchmarkReportPolicyHash: deriveProtocolHash(
+        'BridgeBenchmarkReportPolicyHash',
         { policy: 'bridge-benchmark-report' },
     ),
 };
@@ -332,26 +326,26 @@ export const createSignature = (
     objectType: SignedObjectType,
     signerRole: SignerRole,
     signerIdentity: string,
-    publicKeyDigest: string,
+    publicKeyHash: string,
     objectRoot: string,
     overrides: Partial<CanonicalSignedRootObject> = {},
 ): ProtocolSignatureEnvelope => {
-    const keyFixture = keyFixturesByDigest.get(publicKeyDigest);
+    const keyFixture = keyFixturesByHash.get(publicKeyHash);
     if (keyFixture === undefined) {
-        throw new Error(`Missing ML-DSA test key for ${publicKeyDigest}.`);
+        throw new Error(`Missing ML-DSA test key for ${publicKeyHash}.`);
     }
 
     return createProtocolSignatureFixture({
         profile,
-        publicKeyDigest,
+        publicKeyHash,
         publicKeyBytesHex: keyFixture.publicKeyBytesHex,
         secretKeyBytesHex: keyFixture.secretKeyBytesHex,
         signedRoot: {
             objectType,
             objectVersion: 1,
             ceremonyId,
-            manifestDigest: null,
-            boardHeadDigest: null,
+            manifestHash: null,
+            boardHeadHash: null,
             objectRoot,
             chunkMerkleRoot: null,
             byteLength: 64,
@@ -359,7 +353,7 @@ export const createSignature = (
             signerIdentity,
             recoveryEpoch: 0,
             deviceEpoch: 0,
-            contextDigest,
+            contextHash,
             ...overrides,
         },
     });
@@ -372,14 +366,14 @@ export const replaceSignatureBytes = (
     const payload = {
         profile: signature.profile,
         publicKeyBytesHex: signature.publicKeyBytesHex,
-        publicKeyDigest: signature.publicKeyDigest,
+        publicKeyHash: signature.publicKeyHash,
         signatureBytesHex,
         signedRoot: signature.signedRoot,
     };
 
     return {
         ...payload,
-        signatureDigest: deriveProtocolSignatureDigest(payload),
+        signatureHash: deriveProtocolSignatureHash(payload),
     };
 };
 
@@ -390,14 +384,14 @@ export const replaceSignaturePublicKeyBytes = (
     const payload = {
         profile: signature.profile,
         publicKeyBytesHex,
-        publicKeyDigest: signature.publicKeyDigest,
+        publicKeyHash: signature.publicKeyHash,
         signatureBytesHex: signature.signatureBytesHex,
         signedRoot: signature.signedRoot,
     };
 
     return {
         ...payload,
-        signatureDigest: deriveProtocolSignatureDigest(payload),
+        signatureHash: deriveProtocolSignatureHash(payload),
     };
 };
 
@@ -408,13 +402,13 @@ export const replaceSignatureProfile = (
     const payload = {
         profile: profileOverride,
         publicKeyBytesHex: signature.publicKeyBytesHex,
-        publicKeyDigest: signature.publicKeyDigest,
+        publicKeyHash: signature.publicKeyHash,
         signatureBytesHex: signature.signatureBytesHex,
         signedRoot: signature.signedRoot,
     };
 
     return {
         ...payload,
-        signatureDigest: deriveProtocolSignatureDigest(payload),
+        signatureHash: deriveProtocolSignatureHash(payload),
     };
 };

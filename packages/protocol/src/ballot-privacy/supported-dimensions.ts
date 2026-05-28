@@ -1,12 +1,12 @@
 import type {
     BallotPrivacyRosterProfileEvidence,
-    ProtocolDigest,
+    ProtocolHash,
     RefusalRecord,
 } from '@sealed-lattice/types';
 
 import { createRefusal } from '../common/verification-helpers.js';
 
-import { deriveBallotPrivacyRosterProfileEvidenceDigest } from './objects/object-contracts.js';
+import { deriveBallotPrivacyRosterProfileEvidenceHash } from './objects/object-contracts.js';
 import {
     ballotPrivacyMaximumOptionCount,
     ballotPrivacyMaximumParticipantCount,
@@ -33,15 +33,14 @@ const optionCountIsInSupportedRange = (optionCount: number): boolean =>
     optionCount >= ballotPrivacyMinimumOptionCount &&
     optionCount <= ballotPrivacyMaximumOptionCount;
 
-const approvedDynamicRosterProfileCertificateDigests =
-    new Set<ProtocolDigest>();
+const approvedDynamicRosterProfileCertificateHashes = new Set<ProtocolHash>();
 
 export const collectBallotPrivacyDimensionRefusals = (input: {
-    readonly objectDigest?: ProtocolDigest;
+    readonly objectHash?: ProtocolHash;
     readonly optionCount: number;
     readonly participantCount: number;
     readonly shareVectorWidth: number;
-    readonly thresholdProfileDigest?: ProtocolDigest;
+    readonly thresholdProfileHash?: ProtocolHash;
     readonly dynamicRosterProfileEvidence?: BallotPrivacyRosterProfileEvidence;
     readonly claimBearingPackage?: boolean;
     readonly casualMicroRosterAcknowledged?: boolean;
@@ -54,7 +53,7 @@ export const collectBallotPrivacyDimensionRefusals = (input: {
             createRefusal(
                 'BallotPackageInvalid',
                 `Ballot privacy statements support ${ballotPrivacyMinimumOptionCount} to ${ballotPrivacyMaximumOptionCount} options.`,
-                input.objectDigest,
+                input.objectHash,
             ),
         );
     }
@@ -67,7 +66,7 @@ export const collectBallotPrivacyDimensionRefusals = (input: {
             createRefusal(
                 'BallotPackageInvalid',
                 'Ballot privacy statement shareVectorWidth must equal 11 * optionCount.',
-                input.objectDigest,
+                input.objectHash,
             ),
         );
     }
@@ -76,7 +75,7 @@ export const collectBallotPrivacyDimensionRefusals = (input: {
             createRefusal(
                 'BallotPackageInvalid',
                 `Ballot privacy statements support ${ballotPrivacyMinimumUnsafeParticipantCount} to ${ballotPrivacyMaximumParticipantCount} participants.`,
-                input.objectDigest,
+                input.objectHash,
             ),
         );
     } else if (
@@ -90,7 +89,7 @@ export const collectBallotPrivacyDimensionRefusals = (input: {
                 createRefusal(
                     'BallotPackageInvalid',
                     `Claim-bearing ballot privacy verification requires at least ${ballotPrivacyMinimumSafeClaimBearingParticipantCount} frozen participants.`,
-                    input.objectDigest,
+                    input.objectHash,
                 ),
             );
         } else if (!casualMicroRosterAcknowledged) {
@@ -100,7 +99,7 @@ export const collectBallotPrivacyDimensionRefusals = (input: {
                     `Ballot privacy verification for ${ballotPrivacyMinimumUnsafeParticipantCount} to ${
                         ballotPrivacyMinimumSafeParticipantCount - 1
                     } participants requires explicit casual micro-roster acknowledgement.`,
-                    input.objectDigest,
+                    input.objectHash,
                 ),
             );
         }
@@ -112,7 +111,7 @@ export const collectBallotPrivacyDimensionRefusals = (input: {
             createRefusal(
                 'BallotPackageInvalid',
                 'Dynamic ballot privacy verification requires roster profile parameter certificate evidence for the frozen receiver count.',
-                input.objectDigest,
+                input.objectHash,
             ),
         );
     }
@@ -124,14 +123,14 @@ export const collectBallotPrivacyDimensionRefusals = (input: {
             profileFamily: evidence.profileFamily,
             frozenRosterSize: evidence.frozenRosterSize,
             optionCount: evidence.optionCount,
-            thresholdProfileDigest: evidence.thresholdProfileDigest,
-            dynamicRosterProfileCertificateDigest:
-                evidence.dynamicRosterProfileCertificateDigest,
+            thresholdProfileHash: evidence.thresholdProfileHash,
+            dynamicRosterProfileCertificateHash:
+                evidence.dynamicRosterProfileCertificateHash,
             receiverCoverageProfile: evidence.receiverCoverageProfile,
             proofStatementShape: evidence.proofStatementShape,
         };
-        const expectedEvidenceDigest =
-            deriveBallotPrivacyRosterProfileEvidenceDigest(evidencePayload);
+        const expectedEvidenceHash =
+            deriveBallotPrivacyRosterProfileEvidenceHash(evidencePayload);
         if (
             evidence.objectType !== 'BallotPrivacyRosterProfileEvidence' ||
             evidence.objectVersion !== 1 ||
@@ -140,27 +139,27 @@ export const collectBallotPrivacyDimensionRefusals = (input: {
             evidence.proofStatementShape !== 'EncodedScoreBallotProof-v1' ||
             evidence.frozenRosterSize !== input.participantCount ||
             evidence.optionCount !== input.optionCount ||
-            evidence.thresholdProfileDigest !== input.thresholdProfileDigest ||
-            evidence.rosterProfileEvidenceDigest !== expectedEvidenceDigest
+            evidence.thresholdProfileHash !== input.thresholdProfileHash ||
+            evidence.rosterProfileEvidenceHash !== expectedEvidenceHash
         ) {
             refusedObjects.push(
                 createRefusal(
                     'BallotPackageInvalid',
                     'Dynamic roster profile evidence is not bound to the ballot proof statement dimensions and threshold profile.',
-                    input.objectDigest,
+                    input.objectHash,
                 ),
             );
         }
         if (
-            !approvedDynamicRosterProfileCertificateDigests.has(
-                evidence.dynamicRosterProfileCertificateDigest,
+            !approvedDynamicRosterProfileCertificateHashes.has(
+                evidence.dynamicRosterProfileCertificateHash,
             )
         ) {
             refusedObjects.push(
                 createRefusal(
                     'BallotPackageInvalid',
                     'Dynamic roster profile evidence must reference an approved roster profile parameter certificate.',
-                    input.objectDigest,
+                    input.objectHash,
                 ),
             );
         }

@@ -11,6 +11,6 @@ Pinned reference:
 - Commit date: `2026-05-07T10:30:53Z`
 - Archive SHA-256: `33c9049ea3c3eb0189b55619766a5bd07457de1c2c68565778a1253d9039d680`
 - Required Go toolchain for the oracle container: `go1.25.0`
-- Container base image digest: `sha256:81dc45d05a7444ead8c92a389621fafabc8e40f8fd1a19d7e5df14e61e98bc1a`
+- Container base image hash: `sha256:81dc45d05a7444ead8c92a389621fafabc8e40f8fd1a19d7e5df14e61e98bc1a`
 
 The oracle may compare behavior that is actually comparable across all selected M7 moduli, such as selected ring construction, coefficient-domain addition, subtraction, Barrett multiplication, and NTT/INTT round trips. It must not accept Lattigo serialization, keys, default parameters, Docker output, or oracle roots as transcript objects.

@@ -22,7 +22,7 @@ const config = {
     entryPointStrategy: 'resolve',
     alwaysCreateEntryPointModule: true,
     tsconfig: 'docs/typedoc/tsconfig.json',
-    plugin: ['typedoc-plugin-markdown'],
+    plugin: ['typedoc-plugin-markdown', 'typedoc-plugin-frontmatter'],
     out: 'docs/src/content/docs/api/reference',
     router: 'module',
     readme: 'docs/typedoc/generated-reference-intro.md',
@@ -47,6 +47,15 @@ const config = {
     classPropertiesFormat: 'table',
     interfacePropertiesFormat: 'table',
     indexFormat: 'table',
+    frontmatterGlobals: {
+        editUrl: false,
+    },
+    readmeFrontmatter: {
+        description: 'Export-driven symbol reference for the public API.',
+        sidebar: {
+            hidden: true,
+        },
+    },
 };
 
 export default config;

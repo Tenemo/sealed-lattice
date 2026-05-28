@@ -1,6 +1,6 @@
 import type {
     FieldElement,
-    ProtocolDigest,
+    ProtocolHash,
     TranscriptCoreAnalysis,
     TranscriptCoreFixtureVerification,
 } from '@sealed-lattice/types';
@@ -133,14 +133,12 @@ export const createTranscriptCoreKernelLoader = (
                         inputHex: input.inputHex,
                         chunkSize: input.chunkSize,
                     }).chunkRoot,
-                deriveProtocolDigest: (input): ProtocolDigest =>
-                    executeCommand<{ readonly protocolDigest: ProtocolDigest }>(
-                        {
-                            command: 'DeriveProtocolDigest',
-                            namespace: input.namespace,
-                            value: input.value,
-                        },
-                    ).protocolDigest,
+                deriveProtocolHash: (input): ProtocolHash =>
+                    executeCommand<{ readonly protocolHash: ProtocolHash }>({
+                        command: 'DeriveProtocolHash',
+                        namespace: input.namespace,
+                        value: input.value,
+                    }).protocolHash,
                 evaluatePlaintextComparison: (
                     input,
                 ): TranscriptCorePlaintextComparison =>
@@ -403,14 +401,14 @@ export const createTranscriptCoreKernelLoader = (
                 generateAggregateBridgeEncryption: (input) =>
                     executeCommand({
                         command: 'GenerateAggregateBridgeEncryption',
-                        aggregateSelectionPolicyDigest:
-                            input.aggregateSelectionPolicyDigest,
+                        aggregateSelectionPolicyHash:
+                            input.aggregateSelectionPolicyHash,
                         aggregateDerivationComponent:
                             input.aggregateDerivationComponent,
                         aggregateWitness: input.aggregateWitness,
-                        bridgeWitnessPrivacyProfileDigest:
-                            input.bridgeWitnessPrivacyProfileDigest,
-                        heParamDigest: input.heParamDigest,
+                        bridgeWitnessPrivacyProfileHash:
+                            input.bridgeWitnessPrivacyProfileHash,
+                        heParamHash: input.heParamHash,
                         setupPackage: input.setupPackage,
                         proverRandomnessHex: suppliedOrFreshRandomnessHex(
                             input.proverRandomnessHex,
@@ -421,15 +419,15 @@ export const createTranscriptCoreKernelLoader = (
                 evaluateAggregateBridgeRelation: (input) =>
                     executeCommand({
                         command: 'EvaluateAggregateBridgeRelation',
-                        aggregateSelectionPolicyDigest:
-                            input.aggregateSelectionPolicyDigest,
+                        aggregateSelectionPolicyHash:
+                            input.aggregateSelectionPolicyHash,
                         aggregateDerivationComponent:
                             input.aggregateDerivationComponent,
                         aggregateWitness: input.aggregateWitness,
                         bridgeEncryption: input.bridgeEncryption,
-                        bridgeWitnessPrivacyProfileDigest:
-                            input.bridgeWitnessPrivacyProfileDigest,
-                        heParamDigest: input.heParamDigest,
+                        bridgeWitnessPrivacyProfileHash:
+                            input.bridgeWitnessPrivacyProfileHash,
+                        heParamHash: input.heParamHash,
                         setupPackage: input.setupPackage,
                         proverRandomnessHex: suppliedOrFreshRandomnessHex(
                             input.proverRandomnessHex,
@@ -438,14 +436,14 @@ export const createTranscriptCoreKernelLoader = (
                 verifyAggregateBridgeEncryption: (input) =>
                     executeCommand({
                         command: 'VerifyAggregateBridgeEncryption',
-                        aggregateSelectionPolicyDigest:
-                            input.aggregateSelectionPolicyDigest,
+                        aggregateSelectionPolicyHash:
+                            input.aggregateSelectionPolicyHash,
                         aggregateDerivationComponent:
                             input.aggregateDerivationComponent,
                         bridgeEncryption: input.bridgeEncryption,
-                        bridgeWitnessPrivacyProfileDigest:
-                            input.bridgeWitnessPrivacyProfileDigest,
-                        heParamDigest: input.heParamDigest,
+                        bridgeWitnessPrivacyProfileHash:
+                            input.bridgeWitnessPrivacyProfileHash,
+                        heParamHash: input.heParamHash,
                         setupPackage: input.setupPackage,
                     }),
                 describeBgvRnsProfile: (): BgvRnsProfileReport =>
@@ -475,9 +473,9 @@ export const createTranscriptCoreKernelLoader = (
                     executeCommand<BgvPassiveSetupPackage>({
                         command: 'GenerateBgvPassiveSetup',
                         ceremonyId: input.ceremonyId,
-                        manifestDigest: input.manifestDigest,
-                        rosterDigest: input.rosterDigest,
-                        thresholdProfileDigest: input.thresholdProfileDigest,
+                        manifestHash: input.manifestHash,
+                        rosterHash: input.rosterHash,
+                        thresholdProfileHash: input.thresholdProfileHash,
                         participants: input.participants,
                         setupSeed: input.setupSeed,
                     }),
@@ -485,13 +483,13 @@ export const createTranscriptCoreKernelLoader = (
                     executeCommand<BgvPassiveSetupVerification>({
                         command: 'VerifyBgvPassiveSetup',
                         setupPackage: input.setupPackage,
-                        expectedSetupPackageDigest:
-                            input.expectedSetupPackageDigest,
-                        expectedManifestDigest: input.expectedManifestDigest,
-                        expectedRosterDigest: input.expectedRosterDigest,
+                        expectedSetupPackageHash:
+                            input.expectedSetupPackageHash,
+                        expectedManifestHash: input.expectedManifestHash,
+                        expectedRosterHash: input.expectedRosterHash,
                         expectedCollectivePublicKeyRoot:
                             input.expectedCollectivePublicKeyRoot,
-                        expectedRotSetDigest: input.expectedRotSetDigest,
+                        expectedRotSetHash: input.expectedRotSetHash,
                         expectedEvaluationKeyRoot:
                             input.expectedEvaluationKeyRoot,
                     }),

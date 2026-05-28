@@ -2,7 +2,7 @@ import type {
     BallotProofComponentProofBundle,
     BallotProofComponentProofRecord,
     BallotProofStatement,
-    ProtocolDigest,
+    ProtocolHash,
 } from '@sealed-lattice/types';
 
 import {
@@ -110,7 +110,7 @@ type ExplicitFieldRowBatch = {
 type StructuredShareCommitmentRowBatch = {
     readonly batchKind: 'StructuredModuleSisShareCommitmentRows';
     readonly batchName: 'share_commitment_equation_rows';
-    readonly matrixDigest: ProtocolDigest;
+    readonly matrixHash: ProtocolHash;
     readonly modulus: string;
     readonly rowCount: number;
     readonly shareCommitmentRows: readonly {
@@ -119,13 +119,13 @@ type StructuredShareCommitmentRowBatch = {
         readonly rowCount: number;
         readonly rowOffsetWithinBatch: number;
     }[];
-    readonly targetVectorDigest: ProtocolDigest;
+    readonly targetVectorHash: ProtocolHash;
     readonly variableColumnIndices: readonly number[];
 };
 
 type BallotProofLinearProofStatement = {
-    readonly backendStatementDigest: ProtocolDigest;
-    readonly ballotProofStatementDigest?: ProtocolDigest;
+    readonly backendStatementHash: ProtocolHash;
+    readonly ballotProofStatementHash?: ProtocolHash;
     readonly coefficientModulus: string;
     readonly objectType: 'BallotProofLinearProofStatement';
     readonly objectVersion: 1;
@@ -138,31 +138,31 @@ type BallotProofLinearProofStatement = {
         | 'receiver-key-binding-rows-only'
         | 'full-encoded-score-ballot-relation';
     readonly relation: 'A*w + t = 0';
-    readonly relationStatementDigest: ProtocolDigest;
+    readonly relationStatementHash: ProtocolHash;
     readonly ringDegree: number;
     readonly statementColumns: number;
-    readonly statementDigest: ProtocolDigest;
+    readonly statementHash: ProtocolHash;
     readonly statementMatrixCoefficients: DensePolynomialMatrix;
-    readonly statementMatrixDigest: ProtocolDigest;
+    readonly statementMatrixHash: ProtocolHash;
     readonly statementRows: number;
     readonly matrixCoefficientRepresentation: BallotProofMatrixCoefficientRepresentation;
     readonly targetCoefficientRepresentation: BallotProofTargetCoefficientRepresentation;
     readonly targetVectorCoefficients: DensePolynomialVector;
-    readonly targetVectorDigest: ProtocolDigest;
+    readonly targetVectorHash: ProtocolHash;
     readonly witnessL2BoundSquared: string;
 };
 
 type BallotProofFullRelationLinearProofStatement =
     BallotProofLinearProofStatement & {
-        readonly componentBundleStatementDigest: ProtocolDigest;
-        readonly relationBindingDigest: ProtocolDigest;
+        readonly componentBundleStatementHash: ProtocolHash;
+        readonly relationBindingHash: ProtocolHash;
         readonly relationBindingKind: 'component-bundle-and-lowered-relation';
         readonly projectionCoverage: 'full-encoded-score-ballot-relation';
     };
 
 type BallotProofSparseComponentLinearProofStatement = {
-    readonly backendStatementDigest: ProtocolDigest;
-    readonly ballotProofStatementDigest?: ProtocolDigest;
+    readonly backendStatementHash: ProtocolHash;
+    readonly ballotProofStatementHash?: ProtocolHash;
     readonly coefficientModulus: string;
     readonly objectType: 'BallotProofSparseComponentLinearProofStatement';
     readonly objectVersion: 1;
@@ -173,19 +173,19 @@ type BallotProofSparseComponentLinearProofStatement = {
         | 'payload-plaintext-field-rows-only'
         | 'share-commitment-rows-only';
     readonly relation: 'A*w + t = 0';
-    readonly relationStatementDigest: ProtocolDigest;
+    readonly relationStatementHash: ProtocolHash;
     readonly sourceBackendColumnIndices: readonly number[];
     readonly sourceColumnPackings?: readonly PackedFieldSourceColumn[];
     readonly sourceRingDegree: number;
-    readonly sparseStatementMatrixDigest: ProtocolDigest;
+    readonly sparseStatementMatrixHash: ProtocolHash;
     readonly sparseStatementMatrixEntries: readonly SparseMatrixEntry[];
     readonly sparseStatementTermCount: string;
     readonly statementColumns: number;
-    readonly statementDigest: ProtocolDigest;
+    readonly statementHash: ProtocolHash;
     readonly statementRows: number;
     readonly matrixCoefficientRepresentation: BallotProofMatrixCoefficientRepresentation;
     readonly targetCoefficientRepresentation: BallotProofTargetCoefficientRepresentation;
-    readonly targetVectorDigest: ProtocolDigest;
+    readonly targetVectorHash: ProtocolHash;
     readonly targetVectorEntries: readonly SparseTargetVectorEntry[];
     readonly targetVectorEntryCount: string;
     readonly witnessL2BoundSquared: string;
@@ -211,11 +211,11 @@ type StructuredShareCommitmentReceiverStatement = {
 };
 
 type BallotProofStructuredShareCommitmentProofStatement = {
-    readonly backendStatementDigest: ProtocolDigest;
-    readonly ballotProofStatementDigest?: ProtocolDigest;
+    readonly backendStatementHash: ProtocolHash;
+    readonly ballotProofStatementHash?: ProtocolHash;
     readonly coefficientModulus: string;
     readonly componentId: 'share-commitment-component';
-    readonly matrixDigest: ProtocolDigest;
+    readonly matrixHash: ProtocolHash;
     readonly objectType: 'BallotProofStructuredShareCommitmentProofStatement';
     readonly objectVersion: 1;
     readonly parameterProfileId: string;
@@ -224,17 +224,17 @@ type BallotProofStructuredShareCommitmentProofStatement = {
     readonly projectionCoverage: 'share-commitment-rows-only';
     readonly receiverRows: readonly StructuredShareCommitmentReceiverStatement[];
     readonly relation: 'A*w + t = 0';
-    readonly relationStatementDigest: ProtocolDigest;
-    readonly shareCommitmentProfileDigest: ProtocolDigest;
+    readonly relationStatementHash: ProtocolHash;
+    readonly shareCommitmentProfileHash: ProtocolHash;
     readonly shareVectorWidth: number;
     readonly sourceBackendColumnIndices: readonly number[];
     readonly sourceRingDegree: 64 | 256;
     readonly statementColumns: number;
-    readonly statementDigest: ProtocolDigest;
+    readonly statementHash: ProtocolHash;
     readonly statementRows: number;
     readonly matrixCoefficientRepresentation: BallotProofMatrixCoefficientRepresentation;
     readonly targetCoefficientRepresentation: BallotProofTargetCoefficientRepresentation;
-    readonly targetVectorDigest: ProtocolDigest;
+    readonly targetVectorHash: ProtocolHash;
     readonly witnessL2BoundSquared: string;
 };
 
@@ -253,39 +253,39 @@ type StructuredReceiverEncryptionReceiverStatement = {
     readonly ciphertextChunks: readonly StructuredReceiverEncryptionCiphertextChunkStatement[];
     readonly plaintextBitLength: number;
     readonly publicKeyVector: readonly (readonly number[])[];
-    readonly publicMatrixSeedDigest: ProtocolDigest;
+    readonly publicMatrixSeedHash: ProtocolHash;
     readonly receiverIdentity: string;
-    readonly receiverPayloadDigest: ProtocolDigest;
-    readonly receiverPublicKeyDigest: ProtocolDigest;
+    readonly receiverPayloadHash: ProtocolHash;
+    readonly receiverPublicKeyHash: ProtocolHash;
     readonly receiverRosterPosition: number;
     readonly rowCount: number;
     readonly rowOffsetWithinStatement: number;
 };
 
 type BallotProofStructuredReceiverEncryptionProofStatement = {
-    readonly backendStatementDigest: ProtocolDigest;
-    readonly ballotProofStatementDigest?: ProtocolDigest;
+    readonly backendStatementHash: ProtocolHash;
+    readonly ballotProofStatementHash?: ProtocolHash;
     readonly coefficientModulus: string;
     readonly componentId: 'receiver-encryption-component';
-    readonly componentStatementDigest: ProtocolDigest;
-    readonly matrixDigest: ProtocolDigest;
+    readonly componentStatementHash: ProtocolHash;
+    readonly matrixHash: ProtocolHash;
     readonly objectType: 'BallotProofStructuredReceiverEncryptionProofStatement';
     readonly objectVersion: 1;
     readonly parameterProfileId: string;
     readonly proofStatementFormat: 'structured-module-lwe-linear-proof-v1';
     readonly proofSystemRingDegree: 64;
-    readonly receiverEncryptionProfileDigest: ProtocolDigest;
+    readonly receiverEncryptionProfileHash: ProtocolHash;
     readonly receiverRows: readonly StructuredReceiverEncryptionReceiverStatement[];
     readonly relation: 'A*w + t = 0';
-    readonly relationStatementDigest: ProtocolDigest;
+    readonly relationStatementHash: ProtocolHash;
     readonly sourceBackendColumnIndices: readonly number[];
     readonly sourceRingDegree: 256;
     readonly statementColumns: number;
-    readonly statementDigest: ProtocolDigest;
+    readonly statementHash: ProtocolHash;
     readonly statementRows: number;
     readonly matrixCoefficientRepresentation: BallotProofMatrixCoefficientRepresentation;
     readonly targetCoefficientRepresentation: BallotProofTargetCoefficientRepresentation;
-    readonly targetVectorDigest: ProtocolDigest;
+    readonly targetVectorHash: ProtocolHash;
     readonly witnessL2BoundSquared: string;
 };
 
@@ -353,32 +353,32 @@ type BackendRowBatchForComponentStatement =
 
 type BallotProofComponentProofRecordPayload = Omit<
     BallotProofComponentProofRecord,
-    'componentProofRecordDigest'
+    'componentProofRecordHash'
 >;
 
 type BallotProofComponentProofBundlePayload = Omit<
     BallotProofComponentProofBundle,
-    'componentProofBundleDigest'
+    'componentProofBundleHash'
 >;
 
 export type BallotProofComponentStatement = {
     readonly objectType: 'BallotProofComponentStatement';
     readonly objectVersion: 1;
-    readonly backendStatementDigest: ProtocolDigest;
-    readonly ballotProofStatementDigest?: ProtocolDigest;
+    readonly backendStatementHash: ProtocolHash;
+    readonly ballotProofStatementHash?: ProtocolHash;
     readonly coefficientModulus: string;
-    readonly componentDigest: ProtocolDigest;
+    readonly componentHash: ProtocolHash;
     readonly componentId: BallotPrivacyBackendProofComponentId;
-    readonly componentStatementDigest: ProtocolDigest;
-    readonly matrixDigest: ProtocolDigest;
+    readonly componentStatementHash: ProtocolHash;
+    readonly matrixHash: ProtocolHash;
     readonly proofLoweringStatus: BallotPrivacyBackendProofComponent['proofLoweringStatus'];
-    readonly relationStatementDigest: ProtocolDigest;
-    readonly rowBatchMatrixDigests: readonly ProtocolDigest[];
+    readonly relationStatementHash: ProtocolHash;
+    readonly rowBatchMatrixHashes: readonly ProtocolHash[];
     readonly rowBatchNames: readonly string[];
-    readonly rowBatchTargetVectorDigests: readonly ProtocolDigest[];
+    readonly rowBatchTargetVectorHashes: readonly ProtocolHash[];
     readonly rowCount: number;
     readonly rowKinds: readonly string[];
-    readonly targetVectorDigest: ProtocolDigest;
+    readonly targetVectorHash: ProtocolHash;
     readonly variableColumnCount: number;
     readonly variableColumnIndices: readonly number[];
 };
@@ -390,13 +390,13 @@ export type BallotProofComponentBundleCoverage =
 export type BallotProofComponentBundleStatement = {
     readonly objectType: 'BallotProofComponentBundleStatement';
     readonly objectVersion: 1;
-    readonly backendStatementDigest: ProtocolDigest;
-    readonly ballotProofStatementDigest?: ProtocolDigest;
+    readonly backendStatementHash: ProtocolHash;
+    readonly ballotProofStatementHash?: ProtocolHash;
     readonly bundleCoverage: BallotProofComponentBundleCoverage;
-    readonly componentBundleStatementDigest: ProtocolDigest;
+    readonly componentBundleStatementHash: ProtocolHash;
     readonly componentStatements: readonly BallotProofComponentStatement[];
     readonly relationLabel: 'BallotPrivacyPvssRelation';
-    readonly relationStatementDigest: ProtocolDigest;
+    readonly relationStatementHash: ProtocolHash;
     readonly requiredComponentIds: readonly BallotPrivacyBackendProofComponentId[];
 };
 
@@ -416,23 +416,23 @@ export type BallotProofComponentProofBytesAvailability =
 export type BallotProofComponentProofStatementPlan = {
     readonly objectType: 'BallotProofComponentProofStatementPlan';
     readonly objectVersion: 1;
-    readonly backendStatementDigest: ProtocolDigest;
-    readonly ballotProofStatementDigest?: ProtocolDigest;
+    readonly backendStatementHash: ProtocolHash;
+    readonly ballotProofStatementHash?: ProtocolHash;
     readonly coefficientModulus: string;
     readonly componentId: BallotPrivacyBackendProofComponentId;
-    readonly componentProofStatementDigest: ProtocolDigest;
-    readonly componentStatementDigest: ProtocolDigest;
+    readonly componentProofStatementHash: ProtocolHash;
+    readonly componentStatementHash: ProtocolHash;
     readonly denseCoefficientCount: string | null;
-    readonly matrixDigest: ProtocolDigest;
+    readonly matrixHash: ProtocolHash;
     readonly proofBytesAvailability: BallotProofComponentProofBytesAvailability;
     readonly proofLoweringStatus: BallotPrivacyBackendProofComponent['proofLoweringStatus'];
     readonly proofStatementFormat: BallotProofComponentProofStatementFormat;
     readonly proofSystemRingDegree: number | null;
     readonly relation: 'A*w + t = 0';
-    readonly relationStatementDigest: ProtocolDigest;
-    readonly rowBatchMatrixDigests: readonly ProtocolDigest[];
+    readonly relationStatementHash: ProtocolHash;
+    readonly rowBatchMatrixHashes: readonly ProtocolHash[];
     readonly rowBatchNames: readonly string[];
-    readonly rowBatchTargetVectorDigests: readonly ProtocolDigest[];
+    readonly rowBatchTargetVectorHashes: readonly ProtocolHash[];
     readonly rowBatchTermCounts: readonly string[];
     readonly rowCount: number;
     readonly sparseTermCount: string | null;
@@ -440,7 +440,7 @@ export type BallotProofComponentProofStatementPlan = {
     readonly structuredCiphertextChunkCount: number | null;
     readonly structuredReceiverCount: number | null;
     readonly structuredWitnessTermCount: string | null;
-    readonly targetVectorDigest: ProtocolDigest;
+    readonly targetVectorHash: ProtocolHash;
     readonly variableColumnCount: number;
     readonly variableColumnIndices: readonly number[];
 };
@@ -451,13 +451,13 @@ type BallotProofRecordGenerationSecretState = {
 
 type BallotProofRecordGenerationComponentProofInput = {
     readonly componentId: BallotPrivacyBackendProofComponentId;
-    readonly componentProofStatementDigest: ProtocolDigest;
+    readonly componentProofStatementHash: ProtocolHash;
     readonly proofEncoding: unknown;
     readonly proofParameterSet: unknown;
     readonly proofStatement: unknown;
     readonly proofStatementFormat: BallotProofComponentProofStatementFormat;
     readonly publicRandomnessHex: string;
-    readonly statementDigest: ProtocolDigest;
+    readonly statementHash: ProtocolHash;
 };
 
 export type BallotProofRecordGenerationProofContracts = {
@@ -514,7 +514,7 @@ const linearProofRelation = 'A*w + t = 0' as const;
 const receiverPayloadOpeningEncodingOffset = 1024;
 
 const fullBallotProofParameterProfileId =
-    'full-encoded-score-ballot-linear-compatibility-v1';
+    'full-encoded-score-ballot-linear-proof-parameter-v1';
 
 const fullBallotProofEncodingProfileId =
     'full-encoded-score-ballot-linear-proof-encoding-v1';
@@ -523,14 +523,14 @@ const componentProofParameterProfileIds: Readonly<
     Record<BallotPrivacyBackendProofComponentId, string>
 > = {
     'payload-plaintext-field-component':
-        'payload-plaintext-field-linear-compatibility-v1',
+        'payload-plaintext-field-linear-proof-parameter-v1',
     'receiver-encryption-component':
-        'receiver-encryption-linear-compatibility-v1',
+        'receiver-encryption-linear-proof-parameter-v1',
     'receiver-key-binding-component':
-        'receiver-key-binding-linear-compatibility-v1',
+        'receiver-key-binding-linear-proof-parameter-v1',
     'score-and-shamir-field-component':
-        'encoded-score-field-linear-compatibility-v1',
-    'share-commitment-component': 'share-commitment-linear-compatibility-v1',
+        'encoded-score-field-linear-proof-parameter-v1',
+    'share-commitment-component': 'share-commitment-linear-proof-parameter-v1',
 };
 
 const componentProofEncodingProfileIds: Readonly<

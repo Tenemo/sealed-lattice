@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import { deriveProtocolDigest } from "#packages/crypto/src/digests.js";
+import { deriveProtocolHash } from "#packages/crypto/src/hashes.js";
 import {
     createBallotPrivacyProfileSet,
     createShareCommitmentMessageBoundCert,
@@ -10,14 +10,14 @@ import { buildEncodedScoreFieldLinearProofProjection } from "#packages/protocol/
 import { lowerBallotPrivacyRelationToBackendStatement } from "#packages/protocol/src/ballot-privacy/relation-backend-lowering.js";
 import type { BallotPrivacyRelationBackendPublicContext } from "#packages/protocol/src/ballot-privacy/relation-backend-lowering.js";
 import type { BallotPrivacyRelationCompilerInput } from "#packages/protocol/src/ballot-privacy/relation-compiler.js";
-import type { ProtocolDigest } from "#packages/types/src/index.js";
+import type { ProtocolHash } from "#packages/types/src/index.js";
 
-const parameterProfileId = "encoded-score-field-linear-compatibility-v1";
+const parameterProfileId = "encoded-score-field-linear-proof-parameter-v1";
 const sourceRingDegree = 64;
 const witnessL2BoundSquared = "65536";
 
-const digest = (label: string): ProtocolDigest =>
-    deriveProtocolDigest("ChallengeDomainDigest", {
+const hash = (label: string): ProtocolHash =>
+    deriveProtocolHash("ChallengeDomainHash", {
         label,
         purpose: "ballot-field-linear-proof-vector-input",
     });
@@ -98,82 +98,78 @@ const publicContextForRoster = (
     );
 
     return {
-        actionContextDigest: digest(`action-context-${rosterSize}`),
-        aggregateInputEncodingProfileDigest:
+        actionContextHash: hash(`action-context-${rosterSize}`),
+        aggregateInputEncodingProfileHash:
             profileSet.aggregateInputEncodingProfile
-                .aggregateInputEncodingProfileDigest,
-        ballotProofProfileDigest:
-            profileSet.ballotProofProfile.ballotProofProfileDigest,
-        ballotProofStatementDigest: digest(
-            `ballot-proof-statement-${rosterSize}`,
-        ),
-        ballotScoreEncodingProfileDigest:
+                .aggregateInputEncodingProfileHash,
+        ballotProofProfileHash:
+            profileSet.ballotProofProfile.ballotProofProfileHash,
+        ballotProofStatementHash: hash(`ballot-proof-statement-${rosterSize}`),
+        ballotScoreEncodingProfileHash:
             profileSet.ballotScoreEncodingProfile
-                .ballotScoreEncodingProfileDigest,
-        ballotShareLayoutProfileDigest:
-            profileSet.ballotShareLayoutProfile.ballotShareLayoutProfileDigest,
+                .ballotScoreEncodingProfileHash,
+        ballotShareLayoutProfileHash:
+            profileSet.ballotShareLayoutProfile.ballotShareLayoutProfileHash,
         ceremonyId: `ballot-field-linear-proof-vector-${rosterSize}`,
-        encodedAggregateLayoutDigest:
-            profileSet.encodedAggregateLayoutProfile
-                .encodedAggregateLayoutDigest,
-        encodedShareVectorLayoutDigest:
+        encodedAggregateLayoutHash:
+            profileSet.encodedAggregateLayoutProfile.encodedAggregateLayoutHash,
+        encodedShareVectorLayoutHash:
             profileSet.encodedShareVectorLayoutProfile
-                .encodedShareVectorLayoutDigest,
-        manifestDigest: digest(`manifest-${rosterSize}`),
-        pollSpecDigest: digest(`poll-spec-${rosterSize}`),
-        receiverEncryptionProfileDigest:
-            profileSet.receiverEncryptionProfile
-                .receiverEncryptionProfileDigest,
-        receiverKeyProofRoot: digest(`receiver-key-proof-root-${rosterSize}`),
-        receiverKeyRoot: digest(`receiver-key-root-${rosterSize}`),
+                .encodedShareVectorLayoutHash,
+        manifestHash: hash(`manifest-${rosterSize}`),
+        pollSpecHash: hash(`poll-spec-${rosterSize}`),
+        receiverEncryptionProfileHash:
+            profileSet.receiverEncryptionProfile.receiverEncryptionProfileHash,
+        receiverKeyProofRoot: hash(`receiver-key-proof-root-${rosterSize}`),
+        receiverKeyRoot: hash(`receiver-key-root-${rosterSize}`),
         receiverPayloads: receiverReferences.map((receiverReference) => ({
-            ciphertextBodyDigest: digest(
+            ciphertextBodyHash: hash(
                 `receiver-payload-ciphertext-body-${rosterSize}-${receiverReference.receiverRosterPosition}`,
             ),
             ciphertextChunkCount: 1,
-            ciphertextChunkDigest: digest(
+            ciphertextChunkHash: hash(
                 `receiver-payload-ciphertext-chunks-${rosterSize}-${receiverReference.receiverRosterPosition}`,
             ),
             plaintextBitLength: 704,
             ...receiverReference,
-            receiverPayloadCiphertextRoot: digest(
+            receiverPayloadCiphertextRoot: hash(
                 `receiver-payload-ciphertext-root-${rosterSize}-${receiverReference.receiverRosterPosition}`,
             ),
-            receiverPayloadDigest: digest(
+            receiverPayloadHash: hash(
                 `receiver-payload-${rosterSize}-${receiverReference.receiverRosterPosition}`,
             ),
         })),
         receiverPublicKeys: receiverReferences.map((receiverReference) => ({
-            keyMaterialDigest: digest(
+            keyMaterialHash: hash(
                 `receiver-public-key-material-${rosterSize}-${receiverReference.receiverRosterPosition}`,
             ),
-            publicMatrixSeedDigest: digest(
+            publicMatrixSeedHash: hash(
                 `receiver-public-matrix-seed-${rosterSize}-${receiverReference.receiverRosterPosition}`,
             ),
             ...receiverReference,
-            receiverPublicKeyDigest: digest(
+            receiverPublicKeyHash: hash(
                 `receiver-public-key-${rosterSize}-${receiverReference.receiverRosterPosition}`,
             ),
         })),
-        rosterDigest: digest(`roster-${rosterSize}`),
-        rosterExternalAcceptanceDigest: digest(
+        rosterHash: hash(`roster-${rosterSize}`),
+        rosterExternalAcceptanceHash: hash(
             `roster-external-acceptance-${rosterSize}`,
         ),
-        scoreMembershipProfileDigest:
-            profileSet.scoreMembershipProfile.scoreMembershipProfileDigest,
-        shareCommitmentMessageBoundCertDigest:
-            certificate.shareCommitmentMessageBoundCertDigest,
-        shareCommitmentProfileDigest:
-            profileSet.shareCommitmentProfile.shareCommitmentProfileDigest,
+        scoreMembershipProfileHash:
+            profileSet.scoreMembershipProfile.scoreMembershipProfileHash,
+        shareCommitmentMessageBoundCertHash:
+            certificate.shareCommitmentMessageBoundCertHash,
+        shareCommitmentProfileHash:
+            profileSet.shareCommitmentProfile.shareCommitmentProfileHash,
         shareCommitments: receiverReferences.map((receiverReference) => ({
-            commitmentBodyDigest: digest(
+            commitmentBodyHash: hash(
                 `share-commitment-body-${rosterSize}-${receiverReference.receiverRosterPosition}`,
             ),
-            commitmentPolynomialVectorDigest: digest(
+            commitmentPolynomialVectorHash: hash(
                 `share-commitment-polynomial-vector-${rosterSize}-${receiverReference.receiverRosterPosition}`,
             ),
             ...receiverReference,
-            shareCommitmentDigest: digest(
+            shareCommitmentHash: hash(
                 `share-commitment-${rosterSize}-${receiverReference.receiverRosterPosition}`,
             ),
         })),
@@ -198,7 +194,7 @@ export const generateBallotFieldLinearProofOracleInput = async (
     }
 
     const projection = buildEncodedScoreFieldLinearProofProjection({
-        ballotProofStatementDigest: publicContext.ballotProofStatementDigest,
+        ballotProofStatementHash: publicContext.ballotProofStatementHash,
         loweredStatement: loweringResult.statement,
         parameterProfileId,
         relationInput,
@@ -218,10 +214,9 @@ export const generateBallotFieldLinearProofOracleInput = async (
             statementColumns: projection.linearStatement.statementColumns,
             statementRows: projection.linearStatement.statementRows,
         },
-        relationStatementDigest:
-            loweringResult.statement.relationStatementDigest,
-        backendStatementDigest:
-            loweringResult.statement.backendStatement.backendStatementDigest,
+        relationStatementHash: loweringResult.statement.relationStatementHash,
+        backendStatementHash:
+            loweringResult.statement.backendStatement.backendStatementHash,
         linearStatement: projection.linearStatement,
         privateWitnessVectorCoefficients:
             projection.privateWitnessVectorCoefficients,

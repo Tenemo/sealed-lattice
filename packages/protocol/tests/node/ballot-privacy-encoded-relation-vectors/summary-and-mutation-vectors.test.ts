@@ -15,7 +15,7 @@ describe('ballot privacy encoded relation vectors', () => {
         });
         expect(fullExplicitCase.loweredStatement).toBeUndefined();
         expect(fullExplicitCase.loweredStatementSummary).toMatchObject({
-            backendDigestExpandedRowCount: 0,
+            backendHashExpandedRowCount: 0,
             backendExplicitRowCount: 21_989,
             backendProofComponentCount: 5,
             backendRowBatchCount: 6,
@@ -41,7 +41,7 @@ describe('ballot privacy encoded relation vectors', () => {
         });
         expect(
             fullExplicitCase.componentBundleSummary
-                ?.componentBundleStatementDigest,
+                ?.componentBundleStatementHash,
         ).toMatch(/^[a-f0-9]{128}$/u);
         expect(
             fullExplicitCase.loweredStatementSummary?.firstBackendRowBatch,
@@ -266,7 +266,7 @@ describe('ballot privacy encoded relation vectors', () => {
         ]);
         for (const proofStatementPlan of fullExplicitCase.componentProofStatementPlans ??
             []) {
-            expect(proofStatementPlan.componentProofStatementDigest).toMatch(
+            expect(proofStatementPlan.componentProofStatementHash).toMatch(
                 /^[a-f0-9]{128}$/u,
             );
             expect(
@@ -334,7 +334,7 @@ describe('ballot privacy encoded relation vectors', () => {
         expect(mandatoryCase.loweredStatementSummary).toMatchObject({
             algebraicRowCount: 60,
             backendColumnCount: 17_340,
-            backendDigestExpandedRowCount: 66_560,
+            backendHashExpandedRowCount: 66_560,
             backendExplicitRowCount: 10_120,
             backendRowBatchCount: 62,
             backendRowCount: 76_680,
@@ -360,7 +360,7 @@ describe('ballot privacy encoded relation vectors', () => {
             },
             lastComponentStatement: {
                 componentId: 'receiver-key-binding-component',
-                proofLoweringStatus: 'digestExpandedRowsPending',
+                proofLoweringStatus: 'HashExpandedRowsPending',
             },
             pendingComponentIds: [
                 'share-commitment-component',
@@ -369,8 +369,7 @@ describe('ballot privacy encoded relation vectors', () => {
             ],
         });
         expect(
-            mandatoryCase.componentBundleSummary
-                ?.componentBundleStatementDigest,
+            mandatoryCase.componentBundleSummary?.componentBundleStatementHash,
         ).toMatch(/^[a-f0-9]{128}$/u);
         expect(
             mandatoryCase.loweredStatementSummary?.firstLinearRow,
@@ -404,7 +403,7 @@ describe('ballot privacy encoded relation vectors', () => {
             mandatoryCase.loweredStatementSummary?.lastProofComponent,
         ).toMatchObject({
             componentId: 'receiver-key-binding-component',
-            proofLoweringStatus: 'digestExpandedRowsPending',
+            proofLoweringStatus: 'HashExpandedRowsPending',
         });
         expect(
             mandatoryCase.loweredStatementSummary?.firstBackendRowBatch,
@@ -416,17 +415,17 @@ describe('ballot privacy encoded relation vectors', () => {
         expect(
             mandatoryCase.loweredStatementSummary?.lastBackendRowBatch,
         ).toMatchObject({
-            batchKind: 'DigestExpandedRows',
+            batchKind: 'HashExpandedRows',
             rowCount: 1_024,
             rowKind: 'ReceiverKeyBinding',
         });
     });
 
-    it('records public commitment, payload, and receiver-key mutations as digest-changing vectors', () => {
+    it('records public commitment, payload, and receiver-key mutations as hash-changing vectors', () => {
         const caseNames = [
-            'wrong-share-commitment-target-changes-digest',
-            'wrong-receiver-payload-target-changes-digest',
-            'wrong-receiver-key-target-changes-digest',
+            'wrong-share-commitment-target-changes-hash',
+            'wrong-receiver-payload-target-changes-hash',
+            'wrong-receiver-key-target-changes-hash',
         ] as const;
 
         for (const caseName of caseNames) {
@@ -436,12 +435,12 @@ describe('ballot privacy encoded relation vectors', () => {
                 compilerAccepted: true,
                 expectedOutcome: 'accept',
             });
-            expect(vectorCase.trace.expectedDigestChanged).toBe(true);
-            expect(vectorCase.trace.relationStatementDigest).toMatch(
+            expect(vectorCase.trace.expectedHashChanged).toBe(true);
+            expect(vectorCase.trace.relationStatementHash).toMatch(
                 /^[a-f0-9]{128}$/u,
             );
-            expect(vectorCase.trace.relationStatementDigest).not.toBe(
-                vectorCase.trace.baselineRelationStatementDigest,
+            expect(vectorCase.trace.relationStatementHash).not.toBe(
+                vectorCase.trace.baselineRelationStatementHash,
             );
         }
     });

@@ -4,15 +4,14 @@ const FULL_BALLOT_BINDING_PARAMETER_SOURCE: &str =
     "sealed-lattice/linear-proof/full-ballot-binding-parameters-v1";
 const FULL_BALLOT_BINDING_ENCODING_SOURCE: &str =
     "sealed-lattice/linear-proof/full-ballot-binding-encoding-v1";
-const FULL_BALLOT_BINDING_DIGEST_PURPOSE: &str = "ballot-proof-full-relation-binding-v1";
-const BACKEND_PROOF_COMPONENTS_DIGEST_PURPOSE: &str = "ballot-privacy-backend-proof-components-v1";
+const FULL_BALLOT_BINDING_HASH_PURPOSE: &str = "ballot-proof-full-relation-binding-v1";
+const BACKEND_PROOF_COMPONENTS_HASH_PURPOSE: &str = "ballot-privacy-backend-proof-components-v1";
 const FULL_BALLOT_BINDING_COEFFICIENT_MODULUS: u64 = 65_537;
-// This coefficient is a proof-bound-compatible relation binder, not the
-// Fiat-Shamir soundness challenge. The linear proof soundness challenge is
-// derived inside the backend proof transcript; this value only separates the
-// component-bundle binding row while keeping the current compatibility witness
-// inside the frozen norm bound.
-const FULL_BALLOT_BINDING_COMPATIBILITY_SCALAR_COUNT: u64 = 127;
+// This coefficient is a proof-bound relation binder, not the Fiat-Shamir
+// soundness challenge. The linear proof soundness challenge is derived inside
+// the backend proof transcript; this value only separates the component-bundle
+// binding row while keeping the witness inside the frozen norm bound.
+const FULL_BALLOT_BINDING_SCALAR_COUNT: u64 = 127;
 const UNAPPROVED_DYNAMIC_ROSTER_CERTIFICATE_MESSAGE: &str = "Dynamic roster profile evidence must reference an approved roster profile parameter certificate.";
 
 #[derive(Clone, Copy)]
@@ -32,7 +31,7 @@ struct LinearContractExpectation {
 
 pub(crate) fn collect_supported_ballot_privacy_dimension_refusals(
     statement: &Value,
-    object_digest: Option<&str>,
+    object_hash: Option<&str>,
     dynamic_roster_profile_evidence: Option<&Value>,
     claim_bearing_package: bool,
     unsafe_small_roster_acknowledged: bool,
@@ -50,13 +49,13 @@ pub(crate) fn collect_supported_ballot_privacy_dimension_refusals(
     }) {
         refused_objects.push(structural_refusal(
             "Ballot privacy proof statements must use two to twenty options.",
-            object_digest,
+            object_hash,
         ));
     }
     if share_vector_width != expected_share_vector_width {
         refused_objects.push(structural_refusal(
             "Ballot privacy proof statement shareVectorWidth must equal optionCount times eleven encoded coordinates.",
-            object_digest,
+            object_hash,
         ));
     }
     if !participant_count.is_some_and(|value| {
@@ -65,7 +64,7 @@ pub(crate) fn collect_supported_ballot_privacy_dimension_refusals(
     }) {
         refused_objects.push(structural_refusal(
             "Ballot privacy proof statements must use three to fifty participants.",
-            object_digest,
+            object_hash,
         ));
     }
     if participant_count.is_some_and(|value| value < BALLOT_PRIVACY_MINIMUM_SAFE_PARTICIPANT_COUNT)
@@ -73,12 +72,12 @@ pub(crate) fn collect_supported_ballot_privacy_dimension_refusals(
         if claim_bearing_package {
             refused_objects.push(structural_refusal(
                 "Claim-bearing ballot privacy proof statements must use at least ten frozen participants.",
-                object_digest,
+                object_hash,
             ));
         } else if !unsafe_small_roster_acknowledged {
             refused_objects.push(structural_refusal(
                 "Ballot privacy proof statements with three to nine participants require explicit casual micro-roster acknowledgement.",
-                object_digest,
+                object_hash,
             ));
         }
     }
@@ -89,17 +88,15 @@ pub(crate) fn collect_supported_ballot_privacy_dimension_refusals(
     }) {
         refused_objects.push(structural_refusal(
             "Dynamic ballot privacy proof statements require roster profile parameter certificate evidence for the frozen receiver count.",
-            object_digest,
+            object_hash,
         ));
     }
     if let Some(evidence) = dynamic_roster_profile_evidence {
-        let evidence_digest = string_field(evidence, "rosterProfileEvidenceDigest");
-        let expected_evidence_digest = value_without_field(evidence, "rosterProfileEvidenceDigest")
-            .and_then(|payload| {
-                derive_digest("BallotPrivacyRosterProfileEvidenceDigest", &payload)
-            });
-        let dynamic_roster_profile_certificate_digest =
-            string_field(evidence, "dynamicRosterProfileCertificateDigest");
+        let evidence_hash = string_field(evidence, "rosterProfileEvidenceHash");
+        let expected_evidence_hash = value_without_field(evidence, "rosterProfileEvidenceHash")
+            .and_then(|payload| derive_hash("BallotPrivacyRosterProfileEvidenceHash", &payload));
+        let dynamic_roster_profile_certificate_hash =
+            string_field(evidence, "dynamicRosterProfileCertificateHash");
         let evidence_frozen_roster_size = usize_object_field(evidence, "frozenRosterSize");
         let evidence_option_count = u64_object_field(evidence, "optionCount");
         if string_field(evidence, "objectType") != Some("BallotPrivacyRosterProfileEvidence")
@@ -109,28 +106,27 @@ pub(crate) fn collect_supported_ballot_privacy_dimension_refusals(
             || string_field(evidence, "proofStatementShape") != Some("EncodedScoreBallotProof-v1")
             || evidence_frozen_roster_size != participant_count
             || evidence_option_count.map(u128::from) != option_count
-            || string_field(evidence, "thresholdProfileDigest")
-                != string_field(statement, "thresholdProfileDigest")
-            || dynamic_roster_profile_certificate_digest
-                .is_none_or(|digest| !is_protocol_digest(digest))
-            || expected_evidence_digest.as_deref() != evidence_digest
+            || string_field(evidence, "thresholdProfileHash")
+                != string_field(statement, "thresholdProfileHash")
+            || dynamic_roster_profile_certificate_hash.is_none_or(|hash| !is_protocol_hash(hash))
+            || expected_evidence_hash.as_deref() != evidence_hash
         {
             refused_objects.push(structural_refusal(
                 "Dynamic roster profile evidence is not bound to the ballot proof statement dimensions and threshold profile.",
-                object_digest,
+                object_hash,
             ));
         }
-        if dynamic_roster_profile_certificate_digest.is_some_and(is_protocol_digest)
+        if dynamic_roster_profile_certificate_hash.is_some_and(is_protocol_hash)
             && !dynamic_roster_profile_certificate_is_approved(
                 evidence_frozen_roster_size,
                 evidence_option_count,
-                string_field(evidence, "thresholdProfileDigest"),
-                dynamic_roster_profile_certificate_digest,
+                string_field(evidence, "thresholdProfileHash"),
+                dynamic_roster_profile_certificate_hash,
             )
         {
             refused_objects.push(structural_refusal(
                 UNAPPROVED_DYNAMIC_ROSTER_CERTIFICATE_MESSAGE,
-                object_digest,
+                object_hash,
             ));
         }
     }
@@ -141,8 +137,8 @@ pub(crate) fn collect_supported_ballot_privacy_dimension_refusals(
 fn dynamic_roster_profile_certificate_is_approved(
     _frozen_roster_size: Option<usize>,
     _option_count: Option<u64>,
-    _threshold_profile_digest: Option<&str>,
-    _dynamic_roster_profile_certificate_digest: Option<&str>,
+    _threshold_profile_hash: Option<&str>,
+    _dynamic_roster_profile_certificate_hash: Option<&str>,
 ) -> bool {
     false
 }
@@ -152,7 +148,7 @@ pub(crate) fn collect_full_ballot_binding_contract_refusals(
     parameter_set: &Value,
     proof_encoding: &Value,
     proof_size_bytes: Option<usize>,
-    object_digest: Option<&str>,
+    object_hash: Option<&str>,
 ) -> Vec<Value> {
     let expectation = LinearContractExpectation {
         coefficient_modulus: 65_537,
@@ -170,26 +166,26 @@ pub(crate) fn collect_full_ballot_binding_contract_refusals(
     let mut refused_objects = collect_linear_statement_contract_refusals(
         linear_statement,
         &expectation,
-        object_digest,
+        object_hash,
         "Full ballot binding linear statement",
     );
     if string_field(linear_statement, "relationBindingKind")
         != Some("component-bundle-and-lowered-relation")
-        || string_field(linear_statement, "relationBindingDigest")
-            .is_none_or(|digest| !is_protocol_digest(digest))
-        || string_field(linear_statement, "componentBundleStatementDigest")
-            .is_none_or(|digest| !is_protocol_digest(digest))
+        || string_field(linear_statement, "relationBindingHash")
+            .is_none_or(|hash| !is_protocol_hash(hash))
+        || string_field(linear_statement, "componentBundleStatementHash")
+            .is_none_or(|hash| !is_protocol_hash(hash))
     {
         refused_objects.push(structural_refusal(
             "Full ballot binding linear statement must bind the component bundle and lowered relation.",
-            object_digest,
+            object_hash,
         ));
     }
     refused_objects.extend(collect_parameter_contract_refusals(
         parameter_set,
         &expectation,
         proof_size_bytes,
-        object_digest,
+        object_hash,
         "Full ballot binding parameter set",
         true,
     ));
@@ -197,7 +193,7 @@ pub(crate) fn collect_full_ballot_binding_contract_refusals(
         proof_encoding,
         &expectation,
         proof_size_bytes,
-        object_digest,
+        object_hash,
         "Full ballot binding proof encoding",
         true,
     ));
@@ -208,30 +204,30 @@ pub(crate) fn collect_full_ballot_binding_contract_refusals(
 pub(crate) fn collect_full_ballot_relation_binding_refusals(
     linear_statement: &Value,
     component_bundle_statement: Option<&Value>,
-    object_digest: Option<&str>,
+    object_hash: Option<&str>,
 ) -> Vec<Value> {
     let Some(component_bundle_statement) = component_bundle_statement else {
         return Vec::new();
     };
     let mut refused_objects = Vec::new();
-    let expected_relation_binding_digest =
-        derive_full_relation_binding_digest(component_bundle_statement);
+    let expected_relation_binding_hash =
+        derive_full_relation_binding_hash(component_bundle_statement);
 
-    if string_field(linear_statement, "relationBindingDigest")
-        != expected_relation_binding_digest.as_deref()
+    if string_field(linear_statement, "relationBindingHash")
+        != expected_relation_binding_hash.as_deref()
     {
         refused_objects.push(structural_refusal(
-            "Full ballot binding linear statement relation binding digest does not match the supplied component bundle.",
-            object_digest,
+            "Full ballot binding linear statement relation binding hash does not match the supplied component bundle.",
+            object_hash,
         ));
     }
     if !full_ballot_binding_matrix_and_target_are_derived(
         linear_statement,
-        expected_relation_binding_digest.as_deref(),
+        expected_relation_binding_hash.as_deref(),
     ) {
         refused_objects.push(structural_refusal(
             "Full ballot binding linear statement matrix and target are not derived from the component bundle relation binding.",
-            object_digest,
+            object_hash,
         ));
     }
 
@@ -241,7 +237,7 @@ pub(crate) fn collect_full_ballot_relation_binding_refusals(
 fn collect_linear_statement_contract_refusals(
     proof_statement: &Value,
     expectation: &LinearContractExpectation,
-    object_digest: Option<&str>,
+    object_hash: Option<&str>,
     label: &str,
 ) -> Vec<Value> {
     let mut refused_objects = Vec::new();
@@ -259,22 +255,22 @@ fn collect_linear_statement_contract_refusals(
     {
         refused_objects.push(structural_refusal(
             format!("{label} does not match the frozen proof dimensions."),
-            object_digest,
+            object_hash,
         ));
     }
     if string_field(proof_statement, "relation") != Some("A*w + t = 0") {
         refused_objects.push(structural_refusal(
             format!("{label} does not use the frozen linear relation."),
-            object_digest,
+            object_hash,
         ));
     }
 
     refused_objects
 }
 
-fn derive_backend_digest(purpose: &str, payload: Value) -> Option<String> {
-    derive_digest(
-        "ChallengeDomainDigest",
+fn derive_backend_hash(purpose: &str, payload: Value) -> Option<String> {
+    derive_hash(
+        "ChallengeDomainHash",
         &json!({
             "payload": payload,
             "purpose": purpose,
@@ -294,11 +290,11 @@ fn component_statement_as_proof_component(component_statement: &Value) -> Option
         "rowKinds": component_object.get("rowKinds")?.clone(),
         "variableColumnCount": component_object.get("variableColumnCount")?.clone(),
         "variableColumnIndices": component_object.get("variableColumnIndices")?.clone(),
-        "componentDigest": component_object.get("componentDigest")?.clone()
+        "componentHash": component_object.get("componentHash")?.clone()
     }))
 }
 
-pub(crate) fn derive_full_relation_binding_digest(
+pub(crate) fn derive_full_relation_binding_hash(
     component_bundle_statement: &Value,
 ) -> Option<String> {
     let component_bundle_object = object_map(component_bundle_statement)?;
@@ -309,30 +305,30 @@ pub(crate) fn derive_full_relation_binding_digest(
         .iter()
         .map(component_statement_as_proof_component)
         .collect::<Option<Vec<_>>>()?;
-    let proof_components_digest = derive_backend_digest(
-        BACKEND_PROOF_COMPONENTS_DIGEST_PURPOSE,
+    let proof_components_hash = derive_backend_hash(
+        BACKEND_PROOF_COMPONENTS_HASH_PURPOSE,
         json!({
             "proofComponents": proof_components
         }),
     )?;
 
-    derive_digest(
-        "ChallengeDomainDigest",
+    derive_hash(
+        "ChallengeDomainHash",
         &json!({
-            "backendStatementDigest": component_bundle_object.get("backendStatementDigest")?,
-            "componentBundleStatementDigest": component_bundle_object.get("componentBundleStatementDigest")?,
-            "proofComponentsDigest": proof_components_digest,
-            "purpose": FULL_BALLOT_BINDING_DIGEST_PURPOSE,
-            "relationStatementDigest": component_bundle_object.get("relationStatementDigest")?
+            "backendStatementHash": component_bundle_object.get("backendStatementHash")?,
+            "componentBundleStatementHash": component_bundle_object.get("componentBundleStatementHash")?,
+            "proofComponentsHash": proof_components_hash,
+            "purpose": FULL_BALLOT_BINDING_HASH_PURPOSE,
+            "relationStatementHash": component_bundle_object.get("relationStatementHash")?
         }),
     )
 }
 
-pub(crate) fn binding_scalar_from_digest(relation_binding_digest: &str) -> Option<u64> {
-    let prefix = relation_binding_digest.get(..16)?;
+pub(crate) fn binding_scalar_from_hash(relation_binding_hash: &str) -> Option<u64> {
+    let prefix = relation_binding_hash.get(..16)?;
     u64::from_str_radix(prefix, 16)
         .ok()
-        .map(|value| 1 + (value % FULL_BALLOT_BINDING_COMPATIBILITY_SCALAR_COUNT))
+        .map(|value| 1 + (value % FULL_BALLOT_BINDING_SCALAR_COUNT))
 }
 
 fn dense_polynomial_is_constant(
@@ -360,12 +356,12 @@ fn dense_polynomial_is_constant(
 
 fn full_ballot_binding_matrix_and_target_are_derived(
     linear_statement: &Value,
-    relation_binding_digest: Option<&str>,
+    relation_binding_hash: Option<&str>,
 ) -> bool {
-    let Some(relation_binding_digest) = relation_binding_digest else {
+    let Some(relation_binding_hash) = relation_binding_hash else {
         return false;
     };
-    let Some(binding_scalar) = binding_scalar_from_digest(relation_binding_digest) else {
+    let Some(binding_scalar) = binding_scalar_from_hash(relation_binding_hash) else {
         return false;
     };
     let Some(source_ring_degree) = unsigned_integer_field(linear_statement, "ringDegree")
@@ -401,7 +397,7 @@ fn collect_parameter_contract_refusals(
     parameter_set: &Value,
     expectation: &LinearContractExpectation,
     proof_size_bytes: Option<usize>,
-    object_digest: Option<&str>,
+    object_hash: Option<&str>,
     label: &str,
     require_positive_proof_size: bool,
 ) -> Vec<Value> {
@@ -433,7 +429,7 @@ fn collect_parameter_contract_refusals(
     {
         refused_objects.push(structural_refusal(
             format!("{label} does not match the frozen contract."),
-            object_digest,
+            object_hash,
         ));
     }
 
@@ -444,7 +440,7 @@ fn collect_encoding_contract_refusals(
     proof_encoding: &Value,
     expectation: &LinearContractExpectation,
     proof_size_bytes: Option<usize>,
-    object_digest: Option<&str>,
+    object_hash: Option<&str>,
     label: &str,
     require_positive_proof_size: bool,
 ) -> Vec<Value> {
@@ -486,7 +482,7 @@ fn collect_encoding_contract_refusals(
     {
         refused_objects.push(structural_refusal(
             format!("{label} does not match the frozen contract."),
-            object_digest,
+            object_hash,
         ));
     }
 
@@ -502,4 +498,5 @@ fn unsigned_integer_field(value: &Value, field_name: &str) -> Option<u128> {
 }
 
 #[cfg(test)]
+#[path = "contract_validation/tests.rs"]
 mod tests;

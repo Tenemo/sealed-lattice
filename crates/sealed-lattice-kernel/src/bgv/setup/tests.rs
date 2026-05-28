@@ -5,25 +5,25 @@ use super::{
     generate_passive_setup_package_from_request, sample_centered_binomial_eta2,
     sample_public_residues, sample_small_distribution, verify_passive_setup_package_from_request,
 };
-use crate::hashing::{derive_protocol_digest, hash512};
+use crate::hashing::{derive_protocol_hash, hash512};
 
 type SetupPackageMutation = (&'static str, Box<dyn Fn(&mut serde_json::Value)>);
 
 fn request() -> serde_json::Value {
     serde_json::json!({
         "ceremonyId": "ceremony-main",
-        "manifestDigest": derive_protocol_digest(
-            "ElectionManifestDigest",
+        "manifestHash": derive_protocol_hash(
+            "ElectionManifestHash",
             &serde_json::json!({ "manifest": "m8-test" }),
-        ).expect("manifest digest"),
-        "rosterDigest": derive_protocol_digest(
-            "RosterDigest",
+        ).expect("manifest hash"),
+        "rosterHash": derive_protocol_hash(
+            "RosterHash",
             &serde_json::json!({ "roster": "m8-test" }),
-        ).expect("roster digest"),
-        "thresholdProfileDigest": derive_protocol_digest(
-            "ThresholdProfileDigest",
+        ).expect("roster hash"),
+        "thresholdProfileHash": derive_protocol_hash(
+            "ThresholdProfileHash",
             &serde_json::json!({ "threshold": "m8-test" }),
-        ).expect("threshold digest"),
+        ).expect("threshold hash"),
         "participants": [
             { "trusteeIdentity": "trustee-1", "rosterPosition": 0, "boardPosition": 3 },
             { "trusteeIdentity": "trustee-2", "rosterPosition": 1, "boardPosition": 4 },
@@ -33,24 +33,24 @@ fn request() -> serde_json::Value {
     })
 }
 
-fn rebind_setup_package_digest(package: &mut serde_json::Value) {
-    let mut digest_input = package.clone();
-    digest_input
+fn rebind_setup_package_hash(package: &mut serde_json::Value) {
+    let mut hash_input = package.clone();
+    hash_input
         .as_object_mut()
         .expect("setup package must be an object")
-        .remove("setupPackageDigest");
-    package["setupPackageDigest"] = serde_json::json!(
-        derive_protocol_digest("BGVPassiveSetupPackageDigest", &digest_input)
-            .expect("setup package digest")
+        .remove("setupPackageHash");
+    package["setupPackageHash"] = serde_json::json!(
+        derive_protocol_hash("BGVPassiveSetupPackageHash", &hash_input)
+            .expect("setup package hash")
     );
 }
 
-fn valid_digest(fill: char) -> String {
+fn valid_hash(fill: char) -> String {
     fill.to_string().repeat(128)
 }
 
 fn assert_rebound_package_is_rejected(mut package: serde_json::Value, mutation_description: &str) {
-    rebind_setup_package_digest(&mut package);
+    rebind_setup_package_hash(&mut package);
     assert!(
         verify_passive_setup_package_from_request(&serde_json::json!({
             "setupPackage": package,
@@ -65,15 +65,9 @@ fn passive_setup_generation_is_deterministic_and_verifiable() {
     let first = generate_passive_setup_package_from_request(&request()).expect("first setup");
     let second = generate_passive_setup_package_from_request(&request()).expect("second setup");
 
-    assert_eq!(first["setupPackageDigest"], second["setupPackageDigest"]);
-    assert_eq!(
-        first["kllpsCompatibility"]["setupMaterialCompatibleWithKLLPS"],
-        true
-    );
-    assert_eq!(
-        first["kllpsCompatibility"]["KLLPSPartDecImplemented"],
-        false
-    );
+    assert_eq!(first["setupPackageHash"], second["setupPackageHash"]);
+    assert_eq!(first["kllpsStatus"]["setupMaterialMatchesKLLPS"], true);
+    assert_eq!(first["kllpsStatus"]["KLLPSPartDecStatusImplemented"], false);
     assert_eq!(
         first["certificates"]["setupParameterCertificate"]["finalSecurityStatus"],
         "pendingQTarget"
@@ -81,7 +75,7 @@ fn passive_setup_generation_is_deterministic_and_verifiable() {
     assert_eq!(first["setupInputs"]["defaultSetupSeedUsed"], false);
     assert_eq!(
         first["participants"][0]["sampleDisclosure"],
-        "commitment-digests-and-roots-only"
+        "commitment-hashes-and-roots-only"
     );
     assert_eq!(
         first["participants"][0]["sampledLocalSecretCoefficientsIncluded"],
@@ -104,7 +98,7 @@ fn passive_setup_generation_is_deterministic_and_verifiable() {
 
     let verification = verify_passive_setup_package_from_request(&serde_json::json!({
         "setupPackage": first,
-        "expectedRosterDigest": request()["rosterDigest"],
+        "expectedRosterHash": request()["rosterHash"],
     }))
     .expect("verify setup package");
     assert_eq!(verification["ok"], true);
@@ -163,21 +157,21 @@ fn passive_setup_uses_rejection_sampled_setup_distributions() {
 #[test]
 fn public_common_random_polynomial_uses_its_own_root_namespace() {
     let package = generate_passive_setup_package_from_request(&request()).expect("setup");
-    let setup_seed_digest = package["setupInputs"]["setupSeedDigest"]
+    let setup_seed_hash = package["setupInputs"]["setupSeedHash"]
         .as_str()
-        .expect("setup seed digest");
+        .expect("setup seed hash");
     let common_random_polynomial_record = serde_json::json!({
         "objectType": "BgvPublicCommonRandomPolynomial",
         "objectVersion": 1,
         "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
         "ceremonyId": package["setupInputs"]["ceremonyId"],
-        "rosterDigest": package["setupInputs"]["rosterDigest"],
-        "setupSeedDigest": setup_seed_digest,
+        "rosterHash": package["setupInputs"]["rosterHash"],
+        "setupSeedHash": setup_seed_hash,
         "basisId": "sealed-lattice-bgv-rns-data-basis-v1",
         "level": DATA_PRIMES.len() - 1,
         "coefficientCount": POLYNOMIAL_DEGREE,
         "sampledResidues": sample_public_residues(
-            setup_seed_digest,
+            setup_seed_hash,
             "public-common-random-polynomial",
             DATA_PRIMES[0],
         ),
@@ -185,13 +179,13 @@ fn public_common_random_polynomial_uses_its_own_root_namespace() {
     let actual_root = package["collectivePublicKey"]["record"]["publicCommonRandomPolynomialRoot"]
         .as_str()
         .expect("public common random polynomial root");
-    let expected_root = derive_protocol_digest(
+    let expected_root = derive_protocol_hash(
         "BGVPublicCommonRandomPolynomialRoot",
         &common_random_polynomial_record,
     )
     .expect("common random polynomial root");
     let old_public_key_share_namespace_root =
-        derive_protocol_digest("PublicKeyShareRoot", &common_random_polynomial_record)
+        derive_protocol_hash("PublicKeyShareRoot", &common_random_polynomial_record)
             .expect("old public key share namespace root");
 
     assert_eq!(actual_root, expected_root);
@@ -207,7 +201,7 @@ fn passive_setup_rejects_trusted_dealer_secret_fields() {
 }
 
 #[test]
-fn passive_setup_rejects_non_canonical_roster_positions_and_digests() {
+fn passive_setup_rejects_non_canonical_roster_positions_and_hashes() {
     let mut duplicate_position_request = request();
     duplicate_position_request["participants"][1]["rosterPosition"] = serde_json::json!(0);
     assert!(generate_passive_setup_package_from_request(&duplicate_position_request).is_err());
@@ -216,13 +210,13 @@ fn passive_setup_rejects_non_canonical_roster_positions_and_digests() {
     out_of_range_position_request["participants"][2]["rosterPosition"] = serde_json::json!(3);
     assert!(generate_passive_setup_package_from_request(&out_of_range_position_request).is_err());
 
-    let mut uppercase_digest_request = request();
-    let uppercase_manifest_digest = uppercase_digest_request["manifestDigest"]
+    let mut uppercase_hash_request = request();
+    let uppercase_manifest_hash = uppercase_hash_request["manifestHash"]
         .as_str()
-        .expect("manifest digest")
+        .expect("manifest hash")
         .to_ascii_uppercase();
-    uppercase_digest_request["manifestDigest"] = serde_json::json!(uppercase_manifest_digest);
-    assert!(generate_passive_setup_package_from_request(&uppercase_digest_request).is_err());
+    uppercase_hash_request["manifestHash"] = serde_json::json!(uppercase_manifest_hash);
+    assert!(generate_passive_setup_package_from_request(&uppercase_hash_request).is_err());
 }
 
 #[test]
@@ -243,7 +237,7 @@ fn passive_setup_verification_rejects_rebound_internal_inconsistency() {
     let mut package = generate_passive_setup_package_from_request(&request()).expect("setup");
     package["collectivePublicKey"]["record"]["publicKeyShareRoots"][0] =
         serde_json::json!("f".repeat(128));
-    rebind_setup_package_digest(&mut package);
+    rebind_setup_package_hash(&mut package);
 
     assert!(
         verify_passive_setup_package_from_request(&serde_json::json!({
@@ -257,7 +251,7 @@ fn passive_setup_verification_rejects_rebound_internal_inconsistency() {
 fn passive_setup_verification_rejects_nested_secret_material() {
     let mut package = generate_passive_setup_package_from_request(&request()).expect("setup");
     package["participants"][0]["globalSecretPolynomial"] = serde_json::json!("forbidden");
-    rebind_setup_package_digest(&mut package);
+    rebind_setup_package_hash(&mut package);
 
     assert!(
         verify_passive_setup_package_from_request(&serde_json::json!({
@@ -275,84 +269,83 @@ fn passive_setup_verification_rejects_rebound_binding_mutations() {
             "BGV public key root",
             Box::new(|mutated_package| {
                 mutated_package["collectivePublicKey"]["bgvPublicKeyRoot"] =
-                    serde_json::json!(valid_digest('0'));
+                    serde_json::json!(valid_hash('0'));
             }),
         ),
         (
             "threshold share verification key root",
             Box::new(|mutated_package| {
                 mutated_package["thresholdVerificationMaterial"]["thresholdShareVerificationKeyRoot"] =
-                    serde_json::json!(valid_digest('1'));
+                    serde_json::json!(valid_hash('1'));
             }),
         ),
         (
-            "trustee threshold verification key digest",
+            "trustee threshold verification key hash",
             Box::new(|mutated_package| {
-                mutated_package["thresholdVerificationMaterial"]["trusteeThresholdVerificationKeyDigests"]
-                    [0] = serde_json::json!(valid_digest('2'));
+                mutated_package["thresholdVerificationMaterial"]["trusteeThresholdVerificationKeyHashes"]
+                    [0] = serde_json::json!(valid_hash('2'));
             }),
         ),
         (
             "relinearization key root",
             Box::new(|mutated_package| {
                 mutated_package["evaluationKeys"]["relinearizationKeyRoot"] =
-                    serde_json::json!(valid_digest('3'));
+                    serde_json::json!(valid_hash('3'));
             }),
         ),
         (
             "key-switch key root",
             Box::new(|mutated_package| {
                 mutated_package["evaluationKeys"]["keySwitchKeyRoot"] =
-                    serde_json::json!(valid_digest('4'));
+                    serde_json::json!(valid_hash('4'));
             }),
         ),
         (
-            "key-switch decomposition digest",
+            "key-switch decomposition hash",
             Box::new(|mutated_package| {
-                mutated_package["evaluationKeys"]["keySwitchDecompositionDigest"] =
-                    serde_json::json!(valid_digest('5'));
+                mutated_package["evaluationKeys"]["keySwitchDecompositionHash"] =
+                    serde_json::json!(valid_hash('5'));
             }),
         ),
         (
-            "rotation set digest",
+            "rotation set hash",
             Box::new(|mutated_package| {
-                mutated_package["evaluationKeys"]["rotSetDigest"] =
-                    serde_json::json!(valid_digest('6'));
+                mutated_package["evaluationKeys"]["rotSetHash"] =
+                    serde_json::json!(valid_hash('6'));
             }),
         ),
         (
             "rotation key root",
             Box::new(|mutated_package| {
                 mutated_package["evaluationKeys"]["rotationKeyRoots"][0]["rotationKeyRoot"] =
-                    serde_json::json!(valid_digest('7'));
+                    serde_json::json!(valid_hash('7'));
             }),
         ),
         (
-            "setup parameter certificate digest",
+            "setup parameter certificate hash",
             Box::new(|mutated_package| {
-                mutated_package["certificates"]["setupParameterCertificateDigest"] =
-                    serde_json::json!(valid_digest('8'));
+                mutated_package["certificates"]["setupParameterCertificateHash"] =
+                    serde_json::json!(valid_hash('8'));
             }),
         ),
         (
-            "collective secret distribution certificate digest",
+            "collective secret distribution certificate hash",
             Box::new(|mutated_package| {
-                mutated_package["certificates"]["collectiveSecretDistributionCertificateDigest"] =
-                    serde_json::json!(valid_digest('9'));
+                mutated_package["certificates"]["collectiveSecretDistributionCertificateHash"] =
+                    serde_json::json!(valid_hash('9'));
             }),
         ),
         (
             "KLLPS PartDec claim",
             Box::new(|mutated_package| {
-                mutated_package["kllpsCompatibility"]["KLLPSPartDecImplemented"] =
+                mutated_package["kllpsStatus"]["KLLPSPartDecStatusImplemented"] =
                     serde_json::json!(true);
             }),
         ),
         (
             "KLLPS C1-C4 claim",
             Box::new(|mutated_package| {
-                mutated_package["kllpsCompatibility"]["KLLPSC1C4Certified"] =
-                    serde_json::json!(true);
+                mutated_package["kllpsStatus"]["KLLPSC1C4StatusAccepted"] = serde_json::json!(true);
             }),
         ),
         (
@@ -381,7 +374,7 @@ fn passive_setup_verification_rejects_rebound_binding_mutations() {
             "evaluation key chunk root",
             Box::new(|mutated_package| {
                 mutated_package["certificates"]["evaluationKeyStreamingFixture"]["fixture"]["chunkRoot"] =
-                    serde_json::json!(valid_digest('a'));
+                    serde_json::json!(valid_hash('a'));
             }),
         ),
     ];
@@ -397,20 +390,20 @@ fn passive_setup_verification_rejects_rebound_binding_mutations() {
 fn passive_setup_verification_rejects_evaluator_binding_mutations() {
     let package = generate_passive_setup_package_from_request(&request()).expect("setup");
     for field_name in [
-        "evaluatorBindingContextDigest",
-        "encryptedAggregateBridgeDigest",
-        "encryptedAggregateTargetBasisDataRoot",
-        "encryptedAggregateReconstructionDigest",
-        "scoreBitDerivationCircuitDigest",
-        "comparisonInputDerivationCircuitDigest",
-        "encryptedScoreBitInputDigest",
-        "encryptedComparisonInputDigest",
-        "bitSlicedComparatorDigest",
-        "encryptedSparseTargetProjectionDigest",
-        "m8EvaluatorContextBindingDigest",
+        "evaluatorBindingContextHash",
+        "encryptedAggregateBridgeHash",
+        "encryptedAggregateTargetBasisRoot",
+        "encryptedAggregateReconstructionHash",
+        "scoreBitDerivationCircuitHash",
+        "comparisonInputDerivationCircuitHash",
+        "encryptedScoreBitInputHash",
+        "encryptedComparisonInputHash",
+        "bitSlicedComparatorHash",
+        "encryptedSparseTargetProjectionHash",
+        "m8EvaluatorContextBindingHash",
     ] {
         let mut mutated_package = package.clone();
-        mutated_package["profileBindings"][field_name] = serde_json::json!(valid_digest('b'));
+        mutated_package["profileBindings"][field_name] = serde_json::json!(valid_hash('b'));
         assert_rebound_package_is_rejected(mutated_package, field_name);
     }
 }
@@ -458,10 +451,10 @@ fn passive_setup_rejects_wrong_request_and_recovery_state_shapes() {
                     "finalSecurityStatus": "pendingQTarget",
                 },
             },
-            "kllpsCompatibility": {
-                "KLLPSC1C4Certified": false,
-                "KLLPSPartDecImplemented": false,
-                "setupMaterialCompatibleWithKLLPS": true,
+            "kllpsStatus": {
+                "KLLPSC1C4StatusAccepted": false,
+                "KLLPSPartDecStatusImplemented": false,
+                "setupMaterialMatchesKLLPS": true,
             },
             "objectType": "BgvPassiveSetupPackage",
             "objectVersion": 1,
@@ -481,11 +474,10 @@ fn passive_setup_rejects_wrong_request_and_recovery_state_shapes() {
         );
     }
 
-    let mut malformed_threshold_digest_request = request();
-    malformed_threshold_digest_request["thresholdProfileDigest"] =
-        serde_json::json!("not-a-digest");
+    let mut malformed_threshold_hash_request = request();
+    malformed_threshold_hash_request["thresholdProfileHash"] = serde_json::json!("not-a-hash");
     assert!(
-        generate_passive_setup_package_from_request(&malformed_threshold_digest_request).is_err()
+        generate_passive_setup_package_from_request(&malformed_threshold_hash_request).is_err()
     );
 
     let package = generate_passive_setup_package_from_request(&request()).expect("setup");
@@ -590,15 +582,15 @@ fn passive_setup_verification_rejects_rotation_set_gaps() {
 
 #[test]
 fn centered_binomial_eta2_samples_match_certified_sampler() {
-    let seed_digest = "1".repeat(128);
-    let samples = sample_centered_binomial_eta2(&seed_digest, "trustee-1", "local-error");
+    let seed_hash = "1".repeat(128);
+    let samples = sample_centered_binomial_eta2(&seed_hash, "trustee-1", "local-error");
     for sample in samples {
         let position = sample["position"].as_u64().expect("position") as usize;
         let position_text = position.to_string();
         let output = hash512(
             "sealed-lattice-bgv-rns/sample-centered-binomial-eta2-v1",
             &[
-                seed_digest.as_bytes(),
+                seed_hash.as_bytes(),
                 b"trustee-1",
                 b"local-error",
                 position_text.as_bytes(),
@@ -615,16 +607,16 @@ fn centered_binomial_eta2_samples_match_certified_sampler() {
 
 #[test]
 fn dense_centered_binomial_eta2_sampler_consumes_full_hash_blocks() {
-    let seed_digest = "1".repeat(128);
+    let seed_hash = "1".repeat(128);
     let coefficients =
-        dense_centered_binomial_coefficients(&seed_digest, "trustee-1", "fixture-error");
+        dense_centered_binomial_coefficients(&seed_hash, "trustee-1", "fixture-error");
     let first_block = hash512(
         "sealed-lattice-bgv-rns/sample-centered-binomial-eta2-dense-v1",
-        &[seed_digest.as_bytes(), b"trustee-1", b"fixture-error", b"0"],
+        &[seed_hash.as_bytes(), b"trustee-1", b"fixture-error", b"0"],
     );
     let second_block = hash512(
         "sealed-lattice-bgv-rns/sample-centered-binomial-eta2-dense-v1",
-        &[seed_digest.as_bytes(), b"trustee-1", b"fixture-error", b"1"],
+        &[seed_hash.as_bytes(), b"trustee-1", b"fixture-error", b"1"],
     );
 
     assert_eq!(coefficients.len(), POLYNOMIAL_DEGREE);

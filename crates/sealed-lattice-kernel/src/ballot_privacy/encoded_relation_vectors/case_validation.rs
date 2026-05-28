@@ -1,34 +1,34 @@
-use super::backend_digest_helpers::value_without_field as encoded_relation_value_without_field;
+use super::backend_hash_helpers::value_without_field as encoded_relation_value_without_field;
 use super::*;
 use crate::ballot_privacy::protocol_constants::{
     BALLOT_PRIVACY_ENCODED_COORDINATES_PER_OPTION, BALLOT_PRIVACY_FIELD_MODULUS,
 };
 use serde_json::{Value, json};
 
-use crate::hashing::derive_protocol_digest;
+use crate::hashing::derive_protocol_hash;
 
 pub(super) const ENCODED_COORDINATES_PER_OPTION: u64 =
     BALLOT_PRIVACY_ENCODED_COORDINATES_PER_OPTION;
 pub(super) const FIELD_MODULUS: u64 = BALLOT_PRIVACY_FIELD_MODULUS;
 pub(super) const RELATION_STATEMENT_FORMAT: &str =
     "SparseIntegerRowsModuloGF65537WithBoundGadgets-v1";
-pub(super) const RELATION_STATEMENT_DIGEST_PURPOSE: &str =
+pub(super) const RELATION_STATEMENT_HASH_PURPOSE: &str =
     "ballot-privacy-linear-relation-statement-v1";
 pub(super) const BACKEND_STATEMENT_FORMAT: &str = "SparseSignedIntegerBackendStatement-v1";
-pub(super) const BACKEND_STATEMENT_DIGEST_PURPOSE: &str = "ballot-privacy-backend-statement-v1";
-pub(super) const EXPLICIT_BACKEND_MATRIX_DIGEST_PURPOSE: &str =
+pub(super) const BACKEND_STATEMENT_HASH_PURPOSE: &str = "ballot-privacy-backend-statement-v1";
+pub(super) const EXPLICIT_BACKEND_MATRIX_HASH_PURPOSE: &str =
     "ballot-privacy-backend-explicit-matrix-v1";
-pub(super) const EXPLICIT_BACKEND_TARGET_VECTOR_DIGEST_PURPOSE: &str =
+pub(super) const EXPLICIT_BACKEND_TARGET_VECTOR_HASH_PURPOSE: &str =
     "ballot-privacy-backend-explicit-target-vector-v1";
-pub(super) const DIGEST_EXPANDED_BACKEND_MATRIX_DIGEST_PURPOSE: &str =
-    "ballot-privacy-backend-digest-expanded-matrix-v1";
-pub(super) const DIGEST_EXPANDED_BACKEND_TARGET_VECTOR_DIGEST_PURPOSE: &str =
-    "ballot-privacy-backend-digest-expanded-target-vector-v1";
-pub(super) const BACKEND_MATRIX_DIGEST_PURPOSE: &str = "ballot-privacy-backend-matrix-v1";
-pub(super) const BACKEND_TARGET_VECTOR_DIGEST_PURPOSE: &str =
+pub(super) const HASH_EXPANDED_BACKEND_MATRIX_HASH_PURPOSE: &str =
+    "ballot-privacy-backend-hash-expanded-matrix-v1";
+pub(super) const HASH_EXPANDED_BACKEND_TARGET_VECTOR_HASH_PURPOSE: &str =
+    "ballot-privacy-backend-hash-expanded-target-vector-v1";
+pub(super) const BACKEND_MATRIX_HASH_PURPOSE: &str = "ballot-privacy-backend-matrix-v1";
+pub(super) const BACKEND_TARGET_VECTOR_HASH_PURPOSE: &str =
     "ballot-privacy-backend-target-vector-v1";
-pub(super) const BACKEND_BOUNDS_DIGEST_PURPOSE: &str = "ballot-privacy-backend-bounds-v1";
-pub(super) const BACKEND_PROOF_COMPONENTS_DIGEST_PURPOSE: &str =
+pub(super) const BACKEND_BOUNDS_HASH_PURPOSE: &str = "ballot-privacy-backend-bounds-v1";
+pub(super) const BACKEND_PROOF_COMPONENTS_HASH_PURPOSE: &str =
     "ballot-privacy-backend-proof-components-v1";
 pub(super) const ALGEBRAIC_ROWS_PER_RECEIVER: u64 = 3;
 pub(super) const EXPLICIT_ROW_BATCHES_BEFORE_ALGEBRAIC_ROWS: u64 = 2;
@@ -53,7 +53,7 @@ pub fn verify_encoded_relation_vector_case_value(vector_case: &Value) -> Value {
             "vectorAvailable": true,
             "expectedOutcome": summary.expected_outcome,
             "statusLabels": summary.status_labels,
-            "acceptedDigests": summary.accepted_digests,
+            "acceptedHashes": summary.accepted_hashes,
             "refusedObjects": [],
             "unresolvedReason": Value::Null
         }),
@@ -62,7 +62,7 @@ pub fn verify_encoded_relation_vector_case_value(vector_case: &Value) -> Value {
             "backendAvailable": BALLOT_PRIVACY_PROOF_BACKEND_AVAILABLE,
             "backendStatus": describe_proof_backend(),
             "statusLabels": [],
-            "acceptedDigests": [],
+            "acceptedHashes": [],
             "refusedObjects": [
                 {
                     "code": "InvalidFixture",
@@ -75,7 +75,7 @@ pub fn verify_encoded_relation_vector_case_value(vector_case: &Value) -> Value {
 }
 
 pub(super) struct EncodedRelationVectorSummary {
-    accepted_digests: Vec<String>,
+    accepted_hashes: Vec<String>,
     case_name: String,
     expected_outcome: String,
     status_labels: Vec<&'static str>,
@@ -97,25 +97,25 @@ pub(super) fn validate_encoded_relation_vector_case(
     }
 
     if compiler_accepted && expected_outcome == "accept" {
-        let accepted_digest = validate_accepting_case(case_object)?;
-        validate_digest_change_trace(case_object, &accepted_digest)?;
+        let accepted_hash = validate_accepting_case(case_object)?;
+        validate_hash_change_trace(case_object, &accepted_hash)?;
 
         Ok(EncodedRelationVectorSummary {
-            accepted_digests: vec![accepted_digest],
+            accepted_hashes: vec![accepted_hash],
             case_name,
             expected_outcome,
             status_labels: vec![
                 "EncodedRelationStatementParsed",
                 "EncodedShareLayoutChecked",
                 "EncodedBackendStatementChecked",
-                "EncodedRelationDigestRecomputed",
+                "EncodedRelationHashRecomputed",
             ],
         })
     } else if compiler_accepted && expected_outcome == "reject" {
         validate_preflight_rejecting_case(case_object)?;
 
         Ok(EncodedRelationVectorSummary {
-            accepted_digests: Vec::new(),
+            accepted_hashes: Vec::new(),
             case_name,
             expected_outcome,
             status_labels: vec![
@@ -127,7 +127,7 @@ pub(super) fn validate_encoded_relation_vector_case(
         validate_rejecting_case(case_object, &expected_outcome)?;
 
         Ok(EncodedRelationVectorSummary {
-            accepted_digests: Vec::new(),
+            accepted_hashes: Vec::new(),
             case_name,
             expected_outcome,
             status_labels: vec![
@@ -144,7 +144,7 @@ pub(super) fn validate_accepting_case(
     let full_statement = case_object.get("loweredStatement");
     let statement_summary = case_object.get("loweredStatementSummary");
 
-    let accepted_digest = match (full_statement, statement_summary) {
+    let accepted_hash = match (full_statement, statement_summary) {
         (Some(statement), None) => validate_full_statement(statement),
         (None, Some(summary)) => validate_statement_summary(summary, case_object),
         (Some(_), Some(_)) => Err(
@@ -160,7 +160,7 @@ pub(super) fn validate_accepting_case(
     validate_component_proof_readiness_manifests(case_object)?;
     validate_component_proof_statement_plans(case_object)?;
 
-    Ok(accepted_digest)
+    Ok(accepted_hash)
 }
 
 pub(super) fn validate_preflight_rejecting_case(
@@ -179,9 +179,9 @@ pub(super) fn validate_preflight_rejecting_case(
                 .to_string(),
         );
     }
-    if let Ok(unexpected_digest) = validate_accepting_case(case_object) {
+    if let Ok(unexpected_hash) = validate_accepting_case(case_object) {
         return Err(format!(
-            "encoded relation backend preflight reject vector unexpectedly validated with digest {unexpected_digest}"
+            "encoded relation backend preflight reject vector unexpectedly validated with hash {unexpected_hash}"
         ));
     }
 
@@ -235,7 +235,7 @@ pub(super) fn validate_full_statement(statement: &Value) -> Result<String, Strin
     let variables = array_property(statement_object, "variables")?;
     let bounds = array_property(statement_object, "bounds")?;
     let backend_statement = object_property(statement_object, "backendStatement")?;
-    let relation_statement_digest = string_property(statement_object, "relationStatementDigest")?;
+    let relation_statement_hash = string_property(statement_object, "relationStatementHash")?;
 
     validate_statement_dimensions(EncodedRelationDimensions {
         option_count,
@@ -273,23 +273,23 @@ pub(super) fn validate_full_statement(statement: &Value) -> Result<String, Strin
         },
     )?;
     let statement_payload =
-        encoded_relation_value_without_field(statement, "relationStatementDigest")?;
-    let expected_digest = derive_protocol_digest(
-        "ChallengeDomainDigest",
+        encoded_relation_value_without_field(statement, "relationStatementHash")?;
+    let expected_hash = derive_protocol_hash(
+        "ChallengeDomainHash",
         &json!({
-            "purpose": RELATION_STATEMENT_DIGEST_PURPOSE,
+            "purpose": RELATION_STATEMENT_HASH_PURPOSE,
             "statementPayload": statement_payload,
         }),
     )
-    .map_err(|error| format!("encoded relation digest could not be recomputed: {error}"))?;
+    .map_err(|error| format!("encoded relation hash could not be recomputed: {error}"))?;
 
-    if expected_digest != relation_statement_digest {
+    if expected_hash != relation_statement_hash {
         return Err(
-            "encoded relation statement digest does not match its canonical payload".to_string(),
+            "encoded relation statement hash does not match its canonical payload".to_string(),
         );
     }
 
-    Ok(relation_statement_digest)
+    Ok(relation_statement_hash)
 }
 
 pub(super) fn validate_statement_summary(
@@ -310,13 +310,13 @@ pub(super) fn validate_statement_summary(
     let bound_count = u64_property(summary_object, "boundCount")?;
     let backend_column_count = u64_property(summary_object, "backendColumnCount")?;
     let backend_explicit_row_count = u64_property(summary_object, "backendExplicitRowCount")?;
-    let backend_digest_expanded_row_count =
-        u64_property(summary_object, "backendDigestExpandedRowCount")?;
+    let backend_hash_expanded_row_count =
+        u64_property(summary_object, "backendHashExpandedRowCount")?;
     let backend_proof_component_count = u64_property(summary_object, "backendProofComponentCount")?;
     let backend_row_count = u64_property(summary_object, "backendRowCount")?;
     let backend_row_batch_count = u64_property(summary_object, "backendRowBatchCount")?;
-    let relation_statement_digest = string_property(summary_object, "relationStatementDigest")?;
-    let backend_statement_digest = string_property(summary_object, "backendStatementDigest")?;
+    let relation_statement_hash = string_property(summary_object, "relationStatementHash")?;
+    let backend_statement_hash = string_property(summary_object, "backendStatementHash")?;
     let first_linear_row = object_property(summary_object, "firstLinearRow")?;
     let last_linear_row = object_property(summary_object, "lastLinearRow")?;
     let first_algebraic_row = object_property(summary_object, "firstAlgebraicRow")?;
@@ -361,7 +361,7 @@ pub(super) fn validate_statement_summary(
     }
     validate_backend_summary_counts(BackendSummaryCounts {
         backend_column_count,
-        backend_digest_expanded_row_count,
+        backend_hash_expanded_row_count,
         backend_explicit_row_count,
         backend_proof_component_count,
         backend_row_batch_count,
@@ -380,15 +380,13 @@ pub(super) fn validate_statement_summary(
     })?;
     let last_backend_batch_kind = string_property(last_backend_row_batch, "batchKind")?;
     let last_backend_row_kind = string_property(last_backend_row_batch, "rowKind")?;
-    let receiver_key_backend_batch_is_digest_expanded = last_backend_batch_kind
-        == "DigestExpandedRows"
+    let receiver_key_backend_batch_is_hash_expanded = last_backend_batch_kind == "HashExpandedRows"
         && last_backend_row_kind == "ReceiverKeyBinding";
     let receiver_key_backend_batch_is_explicit = last_backend_batch_kind == "ExplicitSparseRows"
         && last_backend_row_kind == "ReceiverKeyBindingRows";
     if string_property(first_backend_row_batch, "batchKind")? != "ExplicitSparseRows"
         || string_property(first_backend_row_batch, "rowKind")? != "EncodedScoreFieldRows"
-        || !(receiver_key_backend_batch_is_digest_expanded
-            || receiver_key_backend_batch_is_explicit)
+        || !(receiver_key_backend_batch_is_hash_expanded || receiver_key_backend_batch_is_explicit)
     {
         return Err(
             "encoded relation summary backend row-batch sentinels are not canonical".to_string(),
@@ -400,17 +398,17 @@ pub(super) fn validate_statement_summary(
         || string_property(last_proof_component, "componentId")? != "receiver-key-binding-component"
         || !matches!(
             last_proof_component_status.as_str(),
-            "digestExpandedRowsPending" | "explicitRowsAvailable"
+            "HashExpandedRowsPending" | "explicitRowsAvailable"
         )
     {
         return Err(
             "encoded relation summary proof-component sentinels are not canonical".to_string(),
         );
     }
-    validate_digest_string(&backend_statement_digest)?;
-    validate_digest_string(&relation_statement_digest)?;
+    validate_hash_string(&backend_statement_hash)?;
+    validate_hash_string(&relation_statement_hash)?;
 
-    Ok(relation_statement_digest)
+    Ok(relation_statement_hash)
 }
 
 pub(super) fn validate_component_projection_summaries(
@@ -472,9 +470,9 @@ pub(super) fn validate_component_projection_summaries(
         let ring_degree = u64_property(summary_object, "ringDegree")?;
         let witness_l2_bound_squared = string_property(summary_object, "witnessL2BoundSquared")?;
         let parameter_profile_id = string_property(summary_object, "parameterProfileId")?;
-        let linear_statement_digest = string_property(summary_object, "linearStatementDigest")?;
-        let matrix_digest = string_property(summary_object, "matrixDigest")?;
-        let target_vector_digest = string_property(summary_object, "targetVectorDigest")?;
+        let linear_statement_hash = string_property(summary_object, "linearStatementHash")?;
+        let matrix_hash = string_property(summary_object, "matrixHash")?;
+        let target_vector_hash = string_property(summary_object, "targetVectorHash")?;
 
         if component_id != expected_summary.0
             || coefficient_modulus != expected_summary.1
@@ -517,9 +515,9 @@ pub(super) fn validate_component_projection_summaries(
         if ring_degree == 0 || ring_degree & (ring_degree - 1) != 0 {
             return Err("encoded relation component projection ring degree is invalid".to_string());
         }
-        validate_digest_string(&linear_statement_digest)?;
-        validate_digest_string(&matrix_digest)?;
-        validate_digest_string(&target_vector_digest)?;
+        validate_hash_string(&linear_statement_hash)?;
+        validate_hash_string(&matrix_hash)?;
+        validate_hash_string(&target_vector_hash)?;
     }
 
     Ok(())

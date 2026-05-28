@@ -1,127 +1,31 @@
 import { currentRecoveryEpochMap } from './fixtures.js';
 import {
-    lowerHexDigest,
+    assertFailure,
+    expectedVerifierFailure,
+    type FailureExpectation,
+} from './negative-check-assertions.js';
+import {
+    lowerHexHash,
     type ContributionBuild,
     type NegativeCheck,
     type TranscriptCoreKernel,
     type Variant,
 } from './shared.js';
 
-import {
-    canonicalJson,
-    deriveProtocolDigest,
-} from '#packages/crypto/src/index';
+import { canonicalJson, deriveProtocolHash } from '#packages/crypto/src/index';
 import { selectFirstValidAggregateContributions } from '#packages/protocol/src/ballot-privacy/index';
 import type {
     AggregateContribution,
-    ProtocolDigest,
+    ProtocolHash,
 } from '#packages/types/src/index';
 
-type FailureExpectation = {
-    readonly description: string;
-    readonly pattern: RegExp;
-};
+export { runSelectionNegativeChecks } from './selection-negative-checks.js';
 
 type CheapNegativeCase = readonly [
     check: string,
     expectation: FailureExpectation,
     action: () => unknown,
 ];
-
-const expectedVerifierFailure = (
-    description: string,
-    pattern: RegExp,
-): FailureExpectation => ({
-    description,
-    pattern,
-});
-
-const verifierFailureDiagnostics = (failure: {
-    readonly refusedObjects?: unknown;
-    readonly statusLabels?: unknown;
-    readonly unresolvedReason?: unknown;
-}): readonly string[] => {
-    const diagnostics: string[] = [];
-    if (typeof failure.unresolvedReason === 'string') {
-        diagnostics.push(failure.unresolvedReason);
-    }
-    if (Array.isArray(failure.statusLabels)) {
-        diagnostics.push(
-            ...failure.statusLabels.flatMap((statusLabel) =>
-                typeof statusLabel === 'string' ? [statusLabel] : [],
-            ),
-        );
-    }
-    if (Array.isArray(failure.refusedObjects)) {
-        for (const refusedObject of failure.refusedObjects) {
-            if (typeof refusedObject === 'string') {
-                diagnostics.push(refusedObject);
-            } else if (
-                typeof refusedObject === 'object' &&
-                refusedObject !== null
-            ) {
-                const refusal = refusedObject as {
-                    readonly code?: unknown;
-                    readonly message?: unknown;
-                    readonly object?: unknown;
-                    readonly path?: unknown;
-                };
-                for (const value of [
-                    refusal.code,
-                    refusal.message,
-                    refusal.object,
-                    refusal.path,
-                ]) {
-                    if (typeof value === 'string') {
-                        diagnostics.push(value);
-                    }
-                }
-            }
-        }
-    }
-
-    return diagnostics;
-};
-
-const assertFailure = (
-    action: () => unknown,
-    expectation: FailureExpectation,
-): string | null => {
-    try {
-        const result = action();
-        if (
-            typeof result === 'object' &&
-            result !== null &&
-            'ok' in result &&
-            (result as { readonly ok?: unknown }).ok === false
-        ) {
-            const failure = result as {
-                readonly refusedObjects?: unknown;
-                readonly statusLabels?: unknown;
-                readonly unresolvedReason?: unknown;
-            };
-            const diagnostics = verifierFailureDiagnostics(failure);
-            if (diagnostics.length === 0) {
-                return 'mutation returned ok:false without verifier refusal metadata';
-            }
-            if (
-                diagnostics.some((diagnostic) =>
-                    expectation.pattern.test(diagnostic),
-                )
-            ) {
-                return null;
-            }
-
-            return `mutation failed with unexpected verifier diagnostic for ${expectation.description}: ${diagnostics.join(' | ')}`;
-        }
-
-        return 'mutation unexpectedly passed';
-    } catch (error) {
-        return `mutation threw a harness exception: ${
-            error instanceof Error ? error.message : String(error)
-        }`;
-    }
-};
 
 const mutateLastHexDigit = (value: unknown): string => {
     const hex = String(value);
@@ -297,69 +201,68 @@ const mutateFirstSignedI256ResponseOutOfBound = (value: unknown): string => {
     return `${outOfBoundSignedI256SharedWitnessResponseHex}${hex.slice(64)}`;
 };
 
-const bridgeSharedWitnessProofDigest = (
+const bridgeSharedWitnessProofHash = (
     bridgeSharedWitnessProof: unknown,
-): ProtocolDigest =>
-    deriveProtocolDigest('BridgeProofRecordDigest', {
+): ProtocolHash =>
+    deriveProtocolHash('BridgeProofRecordHash', {
         bridgeSharedWitnessProof,
-        purpose:
-            'sealed-lattice-aggregate-bridge-shared-witness-proof-digest-v1',
+        purpose: 'sealed-lattice-aggregate-bridge-shared-witness-proof-hash-v1',
     });
 
-const bgvRandomnessBoundProofStatusDigest = (
+const bgvRandomnessBoundProofStatusHash = (
     bgvRandomnessBoundProofStatusEvidence: unknown,
-): ProtocolDigest =>
-    deriveProtocolDigest('BridgeProofRecordDigest', {
+): ProtocolHash =>
+    deriveProtocolHash('BridgeProofRecordHash', {
         bgvRandomnessBoundProofStatusEvidence,
         purpose:
             'sealed-lattice-aggregate-bridge-bgv-randomness-bound-status-v1',
     });
 
-const bgvRandomnessBoundCommitmentDigest = (
+const bgvRandomnessBoundCommitmentHash = (
     bgvRandomnessBoundCommitment: unknown,
-): ProtocolDigest =>
-    deriveProtocolDigest('BridgeProofRecordDigest', {
+): ProtocolHash =>
+    deriveProtocolHash('BridgeProofRecordHash', {
         bgvRandomnessBoundCommitment,
         purpose:
             'sealed-lattice-aggregate-bridge-bgv-randomness-bound-commitment-v1',
     });
 
-const sharedWitnessZeroKnowledgeStatusDigest = (
+const sharedWitnessZeroKnowledgeStatusHash = (
     sharedWitnessZeroKnowledgeStatusEvidence: unknown,
-): ProtocolDigest =>
-    deriveProtocolDigest('BridgeProofRecordDigest', {
+): ProtocolHash =>
+    deriveProtocolHash('BridgeProofRecordHash', {
         sharedWitnessZeroKnowledgeStatusEvidence,
         purpose:
             'sealed-lattice-aggregate-bridge-shared-witness-zero-knowledge-status-v1',
     });
 
-const setupPackageWithCanonicalDigest = (
+const setupPackageWithCanonicalHash = (
     setupPackage: Record<string, unknown>,
 ): Record<string, unknown> => {
-    const digestInput = structuredClone(setupPackage);
-    delete digestInput.setupPackageDigest;
+    const hashInput = structuredClone(setupPackage);
+    delete hashInput.setupPackageHash;
 
     return {
         ...setupPackage,
-        setupPackageDigest: deriveProtocolDigest(
-            'BGVPassiveSetupPackageDigest',
-            digestInput,
+        setupPackageHash: deriveProtocolHash(
+            'BGVPassiveSetupPackageHash',
+            hashInput,
         ),
     };
 };
 
-const refreshBridgeProofSubproofDigests = (
+const refreshBridgeProofSubproofHashes = (
     proof: Record<string, unknown>,
 ): void => {
     if (
         typeof proof.bridgeSharedWitnessProof === 'object' &&
         proof.bridgeSharedWitnessProof !== null
     ) {
-        proof.bridgeSharedWitnessProofDigest = bridgeSharedWitnessProofDigest(
+        proof.bridgeSharedWitnessProofHash = bridgeSharedWitnessProofHash(
             proof.bridgeSharedWitnessProof,
         );
     }
-    if (typeof proof.bridgeSharedWitnessProofDigest === 'string') {
+    if (typeof proof.bridgeSharedWitnessProofHash === 'string') {
         if (
             typeof proof.sharedWitnessZeroKnowledgeStatusEvidence ===
                 'object' &&
@@ -370,8 +273,7 @@ const refreshBridgeProofSubproofDigests = (
                     string,
                     unknown
                 >
-            ).bridgeSharedWitnessProofDigest =
-                proof.bridgeSharedWitnessProofDigest;
+            ).bridgeSharedWitnessProofHash = proof.bridgeSharedWitnessProofHash;
         }
         if (
             typeof proof.bgvRandomnessBoundProofStatusEvidence === 'object' &&
@@ -382,16 +284,15 @@ const refreshBridgeProofSubproofDigests = (
                     string,
                     unknown
                 >
-            ).bridgeSharedWitnessProofDigest =
-                proof.bridgeSharedWitnessProofDigest;
+            ).bridgeSharedWitnessProofHash = proof.bridgeSharedWitnessProofHash;
         }
     }
     if (
         typeof proof.sharedWitnessZeroKnowledgeStatusEvidence === 'object' &&
         proof.sharedWitnessZeroKnowledgeStatusEvidence !== null
     ) {
-        proof.sharedWitnessZeroKnowledgeStatusDigest =
-            sharedWitnessZeroKnowledgeStatusDigest(
+        proof.sharedWitnessZeroKnowledgeStatusHash =
+            sharedWitnessZeroKnowledgeStatusHash(
                 proof.sharedWitnessZeroKnowledgeStatusEvidence,
             );
     }
@@ -399,8 +300,8 @@ const refreshBridgeProofSubproofDigests = (
         typeof proof.bgvRandomnessBoundProofStatusEvidence === 'object' &&
         proof.bgvRandomnessBoundProofStatusEvidence !== null
     ) {
-        proof.bgvRandomnessBoundProofStatusDigest =
-            bgvRandomnessBoundProofStatusDigest(
+        proof.bgvRandomnessBoundProofStatusHash =
+            bgvRandomnessBoundProofStatusHash(
                 proof.bgvRandomnessBoundProofStatusEvidence,
             );
     }
@@ -417,12 +318,12 @@ const bridgeWithMutatedProof = (
         ).toString('utf8'),
     ) as Record<string, unknown>;
     proofMutator(proof);
-    refreshBridgeProofSubproofDigests(proof);
+    refreshBridgeProofSubproofHashes(proof);
     const bridgeProofBytesHex = Buffer.from(
         canonicalJson(proof),
         'utf8',
     ).toString('hex');
-    const bridgeProofBytesDigest = deriveProtocolDigest('ProofBytesDigest', {
+    const bridgeProofBytesHash = deriveProtocolHash('ProofBytesHash', {
         proofBytesHex: bridgeProofBytesHex,
         purpose: 'sealed-lattice-aggregate-bridge-encryption-proof-bytes-v1',
     });
@@ -430,66 +331,65 @@ const bridgeWithMutatedProof = (
     return {
         ...bridgeEncryption,
         bridgeProofBytesHex,
-        bridgeProofBytesDigest,
-        ...(typeof proof.bridgeSharedWitnessProofDigest === 'string'
+        bridgeProofBytesHash,
+        ...(typeof proof.bridgeSharedWitnessProofHash === 'string'
             ? {
-                  bridgeSharedWitnessProofDigest:
-                      proof.bridgeSharedWitnessProofDigest,
+                  bridgeSharedWitnessProofHash:
+                      proof.bridgeSharedWitnessProofHash,
               }
             : {}),
-        ...(typeof proof.sharedWitnessZeroKnowledgeStatusDigest === 'string'
+        ...(typeof proof.sharedWitnessZeroKnowledgeStatusHash === 'string'
             ? {
-                  sharedWitnessZeroKnowledgeStatusDigest:
-                      proof.sharedWitnessZeroKnowledgeStatusDigest,
+                  sharedWitnessZeroKnowledgeStatusHash:
+                      proof.sharedWitnessZeroKnowledgeStatusHash,
               }
             : {}),
-        ...(typeof proof.bgvRandomnessBoundProofStatusDigest === 'string'
+        ...(typeof proof.bgvRandomnessBoundProofStatusHash === 'string'
             ? {
-                  bgvRandomnessBoundProofStatusDigest:
-                      proof.bgvRandomnessBoundProofStatusDigest,
+                  bgvRandomnessBoundProofStatusHash:
+                      proof.bgvRandomnessBoundProofStatusHash,
               }
             : {}),
-        bridgeProofRoot: deriveProtocolDigest('BridgeProofRecordDigest', {
-            aggregateDerivationComponentDigest:
-                bridgeEncryption.aggregateDerivationComponentDigest,
-            aggregateDerivationStatementDigest:
-                bridgeEncryption.aggregateDerivationStatementDigest,
+        bridgeProofRoot: deriveProtocolHash('BridgeProofRecordHash', {
+            aggregateDerivationComponentHash:
+                bridgeEncryption.aggregateDerivationComponentHash,
+            aggregateDerivationStatementHash:
+                bridgeEncryption.aggregateDerivationStatementHash,
             bgvPublicKeyRoot: bridgeEncryption.bgvPublicKeyRoot,
-            bridgeProofProfileDigest: bridgeEncryption.bridgeProofProfileDigest,
-            bridgeProofStatementDigest:
-                bridgeEncryption.bridgeProofStatementDigest,
+            bridgeProofProfileHash: bridgeEncryption.bridgeProofProfileHash,
+            bridgeProofStatementHash: bridgeEncryption.bridgeProofStatementHash,
             collectivePublicKeyRoot: bridgeEncryption.collectivePublicKeyRoot,
             encryptedAggregateShareCiphertextRoot:
                 bridgeEncryption.encryptedAggregateShareCiphertextRoot,
-            ...(typeof proof.bridgeSharedWitnessProofDigest === 'string'
+            ...(typeof proof.bridgeSharedWitnessProofHash === 'string'
                 ? {
-                      bridgeSharedWitnessProofDigest:
-                          proof.bridgeSharedWitnessProofDigest,
+                      bridgeSharedWitnessProofHash:
+                          proof.bridgeSharedWitnessProofHash,
                   }
                 : {}),
-            ...(typeof proof.sharedWitnessZeroKnowledgeStatusDigest === 'string'
+            ...(typeof proof.sharedWitnessZeroKnowledgeStatusHash === 'string'
                 ? {
-                      sharedWitnessZeroKnowledgeStatusDigest:
-                          proof.sharedWitnessZeroKnowledgeStatusDigest,
+                      sharedWitnessZeroKnowledgeStatusHash:
+                          proof.sharedWitnessZeroKnowledgeStatusHash,
                   }
                 : {}),
-            ...(typeof proof.bgvRandomnessBoundProofStatusDigest === 'string'
+            ...(typeof proof.bgvRandomnessBoundProofStatusHash === 'string'
                 ? {
-                      bgvRandomnessBoundProofStatusDigest:
-                          proof.bgvRandomnessBoundProofStatusDigest,
+                      bgvRandomnessBoundProofStatusHash:
+                          proof.bgvRandomnessBoundProofStatusHash,
                   }
                 : {}),
-            proofBytesDigest: bridgeProofBytesDigest,
+            proofBytesHash: bridgeProofBytesHash,
             purpose: 'sealed-lattice-aggregate-bridge-encryption-proof-root-v1',
         }),
     };
 };
 
 export const runCheapNegativeChecks = (input: {
-    readonly aggregateSelectionPolicyDigest: ProtocolDigest;
-    readonly bridgeWitnessPrivacyProfileDigest: ProtocolDigest;
+    readonly aggregateSelectionPolicyHash: ProtocolHash;
+    readonly bridgeWitnessPrivacyProfileHash: ProtocolHash;
     readonly contribution: ContributionBuild;
-    readonly heParamDigest: ProtocolDigest;
+    readonly heParamHash: ProtocolHash;
     readonly kernel: TranscriptCoreKernel;
     readonly setupPackage: Record<string, unknown>;
     readonly variant: Variant;
@@ -503,15 +403,15 @@ export const runCheapNegativeChecks = (input: {
         aggregateDerivationComponent: unknown,
         bridgeEncryption: unknown,
         setupPackage: unknown,
-        aggregateSelectionPolicyDigest = input.aggregateSelectionPolicyDigest,
+        aggregateSelectionPolicyHash = input.aggregateSelectionPolicyHash,
     ): unknown =>
         input.kernel.verifyAggregateBridgeEncryption({
             aggregateDerivationComponent,
-            aggregateSelectionPolicyDigest,
+            aggregateSelectionPolicyHash,
             bridgeEncryption,
-            bridgeWitnessPrivacyProfileDigest:
-                input.bridgeWitnessPrivacyProfileDigest,
-            heParamDigest: input.heParamDigest,
+            bridgeWitnessPrivacyProfileHash:
+                input.bridgeWitnessPrivacyProfileHash,
+            heParamHash: input.heParamHash,
             setupPackage,
         });
     const component = input.contribution.aggregateDerivationComponent;
@@ -586,14 +486,14 @@ export const runCheapNegativeChecks = (input: {
                 verifyBridge(
                     component,
                     bridgeEncryption,
-                    setupPackageWithCanonicalDigest({
+                    setupPackageWithCanonicalHash({
                         ...input.setupPackage,
                         setupInputs: {
                             ...(input.setupPackage.setupInputs as Record<
                                 string,
                                 unknown
                             >),
-                            thresholdProfileDigest: lowerHexDigest(
+                            thresholdProfileHash: lowerHexHash(
                                 'wrong-threshold-profile',
                             ),
                         },
@@ -624,15 +524,15 @@ export const runCheapNegativeChecks = (input: {
         [
             'wrong BGV profile hash',
             expectedVerifierFailure(
-                'BGV profile digest binding',
-                /BGV profile|profile digest|canonical binding/iu,
+                'BGV profile hash binding',
+                /BGV profile|profile hash|canonical binding/iu,
             ),
             () =>
                 verifyBridge(
                     component,
                     {
                         ...bridgeEncryption,
-                        profileDigest: lowerHexDigest('wrong-bgv-profile'),
+                        profileHash: lowerHexHash('wrong-bgv-profile'),
                     },
                     input.setupPackage,
                 ),
@@ -640,7 +540,7 @@ export const runCheapNegativeChecks = (input: {
         [
             'wrong BGV backend profile hash',
             expectedVerifierFailure(
-                'BGV backend profile digest binding',
+                'BGV backend profile hash binding',
                 /BGV backend profile|backend profile|canonical binding/iu,
             ),
             () =>
@@ -648,7 +548,7 @@ export const runCheapNegativeChecks = (input: {
                     component,
                     {
                         ...bridgeEncryption,
-                        rustBgvBackendProfileDigest: lowerHexDigest(
+                        rustBgvBackendProfileHash: lowerHexHash(
                             'wrong-bgv-backend-profile',
                         ),
                     },
@@ -666,7 +566,7 @@ export const runCheapNegativeChecks = (input: {
                     component,
                     {
                         ...bridgeEncryption,
-                        bgvPublicKeyRoot: lowerHexDigest('wrong-bgv-key'),
+                        bgvPublicKeyRoot: lowerHexHash('wrong-bgv-key'),
                     },
                     input.setupPackage,
                 ),
@@ -681,15 +581,15 @@ export const runCheapNegativeChecks = (input: {
                 verifyBridge(
                     component,
                     bridgeEncryption,
-                    setupPackageWithCanonicalDigest({
+                    setupPackageWithCanonicalHash({
                         ...input.setupPackage,
                         profileBindings: {
                             ...(input.setupPackage.profileBindings as Record<
                                 string,
                                 unknown
                             >),
-                            encryptedAggregateInputLayoutDigest:
-                                lowerHexDigest('wrong-layout'),
+                            encryptedAggregateInputLayoutHash:
+                                lowerHexHash('wrong-layout'),
                         },
                     }),
                 ),
@@ -706,7 +606,7 @@ export const runCheapNegativeChecks = (input: {
                         ...component,
                         statement: {
                             ...component.statement,
-                            encodedShareVectorLayoutDigest: lowerHexDigest(
+                            encodedShareVectorLayoutHash: lowerHexHash(
                                 'scalar-only-encoded-share-layout',
                             ),
                         },
@@ -725,14 +625,14 @@ export const runCheapNegativeChecks = (input: {
                 verifyBridge(
                     component,
                     bridgeEncryption,
-                    setupPackageWithCanonicalDigest({
+                    setupPackageWithCanonicalHash({
                         ...input.setupPackage,
                         profileBindings: {
                             ...(input.setupPackage.profileBindings as Record<
                                 string,
                                 unknown
                             >),
-                            ballotScoreEncodingProfileDigest: lowerHexDigest(
+                            ballotScoreEncodingProfileHash: lowerHexHash(
                                 'permuted-one-hot-score-buckets',
                             ),
                         },
@@ -749,14 +649,14 @@ export const runCheapNegativeChecks = (input: {
                 verifyBridge(
                     component,
                     bridgeEncryption,
-                    setupPackageWithCanonicalDigest({
+                    setupPackageWithCanonicalHash({
                         ...input.setupPackage,
                         profileBindings: {
                             ...(input.setupPackage.profileBindings as Record<
                                 string,
                                 unknown
                             >),
-                            encodedAggregateLayoutDigest: lowerHexDigest(
+                            encodedAggregateLayoutHash: lowerHexHash(
                                 'missing-score-bucket-aggregate-layout',
                             ),
                         },
@@ -773,14 +673,14 @@ export const runCheapNegativeChecks = (input: {
                 verifyBridge(
                     component,
                     bridgeEncryption,
-                    setupPackageWithCanonicalDigest({
+                    setupPackageWithCanonicalHash({
                         ...input.setupPackage,
                         profileBindings: {
                             ...(input.setupPackage.profileBindings as Record<
                                 string,
                                 unknown
                             >),
-                            topKEvaluatorInputLayoutDigest: lowerHexDigest(
+                            topKEvaluatorInputLayoutHash: lowerHexHash(
                                 'wrong-top-k-evaluator-input-layout',
                             ),
                         },
@@ -798,7 +698,7 @@ export const runCheapNegativeChecks = (input: {
                     component,
                     {
                         ...bridgeEncryption,
-                        encryptedAggregateInputRoot: lowerHexDigest(
+                        encryptedAggregateInputRoot: lowerHexHash(
                             'wrong-encrypted-aggregate-input-root',
                         ),
                     },
@@ -815,17 +715,16 @@ export const runCheapNegativeChecks = (input: {
                 verifyBridge(
                     component,
                     bridgeEncryption,
-                    setupPackageWithCanonicalDigest({
+                    setupPackageWithCanonicalHash({
                         ...input.setupPackage,
                         profileBindings: {
                             ...(input.setupPackage.profileBindings as Record<
                                 string,
                                 unknown
                             >),
-                            encryptedAggregateReconstructionDigest:
-                                lowerHexDigest(
-                                    'wrong-encrypted-aggregate-reconstruction',
-                                ),
+                            encryptedAggregateReconstructionHash: lowerHexHash(
+                                'wrong-encrypted-aggregate-reconstruction',
+                            ),
                         },
                     }),
                 ),
@@ -842,8 +741,8 @@ export const runCheapNegativeChecks = (input: {
                         ...component,
                         statement: {
                             ...component.statement,
-                            votingClosedBoardHeadDigest:
-                                lowerHexDigest('wrong-board-head'),
+                            votingClosedBoardHeadHash:
+                                lowerHexHash('wrong-board-head'),
                         },
                     },
                     bridgeEncryption,
@@ -862,7 +761,7 @@ export const runCheapNegativeChecks = (input: {
                         ...component,
                         statement: {
                             ...component.statement,
-                            ballotSetDigest: lowerHexDigest('wrong-ballot-set'),
+                            ballotSetHash: lowerHexHash('wrong-ballot-set'),
                         },
                     },
                     bridgeEncryption,
@@ -892,10 +791,10 @@ export const runCheapNegativeChecks = (input: {
                     currentRecoveryEpochMap: currentRecoveryEpochMap([
                         pendingContribution,
                     ]),
-                    expectedAggregateSelectionPolicyDigest:
-                        input.aggregateSelectionPolicyDigest,
-                    requiredPostVotingClosedContextDigest:
-                        pendingContribution.postVotingClosedContextDigest,
+                    expectedAggregateSelectionPolicyHash:
+                        input.aggregateSelectionPolicyHash,
+                    requiredPostVotingClosedContextHash:
+                        pendingContribution.postVotingClosedContextHash,
                 });
             },
         ],
@@ -963,10 +862,10 @@ export const runCheapNegativeChecks = (input: {
 };
 
 export const runSentinelNegativeChecks = (input: {
-    readonly aggregateSelectionPolicyDigest: ProtocolDigest;
-    readonly bridgeWitnessPrivacyProfileDigest: ProtocolDigest;
+    readonly aggregateSelectionPolicyHash: ProtocolHash;
+    readonly bridgeWitnessPrivacyProfileHash: ProtocolHash;
     readonly contribution: ContributionBuild;
-    readonly heParamDigest: ProtocolDigest;
+    readonly heParamHash: ProtocolHash;
     readonly kernel: TranscriptCoreKernel;
     readonly setupPackage: Record<string, unknown>;
     readonly variant: Variant;
@@ -990,12 +889,12 @@ export const runSentinelNegativeChecks = (input: {
                 input.kernel.verifyAggregateBridgeEncryption({
                     aggregateDerivationComponent:
                         input.contribution.aggregateDerivationComponent,
-                    aggregateSelectionPolicyDigest:
-                        input.aggregateSelectionPolicyDigest,
+                    aggregateSelectionPolicyHash:
+                        input.aggregateSelectionPolicyHash,
                     bridgeEncryption: mutatedBridge,
-                    bridgeWitnessPrivacyProfileDigest:
-                        input.bridgeWitnessPrivacyProfileDigest,
-                    heParamDigest: input.heParamDigest,
+                    bridgeWitnessPrivacyProfileHash:
+                        input.bridgeWitnessPrivacyProfileHash,
+                    heParamHash: input.heParamHash,
                     setupPackage: input.setupPackage,
                 }),
             expectation,
@@ -1023,14 +922,14 @@ export const runSentinelNegativeChecks = (input: {
                     aggregateDerivationComponent:
                         mutation.aggregateDerivationComponent ??
                         input.contribution.aggregateDerivationComponent,
-                    aggregateSelectionPolicyDigest:
-                        input.aggregateSelectionPolicyDigest,
+                    aggregateSelectionPolicyHash:
+                        input.aggregateSelectionPolicyHash,
                     bridgeEncryption:
                         mutation.bridgeEncryption ??
                         input.contribution.bridgeEncryption,
-                    bridgeWitnessPrivacyProfileDigest:
-                        input.bridgeWitnessPrivacyProfileDigest,
-                    heParamDigest: input.heParamDigest,
+                    bridgeWitnessPrivacyProfileHash:
+                        input.bridgeWitnessPrivacyProfileHash,
+                    heParamHash: input.heParamHash,
                     setupPackage: mutation.setupPackage ?? input.setupPackage,
                 }),
             expectation,
@@ -1070,8 +969,8 @@ export const runSentinelNegativeChecks = (input: {
         const firstCommitment = randomizerCommitmentsByModulus[0][0];
         randomizerCommitmentsByModulus[0][0] =
             (firstCommitment + 1) % firstModulus;
-        firstCheck.bgvRandomnessBoundCommitmentDigest =
-            bgvRandomnessBoundCommitmentDigest(bgvRandomnessBoundCommitment);
+        firstCheck.bgvRandomnessBoundCommitmentHash =
+            bgvRandomnessBoundCommitmentHash(bgvRandomnessBoundCommitment);
     };
     const checks = [
         verifyMutatedProof(
@@ -1145,7 +1044,7 @@ export const runSentinelNegativeChecks = (input: {
         verifyMutatedProof(
             'wrong slot layout',
             expectedVerifierFailure(
-                'bridge layout digest binding',
+                'bridge layout hash binding',
                 /layout|statement|shared-witness|bridge proof/iu,
             ),
             (proof) => {
@@ -1153,8 +1052,7 @@ export const runSentinelNegativeChecks = (input: {
                     string,
                     unknown
                 >;
-                statement.bridgeLayoutDigest =
-                    lowerHexDigest('wrong-slot-layout');
+                statement.bridgeLayoutHash = lowerHexHash('wrong-slot-layout');
             },
         ),
         verifyMutatedProof(
@@ -1172,7 +1070,7 @@ export const runSentinelNegativeChecks = (input: {
                 /plaintext|BGV|bridge proof|shared-witness/iu,
             ),
             (proof) => {
-                proof.plaintextRoot = lowerHexDigest(
+                proof.plaintextRoot = lowerHexHash(
                     'wrong-plaintext-polynomial',
                 );
             },
@@ -1181,7 +1079,7 @@ export const runSentinelNegativeChecks = (input: {
             'wrong RNS limb',
             expectedVerifierFailure(
                 'bridge encryption canonical bytes',
-                /canonical|RNS|ciphertext|bridge encryption|digest/iu,
+                /canonical|RNS|ciphertext|bridge encryption|hash/iu,
             ),
             {
                 bridgeEncryption: {
@@ -1196,14 +1094,12 @@ export const runSentinelNegativeChecks = (input: {
             'wrong ciphertext component',
             expectedVerifierFailure(
                 'BGV ciphertext root binding',
-                /ciphertext|BGV|bridge encryption|digest/iu,
+                /ciphertext|BGV|bridge encryption|hash/iu,
             ),
             {
                 bridgeEncryption: {
                     ...input.contribution.bridgeEncryption,
-                    ciphertextRoot: lowerHexDigest(
-                        'wrong-ciphertext-component',
-                    ),
+                    ciphertextRoot: lowerHexHash('wrong-ciphertext-component'),
                 },
             },
         ),
@@ -1224,17 +1120,17 @@ export const runSentinelNegativeChecks = (input: {
             mutateSharedWitnessResponse('boundedPerturbationZeroResponseHex'),
         ),
         verifyMutatedProof(
-            'wrong BGV boundedness commitment digest',
+            'wrong BGV boundedness commitment hash',
             expectedVerifierFailure(
-                'BGV boundedness commitment digest',
-                /BGV|boundedness|commitment|digest/iu,
+                'BGV boundedness commitment hash',
+                /BGV|boundedness|commitment|hash/iu,
             ),
             (proof) => {
                 const sharedProof = proof.bridgeSharedWitnessProof as {
                     readonly checks: Record<string, unknown>[];
                 };
-                sharedProof.checks[0].bgvRandomnessBoundCommitmentDigest =
-                    lowerHexDigest('wrong-bgv-boundedness-commitment-digest');
+                sharedProof.checks[0].bgvRandomnessBoundCommitmentHash =
+                    lowerHexHash('wrong-bgv-boundedness-commitment-hash');
             },
         ),
         verifyMutatedProof(
@@ -1246,16 +1142,16 @@ export const runSentinelNegativeChecks = (input: {
             mutateFirstBgvBoundExpansionCommitment,
         ),
         verifyMutatedPublicInput(
-            'wrong shared-witness proof digest',
+            'wrong shared-witness proof hash',
             expectedVerifierFailure(
-                'shared-witness proof digest binding',
-                /shared-witness|proof digest|digest/iu,
+                'shared-witness proof hash binding',
+                /shared-witness|proof hash|hash/iu,
             ),
             {
                 bridgeEncryption: {
                     ...input.contribution.bridgeEncryption,
-                    bridgeSharedWitnessProofDigest: lowerHexDigest(
-                        'wrong-shared-witness-proof-digest',
+                    bridgeSharedWitnessProofHash: lowerHexHash(
+                        'wrong-shared-witness-proof-hash',
                     ),
                 },
             },
@@ -1264,7 +1160,7 @@ export const runSentinelNegativeChecks = (input: {
             'wrong shared-witness ZK status evidence',
             expectedVerifierFailure(
                 'shared-witness zero-knowledge status evidence',
-                /zero-knowledge|ZK|status|shared-witness|digest/iu,
+                /zero-knowledge|ZK|status|shared-witness|hash/iu,
             ),
             (proof) => {
                 const statusEvidence =
@@ -1276,16 +1172,16 @@ export const runSentinelNegativeChecks = (input: {
             },
         ),
         verifyMutatedPublicInput(
-            'wrong shared-witness ZK status digest',
+            'wrong shared-witness ZK status hash',
             expectedVerifierFailure(
-                'shared-witness zero-knowledge status digest',
-                /zero-knowledge|ZK|status|shared-witness|digest/iu,
+                'shared-witness zero-knowledge status hash',
+                /zero-knowledge|ZK|status|shared-witness|hash/iu,
             ),
             {
                 bridgeEncryption: {
                     ...input.contribution.bridgeEncryption,
-                    sharedWitnessZeroKnowledgeStatusDigest: lowerHexDigest(
-                        'wrong-shared-witness-zk-status-digest',
+                    sharedWitnessZeroKnowledgeStatusHash: lowerHexHash(
+                        'wrong-shared-witness-zk-status-hash',
                     ),
                 },
             },
@@ -1294,7 +1190,7 @@ export const runSentinelNegativeChecks = (input: {
             'wrong BGV boundedness status evidence',
             expectedVerifierFailure(
                 'BGV boundedness status evidence',
-                /BGV|boundedness|randomness|status|digest/iu,
+                /BGV|boundedness|randomness|status|hash/iu,
             ),
             (proof) => {
                 const statusEvidence =
@@ -1306,16 +1202,16 @@ export const runSentinelNegativeChecks = (input: {
             },
         ),
         verifyMutatedPublicInput(
-            'wrong BGV boundedness status digest',
+            'wrong BGV boundedness status hash',
             expectedVerifierFailure(
-                'BGV boundedness status digest',
-                /BGV|boundedness|randomness|status|digest/iu,
+                'BGV boundedness status hash',
+                /BGV|boundedness|randomness|status|hash/iu,
             ),
             {
                 bridgeEncryption: {
                     ...input.contribution.bridgeEncryption,
-                    bgvRandomnessBoundProofStatusDigest: lowerHexDigest(
-                        'wrong-bgv-boundedness-status-digest',
+                    bgvRandomnessBoundProofStatusHash: lowerHexHash(
+                        'wrong-bgv-boundedness-status-hash',
                     ),
                 },
             },
@@ -1334,7 +1230,7 @@ export const runSentinelNegativeChecks = (input: {
             'wrong collective public key',
             expectedVerifierFailure(
                 'collective public key root binding',
-                /collective public key|setup|root|digest/iu,
+                /collective public key|setup|root|hash/iu,
             ),
             {
                 setupPackage: {
@@ -1344,7 +1240,7 @@ export const runSentinelNegativeChecks = (input: {
                             string,
                             unknown
                         >),
-                        collectivePublicKeyRoot: lowerHexDigest(
+                        collectivePublicKeyRoot: lowerHexHash(
                             'wrong-collective-public-key',
                         ),
                     },
@@ -1355,20 +1251,20 @@ export const runSentinelNegativeChecks = (input: {
             'wrong setup root',
             expectedVerifierFailure(
                 'setup package root binding',
-                /setup|root|digest|package/iu,
+                /setup|root|hash|package/iu,
             ),
             {
                 setupPackage: {
                     ...input.setupPackage,
-                    setupPackageDigest: lowerHexDigest('wrong-setup-package'),
+                    setupPackageHash: lowerHexHash('wrong-setup-package'),
                 },
             },
         ),
         verifyMutatedPublicInput(
             'wrong board context',
             expectedVerifierFailure(
-                'board context digest binding',
-                /board|context|digest|statement/iu,
+                'board context hash binding',
+                /board|context|hash|statement/iu,
             ),
             {
                 aggregateDerivationComponent: {
@@ -1376,7 +1272,7 @@ export const runSentinelNegativeChecks = (input: {
                     statement: {
                         ...input.contribution.aggregateDerivationComponent
                             .statement,
-                        votingClosedBoardHeadDigest: lowerHexDigest(
+                        votingClosedBoardHeadHash: lowerHexHash(
                             'wrong-board-context',
                         ),
                     },
@@ -1386,8 +1282,8 @@ export const runSentinelNegativeChecks = (input: {
         verifyMutatedPublicInput(
             'wrong action context',
             expectedVerifierFailure(
-                'action context digest binding',
-                /action|context|digest|statement/iu,
+                'action context hash binding',
+                /action|context|hash|statement/iu,
             ),
             {
                 aggregateDerivationComponent: {
@@ -1395,7 +1291,7 @@ export const runSentinelNegativeChecks = (input: {
                     statement: {
                         ...input.contribution.aggregateDerivationComponent
                             .statement,
-                        contributorActionContextDigest: lowerHexDigest(
+                        contributorActionContextHash: lowerHexHash(
                             'wrong-action-context',
                         ),
                     },
@@ -1409,7 +1305,7 @@ export const runSentinelNegativeChecks = (input: {
                 /plaintext|aggregate relation|shared-witness|BGV/iu,
             ),
             (proof) => {
-                proof.plaintextRoot = lowerHexDigest('wrong-plaintext-root');
+                proof.plaintextRoot = lowerHexHash('wrong-plaintext-root');
             },
         ),
         verifyMutatedProof(
@@ -1419,7 +1315,7 @@ export const runSentinelNegativeChecks = (input: {
                 /aggregate relation|commitment|shared-witness|BGV/iu,
             ),
             (proof) => {
-                proof.aggregateRelationCommitmentDigest = lowerHexDigest(
+                proof.aggregateRelationCommitmentHash = lowerHexHash(
                     'wrong-aggregate-relation',
                 );
             },
@@ -1449,111 +1345,4 @@ export const runSentinelNegativeChecks = (input: {
     ];
 
     return checks;
-};
-
-export const runSelectionNegativeChecks = (input: {
-    readonly aggregateSelectionPolicyDigest: ProtocolDigest;
-    readonly postVotingClosedContextDigest: ProtocolDigest;
-    readonly selectedContributionRecords: readonly AggregateContribution[];
-    readonly trusteeAggregateThreshold: number;
-    readonly variant: Variant;
-}): readonly NegativeCheck[] => {
-    const remainingContributions = input.selectedContributionRecords.slice(1);
-    const failureReason = assertFailure(
-        () =>
-            selectFirstValidAggregateContributions({
-                aggregateContributionQuorum: input.trusteeAggregateThreshold,
-                contributions: remainingContributions,
-                currentRecoveryEpochMap: currentRecoveryEpochMap(
-                    remainingContributions,
-                ),
-                expectedAggregateSelectionPolicyDigest:
-                    input.aggregateSelectionPolicyDigest,
-                requiredPostVotingClosedContextDigest:
-                    input.postVotingClosedContextDigest,
-            }),
-        expectedVerifierFailure(
-            'selected contribution quorum refusal',
-            /quorum|selected|contribution|valid/iu,
-        ),
-    );
-    const firstContribution = input.selectedContributionRecords[0];
-    const staleRecoveryEpochFailureReason = assertFailure(
-        () =>
-            selectFirstValidAggregateContributions({
-                aggregateContributionQuorum: input.trusteeAggregateThreshold,
-                contributions: input.selectedContributionRecords,
-                currentRecoveryEpochMap: {
-                    ...currentRecoveryEpochMap(
-                        input.selectedContributionRecords,
-                    ),
-                    [firstContribution.contributorIdentity]: {
-                        currentDeviceEpoch: firstContribution.deviceEpoch,
-                        currentRecoveryEpoch:
-                            firstContribution.recoveryEpoch + 1,
-                        signerIdentity: firstContribution.contributorIdentity,
-                    },
-                },
-                expectedAggregateSelectionPolicyDigest:
-                    input.aggregateSelectionPolicyDigest,
-                requiredPostVotingClosedContextDigest:
-                    input.postVotingClosedContextDigest,
-            }),
-        expectedVerifierFailure(
-            'stale recovery epoch refusal',
-            /recovery epoch|stale|epoch|current/iu,
-        ),
-    );
-    const clonedDeviceEpochFailureReason = assertFailure(
-        () =>
-            selectFirstValidAggregateContributions({
-                aggregateContributionQuorum: input.trusteeAggregateThreshold,
-                contributions: input.selectedContributionRecords,
-                currentRecoveryEpochMap: {
-                    ...currentRecoveryEpochMap(
-                        input.selectedContributionRecords,
-                    ),
-                    [firstContribution.contributorIdentity]: {
-                        currentDeviceEpoch: firstContribution.deviceEpoch + 1,
-                        currentRecoveryEpoch: firstContribution.recoveryEpoch,
-                        signerIdentity: firstContribution.contributorIdentity,
-                    },
-                },
-                expectedAggregateSelectionPolicyDigest:
-                    input.aggregateSelectionPolicyDigest,
-                requiredPostVotingClosedContextDigest:
-                    input.postVotingClosedContextDigest,
-            }),
-        expectedVerifierFailure(
-            'cloned device epoch refusal',
-            /device epoch|cloned|epoch|current/iu,
-        ),
-    );
-
-    return [
-        {
-            check: 'wrong selected contributor set',
-            expectedFailureObserved: failureReason === null,
-            failureReason,
-            optionCount: input.variant.optionCount,
-            rosterSize: input.variant.rosterSize,
-            suite: 'cheap',
-        },
-        {
-            check: 'stale recovery epoch',
-            expectedFailureObserved: staleRecoveryEpochFailureReason === null,
-            failureReason: staleRecoveryEpochFailureReason,
-            optionCount: input.variant.optionCount,
-            rosterSize: input.variant.rosterSize,
-            suite: 'cheap',
-        },
-        {
-            check: 'cloned device epoch',
-            expectedFailureObserved: clonedDeviceEpochFailureReason === null,
-            failureReason: clonedDeviceEpochFailureReason,
-            optionCount: input.variant.optionCount,
-            rosterSize: input.variant.rosterSize,
-            suite: 'cheap',
-        },
-    ];
 };

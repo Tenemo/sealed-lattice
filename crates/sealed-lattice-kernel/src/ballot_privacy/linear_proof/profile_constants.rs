@@ -207,33 +207,33 @@ pub(crate) const ENCODED_SCORE_FIELD_GENERATED_PARAMETER_CONTRACT:
 
 // Source file: `temp/lazer/python/demo/ballot_field_params.h`.
 // Header field: `_ballot_field_param_l2Bsq0`.
-// This bound is reused by generated field-compatible component statements.
+// This bound is reused by generated field component statements.
 pub(crate) const GENERATED_FIELD_COMPONENT_EXACT_NORM_BOUND_SQUARED: u64 =
     ENCODED_SCORE_FIELD_GENERATED_PROFILE.exact_norm_bound_squared;
 
 // Source file: `tools/ballot-privacy-vectors/generate-encoded-relation-vectors.mts`.
 // Field: `componentProjectionSummaries` entry for
 // `share-commitment-component`. This is not a LaZer-generated `l2Bsq`
-// header value; it is the registered relation-vector compatibility bound for
+// header value; it is the registered relation-vector bound for
 // structured share-commitment component statements.
 pub(crate) const GENERATED_SHARE_COMMITMENT_COMPONENT_EXACT_NORM_BOUND_SQUARED: u64 = 1_048_576;
 
 // M6 aggregate derivation uses the share-commitment source ring and an
 // aggregate witness covering S, rho, Y, and quotient for up to 50 counted
-// ballots and 20 options. This is an implementation-side compatibility bound
+// ballots and 20 options. This is an implementation-side bound
 // for the current Rust/WASM proof experiment, not standalone final theorem
 // evidence.
 pub(crate) const AGGREGATE_DERIVATION_COMPONENT_EXACT_NORM_BOUND_SQUARED: u64 =
     3_000_000_000_000_000;
 
-// Compatibility cap for generated component-proof experiments that reuse the
+// Explicit cap for generated component-proof experiments that reuse the
 // encoded-score decompression tuple over wider generated component statements.
 // This value is not present in the generated LaZer headers as `Bz3sqr`; it is
 // an explicit Rust-side cap and must not be described as generated or as
 // standalone final soundness evidence.
 pub(crate) const GENERATED_COMPONENT_EUCLIDEAN_RESPONSE_BOUND_SQUARED: u128 = 1_u128 << 96;
 
-// Compatibility cap for generated component-proof experiments that reuse the
+// Explicit cap for generated component-proof experiments that reuse the
 // encoded-score decompression tuple over wider generated component statements.
 // This value is not present in the generated LaZer headers as `Bz4`; it is an
 // explicit Rust-side cap and must not be described as generated or as

@@ -90,11 +90,11 @@ fn category_dispatchers_reject_wrong_command_families() {
 }
 
 #[test]
-fn command_derives_protocol_digest_with_kernel_canonical_json() {
+fn command_derives_protocol_hash_with_kernel_canonical_json() {
     let response = super::run_transcript_core_command_inner(
         serde_json::json!({
-            "command": "DeriveProtocolDigest",
-            "namespace": "PollSpecDigest",
+            "command": "DeriveProtocolHash",
+            "namespace": "PollSpecHash",
             "value": {
                 "poll": "main"
             }
@@ -102,11 +102,11 @@ fn command_derives_protocol_digest_with_kernel_canonical_json() {
         .to_string()
         .as_bytes(),
     )
-    .expect("protocol digest command should succeed");
+    .expect("protocol hash command should succeed");
 
     assert_eq!(
-        response["protocolDigest"],
-        "423c71de65abadb5adc05d9b6b704252420bb738af888c62614c8afc53a2be808662585305e76738b23e4f20154f8779e3827c0c8f313455d84675924f4a2c83"
+        response["protocolHash"],
+        "43b28c9a3dcb3e34d75c9936a9930b68fb9f2010b87d43a6a61cbaa85d343d9fd0be2b312a90f404367b9c68793b0dcf02c4dae7351f6e96ded894b92f898cb4"
     );
 }
 

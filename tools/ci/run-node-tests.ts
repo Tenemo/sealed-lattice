@@ -7,24 +7,12 @@ import {
     type CommandInvocation,
     type PackageManagerRunner,
 } from './run-command.js';
-
-export const nodeTestLaneValues = ['fast', 'protocol', 'kernel'] as const;
-
-export type NodeTestLane = (typeof nodeTestLaneValues)[number];
-
-const defaultNodeTestLanes = nodeTestLaneValues;
-
-const nodeTestLaneProjectNames = {
-    fast: 'node',
-    protocol: 'node-protocol',
-    kernel: 'node-kernel',
-} as const satisfies Record<NodeTestLane, string>;
-
-const nodeTestLaneDescriptions = {
-    fast: 'Run fast Node tests',
-    protocol: 'Run protocol Node tests',
-    kernel: 'Run heavy Node kernel tests',
-} as const satisfies Record<NodeTestLane, string>;
+import {
+    defaultNodeTestLanes,
+    nodeTestLaneDefinitions,
+    nodeTestLaneValues,
+    type NodeTestLane,
+} from './test-lanes.js';
 
 const isNodeTestLane = (lane: string): lane is NodeTestLane =>
     nodeTestLaneValues.some((supportedLane) => supportedLane === lane);
@@ -39,15 +27,22 @@ export const parseRequestedNodeTestLanes = (
         throw new Error('Usage: run-node-tests.ts [--only lane].');
     }
 
-    const requestedLane = commandArguments[1]?.trim();
-    if (requestedLane === undefined || requestedLane.length === 0) {
+    const requestedLaneList = commandArguments[1]
+        ?.split(',')
+        .map((lane) => lane.trim())
+        .filter((lane) => lane.length > 0);
+    if (requestedLaneList === undefined || requestedLaneList.length === 0) {
         throw new Error('At least one Node test lane is required.');
     }
-    if (!isNodeTestLane(requestedLane)) {
-        throw new Error(`Unsupported Node test lane: ${requestedLane}`);
+    const requestedLanes: NodeTestLane[] = [];
+    for (const requestedLane of requestedLaneList) {
+        if (!isNodeTestLane(requestedLane)) {
+            throw new Error(`Unsupported Node test lane: ${requestedLane}`);
+        }
+        requestedLanes.push(requestedLane);
     }
 
-    return [requestedLane];
+    return requestedLanes;
 };
 
 export const buildNodeTestCommands = (
@@ -59,20 +54,23 @@ export const buildNodeTestCommands = (
     const packageManagerRunner =
         input.packageManagerRunner ?? resolvePackageManagerRunner();
     const lanes = input.lanes ?? defaultNodeTestLanes;
-    const buildCommand = (lane: NodeTestLane): CommandInvocation =>
-        createPackageManagerCommand(
-            nodeTestLaneDescriptions[lane],
+    const buildCommand = (lane: NodeTestLane): CommandInvocation => {
+        const laneDefinition = nodeTestLaneDefinitions[lane];
+
+        return createPackageManagerCommand(
+            laneDefinition.commandDescription,
             [
                 'exec',
                 'vitest',
                 '--project',
-                nodeTestLaneProjectNames[lane],
+                laneDefinition.projectName,
                 '--run',
             ],
             {
                 packageManagerRunner,
             },
         );
+    };
 
     return lanes.map((lane) => buildCommand(lane));
 };

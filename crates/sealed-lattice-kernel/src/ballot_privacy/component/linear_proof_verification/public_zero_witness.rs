@@ -7,13 +7,13 @@ pub(super) fn verify_public_zero_witness_component_proof(
     proof_input: &Value,
 ) -> Value {
     let mut refused_objects = Vec::new();
-    let component_proof_record_digest = string_field(component_proof, "componentProofRecordDigest");
+    let component_proof_record_hash = string_field(component_proof, "componentProofRecordHash");
     if component_id != "receiver-key-binding-component" {
         refused_objects.push(structural_refusal(
             format!(
                 "Public-zero witness binding checks are only valid for receiver-key-binding-component, not {component_id}."
             ),
-            component_proof_record_digest,
+            component_proof_record_hash,
         ));
     }
     if string_field(proof_input, "proofBytesHex") != Some("")
@@ -26,7 +26,7 @@ pub(super) fn verify_public_zero_witness_component_proof(
             format!(
                 "Ballot proof component proof bytes for {component_id} must be empty for the public-zero witness binding check."
             ),
-            component_proof_record_digest,
+            component_proof_record_hash,
         ));
     }
     if let Some(proof_statement) =
@@ -35,16 +35,16 @@ pub(super) fn verify_public_zero_witness_component_proof(
         refused_objects.extend(collect_component_proof_statement_plan_shape_refusals(
             proof_statement,
             component_id,
-            component_proof_record_digest,
+            component_proof_record_hash,
         ));
-        if derive_ballot_component_proof_statement_plan_digest(proof_statement).as_deref()
-            != string_field(proof_statement, "componentProofStatementDigest")
+        if derive_ballot_component_proof_statement_plan_hash(proof_statement).as_deref()
+            != string_field(proof_statement, "componentProofStatementHash")
         {
             refused_objects.push(structural_refusal(
                 format!(
-                    "Ballot proof component proof statement digest for {component_id} does not match its canonical payload."
+                    "Ballot proof component proof statement hash for {component_id} does not match its canonical payload."
                 ),
-                component_proof_record_digest,
+                component_proof_record_hash,
             ));
         }
     } else {
@@ -52,7 +52,7 @@ pub(super) fn verify_public_zero_witness_component_proof(
             format!(
                 "Ballot proof component proof input for {component_id} must supply its public proof statement object."
             ),
-            component_proof_record_digest,
+            component_proof_record_hash,
         ));
     }
     if !refused_objects.is_empty() {
@@ -74,11 +74,11 @@ pub(super) fn verify_public_zero_witness_component_proof(
             "BallotProofComponentProofBytesVerified",
             "BallotProofComponentPublicZeroWitnessBindingChecked"
         ],
-        "acceptedDigests": [
-            string_field(component_proof, "componentProofRecordDigest"),
-            string_field(component_proof, "proofBytesDigest"),
-            string_field(proof_input, "componentProofStatementDigest"),
-            string_field(proof_input, "statementDigest")
+        "acceptedHashes": [
+            string_field(component_proof, "componentProofRecordHash"),
+            string_field(component_proof, "proofBytesHash"),
+            string_field(proof_input, "componentProofStatementHash"),
+            string_field(proof_input, "statementHash")
         ],
         "refusedObjects": [],
         "unresolvedReason": Value::Null

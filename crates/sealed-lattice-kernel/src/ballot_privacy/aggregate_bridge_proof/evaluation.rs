@@ -4,7 +4,7 @@ use super::{
     generation::generate_aggregate_bridge_encryption,
     validation::{
         read_i64_array, read_u64_array, read_u64_object_field,
-        reject_forbidden_public_bridge_fields, required_protocol_digest_field,
+        reject_forbidden_public_bridge_fields, required_protocol_hash_field,
         validate_bridge_encryption_public_shell, validate_prover_randomness_hex,
     },
     verification::verify_aggregate_bridge_encryption,
@@ -37,21 +37,18 @@ pub(super) fn evaluate_aggregate_bridge_relation(request: &Value) -> CanonicalRe
         "evaluateAggregateBridgeRelation",
     )?;
     validate_prover_randomness_hex(prover_randomness_hex)?;
-    let aggregate_selection_policy_digest = required_protocol_digest_field(
+    let aggregate_selection_policy_hash = required_protocol_hash_field(
         request,
-        "aggregateSelectionPolicyDigest",
+        "aggregateSelectionPolicyHash",
         "evaluateAggregateBridgeRelation",
     )?;
-    let bridge_witness_privacy_profile_digest = required_protocol_digest_field(
+    let bridge_witness_privacy_profile_hash = required_protocol_hash_field(
         request,
-        "bridgeWitnessPrivacyProfileDigest",
+        "bridgeWitnessPrivacyProfileHash",
         "evaluateAggregateBridgeRelation",
     )?;
-    let he_param_digest = required_protocol_digest_field(
-        request,
-        "heParamDigest",
-        "evaluateAggregateBridgeRelation",
-    )?;
+    let he_param_hash =
+        required_protocol_hash_field(request, "heParamHash", "evaluateAggregateBridgeRelation")?;
 
     reject_forbidden_public_bridge_fields(component, "aggregateDerivationComponent")?;
     reject_forbidden_public_bridge_fields(setup_package, "setupPackage")?;
@@ -80,9 +77,9 @@ pub(super) fn evaluate_aggregate_bridge_relation(request: &Value) -> CanonicalRe
         "setupPackage": setup_package,
         "aggregateWitness": witness,
         "proverRandomnessHex": prover_randomness_hex,
-        "aggregateSelectionPolicyDigest": aggregate_selection_policy_digest,
-        "bridgeWitnessPrivacyProfileDigest": bridge_witness_privacy_profile_digest,
-        "heParamDigest": he_param_digest,
+        "aggregateSelectionPolicyHash": aggregate_selection_policy_hash,
+        "bridgeWitnessPrivacyProfileHash": bridge_witness_privacy_profile_hash,
+        "heParamHash": he_param_hash,
         "includeCanonicalBytesHex": true,
     }))?;
     compare_bridge_relation_public_artifacts(
@@ -95,9 +92,9 @@ pub(super) fn evaluate_aggregate_bridge_relation(request: &Value) -> CanonicalRe
         "aggregateDerivationComponent": component,
         "setupPackage": setup_package,
         "bridgeEncryption": bridge_encryption,
-        "aggregateSelectionPolicyDigest": aggregate_selection_policy_digest,
-        "bridgeWitnessPrivacyProfileDigest": bridge_witness_privacy_profile_digest,
-        "heParamDigest": he_param_digest,
+        "aggregateSelectionPolicyHash": aggregate_selection_policy_hash,
+        "bridgeWitnessPrivacyProfileHash": bridge_witness_privacy_profile_hash,
+        "heParamHash": he_param_hash,
     }))?;
     let proof_bytes_hex =
         required_string_field(bridge_encryption, "bridgeProofBytesHex", "bridgeEncryption")?;
@@ -107,14 +104,14 @@ pub(super) fn evaluate_aggregate_bridge_relation(request: &Value) -> CanonicalRe
             "M9 bridge proof byte length does not fit u64",
         )
     })?;
-    let bridge_proof_statement_digest = required_string_field(
+    let bridge_proof_statement_hash = required_string_field(
         bridge_encryption,
-        "bridgeProofStatementDigest",
+        "bridgeProofStatementHash",
         "bridgeEncryption",
     )?;
-    let bridge_proof_target_contract_digest = required_string_field(
+    let bridge_proof_target_contract_hash = required_string_field(
         bridge_encryption,
-        "bridgeProofTargetContractDigest",
+        "bridgeProofTargetContractHash",
         "bridgeEncryption",
     )?;
     let bridge_proof_root =
@@ -134,20 +131,20 @@ pub(super) fn evaluate_aggregate_bridge_relation(request: &Value) -> CanonicalRe
         "aggregateQuotientCoordinateCount",
         "bridgeEncryption",
     )?;
-    let bridge_relation_evaluation_digest = derive_protocol_digest(
-        "BridgeProofRecordDigest",
+    let bridge_relation_evaluation_hash = derive_protocol_hash(
+        "BridgeProofRecordHash",
         &json!({
             "purpose": "sealed-lattice-private-aggregate-bridge-relation-evaluation-v1",
             "participantCount": dimensions.participant_count,
             "optionCount": dimensions.option_count,
             "shareVectorWidth": dimensions.share_vector_width,
-            "aggregateDerivationComponentDigest": required_string_field(
+            "aggregateDerivationComponentHash": required_string_field(
                 component,
-                "aggregateDerivationComponentDigest",
+                "aggregateDerivationComponentHash",
                 "aggregateDerivationComponent",
             )?,
-            "bridgeProofStatementDigest": bridge_proof_statement_digest,
-            "bridgeProofTargetContractDigest": bridge_proof_target_contract_digest,
+            "bridgeProofStatementHash": bridge_proof_statement_hash,
+            "bridgeProofTargetContractHash": bridge_proof_target_contract_hash,
             "bridgeProofRoot": bridge_proof_root,
             "encryptedAggregateShareCiphertextRoot": encrypted_aggregate_share_ciphertext_root,
         }),
@@ -215,10 +212,10 @@ pub(super) fn evaluate_aggregate_bridge_relation(request: &Value) -> CanonicalRe
                 "bridgeEncryption",
             )?,
         },
-        "acceptedDigests": [
-            bridge_relation_evaluation_digest,
-            bridge_proof_statement_digest,
-            bridge_proof_target_contract_digest,
+        "acceptedHashes": [
+            bridge_relation_evaluation_hash,
+            bridge_proof_statement_hash,
+            bridge_proof_target_contract_hash,
             bridge_proof_root,
             encrypted_aggregate_share_ciphertext_root,
         ],

@@ -3,13 +3,13 @@ use super::*;
 pub(in crate::ballot_privacy::aggregate_derivation_proof) fn collect_aggregate_component_refusals(
     component: &Value,
 ) -> Vec<Value> {
-    let object_digest = string_field(component, "aggregateDerivationComponentDigest");
+    let object_hash = string_field(component, "aggregateDerivationComponentHash");
     let mut refused_objects =
-        collect_forbidden_witness_field_refusals(component, object_digest, "component");
+        collect_forbidden_witness_field_refusals(component, object_hash, "component");
     let Some(statement) = component.get("statement") else {
         refused_objects.push(structural_refusal(
             "Aggregate derivation component must include statement.",
-            object_digest,
+            object_hash,
         ));
 
         return refused_objects;
@@ -17,7 +17,7 @@ pub(in crate::ballot_privacy::aggregate_derivation_proof) fn collect_aggregate_c
     let Some(aggregate_commitment) = component.get("aggregateCommitment") else {
         refused_objects.push(structural_refusal(
             "Aggregate derivation component must include aggregateCommitment.",
-            object_digest,
+            object_hash,
         ));
 
         return refused_objects;
@@ -25,25 +25,22 @@ pub(in crate::ballot_privacy::aggregate_derivation_proof) fn collect_aggregate_c
     let Some(certificate) = component.get("shareCommitmentMessageBoundCert") else {
         refused_objects.push(structural_refusal(
             "Aggregate derivation component must include a no-wraparound certificate.",
-            object_digest,
+            object_hash,
         ));
 
         return refused_objects;
     };
 
-    refused_objects.extend(collect_aggregate_statement_refusals(
-        statement,
-        object_digest,
-    ));
+    refused_objects.extend(collect_aggregate_statement_refusals(statement, object_hash));
     refused_objects.extend(collect_aggregate_commitment_refusals(
         aggregate_commitment,
         statement,
-        object_digest,
+        object_hash,
     ));
     refused_objects.extend(collect_aggregate_certificate_refusals(
         certificate,
         statement,
-        object_digest,
+        object_hash,
     ));
 
     refused_objects
@@ -51,15 +48,15 @@ pub(in crate::ballot_privacy::aggregate_derivation_proof) fn collect_aggregate_c
 
 fn collect_aggregate_statement_refusals(
     statement: &Value,
-    object_digest: Option<&str>,
+    object_hash: Option<&str>,
 ) -> Vec<Value> {
     let mut refused_objects = Vec::new();
-    let statement_digest = string_field(statement, "aggregateDerivationStatementDigest");
-    let expected_statement_digest =
-        value_without_field(statement, "aggregateDerivationStatementDigest").and_then(
+    let statement_hash = string_field(statement, "aggregateDerivationStatementHash");
+    let expected_statement_hash =
+        value_without_field(statement, "aggregateDerivationStatementHash").and_then(
             |statement_payload| {
-                derive_digest(
-                    "AggregateDerivationComponentDigest",
+                derive_hash(
+                    "AggregateDerivationComponentHash",
                     &json!({
                         "purpose": "aggregate-derivation-statement-v1",
                         "statement": statement_payload
@@ -85,8 +82,8 @@ fn collect_aggregate_statement_refusals(
 
     if string_field(statement, "objectType") != Some("AggregateDerivationStatement")
         || u64_object_field(statement, "objectVersion") != Some(1)
-        || statement_digest.is_none()
-        || expected_statement_digest.as_deref() != statement_digest
+        || statement_hash.is_none()
+        || expected_statement_hash.as_deref() != statement_hash
         || string_field(statement, "proofProfileId") != Some("aggregate-derivation-linear-proof-v1")
         || string_field(statement, "proofParameterProfileId")
             != Some(AGGREGATE_DERIVATION_PARAMETER_PROFILE_ID)
@@ -102,28 +99,28 @@ fn collect_aggregate_statement_refusals(
         || !small_roster_acknowledgement_matches_policy
     {
         refused_objects.push(structural_refusal(
-            "Aggregate derivation statement digest, profile, or dimension policy is invalid.",
-            object_digest,
+            "Aggregate derivation statement hash, profile, or dimension policy is invalid.",
+            object_hash,
         ));
     }
     refused_objects
 }
 
 fn package_references_are_canonical(package_references: &[Value]) -> bool {
-    let mut seen_package_digests = BTreeSet::new();
-    let mut previous_package_digest: Option<&str> = None;
+    let mut seen_package_hashes = BTreeSet::new();
+    let mut previous_package_hash: Option<&str> = None;
 
     for package_reference in package_references {
-        let Some(package_digest) = string_field(package_reference, "ballotPackageDigest") else {
+        let Some(package_hash) = string_field(package_reference, "ballotPackageHash") else {
             return false;
         };
-        if previous_package_digest.is_some_and(|previous| previous > package_digest) {
+        if previous_package_hash.is_some_and(|previous| previous > package_hash) {
             return false;
         }
-        if !seen_package_digests.insert(package_digest) {
+        if !seen_package_hashes.insert(package_hash) {
             return false;
         }
-        previous_package_digest = Some(package_digest);
+        previous_package_hash = Some(package_hash);
     }
 
     true
@@ -132,15 +129,13 @@ fn package_references_are_canonical(package_references: &[Value]) -> bool {
 fn collect_aggregate_commitment_refusals(
     aggregate_commitment: &Value,
     statement: &Value,
-    object_digest: Option<&str>,
+    object_hash: Option<&str>,
 ) -> Vec<Value> {
     let mut refused_objects = Vec::new();
-    let commitment_digest = string_field(aggregate_commitment, "aggregateShareCommitmentDigest");
-    let expected_commitment_digest =
-        value_without_field(aggregate_commitment, "aggregateShareCommitmentDigest").and_then(
-            |commitment_payload| {
-                derive_digest("AggregateShareCommitmentDigest", &commitment_payload)
-            },
+    let commitment_hash = string_field(aggregate_commitment, "aggregateShareCommitmentHash");
+    let expected_commitment_hash =
+        value_without_field(aggregate_commitment, "aggregateShareCommitmentHash").and_then(
+            |commitment_payload| derive_hash("AggregateShareCommitmentHash", &commitment_payload),
         );
     let commitment_polynomial_vector =
         array_field(aggregate_commitment, "commitmentPolynomialVector");
@@ -159,31 +154,30 @@ fn collect_aggregate_commitment_refusals(
 
     if string_field(aggregate_commitment, "objectType") != Some("AggregateShareCommitment")
         || u64_object_field(aggregate_commitment, "objectVersion") != Some(1)
-        || commitment_digest.is_none()
-        || expected_commitment_digest.as_deref() != commitment_digest
-        || commitment_digest != string_field(statement, "aggregateShareCommitmentDigest")
-        || string_field(aggregate_commitment, "ballotSetDigest")
-            != string_field(statement, "ballotSetDigest")
+        || commitment_hash.is_none()
+        || expected_commitment_hash.as_deref() != commitment_hash
+        || commitment_hash != string_field(statement, "aggregateShareCommitmentHash")
+        || string_field(aggregate_commitment, "ballotSetHash")
+            != string_field(statement, "ballotSetHash")
         || string_field(aggregate_commitment, "ceremonyId") != string_field(statement, "ceremonyId")
-        || string_field(aggregate_commitment, "manifestDigest")
-            != string_field(statement, "manifestDigest")
-        || string_field(aggregate_commitment, "rosterDigest")
-            != string_field(statement, "rosterDigest")
-        || string_field(aggregate_commitment, "pollSpecDigest")
-            != string_field(statement, "pollSpecDigest")
+        || string_field(aggregate_commitment, "manifestHash")
+            != string_field(statement, "manifestHash")
+        || string_field(aggregate_commitment, "rosterHash") != string_field(statement, "rosterHash")
+        || string_field(aggregate_commitment, "pollSpecHash")
+            != string_field(statement, "pollSpecHash")
         || string_field(aggregate_commitment, "contributorIdentity")
             != string_field(statement, "contributorIdentity")
         || usize_object_field(aggregate_commitment, "contributorRosterPosition")
             != usize_object_field(statement, "contributorRosterPosition")
-        || string_field(aggregate_commitment, "shareCommitmentProfileDigest")
-            != string_field(statement, "shareCommitmentProfileDigest")
+        || string_field(aggregate_commitment, "shareCommitmentProfileHash")
+            != string_field(statement, "shareCommitmentProfileHash")
         || usize_object_field(aggregate_commitment, "shareVectorWidth")
             != usize_object_field(statement, "shareVectorWidth")
         || !vector_shape_is_valid
     {
         refused_objects.push(structural_refusal(
-            "Aggregate share commitment digest, context, or polynomial shape is invalid.",
-            object_digest,
+            "Aggregate share commitment hash, context, or polynomial shape is invalid.",
+            object_hash,
         ));
     }
 
@@ -193,17 +187,14 @@ fn collect_aggregate_commitment_refusals(
 fn collect_aggregate_certificate_refusals(
     certificate: &Value,
     statement: &Value,
-    object_digest: Option<&str>,
+    object_hash: Option<&str>,
 ) -> Vec<Value> {
     let mut refused_objects = Vec::new();
-    let certificate_digest = string_field(certificate, "shareCommitmentMessageBoundCertDigest");
-    let expected_certificate_digest =
-        value_without_field(certificate, "shareCommitmentMessageBoundCertDigest").and_then(
+    let certificate_hash = string_field(certificate, "shareCommitmentMessageBoundCertHash");
+    let expected_certificate_hash =
+        value_without_field(certificate, "shareCommitmentMessageBoundCertHash").and_then(
             |certificate_payload| {
-                derive_digest(
-                    "ShareCommitmentMessageBoundCertDigest",
-                    &certificate_payload,
-                )
+                derive_hash("ShareCommitmentMessageBoundCertHash", &certificate_payload)
             },
         );
     let maximum_canonical_turnout = u64_object_field(certificate, "maximumCanonicalTurnout");
@@ -227,11 +218,11 @@ fn collect_aggregate_certificate_refusals(
 
     if string_field(certificate, "objectType") != Some("ShareCommitmentMessageBoundCert")
         || u64_object_field(certificate, "objectVersion") != Some(1)
-        || certificate_digest.is_none()
-        || expected_certificate_digest.as_deref() != certificate_digest
-        || certificate_digest != string_field(statement, "shareCommitmentMessageBoundCertDigest")
-        || string_field(certificate, "shareCommitmentProfileDigest")
-            != string_field(statement, "shareCommitmentProfileDigest")
+        || certificate_hash.is_none()
+        || expected_certificate_hash.as_deref() != certificate_hash
+        || certificate_hash != string_field(statement, "shareCommitmentMessageBoundCertHash")
+        || string_field(certificate, "shareCommitmentProfileHash")
+            != string_field(statement, "shareCommitmentProfileHash")
         || usize_object_field(certificate, "shareVectorWidth")
             != usize_object_field(statement, "shareVectorWidth")
         || maximum_canonical_turnout
@@ -252,7 +243,7 @@ fn collect_aggregate_certificate_refusals(
     {
         refused_objects.push(structural_refusal(
             "Aggregate derivation no-wraparound certificate is invalid or permits wraparound.",
-            object_digest,
+            object_hash,
         ));
     }
 
@@ -261,7 +252,7 @@ fn collect_aggregate_certificate_refusals(
 
 fn collect_forbidden_witness_field_refusals(
     value: &Value,
-    object_digest: Option<&str>,
+    object_hash: Option<&str>,
     path: &str,
 ) -> Vec<Value> {
     let mut refused_objects = Vec::new();
@@ -270,7 +261,7 @@ fn collect_forbidden_witness_field_refusals(
             for (item_index, item) in array.iter().enumerate() {
                 refused_objects.extend(collect_forbidden_witness_field_refusals(
                     item,
-                    object_digest,
+                    object_hash,
                     &format!("{path}[{item_index}]"),
                 ));
             }
@@ -282,12 +273,12 @@ fn collect_forbidden_witness_field_refusals(
                         format!(
                             "Aggregate derivation public component must not expose witness field {path}.{field_name}."
                         ),
-                        object_digest,
+                        object_hash,
                     ));
                 } else {
                     refused_objects.extend(collect_forbidden_witness_field_refusals(
                         field_value,
-                        object_digest,
+                        object_hash,
                         &format!("{path}.{field_name}"),
                     ));
                 }

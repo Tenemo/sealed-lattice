@@ -1,8 +1,8 @@
-import { deriveProtocolDigest } from '@sealed-lattice/crypto';
+import { deriveProtocolHash } from '@sealed-lattice/crypto';
 
 import type { BallotProofRecordGenerationFixture } from '../ballot-privacy-proof-record-generation-fixtures';
-export const digest = (label: string): string =>
-    deriveProtocolDigest('ChallengeDomainDigest', {
+export const hash = (label: string): string =>
+    deriveProtocolHash('ChallengeDomainHash', {
         label,
         purpose: 'ballot-proof-record-generation-input-test',
     });

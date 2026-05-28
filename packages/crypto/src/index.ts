@@ -1,27 +1,19 @@
 export { canonicalJson, hash512, hash512Hex } from './canonical-json.js';
 export {
-    derivePolicyDigest,
+    derivePolicyHash,
     deriveProtocolHash,
-    deriveProtocolDigest,
-    protocolDigestNamespaceByHashAlias,
-    protocolDigestNamespaceValues,
-    protocolHashAliasByDigestNamespace,
-    protocolHashSemanticNameValues,
-    resolveProtocolHashNamespace,
-    resolveProtocolDigestDomain,
-} from './digests.js';
-export type {
-    ProtocolDigestNamespace,
-    ProtocolHashSemanticName,
-} from './digests.js';
+    protocolHashNamespaceValues,
+    resolveProtocolHashDomain,
+} from './hashes.js';
+export type { ProtocolHashNamespace } from './hashes.js';
 export {
     createMlDsaKeyPairFixture,
     createMlDsaSignatureProfileFixture,
     createProtocolSignatureFixture,
-    deriveCanonicalSignedRootDigest,
+    deriveCanonicalSignedRootHash,
     deriveMlDsaContextByteLength,
-    deriveMlDsaPublicKeyDigest,
-    deriveProtocolSignatureDigest,
+    deriveMlDsaPublicKeyHash,
+    deriveProtocolSignatureHash,
     verifySignedObjectSignature,
 } from './signatures.js';
 export type {

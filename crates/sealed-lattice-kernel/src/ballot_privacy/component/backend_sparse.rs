@@ -12,7 +12,7 @@ pub(crate) fn component_proof_backend_rejection(
         "backendStatus": describe_proof_backend(),
         "operation": operation,
         "statusLabels": [],
-        "acceptedDigests": [],
+        "acceptedHashes": [],
         "refusedObjects": refused_objects,
         "componentId": component_id,
         "unresolvedReason": unresolved_reason
@@ -43,9 +43,9 @@ pub(crate) fn u64_object_field(value: &Value, field_name: &str) -> Option<u64> {
     object_map(value)?.get(field_name).and_then(integer_value)
 }
 
-pub(crate) fn derive_sparse_statement_matrix_digest(matrix_entries: &Value) -> Option<String> {
-    derive_digest(
-        "ChallengeDomainDigest",
+pub(crate) fn derive_sparse_statement_matrix_hash(matrix_entries: &Value) -> Option<String> {
+    derive_hash(
+        "ChallengeDomainHash",
         &json!({
             "purpose": "ballot-proof-sparse-linear-statement-matrix-v1",
             "sparseStatementMatrixEntries": matrix_entries
@@ -53,9 +53,9 @@ pub(crate) fn derive_sparse_statement_matrix_digest(matrix_entries: &Value) -> O
     )
 }
 
-pub(crate) fn derive_sparse_target_vector_digest(target_entries: &Value) -> Option<String> {
-    derive_digest(
-        "ChallengeDomainDigest",
+pub(crate) fn derive_sparse_target_vector_hash(target_entries: &Value) -> Option<String> {
+    derive_hash(
+        "ChallengeDomainHash",
         &json!({
             "purpose": "ballot-proof-sparse-linear-target-vector-v1",
             "targetVectorEntries": target_entries
@@ -92,7 +92,7 @@ pub(crate) struct ParsedSparseComponentProofStatement {
 
 #[derive(Clone)]
 pub(crate) struct ParsedStructuredReceiverEncryptionStatement {
-    pub(crate) statement_digest: String,
+    pub(crate) statement_hash: String,
     pub(crate) statement_rows: usize,
     pub(crate) statement_columns: usize,
     pub(crate) source_statement_matrix: SparsePolynomialMatrix,
@@ -235,18 +235,18 @@ pub(crate) fn sparse_matrix_from_sparse_component_statement(
                 .to_string(),
         ));
     }
-    if string_field(sparse_statement, "sparseStatementMatrixDigest")
-        != derive_sparse_statement_matrix_digest(matrix_entries_value).as_deref()
+    if string_field(sparse_statement, "sparseStatementMatrixHash")
+        != derive_sparse_statement_matrix_hash(matrix_entries_value).as_deref()
     {
         return Err(ComponentProofBackendError::invalid(
-            "Sparse component proof statement matrix digest does not match entries.",
+            "Sparse component proof statement matrix hash does not match entries.",
         ));
     }
-    if string_field(sparse_statement, "targetVectorDigest")
-        != derive_sparse_target_vector_digest(target_entries_value).as_deref()
+    if string_field(sparse_statement, "targetVectorHash")
+        != derive_sparse_target_vector_hash(target_entries_value).as_deref()
     {
         return Err(ComponentProofBackendError::invalid(
-            "Sparse component proof statement target vector digest does not match entries."
+            "Sparse component proof statement target vector hash does not match entries."
                 .to_string(),
         ));
     }
@@ -359,7 +359,7 @@ pub(crate) fn dense_matrix_from_sparse_component_statement(
                 .source_statement_matrix
                 .to_dense()
                 .map_err(|error| ComponentProofBackendError::invalid(format!(
-                    "Sparse component proof statement could not be densified for test compatibility: {}",
+                    "Sparse component proof statement could not be densified for the test backend: {}",
                     error.message
                 )))?
                 .entries_by_row()

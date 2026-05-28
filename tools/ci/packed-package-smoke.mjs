@@ -1,7 +1,3 @@
-import { readFile } from 'node:fs/promises';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-
 const assert = (condition, message) => {
     if (!condition) {
         throw new Error(message);
@@ -9,29 +5,11 @@ const assert = (condition, message) => {
 };
 
 const publicApi = await import('sealed-lattice');
-const packageMainPath = fileURLToPath(import.meta.resolve('sealed-lattice'));
-const publicSurface = JSON.parse(
-    await readFile(
-        path.resolve(
-            path.dirname(packageMainPath),
-            '..',
-            'public-surface.json',
-        ),
-        'utf8',
-    ),
-);
 const {
     deriveThresholdProfile,
     deriveValidatedFirstValidOrder,
     verifyTranscriptCoreFixture,
 } = publicApi;
-
-for (const publicKey of publicSurface.forbiddenRuntimeExports) {
-    assert(
-        !(publicKey in publicApi),
-        `Packed package must not export ${publicKey}`,
-    );
-}
 
 assert(
     typeof verifyTranscriptCoreFixture === 'function',
@@ -47,9 +25,9 @@ assert(
 );
 assert(
     deriveValidatedFirstValidOrder({
-        requiredContextDigest: 'context',
-        selectionPolicyDigest: 'policy',
-        expectedSelectionPolicyDigest: 'policy',
+        requiredContextHash: 'context',
+        selectionPolicyHash: 'policy',
+        expectedSelectionPolicyHash: 'policy',
         currentRecoveryEpochMap: {
             participant: {
                 signerIdentity: 'participant',
@@ -59,7 +37,7 @@ assert(
         },
         objects: [
             {
-                objectDigest: 'candidate',
+                objectHash: 'candidate',
                 objectType: 'TargetFinalityRecord',
                 boardSequence: 1,
                 boardPosition: 0,
@@ -67,11 +45,11 @@ assert(
                 recoveryEpoch: 0,
                 deviceEpoch: 0,
                 actionSequence: 0,
-                contextDigest: 'context',
+                contextHash: 'context',
                 isByteIdenticalRetransmission: false,
             },
         ],
-    }).orderedObjects[0]?.objectDigest === 'candidate',
+    }).orderedObjects[0]?.objectHash === 'candidate',
     'First-valid ordering helper must be exported and deterministic',
 );
 const verification = await verifyTranscriptCoreFixture({

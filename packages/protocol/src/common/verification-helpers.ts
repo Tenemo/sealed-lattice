@@ -1,6 +1,6 @@
-import { deriveProtocolDigest } from '@sealed-lattice/crypto';
+import { deriveProtocolHash } from '@sealed-lattice/crypto';
 import type {
-    ProtocolDigest,
+    ProtocolHash,
     ProtocolObjectType,
     ProtocolRefusalCode,
     RefusalRecord,
@@ -11,12 +11,12 @@ import type {
 export const createRefusal = (
     code: ProtocolRefusalCode,
     message: string,
-    objectDigest?: ProtocolDigest,
+    objectHash?: ProtocolHash,
     objectType?: ProtocolObjectType | SignedObjectType,
 ): RefusalRecord => ({
     code,
     message,
-    objectDigest,
+    objectHash,
     objectType,
 });
 
@@ -55,14 +55,14 @@ export const uniqueStrings = <StringValue extends string>(
 export const compareCanonicalStrings = (left: string, right: string): number =>
     left < right ? -1 : left > right ? 1 : 0;
 
-export const defaultSignedRootContextDigest = deriveProtocolDigest(
-    'ActionContextDigest',
+export const defaultSignedRootContextHash = deriveProtocolHash(
+    'ActionContextHash',
     { context: 'default' },
 );
 
 export const signedObjectRootByteLength = 64;
 
-export const isProtocolDigestString = (value: unknown): value is string =>
+export const isProtocolHashString = (value: unknown): value is string =>
     typeof value === 'string' && /^[0-9a-f]{128}$/u.test(value);
 
 export const isNonNegativeInteger = (value: number): boolean =>
@@ -70,5 +70,5 @@ export const isNonNegativeInteger = (value: number): boolean =>
 
 export const buildBoardHeadMap = (
     heads: readonly SignedBoardHead[],
-): Map<ProtocolDigest, SignedBoardHead> =>
-    new Map(heads.map((head) => [head.headDigest, head]));
+): Map<ProtocolHash, SignedBoardHead> =>
+    new Map(heads.map((head) => [head.headHash, head]));

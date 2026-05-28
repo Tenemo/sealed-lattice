@@ -86,14 +86,14 @@ const componentParameterProfileIds: Readonly<
     Record<BallotPrivacyBackendProofComponentId, string>
 > = {
     'payload-plaintext-field-component':
-        'payload-plaintext-field-linear-compatibility-v1',
+        'payload-plaintext-field-linear-proof-parameter-v1',
     'receiver-encryption-component':
-        'receiver-encryption-linear-compatibility-v1',
+        'receiver-encryption-linear-proof-parameter-v1',
     'receiver-key-binding-component':
-        'receiver-key-binding-linear-compatibility-v1',
+        'receiver-key-binding-linear-proof-parameter-v1',
     'score-and-shamir-field-component':
-        'encoded-score-field-linear-compatibility-v1',
-    'share-commitment-component': 'share-commitment-linear-compatibility-v1',
+        'encoded-score-field-linear-proof-parameter-v1',
+    'share-commitment-component': 'share-commitment-linear-proof-parameter-v1',
 };
 
 const componentEncodingProfileIds: Readonly<
@@ -124,11 +124,11 @@ const componentProofContracts = (input: {
         throw new Error('Fixture relation should lower.');
     }
     const componentBundleStatement = buildBallotProofComponentBundleStatement({
-        ballotProofStatementDigest: input.statement.ballotProofStatementDigest,
+        ballotProofStatementHash: input.statement.ballotProofStatementHash,
         loweredStatement: loweringResult.statement,
     });
     const componentPlans = buildBallotProofComponentProofStatementPlans({
-        ballotProofStatementDigest: input.statement.ballotProofStatementDigest,
+        ballotProofStatementHash: input.statement.ballotProofStatementHash,
         componentBundleStatement,
         loweredStatement: loweringResult.statement,
     });
@@ -193,8 +193,7 @@ const componentProofContracts = (input: {
         'sparse-polynomial-matrix-linear-proof-v1'
     ) {
         const scoreProjection = buildEncodedScoreFieldLinearProofProjection({
-            ballotProofStatementDigest:
-                input.statement.ballotProofStatementDigest,
+            ballotProofStatementHash: input.statement.ballotProofStatementHash,
             loweredStatement: loweringResult.statement,
             parameterProfileId:
                 componentParameterProfileIds[
@@ -217,8 +216,8 @@ const componentProofContracts = (input: {
     } else {
         const scoreSparseStatement =
             buildPackedFieldSparseComponentLinearProofStatement({
-                ballotProofStatementDigest:
-                    input.statement.ballotProofStatementDigest,
+                ballotProofStatementHash:
+                    input.statement.ballotProofStatementHash,
                 componentId: 'score-and-shamir-field-component',
                 loweredStatement: loweringResult.statement,
                 parameterProfileId:
@@ -252,8 +251,8 @@ const componentProofContracts = (input: {
             componentId === 'payload-plaintext-field-component' &&
             input.relationInput.optionCount > 1
                 ? buildPackedFieldSparseComponentLinearProofStatement({
-                      ballotProofStatementDigest:
-                          input.statement.ballotProofStatementDigest,
+                      ballotProofStatementHash:
+                          input.statement.ballotProofStatementHash,
                       componentId,
                       loweredStatement: loweringResult.statement,
                       parameterProfileId:
@@ -263,8 +262,8 @@ const componentProofContracts = (input: {
                       witnessL2BoundSquared,
                   })
                 : buildBallotProofSparseComponentLinearProofStatement({
-                      ballotProofStatementDigest:
-                          input.statement.ballotProofStatementDigest,
+                      ballotProofStatementHash:
+                          input.statement.ballotProofStatementHash,
                       componentId,
                       loweredStatement: loweringResult.statement,
                       parameterProfileId:
@@ -274,8 +273,8 @@ const componentProofContracts = (input: {
                   });
         if (input.relationInput.optionCount === 1) {
             buildBallotProofComponentLinearProofProjection({
-                ballotProofStatementDigest:
-                    input.statement.ballotProofStatementDigest,
+                ballotProofStatementHash:
+                    input.statement.ballotProofStatementHash,
                 componentId,
                 loweredStatement: loweringResult.statement,
                 parameterProfileId: componentParameterProfileIds[componentId],
@@ -297,8 +296,7 @@ const componentProofContracts = (input: {
     }
     const receiverEncryptionStatement =
         buildBallotProofStructuredReceiverEncryptionProofStatement({
-            ballotProofStatementDigest:
-                input.statement.ballotProofStatementDigest,
+            ballotProofStatementHash: input.statement.ballotProofStatementHash,
             componentStatement:
                 componentStatementById.get('receiver-encryption-component') ??
                 (() => {
@@ -342,7 +340,7 @@ const componentProofContracts = (input: {
         }),
         ballotProofParameterSet: createParameterSet({
             coefficientModulus: '65537',
-            profileId: 'full-encoded-score-ballot-linear-compatibility-v1',
+            profileId: 'full-encoded-score-ballot-linear-proof-parameter-v1',
             ringDegree: 64,
             source: 'sealed-lattice/linear-proof/full-ballot-binding-parameters-v1',
             statementColumns: 1,
@@ -397,7 +395,7 @@ const createBallotProofRecordGenerationFixtureWithOptions = (
     });
     const publicContext = {
         ...contextWithoutStatement,
-        ballotProofStatementDigest: statement.ballotProofStatementDigest,
+        ballotProofStatementHash: statement.ballotProofStatementHash,
     };
     const proofContracts = componentProofContracts({
         projectionWitness,

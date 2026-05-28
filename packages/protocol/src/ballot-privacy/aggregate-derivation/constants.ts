@@ -1,4 +1,4 @@
-import type { ProtocolDigest, RefusalRecord } from '@sealed-lattice/types';
+import type { ProtocolHash, RefusalRecord } from '@sealed-lattice/types';
 
 import { createRefusal } from '../../common/verification-helpers.js';
 
@@ -15,7 +15,7 @@ export const aggregateDerivationProofCoefficientModulus =
 export const aggregateDerivationWitnessL2BoundSquared =
     3_000_000_000_000_000 as const;
 
-export const protocolDigestPattern = /^[a-f0-9]{128}$/u;
+export const protocolHashPattern = /^[a-f0-9]{128}$/u;
 
 export const lowercaseHexBytesPattern = /^(?:[a-f0-9]{2})+$/u;
 
@@ -53,6 +53,5 @@ export const forbiddenPublicWitnessFieldNames = new Set([
 
 export const createAggregateRefusal = (
     message: string,
-    objectDigest?: ProtocolDigest,
-): RefusalRecord =>
-    createRefusal('BallotPackageInvalid', message, objectDigest);
+    objectHash?: ProtocolHash,
+): RefusalRecord => createRefusal('BallotPackageInvalid', message, objectHash);

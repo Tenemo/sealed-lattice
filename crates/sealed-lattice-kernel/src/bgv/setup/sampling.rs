@@ -1,20 +1,20 @@
 use super::*;
 
-pub(super) fn sample_public_residues(seed_digest: &str, label: &str, modulus: u64) -> Vec<Value> {
+pub(super) fn sample_public_residues(seed_hash: &str, label: &str, modulus: u64) -> Vec<Value> {
     sample_positions()
         .into_iter()
         .map(|position| {
             json!({
                 "position": position,
                 "modulus": modulus,
-                "value": sample_residue(seed_digest, label, position, modulus),
+                "value": sample_residue(seed_hash, label, position, modulus),
             })
         })
         .collect()
 }
 
 pub(super) fn sample_small_distribution(
-    seed_digest: &str,
+    seed_hash: &str,
     identity: &str,
     label: &str,
     minimum: i64,
@@ -26,11 +26,7 @@ pub(super) fn sample_small_distribution(
         .map(|position| {
             let value = minimum
                 + i64::try_from(sample_small_distribution_offset(
-                    seed_digest,
-                    identity,
-                    label,
-                    position,
-                    width,
+                    seed_hash, identity, label, position, width,
                 ))
                 .expect("small distribution offset fits i64");
             json!({
@@ -42,7 +38,7 @@ pub(super) fn sample_small_distribution(
 }
 
 pub(super) fn sample_small_distribution_offset(
-    seed_digest: &str,
+    seed_hash: &str,
     identity: &str,
     label: &str,
     position: usize,
@@ -55,7 +51,7 @@ pub(super) fn sample_small_distribution_offset(
         let output = hash512(
             "sealed-lattice-bgv-rns/sample-small-distribution-v2",
             &[
-                seed_digest.as_bytes(),
+                seed_hash.as_bytes(),
                 identity.as_bytes(),
                 label.as_bytes(),
                 position_text.as_bytes(),
@@ -76,7 +72,7 @@ pub(super) fn sample_small_distribution_offset(
 }
 
 pub(super) fn sample_centered_binomial_eta2(
-    seed_digest: &str,
+    seed_hash: &str,
     identity: &str,
     label: &str,
 ) -> Vec<Value> {
@@ -87,7 +83,7 @@ pub(super) fn sample_centered_binomial_eta2(
             let output = hash512(
                 "sealed-lattice-bgv-rns/sample-centered-binomial-eta2-v1",
                 &[
-                    seed_digest.as_bytes(),
+                    seed_hash.as_bytes(),
                     identity.as_bytes(),
                     label.as_bytes(),
                     position_text.as_bytes(),
@@ -102,14 +98,14 @@ pub(super) fn sample_centered_binomial_eta2(
         .collect()
 }
 
-pub(super) fn dense_public_residues(seed_digest: &str, label: &str, modulus: u64) -> Vec<u64> {
+pub(super) fn dense_public_residues(seed_hash: &str, label: &str, modulus: u64) -> Vec<u64> {
     (0..POLYNOMIAL_DEGREE)
-        .map(|position| sample_residue(seed_digest, label, position, modulus))
+        .map(|position| sample_residue(seed_hash, label, position, modulus))
         .collect()
 }
 
 pub(super) fn dense_small_coefficients(
-    seed_digest: &str,
+    seed_hash: &str,
     identity: &str,
     label: &str,
     minimum: i64,
@@ -120,11 +116,7 @@ pub(super) fn dense_small_coefficients(
         .map(|position| {
             minimum
                 + i64::try_from(sample_small_distribution_offset(
-                    seed_digest,
-                    identity,
-                    label,
-                    position,
-                    width,
+                    seed_hash, identity, label, position, width,
                 ))
                 .expect("small distribution offset fits i64")
         })
@@ -132,7 +124,7 @@ pub(super) fn dense_small_coefficients(
 }
 
 pub(super) fn dense_centered_binomial_coefficients(
-    seed_digest: &str,
+    seed_hash: &str,
     identity: &str,
     label: &str,
 ) -> Vec<i64> {
@@ -143,7 +135,7 @@ pub(super) fn dense_centered_binomial_coefficients(
         let output = hash512(
             "sealed-lattice-bgv-rns/sample-centered-binomial-eta2-dense-v1",
             &[
-                seed_digest.as_bytes(),
+                seed_hash.as_bytes(),
                 identity.as_bytes(),
                 label.as_bytes(),
                 block_index_text.as_bytes(),
@@ -263,7 +255,7 @@ pub(super) fn sample_encryption_relation_checks(
         .collect()
 }
 
-pub(super) fn sample_residue(seed_digest: &str, label: &str, position: usize, modulus: u64) -> u64 {
+pub(super) fn sample_residue(seed_hash: &str, label: &str, position: usize, modulus: u64) -> u64 {
     let position_text = position.to_string();
     let modulus_text = modulus.to_string();
     let mut block_index = 0_u64;
@@ -272,7 +264,7 @@ pub(super) fn sample_residue(seed_digest: &str, label: &str, position: usize, mo
         let output = hash512(
             "sealed-lattice-bgv-rns/sample-residue-v2",
             &[
-                seed_digest.as_bytes(),
+                seed_hash.as_bytes(),
                 label.as_bytes(),
                 position_text.as_bytes(),
                 modulus_text.as_bytes(),
@@ -321,11 +313,11 @@ pub(super) fn sample_positions() -> Vec<usize> {
     positions
 }
 
-pub(super) fn development_fixture_digest(fixture_record: &Value) -> CanonicalResult<String> {
+pub(super) fn development_fixture_hash(fixture_record: &Value) -> CanonicalResult<String> {
     let canonical_fixture = canonical_json(fixture_record)?;
 
     Ok(hash512_hex(
-        "sealed-lattice-bgv-rns/development-fixture-digest-v1",
+        "sealed-lattice-bgv-rns/development-fixture-hash-v1",
         &[canonical_fixture.as_bytes()],
     ))
 }

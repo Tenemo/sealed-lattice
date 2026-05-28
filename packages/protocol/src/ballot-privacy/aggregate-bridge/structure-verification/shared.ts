@@ -2,52 +2,52 @@ import type {
     ActionContext,
     AggregateDerivationComponent,
     BridgeProofRecord,
-    ProtocolDigest,
+    ProtocolHash,
     ProtocolSignatureEnvelope,
     RefusalRecord,
 } from '@sealed-lattice/types';
 
 import {
     createAggregateRefusal,
-    protocolDigestPattern,
+    protocolHashPattern,
 } from '../../aggregate-derivation/constants.js';
 import { collectForbiddenWitnessFieldRefusals as collectBoundedForbiddenWitnessFieldRefusals } from '../../aggregate-derivation/witness-field-refusals.js';
 
 export type BridgeSetupEvidence = {
-    readonly setupPackageDigest: ProtocolDigest;
+    readonly setupPackageHash: ProtocolHash;
     readonly setupInputs: {
         readonly ceremonyId: string;
-        readonly manifestDigest: ProtocolDigest;
+        readonly manifestHash: ProtocolHash;
         readonly participantCount: number;
-        readonly rosterDigest: ProtocolDigest;
-        readonly thresholdProfileDigest: ProtocolDigest;
+        readonly rosterHash: ProtocolHash;
+        readonly thresholdProfileHash: ProtocolHash;
     };
     readonly profileBindings: Readonly<Record<string, unknown>>;
     readonly collectivePublicKey: {
-        readonly bgvPublicKeyRoot: ProtocolDigest;
-        readonly collectivePublicKeyRoot: ProtocolDigest;
+        readonly bgvPublicKeyRoot: ProtocolHash;
+        readonly collectivePublicKeyRoot: ProtocolHash;
     };
 };
 
 export type BridgeEncryptionEvidence = {
-    readonly aggregateDerivationComponentDigest: ProtocolDigest;
-    readonly aggregateDerivationStatementDigest: ProtocolDigest;
+    readonly aggregateDerivationComponentHash: ProtocolHash;
+    readonly aggregateDerivationStatementHash: ProtocolHash;
     readonly aggregateQuotientCoordinateCount: number;
     readonly aggregateReducedCoordinateCount: number;
     readonly aggregateRelationChallengeHex: string;
-    readonly aggregateRelationCommitmentDigest: ProtocolDigest;
+    readonly aggregateRelationCommitmentHash: ProtocolHash;
     readonly aggregateRelationSubproofSizeBytes: number;
     readonly basisId: string;
-    readonly bgvPublicKeyRoot: ProtocolDigest;
-    readonly bridgeProofBytesDigest: ProtocolDigest;
+    readonly bgvPublicKeyRoot: ProtocolHash;
+    readonly bridgeProofBytesHash: ProtocolHash;
     readonly bridgeProofBytesHex: string;
-    readonly bridgeProofProfileDigest: ProtocolDigest;
-    readonly bridgeProofRoot: ProtocolDigest;
-    readonly bridgeSharedWitnessProofDigest: ProtocolDigest;
-    readonly sharedWitnessZeroKnowledgeStatusDigest: ProtocolDigest;
-    readonly bgvRandomnessBoundProofStatusDigest: ProtocolDigest;
-    readonly bridgeProofStatementDigest: ProtocolDigest;
-    readonly bridgeProofTargetContractDigest: ProtocolDigest;
+    readonly bridgeProofProfileHash: ProtocolHash;
+    readonly bridgeProofRoot: ProtocolHash;
+    readonly bridgeSharedWitnessProofHash: ProtocolHash;
+    readonly sharedWitnessZeroKnowledgeStatusHash: ProtocolHash;
+    readonly bgvRandomnessBoundProofStatusHash: ProtocolHash;
+    readonly bridgeProofStatementHash: ProtocolHash;
+    readonly bridgeProofTargetContractHash: ProtocolHash;
     readonly bridgeProofVerificationStatus: 'BridgeProofRelationChecked';
     readonly bridgeClaimClosureVerified?: false;
     readonly bridgeClaimVerificationStatus?: 'BridgeProofClaimClosureMissing';
@@ -56,16 +56,16 @@ export type BridgeEncryptionEvidence = {
         | 'full-matrix-row-evidence-missing';
     readonly canonicalByteLength: number;
     readonly canonicalBytesHash512: string;
-    readonly canonicalCiphertextConventionDigest: ProtocolDigest;
-    readonly ciphertextRoot: ProtocolDigest;
+    readonly canonicalCiphertextConventionHash: ProtocolHash;
+    readonly ciphertextRoot: ProtocolHash;
     readonly coefficientCount: number;
-    readonly collectivePublicKeyRoot: ProtocolDigest;
-    readonly encryptedAggregateInputRoot: ProtocolDigest;
-    readonly encryptedAggregateShareCiphertextRoot: ProtocolDigest;
+    readonly collectivePublicKeyRoot: ProtocolHash;
+    readonly encryptedAggregateInputRoot: ProtocolHash;
+    readonly encryptedAggregateShareCiphertextRoot: ProtocolHash;
     readonly level: number;
-    readonly plaintextRoot: ProtocolDigest;
-    readonly profileDigest: ProtocolDigest;
-    readonly rustBgvBackendProfileDigest: ProtocolDigest;
+    readonly plaintextRoot: ProtocolHash;
+    readonly profileHash: ProtocolHash;
+    readonly rustBgvBackendProfileHash: ProtocolHash;
     readonly sampledPublicRelationCheckPolicy: {
         readonly acceptedForBridgeProofVerification: false;
         readonly diagnosticOnly: true;
@@ -84,38 +84,38 @@ export type BridgeEvidenceVerification = {
     readonly aggregateQuotientCoordinateCount: number;
     readonly aggregateReducedCoordinateCount: number;
     readonly aggregateRelationChallengeHex: string;
-    readonly aggregateRelationCommitmentDigest: ProtocolDigest;
+    readonly aggregateRelationCommitmentHash: ProtocolHash;
     readonly aggregateRelationSubproofSizeBytes: number;
     readonly bridgeEvidenceVerificationStatus: 'BridgeProofEvidenceChecked';
-    readonly bridgeProofBytesDigest: ProtocolDigest;
-    readonly bridgeProofProfileDigest: ProtocolDigest;
-    readonly bridgeProofRoot: ProtocolDigest;
-    readonly bridgeSharedWitnessProofDigest: ProtocolDigest;
-    readonly sharedWitnessZeroKnowledgeStatusDigest: ProtocolDigest;
-    readonly bgvRandomnessBoundProofStatusDigest: ProtocolDigest;
-    readonly bridgeProofStatementDigest: ProtocolDigest;
-    readonly bridgeProofTargetContractDigest: ProtocolDigest;
+    readonly bridgeProofBytesHash: ProtocolHash;
+    readonly bridgeProofProfileHash: ProtocolHash;
+    readonly bridgeProofRoot: ProtocolHash;
+    readonly bridgeSharedWitnessProofHash: ProtocolHash;
+    readonly sharedWitnessZeroKnowledgeStatusHash: ProtocolHash;
+    readonly bgvRandomnessBoundProofStatusHash: ProtocolHash;
+    readonly bridgeProofStatementHash: ProtocolHash;
+    readonly bridgeProofTargetContractHash: ProtocolHash;
     readonly bridgeProofVerificationStatus: 'BridgeProofRelationChecked';
     readonly bridgeClaimClosureVerified?: false;
     readonly bridgeClaimVerificationStatus?: 'BridgeProofClaimClosureMissing';
     readonly bridgeVariantEvidenceStatus?:
         | 'representative-row-evidence'
         | 'full-matrix-row-evidence-missing';
-    readonly encryptedAggregateInputRoot: ProtocolDigest;
-    readonly encryptedAggregateShareCiphertextRoot: ProtocolDigest;
+    readonly encryptedAggregateInputRoot: ProtocolHash;
+    readonly encryptedAggregateShareCiphertextRoot: ProtocolHash;
     readonly ok: true;
 };
 
 export type PendingBridgeProofRecordFromEvidenceInput = {
     readonly aggregateDerivationComponent: AggregateDerivationComponent;
-    readonly aggregateSelectionPolicyDigest: ProtocolDigest;
+    readonly aggregateSelectionPolicyHash: ProtocolHash;
     readonly bridgeEncryptionEvidence: BridgeEncryptionEvidence;
     readonly bridgeEvidenceVerification: BridgeEvidenceVerification;
-    readonly bridgeWitnessPrivacyProfileDigest: ProtocolDigest;
-    readonly heParamDigest: ProtocolDigest;
-    readonly proofEncodingProfileDigest?: ProtocolDigest;
-    readonly proofParameterSetDigest?: ProtocolDigest;
-    readonly publicRandomnessDigest?: ProtocolDigest;
+    readonly bridgeWitnessPrivacyProfileHash: ProtocolHash;
+    readonly heParamHash: ProtocolHash;
+    readonly proofEncodingProfileHash?: ProtocolHash;
+    readonly proofParameterSetHash?: ProtocolHash;
+    readonly publicRandomnessHash?: ProtocolHash;
     readonly setupPackage: BridgeSetupEvidence;
 };
 
@@ -123,170 +123,170 @@ export type AggregateContributionFromBridgeProofRecordInput = {
     readonly actionContext: ActionContext;
     readonly boardPosition: number;
     readonly bridgeProofRecord: BridgeProofRecord;
-    readonly closeRecordDigest: ProtocolDigest;
+    readonly closeRecordHash: ProtocolHash;
     readonly signature:
         | ProtocolSignatureEnvelope
         | ((input: {
-              readonly aggregateContributionDigest: ProtocolDigest;
+              readonly aggregateContributionHash: ProtocolHash;
           }) => ProtocolSignatureEnvelope);
 };
 
-export const bridgeDigestFieldNames = [
-    'aggregateDerivationComponentDigest',
-    'aggregateShareCommitmentDigest',
-    'shareCommitmentMessageBoundCertDigest',
-    'encryptedAggregateBridgeDigest',
-    'encryptedAggregateTargetBasisDataRoot',
+export const bridgeHashFieldNames = [
+    'aggregateDerivationComponentHash',
+    'aggregateShareCommitmentHash',
+    'shareCommitmentMessageBoundCertHash',
+    'encryptedAggregateBridgeHash',
+    'encryptedAggregateTargetBasisRoot',
     'encryptedAggregateInputRoot',
     'encryptedAggregateShareCiphertextRoot',
-    'encryptedAggregateReconstructionDigest',
-    'bridgeProofProfileDigest',
-    'bridgeProofTargetContractDigest',
-    'bridgeWitnessPrivacyProfileDigest',
-    'bgvBatchEncoderDigest',
-    'bridgeLayoutDigest',
-    'ballotScoreEncodingProfileDigest',
-    'ballotShareLayoutProfileDigest',
-    'aggregateInputEncodingProfileDigest',
-    'encodedShareVectorLayoutDigest',
-    'encodedAggregateLayoutDigest',
-    'encryptedAggregateInputLayoutDigest',
-    'topKEvaluatorInputLayoutDigest',
-    'heParamDigest',
-    'bgvProfileDigest',
-    'rustBgvBackendProfileDigest',
-    'canonicalCiphertextConventionDigest',
+    'encryptedAggregateReconstructionHash',
+    'bridgeProofProfileHash',
+    'bridgeProofTargetContractHash',
+    'bridgeWitnessPrivacyProfileHash',
+    'bgvBatchEncoderHash',
+    'bridgeLayoutHash',
+    'ballotScoreEncodingProfileHash',
+    'ballotShareLayoutProfileHash',
+    'aggregateInputEncodingProfileHash',
+    'encodedShareVectorLayoutHash',
+    'encodedAggregateLayoutHash',
+    'encryptedAggregateInputLayoutHash',
+    'topKEvaluatorInputLayoutHash',
+    'heParamHash',
+    'bgvProfileHash',
+    'rustBgvBackendProfileHash',
+    'canonicalCiphertextConventionHash',
     'bgvPublicKeyRoot',
     'collectivePublicKeyRoot',
-    'aggregateSelectionPolicyDigest',
-    'postVotingClosedContextDigest',
-    'manifestDigest',
-    'rosterDigest',
-    'pollSpecDigest',
-    'thresholdProfileDigest',
-    'setupPackageDigest',
-    'ballotSetDigest',
-    'votingClosedBoardHeadDigest',
-    'contributorActionContextDigest',
-    'contributorRosterExternalAcceptanceDigest',
-    'proofStatementDigest',
+    'aggregateSelectionPolicyHash',
+    'postVotingClosedContextHash',
+    'manifestHash',
+    'rosterHash',
+    'pollSpecHash',
+    'thresholdProfileHash',
+    'setupPackageHash',
+    'ballotSetHash',
+    'votingClosedBoardHeadHash',
+    'contributorActionContextHash',
+    'contributorRosterExternalAcceptanceHash',
+    'proofStatementHash',
     'proofRoot',
-    'proofBytesDigest',
-    'proofEncodingProfileDigest',
-    'proofParameterSetDigest',
-    'publicRandomnessDigest',
+    'proofBytesHash',
+    'proofEncodingProfileHash',
+    'proofParameterSetHash',
+    'publicRandomnessHash',
 ] as const;
 
-export const contributionDigestFieldNames = [
-    'aggregateContributionDigest',
-    'bridgeProofRecordDigest',
-    'aggregateDerivationComponentDigest',
-    'aggregateShareCommitmentDigest',
-    'shareCommitmentMessageBoundCertDigest',
-    'encryptedAggregateBridgeDigest',
-    'encryptedAggregateTargetBasisDataRoot',
+export const contributionHashFieldNames = [
+    'aggregateContributionHash',
+    'bridgeProofRecordHash',
+    'aggregateDerivationComponentHash',
+    'aggregateShareCommitmentHash',
+    'shareCommitmentMessageBoundCertHash',
+    'encryptedAggregateBridgeHash',
+    'encryptedAggregateTargetBasisRoot',
     'encryptedAggregateInputRoot',
     'encryptedAggregateShareCiphertextRoot',
-    'encryptedAggregateReconstructionDigest',
-    'bridgeProofProfileDigest',
-    'bridgeWitnessPrivacyProfileDigest',
-    'bgvBatchEncoderDigest',
-    'bridgeLayoutDigest',
-    'ballotScoreEncodingProfileDigest',
-    'ballotShareLayoutProfileDigest',
-    'aggregateInputEncodingProfileDigest',
-    'encodedShareVectorLayoutDigest',
-    'encodedAggregateLayoutDigest',
-    'encryptedAggregateInputLayoutDigest',
-    'topKEvaluatorInputLayoutDigest',
-    'heParamDigest',
-    'bgvProfileDigest',
-    'rustBgvBackendProfileDigest',
-    'canonicalCiphertextConventionDigest',
+    'encryptedAggregateReconstructionHash',
+    'bridgeProofProfileHash',
+    'bridgeWitnessPrivacyProfileHash',
+    'bgvBatchEncoderHash',
+    'bridgeLayoutHash',
+    'ballotScoreEncodingProfileHash',
+    'ballotShareLayoutProfileHash',
+    'aggregateInputEncodingProfileHash',
+    'encodedShareVectorLayoutHash',
+    'encodedAggregateLayoutHash',
+    'encryptedAggregateInputLayoutHash',
+    'topKEvaluatorInputLayoutHash',
+    'heParamHash',
+    'bgvProfileHash',
+    'rustBgvBackendProfileHash',
+    'canonicalCiphertextConventionHash',
     'bgvPublicKeyRoot',
     'collectivePublicKeyRoot',
-    'aggregateSelectionPolicyDigest',
-    'postVotingClosedContextDigest',
-    'manifestDigest',
-    'rosterDigest',
-    'pollSpecDigest',
-    'thresholdProfileDigest',
-    'setupPackageDigest',
-    'ballotSetDigest',
-    'votingClosedBoardHeadDigest',
-    'closeRecordDigest',
-    'contributorRosterExternalAcceptanceDigest',
+    'aggregateSelectionPolicyHash',
+    'postVotingClosedContextHash',
+    'manifestHash',
+    'rosterHash',
+    'pollSpecHash',
+    'thresholdProfileHash',
+    'setupPackageHash',
+    'ballotSetHash',
+    'votingClosedBoardHeadHash',
+    'closeRecordHash',
+    'contributorRosterExternalAcceptanceHash',
 ] as const;
 
-export const aggregateReadyDigestFieldNames = [
-    'aggregateReadyRecordDigest',
-    'manifestDigest',
-    'rosterDigest',
-    'pollSpecDigest',
-    'thresholdProfileDigest',
-    'ballotSetDigest',
-    'votingClosedBoardHeadDigest',
-    'postVotingClosedContextDigest',
-    'aggregateSelectionPolicyDigest',
-    'firstValidOrderDigest',
-    'interpolationCoefficientReportDigest',
-    'encryptedAggregateBridgeDigest',
-    'encryptedAggregateTargetBasisDataRoot',
-    'encryptedAggregateReconstructionDigest',
+export const aggregateReadyHashFieldNames = [
+    'aggregateReadyRecordHash',
+    'manifestHash',
+    'rosterHash',
+    'pollSpecHash',
+    'thresholdProfileHash',
+    'ballotSetHash',
+    'votingClosedBoardHeadHash',
+    'postVotingClosedContextHash',
+    'aggregateSelectionPolicyHash',
+    'firstValidOrderHash',
+    'interpolationCoefficientReportHash',
+    'encryptedAggregateBridgeHash',
+    'encryptedAggregateTargetBasisRoot',
+    'encryptedAggregateReconstructionHash',
     'encryptedAggregateReconstructionRoot',
-    'bridgeWitnessPrivacyProfileDigest',
-    'bgvBatchEncoderDigest',
-    'bridgeLayoutDigest',
-    'encryptedAggregateInputLayoutDigest',
-    'topKEvaluatorInputLayoutDigest',
-    'bgvProfileDigest',
-    'setupPackageDigest',
+    'bridgeWitnessPrivacyProfileHash',
+    'bgvBatchEncoderHash',
+    'bridgeLayoutHash',
+    'encryptedAggregateInputLayoutHash',
+    'topKEvaluatorInputLayoutHash',
+    'bgvProfileHash',
+    'setupPackageHash',
     'collectivePublicKeyRoot',
 ] as const;
 
 export const collectForbiddenWitnessFieldRefusals = (
     value: unknown,
-    objectDigest: ProtocolDigest | undefined,
+    objectHash: ProtocolHash | undefined,
     path: string,
 ): readonly RefusalRecord[] =>
-    collectBoundedForbiddenWitnessFieldRefusals(value, objectDigest, path, {
+    collectBoundedForbiddenWitnessFieldRefusals(value, objectHash, path, {
         publicObjectDescription: 'Aggregate contribution public object',
     });
 
-export const collectDigestShapeRefusals = (
+export const collectHashShapeRefusals = (
     value: Record<string, unknown>,
-    digestFieldNames: readonly string[],
-    objectDigest: ProtocolDigest | undefined,
+    hashFieldNames: readonly string[],
+    objectHash: ProtocolHash | undefined,
 ): readonly RefusalRecord[] =>
-    digestFieldNames.flatMap((fieldName) => {
+    hashFieldNames.flatMap((fieldName) => {
         const fieldValue = value[fieldName];
 
         return typeof fieldValue === 'string' &&
-            protocolDigestPattern.test(fieldValue)
+            protocolHashPattern.test(fieldValue)
             ? []
             : [
                   createAggregateRefusal(
-                      `Aggregate bridge field ${fieldName} must be a canonical protocol digest.`,
-                      objectDigest,
+                      `Aggregate bridge field ${fieldName} must be a canonical protocol hash.`,
+                      objectHash,
                   ),
               ];
     });
 
-export const requireProtocolDigestField = (
+export const requireProtocolHashField = (
     value: Readonly<Record<string, unknown>>,
     fieldName: string,
     objectName: string,
-): ProtocolDigest => {
+): ProtocolHash => {
     const fieldValue = value[fieldName];
     if (
         typeof fieldValue === 'string' &&
-        protocolDigestPattern.test(fieldValue)
+        protocolHashPattern.test(fieldValue)
     ) {
         return fieldValue;
     }
 
     throw new RangeError(
-        `${objectName}.${fieldName} must be a canonical protocol digest.`,
+        `${objectName}.${fieldName} must be a canonical protocol hash.`,
     );
 };
 
@@ -302,13 +302,13 @@ export const requireMatchingValue = (
     }
 };
 
-export const requireProtocolDigest = (
-    value: ProtocolDigest,
+export const requireProtocolHash = (
+    value: ProtocolHash,
     description: string,
-): ProtocolDigest => {
-    if (!protocolDigestPattern.test(value)) {
+): ProtocolHash => {
+    if (!protocolHashPattern.test(value)) {
         throw new RangeError(
-            `${description} must be a canonical protocol digest.`,
+            `${description} must be a canonical protocol hash.`,
         );
     }
 

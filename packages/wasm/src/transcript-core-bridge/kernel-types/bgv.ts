@@ -1,4 +1,4 @@
-import type { ProtocolDigest } from '@sealed-lattice/types';
+import type { ProtocolHash } from '@sealed-lattice/types';
 
 export type BgvRnsProfileReport = {
     readonly profile: {
@@ -18,22 +18,22 @@ export type BgvRnsProfileReport = {
         readonly batchEncoderId: string;
         readonly canonicalCiphertextConventionId: string;
     };
-    readonly profileDigest: ProtocolDigest;
-    readonly backendProfileDigest: ProtocolDigest;
-    readonly batchEncoderDigest: ProtocolDigest;
-    readonly encryptedAggregateInputLayoutDigest: ProtocolDigest;
+    readonly profileHash: ProtocolHash;
+    readonly backendProfileHash: ProtocolHash;
+    readonly batchEncoderHash: ProtocolHash;
+    readonly encryptedAggregateInputLayoutHash: ProtocolHash;
     readonly batchLayoutBinding: unknown;
-    readonly batchLayoutBindingDigest: ProtocolDigest;
-    readonly ballotScoreEncodingProfileDigest: ProtocolDigest;
-    readonly ballotShareLayoutProfileDigest: ProtocolDigest;
-    readonly aggregateInputEncodingProfileDigest: ProtocolDigest;
-    readonly encodedAggregateLayoutDigest: ProtocolDigest;
-    readonly topKEvaluatorInputLayoutDigest: ProtocolDigest;
-    readonly canonicalCiphertextConventionDigest: ProtocolDigest;
-    readonly allowedEvaluatorOpsDigest: ProtocolDigest;
-    readonly securityEstimatorInputDigest: string;
+    readonly batchLayoutBindingHash: ProtocolHash;
+    readonly ballotScoreEncodingProfileHash: ProtocolHash;
+    readonly ballotShareLayoutProfileHash: ProtocolHash;
+    readonly aggregateInputEncodingProfileHash: ProtocolHash;
+    readonly encodedAggregateLayoutHash: ProtocolHash;
+    readonly topKEvaluatorInputLayoutHash: ProtocolHash;
+    readonly canonicalCiphertextConventionHash: ProtocolHash;
+    readonly allowedEvaluatorOpsHash: ProtocolHash;
+    readonly securityEstimatorInputHash: string;
     readonly bigIntegerReferenceVectors: unknown;
-    readonly bigIntegerReferenceVectorRoot: ProtocolDigest;
+    readonly bigIntegerReferenceVectorRoot: ProtocolHash;
     readonly basisReports: readonly unknown[];
     readonly statusLabels: readonly string[];
     readonly nonClaims: readonly string[];
@@ -43,13 +43,13 @@ export type BgvObjectValidation = {
     readonly ok: boolean;
     readonly objectKind: 'plaintext' | 'ciphertext';
     readonly componentCount: number;
-    readonly profileDigest: ProtocolDigest;
+    readonly profileHash: ProtocolHash;
     readonly basisId: string;
     readonly level: number;
     readonly coefficientCount: number;
-    readonly layoutDigest: ProtocolDigest;
-    readonly plaintextRoot?: ProtocolDigest;
-    readonly ciphertextRoot?: ProtocolDigest;
+    readonly layoutHash: ProtocolHash;
+    readonly plaintextRoot?: ProtocolHash;
+    readonly ciphertextRoot?: ProtocolHash;
     readonly canonicalBytesHash512: string;
     readonly statusLabels: readonly string[];
 };
@@ -57,23 +57,23 @@ export type BgvObjectValidation = {
 export type BgvCanonicalObjectAnalysis = {
     readonly objectKind: 'plaintext' | 'ciphertext';
     readonly componentCount: number;
-    readonly profileDigest: ProtocolDigest;
+    readonly profileHash: ProtocolHash;
     readonly basisId: string;
     readonly level: number;
     readonly coefficientCount: number;
-    readonly layoutDigest: ProtocolDigest;
+    readonly layoutHash: ProtocolHash;
     readonly statusLabels: readonly string[];
 };
 
 export type BgvProfileRejection = {
     readonly ok: false;
     readonly operation: string;
-    readonly acceptedDigests: readonly ProtocolDigest[];
+    readonly acceptedHashes: readonly ProtocolHash[];
     readonly refusedObjects: readonly {
         readonly code: 'BGVProfileRejected';
         readonly reasonCode: string;
         readonly message: string;
-        readonly objectDigest?: ProtocolDigest;
+        readonly objectHash?: ProtocolHash;
     }[];
     readonly unresolvedReason: 'BGVProfileRejected';
     readonly statusLabels: readonly string[];
@@ -84,22 +84,22 @@ export type BgvEvaluatorOperationValidation =
           readonly ok: true;
           readonly operation: 'validateBgvEvaluatorOperation';
           readonly acceptedOperation: string;
-          readonly allowedEvaluatorOpsDigest: ProtocolDigest;
+          readonly allowedEvaluatorOpsHash: ProtocolHash;
           readonly statusLabels: readonly string[];
       }
     | BgvProfileRejection;
 
 export type BgvBatchPlaintextEncoding = {
-    readonly profileDigest: ProtocolDigest;
+    readonly profileHash: ProtocolHash;
     readonly basisId: string;
     readonly level: number;
     readonly coefficientCount: number;
     readonly suppliedSlotCount: number;
     readonly slotCount: number;
-    readonly plaintextRoot: ProtocolDigest;
+    readonly plaintextRoot: ProtocolHash;
     readonly canonicalBytesHash512: string;
     readonly canonicalByteLength: number;
-    readonly batchLayoutBindingDigest: ProtocolDigest;
+    readonly batchLayoutBindingHash: ProtocolHash;
     readonly sampledSlots: readonly {
         readonly position: number;
         readonly value: number;
@@ -125,8 +125,8 @@ export type BgvReferenceOracleRejection = {
 };
 
 export type BgvCiphertextConventionFixture = {
-    readonly profileDigest: ProtocolDigest;
-    readonly ciphertextRoot: ProtocolDigest;
+    readonly profileHash: ProtocolHash;
+    readonly ciphertextRoot: ProtocolHash;
     readonly canonicalBytesHash512: string;
     readonly canonicalByteLength: number;
     readonly componentCount: number;
@@ -136,8 +136,8 @@ export type BgvCiphertextConventionFixture = {
 };
 
 export type BgvBaseConversionFixture = {
-    readonly sourcePlaintextRoot: ProtocolDigest;
-    readonly convertedPlaintextRoot: ProtocolDigest;
+    readonly sourcePlaintextRoot: ProtocolHash;
+    readonly convertedPlaintextRoot: ProtocolHash;
     readonly sourceCanonicalBytesHash512: string;
     readonly convertedCanonicalBytesHash512: string;
     readonly sourceBasisId: string;
@@ -165,31 +165,31 @@ export type BgvPassiveSetupPackage = {
     readonly objectVersion: 1;
     readonly setupProfileId: string;
     readonly setupMode: string;
-    readonly setupPackageDigest: ProtocolDigest;
+    readonly setupPackageHash: ProtocolHash;
     readonly setupInputs: {
         readonly ceremonyId: string;
-        readonly manifestDigest: ProtocolDigest;
-        readonly rosterDigest: ProtocolDigest;
-        readonly thresholdProfileDigest: ProtocolDigest;
+        readonly manifestHash: ProtocolHash;
+        readonly rosterHash: ProtocolHash;
+        readonly thresholdProfileHash: ProtocolHash;
         readonly participantCount: number;
         readonly participantIdentities: readonly string[];
-        readonly setupSeedDigest: string;
+        readonly setupSeedHash: string;
     };
     readonly profileBindings: Readonly<Record<string, unknown>>;
     readonly participants: readonly unknown[];
     readonly collectivePublicKey: {
-        readonly collectivePublicKeyRoot: ProtocolDigest;
-        readonly bgvPublicKeyRoot: ProtocolDigest;
+        readonly collectivePublicKeyRoot: ProtocolHash;
+        readonly bgvPublicKeyRoot: ProtocolHash;
         readonly statusLabels: readonly string[];
         readonly record: unknown;
     };
     readonly thresholdVerificationMaterial: Readonly<Record<string, unknown>>;
     readonly evaluationKeys: {
-        readonly rotSetDigest: ProtocolDigest;
-        readonly evaluationKeyRoot: ProtocolDigest;
-        readonly relinearizationKeyRoot: ProtocolDigest;
-        readonly keySwitchKeyRoot: ProtocolDigest;
-        readonly keySwitchDecompositionDigest: ProtocolDigest;
+        readonly rotSetHash: ProtocolHash;
+        readonly evaluationKeyRoot: ProtocolHash;
+        readonly relinearizationKeyRoot: ProtocolHash;
+        readonly keySwitchKeyRoot: ProtocolHash;
+        readonly keySwitchDecompositionHash: ProtocolHash;
         readonly rotationKeyRoots: readonly unknown[];
         readonly statusLabels: readonly string[];
         readonly record: unknown;
@@ -198,13 +198,13 @@ export type BgvPassiveSetupPackage = {
     readonly developmentEncryptionFixture: Readonly<Record<string, unknown>>;
     readonly certificates: Readonly<Record<string, unknown>>;
     readonly trustedDealerBoundary: Readonly<Record<string, unknown>>;
-    readonly kllpsCompatibility: {
+    readonly kllpsStatus: {
         readonly thresholdDecryptionProfileId: string;
-        readonly thresholdDecryptionProfileDigest: ProtocolDigest;
-        readonly kllpsTargetDecryptionProfileDigest: ProtocolDigest;
-        readonly setupMaterialCompatibleWithKLLPS: boolean;
-        readonly KLLPSPartDecImplemented: boolean;
-        readonly KLLPSC1C4Certified: boolean;
+        readonly thresholdDecryptionProfileHash: ProtocolHash;
+        readonly kllpsTargetDecryptionProfileHash: ProtocolHash;
+        readonly setupMaterialMatchesKLLPS: boolean;
+        readonly KLLPSPartDecStatusImplemented: boolean;
+        readonly KLLPSC1C4StatusAccepted: boolean;
     };
     readonly statusLabels: readonly string[];
     readonly nonClaims: readonly string[];
@@ -213,7 +213,7 @@ export type BgvPassiveSetupPackage = {
 export type BgvPassiveSetupVerification = {
     readonly ok: boolean;
     readonly operation: 'verifyBgvPassiveSetupPackage';
-    readonly acceptedDigests: readonly ProtocolDigest[];
+    readonly acceptedHashes: readonly ProtocolHash[];
     readonly refusedObjects: readonly unknown[];
     readonly unresolvedReason: string | null;
     readonly statusLabels: readonly string[];

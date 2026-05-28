@@ -1,7 +1,5 @@
 {
     "compilerOptions": {
-        "baseUrl": ".",
-        "ignoreDeprecations": "6.0",
         "paths": {
             "sealed-lattice": ["./packages/sdk/src/index.ts"],
             "@sealed-lattice/types": ["./packages/types/src/index.ts"],

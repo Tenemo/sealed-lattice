@@ -16,7 +16,7 @@ pub(crate) fn proof_contract_with_expected_size(
     Ok(Value::Object(proof_contract))
 }
 
-pub(crate) fn proof_bytes_digest(
+pub(crate) fn proof_bytes_hash(
     proof_bytes_hex: &str,
     allow_empty: bool,
 ) -> crate::encoding::CanonicalResult<String> {
@@ -28,8 +28,8 @@ pub(crate) fn proof_bytes_digest(
             "generated proof bytes must be non-empty for this proof record",
         ));
     }
-    derive_digest(
-        "ProofBytesDigest",
+    derive_hash(
+        "ProofBytesHash",
         &json!({
             "objectType": "ProofBytes",
             "objectVersion": 1,
@@ -37,7 +37,7 @@ pub(crate) fn proof_bytes_digest(
             "proofSizeBytes": proof_bytes.len(),
         }),
     )
-    .ok_or_else(|| invalid_preflight("generated proof bytes digest could not be derived"))
+    .ok_or_else(|| invalid_preflight("generated proof bytes hash could not be derived"))
 }
 
 pub(crate) fn generated_component_proof_input(
@@ -72,7 +72,7 @@ pub(crate) fn generated_component_proof_input(
             "component proof encoding",
         )?,
     );
-    if !proof_input.contains_key("componentProofStatementDigest") {
+    if !proof_input.contains_key("componentProofStatementHash") {
         let proof_statement = proof_input
             .get("proofStatement")
             .ok_or_else(|| invalid_preflight("component proof input is missing proofStatement"))?;
@@ -82,12 +82,12 @@ pub(crate) fn generated_component_proof_input(
             .ok_or_else(|| {
                 invalid_preflight("component proof input is missing proofStatementFormat")
             })?;
-        if let (Some(component_proof_statement_digest), _) =
-            supplied_component_proof_statement_digest(proof_statement, proof_statement_format)
+        if let (Some(component_proof_statement_hash), _) =
+            supplied_component_proof_statement_hash(proof_statement, proof_statement_format)
         {
             proof_input.insert(
-                "componentProofStatementDigest".to_string(),
-                json!(component_proof_statement_digest),
+                "componentProofStatementHash".to_string(),
+                json!(component_proof_statement_hash),
             );
         }
     }
@@ -105,7 +105,7 @@ pub(crate) fn generated_component_proof_record(
     proof_size_bytes: usize,
 ) -> crate::encoding::CanonicalResult<Value> {
     let allow_empty_proof_bytes = component_proof_bytes_must_be_empty(component_id);
-    let proof_bytes_digest = proof_bytes_digest(proof_bytes_hex, allow_empty_proof_bytes)?;
+    let proof_bytes_hash = proof_bytes_hash(proof_bytes_hex, allow_empty_proof_bytes)?;
     let proof_encoding = required_json_field(
         component_proof_input,
         "proofEncoding",
@@ -118,41 +118,41 @@ pub(crate) fn generated_component_proof_record(
     )?;
     let public_randomness_hex = string_field(component_proof_input, "publicRandomnessHex")
         .ok_or_else(|| invalid_preflight("component proof input is missing publicRandomnessHex"))?;
-    let proof_encoding_profile_digest = derive_ballot_proof_encoding_profile_digest(proof_encoding)
-        .ok_or_else(|| invalid_preflight("component proof encoding digest could not be derived"))?;
-    let proof_parameter_set_digest = derive_ballot_proof_parameter_set_digest(proof_parameter_set)
+    let proof_encoding_profile_hash = derive_ballot_proof_encoding_profile_hash(proof_encoding)
+        .ok_or_else(|| invalid_preflight("component proof encoding hash could not be derived"))?;
+    let proof_parameter_set_hash = derive_ballot_proof_parameter_set_hash(proof_parameter_set)
         .ok_or_else(|| {
-            invalid_preflight("component proof parameter-set digest could not be derived")
+            invalid_preflight("component proof parameter-set hash could not be derived")
         })?;
-    let public_randomness_digest =
-        derive_ballot_proof_public_randomness_digest(public_randomness_hex).ok_or_else(|| {
-            invalid_preflight("component proof public randomness digest could not be derived")
+    let public_randomness_hash = derive_ballot_proof_public_randomness_hash(public_randomness_hex)
+        .ok_or_else(|| {
+            invalid_preflight("component proof public randomness hash could not be derived")
         })?;
-    let component_statement_digest = string_field(component_proof_input, "statementDigest")
-        .ok_or_else(|| invalid_preflight("component proof input is missing statementDigest"))?;
+    let component_statement_hash = string_field(component_proof_input, "statementHash")
+        .ok_or_else(|| invalid_preflight("component proof input is missing statementHash"))?;
 
     let mut proof_root_payload = Map::new();
     proof_root_payload.insert("componentId".to_string(), json!(component_id));
-    if let Some(component_proof_statement_digest) =
-        string_field(component_proof_input, "componentProofStatementDigest")
+    if let Some(component_proof_statement_hash) =
+        string_field(component_proof_input, "componentProofStatementHash")
     {
         proof_root_payload.insert(
-            "componentProofStatementDigest".to_string(),
-            json!(component_proof_statement_digest),
+            "componentProofStatementHash".to_string(),
+            json!(component_proof_statement_hash),
         );
     }
     proof_root_payload.insert(
-        "componentStatementDigest".to_string(),
-        json!(component_statement_digest),
+        "componentStatementHash".to_string(),
+        json!(component_statement_hash),
     );
-    proof_root_payload.insert("proofBytesDigest".to_string(), json!(proof_bytes_digest));
+    proof_root_payload.insert("proofBytesHash".to_string(), json!(proof_bytes_hash));
     proof_root_payload.insert(
-        "proofEncodingProfileDigest".to_string(),
-        json!(proof_encoding_profile_digest),
+        "proofEncodingProfileHash".to_string(),
+        json!(proof_encoding_profile_hash),
     );
     proof_root_payload.insert(
-        "proofParameterSetDigest".to_string(),
-        json!(proof_parameter_set_digest),
+        "proofParameterSetHash".to_string(),
+        json!(proof_parameter_set_hash),
     );
     proof_root_payload.insert(
         "proofStatementFormat".to_string(),
@@ -163,51 +163,44 @@ pub(crate) fn generated_component_proof_record(
         ),
     );
     proof_root_payload.insert(
-        "publicRandomnessDigest".to_string(),
-        json!(public_randomness_digest),
+        "publicRandomnessHash".to_string(),
+        json!(public_randomness_hash),
     );
     proof_root_payload.insert(
         "purpose".to_string(),
         json!("ballot-proof-component-proof-root-v1"),
     );
-    proof_root_payload.insert(
-        "statementDigest".to_string(),
-        json!(component_statement_digest),
-    );
-    let proof_root = derive_digest("ChallengeDomainDigest", &Value::Object(proof_root_payload))
+    proof_root_payload.insert("statementHash".to_string(), json!(component_statement_hash));
+    let proof_root = derive_hash("ChallengeDomainHash", &Value::Object(proof_root_payload))
         .ok_or_else(|| invalid_preflight("component proof root could not be derived"))?;
 
     let mut component_proof_payload = Map::new();
     component_proof_payload.insert(
-        "backendStatementDigest".to_string(),
+        "backendStatementHash".to_string(),
         json!(
-            string_field(component_bundle_statement, "backendStatementDigest").ok_or_else(
-                || invalid_preflight(
-                    "component bundle statement is missing backendStatementDigest"
-                )
-            )?
+            string_field(component_bundle_statement, "backendStatementHash").ok_or_else(|| {
+                invalid_preflight("component bundle statement is missing backendStatementHash")
+            })?
         ),
     );
-    if let Some(ballot_proof_statement_digest) =
-        string_field(statement, "ballotProofStatementDigest")
-    {
+    if let Some(ballot_proof_statement_hash) = string_field(statement, "ballotProofStatementHash") {
         component_proof_payload.insert(
-            "ballotProofStatementDigest".to_string(),
-            json!(ballot_proof_statement_digest),
+            "ballotProofStatementHash".to_string(),
+            json!(ballot_proof_statement_hash),
         );
     }
     component_proof_payload.insert("componentId".to_string(), json!(component_id));
-    if let Some(component_proof_statement_digest) =
-        string_field(component_proof_input, "componentProofStatementDigest")
+    if let Some(component_proof_statement_hash) =
+        string_field(component_proof_input, "componentProofStatementHash")
     {
         component_proof_payload.insert(
-            "componentProofStatementDigest".to_string(),
-            json!(component_proof_statement_digest),
+            "componentProofStatementHash".to_string(),
+            json!(component_proof_statement_hash),
         );
     }
     component_proof_payload.insert(
-        "componentStatementDigest".to_string(),
-        json!(component_statement_digest),
+        "componentStatementHash".to_string(),
+        json!(component_statement_hash),
     );
     component_proof_payload.insert(
         "objectType".to_string(),
@@ -218,39 +211,36 @@ pub(crate) fn generated_component_proof_record(
         "proofBackend".to_string(),
         json!("LocalLinearLatticeRelation"),
     );
-    component_proof_payload.insert("proofBytesDigest".to_string(), json!(proof_bytes_digest));
+    component_proof_payload.insert("proofBytesHash".to_string(), json!(proof_bytes_hash));
     component_proof_payload.insert(
-        "proofEncodingProfileDigest".to_string(),
-        json!(proof_encoding_profile_digest),
+        "proofEncodingProfileHash".to_string(),
+        json!(proof_encoding_profile_hash),
     );
     component_proof_payload.insert(
-        "proofParameterSetDigest".to_string(),
-        json!(proof_parameter_set_digest),
+        "proofParameterSetHash".to_string(),
+        json!(proof_parameter_set_hash),
     );
     component_proof_payload.insert("proofRoot".to_string(), json!(proof_root));
     component_proof_payload.insert("proofSizeBytes".to_string(), json!(proof_size_bytes));
     component_proof_payload.insert(
-        "publicRandomnessDigest".to_string(),
-        json!(public_randomness_digest),
+        "publicRandomnessHash".to_string(),
+        json!(public_randomness_hash),
     );
     component_proof_payload.insert(
-        "relationStatementDigest".to_string(),
+        "relationStatementHash".to_string(),
         json!(
-            string_field(component_bundle_statement, "relationStatementDigest").ok_or_else(
-                || invalid_preflight(
-                    "component bundle statement is missing relationStatementDigest"
-                )
-            )?
+            string_field(component_bundle_statement, "relationStatementHash").ok_or_else(|| {
+                invalid_preflight("component bundle statement is missing relationStatementHash")
+            })?
         ),
     );
     let component_proof_payload_value = Value::Object(component_proof_payload.clone());
-    let component_proof_record_digest = derive_ballot_component_proof_record_digest(
-        &component_proof_payload_value,
-    )
-    .ok_or_else(|| invalid_preflight("component proof record digest could not be derived"))?;
+    let component_proof_record_hash =
+        derive_ballot_component_proof_record_hash(&component_proof_payload_value)
+            .ok_or_else(|| invalid_preflight("component proof record hash could not be derived"))?;
     component_proof_payload.insert(
-        "componentProofRecordDigest".to_string(),
-        json!(component_proof_record_digest),
+        "componentProofRecordHash".to_string(),
+        json!(component_proof_record_hash),
     );
 
     Ok(Value::Object(component_proof_payload))
@@ -262,21 +252,19 @@ pub(crate) fn generated_component_proof_bundle(
 ) -> crate::encoding::CanonicalResult<Value> {
     let mut component_proof_bundle_payload = Map::new();
     component_proof_bundle_payload.insert(
-        "backendStatementDigest".to_string(),
+        "backendStatementHash".to_string(),
         json!(
-            string_field(component_bundle_statement, "backendStatementDigest").ok_or_else(
-                || invalid_preflight(
-                    "component bundle statement is missing backendStatementDigest"
-                )
-            )?
+            string_field(component_bundle_statement, "backendStatementHash").ok_or_else(|| {
+                invalid_preflight("component bundle statement is missing backendStatementHash")
+            })?
         ),
     );
-    if let Some(ballot_proof_statement_digest) =
-        string_field(component_bundle_statement, "ballotProofStatementDigest")
+    if let Some(ballot_proof_statement_hash) =
+        string_field(component_bundle_statement, "ballotProofStatementHash")
     {
         component_proof_bundle_payload.insert(
-            "ballotProofStatementDigest".to_string(),
-            json!(ballot_proof_statement_digest),
+            "ballotProofStatementHash".to_string(),
+            json!(ballot_proof_statement_hash),
         );
     }
     component_proof_bundle_payload.insert(
@@ -284,11 +272,11 @@ pub(crate) fn generated_component_proof_bundle(
         json!(FULL_BALLOT_PROOF_PROJECTION_COVERAGE),
     );
     component_proof_bundle_payload.insert(
-        "componentBundleStatementDigest".to_string(),
+        "componentBundleStatementHash".to_string(),
         json!(
-            string_field(component_bundle_statement, "componentBundleStatementDigest").ok_or_else(
+            string_field(component_bundle_statement, "componentBundleStatementHash").ok_or_else(
                 || invalid_preflight(
-                    "component bundle statement is missing componentBundleStatementDigest"
+                    "component bundle statement is missing componentBundleStatementHash"
                 )
             )?
         ),
@@ -300,13 +288,11 @@ pub(crate) fn generated_component_proof_bundle(
     );
     component_proof_bundle_payload.insert("objectVersion".to_string(), json!(1));
     component_proof_bundle_payload.insert(
-        "relationStatementDigest".to_string(),
+        "relationStatementHash".to_string(),
         json!(
-            string_field(component_bundle_statement, "relationStatementDigest").ok_or_else(
-                || invalid_preflight(
-                    "component bundle statement is missing relationStatementDigest"
-                )
-            )?
+            string_field(component_bundle_statement, "relationStatementHash").ok_or_else(|| {
+                invalid_preflight("component bundle statement is missing relationStatementHash")
+            })?
         ),
     );
     component_proof_bundle_payload.insert(
@@ -314,13 +300,12 @@ pub(crate) fn generated_component_proof_bundle(
         json!(REQUIRED_BALLOT_PROOF_COMPONENT_IDS),
     );
     let component_proof_bundle_value = Value::Object(component_proof_bundle_payload.clone());
-    let component_proof_bundle_digest = derive_ballot_component_proof_bundle_digest(
-        &component_proof_bundle_value,
-    )
-    .ok_or_else(|| invalid_preflight("component proof bundle digest could not be derived"))?;
+    let component_proof_bundle_hash =
+        derive_ballot_component_proof_bundle_hash(&component_proof_bundle_value)
+            .ok_or_else(|| invalid_preflight("component proof bundle hash could not be derived"))?;
     component_proof_bundle_payload.insert(
-        "componentProofBundleDigest".to_string(),
-        json!(component_proof_bundle_digest),
+        "componentProofBundleHash".to_string(),
+        json!(component_proof_bundle_hash),
     );
 
     Ok(Value::Object(component_proof_bundle_payload))
@@ -350,27 +335,25 @@ pub(crate) fn generated_ballot_proof_record(
     let component_proof_bundle = input.component_proof_bundle;
     let proof_bytes_hex = input.proof_bytes_hex;
     let proof_size_bytes = input.proof_size_bytes;
-    let proof_bytes_digest = proof_bytes_digest(proof_bytes_hex, false)?;
-    let proof_encoding_profile_digest = derive_ballot_proof_encoding_profile_digest(proof_encoding)
-        .ok_or_else(|| invalid_preflight("ballot proof encoding digest could not be derived"))?;
-    let proof_parameter_set_digest = derive_ballot_proof_parameter_set_digest(parameter_set)
+    let proof_bytes_hash = proof_bytes_hash(proof_bytes_hex, false)?;
+    let proof_encoding_profile_hash = derive_ballot_proof_encoding_profile_hash(proof_encoding)
+        .ok_or_else(|| invalid_preflight("ballot proof encoding hash could not be derived"))?;
+    let proof_parameter_set_hash = derive_ballot_proof_parameter_set_hash(parameter_set)
+        .ok_or_else(|| invalid_preflight("ballot proof parameter-set hash could not be derived"))?;
+    let public_randomness_hash = derive_ballot_proof_public_randomness_hash(public_randomness_hex)
         .ok_or_else(|| {
-            invalid_preflight("ballot proof parameter-set digest could not be derived")
+            invalid_preflight("ballot proof public randomness hash could not be derived")
         })?;
-    let public_randomness_digest =
-        derive_ballot_proof_public_randomness_digest(public_randomness_hex).ok_or_else(|| {
-            invalid_preflight("ballot proof public randomness digest could not be derived")
-        })?;
-    let linear_statement_digest = string_field(linear_statement, "statementDigest")
-        .ok_or_else(|| invalid_preflight("linear statement is missing statementDigest"))?;
-    let proof_root = derive_digest(
-        "BallotProofRecordDigest",
+    let linear_statement_hash = string_field(linear_statement, "statementHash")
+        .ok_or_else(|| invalid_preflight("linear statement is missing statementHash"))?;
+    let proof_root = derive_hash(
+        "BallotProofRecordHash",
         &json!({
-            "linearStatementDigest": linear_statement_digest,
-            "proofBytesDigest": proof_bytes_digest,
-            "proofEncodingProfileDigest": proof_encoding_profile_digest,
-            "proofParameterSetDigest": proof_parameter_set_digest,
-            "publicRandomnessDigest": public_randomness_digest,
+            "linearStatementHash": linear_statement_hash,
+            "proofBytesHash": proof_bytes_hash,
+            "proofEncodingProfileHash": proof_encoding_profile_hash,
+            "proofParameterSetHash": proof_parameter_set_hash,
+            "publicRandomnessHash": public_randomness_hash,
             "purpose": "ballot-proof-linear-proof-record-root-v1",
         }),
     )
@@ -378,52 +361,50 @@ pub(crate) fn generated_ballot_proof_record(
 
     let mut proof_payload = Map::new();
     proof_payload.insert(
-        "backendStatementDigest".to_string(),
+        "backendStatementHash".to_string(),
         json!(
-            string_field(linear_statement, "backendStatementDigest").ok_or_else(|| {
-                invalid_preflight("linear statement is missing backendStatementDigest")
+            string_field(linear_statement, "backendStatementHash").ok_or_else(|| {
+                invalid_preflight("linear statement is missing backendStatementHash")
             })?
         ),
     );
     proof_payload.insert(
-        "ballotProofProfileDigest".to_string(),
+        "ballotProofProfileHash".to_string(),
         json!(
-            string_field(statement, "ballotProofProfileDigest").ok_or_else(|| {
-                invalid_preflight("statement is missing ballotProofProfileDigest")
+            string_field(statement, "ballotProofProfileHash").ok_or_else(|| {
+                invalid_preflight("statement is missing ballotProofProfileHash")
             })?
         ),
     );
     proof_payload.insert(
-        "ballotProofStatementDigest".to_string(),
+        "ballotProofStatementHash".to_string(),
         json!(
-            string_field(statement, "ballotProofStatementDigest").ok_or_else(|| {
-                invalid_preflight("statement is missing ballotProofStatementDigest")
+            string_field(statement, "ballotProofStatementHash").ok_or_else(|| {
+                invalid_preflight("statement is missing ballotProofStatementHash")
             })?
         ),
     );
     proof_payload.insert(
-        "componentBundleStatementDigest".to_string(),
+        "componentBundleStatementHash".to_string(),
         json!(
-            string_field(component_bundle_statement, "componentBundleStatementDigest").ok_or_else(
+            string_field(component_bundle_statement, "componentBundleStatementHash").ok_or_else(
                 || invalid_preflight(
-                    "component bundle statement is missing componentBundleStatementDigest"
+                    "component bundle statement is missing componentBundleStatementHash"
                 )
             )?
         ),
     );
     proof_payload.insert(
-        "componentProofBundleDigest".to_string(),
+        "componentProofBundleHash".to_string(),
         json!(
-            string_field(component_proof_bundle, "componentProofBundleDigest").ok_or_else(
-                || invalid_preflight(
-                    "component proof bundle is missing componentProofBundleDigest"
-                )
-            )?
+            string_field(component_proof_bundle, "componentProofBundleHash").ok_or_else(|| {
+                invalid_preflight("component proof bundle is missing componentProofBundleHash")
+            })?
         ),
     );
     proof_payload.insert(
-        "linearStatementDigest".to_string(),
-        json!(linear_statement_digest),
+        "linearStatementHash".to_string(),
+        json!(linear_statement_hash),
     );
     proof_payload.insert("objectType".to_string(), json!("BallotProofRecord"));
     proof_payload.insert("objectVersion".to_string(), json!(1));
@@ -431,57 +412,55 @@ pub(crate) fn generated_ballot_proof_record(
         "proofBackend".to_string(),
         json!("LocalLinearLatticeRelation"),
     );
-    proof_payload.insert("proofBytesDigest".to_string(), json!(proof_bytes_digest));
+    proof_payload.insert("proofBytesHash".to_string(), json!(proof_bytes_hash));
     proof_payload.insert(
-        "proofEncodingProfileDigest".to_string(),
-        json!(proof_encoding_profile_digest),
+        "proofEncodingProfileHash".to_string(),
+        json!(proof_encoding_profile_hash),
     );
     proof_payload.insert(
-        "proofParameterSetDigest".to_string(),
-        json!(proof_parameter_set_digest),
+        "proofParameterSetHash".to_string(),
+        json!(proof_parameter_set_hash),
     );
     proof_payload.insert("proofRoot".to_string(), json!(proof_root));
     proof_payload.insert("proofSizeBytes".to_string(), json!(proof_size_bytes));
     proof_payload.insert(
-        "publicRandomnessDigest".to_string(),
-        json!(public_randomness_digest),
+        "publicRandomnessHash".to_string(),
+        json!(public_randomness_hash),
     );
     proof_payload.insert(
-        "relationStatementDigest".to_string(),
+        "relationStatementHash".to_string(),
         json!(
-            string_field(linear_statement, "relationStatementDigest").ok_or_else(|| {
-                invalid_preflight("linear statement is missing relationStatementDigest")
+            string_field(linear_statement, "relationStatementHash").ok_or_else(|| {
+                invalid_preflight("linear statement is missing relationStatementHash")
             })?
         ),
     );
     proof_payload.insert(
-        "statementMatrixDigest".to_string(),
+        "statementMatrixHash".to_string(),
         json!(
-            string_field(linear_statement, "statementMatrixDigest").ok_or_else(|| {
-                invalid_preflight("linear statement is missing statementMatrixDigest")
+            string_field(linear_statement, "statementMatrixHash").ok_or_else(|| {
+                invalid_preflight("linear statement is missing statementMatrixHash")
             })?
         ),
     );
     proof_payload.insert(
-        "targetVectorDigest".to_string(),
+        "targetVectorHash".to_string(),
         json!(
-            string_field(linear_statement, "targetVectorDigest").ok_or_else(|| {
-                invalid_preflight("linear statement is missing targetVectorDigest")
+            string_field(linear_statement, "targetVectorHash").ok_or_else(|| {
+                invalid_preflight("linear statement is missing targetVectorHash")
             })?
         ),
     );
-    let challenge_digest =
-        derive_ballot_proof_challenge_digest(statement, &Value::Object(proof_payload.clone()))
-            .ok_or_else(|| {
-                invalid_preflight("ballot proof challenge digest could not be derived")
-            })?;
-    proof_payload.insert("challengeDigest".to_string(), json!(challenge_digest));
+    let challenge_hash =
+        derive_ballot_proof_challenge_hash(statement, &Value::Object(proof_payload.clone()))
+            .ok_or_else(|| invalid_preflight("ballot proof challenge hash could not be derived"))?;
+    proof_payload.insert("challengeHash".to_string(), json!(challenge_hash));
     let proof_payload_value = Value::Object(proof_payload.clone());
-    let ballot_proof_record_digest = derive_digest("BallotProofRecordDigest", &proof_payload_value)
-        .ok_or_else(|| invalid_preflight("ballot proof record digest could not be derived"))?;
+    let ballot_proof_record_hash = derive_hash("BallotProofRecordHash", &proof_payload_value)
+        .ok_or_else(|| invalid_preflight("ballot proof record hash could not be derived"))?;
     proof_payload.insert(
-        "ballotProofRecordDigest".to_string(),
-        json!(ballot_proof_record_digest),
+        "ballotProofRecordHash".to_string(),
+        json!(ballot_proof_record_hash),
     );
 
     Ok(Value::Object(proof_payload))

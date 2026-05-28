@@ -11,7 +11,7 @@ import {
     canonicalErrorCodes,
     concatenateByteChunks,
     hasWasmHeader,
-    normalizeRustSourcePathsForDigest,
+    normalizeRustSourcePathsForHash,
     readWasmVarUint32,
     sha256HexPattern,
     textDecoder,
@@ -21,7 +21,7 @@ import {
     wasmHeaderByteLength,
 } from './kernel-contracts.js';
 
-const stripWasmCustomSectionsForDigest = (bytes: Uint8Array): Uint8Array => {
+const stripWasmCustomSectionsForHash = (bytes: Uint8Array): Uint8Array => {
     if (!hasWasmHeader(bytes)) {
         return bytes;
     }
@@ -56,12 +56,12 @@ const stripWasmCustomSectionsForDigest = (bytes: Uint8Array): Uint8Array => {
     return concatenateByteChunks(chunks, totalByteLength);
 };
 
-export const normalizeTranscriptCoreKernelBytesForDigest = (
+export const normalizeTranscriptCoreKernelBytesForHash = (
     bytes: Uint8Array,
 ): Uint8Array =>
-    stripWasmCustomSectionsForDigest(normalizeRustSourcePathsForDigest(bytes));
+    stripWasmCustomSectionsForHash(normalizeRustSourcePathsForHash(bytes));
 
-const hashSha256Hex = async (bytes: Uint8Array): Promise<string> => {
+const sha256Hex = async (bytes: Uint8Array): Promise<string> => {
     const subtleCrypto = globalThis.crypto?.subtle;
     /* v8 ignore next 5 */
     if (subtleCrypto === undefined) {
@@ -70,12 +70,10 @@ const hashSha256Hex = async (bytes: Uint8Array): Promise<string> => {
         );
     }
 
-    const digestInput = Uint8Array.from(bytes);
+    const hashInput = Uint8Array.from(bytes);
 
     return bytesToHex(
-        new Uint8Array(
-            await subtleCrypto.digest('SHA-256', digestInput.buffer),
-        ),
+        new Uint8Array(await subtleCrypto.digest('SHA-256', hashInput.buffer)),
     );
 };
 
@@ -85,12 +83,12 @@ const verifyKernelIntegrity = async (
 ): Promise<void> => {
     if (!sha256HexPattern.test(expectedSha256Hex)) {
         throw new Error(
-            `The transcript-core kernel expected integrity digest is invalid: ${expectedSha256Hex}.`,
+            `The transcript-core kernel expected integrity hash is invalid: ${expectedSha256Hex}.`,
         );
     }
 
-    const actualSha256Hex = await hashSha256Hex(
-        normalizeTranscriptCoreKernelBytesForDigest(new Uint8Array(bytes)),
+    const actualSha256Hex = await sha256Hex(
+        normalizeTranscriptCoreKernelBytesForHash(new Uint8Array(bytes)),
     );
     if (actualSha256Hex !== expectedSha256Hex) {
         throw new Error(
@@ -111,7 +109,7 @@ const requireKernelIntegrityExpectation = (
     if (expectedKernelSha256Hex !== undefined) {
         if (!sha256HexPattern.test(expectedKernelSha256Hex)) {
             throw new Error(
-                `The transcript-core kernel expected integrity digest is invalid: ${expectedKernelSha256Hex}.`,
+                `The transcript-core kernel expected integrity hash is invalid: ${expectedKernelSha256Hex}.`,
             );
         }
 

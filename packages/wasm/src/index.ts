@@ -34,7 +34,7 @@ const transcriptCoreKernelUrl = new URL(
     import.meta.url,
 );
 const packagedTranscriptCoreKernelNormalizedSha256Hex =
-    '12ba844182fb69cf50f74ad33861554ac578df65ec2eb25db6935b1d7ab92953';
+    '5648d676d712c7e5a420135784507d2f43bc25d1e12d04b80a01cf54656ef98f';
 
 export {
     canonicalErrorCodes,

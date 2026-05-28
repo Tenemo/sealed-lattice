@@ -24,7 +24,7 @@ pub fn verify_linear_proof_vector_case_value(vector_case: &Value) -> Value {
             "vectorAvailable": false,
             "expectedOutcome": parsed_case.expected_outcome,
             "statusLabels": [],
-            "acceptedDigests": [],
+            "acceptedHashes": [],
             "refusedObjects": [
                 {
                     "code": "OperationUnavailable",
@@ -61,7 +61,7 @@ pub fn verify_linear_proof_vector_case_value(vector_case: &Value) -> Value {
             "vectorAvailable": true,
             "expectedOutcome": parsed_case.expected_outcome,
             "statusLabels": verified_status_labels,
-            "acceptedDigests": [],
+            "acceptedHashes": [],
             "refusedObjects": [
                 {
                     "code": "FixtureMismatch",
@@ -80,7 +80,7 @@ pub fn verify_linear_proof_vector_case_value(vector_case: &Value) -> Value {
         "vectorAvailable": true,
         "expectedOutcome": parsed_case.expected_outcome,
         "statusLabels": verified_status_labels,
-        "acceptedDigests": [],
+        "acceptedHashes": [],
         "refusedObjects": [],
         "unresolvedReason": null
     })
@@ -96,7 +96,7 @@ pub(super) fn error_value(error: CanonicalError) -> Value {
         "backendAvailable": BALLOT_PRIVACY_PROOF_BACKEND_AVAILABLE,
         "backendStatus": describe_proof_backend(),
         "statusLabels": [],
-        "acceptedDigests": [],
+        "acceptedHashes": [],
         "refusedObjects": [
             {
                 "code": error.code.as_str(),
@@ -119,7 +119,7 @@ pub(super) fn error_value_for_case(
         "vectorAvailable": parsed_case.upstream_vector_available,
         "expectedOutcome": parsed_case.expected_outcome,
         "statusLabels": [],
-        "acceptedDigests": [],
+        "acceptedHashes": [],
         "refusedObjects": [
             {
                 "code": error.code.as_str(),
@@ -265,7 +265,7 @@ mod tests {
             "expectedOutcome": "reject",
             "upstreamVectorAvailable": true,
             "parameterSet": {
-                "profileId": "demo-linear-proof-compatibility-v1",
+                "profileId": "demo-linear-proof-parameter-v1",
                 "source": "sealed-lattice/linear-proof/demo-parameters-v1",
                 "relation": "A*w + t = 0",
                 "ringDegree": DEMO_GENERATED_PARAMETER_CONTRACT.source_ring_degree,

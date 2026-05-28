@@ -2,9 +2,9 @@ import {
     deriveValidatedFirstValidOrder as deriveValidatedFirstValidOrderInternal,
     deriveLifecycleLabels as deriveLifecycleLabelsInternal,
     deriveFrozenRosterProfile as deriveFrozenRosterProfileInternal,
-    derivePollSpecDigest as derivePollSpecDigestInternal,
+    derivePollSpecHash as derivePollSpecHashInternal,
     deriveThresholdProfile as deriveThresholdProfileInternal,
-    deriveThresholdProfileDigest as deriveThresholdProfileDigestInternal,
+    deriveThresholdProfileHash as deriveThresholdProfileHashInternal,
     evaluateActionCapability as evaluateActionCapabilityInternal,
     verifyCastReceiptShell as verifyCastReceiptShellInternal,
     verifyCloseRecordShell as verifyCloseRecordShellInternal,
@@ -126,7 +126,7 @@ export type {
     MalformedObjectFixture,
     MalformedObjectFixtureVerification,
     ManifestOpaqueBindings,
-    ManifestPolicyDigests,
+    ManifestPolicyHashes,
     MheSecurityClosure,
     MlDsaSignatureMode,
     MlDsaSignatureProfile,
@@ -138,7 +138,7 @@ export type {
     PollSpecValidationErrorCode,
     PrimaryStatusLabel,
     ProtocolAction,
-    ProtocolDigest,
+    ProtocolHash,
     ProtocolObjectType,
     ProtocolRefusalCode,
     ProtocolSignatureEnvelope,
@@ -210,12 +210,11 @@ export const deriveThresholdProfile = (
 /** Derives the concrete roster profile after registration closes and the roster freezes. */
 export const deriveFrozenRosterProfile = deriveFrozenRosterProfileInternal;
 
-/** Derives the canonical poll-spec digest including roster policy fields. */
-export const derivePollSpecDigest = derivePollSpecDigestInternal;
+/** Derives the canonical poll-spec hash including roster policy fields. */
+export const derivePollSpecHash = derivePollSpecHashInternal;
 
-/** Derives the canonical threshold-profile digest for a frozen roster profile. */
-export const deriveThresholdProfileDigest =
-    deriveThresholdProfileDigestInternal;
+/** Derives the canonical threshold-profile hash for a frozen roster profile. */
+export const deriveThresholdProfileHash = deriveThresholdProfileHashInternal;
 
 /** Validates and normalizes a poll specification from trusted or untrusted input. */
 export function validatePollSpec(input: PollSpecInput): PollSpecValidation;
@@ -245,7 +244,7 @@ const unavailableFutureProtocolOperation = (
 ): FutureProtocolOperationResult => ({
     ok: false,
     statusLabels: [],
-    acceptedDigests: [],
+    acceptedHashes: [],
     refusedObjects: [
         {
             code: 'OperationUnavailable',
@@ -260,24 +259,9 @@ const unavailableFutureProtocolOperation = (
 export const verifyTranscript = (): FutureProtocolOperationResult =>
     unavailableFutureProtocolOperation('verifyTranscript');
 
-/** Input accepted by the packaged WASM aggregate bridge verifier. */
-export type BridgeProofVerificationInput = Parameters<
-    TranscriptCoreKernel['verifyAggregateBridgeEncryption']
->[0];
-
-/** Verification result returned by the packaged WASM aggregate bridge verifier. */
-export type BridgeProofVerification =
-    | AggregateBridgeEncryptionVerification
-    | BallotPrivacyKernelVerification;
-
-/** Verifies encrypted aggregate bridge proof evidence with the packaged WASM backend. */
-export const verifyBridgeProof = async (
-    input: BridgeProofVerificationInput,
-): Promise<BridgeProofVerification> => {
-    const kernel = await loadTranscriptCoreKernel();
-
-    return kernel.verifyAggregateBridgeEncryption(input);
-};
+/** Reserved bridge-proof creation entry point for the future aggregate path. */
+export const createBridgeProof = (): FutureProtocolOperationResult =>
+    unavailableFutureProtocolOperation('createBridgeProof');
 
 /** Reserved one-shot decryption-share policy verifier for the future target path. */
 export const verifyOneShotSharePolicy = (): FutureProtocolOperationResult =>
@@ -379,10 +363,20 @@ export type ClaimBearingBallotPackageVerificationInput = Parameters<
     TranscriptCoreKernel['verifyClaimBearingBallotPackage']
 >[0];
 
-/** Input accepted by the packaged WASM aggregate derivation component checker. */
+/** Input accepted by the packaged WASM aggregate derivation proof verifier. */
 export type AggregateDerivationComponentVerificationInput = Parameters<
     TranscriptCoreKernel['verifyAggregateDerivationProof']
 >[0];
+
+/** Input accepted by the packaged WASM bridge proof verifier. */
+export type BridgeProofVerificationInput = Parameters<
+    TranscriptCoreKernel['verifyAggregateBridgeEncryption']
+>[0];
+
+/** Result returned by the packaged WASM bridge proof verifier. */
+export type BridgeProofVerification =
+    | AggregateBridgeEncryptionVerification
+    | BallotPrivacyKernelVerification;
 
 /** Verifies a receiver-key proof with the packaged WASM proof backend. */
 export const verifyReceiverKeyProof = async (
@@ -411,11 +405,20 @@ export const verifyClaimBearingBallotPackage = async (
     return kernel.verifyClaimBearingBallotPackage(input);
 };
 
-/** Checks an aggregate derivation component with the packaged WASM backend. */
+/** Verifies an M6 aggregate derivation component with the packaged WASM proof backend. */
 export const verifyAggregateDerivationComponent = async (
     input: AggregateDerivationComponentVerificationInput,
 ): Promise<BallotPrivacyKernelVerification> => {
     const kernel = await loadTranscriptCoreKernel();
 
     return kernel.verifyAggregateDerivationProof(input);
+};
+
+/** Verifies an M9 bridge proof with the packaged WASM proof backend. */
+export const verifyBridgeProof = async (
+    input: BridgeProofVerificationInput,
+): Promise<BridgeProofVerification> => {
+    const kernel = await loadTranscriptCoreKernel();
+
+    return kernel.verifyAggregateBridgeEncryption(input);
 };

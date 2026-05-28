@@ -3,19 +3,19 @@ use super::*;
 pub(crate) fn collect_component_bundle_component_refusals(
     component_statement: &Value,
     expected_component_id: &str,
-    bundle_digest: Option<&str>,
+    bundle_hash: Option<&str>,
     statement: &Value,
     linear_statement: &Value,
 ) -> Vec<Value> {
     let mut refused_objects = Vec::new();
-    let component_statement_digest = string_field(component_statement, "componentStatementDigest");
-    let expected_component_statement_digest =
-        derive_ballot_component_statement_digest(component_statement);
+    let component_statement_hash = string_field(component_statement, "componentStatementHash");
+    let expected_component_statement_hash =
+        derive_ballot_component_statement_hash(component_statement);
     let row_batch_name_count = string_array_length(component_statement, "rowBatchNames");
-    let row_batch_matrix_digest_count =
-        string_array_length(component_statement, "rowBatchMatrixDigests");
-    let row_batch_target_vector_digest_count =
-        string_array_length(component_statement, "rowBatchTargetVectorDigests");
+    let row_batch_matrix_hash_count =
+        string_array_length(component_statement, "rowBatchMatrixHashes");
+    let row_batch_target_vector_hash_count =
+        string_array_length(component_statement, "rowBatchTargetVectorHashes");
     let variable_column_count = object_map(component_statement)
         .and_then(|object| object.get("variableColumnCount"))
         .and_then(Value::as_u64);
@@ -37,15 +37,15 @@ pub(crate) fn collect_component_bundle_component_refusals(
             != Some(1)
         || string_field(component_statement, "componentId") != Some(expected_component_id)
         || string_field(component_statement, "coefficientModulus").is_none_or(str::is_empty)
-        || string_field(component_statement, "componentDigest")
-            .is_none_or(|digest| !is_protocol_digest(digest))
-        || component_statement_digest.is_none_or(|digest| !is_protocol_digest(digest))
-        || string_field(component_statement, "matrixDigest")
-            .is_none_or(|digest| !is_protocol_digest(digest))
-        || string_field(component_statement, "targetVectorDigest")
-            .is_none_or(|digest| !is_protocol_digest(digest))
-        || string_field(component_statement, "ballotProofStatementDigest")
-            .is_none_or(|digest| !is_protocol_digest(digest))
+        || string_field(component_statement, "componentHash")
+            .is_none_or(|hash| !is_protocol_hash(hash))
+        || component_statement_hash.is_none_or(|hash| !is_protocol_hash(hash))
+        || string_field(component_statement, "matrixHash")
+            .is_none_or(|hash| !is_protocol_hash(hash))
+        || string_field(component_statement, "targetVectorHash")
+            .is_none_or(|hash| !is_protocol_hash(hash))
+        || string_field(component_statement, "ballotProofStatementHash")
+            .is_none_or(|hash| !is_protocol_hash(hash))
         || row_count.is_none_or(|count| count == 0)
         || !row_kinds_are_present
         || variable_column_count != variable_column_indices_count
@@ -54,37 +54,37 @@ pub(crate) fn collect_component_bundle_component_refusals(
             format!(
                 "Ballot proof component statement for {expected_component_id} has an invalid canonical shape."
             ),
-            bundle_digest,
+            bundle_hash,
         ));
     }
-    if expected_component_statement_digest.as_deref() != component_statement_digest {
+    if expected_component_statement_hash.as_deref() != component_statement_hash {
         refused_objects.push(structural_refusal(
             format!(
-                "Ballot proof component statement digest for {expected_component_id} does not match its canonical payload."
+                "Ballot proof component statement hash for {expected_component_id} does not match its canonical payload."
             ),
-            bundle_digest,
+            bundle_hash,
         ));
     }
-    if string_field(component_statement, "backendStatementDigest")
-        != string_field(linear_statement, "backendStatementDigest")
-        || string_field(component_statement, "relationStatementDigest")
-            != string_field(linear_statement, "relationStatementDigest")
+    if string_field(component_statement, "backendStatementHash")
+        != string_field(linear_statement, "backendStatementHash")
+        || string_field(component_statement, "relationStatementHash")
+            != string_field(linear_statement, "relationStatementHash")
     {
         refused_objects.push(structural_refusal(
             format!(
                 "Ballot proof component statement for {expected_component_id} is not bound to the supplied relation and backend statement."
             ),
-            bundle_digest,
+            bundle_hash,
         ));
     }
-    if string_field(component_statement, "ballotProofStatementDigest")
-        != string_field(statement, "ballotProofStatementDigest")
+    if string_field(component_statement, "ballotProofStatementHash")
+        != string_field(statement, "ballotProofStatementHash")
     {
         refused_objects.push(structural_refusal(
             format!(
                 "Ballot proof component statement for {expected_component_id} is not bound to the supplied ballot proof statement."
             ),
-            bundle_digest,
+            bundle_hash,
         ));
     }
     if string_field(component_statement, "proofLoweringStatus") != Some("explicitRowsAvailable") {
@@ -92,42 +92,36 @@ pub(crate) fn collect_component_bundle_component_refusals(
             format!(
                 "Ballot proof component statement for {expected_component_id} is not fully lowered into explicit proof rows."
             ),
-            bundle_digest,
+            bundle_hash,
         ));
     }
     if row_batch_name_count.is_none()
-        || row_batch_matrix_digest_count.is_none()
-        || row_batch_target_vector_digest_count.is_none()
-        || row_batch_name_count != row_batch_matrix_digest_count
-        || row_batch_name_count != row_batch_target_vector_digest_count
+        || row_batch_matrix_hash_count.is_none()
+        || row_batch_target_vector_hash_count.is_none()
+        || row_batch_name_count != row_batch_matrix_hash_count
+        || row_batch_name_count != row_batch_target_vector_hash_count
     {
         refused_objects.push(structural_refusal(
             format!(
-                "Ballot proof component statement for {expected_component_id} has inconsistent row-batch digest lists."
+                "Ballot proof component statement for {expected_component_id} has inconsistent row-batch hash lists."
             ),
-            bundle_digest,
+            bundle_hash,
         ));
     }
-    if array_field(component_statement, "rowBatchMatrixDigests").is_some_and(|digests| {
-        digests.iter().any(|digest| {
-            digest
-                .as_str()
-                .is_none_or(|value| !is_protocol_digest(value))
-        })
-    }) || array_field(component_statement, "rowBatchTargetVectorDigests").is_some_and(
-        |digests| {
-            digests.iter().any(|digest| {
-                digest
-                    .as_str()
-                    .is_none_or(|value| !is_protocol_digest(value))
-            })
-        },
-    ) {
+    if array_field(component_statement, "rowBatchMatrixHashes").is_some_and(|hashes| {
+        hashes
+            .iter()
+            .any(|hash| hash.as_str().is_none_or(|value| !is_protocol_hash(value)))
+    }) || array_field(component_statement, "rowBatchTargetVectorHashes").is_some_and(|hashes| {
+        hashes
+            .iter()
+            .any(|hash| hash.as_str().is_none_or(|value| !is_protocol_hash(value)))
+    }) {
         refused_objects.push(structural_refusal(
             format!(
-                "Ballot proof component statement for {expected_component_id} contains a non-digest row-batch reference."
+                "Ballot proof component statement for {expected_component_id} contains a non-hash row-batch reference."
             ),
-            bundle_digest,
+            bundle_hash,
         ));
     }
 
@@ -141,25 +135,25 @@ pub(crate) fn collect_ballot_component_bundle_refusals(
     component_bundle_statement: Option<&Value>,
 ) -> Vec<Value> {
     let mut refused_objects = Vec::new();
-    let proof_record_digest = string_field(ballot_proof, "ballotProofRecordDigest");
+    let proof_record_hash = string_field(ballot_proof, "ballotProofRecordHash");
     let projection_coverage = string_field(linear_statement, "projectionCoverage");
 
     let Some(component_bundle_statement) = component_bundle_statement else {
         if projection_coverage == Some(FULL_BALLOT_PROOF_PROJECTION_COVERAGE)
-            || string_field(ballot_proof, "componentBundleStatementDigest").is_some()
+            || string_field(ballot_proof, "componentBundleStatementHash").is_some()
         {
             refused_objects.push(structural_refusal(
                 "Full encoded-score ballot proof verification requires a public component bundle statement.",
-                proof_record_digest,
+                proof_record_hash,
             ));
         }
 
         return refused_objects;
     };
 
-    let bundle_digest = string_field(component_bundle_statement, "componentBundleStatementDigest");
-    let expected_bundle_digest =
-        derive_ballot_component_bundle_statement_digest(component_bundle_statement);
+    let bundle_hash = string_field(component_bundle_statement, "componentBundleStatementHash");
+    let expected_bundle_hash =
+        derive_ballot_component_bundle_statement_hash(component_bundle_statement);
 
     if string_field(component_bundle_statement, "objectType")
         != Some("BallotProofComponentBundleStatement")
@@ -169,9 +163,9 @@ pub(crate) fn collect_ballot_component_bundle_refusals(
             != Some(1)
         || string_field(component_bundle_statement, "relationLabel")
             != Some("BallotPrivacyPvssRelation")
-        || bundle_digest.is_none_or(|digest| !is_protocol_digest(digest))
-        || string_field(component_bundle_statement, "ballotProofStatementDigest")
-            .is_none_or(|digest| !is_protocol_digest(digest))
+        || bundle_hash.is_none_or(|hash| !is_protocol_hash(hash))
+        || string_field(component_bundle_statement, "ballotProofStatementHash")
+            .is_none_or(|hash| !is_protocol_hash(hash))
         || !string_array_matches_expected(
             component_bundle_statement,
             "requiredComponentIds",
@@ -180,37 +174,37 @@ pub(crate) fn collect_ballot_component_bundle_refusals(
     {
         refused_objects.push(structural_refusal(
             "Ballot proof component bundle statement has an invalid canonical shape.",
-            proof_record_digest,
+            proof_record_hash,
         ));
     }
-    if expected_bundle_digest.as_deref() != bundle_digest {
+    if expected_bundle_hash.as_deref() != bundle_hash {
         refused_objects.push(structural_refusal(
-            "Ballot proof component bundle digest does not match its canonical payload.",
-            proof_record_digest,
+            "Ballot proof component bundle hash does not match its canonical payload.",
+            proof_record_hash,
         ));
     }
-    if string_field(ballot_proof, "componentBundleStatementDigest") != bundle_digest {
+    if string_field(ballot_proof, "componentBundleStatementHash") != bundle_hash {
         refused_objects.push(structural_refusal(
             "Ballot proof record is not bound to the supplied component bundle statement.",
-            proof_record_digest,
+            proof_record_hash,
         ));
     }
-    if string_field(component_bundle_statement, "backendStatementDigest")
-        != string_field(linear_statement, "backendStatementDigest")
-        || string_field(component_bundle_statement, "relationStatementDigest")
-            != string_field(linear_statement, "relationStatementDigest")
+    if string_field(component_bundle_statement, "backendStatementHash")
+        != string_field(linear_statement, "backendStatementHash")
+        || string_field(component_bundle_statement, "relationStatementHash")
+            != string_field(linear_statement, "relationStatementHash")
     {
         refused_objects.push(structural_refusal(
             "Ballot proof component bundle is not bound to the supplied relation and backend statement.",
-            proof_record_digest,
+            proof_record_hash,
         ));
     }
-    if string_field(component_bundle_statement, "ballotProofStatementDigest")
-        != string_field(statement, "ballotProofStatementDigest")
+    if string_field(component_bundle_statement, "ballotProofStatementHash")
+        != string_field(statement, "ballotProofStatementHash")
     {
         refused_objects.push(structural_refusal(
             "Ballot proof component bundle is not bound to the supplied ballot proof statement.",
-            proof_record_digest,
+            proof_record_hash,
         ));
     }
     if string_field(component_bundle_statement, "bundleCoverage")
@@ -218,14 +212,14 @@ pub(crate) fn collect_ballot_component_bundle_refusals(
     {
         refused_objects.push(structural_refusal(
             "Ballot proof component bundle is still incomplete.",
-            proof_record_digest,
+            proof_record_hash,
         ));
     } else if string_field(component_bundle_statement, "bundleCoverage")
         != Some(FULL_BALLOT_PROOF_PROJECTION_COVERAGE)
     {
         refused_objects.push(structural_refusal(
             "Ballot proof component bundle has an unknown coverage label.",
-            proof_record_digest,
+            proof_record_hash,
         ));
     }
 
@@ -233,7 +227,7 @@ pub(crate) fn collect_ballot_component_bundle_refusals(
     else {
         refused_objects.push(structural_refusal(
             "Ballot proof component bundle must contain component statements.",
-            proof_record_digest,
+            proof_record_hash,
         ));
 
         return refused_objects;
@@ -241,7 +235,7 @@ pub(crate) fn collect_ballot_component_bundle_refusals(
     if component_statements.len() != REQUIRED_BALLOT_PROOF_COMPONENT_IDS.len() {
         refused_objects.push(structural_refusal(
             "Ballot proof component bundle must contain exactly the required component statements.",
-            proof_record_digest,
+            proof_record_hash,
         ));
     }
 
@@ -257,13 +251,13 @@ pub(crate) fn collect_ballot_component_bundle_refusals(
         {
             refused_objects.push(structural_refusal(
                 "Ballot proof component bundle contains a duplicate component statement.",
-                proof_record_digest,
+                proof_record_hash,
             ));
         }
         refused_objects.extend(collect_component_bundle_component_refusals(
             component_statement,
             expected_component_id,
-            proof_record_digest,
+            proof_record_hash,
             statement,
             linear_statement,
         ));
@@ -275,14 +269,14 @@ pub(crate) fn collect_ballot_component_bundle_refusals(
 pub(crate) fn collect_component_proof_record_refusals(
     component_proof: &Value,
     expected_component_id: &str,
-    proof_record_digest: Option<&str>,
+    proof_record_hash: Option<&str>,
     statement: &Value,
     component_proof_bundle: &Value,
 ) -> Vec<Value> {
     let mut refused_objects = Vec::new();
-    let component_proof_record_digest = string_field(component_proof, "componentProofRecordDigest");
-    let expected_component_proof_record_digest =
-        derive_ballot_component_proof_record_digest(component_proof);
+    let component_proof_record_hash = string_field(component_proof, "componentProofRecordHash");
+    let expected_component_proof_record_hash =
+        derive_ballot_component_proof_record_hash(component_proof);
     let proof_size_bytes = object_map(component_proof)
         .and_then(|object| object.get("proofSizeBytes"))
         .and_then(Value::as_u64);
@@ -301,64 +295,63 @@ pub(crate) fn collect_component_proof_record_refusals(
             != Some(1)
         || string_field(component_proof, "componentId") != Some(expected_component_id)
         || string_field(component_proof, "proofBackend") != Some("LocalLinearLatticeRelation")
-        || component_proof_record_digest.is_none_or(|digest| !is_protocol_digest(digest))
-        || string_field(component_proof, "componentStatementDigest")
-            .is_none_or(|digest| !is_protocol_digest(digest))
-        || string_field(component_proof, "backendStatementDigest")
-            .is_none_or(|digest| !is_protocol_digest(digest))
-        || string_field(component_proof, "relationStatementDigest")
-            .is_none_or(|digest| !is_protocol_digest(digest))
-        || string_field(component_proof, "proofRoot")
-            .is_none_or(|digest| !is_protocol_digest(digest))
-        || string_field(component_proof, "proofBytesDigest")
-            .is_none_or(|digest| !is_protocol_digest(digest))
-        || string_field(component_proof, "proofEncodingProfileDigest")
-            .is_none_or(|digest| !is_protocol_digest(digest))
-        || string_field(component_proof, "proofParameterSetDigest")
-            .is_none_or(|digest| !is_protocol_digest(digest))
-        || string_field(component_proof, "publicRandomnessDigest")
-            .is_none_or(|digest| !is_protocol_digest(digest))
-        || string_field(component_proof, "componentProofStatementDigest")
-            .is_none_or(|digest| !is_protocol_digest(digest))
-        || string_field(component_proof, "ballotProofStatementDigest")
-            .is_none_or(|digest| !is_protocol_digest(digest))
+        || component_proof_record_hash.is_none_or(|hash| !is_protocol_hash(hash))
+        || string_field(component_proof, "componentStatementHash")
+            .is_none_or(|hash| !is_protocol_hash(hash))
+        || string_field(component_proof, "backendStatementHash")
+            .is_none_or(|hash| !is_protocol_hash(hash))
+        || string_field(component_proof, "relationStatementHash")
+            .is_none_or(|hash| !is_protocol_hash(hash))
+        || string_field(component_proof, "proofRoot").is_none_or(|hash| !is_protocol_hash(hash))
+        || string_field(component_proof, "proofBytesHash")
+            .is_none_or(|hash| !is_protocol_hash(hash))
+        || string_field(component_proof, "proofEncodingProfileHash")
+            .is_none_or(|hash| !is_protocol_hash(hash))
+        || string_field(component_proof, "proofParameterSetHash")
+            .is_none_or(|hash| !is_protocol_hash(hash))
+        || string_field(component_proof, "publicRandomnessHash")
+            .is_none_or(|hash| !is_protocol_hash(hash))
+        || string_field(component_proof, "componentProofStatementHash")
+            .is_none_or(|hash| !is_protocol_hash(hash))
+        || string_field(component_proof, "ballotProofStatementHash")
+            .is_none_or(|hash| !is_protocol_hash(hash))
         || !proof_size_bytes_is_valid
     {
         refused_objects.push(structural_refusal(
             format!(
                 "Ballot proof component proof for {expected_component_id} has an invalid canonical shape."
             ),
-            proof_record_digest,
+            proof_record_hash,
         ));
     }
-    if expected_component_proof_record_digest.as_deref() != component_proof_record_digest {
+    if expected_component_proof_record_hash.as_deref() != component_proof_record_hash {
         refused_objects.push(structural_refusal(
             format!(
-                "Ballot proof component proof digest for {expected_component_id} does not match its canonical payload."
+                "Ballot proof component proof hash for {expected_component_id} does not match its canonical payload."
             ),
-            proof_record_digest,
+            proof_record_hash,
         ));
     }
-    if string_field(component_proof, "backendStatementDigest")
-        != string_field(component_proof_bundle, "backendStatementDigest")
-        || string_field(component_proof, "relationStatementDigest")
-            != string_field(component_proof_bundle, "relationStatementDigest")
+    if string_field(component_proof, "backendStatementHash")
+        != string_field(component_proof_bundle, "backendStatementHash")
+        || string_field(component_proof, "relationStatementHash")
+            != string_field(component_proof_bundle, "relationStatementHash")
     {
         refused_objects.push(structural_refusal(
             format!(
                 "Ballot proof component proof for {expected_component_id} is not bound to the supplied relation and backend statement."
             ),
-            proof_record_digest,
+            proof_record_hash,
         ));
     }
-    if string_field(component_proof, "ballotProofStatementDigest")
-        != string_field(statement, "ballotProofStatementDigest")
+    if string_field(component_proof, "ballotProofStatementHash")
+        != string_field(statement, "ballotProofStatementHash")
     {
         refused_objects.push(structural_refusal(
             format!(
                 "Ballot proof component proof for {expected_component_id} is not bound to the supplied ballot proof statement."
             ),
-            proof_record_digest,
+            proof_record_hash,
         ));
     }
 
@@ -373,22 +366,21 @@ pub(crate) fn collect_ballot_component_proof_bundle_refusals(
     component_proof_inputs: Option<&Value>,
 ) -> Vec<Value> {
     let mut refused_objects = Vec::new();
-    let proof_record_digest = string_field(ballot_proof, "ballotProofRecordDigest");
-    let ballot_proof_component_bundle_digest =
-        string_field(ballot_proof, "componentProofBundleDigest");
+    let proof_record_hash = string_field(ballot_proof, "ballotProofRecordHash");
+    let ballot_proof_component_bundle_hash = string_field(ballot_proof, "componentProofBundleHash");
 
-    if ballot_proof_component_bundle_digest.is_some() && component_proof_bundle.is_none() {
+    if ballot_proof_component_bundle_hash.is_some() && component_proof_bundle.is_none() {
         refused_objects.push(structural_refusal(
             "Ballot proof record references a component proof bundle that was not supplied.",
-            proof_record_digest,
+            proof_record_hash,
         ));
 
         return refused_objects;
     }
-    if component_proof_bundle.is_some() && ballot_proof_component_bundle_digest.is_none() {
+    if component_proof_bundle.is_some() && ballot_proof_component_bundle_hash.is_none() {
         refused_objects.push(structural_refusal(
             "Supplied component proof bundle is not bound by the ballot proof record.",
-            proof_record_digest,
+            proof_record_hash,
         ));
     }
     if component_bundle_statement.is_some_and(|bundle_statement| {
@@ -398,7 +390,7 @@ pub(crate) fn collect_ballot_component_proof_bundle_refusals(
     {
         refused_objects.push(structural_refusal(
             "Full encoded-score ballot proof verification requires a component proof bundle.",
-            proof_record_digest,
+            proof_record_hash,
         ));
     }
     let Some(component_proof_bundle) = component_proof_bundle else {
@@ -410,10 +402,10 @@ pub(crate) fn collect_ballot_component_proof_bundle_refusals(
         component_proof_inputs,
     ));
 
-    let component_proof_bundle_digest =
-        string_field(component_proof_bundle, "componentProofBundleDigest");
-    let expected_component_proof_bundle_digest =
-        derive_ballot_component_proof_bundle_digest(component_proof_bundle);
+    let component_proof_bundle_hash =
+        string_field(component_proof_bundle, "componentProofBundleHash");
+    let expected_component_proof_bundle_hash =
+        derive_ballot_component_proof_bundle_hash(component_proof_bundle);
 
     if string_field(component_proof_bundle, "objectType") != Some("BallotProofComponentProofBundle")
         || object_map(component_proof_bundle)
@@ -422,15 +414,15 @@ pub(crate) fn collect_ballot_component_proof_bundle_refusals(
             != Some(1)
         || string_field(component_proof_bundle, "bundleCoverage")
             != Some(FULL_BALLOT_PROOF_PROJECTION_COVERAGE)
-        || component_proof_bundle_digest.is_none_or(|digest| !is_protocol_digest(digest))
-        || string_field(component_proof_bundle, "componentBundleStatementDigest")
-            .is_none_or(|digest| !is_protocol_digest(digest))
-        || string_field(component_proof_bundle, "backendStatementDigest")
-            .is_none_or(|digest| !is_protocol_digest(digest))
-        || string_field(component_proof_bundle, "relationStatementDigest")
-            .is_none_or(|digest| !is_protocol_digest(digest))
-        || string_field(component_proof_bundle, "ballotProofStatementDigest")
-            .is_none_or(|digest| !is_protocol_digest(digest))
+        || component_proof_bundle_hash.is_none_or(|hash| !is_protocol_hash(hash))
+        || string_field(component_proof_bundle, "componentBundleStatementHash")
+            .is_none_or(|hash| !is_protocol_hash(hash))
+        || string_field(component_proof_bundle, "backendStatementHash")
+            .is_none_or(|hash| !is_protocol_hash(hash))
+        || string_field(component_proof_bundle, "relationStatementHash")
+            .is_none_or(|hash| !is_protocol_hash(hash))
+        || string_field(component_proof_bundle, "ballotProofStatementHash")
+            .is_none_or(|hash| !is_protocol_hash(hash))
         || !string_array_matches_expected(
             component_proof_bundle,
             "requiredComponentIds",
@@ -439,55 +431,55 @@ pub(crate) fn collect_ballot_component_proof_bundle_refusals(
     {
         refused_objects.push(structural_refusal(
             "Ballot proof component proof bundle has an invalid canonical shape.",
-            proof_record_digest,
+            proof_record_hash,
         ));
     }
-    if expected_component_proof_bundle_digest.as_deref() != component_proof_bundle_digest {
+    if expected_component_proof_bundle_hash.as_deref() != component_proof_bundle_hash {
         refused_objects.push(structural_refusal(
-            "Ballot proof component proof bundle digest does not match its canonical payload.",
-            proof_record_digest,
+            "Ballot proof component proof bundle hash does not match its canonical payload.",
+            proof_record_hash,
         ));
     }
-    if ballot_proof_component_bundle_digest != component_proof_bundle_digest {
+    if ballot_proof_component_bundle_hash != component_proof_bundle_hash {
         refused_objects.push(structural_refusal(
             "Ballot proof record is not bound to the supplied component proof bundle.",
-            proof_record_digest,
+            proof_record_hash,
         ));
     }
-    if string_field(component_proof_bundle, "componentBundleStatementDigest")
-        != string_field(ballot_proof, "componentBundleStatementDigest")
-        || string_field(component_proof_bundle, "backendStatementDigest")
-            != string_field(ballot_proof, "backendStatementDigest")
-        || string_field(component_proof_bundle, "relationStatementDigest")
-            != string_field(ballot_proof, "relationStatementDigest")
+    if string_field(component_proof_bundle, "componentBundleStatementHash")
+        != string_field(ballot_proof, "componentBundleStatementHash")
+        || string_field(component_proof_bundle, "backendStatementHash")
+            != string_field(ballot_proof, "backendStatementHash")
+        || string_field(component_proof_bundle, "relationStatementHash")
+            != string_field(ballot_proof, "relationStatementHash")
     {
         refused_objects.push(structural_refusal(
             "Ballot proof component proof bundle is not bound to the supplied proof statement roots.",
-            proof_record_digest,
+            proof_record_hash,
         ));
     }
     if let Some(component_bundle_statement) = component_bundle_statement
-        && string_field(component_proof_bundle, "componentBundleStatementDigest")
-            != string_field(component_bundle_statement, "componentBundleStatementDigest")
+        && string_field(component_proof_bundle, "componentBundleStatementHash")
+            != string_field(component_bundle_statement, "componentBundleStatementHash")
     {
         refused_objects.push(structural_refusal(
             "Ballot proof component proof bundle is not bound to the supplied component bundle statement.",
-            proof_record_digest,
+            proof_record_hash,
         ));
     }
-    if string_field(component_proof_bundle, "ballotProofStatementDigest")
-        != string_field(statement, "ballotProofStatementDigest")
+    if string_field(component_proof_bundle, "ballotProofStatementHash")
+        != string_field(statement, "ballotProofStatementHash")
     {
         refused_objects.push(structural_refusal(
             "Ballot proof component proof bundle is not bound to the supplied ballot proof statement.",
-            proof_record_digest,
+            proof_record_hash,
         ));
     }
 
     let Some(component_proofs) = array_field(component_proof_bundle, "componentProofs") else {
         refused_objects.push(structural_refusal(
             "Ballot proof component proof bundle must contain component proofs.",
-            proof_record_digest,
+            proof_record_hash,
         ));
 
         return refused_objects;
@@ -495,7 +487,7 @@ pub(crate) fn collect_ballot_component_proof_bundle_refusals(
     if component_proofs.len() != REQUIRED_BALLOT_PROOF_COMPONENT_IDS.len() {
         refused_objects.push(structural_refusal(
             "Ballot proof component proof bundle must contain exactly the required component proofs.",
-            proof_record_digest,
+            proof_record_hash,
         ));
     }
 
@@ -511,27 +503,27 @@ pub(crate) fn collect_ballot_component_proof_bundle_refusals(
         {
             refused_objects.push(structural_refusal(
                 "Ballot proof component proof bundle contains a duplicate component proof.",
-                proof_record_digest,
+                proof_record_hash,
             ));
         }
         if let Some(component_bundle_statement) = component_bundle_statement
             && let Some(component_statement) =
                 array_field(component_bundle_statement, "componentStatements")
                     .and_then(|component_statements| component_statements.get(component_index))
-            && string_field(component_proof, "componentStatementDigest")
-                != string_field(component_statement, "componentStatementDigest")
+            && string_field(component_proof, "componentStatementHash")
+                != string_field(component_statement, "componentStatementHash")
         {
             refused_objects.push(structural_refusal(
                 format!(
                     "Ballot proof component proof for {expected_component_id} is not bound to the supplied component statement."
                 ),
-                proof_record_digest,
+                proof_record_hash,
             ));
         }
         refused_objects.extend(collect_component_proof_record_refusals(
             component_proof,
             expected_component_id,
-            proof_record_digest,
+            proof_record_hash,
             statement,
             component_proof_bundle,
         ));
@@ -540,7 +532,7 @@ pub(crate) fn collect_ballot_component_proof_bundle_refusals(
     refused_objects
 }
 
-pub(crate) fn supplied_component_proof_statement_digest<'a>(
+pub(crate) fn supplied_component_proof_statement_hash<'a>(
     proof_statement: &'a Value,
     proof_statement_format: &str,
 ) -> (Option<String>, Option<&'a str>) {
@@ -549,43 +541,43 @@ pub(crate) fn supplied_component_proof_statement_digest<'a>(
         proof_statement_format,
     ) {
         (Some("BallotProofLinearProofStatement"), "dense-polynomial-matrix-linear-proof-v1") => (
-            derive_ballot_proof_linear_statement_digest(proof_statement),
-            Some("statementDigest"),
+            derive_ballot_proof_linear_statement_hash(proof_statement),
+            Some("statementHash"),
         ),
         (
             Some("BallotProofSparseComponentLinearProofStatement"),
             "sparse-polynomial-matrix-linear-proof-v1",
         ) => (
-            derive_ballot_sparse_linear_statement_digest(proof_statement),
-            Some("statementDigest"),
+            derive_ballot_sparse_linear_statement_hash(proof_statement),
+            Some("statementHash"),
         ),
         (
             Some("BallotProofComponentProofStatementPlan"),
             "structured-module-lwe-linear-proof-v1" | "public-zero-witness-binding-check-v1",
         ) => (
-            derive_ballot_component_proof_statement_plan_digest(proof_statement),
-            Some("componentProofStatementDigest"),
+            derive_ballot_component_proof_statement_plan_hash(proof_statement),
+            Some("componentProofStatementHash"),
         ),
         (
             Some("BallotProofStructuredReceiverEncryptionProofStatement"),
             "structured-module-lwe-linear-proof-v1",
         ) => (
-            derive_ballot_structured_receiver_encryption_statement_digest(proof_statement),
-            Some("statementDigest"),
+            derive_ballot_structured_receiver_encryption_statement_hash(proof_statement),
+            Some("statementHash"),
         ),
         (
             Some("BallotProofStructuredShareCommitmentProofStatement"),
             "structured-module-sis-share-commitment-v1",
         ) => (
-            derive_ballot_structured_share_commitment_statement_digest(proof_statement),
-            Some("statementDigest"),
+            derive_ballot_structured_share_commitment_statement_hash(proof_statement),
+            Some("statementHash"),
         ),
         _ => (None, None),
     }
 }
 
-pub(crate) fn protocol_digest_field(value: &Value, field_name: &str) -> bool {
-    string_field(value, field_name).is_some_and(is_protocol_digest)
+pub(crate) fn protocol_hash_field(value: &Value, field_name: &str) -> bool {
+    string_field(value, field_name).is_some_and(is_protocol_hash)
 }
 
 pub(crate) fn unsigned_decimal_string_field(value: &Value, field_name: &str) -> bool {
@@ -606,11 +598,11 @@ pub(crate) fn string_array_field<'value>(
         .collect()
 }
 
-pub(crate) fn digest_array_field_is_valid(value: &Value, field_name: &str) -> bool {
+pub(crate) fn hash_array_field_is_valid(value: &Value, field_name: &str) -> bool {
     array_field(value, field_name).is_some_and(|values| {
         values
             .iter()
-            .all(|entry| entry.as_str().is_some_and(is_protocol_digest))
+            .all(|entry| entry.as_str().is_some_and(is_protocol_hash))
     })
 }
 
@@ -628,7 +620,7 @@ pub(crate) fn null_field(value: &Value, field_name: &str) -> bool {
 pub(crate) fn collect_component_proof_statement_plan_shape_refusals(
     proof_statement: &Value,
     expected_component_id: &str,
-    proof_record_digest: Option<&str>,
+    proof_record_hash: Option<&str>,
 ) -> Vec<Value> {
     if string_field(proof_statement, "objectType") != Some("BallotProofComponentProofStatementPlan")
     {
@@ -642,10 +634,10 @@ pub(crate) fn collect_component_proof_statement_plan_shape_refusals(
         .filter(|names| !names.is_empty())
         .map(Vec::len);
     let row_batch_lengths_match = row_batch_count.is_some_and(|row_batch_count| {
-        array_field(proof_statement, "rowBatchMatrixDigests")
-            .is_some_and(|digests| digests.len() == row_batch_count)
-            && array_field(proof_statement, "rowBatchTargetVectorDigests")
-                .is_some_and(|digests| digests.len() == row_batch_count)
+        array_field(proof_statement, "rowBatchMatrixHashes")
+            .is_some_and(|hashes| hashes.len() == row_batch_count)
+            && array_field(proof_statement, "rowBatchTargetVectorHashes")
+                .is_some_and(|hashes| hashes.len() == row_batch_count)
             && row_batch_term_counts
                 .as_ref()
                 .is_some_and(|counts| counts.len() == row_batch_count)
@@ -677,15 +669,15 @@ pub(crate) fn collect_component_proof_statement_plan_shape_refusals(
         && string_field(proof_statement, "proofLoweringStatus") == Some("explicitRowsAvailable")
         && string_field(proof_statement, "relation") == Some("A*w + t = 0")
         && unsigned_decimal_string_field(proof_statement, "coefficientModulus")
-        && protocol_digest_field(proof_statement, "backendStatementDigest")
-        && protocol_digest_field(proof_statement, "componentProofStatementDigest")
-        && protocol_digest_field(proof_statement, "componentStatementDigest")
-        && protocol_digest_field(proof_statement, "matrixDigest")
-        && protocol_digest_field(proof_statement, "relationStatementDigest")
-        && protocol_digest_field(proof_statement, "targetVectorDigest")
-        && digest_array_field_is_valid(proof_statement, "rowBatchMatrixDigests")
+        && protocol_hash_field(proof_statement, "backendStatementHash")
+        && protocol_hash_field(proof_statement, "componentProofStatementHash")
+        && protocol_hash_field(proof_statement, "componentStatementHash")
+        && protocol_hash_field(proof_statement, "matrixHash")
+        && protocol_hash_field(proof_statement, "relationStatementHash")
+        && protocol_hash_field(proof_statement, "targetVectorHash")
+        && hash_array_field_is_valid(proof_statement, "rowBatchMatrixHashes")
         && row_batch_names.is_some()
-        && digest_array_field_is_valid(proof_statement, "rowBatchTargetVectorDigests")
+        && hash_array_field_is_valid(proof_statement, "rowBatchTargetVectorHashes")
         && row_batch_term_counts.as_ref().is_some_and(|term_counts| {
             term_counts
                 .iter()
@@ -744,7 +736,7 @@ pub(crate) fn collect_component_proof_statement_plan_shape_refusals(
             format!(
                 "Ballot proof component proof statement plan for {expected_component_id} has an invalid canonical shape."
             ),
-            proof_record_digest,
+            proof_record_hash,
         )]
     }
 }

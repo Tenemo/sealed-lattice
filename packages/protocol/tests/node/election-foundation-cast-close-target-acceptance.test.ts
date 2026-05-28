@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-    closeRecordElectionManifestDigest,
+    closeRecordElectionManifestHash,
     createAcceptedTargetScenario,
     createDecryptionShare,
     createLocalReplayRecord,
@@ -14,9 +14,9 @@ import {
 import {
     createBoardEvidence,
     createBoardHeadWithObjects,
-    deriveProtocolDigest,
-    getParticipantSigningPublicKeyDigest,
-    organizerPublicKeyDigest,
+    deriveProtocolHash,
+    getParticipantSigningPublicKeyHash,
+    organizerPublicKeyHash,
     verifyCloseRecordShell,
     verifyLocalReplayRecordShell,
     verifyTargetAcceptedRecordShell,
@@ -31,16 +31,15 @@ describe('close record shells', () => {
                 boardEvidence: scenario.boardEvidence,
                 closeRecord: scenario.closeRecord,
                 closeRecordInclusionProof: scenario.closeRecordInclusionProof,
-                expectedElectionManifestDigest:
-                    closeRecordElectionManifestDigest,
+                expectedElectionManifestHash: closeRecordElectionManifestHash,
                 expectedOrganizerIdentity: 'organizer',
-                expectedOrganizerPublicKeyDigest: organizerPublicKeyDigest,
+                expectedOrganizerPublicKeyHash: organizerPublicKeyHash,
             }),
         ).toMatchObject({
             ok: true,
-            closeRecordDigest: scenario.closeRecord.closeRecordDigest,
-            postVotingClosedContextDigest:
-                scenario.closeRecord.postVotingClosedContextDigest,
+            closeRecordHash: scenario.closeRecord.closeRecordHash,
+            postVotingClosedContextHash:
+                scenario.closeRecord.postVotingClosedContextHash,
         });
     });
 
@@ -53,14 +52,14 @@ describe('close record shells', () => {
             boardEvidence: scenario.boardEvidence,
             closeRecord: scenario.closeRecord,
             closeRecordInclusionProof: scenario.closeRecordInclusionProof,
-            expectedElectionManifestDigest: closeRecordElectionManifestDigest,
+            expectedElectionManifestHash: closeRecordElectionManifestHash,
             expectedOrganizerIdentity: 'organizer',
-            expectedOrganizerPublicKeyDigest: organizerPublicKeyDigest,
+            expectedOrganizerPublicKeyHash: organizerPublicKeyHash,
         });
 
         expect(result.ok).toBe(false);
-        expect(result.acceptedDigests).toEqual([]);
-        expect(result.closeRecordDigest).toBeUndefined();
+        expect(result.acceptedHashes).toEqual([]);
+        expect(result.closeRecordHash).toBeUndefined();
         expect(result.refusedObjects).toEqual(
             expect.arrayContaining([
                 expect.objectContaining({ code: 'CloseRecordInvalid' }),
@@ -76,10 +75,10 @@ describe('target acceptance and local replay shells', () => {
         expect(scenario.targetFinalityVerification.ok).toBe(true);
         expect(scenario.targetAcceptedRecordVerification).toMatchObject({
             ok: true,
-            targetAcceptedRecordDigest:
-                scenario.targetAcceptedRecord.targetAcceptedRecordDigest,
-            targetFinalityRecordDigest:
-                scenario.targetFinalityRecord.targetFinalityRecordDigest,
+            targetAcceptedRecordHash:
+                scenario.targetAcceptedRecord.targetAcceptedRecordHash,
+            targetFinalityRecordHash:
+                scenario.targetFinalityRecord.targetFinalityRecordHash,
         });
 
         expect(
@@ -87,14 +86,11 @@ describe('target acceptance and local replay shells', () => {
                 ...scenario,
                 evaluationProofRecord: {
                     ...scenario.evaluationProofRecord,
-                    targetCiphertextDigest: deriveProtocolDigest(
-                        'CiphertextRoot',
-                        {
-                            target: 'wrong',
-                        },
-                    ),
+                    targetCiphertextHash: deriveProtocolHash('CiphertextRoot', {
+                        target: 'wrong',
+                    }),
                 },
-                expectedOrganizerPublicKeyDigest: organizerPublicKeyDigest,
+                expectedOrganizerPublicKeyHash: organizerPublicKeyHash,
             }).refusedObjects,
         ).toEqual(
             expect.arrayContaining([
@@ -114,12 +110,12 @@ describe('target acceptance and local replay shells', () => {
             inclusionProofs: misplacedAcceptedProofs,
         } = createBoardHeadWithObjects(
             3,
-            scenario.evaluationProofHead.headDigest,
+            scenario.evaluationProofHead.headHash,
             [
                 {
                     objectType: 'TargetAcceptedRecord',
-                    objectDigest:
-                        unsignedMisplacedTargetAcceptedRecord.targetAcceptedRecordDigest,
+                    objectHash:
+                        unsignedMisplacedTargetAcceptedRecord.targetAcceptedRecordHash,
                     boardPosition:
                         unsignedMisplacedTargetAcceptedRecord.boardPosition + 1,
                 },
@@ -127,7 +123,7 @@ describe('target acceptance and local replay shells', () => {
         );
         const misplacedTargetAcceptedRecord = signTargetAcceptedRecord(
             unsignedMisplacedTargetAcceptedRecord,
-            misplacedAcceptedHead.headDigest,
+            misplacedAcceptedHead.headHash,
         );
         const misplacedTargetResult = verifyTargetAcceptedRecordShell({
             boardEvidence: createBoardEvidence([
@@ -141,11 +137,11 @@ describe('target acceptance and local replay shells', () => {
             targetFinalityRecord: scenario.targetFinalityRecord,
             targetFinalityVerification: scenario.targetFinalityVerification,
             evaluationProofRecord: scenario.evaluationProofRecord,
-            expectedOrganizerPublicKeyDigest: organizerPublicKeyDigest,
+            expectedOrganizerPublicKeyHash: organizerPublicKeyHash,
         });
 
         expect(misplacedTargetResult.ok).toBe(false);
-        expect(misplacedTargetResult.acceptedDigests).toEqual([]);
+        expect(misplacedTargetResult.acceptedHashes).toEqual([]);
         expect(misplacedTargetResult.refusedObjects).toEqual(
             expect.arrayContaining([
                 expect.objectContaining({ code: 'InclusionProofInvalid' }),
@@ -160,16 +156,16 @@ describe('target acceptance and local replay shells', () => {
             scenario.evaluationProofRecord,
         );
         const { head: replayHead, inclusionProofs } =
-            createBoardHeadWithObjects(4, scenario.acceptedHead.headDigest, [
+            createBoardHeadWithObjects(4, scenario.acceptedHead.headHash, [
                 {
                     objectType: 'LocalReplayRecord',
-                    objectDigest: localReplayRecord.localReplayRecordDigest,
+                    objectHash: localReplayRecord.localReplayRecordHash,
                     boardPosition: 0,
                 },
             ]);
         const signedLocalReplayRecord = signLocalReplayRecord(
             localReplayRecord,
-            replayHead.headDigest,
+            replayHead.headHash,
         );
         const boardEvidence = createBoardEvidence([
             scenario.head0,
@@ -188,14 +184,14 @@ describe('target acceptance and local replay shells', () => {
                 targetFinalityRecord: scenario.targetFinalityRecord,
                 targetFinalityVerification: scenario.targetFinalityVerification,
                 evaluationProofRecord: scenario.evaluationProofRecord,
-                expectedSignerPublicKeyDigest:
-                    getParticipantSigningPublicKeyDigest('participant-1'),
+                expectedSignerPublicKeyHash:
+                    getParticipantSigningPublicKeyHash('participant-1'),
             }),
         ).toMatchObject({
             ok: true,
-            localReplayRecordDigest: localReplayRecord.localReplayRecordDigest,
-            targetFinalityRecordDigest:
-                scenario.targetFinalityRecord.targetFinalityRecordDigest,
+            localReplayRecordHash: localReplayRecord.localReplayRecordHash,
+            targetFinalityRecordHash:
+                scenario.targetFinalityRecord.targetFinalityRecordHash,
         });
 
         expect(
@@ -203,8 +199,8 @@ describe('target acceptance and local replay shells', () => {
                 boardEvidence,
                 record: {
                     ...signedLocalReplayRecord,
-                    evaluationProofRecordDigest: deriveProtocolDigest(
-                        'EvaluationProofRecordDigest',
+                    evaluationProofRecordHash: deriveProtocolHash(
+                        'EvaluationProofRecordHash',
                         { proof: 'wrong' },
                     ),
                 },
@@ -212,8 +208,8 @@ describe('target acceptance and local replay shells', () => {
                 targetFinalityRecord: scenario.targetFinalityRecord,
                 targetFinalityVerification: scenario.targetFinalityVerification,
                 evaluationProofRecord: scenario.evaluationProofRecord,
-                expectedSignerPublicKeyDigest:
-                    getParticipantSigningPublicKeyDigest('participant-1'),
+                expectedSignerPublicKeyHash:
+                    getParticipantSigningPublicKeyHash('participant-1'),
             }).refusedObjects,
         ).toEqual(
             expect.arrayContaining([
@@ -222,25 +218,25 @@ describe('target acceptance and local replay shells', () => {
         );
     });
 
-    it('requires target-bound decryption shares to bind accepted target and profile digests', () => {
+    it('requires target-bound decryption shares to bind accepted target and profile Hashes', () => {
         const scenario = createAcceptedTargetScenario();
         const decryptionShare = createDecryptionShare(
             scenario.targetAcceptedRecord,
         );
         const { head: shareHead, inclusionProofs } = createBoardHeadWithObjects(
             4,
-            scenario.acceptedHead.headDigest,
+            scenario.acceptedHead.headHash,
             [
                 {
                     objectType: 'TopKDecryptionShare',
-                    objectDigest: decryptionShare.topKDecryptionShareDigest,
+                    objectHash: decryptionShare.topKDecryptionShareHash,
                     boardPosition: decryptionShare.boardPosition,
                 },
             ],
         );
         const signedDecryptionShare = signDecryptionShare(
             decryptionShare,
-            shareHead.headDigest,
+            shareHead.headHash,
         );
         const boardEvidence = createBoardEvidence([
             scenario.head0,
@@ -258,15 +254,14 @@ describe('target acceptance and local replay shells', () => {
                 targetAcceptedRecord: scenario.targetAcceptedRecord,
                 targetAcceptedRecordVerification:
                     scenario.targetAcceptedRecordVerification,
-                expectedTrusteePublicKeyDigest:
-                    getParticipantSigningPublicKeyDigest('participant-1'),
+                expectedTrusteePublicKeyHash:
+                    getParticipantSigningPublicKeyHash('participant-1'),
             }),
         ).toMatchObject({
             ok: true,
-            topKDecryptionShareDigest:
-                decryptionShare.topKDecryptionShareDigest,
-            targetAcceptedRecordDigest:
-                scenario.targetAcceptedRecord.targetAcceptedRecordDigest,
+            topKDecryptionShareHash: decryptionShare.topKDecryptionShareHash,
+            targetAcceptedRecordHash:
+                scenario.targetAcceptedRecord.targetAcceptedRecordHash,
         });
 
         expect(
@@ -274,17 +269,16 @@ describe('target acceptance and local replay shells', () => {
                 boardEvidence,
                 decryptionShare: {
                     ...signedDecryptionShare,
-                    cpadProfileDigest: deriveProtocolDigest(
-                        'CPADProfileDigest',
-                        { profile: 'wrong' },
-                    ),
+                    cpadProfileHash: deriveProtocolHash('CPADProfileHash', {
+                        profile: 'wrong',
+                    }),
                 },
                 decryptionShareInclusionProof: inclusionProofs[0],
                 targetAcceptedRecord: scenario.targetAcceptedRecord,
                 targetAcceptedRecordVerification:
                     scenario.targetAcceptedRecordVerification,
-                expectedTrusteePublicKeyDigest:
-                    getParticipantSigningPublicKeyDigest('participant-1'),
+                expectedTrusteePublicKeyHash:
+                    getParticipantSigningPublicKeyHash('participant-1'),
             }).refusedObjects,
         ).toEqual(
             expect.arrayContaining([
@@ -297,8 +291,8 @@ describe('target acceptance and local replay shells', () => {
                 boardEvidence,
                 decryptionShare: {
                     ...signedDecryptionShare,
-                    targetDecryptionCiphertextDigest: deriveProtocolDigest(
-                        'TargetDecryptionCiphertextDigest',
+                    targetDecryptionCiphertextHash: deriveProtocolHash(
+                        'TargetDecryptionCiphertextHash',
                         { target: 'wrong' },
                     ),
                 },
@@ -306,8 +300,8 @@ describe('target acceptance and local replay shells', () => {
                 targetAcceptedRecord: scenario.targetAcceptedRecord,
                 targetAcceptedRecordVerification:
                     scenario.targetAcceptedRecordVerification,
-                expectedTrusteePublicKeyDigest:
-                    getParticipantSigningPublicKeyDigest('participant-1'),
+                expectedTrusteePublicKeyHash:
+                    getParticipantSigningPublicKeyHash('participant-1'),
             }).refusedObjects,
         ).toEqual(
             expect.arrayContaining([
@@ -320,7 +314,7 @@ describe('target acceptance and local replay shells', () => {
                 boardEvidence,
                 decryptionShare: {
                     ...signedDecryptionShare,
-                    thresholdShareVerificationKeyRoot: deriveProtocolDigest(
+                    thresholdShareVerificationKeyRoot: deriveProtocolHash(
                         'ThresholdShareVerificationKeyRoot',
                         { trustee: 'wrong' },
                     ),
@@ -329,8 +323,8 @@ describe('target acceptance and local replay shells', () => {
                 targetAcceptedRecord: scenario.targetAcceptedRecord,
                 targetAcceptedRecordVerification:
                     scenario.targetAcceptedRecordVerification,
-                expectedTrusteePublicKeyDigest:
-                    getParticipantSigningPublicKeyDigest('participant-1'),
+                expectedTrusteePublicKeyHash:
+                    getParticipantSigningPublicKeyHash('participant-1'),
             }).refusedObjects,
         ).toEqual(
             expect.arrayContaining([
@@ -341,16 +335,16 @@ describe('target acceptance and local replay shells', () => {
         const {
             head: misplacedShareHead,
             inclusionProofs: misplacedShareProofs,
-        } = createBoardHeadWithObjects(4, scenario.acceptedHead.headDigest, [
+        } = createBoardHeadWithObjects(4, scenario.acceptedHead.headHash, [
             {
                 objectType: 'TopKDecryptionShare',
-                objectDigest: decryptionShare.topKDecryptionShareDigest,
+                objectHash: decryptionShare.topKDecryptionShareHash,
                 boardPosition: decryptionShare.boardPosition + 1,
             },
         ]);
         const misplacedSignedDecryptionShare = signDecryptionShare(
             decryptionShare,
-            misplacedShareHead.headDigest,
+            misplacedShareHead.headHash,
         );
         const misplacedShareResult = verifyTopKDecryptionShareShell({
             boardEvidence: createBoardEvidence([
@@ -365,12 +359,12 @@ describe('target acceptance and local replay shells', () => {
             targetAcceptedRecord: scenario.targetAcceptedRecord,
             targetAcceptedRecordVerification:
                 scenario.targetAcceptedRecordVerification,
-            expectedTrusteePublicKeyDigest:
-                getParticipantSigningPublicKeyDigest('participant-1'),
+            expectedTrusteePublicKeyHash:
+                getParticipantSigningPublicKeyHash('participant-1'),
         });
 
         expect(misplacedShareResult.ok).toBe(false);
-        expect(misplacedShareResult.acceptedDigests).toEqual([]);
+        expect(misplacedShareResult.acceptedHashes).toEqual([]);
         expect(misplacedShareResult.refusedObjects).toEqual(
             expect.arrayContaining([
                 expect.objectContaining({ code: 'InclusionProofInvalid' }),
@@ -388,8 +382,8 @@ describe('target acceptance and local replay shells', () => {
                 targetAcceptedRecord: scenario.targetAcceptedRecord,
                 targetAcceptedRecordVerification:
                     scenario.targetAcceptedRecordVerification,
-                expectedTrusteePublicKeyDigest:
-                    getParticipantSigningPublicKeyDigest('participant-1'),
+                expectedTrusteePublicKeyHash:
+                    getParticipantSigningPublicKeyHash('participant-1'),
             }).refusedObjects,
         ).toEqual(
             expect.arrayContaining([

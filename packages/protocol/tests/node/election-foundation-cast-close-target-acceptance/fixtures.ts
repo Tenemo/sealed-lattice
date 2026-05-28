@@ -14,24 +14,24 @@ import {
     createSignature,
     createTargetFinalityRecord,
     createTargetProposalHead,
-    deriveCloseRecordDigest,
-    deriveLocalReplayRecordDigest,
-    derivePostVotingClosedContextDigest,
-    deriveProtocolDigest,
-    deriveTargetAcceptedRecordDigest,
-    deriveTopKDecryptionShareDigest,
-    getParticipantSigningPublicKeyDigest,
+    deriveCloseRecordHash,
+    deriveLocalReplayRecordHash,
+    derivePostVotingClosedContextHash,
+    deriveProtocolHash,
+    deriveTargetAcceptedRecordHash,
+    deriveTopKDecryptionShareHash,
+    getParticipantSigningPublicKeyHash,
     manifestOpaqueBindings,
-    organizerPublicKeyDigest,
+    organizerPublicKeyHash,
     verifyTargetAcceptedRecordShell,
     verifyTargetFinality,
     witnessPolicy,
     targetFinalityPolicy,
-    witnessPublicKeyDigests,
+    witnessPublicKeyHashes,
 } from '../election-foundation-test-helpers';
 
-export const closeRecordElectionManifestDigest = deriveProtocolDigest(
-    'ElectionManifestDigest',
+export const closeRecordElectionManifestHash = deriveProtocolHash(
+    'ElectionManifestHash',
     { manifest: 'close-record-shell' },
 );
 
@@ -48,56 +48,56 @@ export const createVotingCloseScenario = (input?: {
     readonly genesisHead: ReturnType<typeof createBoardHead>;
 } => {
     const genesisHead = createBoardHead(0, null);
-    const closedHead = createBoardHead(1, genesisHead.headDigest);
-    const closedBoardHeadDigest = input?.useGenesisAsClosedHead
-        ? genesisHead.headDigest
-        : closedHead.headDigest;
+    const closedHead = createBoardHead(1, genesisHead.headHash);
+    const closedBoardHeadHash = input?.useGenesisAsClosedHead
+        ? genesisHead.headHash
+        : closedHead.headHash;
     const closeRecordPayload = {
         objectType: 'CloseRecord',
         objectVersion: 1,
         ceremonyId,
-        electionManifestDigest: closeRecordElectionManifestDigest,
+        electionManifestHash: closeRecordElectionManifestHash,
         closeKind: 'VotingClosed',
-        closedBoardHeadDigest,
+        closedBoardHeadHash,
         boardSequence: 2,
         boardPosition: 0,
         organizerIdentity: 'organizer',
     } satisfies Omit<
         CloseRecord,
-        'closeRecordDigest' | 'postVotingClosedContextDigest' | 'signature'
+        'closeRecordHash' | 'postVotingClosedContextHash' | 'signature'
     >;
-    const closeRecordDigest = deriveCloseRecordDigest(closeRecordPayload);
+    const closeRecordHash = deriveCloseRecordHash(closeRecordPayload);
     const { head: closeHead, inclusionProofs } = createBoardHeadWithObjects(
         2,
-        closedHead.headDigest,
+        closedHead.headHash,
         [
             {
                 objectType: 'CloseRecord',
-                objectDigest: closeRecordDigest,
+                objectHash: closeRecordHash,
                 boardPosition: closeRecordPayload.boardPosition,
             },
         ],
     );
-    const postVotingClosedContextDigest = derivePostVotingClosedContextDigest({
+    const postVotingClosedContextHash = derivePostVotingClosedContextHash({
         ceremonyId,
-        closeRecordDigest,
-        electionManifestDigest: closeRecordElectionManifestDigest,
-        votingClosedBoardHeadDigest: closeHead.headDigest,
+        closeRecordHash,
+        electionManifestHash: closeRecordElectionManifestHash,
+        votingClosedBoardHeadHash: closeHead.headHash,
     });
     const closeRecord: CloseRecord = {
         ...closeRecordPayload,
-        closeRecordDigest,
-        postVotingClosedContextDigest,
+        closeRecordHash,
+        postVotingClosedContextHash,
         signature: createSignature(
             'CloseRecord',
             'Organizer',
             'organizer',
-            organizerPublicKeyDigest,
-            closeRecordDigest,
+            organizerPublicKeyHash,
+            closeRecordHash,
             {
-                boardHeadDigest: closeHead.headDigest,
-                contextDigest: postVotingClosedContextDigest,
-                manifestDigest: closeRecordElectionManifestDigest,
+                boardHeadHash: closeHead.headHash,
+                contextHash: postVotingClosedContextHash,
+                manifestHash: closeRecordElectionManifestHash,
             },
         ),
     };
@@ -116,24 +116,24 @@ export const createVotingCloseScenario = (input?: {
     };
 };
 
-export const deriveEvaluationProofRecordDigest = (
-    proofRecord: Omit<EvaluationProofRecord, 'evaluationProofRecordDigest'>,
+export const deriveEvaluationProofRecordHash = (
+    proofRecord: Omit<EvaluationProofRecord, 'evaluationProofRecordHash'>,
 ): string =>
-    deriveProtocolDigest('EvaluationProofRecordDigest', {
-        targetCiphertextDigest: proofRecord.targetCiphertextDigest,
-        topKCiphertextDigest: proofRecord.topKCiphertextDigest,
+    deriveProtocolHash('EvaluationProofRecordHash', {
+        targetCiphertextHash: proofRecord.targetCiphertextHash,
+        topKCiphertextHash: proofRecord.topKCiphertextHash,
         ceremonyId: proofRecord.ceremonyId,
-        electionManifestDigest: proofRecord.electionManifestDigest,
-        evaluationContextDigest: proofRecord.evaluationContextDigest,
-        evaluationProofProfileDigest: proofRecord.evaluationProofProfileDigest,
+        electionManifestHash: proofRecord.electionManifestHash,
+        evaluationContextHash: proofRecord.evaluationContextHash,
+        evaluationProofProfileHash: proofRecord.evaluationProofProfileHash,
         objectType: proofRecord.objectType,
         objectVersion: proofRecord.objectVersion,
         proofRoot: proofRecord.proofRoot,
-        publicSlotMaskDigest: proofRecord.publicSlotMaskDigest,
-        targetFinalityRecordDigest: proofRecord.targetFinalityRecordDigest,
-        targetLayoutDigest: proofRecord.targetLayoutDigest,
-        targetProposalDigest: proofRecord.targetProposalDigest,
-        topKEvaluationRecordDigest: proofRecord.topKEvaluationRecordDigest,
+        publicSlotMaskHash: proofRecord.publicSlotMaskHash,
+        targetFinalityRecordHash: proofRecord.targetFinalityRecordHash,
+        targetLayoutHash: proofRecord.targetLayoutHash,
+        targetProposalHash: proofRecord.targetProposalHash,
+        topKEvaluationRecordHash: proofRecord.topKEvaluationRecordHash,
     });
 
 export const createEvaluationProofRecord = (
@@ -144,18 +144,17 @@ export const createEvaluationProofRecord = (
         objectType: 'EvaluationProofRecord',
         objectVersion: 1,
         ceremonyId,
-        electionManifestDigest: checkpoint.electionManifestDigest,
-        targetProposalDigest: targetFinalityRecord.targetProposalDigest,
-        topKEvaluationRecordDigest: checkpoint.topKEvaluationRecordDigest,
-        targetFinalityRecordDigest:
-            targetFinalityRecord.targetFinalityRecordDigest,
-        evaluationProofProfileDigest: checkpoint.evaluationProofProfileDigest,
-        evaluationContextDigest: checkpoint.evaluationContextDigest,
-        topKCiphertextDigest: checkpoint.topKCiphertextDigest,
-        publicSlotMaskDigest: checkpoint.publicSlotMaskDigest,
-        targetCiphertextDigest: checkpoint.targetCiphertextDigest,
-        targetLayoutDigest: checkpoint.targetLayoutDigest,
-        proofRoot: deriveProtocolDigest('EvaluationProofRecordDigest', {
+        electionManifestHash: checkpoint.electionManifestHash,
+        targetProposalHash: targetFinalityRecord.targetProposalHash,
+        topKEvaluationRecordHash: checkpoint.topKEvaluationRecordHash,
+        targetFinalityRecordHash: targetFinalityRecord.targetFinalityRecordHash,
+        evaluationProofProfileHash: checkpoint.evaluationProofProfileHash,
+        evaluationContextHash: checkpoint.evaluationContextHash,
+        topKCiphertextHash: checkpoint.topKCiphertextHash,
+        publicSlotMaskHash: checkpoint.publicSlotMaskHash,
+        targetCiphertextHash: checkpoint.targetCiphertextHash,
+        targetLayoutHash: checkpoint.targetLayoutHash,
+        proofRoot: deriveProtocolHash('EvaluationProofRecordHash', {
             proof: 'mandatory-pq-evaluation-proof',
         }),
         boardSequence: 2,
@@ -164,7 +163,7 @@ export const createEvaluationProofRecord = (
 
     return {
         ...payload,
-        evaluationProofRecordDigest: deriveEvaluationProofRecordDigest(payload),
+        evaluationProofRecordHash: deriveEvaluationProofRecordHash(payload),
     };
 };
 
@@ -177,55 +176,52 @@ export const createTargetAcceptedRecord = (
         objectType: 'TargetAcceptedRecord',
         objectVersion: 1,
         ceremonyId,
-        electionManifestDigest: checkpoint.electionManifestDigest,
+        electionManifestHash: checkpoint.electionManifestHash,
         targetFinalityScope: 'target',
-        targetProposalDigest: targetFinalityRecord.targetProposalDigest,
-        topKEvaluationRecordDigest: checkpoint.topKEvaluationRecordDigest,
-        targetContextDigest: deriveProtocolDigest('TargetContextDigest', {
+        targetProposalHash: targetFinalityRecord.targetProposalHash,
+        topKEvaluationRecordHash: checkpoint.topKEvaluationRecordHash,
+        targetContextHash: deriveProtocolHash('TargetContextHash', {
             target: 'accepted-target-context',
         }),
-        targetFinalityRecordDigest:
-            targetFinalityRecord.targetFinalityRecordDigest,
-        targetFinalityCheckpointDigest:
-            checkpoint.targetFinalityCheckpointDigest,
-        evaluationProofRecordDigest:
-            evaluationProofRecord.evaluationProofRecordDigest,
-        evaluationProofProfileDigest:
-            evaluationProofRecord.evaluationProofProfileDigest,
-        targetPreimageDigest: deriveProtocolDigest('TargetPreimageDigest', {
+        targetFinalityRecordHash: targetFinalityRecord.targetFinalityRecordHash,
+        targetFinalityCheckpointHash: checkpoint.targetFinalityCheckpointHash,
+        evaluationProofRecordHash:
+            evaluationProofRecord.evaluationProofRecordHash,
+        evaluationProofProfileHash:
+            evaluationProofRecord.evaluationProofProfileHash,
+        targetPreimageHash: deriveProtocolHash('TargetPreimageHash', {
             target: 'accepted-target-preimage',
         }),
-        targetCiphertextDigest: evaluationProofRecord.targetCiphertextDigest,
-        targetLayoutDigest: evaluationProofRecord.targetLayoutDigest,
+        targetCiphertextHash: evaluationProofRecord.targetCiphertextHash,
+        targetLayoutHash: evaluationProofRecord.targetLayoutHash,
         acceptanceMode: 'evaluation-proof',
-        kllpsTargetDecryptionProfileDigest:
-            manifestOpaqueBindings.kllpsTargetDecryptionProfileDigest,
-        targetBasisDigest: manifestOpaqueBindings.targetBasisDigest,
+        kllpsTargetDecryptionProfileHash:
+            manifestOpaqueBindings.kllpsTargetDecryptionProfileHash,
+        targetBasisHash: manifestOpaqueBindings.targetBasisHash,
         cpadProfileId: manifestOpaqueBindings.cpadProfileId,
-        cpadProfileDigest: manifestOpaqueBindings.cpadProfileDigest,
+        cpadProfileHash: manifestOpaqueBindings.cpadProfileHash,
         thresholdDecryptionProfileId:
             manifestOpaqueBindings.thresholdDecryptionProfileId,
-        thresholdDecryptionProfileDigest:
-            manifestOpaqueBindings.thresholdDecryptionProfileDigest,
+        thresholdDecryptionProfileHash:
+            manifestOpaqueBindings.thresholdDecryptionProfileHash,
         boardSequence: 3,
         boardPosition: 0,
         organizerIdentity: 'organizer',
     } as const;
-    const targetAcceptedRecordDigest =
-        deriveTargetAcceptedRecordDigest(payload);
+    const targetAcceptedRecordHash = deriveTargetAcceptedRecordHash(payload);
 
     return {
         ...payload,
-        targetAcceptedRecordDigest,
+        targetAcceptedRecordHash,
         signature: createSignature(
             'TargetAcceptedRecord',
             'Organizer',
             'organizer',
-            organizerPublicKeyDigest,
-            targetAcceptedRecordDigest,
+            organizerPublicKeyHash,
+            targetAcceptedRecordHash,
             {
-                contextDigest: payload.targetContextDigest,
-                manifestDigest: payload.electionManifestDigest,
+                contextHash: payload.targetContextHash,
+                manifestHash: payload.electionManifestHash,
             },
         ),
     };
@@ -233,19 +229,19 @@ export const createTargetAcceptedRecord = (
 
 export const signTargetAcceptedRecord = (
     targetAcceptedRecord: TargetAcceptedRecord,
-    boardHeadDigest: string,
+    boardHeadHash: string,
 ): TargetAcceptedRecord => ({
     ...targetAcceptedRecord,
     signature: createSignature(
         'TargetAcceptedRecord',
         'Organizer',
         targetAcceptedRecord.organizerIdentity,
-        organizerPublicKeyDigest,
-        targetAcceptedRecord.targetAcceptedRecordDigest,
+        organizerPublicKeyHash,
+        targetAcceptedRecord.targetAcceptedRecordHash,
         {
-            boardHeadDigest,
-            contextDigest: targetAcceptedRecord.targetContextDigest,
-            manifestDigest: targetAcceptedRecord.electionManifestDigest,
+            boardHeadHash,
+            contextHash: targetAcceptedRecord.targetContextHash,
+            manifestHash: targetAcceptedRecord.electionManifestHash,
         },
     ),
 });
@@ -257,70 +253,67 @@ export const createDecryptionShare = (
         objectType: 'TopKDecryptionShare',
         objectVersion: 1,
         ceremonyId,
-        electionManifestDigest: targetAcceptedRecord.electionManifestDigest,
+        electionManifestHash: targetAcceptedRecord.electionManifestHash,
         trusteeIdentity: 'participant-1',
-        targetAcceptedRecordDigest:
-            targetAcceptedRecord.targetAcceptedRecordDigest,
-        targetProposalDigest: targetAcceptedRecord.targetProposalDigest,
-        targetPreimageDigest: targetAcceptedRecord.targetPreimageDigest,
-        targetFinalityRecordDigest:
-            targetAcceptedRecord.targetFinalityRecordDigest,
-        targetFinalityCheckpointDigest:
-            targetAcceptedRecord.targetFinalityCheckpointDigest,
-        evaluationProofRecordDigest:
-            targetAcceptedRecord.evaluationProofRecordDigest,
-        topKEvaluationRecordDigest:
-            targetAcceptedRecord.topKEvaluationRecordDigest,
-        targetContextDigest: targetAcceptedRecord.targetContextDigest,
-        targetCiphertextDigest: targetAcceptedRecord.targetCiphertextDigest,
-        cpadProfileDigest: targetAcceptedRecord.cpadProfileDigest,
-        thresholdDecryptionProfileDigest:
-            targetAcceptedRecord.thresholdDecryptionProfileDigest,
-        kllpsTargetDecryptionProfileDigest:
-            targetAcceptedRecord.kllpsTargetDecryptionProfileDigest,
-        targetDecryptionPreparationRecordDigest: deriveProtocolDigest(
-            'TargetDecryptionPreparationRecordDigest',
+        targetAcceptedRecordHash: targetAcceptedRecord.targetAcceptedRecordHash,
+        targetProposalHash: targetAcceptedRecord.targetProposalHash,
+        targetPreimageHash: targetAcceptedRecord.targetPreimageHash,
+        targetFinalityRecordHash: targetAcceptedRecord.targetFinalityRecordHash,
+        targetFinalityCheckpointHash:
+            targetAcceptedRecord.targetFinalityCheckpointHash,
+        evaluationProofRecordHash:
+            targetAcceptedRecord.evaluationProofRecordHash,
+        topKEvaluationRecordHash: targetAcceptedRecord.topKEvaluationRecordHash,
+        targetContextHash: targetAcceptedRecord.targetContextHash,
+        targetCiphertextHash: targetAcceptedRecord.targetCiphertextHash,
+        cpadProfileHash: targetAcceptedRecord.cpadProfileHash,
+        thresholdDecryptionProfileHash:
+            targetAcceptedRecord.thresholdDecryptionProfileHash,
+        kllpsTargetDecryptionProfileHash:
+            targetAcceptedRecord.kllpsTargetDecryptionProfileHash,
+        targetDecryptionPreparationRecordHash: deriveProtocolHash(
+            'TargetDecryptionPreparationRecordHash',
             { target: 'accepted-target-decryption-preparation' },
         ),
-        targetDecryptionCiphertextDigest: deriveProtocolDigest(
-            'TargetDecryptionCiphertextDigest',
+        targetDecryptionCiphertextHash: deriveProtocolHash(
+            'TargetDecryptionCiphertextHash',
             { target: 'accepted-target-decryption-ciphertext' },
         ),
-        targetBasisDigest: targetAcceptedRecord.targetBasisDigest,
-        thresholdShareVerificationKeyRoot: deriveProtocolDigest(
+        targetBasisHash: targetAcceptedRecord.targetBasisHash,
+        thresholdShareVerificationKeyRoot: deriveProtocolHash(
             'ThresholdShareVerificationKeyRoot',
             { trustee: 'participant-1' },
         ),
-        thresholdShareVerificationKeyDigest: deriveProtocolDigest(
-            'ThresholdShareVerificationKeyDigest',
+        thresholdShareVerificationKeyHash: deriveProtocolHash(
+            'ThresholdShareVerificationKeyHash',
             { trustee: 'participant-1' },
         ),
-        trusteeThresholdVerificationKeyDigest: deriveProtocolDigest(
-            'TrusteeThresholdVerificationKeyDigest',
+        trusteeThresholdVerificationKeyHash: deriveProtocolHash(
+            'TrusteeThresholdVerificationKeyHash',
             { trustee: 'participant-1', scope: 'trustee' },
         ),
         boardSequence: 4,
         boardPosition: 0,
         recoveryEpoch: 0,
         deviceEpoch: 0,
-        shareRoot: deriveProtocolDigest('TopKDecryptionShareDigest', {
+        shareRoot: deriveProtocolHash('TopKDecryptionShareHash', {
             share: 'participant-1',
         }),
     } as const;
-    const topKDecryptionShareDigest = deriveTopKDecryptionShareDigest(payload);
+    const topKDecryptionShareHash = deriveTopKDecryptionShareHash(payload);
 
     return {
         ...payload,
-        topKDecryptionShareDigest,
+        topKDecryptionShareHash,
         signature: createSignature(
             'TopKDecryptionShare',
             'Trustee',
             'participant-1',
-            getParticipantSigningPublicKeyDigest('participant-1'),
-            topKDecryptionShareDigest,
+            getParticipantSigningPublicKeyHash('participant-1'),
+            topKDecryptionShareHash,
             {
-                contextDigest: payload.targetContextDigest,
-                manifestDigest: payload.electionManifestDigest,
+                contextHash: payload.targetContextHash,
+                manifestHash: payload.electionManifestHash,
             },
         ),
     };
@@ -328,19 +321,19 @@ export const createDecryptionShare = (
 
 export const signDecryptionShare = (
     decryptionShare: TopKDecryptionShareShell,
-    boardHeadDigest: string,
+    boardHeadHash: string,
 ): TopKDecryptionShareShell => ({
     ...decryptionShare,
     signature: createSignature(
         'TopKDecryptionShare',
         'Trustee',
         decryptionShare.trusteeIdentity,
-        getParticipantSigningPublicKeyDigest(decryptionShare.trusteeIdentity),
-        decryptionShare.topKDecryptionShareDigest,
+        getParticipantSigningPublicKeyHash(decryptionShare.trusteeIdentity),
+        decryptionShare.topKDecryptionShareHash,
         {
-            boardHeadDigest,
-            contextDigest: decryptionShare.targetContextDigest,
-            manifestDigest: decryptionShare.electionManifestDigest,
+            boardHeadHash,
+            contextHash: decryptionShare.targetContextHash,
+            manifestHash: decryptionShare.electionManifestHash,
         },
     ),
 });
@@ -353,41 +346,39 @@ export const createLocalReplayRecord = (
         objectType: 'LocalReplayRecord',
         objectVersion: 1,
         ceremonyId,
-        electionManifestDigest:
-            targetFinalityRecord.targetFinalityCheckpoint
-                .electionManifestDigest,
+        electionManifestHash:
+            targetFinalityRecord.targetFinalityCheckpoint.electionManifestHash,
         participantIdentity: 'participant-1',
-        targetProposalDigest: targetFinalityRecord.targetProposalDigest,
-        targetFinalityRecordDigest:
-            targetFinalityRecord.targetFinalityRecordDigest,
-        evaluationProofRecordDigest:
-            evaluationProofRecord.evaluationProofRecordDigest,
-        replayContextDigest: deriveProtocolDigest('ActionContextDigest', {
+        targetProposalHash: targetFinalityRecord.targetProposalHash,
+        targetFinalityRecordHash: targetFinalityRecord.targetFinalityRecordHash,
+        evaluationProofRecordHash:
+            evaluationProofRecord.evaluationProofRecordHash,
+        replayContextHash: deriveProtocolHash('ActionContextHash', {
             replay: 'participant-1',
         }),
         recoveryEpoch: 0,
         deviceEpoch: 0,
-        localReplayDiagnosticDigest: deriveProtocolDigest(
-            'LocalReplayDiagnosticDigest',
+        localReplayDiagnosticHash: deriveProtocolHash(
+            'LocalReplayDiagnosticHash',
             {
                 replay: 'participant-1',
             },
         ),
     } as const;
-    const localReplayRecordDigest = deriveLocalReplayRecordDigest(payload);
+    const localReplayRecordHash = deriveLocalReplayRecordHash(payload);
 
     return {
         ...payload,
-        localReplayRecordDigest,
+        localReplayRecordHash,
         signature: createSignature(
             'LocalReplayRecord',
             'Participant',
             'participant-1',
-            getParticipantSigningPublicKeyDigest('participant-1'),
-            localReplayRecordDigest,
+            getParticipantSigningPublicKeyHash('participant-1'),
+            localReplayRecordHash,
             {
-                contextDigest: payload.replayContextDigest,
-                manifestDigest: payload.electionManifestDigest,
+                contextHash: payload.replayContextHash,
+                manifestHash: payload.electionManifestHash,
             },
         ),
     };
@@ -395,21 +386,21 @@ export const createLocalReplayRecord = (
 
 export const signLocalReplayRecord = (
     localReplayRecord: LocalReplayRecord,
-    boardHeadDigest: string,
+    boardHeadHash: string,
 ): LocalReplayRecord => ({
     ...localReplayRecord,
     signature: createSignature(
         'LocalReplayRecord',
         'Participant',
         localReplayRecord.participantIdentity,
-        getParticipantSigningPublicKeyDigest(
+        getParticipantSigningPublicKeyHash(
             localReplayRecord.participantIdentity,
         ),
-        localReplayRecord.localReplayRecordDigest,
+        localReplayRecord.localReplayRecordHash,
         {
-            boardHeadDigest,
-            contextDigest: localReplayRecord.replayContextDigest,
-            manifestDigest: localReplayRecord.electionManifestDigest,
+            boardHeadHash,
+            contextHash: localReplayRecord.replayContextHash,
+            manifestHash: localReplayRecord.electionManifestHash,
         },
     ),
 });
@@ -438,24 +429,24 @@ type AcceptedTargetScenario = {
 
 export const createAcceptedTargetScenario = (): AcceptedTargetScenario => {
     const head0 = createBoardHead(0, null);
-    const head1 = createTargetProposalHead(1, head0.headDigest);
+    const head1 = createTargetProposalHead(1, head0.headHash);
     const targetFinalityRecord = createTargetFinalityRecord(head1);
     const targetFinalityVerification = verifyTargetFinality({
         boardEvidence: createBoardEvidence([head0, head1]),
         record: targetFinalityRecord,
         witnessPolicy,
         targetFinalityPolicy,
-        witnessPublicKeyDigests,
+        witnessPublicKeyHashes,
     });
     const evaluationProofRecord =
         createEvaluationProofRecord(targetFinalityRecord);
     const { head: evaluationProofHead } = createBoardHeadWithObjects(
         2,
-        head1.headDigest,
+        head1.headHash,
         [
             {
                 objectType: 'EvaluationProofRecord',
-                objectDigest: evaluationProofRecord.evaluationProofRecordDigest,
+                objectHash: evaluationProofRecord.evaluationProofRecordHash,
                 boardPosition: evaluationProofRecord.boardPosition,
             },
         ],
@@ -466,19 +457,19 @@ export const createAcceptedTargetScenario = (): AcceptedTargetScenario => {
     );
     const { head: acceptedHead, inclusionProofs } = createBoardHeadWithObjects(
         3,
-        evaluationProofHead.headDigest,
+        evaluationProofHead.headHash,
         [
             {
                 objectType: 'TargetAcceptedRecord',
-                objectDigest:
-                    unsignedTargetAcceptedRecord.targetAcceptedRecordDigest,
+                objectHash:
+                    unsignedTargetAcceptedRecord.targetAcceptedRecordHash,
                 boardPosition: unsignedTargetAcceptedRecord.boardPosition,
             },
         ],
     );
     const targetAcceptedRecord = signTargetAcceptedRecord(
         unsignedTargetAcceptedRecord,
-        acceptedHead.headDigest,
+        acceptedHead.headHash,
     );
     const boardEvidence = createBoardEvidence([
         head0,
@@ -494,7 +485,7 @@ export const createAcceptedTargetScenario = (): AcceptedTargetScenario => {
         targetFinalityRecord,
         targetFinalityVerification,
         evaluationProofRecord,
-        expectedOrganizerPublicKeyDigest: organizerPublicKeyDigest,
+        expectedOrganizerPublicKeyHash: organizerPublicKeyHash,
     });
 
     return {

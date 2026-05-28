@@ -13,7 +13,7 @@ pub(super) fn bridge_proof_target_contract_value(
         aggregate_reduced_coordinate_count,
         aggregate_quotient_coordinate_count,
     );
-    let shared_witness_layout_digest = shared_witness_layout_digest(&shared_witness_layout)?;
+    let shared_witness_layout_hash = shared_witness_layout_hash(&shared_witness_layout)?;
 
     Ok(json!({
         "objectType": "AggregateBridgeProofTargetContract",
@@ -51,7 +51,7 @@ pub(super) fn bridge_proof_target_contract_value(
         "plaintextRootProofBindingStatus": PLAINTEXT_ROOT_PROOF_BINDING_CHECKED_STATUS,
         "publicPlaintextRootAcceptedAsClosureEvidence": false,
         "sharedWitnessLayout": shared_witness_layout,
-        "sharedWitnessLayoutDigest": shared_witness_layout_digest,
+        "sharedWitnessLayoutHash": shared_witness_layout_hash,
         "bgvEncryptionProofStatus": BGV_ENCRYPTION_PROOF_CHECKED_STATUS,
         "bgvRandomnessBoundProofStatus": BGV_RANDOMNESS_BOUND_PROOF_STATUS,
         "rnsCrtConsistencyProofStatus": RNS_CRT_CONSISTENCY_PROOF_CHECKED_STATUS,
@@ -110,9 +110,9 @@ fn shared_witness_layout_value(
     })
 }
 
-fn shared_witness_layout_digest(layout: &Value) -> CanonicalResult<String> {
-    derive_protocol_digest(
-        "BridgeProofRecordDigest",
+fn shared_witness_layout_hash(layout: &Value) -> CanonicalResult<String> {
+    derive_protocol_hash(
+        "BridgeProofRecordHash",
         &json!({
             "purpose": "sealed-lattice-aggregate-bridge-shared-witness-layout-v1",
             "layout": layout,
@@ -120,11 +120,11 @@ fn shared_witness_layout_digest(layout: &Value) -> CanonicalResult<String> {
     )
 }
 
-pub(super) fn bridge_proof_target_contract_digest(
+pub(super) fn bridge_proof_target_contract_hash(
     target_contract: &Value,
 ) -> CanonicalResult<String> {
-    derive_protocol_digest(
-        "BridgeProofRecordDigest",
+    derive_protocol_hash(
+        "BridgeProofRecordHash",
         &json!({
             "purpose": "sealed-lattice-aggregate-bridge-proof-target-contract-v1",
             "contract": target_contract,
@@ -161,12 +161,12 @@ pub(super) fn validate_bridge_proof_target_contract(
             "M9 bridge proof target contract does not match the relation requirements",
         ));
     }
-    let expected_target_contract_digest =
-        bridge_proof_target_contract_digest(&expected_target_contract)?;
+    let expected_target_contract_hash =
+        bridge_proof_target_contract_hash(&expected_target_contract)?;
     require_matching_string_field(
         bridge_proof_statement,
-        "bridgeProofTargetContractDigest",
-        &expected_target_contract_digest,
-        "bridge proof target contract digest",
+        "bridgeProofTargetContractHash",
+        &expected_target_contract_hash,
+        "bridge proof target contract hash",
     )
 }

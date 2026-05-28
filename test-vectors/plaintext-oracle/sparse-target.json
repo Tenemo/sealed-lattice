@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "layoutId": "WinnerRankTopK-v1",
-  "layoutDigest": "916d8c90b291d37bd7a2854a23b52c3dbb3eb79ec53e8e9067907d3c30bb39f213758e3f5318e0594ed8e5eaebde690cc418b440736a177bc9fe1d63989a4e6f",
-  "targetDigest": "fb6b11e44a6eeccb4a4828832d286e9d3d5fc1fb3092869b74b2a001cbcadad062309d54af1d09fec935357325c13df9486b9f21526ff0b3a485a919e416dc99",
+  "layoutHash": "b1d9c6781b7cae8f154c5f622bdc3474cf084ba389163e7815695a45a80ae768d830c2bb0c24b62e3062bd699dd6019491fbd9be0a37e9229b1fbfff04fe13ee",
+  "targetHash": "4a3845030e270b8a3920557029f8a85a35c0b812cda5415cd1c69b7c29fbd8b56a668d5aa2809aeaa3d86f46e7c7673800c8c6e0f4ea4975c56b7d2d03d6e2cc",
   "target": {
     "forbiddenSemanticSlots": [
       0,
@@ -10,7 +10,7 @@
       0,
       0
     ],
-    "layoutDigest": "916d8c90b291d37bd7a2854a23b52c3dbb3eb79ec53e8e9067907d3c30bb39f213758e3f5318e0594ed8e5eaebde690cc418b440736a177bc9fe1d63989a4e6f",
+    "layoutHash": "b1d9c6781b7cae8f154c5f622bdc3474cf084ba389163e7815695a45a80ae768d830c2bb0c24b62e3062bd699dd6019491fbd9be0a37e9229b1fbfff04fe13ee",
     "layoutId": "WinnerRankTopK-v1",
     "optionCount": 4,
     "targetIdSlots": [
@@ -26,7 +26,7 @@
       0
     ],
     "topOptionCount": 2,
-    "targetDigest": "fb6b11e44a6eeccb4a4828832d286e9d3d5fc1fb3092869b74b2a001cbcadad062309d54af1d09fec935357325c13df9486b9f21526ff0b3a485a919e416dc99"
+    "targetHash": "4a3845030e270b8a3920557029f8a85a35c0b812cda5415cd1c69b7c29fbd8b56a668d5aa2809aeaa3d86f46e7c7673800c8c6e0f4ea4975c56b7d2d03d6e2cc"
   },
   "expectedSelectedOptionOrdinals": [
     2,

@@ -7,13 +7,13 @@ pub(super) fn verify_structured_receiver_encryption_component_proof(
     proof_input: &Value,
 ) -> Value {
     let mut refused_objects = Vec::new();
-    let component_proof_record_digest = string_field(component_proof, "componentProofRecordDigest");
+    let component_proof_record_hash = string_field(component_proof, "componentProofRecordHash");
     if component_id != "receiver-encryption-component" {
         refused_objects.push(component_backend_refusal(
             format!(
                 "Structured receiver-encryption proof statements are only valid for receiver-encryption-component, not {component_id}."
             ),
-            component_proof_record_digest,
+            component_proof_record_hash,
         ));
     }
     if let Some(proof_statement) =
@@ -26,27 +26,27 @@ pub(super) fn verify_structured_receiver_encryption_component_proof(
                 format!(
                     "Structured receiver-encryption proof bytes for {component_id} require a public structured proof statement, not only the proof statement plan."
                 ),
-                component_proof_record_digest,
+                component_proof_record_hash,
             ));
-        } else if derive_ballot_structured_receiver_encryption_statement_digest(proof_statement)
+        } else if derive_ballot_structured_receiver_encryption_statement_hash(proof_statement)
             .as_deref()
-            != string_field(proof_statement, "statementDigest")
+            != string_field(proof_statement, "statementHash")
         {
             refused_objects.push(component_backend_refusal(
                 format!(
-                    "Ballot proof component proof statement digest for {component_id} does not match its canonical payload."
+                    "Ballot proof component proof statement hash for {component_id} does not match its canonical payload."
                 ),
-                component_proof_record_digest,
+                component_proof_record_hash,
             ));
         }
-        if string_field(proof_statement, "statementDigest")
-            != string_field(proof_input, "componentProofStatementDigest")
+        if string_field(proof_statement, "statementHash")
+            != string_field(proof_input, "componentProofStatementHash")
         {
             refused_objects.push(component_backend_refusal(
                 format!(
                     "Ballot proof component proof statement for {component_id} is not bound to the supplied proof input."
                 ),
-                component_proof_record_digest,
+                component_proof_record_hash,
             ));
         }
     } else {
@@ -54,7 +54,7 @@ pub(super) fn verify_structured_receiver_encryption_component_proof(
             format!(
                 "Ballot proof component proof input for {component_id} must supply its public proof statement object."
             ),
-            component_proof_record_digest,
+            component_proof_record_hash,
         ));
     }
     if !refused_objects.is_empty() {
@@ -79,7 +79,7 @@ pub(super) fn verify_structured_receiver_encryption_component_proof(
                     vec![json!({
                         "code": error.code,
                         "message": error.message,
-                        "objectDigest": string_field(component_proof, "componentProofRecordDigest")
+                        "objectHash": string_field(component_proof, "componentProofRecordHash")
                     })],
                     json!(error.code),
                 );
@@ -92,7 +92,7 @@ pub(super) fn verify_structured_receiver_encryption_component_proof(
                 operation,
                 component_id,
                 format!("Ballot proof component {component_id} has no proof bytes."),
-                component_proof_record_digest,
+                component_proof_record_hash,
             );
         }
     };
@@ -103,7 +103,7 @@ pub(super) fn verify_structured_receiver_encryption_component_proof(
                 operation,
                 component_id,
                 format!("Ballot proof component {component_id} has no public randomness."),
-                component_proof_record_digest,
+                component_proof_record_hash,
             );
         }
     };
@@ -115,7 +115,7 @@ pub(super) fn verify_structured_receiver_encryption_component_proof(
                     operation,
                     component_id,
                     format!("Ballot proof component {component_id} has no parameter set."),
-                    component_proof_record_digest,
+                    component_proof_record_hash,
                 );
             }
         };
@@ -127,7 +127,7 @@ pub(super) fn verify_structured_receiver_encryption_component_proof(
                     operation,
                     component_id,
                     format!("Ballot proof component {component_id} has no proof encoding."),
-                    component_proof_record_digest,
+                    component_proof_record_hash,
                 );
             }
         };
@@ -141,7 +141,7 @@ pub(super) fn verify_structured_receiver_encryption_component_proof(
                     format!(
                         "Ballot proof component {component_id} parameter set is invalid: {error}."
                     ),
-                    component_proof_record_digest,
+                    component_proof_record_hash,
                 );
             }
         };
@@ -155,7 +155,7 @@ pub(super) fn verify_structured_receiver_encryption_component_proof(
                     format!(
                         "Ballot proof component {component_id} proof encoding is invalid: {error}."
                     ),
-                    component_proof_record_digest,
+                    component_proof_record_hash,
                 );
             }
         };
@@ -174,7 +174,7 @@ pub(super) fn verify_structured_receiver_encryption_component_proof(
                     format!(
                         "Structured receiver-encryption proof statement for {component_id} has invalid targetCoefficientRepresentation: {error}."
                     ),
-                    component_proof_record_digest,
+                    component_proof_record_hash,
                 );
             }
         };
@@ -191,7 +191,7 @@ pub(super) fn verify_structured_receiver_encryption_component_proof(
                     "Structured receiver-encryption proof statement for {component_id} has invalid matrixCoefficientRepresentation: {}.",
                     error.message
                 ),
-                component_proof_record_digest,
+                component_proof_record_hash,
             );
         }
     };
@@ -199,8 +199,8 @@ pub(super) fn verify_structured_receiver_encryption_component_proof(
         .and_then(|object| object.get("proofSizeBytes"))
         .and_then(Value::as_u64)
         .and_then(|proof_size| usize::try_from(proof_size).ok());
-    let proof_verification = linear_proof::verifier::verify_streamed_linear_proof_components(
-        linear_proof::verifier::StreamedLinearProofVerificationInput {
+    let proof_verification = linear_proof_verifier::verify_streamed_linear_proof_components(
+        linear_proof_verifier::StreamedLinearProofVerificationInput {
             case_name: &format!("{component_id}-component-proof"),
             parameter_set: &parameter_set,
             proof_encoding: &proof_encoding,
@@ -260,11 +260,11 @@ pub(super) fn verify_structured_receiver_encryption_component_proof(
         "operation": operation,
         "componentId": component_id,
         "statusLabels": status_labels,
-        "acceptedDigests": [
-            string_field(component_proof, "componentProofRecordDigest"),
-            string_field(component_proof, "proofBytesDigest"),
-            string_field(proof_input, "componentProofStatementDigest"),
-            string_field(proof_input, "statementDigest")
+        "acceptedHashes": [
+            string_field(component_proof, "componentProofRecordHash"),
+            string_field(component_proof, "proofBytesHash"),
+            string_field(proof_input, "componentProofStatementHash"),
+            string_field(proof_input, "statementHash")
         ],
         "refusedObjects": [],
         "unresolvedReason": Value::Null

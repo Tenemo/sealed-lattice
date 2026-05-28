@@ -22,7 +22,7 @@ export type {
     TranscriptCoreKernel,
 } from './transcript-core-bridge/kernel-contracts.js';
 export {
-    normalizeTranscriptCoreKernelBytesForDigest,
+    normalizeTranscriptCoreKernelBytesForHash,
     TranscriptCoreKernelCommandError,
 } from './transcript-core-bridge/kernel-runtime.js';
 export type { TranscriptCoreKernelLoaderOptions } from './transcript-core-bridge/kernel-runtime.js';

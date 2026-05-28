@@ -51,6 +51,10 @@ const requiredApiEntryPages = [
     ...documentedPublicApiEntries.map((entry) => entry.apiReferencePagePath),
     apiNavigationPath,
 ] as const;
+const docsShellSourcePath = 'docs/src/styles/docs-shell.css';
+const themeToggleSourcePath = 'docs/src/components/ThemeToggle.astro';
+const astroConfigPath = 'docs/astro.config.ts';
+const builtDocsIndexPath = 'docs/dist/index.html';
 
 const markdownLinkPattern = /!?\[[^\]]*]\(([^)]+)\)/g;
 const linkTargetPattern = /^([^\s]+)(?:\s+["'][^"']*["'])?$/;
@@ -442,6 +446,77 @@ const verifyApiEntryPages = async (): Promise<string[]> => {
     return failures;
 };
 
+const verifyDocsShellContract = async (): Promise<string[]> => {
+    const failures: string[] = [];
+    const themeToggleSource = await fs.readFile(
+        path.resolve(repoRoot, themeToggleSourcePath),
+        'utf8',
+    );
+    const astroConfigSource = await fs.readFile(
+        path.resolve(repoRoot, astroConfigPath),
+        'utf8',
+    );
+    const docsShellSource = await fs.readFile(
+        path.resolve(repoRoot, docsShellSourcePath),
+        'utf8',
+    );
+    const requiredThemeToggleSnippets = [
+        'data-sl-theme-toggle',
+        'aria-label="Switch to light theme"',
+        'aria-pressed="true"',
+        'localStorage.setItem(STORAGE_KEY, next)',
+        ".querySelectorAll('[data-sl-theme-toggle]')",
+    ];
+    const requiredDocsShellSnippets = [
+        '@layer starlight.core',
+        'html[data-has-sidebar][data-has-toc] .sidebar-pane',
+        'html[data-has-sidebar][data-has-toc] .main-frame > .lg\\:sl-flex',
+        'html[data-has-sidebar][data-has-toc] .right-sidebar',
+        '--sl-docs-shell-width',
+    ];
+
+    if (
+        !astroConfigSource.includes(
+            "ThemeSelect: './src/components/ThemeToggle.astro'",
+        )
+    ) {
+        failures.push('Starlight theme select override is not registered');
+    }
+
+    for (const snippet of requiredThemeToggleSnippets) {
+        if (!themeToggleSource.includes(snippet)) {
+            failures.push(`${themeToggleSourcePath} is missing "${snippet}"`);
+        }
+    }
+
+    for (const snippet of requiredDocsShellSnippets) {
+        if (!docsShellSource.includes(snippet)) {
+            failures.push(`${docsShellSourcePath} is missing "${snippet}"`);
+        }
+    }
+
+    const builtDocsIndex = path.resolve(repoRoot, builtDocsIndexPath);
+    if (!(await fileExists(builtDocsIndex))) {
+        failures.push(`${builtDocsIndexPath} was not built`);
+        return failures;
+    }
+
+    const builtIndexSource = await fs.readFile(builtDocsIndex, 'utf8');
+    for (const snippet of [
+        'data-sl-theme-toggle',
+        'aria-label="Switch to light theme"',
+        'aria-pressed="true"',
+    ]) {
+        if (!builtIndexSource.includes(snippet)) {
+            failures.push(
+                `${builtDocsIndexPath} is missing rendered theme toggle snippet "${snippet}"`,
+            );
+        }
+    }
+
+    return failures;
+};
+
 const getReflectionSummary = (reflection: DeclarationReflection): string => {
     const comment =
         reflection.comment ??
@@ -511,6 +586,7 @@ const main = async (): Promise<void> => {
     const baseAwareFailures = await verifyBaseAwareLinks();
     const generatedLayoutFailures = await verifyGeneratedApiLayout();
     const apiFailures = await verifyApiEntryPages();
+    const docsShellFailures = await verifyDocsShellContract();
     const typeDocProject = await loadTypeDocProject();
     const summaryFailures = verifyTypeDocSummaries(typeDocProject);
 
@@ -536,6 +612,11 @@ const main = async (): Promise<void> => {
     if (apiFailures.length > 0) {
         failures.push('Missing generated API entry pages:');
         failures.push(...apiFailures.map((failure) => `- ${failure}`));
+    }
+
+    if (docsShellFailures.length > 0) {
+        failures.push('Docs shell contract violations:');
+        failures.push(...docsShellFailures.map((failure) => `- ${failure}`));
     }
 
     if (summaryFailures.length > 0) {

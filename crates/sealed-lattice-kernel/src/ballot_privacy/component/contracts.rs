@@ -6,7 +6,7 @@ use super::{
 
 pub(crate) const FULL_BALLOT_PROOF_PROJECTION_COVERAGE: &str = "full-encoded-score-ballot-relation";
 pub(crate) const FULL_BALLOT_PROOF_PARAMETER_PROFILE_ID: &str =
-    "full-encoded-score-ballot-linear-compatibility-v1";
+    "full-encoded-score-ballot-linear-proof-parameter-v1";
 pub(crate) const FULL_BALLOT_PROOF_ENCODING_PROFILE_ID: &str =
     "full-encoded-score-ballot-linear-proof-encoding-v1";
 pub(crate) const RECEIVER_KEY_PROOF_PARAMETER_PROFILE_ID: &str =

@@ -162,6 +162,28 @@ export const resolvePackageManagerRunner = (
     };
 };
 
+export const resolvePackageManagerRunnerForPackageManager = (
+    packageManager: PackageManager,
+    packageManagerEntryPointPath = process.env.npm_execpath,
+    pathEnvironment: string = process.env.PATH ?? '',
+    nodeExecutablePath: string = process.execPath,
+    pathExists: (candidatePath: string) => boolean = existsSync,
+): PackageManagerRunner => {
+    const entryPointPath = resolvePackageManagerEntryPoint(
+        packageManager,
+        packageManagerEntryPointPath,
+        pathEnvironment,
+        nodeExecutablePath,
+        pathExists,
+    );
+
+    return {
+        command: nodeExecutablePath,
+        commandArgumentsPrefix: [entryPointPath],
+        kind: packageManager,
+    };
+};
+
 export const resolvePackageManagerRunnerFromArguments = (
     commandLineArguments: readonly string[],
     packageManagerEntryPointPath = process.env.npm_execpath,
@@ -172,19 +194,13 @@ export const resolvePackageManagerRunnerFromArguments = (
     const packageManagerOverride =
         parsePackageManagerOverride(commandLineArguments);
     if (packageManagerOverride !== undefined) {
-        const entryPointPath = resolvePackageManagerEntryPoint(
+        return resolvePackageManagerRunnerForPackageManager(
             packageManagerOverride,
             packageManagerEntryPointPath,
             pathEnvironment,
             nodeExecutablePath,
             pathExists,
         );
-
-        return {
-            command: nodeExecutablePath,
-            commandArgumentsPrefix: [entryPointPath],
-            kind: packageManagerOverride,
-        };
     }
 
     if (packageManagerEntryPointPath === undefined) {

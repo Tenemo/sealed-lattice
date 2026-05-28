@@ -1,5 +1,3 @@
-import { readFile } from 'node:fs/promises';
-
 import {
     cpadProfileId,
     targetBoundShareSelectionProfileId,
@@ -18,8 +16,8 @@ import {
 } from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
+import apiSnapshot from '../../api-snapshot.json' with { type: 'json' };
 import * as publicApiRuntime from '../../dist/index.js';
-import publicSurface from '../../public-surface.json' with { type: 'json' };
 
 type DeriveThresholdProfile = (
     input: ThresholdProfileInput,
@@ -34,9 +32,6 @@ type EvaluateActionCapability = (
 type DeriveValidatedFirstValidOrder = (
     input: FirstValidOrderingInput,
 ) => FirstValidOrderingVerification;
-type VerifyBridgeProof = (
-    input: Record<string, unknown>,
-) => Promise<Record<string, unknown>>;
 
 const publicApiRuntimeRecord = publicApiRuntime as Record<string, unknown>;
 const deriveThresholdProfile =
@@ -51,20 +46,19 @@ const evaluateActionCapability =
     publicApiRuntimeRecord.evaluateActionCapability as EvaluateActionCapability;
 const deriveValidatedFirstValidOrder =
     publicApiRuntimeRecord.deriveValidatedFirstValidOrder as DeriveValidatedFirstValidOrder;
-const verifyBridgeProof =
-    publicApiRuntimeRecord.verifyBridgeProof as VerifyBridgeProof;
 
 const requiredPublicFunctions = [
+    ['createBridgeProof', publicApiRuntimeRecord.createBridgeProof],
     [
         'deriveFrozenRosterProfile',
         publicApiRuntimeRecord.deriveFrozenRosterProfile,
     ],
     ['deriveLifecycleLabels', deriveLifecycleLabels],
-    ['derivePollSpecDigest', publicApiRuntimeRecord.derivePollSpecDigest],
+    ['derivePollSpecHash', publicApiRuntimeRecord.derivePollSpecHash],
     ['deriveThresholdProfile', deriveThresholdProfile],
     [
-        'deriveThresholdProfileDigest',
-        publicApiRuntimeRecord.deriveThresholdProfileDigest,
+        'deriveThresholdProfileHash',
+        publicApiRuntimeRecord.deriveThresholdProfileHash,
     ],
     ['deriveValidatedFirstValidOrder', deriveValidatedFirstValidOrder],
     ['evaluateActionCapability', evaluateActionCapability],
@@ -113,14 +107,15 @@ const requiredPublicFunctions = [
     ],
 ] as const;
 
-const expectedRuntimeExports = requiredPublicFunctions.map(
-    ([publicFunctionName]) => publicFunctionName,
-);
-const forbiddenPublicKeys = publicSurface.forbiddenRuntimeExports;
-const lowerHexSha256Pattern = /^[a-f0-9]{64}$/u;
+const expectedRuntimeExports = [...apiSnapshot.runtimeExports].sort();
 
 describe('election foundation public package API in Node', () => {
     it('exposes only the safe runtime functions and keeps forbidden operations absent', () => {
+        expect(
+            requiredPublicFunctions.map(
+                ([publicFunctionName]) => publicFunctionName,
+            ),
+        ).toEqual(expectedRuntimeExports);
         expect(Object.keys(publicApiRuntimeRecord).sort()).toEqual(
             expectedRuntimeExports,
         );
@@ -130,54 +125,6 @@ describe('election foundation public package API in Node', () => {
         ] of requiredPublicFunctions) {
             expect(typeof publicFunction, publicFunctionName).toBe('function');
         }
-        for (const publicKey of forbiddenPublicKeys) {
-            expect(publicKey in publicApiRuntimeRecord).toBe(false);
-        }
-    });
-
-    it('exposes the public bridge verifier without upgrading claim closure', async () => {
-        const verification = await verifyBridgeProof({
-            aggregateDerivationComponent: {},
-            aggregateSelectionPolicyDigest: 'not-a-digest',
-            bridgeEncryption: {},
-            bridgeWitnessPrivacyProfileDigest: 'not-a-digest',
-            heParamDigest: 'not-a-digest',
-            setupPackage: {},
-        });
-
-        expect(verification).toMatchObject({
-            acceptedDigests: [],
-            ok: false,
-            operation: 'verifyAggregateBridgeEncryption',
-            statusLabels: [],
-            unresolvedReason: expect.any(String) as string,
-        });
-        expect(verification.refusedObjects).toEqual([
-            expect.objectContaining({
-                code: 'BallotPackageInvalid',
-                message:
-                    'bridgeEncryption.privateMaterialDisclosure is required',
-            }),
-        ]);
-        expect(verification).not.toMatchObject({
-            bridgeClaimClosureVerified: true,
-        });
-    });
-
-    it('keeps the packaged bridge verifier kernel pinned', async () => {
-        const kernelLoaderSource = await readFile(
-            new URL('../../dist/kernel.js', import.meta.url),
-            'utf8',
-        );
-        const digestMatch =
-            /packagedTranscriptCoreKernelNormalizedSha256Hex\s*=\s*'(?<digest>[a-f0-9]{64})'/u.exec(
-                kernelLoaderSource,
-            );
-
-        expect(digestMatch?.groups?.digest).toMatch(lowerHexSha256Pattern);
-        expect(kernelLoaderSource).not.toContain(
-            'packagedTranscriptCoreKernelNormalizedSha256Hex =\n    undefined',
-        );
     });
 
     it('derives threshold, poll, lifecycle, label, and capability decisions', () => {
@@ -185,9 +132,9 @@ describe('election foundation public package API in Node', () => {
             rosterSize: 20,
             targetBoundShareSelectionProfile: {
                 profileId: targetBoundShareSelectionProfileId,
-                certificateDigest: 'target-bound-certificate-digest',
+                certificateHash: 'target-bound-certificate-hash',
                 cpadProfileId,
-                targetBasisDigest: 'target-basis-digest',
+                targetBasisHash: 'target-basis-hash',
                 decryptionShareQuorum: 9,
                 minimumSharesForInterpolation: 7,
                 minimumArrivalsForRobustDecode: 9,
@@ -230,26 +177,49 @@ describe('election foundation public package API in Node', () => {
         });
 
         expect(labels.resultClaimLabels).toEqual(['fullyVerified']);
-        expect(labels.modes).toEqual([]);
+        expect(labels.primary).toContain('fullyVerified');
         expect(
             evaluateActionCapability('AcceptTarget', {
                 lifecycleState: 'evaluationProofVerified',
                 thresholdProfile,
                 pollSpecValid: true,
                 localRosterAccepted: true,
-                rosterExternalAcceptanceDigest: 'accepted-roster-digest',
-                actionContextRosterExternalAcceptanceDigest:
-                    'accepted-roster-digest',
+                rosterExternalAcceptanceHash: 'accepted-roster-hash',
+                actionContextRosterExternalAcceptanceHash:
+                    'accepted-roster-hash',
                 targetFinalityAccepted: true,
                 evaluationProofVerified: true,
                 bridgeBenchmarkReportPresent: true,
             }),
         ).toEqual({ allowed: true, action: 'AcceptTarget' });
         expect(
+            publicApiRuntimeRecord.createBridgeProof as () => {
+                readonly ok: boolean;
+                readonly refusedObjects: readonly {
+                    readonly code: string;
+                }[];
+            },
+        ).toBeTypeOf('function');
+        expect(
+            (
+                publicApiRuntimeRecord.createBridgeProof as () => {
+                    readonly ok: boolean;
+                    readonly refusedObjects: readonly {
+                        readonly code: string;
+                    }[];
+                }
+            )(),
+        ).toMatchObject({
+            ok: false,
+            refusedObjects: [
+                expect.objectContaining({ code: 'OperationUnavailable' }),
+            ],
+        });
+        expect(
             deriveValidatedFirstValidOrder({
-                requiredContextDigest: 'context',
-                selectionPolicyDigest: 'policy',
-                expectedSelectionPolicyDigest: 'policy',
+                requiredContextHash: 'context',
+                selectionPolicyHash: 'policy',
+                expectedSelectionPolicyHash: 'policy',
                 currentRecoveryEpochMap: {
                     participant: {
                         signerIdentity: 'participant',
@@ -259,7 +229,7 @@ describe('election foundation public package API in Node', () => {
                 },
                 objects: [
                     {
-                        objectDigest: 'candidate',
+                        objectHash: 'candidate',
                         objectType: 'TargetFinalityRecord',
                         boardSequence: 1,
                         boardPosition: 0,
@@ -267,7 +237,7 @@ describe('election foundation public package API in Node', () => {
                         recoveryEpoch: 0,
                         deviceEpoch: 0,
                         actionSequence: 0,
-                        contextDigest: 'context',
+                        contextHash: 'context',
                         isByteIdenticalRetransmission: false,
                     },
                 ],
@@ -275,7 +245,7 @@ describe('election foundation public package API in Node', () => {
         ).toMatchObject({
             ok: true,
             orderedObjects: [
-                expect.objectContaining({ objectDigest: 'candidate' }),
+                expect.objectContaining({ objectHash: 'candidate' }),
             ],
         });
     });

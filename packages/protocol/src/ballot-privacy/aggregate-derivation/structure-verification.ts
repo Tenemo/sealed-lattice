@@ -7,11 +7,11 @@ import {
     type AggregateDerivationStatement,
     type AggregateDerivationVerification,
     type AggregateShareCommitment,
-    type ProtocolDigest,
+    type ProtocolHash,
     type RefusalRecord,
 } from '@sealed-lattice/types';
 
-import { deriveProofBytesDigest } from '../objects.js';
+import { deriveProofBytesHash } from '../objects.js';
 import { verifyShareCommitmentMessageBoundCert } from '../profiles.js';
 import {
     ballotPrivacyMaximumParticipantCount,
@@ -30,37 +30,37 @@ import {
     aggregateDerivationComponentId,
     createAggregateRefusal,
     lowercaseHexBytesPattern,
-    protocolDigestPattern,
+    protocolHashPattern,
 } from './constants.js';
 import {
-    deriveAggregateCommitmentBodyDigest,
-    deriveAggregateDerivationComponentDigest,
-    deriveAggregateDerivationProofRecordDigest,
-    deriveAggregateDerivationStatementDigest,
-    deriveAggregateShareCommitmentDigest,
-} from './digests.js';
+    deriveAggregateCommitmentBodyHash,
+    deriveAggregateDerivationComponentHash,
+    deriveAggregateDerivationProofRecordHash,
+    deriveAggregateDerivationStatementHash,
+    deriveAggregateShareCommitmentHash,
+} from './hashes.js';
 import { collectForbiddenWitnessFieldRefusals as collectBoundedForbiddenWitnessFieldRefusals } from './witness-field-refusals.js';
 
 const packageReferencesAreCanonical = (
     packageReferences: readonly AggregateDerivationPackageReference[],
 ): boolean => {
-    const seenPackageDigests = new Set<ProtocolDigest>();
-    let previousPackageDigest: ProtocolDigest | undefined;
+    const seenPackageHashes = new Set<ProtocolHash>();
+    let previousPackageHash: ProtocolHash | undefined;
 
     for (const packageReference of packageReferences) {
-        if (seenPackageDigests.has(packageReference.ballotPackageDigest)) {
+        if (seenPackageHashes.has(packageReference.ballotPackageHash)) {
             return false;
         }
         if (
-            previousPackageDigest !== undefined &&
-            previousPackageDigest.localeCompare(
-                packageReference.ballotPackageDigest,
+            previousPackageHash !== undefined &&
+            previousPackageHash.localeCompare(
+                packageReference.ballotPackageHash,
             ) > 0
         ) {
             return false;
         }
-        previousPackageDigest = packageReference.ballotPackageDigest;
-        seenPackageDigests.add(packageReference.ballotPackageDigest);
+        previousPackageHash = packageReference.ballotPackageHash;
+        seenPackageHashes.add(packageReference.ballotPackageHash);
     }
 
     return true;
@@ -68,10 +68,10 @@ const packageReferencesAreCanonical = (
 
 const collectForbiddenWitnessFieldRefusals = (
     value: unknown,
-    objectDigest: ProtocolDigest | undefined,
+    objectHash: ProtocolHash | undefined,
     path: string,
 ): readonly RefusalRecord[] =>
-    collectBoundedForbiddenWitnessFieldRefusals(value, objectDigest, path, {
+    collectBoundedForbiddenWitnessFieldRefusals(value, objectHash, path, {
         publicObjectDescription: 'Aggregate derivation public component',
     });
 
@@ -79,14 +79,13 @@ const collectAggregateStatementRefusals = (
     statement: AggregateDerivationStatement,
 ): readonly RefusalRecord[] => {
     const refusedObjects: RefusalRecord[] = [];
-    const { aggregateDerivationStatementDigest, ...statementWithoutDigest } =
+    const { aggregateDerivationStatementHash, ...statementWithoutHash } =
         statement;
-    const expectedStatementDigest = deriveAggregateDerivationStatementDigest(
-        statementWithoutDigest,
-    );
+    const expectedStatementHash =
+        deriveAggregateDerivationStatementHash(statementWithoutHash);
     refusedObjects.push(
         ...collectBallotPrivacyDimensionRefusals({
-            objectDigest: aggregateDerivationStatementDigest,
+            objectHash: aggregateDerivationStatementHash,
             optionCount: statement.optionCount,
             participantCount: statement.participantCount,
             shareVectorWidth: statement.shareVectorWidth,
@@ -101,8 +100,7 @@ const collectAggregateStatementRefusals = (
     if (
         statement.objectType !== 'AggregateDerivationStatement' ||
         statement.objectVersion !== 1 ||
-        statement.aggregateDerivationStatementDigest !==
-            expectedStatementDigest ||
+        statement.aggregateDerivationStatementHash !== expectedStatementHash ||
         statement.proofProfileId !== aggregateDerivationProofProfileId ||
         statement.proofParameterProfileId !==
             aggregateDerivationProofParameterProfileId ||
@@ -117,8 +115,8 @@ const collectAggregateStatementRefusals = (
     ) {
         refusedObjects.push(
             createAggregateRefusal(
-                'Aggregate derivation statement digest or shape is invalid.',
-                aggregateDerivationStatementDigest,
+                'Aggregate derivation statement hash or shape is invalid.',
+                aggregateDerivationStatementHash,
             ),
         );
     }
@@ -130,19 +128,17 @@ const collectAggregateCommitmentRefusals = (input: {
     readonly statement: AggregateDerivationStatement;
 }): readonly RefusalRecord[] => {
     const refusedObjects: RefusalRecord[] = [];
-    const expectedBodyDigest = deriveAggregateCommitmentBodyDigest({
+    const expectedBodyHash = deriveAggregateCommitmentBodyHash({
         commitmentPolynomialVector:
             input.aggregateCommitment.commitmentPolynomialVector,
-        shareCommitmentProfileDigest:
-            input.aggregateCommitment.shareCommitmentProfileDigest,
+        shareCommitmentProfileHash:
+            input.aggregateCommitment.shareCommitmentProfileHash,
     });
-    const {
-        aggregateShareCommitmentDigest,
-        ...aggregateCommitmentWithoutDigest
-    } = input.aggregateCommitment;
-    void aggregateShareCommitmentDigest;
-    const expectedCommitmentDigest = deriveAggregateShareCommitmentDigest(
-        aggregateCommitmentWithoutDigest,
+    const { aggregateShareCommitmentHash, ...aggregateCommitmentWithoutHash } =
+        input.aggregateCommitment;
+    void aggregateShareCommitmentHash;
+    const expectedCommitmentHash = deriveAggregateShareCommitmentHash(
+        aggregateCommitmentWithoutHash,
     );
     const vectorShapeIsValid =
         input.aggregateCommitment.commitmentPolynomialVector.length ===
@@ -165,34 +161,33 @@ const collectAggregateCommitmentRefusals = (input: {
     if (
         input.aggregateCommitment.objectType !== 'AggregateShareCommitment' ||
         input.aggregateCommitment.objectVersion !== 1 ||
-        input.aggregateCommitment.aggregateShareCommitmentDigest !==
-            expectedCommitmentDigest ||
-        input.aggregateCommitment.commitmentBodyDigest !== expectedBodyDigest ||
-        input.aggregateCommitment.aggregateShareCommitmentDigest !==
-            input.statement.aggregateShareCommitmentDigest ||
-        input.aggregateCommitment.ballotSetDigest !==
-            input.statement.ballotSetDigest ||
+        input.aggregateCommitment.aggregateShareCommitmentHash !==
+            expectedCommitmentHash ||
+        input.aggregateCommitment.commitmentBodyHash !== expectedBodyHash ||
+        input.aggregateCommitment.aggregateShareCommitmentHash !==
+            input.statement.aggregateShareCommitmentHash ||
+        input.aggregateCommitment.ballotSetHash !==
+            input.statement.ballotSetHash ||
         input.aggregateCommitment.ceremonyId !== input.statement.ceremonyId ||
-        input.aggregateCommitment.manifestDigest !==
-            input.statement.manifestDigest ||
-        input.aggregateCommitment.rosterDigest !==
-            input.statement.rosterDigest ||
-        input.aggregateCommitment.pollSpecDigest !==
-            input.statement.pollSpecDigest ||
+        input.aggregateCommitment.manifestHash !==
+            input.statement.manifestHash ||
+        input.aggregateCommitment.rosterHash !== input.statement.rosterHash ||
+        input.aggregateCommitment.pollSpecHash !==
+            input.statement.pollSpecHash ||
         input.aggregateCommitment.contributorIdentity !==
             input.statement.contributorIdentity ||
         input.aggregateCommitment.contributorRosterPosition !==
             input.statement.contributorRosterPosition ||
-        input.aggregateCommitment.shareCommitmentProfileDigest !==
-            input.statement.shareCommitmentProfileDigest ||
+        input.aggregateCommitment.shareCommitmentProfileHash !==
+            input.statement.shareCommitmentProfileHash ||
         input.aggregateCommitment.shareVectorWidth !==
             input.statement.shareVectorWidth ||
         !vectorShapeIsValid
     ) {
         refusedObjects.push(
             createAggregateRefusal(
-                'Aggregate share commitment digest, context, or polynomial shape is invalid.',
-                input.aggregateCommitment.aggregateShareCommitmentDigest,
+                'Aggregate share commitment hash, context, or polynomial shape is invalid.',
+                input.aggregateCommitment.aggregateShareCommitmentHash,
             ),
         );
     }
@@ -206,45 +201,44 @@ const collectProofRecordRefusals = (
     const refusedObjects: RefusalRecord[] = [];
     const proofInput = component.proofInput;
     const proofRecord = component.proofRecord;
-    const {
-        aggregateDerivationProofRecordDigest,
-        ...proofRecordWithoutDigest
-    } = proofRecord;
-    void aggregateDerivationProofRecordDigest;
-    const proofBytesDigest = lowercaseHexBytesPattern.test(
+    const { aggregateDerivationProofRecordHash, ...proofRecordWithoutHash } =
+        proofRecord;
+    void aggregateDerivationProofRecordHash;
+    const proofBytesHash = lowercaseHexBytesPattern.test(
         proofInput.proofBytesHex,
     )
-        ? deriveProofBytesDigest({ proofBytesHex: proofInput.proofBytesHex })
+        ? deriveProofBytesHash({ proofBytesHex: proofInput.proofBytesHex })
         : undefined;
-    const expectedProofRecordDigest =
-        deriveAggregateDerivationProofRecordDigest(proofRecordWithoutDigest);
+    const expectedProofRecordHash = deriveAggregateDerivationProofRecordHash(
+        proofRecordWithoutHash,
+    );
 
     if (
         proofRecord.objectType !== 'AggregateDerivationProofRecord' ||
         proofRecord.objectVersion !== 1 ||
-        proofRecord.aggregateDerivationProofRecordDigest !==
-            expectedProofRecordDigest ||
-        proofRecord.aggregateDerivationStatementDigest !==
-            component.statement.aggregateDerivationStatementDigest ||
-        proofRecord.aggregateShareCommitmentDigest !==
-            component.aggregateCommitment.aggregateShareCommitmentDigest ||
+        proofRecord.aggregateDerivationProofRecordHash !==
+            expectedProofRecordHash ||
+        proofRecord.aggregateDerivationStatementHash !==
+            component.statement.aggregateDerivationStatementHash ||
+        proofRecord.aggregateShareCommitmentHash !==
+            component.aggregateCommitment.aggregateShareCommitmentHash ||
         proofRecord.componentId !== aggregateDerivationComponentId ||
         proofInput.componentId !== aggregateDerivationComponentId ||
         proofInput.proofStatementFormat !==
             'sparse-polynomial-matrix-linear-proof-v1' ||
-        proofInput.statementDigest !==
-            component.statement.aggregateDerivationStatementDigest ||
-        proofInput.componentProofStatementDigest !==
-            proofRecord.componentProofStatementDigest ||
-        proofBytesDigest === undefined ||
-        proofRecord.proofBytesDigest !== proofBytesDigest ||
+        proofInput.statementHash !==
+            component.statement.aggregateDerivationStatementHash ||
+        proofInput.componentProofStatementHash !==
+            proofRecord.componentProofStatementHash ||
+        proofBytesHash === undefined ||
+        proofRecord.proofBytesHash !== proofBytesHash ||
         proofRecord.proofSizeBytes !== proofInput.proofBytesHex.length / 2 ||
-        !protocolDigestPattern.test(proofRecord.proofRoot)
+        !protocolHashPattern.test(proofRecord.proofRoot)
     ) {
         refusedObjects.push(
             createAggregateRefusal(
                 'Aggregate derivation proof record or proof input is invalid.',
-                proofRecord.aggregateDerivationProofRecordDigest,
+                proofRecord.aggregateDerivationProofRecordHash,
             ),
         );
     }
@@ -255,16 +249,16 @@ const collectProofRecordRefusals = (
 export const verifyAggregateDerivationComponentStructure = (
     component: AggregateDerivationComponent,
 ): AggregateDerivationVerification => {
-    const componentDigest = component.aggregateDerivationComponentDigest;
+    const componentHash = component.aggregateDerivationComponentHash;
     const certificateVerification = verifyShareCommitmentMessageBoundCert({
         certificate: component.shareCommitmentMessageBoundCert,
-        expectedShareCommitmentProfileDigest:
-            component.statement.shareCommitmentProfileDigest,
+        expectedShareCommitmentProfileHash:
+            component.statement.shareCommitmentProfileHash,
     });
     const refusedObjects: RefusalRecord[] = [
         ...collectForbiddenWitnessFieldRefusals(
             component,
-            componentDigest,
+            componentHash,
             'component',
         ),
         ...collectAggregateStatementRefusals(component.statement),
@@ -279,8 +273,8 @@ export const verifyAggregateDerivationComponentStructure = (
         component.shareCommitmentMessageBoundCert.shareVectorWidth !==
             component.statement.shareVectorWidth ||
         component.shareCommitmentMessageBoundCert
-            .shareCommitmentMessageBoundCertDigest !==
-            component.statement.shareCommitmentMessageBoundCertDigest ||
+            .shareCommitmentMessageBoundCertHash !==
+            component.statement.shareCommitmentMessageBoundCertHash ||
         component.shareCommitmentMessageBoundCert.maximumCanonicalTurnout <
             component.statement.canonicalTurnout ||
         component.shareCommitmentMessageBoundCert.maximumCanonicalTurnout >
@@ -289,36 +283,35 @@ export const verifyAggregateDerivationComponentStructure = (
         refusedObjects.push(
             createAggregateRefusal(
                 'Aggregate derivation no-wraparound certificate is not bound to the statement.',
-                component.statement.shareCommitmentMessageBoundCertDigest,
+                component.statement.shareCommitmentMessageBoundCertHash,
             ),
         );
     }
 
-    const { aggregateDerivationComponentDigest, ...componentWithoutDigest } =
+    const { aggregateDerivationComponentHash, ...componentWithoutHash } =
         component;
-    let expectedComponentDigest: ProtocolDigest | undefined;
+    let expectedComponentHash: ProtocolHash | undefined;
     try {
-        expectedComponentDigest = deriveAggregateDerivationComponentDigest(
-            componentWithoutDigest,
-        );
+        expectedComponentHash =
+            deriveAggregateDerivationComponentHash(componentWithoutHash);
     } catch (error) {
         refusedObjects.push(
             createAggregateRefusal(
-                `Aggregate derivation component digest could not be canonicalized: ${
+                `Aggregate derivation component hash could not be canonicalized: ${
                     error instanceof Error ? error.message : String(error)
                 }.`,
-                componentDigest,
+                componentHash,
             ),
         );
     }
     if (
-        expectedComponentDigest === undefined ||
-        aggregateDerivationComponentDigest !== expectedComponentDigest
+        expectedComponentHash === undefined ||
+        aggregateDerivationComponentHash !== expectedComponentHash
     ) {
         refusedObjects.push(
             createAggregateRefusal(
-                'Aggregate derivation component digest does not match its canonical payload.',
-                componentDigest,
+                'Aggregate derivation component hash does not match its canonical payload.',
+                componentHash,
             ),
         );
     }
@@ -333,8 +326,8 @@ export const verifyAggregateDerivationComponentStructure = (
     if (refusedObjects.length > 0) {
         return {
             ok: false,
-            acceptedDigests: [],
-            aggregateDerivationComponentDigest: componentDigest,
+            acceptedHashes: [],
+            aggregateDerivationComponentHash: componentHash,
             backendAvailable: false,
             refusedObjects,
             statusLabels: unsafeSmallRosterStatusLabels,
@@ -344,12 +337,12 @@ export const verifyAggregateDerivationComponentStructure = (
 
     return {
         ok: true,
-        acceptedDigests: [
-            component.aggregateCommitment.aggregateShareCommitmentDigest,
-            component.proofRecord.aggregateDerivationProofRecordDigest,
-            componentDigest,
+        acceptedHashes: [
+            component.aggregateCommitment.aggregateShareCommitmentHash,
+            component.proofRecord.aggregateDerivationProofRecordHash,
+            componentHash,
         ],
-        aggregateDerivationComponentDigest: componentDigest,
+        aggregateDerivationComponentHash: componentHash,
         backendAvailable: false,
         refusedObjects: [],
         statusLabels: ['pending', ...unsafeSmallRosterStatusLabels],

@@ -17,21 +17,21 @@ pub(crate) use dense_vector_case::component_linear_proof_vector_case;
 
 pub(super) fn component_backend_refusal(
     message: impl Into<String>,
-    object_digest: Option<&str>,
+    object_hash: Option<&str>,
 ) -> Value {
-    structural_refusal(message, object_digest)
+    structural_refusal(message, object_hash)
 }
 
 pub(super) fn component_backend_invalid_rejection(
     operation: &str,
     component_id: &str,
     message: impl Into<String>,
-    object_digest: Option<&str>,
+    object_hash: Option<&str>,
 ) -> Value {
     component_proof_backend_rejection(
         operation,
         component_id,
-        vec![component_backend_refusal(message, object_digest)],
+        vec![component_backend_refusal(message, object_hash)],
         json!("BallotPackageInvalid"),
     )
 }

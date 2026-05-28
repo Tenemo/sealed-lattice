@@ -4,7 +4,7 @@ use crate::{
     ballot_privacy::component::ParsedSparseComponentProofStatement,
     bgv::profile::{DATA_PRIMES, POLYNOMIAL_DEGREE},
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
-    hashing::{canonical_json, derive_protocol_digest, hash512, to_hex},
+    hashing::{canonical_json, derive_protocol_hash, hash512, to_hex},
     transcript_core::decode_hex,
 };
 
@@ -16,7 +16,7 @@ use super::protocol_constants::{
 };
 use super::{
     PolynomialVector, SHARE_COMMITMENT_MODULE_RANK, SHARE_COMMITMENT_OPENING_DIMENSION,
-    check_aggregate_derivation_witness_relation, is_protocol_digest, required_json_field,
+    check_aggregate_derivation_witness_relation, is_protocol_hash, required_json_field,
     required_string_field, sparse_matrix_from_sparse_component_statement, string_field,
     structural_refusal, structural_rejection,
     verify_aggregate_derivation_relation_subproof_for_component,
@@ -42,7 +42,7 @@ const SHARED_WITNESS_ZERO_KNOWLEDGE_STATUS: &str =
 const BGV_RANDOMNESS_BOUND_PROOF_MISSING_STATUS: &str = "BgvRandomnessBoundProofMissing";
 const BGV_RANDOMNESS_BOUND_PROOF_STATUS: &str = "BgvRandomnessErrorSupportPolynomialChecked";
 const BRIDGE_CLAIM_CLOSURE_STATUS: &str = "BridgeProofClaimClosureMissing";
-const HWANG_PIOP_DEFERRED_STATUS: &str = "DeferredUntilSealedLatticeBgvRnsCompatibilityFreeze";
+const HWANG_PIOP_DEFERRED_STATUS: &str = "DeferredUntilSealedLatticeBgvRnsProfileFreeze";
 const PLAINTEXT_ENCODING_RELATION: &str = "BGVBatchEncode65537InverseNegacyclicNtt";
 const NAIVE_LINEAR_EXPANSION_BACKEND_STATUS: &str = "InfeasibleForEncryptedAggregateBridgeClaim";
 const SAME_WITNESS_LINKAGE_MODEL: &str =

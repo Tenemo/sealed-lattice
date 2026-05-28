@@ -27,20 +27,20 @@ pub(super) fn validate_prover_randomness_hex(value: &str) -> CanonicalResult<()>
     Ok(())
 }
 
-pub(super) fn required_protocol_digest_field<'value>(
+pub(super) fn required_protocol_hash_field<'value>(
     value: &'value Value,
     field_name: &str,
     object_name: &str,
 ) -> CanonicalResult<&'value str> {
-    let digest = required_string_field(value, field_name, object_name)?;
-    if !is_protocol_digest(digest) {
+    let hash = required_string_field(value, field_name, object_name)?;
+    if !is_protocol_hash(hash) {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            format!("{object_name}.{field_name} must be a nonzero lowercase protocol digest"),
+            format!("{object_name}.{field_name} must be a nonzero lowercase protocol hash"),
         ));
     }
 
-    Ok(digest)
+    Ok(hash)
 }
 
 pub(super) fn parse_bridge_proof_value(proof_bytes_hex: &str) -> CanonicalResult<Value> {
@@ -191,26 +191,26 @@ pub(super) fn validate_bridge_proof_public_shell(proof_value: &Value) -> Canonic
                 proof_value,
                 "bridgeProof",
                 &[
-                    "aggregateDerivationComponentDigest",
-                    "aggregateDerivationStatementDigest",
+                    "aggregateDerivationComponentHash",
+                    "aggregateDerivationStatementHash",
                     "aggregateQuotientCoordinateCount",
                     "aggregateReducedCoordinateCount",
                     "aggregateRelationChallengeHex",
-                    "aggregateRelationCommitmentDigest",
+                    "aggregateRelationCommitmentHash",
                     "aggregateRelationSubproofHex",
                     "aggregateRelationSubproofSizeBytes",
                     "bgvEncryptionProofSubrelation",
                     "bgvPublicKeyRoot",
-                    "bgvRandomnessBoundProofStatusDigest",
+                    "bgvRandomnessBoundProofStatusHash",
                     "bgvRandomnessBoundProofStatusEvidence",
                     "bridgeClaimClosureVerified",
                     "bridgeClaimVerificationStatus",
-                    "bridgeProofProfileDigest",
+                    "bridgeProofProfileHash",
                     "bridgeProofStatement",
-                    "bridgeProofStatementDigest",
-                    "bridgeProofTargetContractDigest",
+                    "bridgeProofStatementHash",
+                    "bridgeProofTargetContractHash",
                     "bridgeSharedWitnessProof",
-                    "bridgeSharedWitnessProofDigest",
+                    "bridgeSharedWitnessProofHash",
                     "bridgeVariantEvidenceStatus",
                     "ciphertextRoot",
                     "collectivePublicKeyRoot",
@@ -220,14 +220,14 @@ pub(super) fn validate_bridge_proof_public_shell(proof_value: &Value) -> Canonic
                     "objectType",
                     "objectVersion",
                     "plaintextRoot",
-                    "postVotingClosedContextDigest",
+                    "postVotingClosedContextHash",
                     "privateMaterialDisclosure",
                     "profileId",
                     "proofBackend",
-                    "proverRandomnessPublicDigest",
+                    "proverRandomnessPublicHash",
                     "relationScope",
                     "scopedBridgeRelationClosure",
-                    "sharedWitnessZeroKnowledgeStatusDigest",
+                    "sharedWitnessZeroKnowledgeStatusHash",
                     "sharedWitnessZeroKnowledgeStatusEvidence",
                     "singleContributionBridgeRelationChecked",
                 ],

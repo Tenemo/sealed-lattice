@@ -4,23 +4,18 @@ import {
     createPackageManagerCommand,
     resolvePackageManagerRunner,
     runCommand,
-    runCommandsInParallel,
     type CommandInvocation,
     type PackageManagerRunner,
 } from './run-command.js';
+import {
+    defaultProofBenchmarkLanes,
+    proofBenchmarkLaneDefinitions,
+    proofBenchmarkLaneValues,
+    type ProofBenchmarkLane,
+} from './test-lanes.js';
 
-type ProofBenchmarkLane = 'desktop' | 'mobile-throttled' | 'node';
-
-const defaultProofBenchmarkLanes: readonly ProofBenchmarkLane[] = [
-    'node',
-    'desktop',
-];
-
-const proofBenchmarkProjectByLane = {
-    desktop: 'browser-desktop-proof-benchmark',
-    'mobile-throttled': 'browser-mobile-throttled-proof-benchmark',
-    node: 'node-proof-benchmark',
-} as const;
+const isProofBenchmarkLane = (lane: string): lane is ProofBenchmarkLane =>
+    proofBenchmarkLaneValues.some((supportedLane) => supportedLane === lane);
 
 export const parseRequestedProofBenchmarkLanes = (
     commandLineArguments: readonly string[],
@@ -36,7 +31,7 @@ export const parseRequestedProofBenchmarkLanes = (
     }
 
     const lane = commandLineArguments[1];
-    if (lane !== 'desktop' && lane !== 'mobile-throttled' && lane !== 'node') {
+    if (lane === undefined || !isProofBenchmarkLane(lane)) {
         throw new Error(`Unsupported proof benchmark lane: ${lane}`);
     }
 
@@ -62,26 +57,23 @@ export const buildProofBenchmarkCommands = (
 
     return [
         buildCommand('Build workspace packages', ['run', 'build']),
-        ...lanes.map((lane) =>
-            buildCommand(
-                lane === 'mobile-throttled'
-                    ? 'Run manually throttled mobile Chromium proof benchmark'
-                    : `Run ${lane} proof benchmark`,
-                [
-                    'exec',
-                    'vitest',
-                    '--project',
-                    proofBenchmarkProjectByLane[lane],
-                    '--run',
-                ],
-            ),
-        ),
+        ...lanes.map((lane) => {
+            const laneDefinition = proofBenchmarkLaneDefinitions[lane];
+
+            return buildCommand(laneDefinition.commandDescription, [
+                'exec',
+                'vitest',
+                '--project',
+                laneDefinition.projectName,
+                '--run',
+            ]);
+        }),
     ];
 };
 
-export const runProofBenchmarkCommands = async (
+export const runProofBenchmarkCommands = (
     invocations: readonly CommandInvocation[],
-): Promise<number> => {
+): number => {
     const [buildCommand, ...benchmarkCommands] = invocations;
     if (buildCommand === undefined) {
         return 0;
@@ -92,11 +84,18 @@ export const runProofBenchmarkCommands = async (
         return buildExitCode;
     }
 
-    return runCommandsInParallel(benchmarkCommands);
+    for (const benchmarkCommand of benchmarkCommands) {
+        const benchmarkExitCode = runCommand(benchmarkCommand);
+        if (benchmarkExitCode !== 0) {
+            return benchmarkExitCode;
+        }
+    }
+
+    return 0;
 };
 
-const main = async (): Promise<void> => {
-    process.exitCode = await runProofBenchmarkCommands(
+const main = (): void => {
+    process.exitCode = runProofBenchmarkCommands(
         buildProofBenchmarkCommands({
             lanes: parseRequestedProofBenchmarkLanes(process.argv.slice(2)),
         }),

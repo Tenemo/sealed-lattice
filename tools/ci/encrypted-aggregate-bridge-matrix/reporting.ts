@@ -3,7 +3,7 @@ import path from 'node:path';
 
 import {
     claimTierForRosterSize,
-    lowerHexDigest,
+    lowerHexHash,
     outputDirectory,
     variantKey,
     type MatrixRow,
@@ -41,7 +41,7 @@ export const failedRow = (
         selectedContributionCount: thresholdProfile.pvssThreshold,
         shareVectorWidth: variant.optionCount * 11,
         status: 'failed',
-        thresholdProfileHash: lowerHexDigest(
+        thresholdProfileHash: lowerHexHash(
             `failed-threshold-${variantKey(variant)}`,
         ),
         trusteeAggregateThreshold: thresholdProfile.pvssThreshold,
@@ -108,7 +108,7 @@ export const shapeConfigMarkdown = (
     const lines = [
         '# Encrypted aggregate bridge shape/config matrix',
         '',
-        '| n | m | claim tier | t_pvss | selected | shareVectorWidth | target contract digest | statement digest | status | failure reason |',
+        '| n | m | claim tier | t_pvss | selected | shareVectorWidth | target contract hash | statement hash | status | failure reason |',
         '| -: | -: | - | -: | -: | -: | - | - | - | - |',
         ...rows.map((row) =>
             [
@@ -118,8 +118,8 @@ export const shapeConfigMarkdown = (
                 row.trusteeAggregateThreshold,
                 row.selectedContributionCount,
                 row.shareVectorWidth,
-                row.bridgeProofTargetContractDigest,
-                row.bridgeProofStatementDigest,
+                row.bridgeProofTargetContractHash,
+                row.bridgeProofStatementHash,
                 row.status,
                 row.failureReason ?? '',
             ].join(' | '),

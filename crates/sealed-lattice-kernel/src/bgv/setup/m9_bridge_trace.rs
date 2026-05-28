@@ -70,9 +70,9 @@ impl M9BridgeCiphertextRelationTrace {
 pub(crate) fn generate_m9_bridge_ciphertext_relation_trace_from_slots(
     setup_package: &Value,
     contributor_identity: &str,
-    aggregate_derivation_component_digest: &str,
-    aggregate_derivation_statement_digest: &str,
-    post_voting_closed_context_digest: &str,
+    aggregate_derivation_component_hash: &str,
+    aggregate_derivation_statement_hash: &str,
+    post_voting_closed_context_hash: &str,
     reduced_aggregate_slots: &[u64],
     prover_randomness_hex: &str,
     include_canonical_bytes_hex: bool,
@@ -80,53 +80,53 @@ pub(crate) fn generate_m9_bridge_ciphertext_relation_trace_from_slots(
     validation::validate_setup_package_shape(setup_package)?;
     validation::validate_setup_package_internal_bindings(setup_package)?;
 
-    let setup_seed_digest = string_at_path(setup_package, &["setupInputs", "setupSeedDigest"])?;
+    let setup_seed_hash = string_at_path(setup_package, &["setupInputs", "setupSeedHash"])?;
     let collective_public_key_root = string_at_path(
         setup_package,
         &["collectivePublicKey", "collectivePublicKeyRoot"],
     )?;
     let bgv_public_key_root =
         string_at_path(setup_package, &["collectivePublicKey", "bgvPublicKeyRoot"])?;
-    let manifest_digest = string_at_path(setup_package, &["setupInputs", "manifestDigest"])?;
-    let roster_digest = string_at_path(setup_package, &["setupInputs", "rosterDigest"])?;
-    let threshold_profile_digest =
-        string_at_path(setup_package, &["setupInputs", "thresholdProfileDigest"])?;
+    let manifest_hash = string_at_path(setup_package, &["setupInputs", "manifestHash"])?;
+    let roster_hash = string_at_path(setup_package, &["setupInputs", "rosterHash"])?;
+    let threshold_profile_hash =
+        string_at_path(setup_package, &["setupInputs", "thresholdProfileHash"])?;
     let encoded = encode_batch_plaintext_slots(reduced_aggregate_slots, DATA_PRIMES.len() - 1)?;
     let plaintext_bytes = serialize_bgv_object(
         BgvObjectKind::Plaintext,
         std::slice::from_ref(&encoded.polynomial),
     )?;
     let plaintext_root = plaintext_root(&plaintext_bytes);
-    let encryption_seed_digest = hash512_hex(
+    let encryption_seed_hash = hash512_hex(
         "sealed-lattice-bgv-rns/aggregate-bridge-encryption-seed-v1",
         &[
-            setup_seed_digest.as_bytes(),
+            setup_seed_hash.as_bytes(),
             contributor_identity.as_bytes(),
-            aggregate_derivation_component_digest.as_bytes(),
-            aggregate_derivation_statement_digest.as_bytes(),
-            post_voting_closed_context_digest.as_bytes(),
+            aggregate_derivation_component_hash.as_bytes(),
+            aggregate_derivation_statement_hash.as_bytes(),
+            post_voting_closed_context_hash.as_bytes(),
             prover_randomness_hex.as_bytes(),
         ],
     );
     let encryption_randomness_coefficients = dense_small_coefficients(
-        &encryption_seed_digest,
+        &encryption_seed_hash,
         "aggregate-bridge-encryption",
         "encryption-randomness",
         -1,
         1,
     );
     let encryption_error_zero_coefficients = dense_centered_binomial_coefficients(
-        &encryption_seed_digest,
+        &encryption_seed_hash,
         "aggregate-bridge-encryption",
         "encryption-error-zero",
     );
     let encryption_error_one_coefficients = dense_centered_binomial_coefficients(
-        &encryption_seed_digest,
+        &encryption_seed_hash,
         "aggregate-bridge-encryption",
         "encryption-error-one",
     );
     let public_sample_label = format!(
-        "aggregate-bridge-encryption-public-sample:{aggregate_derivation_statement_digest}:{contributor_identity}"
+        "aggregate-bridge-encryption-public-sample:{aggregate_derivation_statement_hash}:{contributor_identity}"
     );
     let mut component_zero_residues_by_modulus = Vec::with_capacity(DATA_PRIMES.len());
     let mut component_one_residues_by_modulus = Vec::with_capacity(DATA_PRIMES.len());
@@ -134,12 +134,12 @@ pub(crate) fn generate_m9_bridge_ciphertext_relation_trace_from_slots(
 
     for (modulus_index, modulus) in DATA_PRIMES.iter().copied().enumerate() {
         let public_key_coefficients = dense_public_residues(
-            setup_seed_digest,
+            setup_seed_hash,
             "development-collective-public-key-coefficients",
             modulus,
         );
         let public_sample_coefficients =
-            dense_public_residues(setup_seed_digest, &public_sample_label, modulus);
+            dense_public_residues(setup_seed_hash, &public_sample_label, modulus);
         let randomness_residues = encryption_randomness_coefficients
             .iter()
             .map(|coefficient| signed_to_modulus_residue(*coefficient, modulus))
@@ -197,39 +197,39 @@ pub(crate) fn generate_m9_bridge_ciphertext_relation_trace_from_slots(
         component_one_residues_by_modulus.push(ciphertext_component_one);
     }
 
-    let layout_digest = layout_digest()?;
+    let layout_hash = layout_hash()?;
     let component_zero = RnsPolynomial::coefficient_domain(
         BgvBasisKind::Data,
         DATA_PRIMES.len() - 1,
-        layout_digest.clone(),
+        layout_hash.clone(),
         component_zero_residues_by_modulus,
     )?;
     let component_one = RnsPolynomial::coefficient_domain(
         BgvBasisKind::Data,
         DATA_PRIMES.len() - 1,
-        layout_digest,
+        layout_hash,
         component_one_residues_by_modulus,
     )?;
     let canonical_bytes =
         serialize_bgv_object(BgvObjectKind::Ciphertext, &[component_zero, component_one])?;
     let ciphertext_root = ciphertext_root(&canonical_bytes);
-    let encrypted_aggregate_share_ciphertext_root = derive_protocol_digest(
+    let encrypted_aggregate_share_ciphertext_root = derive_protocol_hash(
         "EncryptedAggregateShareCiphertextRoot",
         &json!({
             "purpose": "sealed-lattice-encrypted-aggregate-share-ciphertext-root-v1",
-            "aggregateDerivationComponentDigest": aggregate_derivation_component_digest,
-            "aggregateDerivationStatementDigest": aggregate_derivation_statement_digest,
-            "postVotingClosedContextDigest": post_voting_closed_context_digest,
-            "manifestDigest": manifest_digest,
-            "rosterDigest": roster_digest,
-            "thresholdProfileDigest": threshold_profile_digest,
+            "aggregateDerivationComponentHash": aggregate_derivation_component_hash,
+            "aggregateDerivationStatementHash": aggregate_derivation_statement_hash,
+            "postVotingClosedContextHash": post_voting_closed_context_hash,
+            "manifestHash": manifest_hash,
+            "rosterHash": roster_hash,
+            "thresholdProfileHash": threshold_profile_hash,
             "collectivePublicKeyRoot": collective_public_key_root,
             "bgvPublicKeyRoot": bgv_public_key_root,
             "plaintextRoot": plaintext_root,
             "ciphertextRoot": ciphertext_root,
-            "canonicalCiphertextConventionDigest": canonical_ciphertext_convention_digest()?,
-            "bgvProfileDigest": profile_digest()?,
-            "rustBgvBackendProfileDigest": backend_profile_digest()?,
+            "canonicalCiphertextConventionHash": canonical_ciphertext_convention_hash()?,
+            "bgvProfileHash": profile_hash()?,
+            "rustBgvBackendProfileHash": backend_profile_hash()?,
         }),
     )?;
 
@@ -237,9 +237,9 @@ pub(crate) fn generate_m9_bridge_ciphertext_relation_trace_from_slots(
     let mut result = json!({
         "ok": true,
         "operation": "generateAggregateBridgeEncryption",
-        "profileDigest": profile_digest()?,
-        "rustBgvBackendProfileDigest": backend_profile_digest()?,
-        "canonicalCiphertextConventionDigest": canonical_ciphertext_convention_digest()?,
+        "profileHash": profile_hash()?,
+        "rustBgvBackendProfileHash": backend_profile_hash()?,
+        "canonicalCiphertextConventionHash": canonical_ciphertext_convention_hash()?,
         "collectivePublicKeyRoot": collective_public_key_root,
         "bgvPublicKeyRoot": bgv_public_key_root,
         "plaintextRoot": plaintext_root,
@@ -299,7 +299,7 @@ pub(crate) fn generate_m9_bridge_ciphertext_relation_trace_from_slots(
     Ok(trace)
 }
 
-pub(crate) fn m9_bridge_batch_encoding_commitment_digest_from_responses(
+pub(crate) fn m9_bridge_batch_encoding_commitment_hash_from_responses(
     reduced_slot_response: &[BigInt],
     plaintext_coefficient_response: &[BigInt],
 ) -> CanonicalResult<String> {
@@ -333,8 +333,8 @@ pub(crate) fn m9_bridge_batch_encoding_commitment_digest_from_responses(
         })
         .collect::<CanonicalResult<Vec<_>>>()?;
 
-    derive_protocol_digest(
-        "BridgeProofRecordDigest",
+    derive_protocol_hash(
+        "BridgeProofRecordHash",
         &json!({
             "purpose": "sealed-lattice-aggregate-bridge-batch-encoding-commitment-v1",
             "commitmentCoefficients": commitment_coefficients
@@ -346,10 +346,10 @@ pub(crate) fn m9_bridge_batch_encoding_commitment_digest_from_responses(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn m9_bridge_ciphertext_commitment_digest_from_responses(
+pub(crate) fn m9_bridge_ciphertext_commitment_hash_from_responses(
     setup_package: &Value,
     contributor_identity: &str,
-    aggregate_derivation_statement_digest: &str,
+    aggregate_derivation_statement_hash: &str,
     bridge_encryption: &Value,
     challenge_scalar: u64,
     plaintext_coefficient_response: &[BigInt],
@@ -391,9 +391,9 @@ pub(crate) fn m9_bridge_ciphertext_commitment_digest_from_responses(
         }
     }
 
-    let setup_seed_digest = string_at_path(setup_package, &["setupInputs", "setupSeedDigest"])?;
+    let setup_seed_hash = string_at_path(setup_package, &["setupInputs", "setupSeedHash"])?;
     let public_sample_label = format!(
-        "aggregate-bridge-encryption-public-sample:{aggregate_derivation_statement_digest}:{contributor_identity}"
+        "aggregate-bridge-encryption-public-sample:{aggregate_derivation_statement_hash}:{contributor_identity}"
     );
     let mut component_zero_residues_by_modulus = Vec::with_capacity(DATA_PRIMES.len());
     let mut component_one_residues_by_modulus = Vec::with_capacity(DATA_PRIMES.len());
@@ -401,12 +401,12 @@ pub(crate) fn m9_bridge_ciphertext_commitment_digest_from_responses(
     for (modulus_index, modulus) in DATA_PRIMES.iter().copied().enumerate() {
         let modulus_bigint = BigInt::from(modulus);
         let public_key_coefficients = dense_public_residues(
-            setup_seed_digest,
+            setup_seed_hash,
             "development-collective-public-key-coefficients",
             modulus,
         );
         let public_sample_coefficients =
-            dense_public_residues(setup_seed_digest, &public_sample_label, modulus);
+            dense_public_residues(setup_seed_hash, &public_sample_label, modulus);
         let randomizer_residues = randomizer_response
             .iter()
             .map(|coefficient| signed_bigint_to_modulus_residue(coefficient, &modulus_bigint))
@@ -481,24 +481,24 @@ pub(crate) fn m9_bridge_ciphertext_commitment_digest_from_responses(
         component_one_residues_by_modulus.push(commitment_one);
     }
 
-    let layout_digest = layout_digest()?;
+    let layout_hash = layout_hash()?;
     let component_zero = RnsPolynomial::coefficient_domain(
         BgvBasisKind::Data,
         DATA_PRIMES.len() - 1,
-        layout_digest.clone(),
+        layout_hash.clone(),
         component_zero_residues_by_modulus,
     )?;
     let component_one = RnsPolynomial::coefficient_domain(
         BgvBasisKind::Data,
         DATA_PRIMES.len() - 1,
-        layout_digest,
+        layout_hash,
         component_one_residues_by_modulus,
     )?;
     let commitment_bytes =
         serialize_bgv_object(BgvObjectKind::Ciphertext, &[component_zero, component_one])?;
 
-    derive_protocol_digest(
-        "BridgeProofRecordDigest",
+    derive_protocol_hash(
+        "BridgeProofRecordHash",
         &json!({
             "purpose": "sealed-lattice-aggregate-bridge-bgv-ciphertext-commitment-v1",
             "commitmentRoot": ciphertext_root(&commitment_bytes),
@@ -518,9 +518,9 @@ fn signed_bigint_to_modulus_residue(value: &BigInt, modulus_bigint: &BigInt) -> 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn verify_m9_bridge_ciphertext_public_bindings(
     setup_package: &Value,
-    aggregate_derivation_component_digest: &str,
-    aggregate_derivation_statement_digest: &str,
-    post_voting_closed_context_digest: &str,
+    aggregate_derivation_component_hash: &str,
+    aggregate_derivation_statement_hash: &str,
+    post_voting_closed_context_hash: &str,
     bridge_encryption: &Value,
 ) -> CanonicalResult<()> {
     validation::validate_setup_package_shape(setup_package)?;
@@ -532,49 +532,49 @@ pub(crate) fn verify_m9_bridge_ciphertext_public_bindings(
     )?;
     let bgv_public_key_root =
         string_at_path(setup_package, &["collectivePublicKey", "bgvPublicKeyRoot"])?;
-    let manifest_digest = string_at_path(setup_package, &["setupInputs", "manifestDigest"])?;
-    let roster_digest = string_at_path(setup_package, &["setupInputs", "rosterDigest"])?;
-    let threshold_profile_digest =
-        string_at_path(setup_package, &["setupInputs", "thresholdProfileDigest"])?;
+    let manifest_hash = string_at_path(setup_package, &["setupInputs", "manifestHash"])?;
+    let roster_hash = string_at_path(setup_package, &["setupInputs", "rosterHash"])?;
+    let threshold_profile_hash =
+        string_at_path(setup_package, &["setupInputs", "thresholdProfileHash"])?;
     let plaintext_root = string_at_path(bridge_encryption, &["plaintextRoot"])?;
     let ciphertext_root = string_at_path(bridge_encryption, &["ciphertextRoot"])?;
-    let expected_encrypted_aggregate_share_ciphertext_root = derive_protocol_digest(
+    let expected_encrypted_aggregate_share_ciphertext_root = derive_protocol_hash(
         "EncryptedAggregateShareCiphertextRoot",
         &json!({
             "purpose": "sealed-lattice-encrypted-aggregate-share-ciphertext-root-v1",
-            "aggregateDerivationComponentDigest": aggregate_derivation_component_digest,
-            "aggregateDerivationStatementDigest": aggregate_derivation_statement_digest,
-            "postVotingClosedContextDigest": post_voting_closed_context_digest,
-            "manifestDigest": manifest_digest,
-            "rosterDigest": roster_digest,
-            "thresholdProfileDigest": threshold_profile_digest,
+            "aggregateDerivationComponentHash": aggregate_derivation_component_hash,
+            "aggregateDerivationStatementHash": aggregate_derivation_statement_hash,
+            "postVotingClosedContextHash": post_voting_closed_context_hash,
+            "manifestHash": manifest_hash,
+            "rosterHash": roster_hash,
+            "thresholdProfileHash": threshold_profile_hash,
             "collectivePublicKeyRoot": collective_public_key_root,
             "bgvPublicKeyRoot": bgv_public_key_root,
             "plaintextRoot": plaintext_root,
             "ciphertextRoot": ciphertext_root,
-            "canonicalCiphertextConventionDigest": canonical_ciphertext_convention_digest()?,
-            "bgvProfileDigest": profile_digest()?,
-            "rustBgvBackendProfileDigest": backend_profile_digest()?,
+            "canonicalCiphertextConventionHash": canonical_ciphertext_convention_hash()?,
+            "bgvProfileHash": profile_hash()?,
+            "rustBgvBackendProfileHash": backend_profile_hash()?,
         }),
     )?;
 
     compare_m9_bridge_string_at_path(
         bridge_encryption,
-        &["profileDigest"],
-        &profile_digest()?,
-        "BGV profile digest",
+        &["profileHash"],
+        &profile_hash()?,
+        "BGV profile hash",
     )?;
     compare_m9_bridge_string_at_path(
         bridge_encryption,
-        &["rustBgvBackendProfileDigest"],
-        &backend_profile_digest()?,
-        "Rust BGV backend profile digest",
+        &["rustBgvBackendProfileHash"],
+        &backend_profile_hash()?,
+        "Rust BGV backend profile hash",
     )?;
     compare_m9_bridge_string_at_path(
         bridge_encryption,
-        &["canonicalCiphertextConventionDigest"],
-        &canonical_ciphertext_convention_digest()?,
-        "canonical ciphertext convention digest",
+        &["canonicalCiphertextConventionHash"],
+        &canonical_ciphertext_convention_hash()?,
+        "canonical ciphertext convention hash",
     )?;
     compare_m9_bridge_string_at_path(
         bridge_encryption,

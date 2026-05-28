@@ -15,7 +15,7 @@ sidebar:
 - the public runtime facade verifies supported receiver-key proofs, ballot proof records, and proof-byte-bearing scoped relation packages through the packaged Rust/WASM backend
 - the election foundation verifies ML-DSA-65 signed-root envelopes for the current board, finality, roster-manifest, cast receipt, close record, and recovery helpers
 - the Rust transcript-core builds, the published SDK loader verifies the packaged kernel hash before instantiation, and unpinned local WASM loader use requires an explicit test-only opt-in
-- internal Rust/WASM commands derive reserved protocol digests and check the current `GF(65537)` interpolation/comparison relations used by the TypeScript reference layer
+- internal Rust/WASM commands derive reserved protocol Hashes and check the current `GF(65537)` interpolation/comparison relations used by the TypeScript reference layer
 - local replay record, target-accepted-record, and decryption-share shell checks remain internal protocol coverage
 - target-bound decryption capabilities fail closed unless a threshold profile includes a target-bound share-selection profile and the relevant proof certificates are explicitly present
 - docs, smoke checks, browser coverage, vector manifest verification, and release workflow continue to verify the current boundary

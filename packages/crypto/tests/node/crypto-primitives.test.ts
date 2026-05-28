@@ -6,31 +6,27 @@ import {
     createMlDsaKeyPairFixture,
     createMlDsaSignatureProfileFixture,
     createProtocolSignatureFixture,
-    deriveMlDsaPublicKeyDigest,
-    deriveProtocolDigest,
+    deriveMlDsaPublicKeyHash,
     deriveProtocolHash,
-    deriveProtocolSignatureDigest,
+    deriveProtocolSignatureHash,
     hash512,
     hash512Hex,
-    protocolDigestNamespaceByHashAlias,
-    protocolHashAliasByDigestNamespace,
-    resolveProtocolDigestDomain,
-    resolveProtocolHashNamespace,
+    resolveProtocolHashDomain,
     verifySignedObjectSignature,
 } from '../../src/index';
 
-const contextDigest = deriveProtocolDigest('ActionContextDigest', {
+const contextHash = deriveProtocolHash('ActionContextHash', {
     context: 'crypto-test',
 });
 
 const createSignedRoot = (
-    objectRoot = deriveProtocolDigest('BoardHeadDigest', { object: 'root' }),
+    objectRoot = deriveProtocolHash('BoardHeadHash', { object: 'root' }),
 ): CanonicalSignedRootObject => ({
     objectType: 'BoardHead',
     objectVersion: 1,
     ceremonyId: 'ceremony',
-    manifestDigest: null,
-    boardHeadDigest: null,
+    manifestHash: null,
+    boardHeadHash: null,
     objectRoot,
     chunkMerkleRoot: null,
     byteLength: 64,
@@ -38,27 +34,27 @@ const createSignedRoot = (
     signerIdentity: 'board',
     recoveryEpoch: 0,
     deviceEpoch: 0,
-    contextDigest,
+    contextHash,
 });
 
 describe('crypto primitive boundary', () => {
-    it('uses the Rust Hash512 framing for protocol digest namespaces', () => {
+    it('uses the Rust Hash512 framing for protocol hash namespaces', () => {
         const canonicalBytes = new TextEncoder().encode(
             canonicalJson({ poll: 'main' }),
         );
 
-        expect(resolveProtocolDigestDomain('PollSpecDigest')).toBe(
-            'sealed-lattice-root/poll-spec-digest-v1',
+        expect(resolveProtocolHashDomain('PollSpecHash')).toBe(
+            'sealed-lattice-root/poll-spec-hash-v1',
         );
         expect(
-            hash512Hex('sealed-lattice-root/poll-spec-digest-v1', [
+            hash512Hex('sealed-lattice-root/poll-spec-hash-v1', [
                 canonicalBytes,
             ]),
         ).toBe(
-            '423c71de65abadb5adc05d9b6b704252420bb738af888c62614c8afc53a2be808662585305e76738b23e4f20154f8779e3827c0c8f313455d84675924f4a2c83',
+            '43b28c9a3dcb3e34d75c9936a9930b68fb9f2010b87d43a6a61cbaa85d343d9fd0be2b312a90f404367b9c68793b0dcf02c4dae7351f6e96ded894b92f898cb4',
         );
-        expect(deriveProtocolDigest('PollSpecDigest', { poll: 'main' })).toBe(
-            '423c71de65abadb5adc05d9b6b704252420bb738af888c62614c8afc53a2be808662585305e76738b23e4f20154f8779e3827c0c8f313455d84675924f4a2c83',
+        expect(deriveProtocolHash('PollSpecHash', { poll: 'main' })).toBe(
+            '43b28c9a3dcb3e34d75c9936a9930b68fb9f2010b87d43a6a61cbaa85d343d9fd0be2b312a90f404367b9c68793b0dcf02c4dae7351f6e96ded894b92f898cb4',
         );
     });
 
@@ -74,36 +70,38 @@ describe('crypto primitive boundary', () => {
         ).toHaveLength(64);
     });
 
-    it('rejects unreserved protocol digest namespaces', () => {
+    it('rejects unreserved protocol hash namespaces', () => {
         expect(() =>
-            resolveProtocolDigestDomain('AuxiliaryBridgeModulusDigest'),
+            resolveProtocolHashDomain('AuxiliaryBridgeModulusHash'),
         ).toThrow('reserved');
         expect(() =>
-            resolveProtocolDigestDomain(
-                'sealed-lattice-root/auxiliary-bridge-modulus-digest-v1',
+            resolveProtocolHashDomain(
+                'sealed-lattice-root/auxiliary-bridge-modulus-hash-v1',
             ),
         ).toThrow('reserved');
         expect(() =>
-            deriveProtocolDigest('ReceiverKeyRoot', {
+            deriveProtocolHash('ReceiverKeyRoot', {
                 receiver: 'fixture',
             }),
         ).toThrow('reserved');
     });
 
-    it('maps document-facing Hash names onto reserved v1 namespaces', () => {
+    it('uses only reserved hash namespaces without aliases', () => {
         const targetProposal = { target: 'proposal' };
+        const targetProposalHash = deriveProtocolHash(
+            'TargetProposalHash',
+            targetProposal,
+        );
 
-        expect(resolveProtocolHashNamespace('TargetProposalHash')).toBe(
-            'TargetProposalDigest',
+        expect(resolveProtocolHashDomain('TargetProposalHash')).toBe(
+            'sealed-lattice-root/target-proposal-hash-v1',
         );
-        expect(protocolDigestNamespaceByHashAlias.ManifestHash).toBe(
-            'ElectionManifestDigest',
+        expect(() => resolveProtocolHashDomain('ManifestHash')).toThrow(
+            'reserved',
         );
-        expect(
-            protocolHashAliasByDigestNamespace.KllpsTargetDecryptionProfileDigest,
-        ).toBe('KllpsTargetDecryptionProfileHash');
-        expect(deriveProtocolHash('TargetProposalHash', targetProposal)).toBe(
-            deriveProtocolDigest('TargetProposalDigest', targetProposal),
+        expect(targetProposalHash).toMatch(/^[0-9a-f]{128}$/u);
+        expect(targetProposalHash).toBe(
+            deriveProtocolHash('TargetProposalHash', targetProposal),
         );
     });
 
@@ -186,15 +184,15 @@ describe('crypto primitive boundary', () => {
         const signature = createProtocolSignatureFixture({
             profile,
             publicKeyBytesHex: keyPair.publicKeyBytesHex,
-            publicKeyDigest: keyPair.publicKeyDigest,
+            publicKeyHash: keyPair.publicKeyHash,
             secretKeyBytesHex: keyPair.secretKeyBytesHex,
             signedRoot,
         });
 
-        expect(deriveMlDsaPublicKeyDigest(keyPair.publicKeyBytesHex)).toBe(
-            keyPair.publicKeyDigest,
+        expect(deriveMlDsaPublicKeyHash(keyPair.publicKeyBytesHex)).toBe(
+            keyPair.publicKeyHash,
         );
-        expect(signature.signatureDigest).toMatch(/^[0-9a-f]{128}$/u);
+        expect(signature.signatureHash).toMatch(/^[0-9a-f]{128}$/u);
         expect(
             verifySignedObjectSignature(signature, {
                 objectType: 'BoardHead',
@@ -202,11 +200,11 @@ describe('crypto primitive boundary', () => {
                 signerRole: 'Board',
                 signerIdentity: 'board',
                 ceremonyId: 'ceremony',
-                publicKeyDigest: keyPair.publicKeyDigest,
+                publicKeyHash: keyPair.publicKeyHash,
                 objectRoot: signedRoot.objectRoot,
-                boardHeadDigest: null,
-                manifestDigest: null,
-                contextDigest,
+                boardHeadHash: null,
+                manifestHash: null,
+                contextHash,
             }).ok,
         ).toBe(true);
         expect(
@@ -216,13 +214,13 @@ describe('crypto primitive boundary', () => {
                 signerRole: 'Board',
                 signerIdentity: 'board',
                 ceremonyId: 'ceremony',
-                publicKeyDigest: deriveProtocolDigest('PublicKeyDigest', {
+                publicKeyHash: deriveProtocolHash('PublicKeyHash', {
                     key: 'wrong',
                 }),
                 objectRoot: signedRoot.objectRoot,
-                boardHeadDigest: null,
-                manifestDigest: null,
-                contextDigest,
+                boardHeadHash: null,
+                manifestHash: null,
+                contextHash,
             }).refusedObjects,
         ).toEqual(
             expect.arrayContaining([
@@ -238,7 +236,7 @@ describe('crypto primitive boundary', () => {
         const signature = createProtocolSignatureFixture({
             profile,
             publicKeyBytesHex: keyPair.publicKeyBytesHex,
-            publicKeyDigest: keyPair.publicKeyDigest,
+            publicKeyHash: keyPair.publicKeyHash,
             secretKeyBytesHex: keyPair.secretKeyBytesHex,
             signedRoot,
         });
@@ -265,7 +263,7 @@ describe('crypto primitive boundary', () => {
         const signature = createProtocolSignatureFixture({
             profile,
             publicKeyBytesHex: keyPair.publicKeyBytesHex,
-            publicKeyDigest: keyPair.publicKeyDigest,
+            publicKeyHash: keyPair.publicKeyHash,
             secretKeyBytesHex: keyPair.secretKeyBytesHex,
             signedRoot,
         });
@@ -274,23 +272,18 @@ describe('crypto primitive boundary', () => {
                 ...signature.profile,
                 providerName: 'forged-provider',
                 providerVersion: '999',
-                providerBuildDigest: deriveProtocolDigest(
-                    'ProviderBuildDigest',
-                    {
-                        forged: true,
-                    },
-                ),
+                providerBuildHash: deriveProtocolHash('ProviderBuildHash', {
+                    forged: true,
+                }),
             },
             publicKeyBytesHex: signature.publicKeyBytesHex,
-            publicKeyDigest: signature.publicKeyDigest,
+            publicKeyHash: signature.publicKeyHash,
             signatureBytesHex: signature.signatureBytesHex,
             signedRoot: signature.signedRoot,
         };
         const tamperedProfileSignature = {
             ...tamperedProfilePayload,
-            signatureDigest: deriveProtocolSignatureDigest(
-                tamperedProfilePayload,
-            ),
+            signatureHash: deriveProtocolSignatureHash(tamperedProfilePayload),
         };
         const uppercaseHexSignature = {
             ...signature,
@@ -309,11 +302,11 @@ describe('crypto primitive boundary', () => {
                     signerRole: 'Board',
                     signerIdentity: 'board',
                     ceremonyId: 'ceremony',
-                    publicKeyDigest: keyPair.publicKeyDigest,
+                    publicKeyHash: keyPair.publicKeyHash,
                     objectRoot: signedRoot.objectRoot,
-                    boardHeadDigest: null,
-                    manifestDigest: null,
-                    contextDigest,
+                    boardHeadHash: null,
+                    manifestHash: null,
+                    contextHash,
                 }).refusedObjects,
             ).toEqual(
                 expect.arrayContaining([
@@ -323,13 +316,13 @@ describe('crypto primitive boundary', () => {
         }
     });
 
-    it('rejects signatures over malformed signed-root digest bindings', () => {
+    it('rejects signatures over malformed signed-root hash bindings', () => {
         const profile = createMlDsaSignatureProfileFixture();
         const keyPair = createMlDsaKeyPairFixture('crypto-test-bad-root');
         const malformedRoots: CanonicalSignedRootObject[] = [
             {
                 ...createSignedRoot(),
-                objectRoot: 'not-a-digest',
+                objectRoot: 'not-a-hash',
             } as CanonicalSignedRootObject,
             {
                 ...createSignedRoot(),
@@ -338,7 +331,7 @@ describe('crypto primitive boundary', () => {
             } as CanonicalSignedRootObject,
             {
                 ...createSignedRoot(),
-                contextDigest: 'not-a-digest',
+                contextHash: 'not-a-hash',
             } as CanonicalSignedRootObject,
         ];
 
@@ -346,7 +339,7 @@ describe('crypto primitive boundary', () => {
             const signature = createProtocolSignatureFixture({
                 profile,
                 publicKeyBytesHex: keyPair.publicKeyBytesHex,
-                publicKeyDigest: keyPair.publicKeyDigest,
+                publicKeyHash: keyPair.publicKeyHash,
                 secretKeyBytesHex: keyPair.secretKeyBytesHex,
                 signedRoot,
             });

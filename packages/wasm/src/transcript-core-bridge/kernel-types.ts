@@ -1,7 +1,7 @@
 import type {
     CanonicalError,
     FieldElement,
-    ProtocolDigest,
+    ProtocolHash,
     TranscriptCoreAnalysis,
     TranscriptCoreFixture,
     TranscriptCoreFixtureVerification,
@@ -87,10 +87,10 @@ export type TranscriptCoreKernel = {
         readonly inputHex: string;
         readonly chunkSize: number;
     }): string;
-    deriveProtocolDigest(input: {
+    deriveProtocolHash(input: {
         readonly namespace: string;
         readonly value: unknown;
-    }): ProtocolDigest;
+    }): ProtocolHash;
     evaluatePlaintextComparison(input: {
         readonly leftTotalScore: number;
         readonly rightTotalScore: number;
@@ -206,31 +206,31 @@ export type TranscriptCoreKernel = {
         readonly unsafeSmallRosterAcknowledged?: boolean;
     }): BallotPrivacyKernelVerification;
     generateAggregateBridgeEncryption(input: {
-        readonly aggregateSelectionPolicyDigest: ProtocolDigest;
+        readonly aggregateSelectionPolicyHash: ProtocolHash;
         readonly aggregateDerivationComponent: unknown;
         readonly aggregateWitness: unknown;
-        readonly bridgeWitnessPrivacyProfileDigest: ProtocolDigest;
-        readonly heParamDigest: ProtocolDigest;
+        readonly bridgeWitnessPrivacyProfileHash: ProtocolHash;
+        readonly heParamHash: ProtocolHash;
         readonly setupPackage: unknown;
         readonly proverRandomnessHex?: string;
         readonly includeCanonicalBytesHex?: boolean;
     }): AggregateBridgeEncryptionGeneration | BallotPrivacyKernelVerification;
     evaluateAggregateBridgeRelation(input: {
-        readonly aggregateSelectionPolicyDigest: ProtocolDigest;
+        readonly aggregateSelectionPolicyHash: ProtocolHash;
         readonly aggregateDerivationComponent: unknown;
         readonly aggregateWitness: unknown;
         readonly bridgeEncryption: unknown;
-        readonly bridgeWitnessPrivacyProfileDigest: ProtocolDigest;
-        readonly heParamDigest: ProtocolDigest;
+        readonly bridgeWitnessPrivacyProfileHash: ProtocolHash;
+        readonly heParamHash: ProtocolHash;
         readonly setupPackage: unknown;
         readonly proverRandomnessHex?: string;
     }): AggregateBridgeRelationEvaluation | BallotPrivacyKernelVerification;
     verifyAggregateBridgeEncryption(input: {
-        readonly aggregateSelectionPolicyDigest: ProtocolDigest;
+        readonly aggregateSelectionPolicyHash: ProtocolHash;
         readonly aggregateDerivationComponent: unknown;
         readonly bridgeEncryption: unknown;
-        readonly bridgeWitnessPrivacyProfileDigest: ProtocolDigest;
-        readonly heParamDigest: ProtocolDigest;
+        readonly bridgeWitnessPrivacyProfileHash: ProtocolHash;
+        readonly heParamHash: ProtocolHash;
         readonly setupPackage: unknown;
     }): AggregateBridgeEncryptionVerification | BallotPrivacyKernelVerification;
     describeBgvRnsProfile(): BgvRnsProfileReport;
@@ -239,20 +239,20 @@ export type TranscriptCoreKernel = {
     describeBgvPassiveSetupObjectModel(): unknown;
     generateBgvPassiveSetup(input: {
         readonly ceremonyId: string;
-        readonly manifestDigest: ProtocolDigest;
-        readonly rosterDigest: ProtocolDigest;
-        readonly thresholdProfileDigest: ProtocolDigest;
+        readonly manifestHash: ProtocolHash;
+        readonly rosterHash: ProtocolHash;
+        readonly thresholdProfileHash: ProtocolHash;
         readonly participants: readonly BgvPassiveSetupParticipantInput[];
         readonly setupSeed?: string;
     }): BgvPassiveSetupPackage;
     verifyBgvPassiveSetup(input: {
         readonly setupPackage: BgvPassiveSetupPackage;
-        readonly expectedSetupPackageDigest?: ProtocolDigest;
-        readonly expectedManifestDigest?: ProtocolDigest;
-        readonly expectedRosterDigest?: ProtocolDigest;
-        readonly expectedCollectivePublicKeyRoot?: ProtocolDigest;
-        readonly expectedRotSetDigest?: ProtocolDigest;
-        readonly expectedEvaluationKeyRoot?: ProtocolDigest;
+        readonly expectedSetupPackageHash?: ProtocolHash;
+        readonly expectedManifestHash?: ProtocolHash;
+        readonly expectedRosterHash?: ProtocolHash;
+        readonly expectedCollectivePublicKeyRoot?: ProtocolHash;
+        readonly expectedRotSetHash?: ProtocolHash;
+        readonly expectedEvaluationKeyRoot?: ProtocolHash;
     }): BgvPassiveSetupVerification;
     encodeBgvBatchPlaintext(input: {
         readonly slots: readonly number[];
@@ -299,7 +299,7 @@ type TranscriptCoreKernelCommand =
           readonly chunkSize: number;
       }
     | {
-          readonly command: 'DeriveProtocolDigest';
+          readonly command: 'DeriveProtocolHash';
           readonly namespace: string;
           readonly value: unknown;
       }
@@ -443,33 +443,33 @@ type TranscriptCoreKernelCommand =
       }
     | {
           readonly command: 'GenerateAggregateBridgeEncryption';
-          readonly aggregateSelectionPolicyDigest: ProtocolDigest;
+          readonly aggregateSelectionPolicyHash: ProtocolHash;
           readonly aggregateDerivationComponent: unknown;
           readonly aggregateWitness: unknown;
-          readonly bridgeWitnessPrivacyProfileDigest: ProtocolDigest;
-          readonly heParamDigest: ProtocolDigest;
+          readonly bridgeWitnessPrivacyProfileHash: ProtocolHash;
+          readonly heParamHash: ProtocolHash;
           readonly setupPackage: unknown;
           readonly proverRandomnessHex: string;
           readonly includeCanonicalBytesHex?: boolean;
       }
     | {
           readonly command: 'EvaluateAggregateBridgeRelation';
-          readonly aggregateSelectionPolicyDigest: ProtocolDigest;
+          readonly aggregateSelectionPolicyHash: ProtocolHash;
           readonly aggregateDerivationComponent: unknown;
           readonly aggregateWitness: unknown;
           readonly bridgeEncryption: unknown;
-          readonly bridgeWitnessPrivacyProfileDigest: ProtocolDigest;
-          readonly heParamDigest: ProtocolDigest;
+          readonly bridgeWitnessPrivacyProfileHash: ProtocolHash;
+          readonly heParamHash: ProtocolHash;
           readonly setupPackage: unknown;
           readonly proverRandomnessHex: string;
       }
     | {
           readonly command: 'VerifyAggregateBridgeEncryption';
-          readonly aggregateSelectionPolicyDigest: ProtocolDigest;
+          readonly aggregateSelectionPolicyHash: ProtocolHash;
           readonly aggregateDerivationComponent: unknown;
           readonly bridgeEncryption: unknown;
-          readonly bridgeWitnessPrivacyProfileDigest: ProtocolDigest;
-          readonly heParamDigest: ProtocolDigest;
+          readonly bridgeWitnessPrivacyProfileHash: ProtocolHash;
+          readonly heParamHash: ProtocolHash;
           readonly setupPackage: unknown;
       }
     | {
@@ -491,21 +491,21 @@ type TranscriptCoreKernelCommand =
     | {
           readonly command: 'GenerateBgvPassiveSetup';
           readonly ceremonyId: string;
-          readonly manifestDigest: ProtocolDigest;
-          readonly rosterDigest: ProtocolDigest;
-          readonly thresholdProfileDigest: ProtocolDigest;
+          readonly manifestHash: ProtocolHash;
+          readonly rosterHash: ProtocolHash;
+          readonly thresholdProfileHash: ProtocolHash;
           readonly participants: readonly BgvPassiveSetupParticipantInput[];
           readonly setupSeed?: string;
       }
     | {
           readonly command: 'VerifyBgvPassiveSetup';
           readonly setupPackage: BgvPassiveSetupPackage;
-          readonly expectedSetupPackageDigest?: ProtocolDigest;
-          readonly expectedManifestDigest?: ProtocolDigest;
-          readonly expectedRosterDigest?: ProtocolDigest;
-          readonly expectedCollectivePublicKeyRoot?: ProtocolDigest;
-          readonly expectedRotSetDigest?: ProtocolDigest;
-          readonly expectedEvaluationKeyRoot?: ProtocolDigest;
+          readonly expectedSetupPackageHash?: ProtocolHash;
+          readonly expectedManifestHash?: ProtocolHash;
+          readonly expectedRosterHash?: ProtocolHash;
+          readonly expectedCollectivePublicKeyRoot?: ProtocolHash;
+          readonly expectedRotSetHash?: ProtocolHash;
+          readonly expectedEvaluationKeyRoot?: ProtocolHash;
       }
     | {
           readonly command: 'EncodeBgvBatchPlaintext';

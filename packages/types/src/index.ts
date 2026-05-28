@@ -4,7 +4,7 @@ export * from './lifecycle.js';
 export * from './plaintext-oracle.js';
 export * from './profile-identifiers.js';
 export * from './pvss-ballot.js';
-export * from './protocol-digest.js';
+export * from './protocol-hash.js';
 export * from './protocol-objects.js';
 export * from './roster-recovery.js';
 export * from './transcript-core.js';

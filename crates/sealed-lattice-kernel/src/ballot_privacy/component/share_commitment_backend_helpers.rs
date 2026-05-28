@@ -1,7 +1,7 @@
 use super::*;
 
 pub(crate) fn derive_share_commitment_message_matrix(
-    share_commitment_profile_digest: &str,
+    share_commitment_profile_hash: &str,
 ) -> Result<Vec<Vec<u64>>, ComponentProofBackendError> {
     (0..SHARE_COMMITMENT_MODULE_RANK)
         .map(|row_index| {
@@ -9,7 +9,7 @@ pub(crate) fn derive_share_commitment_message_matrix(
                 "sealed.vote/internal/share-commitment/message-matrix-v1",
                 &json!({
                     "rowIndex": row_index,
-                    "shareCommitmentProfileDigest": share_commitment_profile_digest,
+                    "shareCommitmentProfileHash": share_commitment_profile_hash,
                 }),
             )
         })
@@ -17,7 +17,7 @@ pub(crate) fn derive_share_commitment_message_matrix(
 }
 
 pub(crate) fn derive_share_commitment_randomness_matrix(
-    share_commitment_profile_digest: &str,
+    share_commitment_profile_hash: &str,
 ) -> Result<Vec<Vec<Vec<u64>>>, ComponentProofBackendError> {
     (0..SHARE_COMMITMENT_MODULE_RANK)
         .map(|row_index| {
@@ -28,7 +28,7 @@ pub(crate) fn derive_share_commitment_randomness_matrix(
                         &json!({
                             "columnIndex": column_index,
                             "rowIndex": row_index,
-                            "shareCommitmentProfileDigest": share_commitment_profile_digest,
+                            "shareCommitmentProfileHash": share_commitment_profile_hash,
                         }),
                     )
                 })
@@ -284,8 +284,9 @@ impl StreamedLinearProofStatement for ParsedStructuredReceiverEncryptionStatemen
         matrix_coefficient_representation: LinearProofMatrixCoefficientRepresentation,
         target_coefficient_representation: LinearProofTargetCoefficientRepresentation,
         public_randomness: &[u8],
-    ) -> crate::encoding::CanonicalResult<self::linear_proof::statement::LinearStatementTranscript>
-    {
+    ) -> crate::encoding::CanonicalResult<
+        crate::ballot_privacy::linear_proof::statement::LinearStatementTranscript,
+    > {
         if public_randomness.len() != 32 {
             return Err(invalid_preflight(
                 "structured linear statement public randomness must be exactly 32 bytes",
@@ -303,7 +304,7 @@ impl StreamedLinearProofStatement for ParsedStructuredReceiverEncryptionStatemen
             .ok_or_else(|| invalid_preflight("structured transformed column count overflowed"))?;
         let transcript_payload = json!({
             "domain": "sealed.vote/internal/structured-linear-statement-transcript-v1",
-            "statementDigest": &self.statement_digest,
+            "statementHash": &self.statement_hash,
             "parameterSet": {
                 "profileId": &parameter_set.profile_id,
                 "source": &parameter_set.source,
@@ -348,16 +349,20 @@ impl StreamedLinearProofStatement for ParsedStructuredReceiverEncryptionStatemen
         let public_parameters_and_statement_hash =
             shake128_32(&[public_randomness, &arithmetic_statement_hash]);
 
-        Ok(self::linear_proof::statement::LinearStatementTranscript {
-            transformed_statement_matrix_rows: transformed_statement_rows,
-            transformed_statement_matrix_columns: transformed_statement_columns,
-            transformed_target_vector_length: transformed_statement_rows,
-            encoded_statement_bytes: encoded_statement.len(),
-            arithmetic_statement_hash,
-            arithmetic_statement_hash_hex: to_hex(&arithmetic_statement_hash),
-            public_parameters_and_statement_hash,
-            public_parameters_and_statement_hash_hex: to_hex(&public_parameters_and_statement_hash),
-        })
+        Ok(
+            crate::ballot_privacy::linear_proof::statement::LinearStatementTranscript {
+                transformed_statement_matrix_rows: transformed_statement_rows,
+                transformed_statement_matrix_columns: transformed_statement_columns,
+                transformed_target_vector_length: transformed_statement_rows,
+                encoded_statement_bytes: encoded_statement.len(),
+                arithmetic_statement_hash,
+                arithmetic_statement_hash_hex: to_hex(&arithmetic_statement_hash),
+                public_parameters_and_statement_hash,
+                public_parameters_and_statement_hash_hex: to_hex(
+                    &public_parameters_and_statement_hash,
+                ),
+            },
+        )
     }
 
     fn transformed_target_vector(
@@ -437,7 +442,7 @@ impl StreamedLinearProofStatement for ParsedStructuredReceiverEncryptionStatemen
                 &self.source_statement_matrix,
                 matrix_coefficient_representation,
             )?;
-        linear_proof::tbox_relations::multiply_rows_by_sparse_polynomial_matrix(
+        tbox_relations::multiply_rows_by_sparse_polynomial_matrix(
             proof_ring,
             shifted_rotation_polynomial_matrix,
             &transformed_statement_matrix,

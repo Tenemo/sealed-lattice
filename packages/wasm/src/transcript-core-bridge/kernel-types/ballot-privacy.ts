@@ -14,11 +14,11 @@ export type BallotPrivacyKernelVerification = {
     readonly backendStatus: BallotPrivacyProofBackendStatus;
     readonly operation: string;
     readonly statusLabels: readonly string[];
-    readonly acceptedDigests: readonly string[];
+    readonly acceptedHashes: readonly string[];
     readonly refusedObjects: readonly {
         readonly code: string;
         readonly message: string;
-        readonly objectDigest?: string;
+        readonly objectHash?: string;
     }[];
     readonly unresolvedReason: string | null;
 };
@@ -28,7 +28,7 @@ export type BallotPrivacyLinearProofVectorVerification = {
     readonly backendAvailable: boolean;
     readonly backendStatus: BallotPrivacyProofBackendStatus;
     readonly statusLabels: readonly string[];
-    readonly acceptedDigests: readonly string[];
+    readonly acceptedHashes: readonly string[];
     readonly refusedObjects: readonly {
         readonly code: string;
         readonly message: string;
@@ -44,7 +44,7 @@ export type BallotPrivacyEncodedRelationVectorVerification = {
     readonly backendAvailable: boolean;
     readonly backendStatus: BallotPrivacyProofBackendStatus;
     readonly statusLabels: readonly string[];
-    readonly acceptedDigests: readonly string[];
+    readonly acceptedHashes: readonly string[];
     readonly refusedObjects: readonly {
         readonly code: string;
         readonly message: string;
@@ -60,7 +60,7 @@ export type BallotPrivacyReceiverKeyVectorVerification = {
     readonly backendAvailable: boolean;
     readonly backendStatus: BallotPrivacyProofBackendStatus;
     readonly statusLabels: readonly string[];
-    readonly acceptedDigests: readonly string[];
+    readonly acceptedHashes: readonly string[];
     readonly refusedObjects: readonly {
         readonly code: string;
         readonly message: string;

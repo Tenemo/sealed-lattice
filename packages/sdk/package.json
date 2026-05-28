@@ -8,7 +8,6 @@
     "types": "dist/index.d.ts",
     "files": [
         "dist",
-        "public-surface.json",
         "README.md",
         "LICENSE"
     ],
@@ -34,7 +33,8 @@
         "build:types": "pnpm --filter @sealed-lattice/types run build",
         "build:wasm": "tsx ../../tools/ci/build-wasm-kernel.ts --out packages/sdk/dist/sealed-lattice-kernel.wasm",
         "build:bridge": "tsx ../../tools/ci/build-sdk-bridge.ts",
-        "build": "pnpm run build:types && del-cli dist tsconfig.tsbuildinfo && tsc --project tsconfig.json && pnpm run build:bridge && pnpm run build:wasm"
+        "build:api": "pnpm run build:types && del-cli dist tsconfig.tsbuildinfo && tsc --project tsconfig.json && pnpm run build:bridge",
+        "build": "pnpm run build:api && pnpm run build:wasm"
     },
     "devDependencies": {
         "@sealed-lattice/protocol": "workspace:*",

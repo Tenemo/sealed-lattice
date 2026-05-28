@@ -14,8 +14,8 @@ export interface EncodedBallotRelationVectorCase {
     readonly componentProjectionSummaries?: readonly {
         readonly coefficientModulus: string;
         readonly componentId: string;
-        readonly linearStatementDigest: string;
-        readonly matrixDigest: string;
+        readonly linearStatementHash: string;
+        readonly matrixHash: string;
         readonly parameterProfileId: string;
         readonly projectionCoverage: string;
         readonly ringDegree: number;
@@ -23,7 +23,7 @@ export interface EncodedBallotRelationVectorCase {
         readonly sourceRowBatchNames: readonly string[];
         readonly statementColumns: number;
         readonly statementRows: number;
-        readonly targetVectorDigest: string;
+        readonly targetVectorHash: string;
         readonly witnessL2BoundSquared: string;
     }[];
     readonly componentProofReadinessManifests?: readonly {
@@ -66,7 +66,7 @@ export interface EncodedBallotRelationVectorCase {
     readonly componentBundleStatement?: BallotProofComponentBundleStatement;
     readonly componentBundleSummary?: {
         readonly bundleCoverage: string;
-        readonly componentBundleStatementDigest: string;
+        readonly componentBundleStatementHash: string;
         readonly componentCount: number;
         readonly explicitComponentCount: number;
         readonly firstComponentStatement: BallotProofComponentStatement;
@@ -78,12 +78,12 @@ export interface EncodedBallotRelationVectorCase {
     readonly loweredStatementSummary?: {
         readonly algebraicRowCount: number;
         readonly backendColumnCount: number;
-        readonly backendDigestExpandedRowCount: number;
+        readonly backendHashExpandedRowCount: number;
         readonly backendExplicitRowCount: number;
         readonly backendProofComponentCount: number;
         readonly backendRowBatchCount: number;
         readonly backendRowCount: number;
-        readonly backendStatementDigest: string;
+        readonly backendStatementHash: string;
         readonly backendStatementFormat: string;
         readonly boundCount: number;
         readonly encodedCoordinateCount: number;
@@ -99,7 +99,7 @@ export interface EncodedBallotRelationVectorCase {
         readonly lastLinearRow: unknown;
         readonly linearRowCount: number;
         readonly optionCount: number;
-        readonly relationStatementDigest: string;
+        readonly relationStatementHash: string;
         readonly relationStatementFormat: string;
         readonly rosterSize: number;
         readonly shareVectorWidth: number;
@@ -114,8 +114,8 @@ export interface EncodedBallotRelationVectorCase {
         readonly rosterSize: number;
         readonly pvssThreshold: number;
         readonly shareVectorWidth: number;
-        readonly relationStatementDigest?: string;
-        readonly baselineRelationStatementDigest?: string;
-        readonly expectedDigestChanged?: true;
+        readonly relationStatementHash?: string;
+        readonly baselineRelationStatementHash?: string;
+        readonly expectedHashChanged?: true;
     };
 }

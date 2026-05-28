@@ -16,7 +16,7 @@ describe('plaintext comparator polynomial oracle', () => {
         );
 
         expect(comparator).toMatchObject({
-            comparatorDigest: comparatorPolynomialVectors.comparatorDigest,
+            comparatorHash: comparatorPolynomialVectors.comparatorHash,
             domainMaximum: comparatorPolynomialVectors.domainMaximum,
             domainMinimum: comparatorPolynomialVectors.domainMinimum,
         });
@@ -85,9 +85,9 @@ describe('plaintext comparator polynomial oracle', () => {
         );
 
         expect(comparator).toMatchObject({
-            comparatorDigest:
+            comparatorHash:
                 comparatorPolynomialVectors.maximumRosterBoundaryCase
-                    .comparatorDigest,
+                    .comparatorHash,
             domainMaximum:
                 comparatorPolynomialVectors.maximumRosterBoundaryCase
                     .domainMaximum,

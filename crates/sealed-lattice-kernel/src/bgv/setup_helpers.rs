@@ -2,7 +2,7 @@ use serde_json::Value;
 
 use crate::{
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
-    hashing::derive_protocol_digest,
+    hashing::derive_protocol_hash,
 };
 
 const COMMON_FORBIDDEN_SETUP_SECRET_FIELD_NAMES: &[&str] = &[
@@ -68,25 +68,22 @@ pub(super) fn read_non_empty_string<'a>(
     Ok(field)
 }
 
-pub(super) fn read_digest_field<'a>(
-    value: &'a Value,
-    field_name: &str,
-) -> CanonicalResult<&'a str> {
-    let digest = read_non_empty_string(value, field_name)?;
-    validate_digest_string(digest, field_name)?;
+pub(super) fn read_hash_field<'a>(value: &'a Value, field_name: &str) -> CanonicalResult<&'a str> {
+    let hash = read_non_empty_string(value, field_name)?;
+    validate_hash_string(hash, field_name)?;
 
-    Ok(digest)
+    Ok(hash)
 }
 
-pub(super) fn validate_digest_string(digest: &str, field_name: &str) -> CanonicalResult<()> {
-    if digest.len() != 128
-        || !digest
+pub(super) fn validate_hash_string(hash: &str, field_name: &str) -> CanonicalResult<()> {
+    if hash.len() != 128
+        || !hash
             .chars()
             .all(|character| character.is_ascii_digit() || ('a'..='f').contains(&character))
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            format!("{field_name} must be a 128-character lowercase hexadecimal protocol digest"),
+            format!("{field_name} must be a 128-character lowercase hexadecimal protocol hash"),
         ));
     }
 
@@ -130,7 +127,7 @@ pub(super) fn compare_expected_string(
     description: &str,
 ) -> CanonicalResult<()> {
     if let Some(expected) = request.get(expected_field_name).and_then(Value::as_str) {
-        validate_digest_string(expected, expected_field_name)?;
+        validate_hash_string(expected, expected_field_name)?;
         if expected != actual {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::ProfileComponentMismatch,
@@ -238,11 +235,11 @@ pub(super) fn usize_at_path(value: &Value, path: &[&str]) -> CanonicalResult<usi
     })
 }
 
-pub(super) fn digest_at_path<'a>(value: &'a Value, path: &[&str]) -> CanonicalResult<&'a str> {
-    let digest = string_at_path(value, path)?;
-    validate_digest_string(digest, &path.join("."))?;
+pub(super) fn hash_at_path<'a>(value: &'a Value, path: &[&str]) -> CanonicalResult<&'a str> {
+    let hash = string_at_path(value, path)?;
+    validate_hash_string(hash, &path.join("."))?;
 
-    Ok(digest)
+    Ok(hash)
 }
 
 pub(super) fn compare_required_string(
@@ -269,23 +266,23 @@ pub(super) fn compare_string_at_path(
     compare_required_string(string_at_path(value, path)?, expected, description)
 }
 
-pub(super) fn compare_digest_at_path(
+pub(super) fn compare_hash_at_path(
     value: &Value,
     path: &[&str],
     expected: &str,
     description: &str,
 ) -> CanonicalResult<()> {
-    compare_required_string(digest_at_path(value, path)?, expected, description)
+    compare_required_string(hash_at_path(value, path)?, expected, description)
 }
 
-pub(super) fn compare_derived_digest(
+pub(super) fn compare_derived_hash(
     namespace: &str,
     value: &Value,
-    actual_digest: &str,
+    actual_hash: &str,
     description: &str,
 ) -> CanonicalResult<()> {
-    let expected_digest = derive_protocol_digest(namespace, value)?;
-    if actual_digest != expected_digest {
+    let expected_hash = derive_protocol_hash(namespace, value)?;
+    if actual_hash != expected_hash {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
             format!("M8 setup package {description} does not match its canonical payload"),

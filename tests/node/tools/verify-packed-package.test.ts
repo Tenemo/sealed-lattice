@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-    extractPublishedKernelDigest,
+    extractPublishedKernelHash,
     hashPublishedKernelBytesSha256Hex,
     parsePackDryRunFilePaths,
     validatePublishedKernelIntegrity,
@@ -73,10 +73,10 @@ describe('packed package policy checks', () => {
         ]);
 
         const kernelBytes = Uint8Array.from([0]);
-        const digest = hashPublishedKernelBytesSha256Hex(kernelBytes);
-        const kernelRuntimeText = `const packagedTranscriptCoreKernelNormalizedSha256Hex = '${digest}';`;
+        const hash = hashPublishedKernelBytesSha256Hex(kernelBytes);
+        const kernelRuntimeText = `const packagedTranscriptCoreKernelNormalizedSha256Hex = '${hash}';`;
 
-        expect(extractPublishedKernelDigest(kernelRuntimeText)).toBe(digest);
+        expect(extractPublishedKernelHash(kernelRuntimeText)).toBe(hash);
         expect(
             validatePublishedKernelIntegrity(kernelRuntimeText, kernelBytes),
         ).toEqual([]);
@@ -86,7 +86,7 @@ describe('packed package policy checks', () => {
                 kernelBytes,
             ),
         ).toEqual([
-            'Published package kernel loader must pin the packaged transcript-core WASM digest',
+            'Published package kernel loader must pin the packaged transcript-core WASM hash',
         ]);
     });
 });

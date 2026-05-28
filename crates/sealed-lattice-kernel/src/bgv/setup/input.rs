@@ -2,10 +2,9 @@ use super::*;
 
 pub(super) fn read_passive_setup_input(request: &Value) -> CanonicalResult<PassiveSetupInput> {
     let ceremony_id = read_non_empty_string(request, "ceremonyId")?.to_string();
-    let manifest_digest = read_digest_field(request, "manifestDigest")?.to_string();
-    let roster_digest = read_digest_field(request, "rosterDigest")?.to_string();
-    let threshold_profile_digest =
-        read_digest_field(request, "thresholdProfileDigest")?.to_string();
+    let manifest_hash = read_hash_field(request, "manifestHash")?.to_string();
+    let roster_hash = read_hash_field(request, "rosterHash")?.to_string();
+    let threshold_profile_hash = read_hash_field(request, "thresholdProfileHash")?.to_string();
     let setup_seed_provided = request.get("setupSeed").is_some();
     let setup_seed = request
         .get("setupSeed")
@@ -17,13 +16,13 @@ pub(super) fn read_passive_setup_input(request: &Value) -> CanonicalResult<Passi
             "setupSeed must not be empty when supplied",
         ));
     }
-    let setup_seed_digest = hash512_hex(
-        "sealed-lattice-bgv-rns/passive-setup-seed-digest-v1",
+    let setup_seed_hash = hash512_hex(
+        "sealed-lattice-bgv-rns/passive-setup-seed-hash-v1",
         &[
             ceremony_id.as_bytes(),
-            manifest_digest.as_bytes(),
-            roster_digest.as_bytes(),
-            threshold_profile_digest.as_bytes(),
+            manifest_hash.as_bytes(),
+            roster_hash.as_bytes(),
+            threshold_profile_hash.as_bytes(),
             setup_seed.as_bytes(),
         ],
     );
@@ -61,11 +60,11 @@ pub(super) fn read_passive_setup_input(request: &Value) -> CanonicalResult<Passi
 
     Ok(PassiveSetupInput {
         ceremony_id,
-        manifest_digest,
-        roster_digest,
-        threshold_profile_digest,
+        manifest_hash,
+        roster_hash,
+        threshold_profile_hash,
         setup_seed_provided,
-        setup_seed_digest,
+        setup_seed_hash,
         participants,
     })
 }

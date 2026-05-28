@@ -7,7 +7,7 @@ export {
     bytesToHex,
     concatenateByteChunks,
     hasWasmHeader,
-    normalizeRustSourcePathsForDigest,
+    normalizeRustSourcePathsForHash,
     readWasmVarUint32,
     sha256HexPattern,
     textDecoder,
@@ -15,5 +15,5 @@ export {
     wasm32UsizeByteLength,
     wasmCustomSectionId,
     wasmHeaderByteLength,
-} from './kernel-wasm-digest.js';
+} from './kernel-wasm-hash.js';
 export type * from './kernel-types.js';

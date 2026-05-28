@@ -14,12 +14,12 @@ import path, { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
-    resolvePackageManagerEntryPoint,
+    resolvePackageManagerRunner,
     resolvePackageManagerRunnerFromArguments,
+    resolvePackageManagerRunnerForPackageManager,
     runPackageManager,
     runPackageManagerAndCaptureOutput,
     type PackageManager,
-    type PackageManagerRunner,
 } from './run-command.js';
 import {
     getRootPackageJsonPath,
@@ -27,7 +27,7 @@ import {
     stagePublicPackage,
 } from './stage-public-package.mjs';
 
-import { normalizeTranscriptCoreKernelBytesForDigest } from '#packages/wasm/src/transcript-core-bridge.js';
+import { normalizeTranscriptCoreKernelBytesForHash } from '#packages/wasm/src/transcript-core-bridge.js';
 
 type PackedFileMetadata = {
     readonly path: string;
@@ -38,13 +38,6 @@ type PackDryRunMetadataEntry = {
 };
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
-const publintCliPath = path.resolve(
-    repoRoot,
-    'node_modules',
-    'publint',
-    'src',
-    'cli.js',
-);
 const forbiddenPublishedRuntimePathFragments = [
     'dist/internal/election-foundation/plaintext-oracle/',
     'dist/internal/election-foundation/target-acceptance/',
@@ -72,19 +65,18 @@ const requiredPublishedPackageFilePaths = [
     'dist/internal/board-target.d.ts',
     'dist/internal/lifecycle.d.ts',
     'dist/internal/plaintext-oracle.d.ts',
-    'dist/internal/protocol-digest.d.ts',
+    'dist/internal/protocol-hash.d.ts',
     'dist/internal/protocol-objects.d.ts',
     'dist/internal/roster-recovery.d.ts',
     'dist/internal/transcript-core.d.ts',
-    'public-surface.json',
 ] as const;
 const forbiddenPublishedOracleFileNames = new Set([
     'Dockerfile',
     'go.mod',
     'go.sum',
 ]);
-const publishedKernelDigestPattern =
-    /const packagedTranscriptCoreKernelNormalizedSha256Hex\s*=\s*(?<digest>undefined|'[a-f0-9]{64}');/u;
+const publishedKernelHashPattern =
+    /const packagedTranscriptCoreKernelNormalizedSha256Hex\s*=\s*(?<hash>undefined|'[a-f0-9]{64}');/u;
 
 const createDryRunPackArguments = (): readonly string[] => [
     'pack',
@@ -236,36 +228,36 @@ export const validatePublishedPackageMetadata = (
 
 export const hashPublishedKernelBytesSha256Hex = (bytes: Uint8Array): string =>
     createHash('sha256')
-        .update(normalizeTranscriptCoreKernelBytesForDigest(bytes))
+        .update(normalizeTranscriptCoreKernelBytesForHash(bytes))
         .digest('hex');
 
-export const extractPublishedKernelDigest = (
+export const extractPublishedKernelHash = (
     kernelRuntimeText: string,
 ): string | undefined => {
-    const match = publishedKernelDigestPattern.exec(kernelRuntimeText);
-    const digest = match?.groups?.digest;
-    if (digest === undefined || digest === 'undefined') {
+    const match = publishedKernelHashPattern.exec(kernelRuntimeText);
+    const hash = match?.groups?.hash;
+    if (hash === undefined || hash === 'undefined') {
         return undefined;
     }
 
-    return digest.slice(1, -1);
+    return hash.slice(1, -1);
 };
 
 export const validatePublishedKernelIntegrity = (
     kernelRuntimeText: string,
     kernelBytes: Uint8Array,
 ): string[] => {
-    const expectedDigest = extractPublishedKernelDigest(kernelRuntimeText);
-    if (expectedDigest === undefined) {
+    const expectedHash = extractPublishedKernelHash(kernelRuntimeText);
+    if (expectedHash === undefined) {
         return [
-            'Published package kernel loader must pin the packaged transcript-core WASM digest',
+            'Published package kernel loader must pin the packaged transcript-core WASM hash',
         ];
     }
 
-    const actualDigest = hashPublishedKernelBytesSha256Hex(kernelBytes);
-    if (actualDigest !== expectedDigest) {
+    const actualHash = hashPublishedKernelBytesSha256Hex(kernelBytes);
+    if (actualHash !== expectedHash) {
         return [
-            `Published package kernel digest mismatch: expected ${expectedDigest}, received ${actualDigest}`,
+            `Published package kernel hash mismatch: expected ${expectedHash}, received ${actualHash}`,
         ];
     }
 
@@ -273,34 +265,19 @@ export const validatePublishedKernelIntegrity = (
 };
 
 const runPublint = (packageDirectory: string): void => {
-    const commandArguments = [
-        publintCliPath,
-        'run',
-        packageDirectory,
-        '--pack',
-        'false',
-        '--strict',
-    ];
-    const result = spawnSync(process.execPath, commandArguments, {
-        cwd: repoRoot,
-        env: process.env,
-        encoding: 'utf8',
-        maxBuffer: 100 * 1024 * 1024,
-    });
-
-    if (result.error !== undefined) {
-        throw new Error(`Failed to start publint: ${result.error.message}`);
-    }
-    if (result.signal !== null) {
-        throw new Error(`publint terminated by signal ${result.signal}`);
-    }
-    if (result.status !== 0) {
-        throw new Error(
-            `publint failed:\n${[result.stdout, result.stderr]
-                .filter(Boolean)
-                .join('\n')}`,
-        );
-    }
+    runPackageManager(
+        resolvePackageManagerRunner(),
+        [
+            'exec',
+            'publint',
+            'run',
+            packageDirectory,
+            '--pack',
+            'false',
+            '--strict',
+        ],
+        repoRoot,
+    );
 };
 
 const runSmokeEntryPoint = (consumerDirectory: string): void => {
@@ -335,11 +312,7 @@ const main = async (): Promise<void> => {
     const packageManagerRunner = resolvePackageManagerRunnerFromArguments(
         process.argv.slice(2),
     );
-    const npmPackRunner: PackageManagerRunner = {
-        command: process.execPath,
-        commandArgumentsPrefix: [resolvePackageManagerEntryPoint('npm')],
-        kind: 'npm',
-    };
+    const npmPackRunner = resolvePackageManagerRunnerForPackageManager('npm');
     const tempRoot = await mkdtemp(join(tmpdir(), 'sealed-lattice-packed-'));
     const packDirectory = join(tempRoot, 'pack');
     const consumerDirectory = join(tempRoot, 'consumer');

@@ -22,10 +22,7 @@ import {
     type VariantBuildResult,
 } from './shared.js';
 
-import {
-    canonicalJson,
-    deriveProtocolDigest,
-} from '#packages/crypto/src/index';
+import { canonicalJson, deriveProtocolHash } from '#packages/crypto/src/index';
 import {
     createAggregateReadyRecord,
     createBallotPrivacyProfileSet,
@@ -59,35 +56,35 @@ export const buildVariant = (input: {
     });
     const setupPackage = input.kernel.generateBgvPassiveSetup({
         ceremonyId: fixture.statement.ceremonyId,
-        manifestDigest: fixture.statement.manifestDigest,
+        manifestHash: fixture.statement.manifestHash,
         participants: setupParticipants(input.variant.rosterSize),
-        rosterDigest: fixture.statement.rosterDigest,
+        rosterHash: fixture.statement.rosterHash,
         setupSeed: `encrypted-aggregate-bridge-${variantKey(input.variant)}`,
-        thresholdProfileDigest: fixture.statement.thresholdProfileDigest,
+        thresholdProfileHash: fixture.statement.thresholdProfileHash,
     }) as Record<string, unknown>;
     if (setupPackage.ok === false) {
         throw new Error(
             `Setup generation failed: ${canonicalJson(setupPackage)}`,
         );
     }
-    const aggregateSelectionPolicyDigest = deriveProtocolDigest(
-        'AggregateSelectionPolicyDigest',
+    const aggregateSelectionPolicyHash = deriveProtocolHash(
+        'AggregateSelectionPolicyHash',
         {
             optionCount: input.variant.optionCount,
             purpose: 'encrypted-aggregate-bridge-selection-policy-v1',
             rosterSize: input.variant.rosterSize,
-            thresholdProfileDigest: fixture.statement.thresholdProfileDigest,
+            thresholdProfileHash: fixture.statement.thresholdProfileHash,
         },
     );
-    const bridgeWitnessPrivacyProfileDigest = deriveProtocolDigest(
-        'BridgeWitnessPrivacyProfileDigest',
+    const bridgeWitnessPrivacyProfileHash = deriveProtocolHash(
+        'BridgeWitnessPrivacyProfileHash',
         {
             optionCount: input.variant.optionCount,
             purpose: 'encrypted-aggregate-bridge-witness-privacy-v1',
             rosterSize: input.variant.rosterSize,
         },
     );
-    const heParamDigest = deriveProtocolDigest('HEParamDigest', {
+    const heParamHash = deriveProtocolHash('HEParamHash', {
         optionCount: input.variant.optionCount,
         purpose: 'encrypted-aggregate-bridge-he-param-v1',
         rosterSize: input.variant.rosterSize,
@@ -96,12 +93,12 @@ export const buildVariant = (input: {
         { length: trusteeAggregateThreshold },
         (_unusedValue, contributorIndex) =>
             createContribution({
-                aggregateSelectionPolicyDigest,
+                aggregateSelectionPolicyHash,
                 ballotPackage,
-                bridgeWitnessPrivacyProfileDigest,
+                bridgeWitnessPrivacyProfileHash,
                 certificate,
                 contributorRosterPosition: contributorIndex + 1,
-                heParamDigest,
+                heParamHash,
                 kernel: input.kernel,
                 setupPackage,
                 unsafeSmallRosterAcknowledged: input.variant.rosterSize < 10,
@@ -117,20 +114,20 @@ export const buildVariant = (input: {
         currentRecoveryEpochMap: currentRecoveryEpochMap(
             selectedContributionRecords,
         ),
-        expectedAggregateSelectionPolicyDigest: aggregateSelectionPolicyDigest,
-        requiredPostVotingClosedContextDigest:
-            selectedContributionRecords[0].postVotingClosedContextDigest,
+        expectedAggregateSelectionPolicyHash: aggregateSelectionPolicyHash,
+        requiredPostVotingClosedContextHash:
+            selectedContributionRecords[0].postVotingClosedContextHash,
     });
-    if (!selection.ok || selection.firstValidOrderDigest === undefined) {
+    if (!selection.ok || selection.firstValidOrderHash === undefined) {
         throw new Error(
             `Contribution selection failed: ${canonicalJson(selection)}`,
         );
     }
-    const firstValidOrderDigest = selection.firstValidOrderDigest;
+    const firstValidOrderHash = selection.firstValidOrderHash;
     const aggregateReadyMeasurement = measure(() =>
         createAggregateReadyRecord({
             aggregateContributionQuorum: trusteeAggregateThreshold,
-            firstValidOrderDigest,
+            firstValidOrderHash,
             rosterSize: input.variant.rosterSize,
             selectedContributions: selection.selectedContributions,
         }),
@@ -181,7 +178,7 @@ export const buildVariant = (input: {
         selectedContributionCount: trusteeAggregateThreshold,
         shareVectorWidth: fixture.statement.shareVectorWidth,
         status: 'passed' as const,
-        thresholdProfileHash: fixture.statement.thresholdProfileDigest,
+        thresholdProfileHash: fixture.statement.thresholdProfileHash,
         trusteeAggregateThreshold,
         verifierTime: contributions.reduce(
             (sum, contribution) =>
@@ -193,11 +190,11 @@ export const buildVariant = (input: {
         input.kernel.evaluateAggregateBridgeRelation({
             aggregateDerivationComponent:
                 contributions[0].aggregateDerivationComponent,
-            aggregateSelectionPolicyDigest,
+            aggregateSelectionPolicyHash,
             aggregateWitness: contributions[0].aggregateWitness,
             bridgeEncryption: contributions[0].bridgeEncryption,
-            bridgeWitnessPrivacyProfileDigest,
-            heParamDigest,
+            bridgeWitnessPrivacyProfileHash,
+            heParamHash,
             proverRandomnessHex: '77'.repeat(32),
             setupPackage,
         }),
@@ -213,28 +210,28 @@ export const buildVariant = (input: {
     }
     const negativeChecks = [
         ...runCheapNegativeChecks({
-            aggregateSelectionPolicyDigest,
-            bridgeWitnessPrivacyProfileDigest,
+            aggregateSelectionPolicyHash,
+            bridgeWitnessPrivacyProfileHash,
             contribution: contributions[0],
-            heParamDigest,
+            heParamHash,
             kernel: input.kernel,
             setupPackage,
             variant: input.variant,
         }),
         ...runSelectionNegativeChecks({
-            aggregateSelectionPolicyDigest,
-            postVotingClosedContextDigest:
-                selectedContributionRecords[0].postVotingClosedContextDigest,
+            aggregateSelectionPolicyHash,
+            postVotingClosedContextHash:
+                selectedContributionRecords[0].postVotingClosedContextHash,
             selectedContributionRecords,
             trusteeAggregateThreshold,
             variant: input.variant,
         }),
         ...(sentinelVariants.has(variantKey(input.variant))
             ? runSentinelNegativeChecks({
-                  aggregateSelectionPolicyDigest,
-                  bridgeWitnessPrivacyProfileDigest,
+                  aggregateSelectionPolicyHash,
+                  bridgeWitnessPrivacyProfileHash,
                   contribution: contributions[0],
-                  heParamDigest,
+                  heParamHash,
                   kernel: input.kernel,
                   setupPackage,
                   variant: input.variant,

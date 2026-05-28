@@ -26,6 +26,12 @@ const moduleOrder = new Map(
     ]),
 );
 
+type ExtractedFrontmatter = {
+    content: string;
+    lines: readonly string[];
+};
+
+const frontmatterBlockPattern = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/;
 const internalLinkPattern = /(!?\[[^\]]*])\(([^)#\s]+)(#[^)]+)?\)/g;
 const generatedPreamblePattern = /^[\s\S]*?(?:^|\r?\n)# .+\r?\n\r?\n/;
 const sentenceCaseReplacements: readonly (readonly [RegExp, string])[] = [
@@ -78,6 +84,20 @@ const toReferenceRoutePath = (relativePath: string): string => {
 
 const collectMarkdownFiles = async (directory: string): Promise<string[]> =>
     collectFiles(directory, { extensions: ['.md'] });
+
+const extractGeneratedFrontmatter = (content: string): ExtractedFrontmatter => {
+    const match = frontmatterBlockPattern.exec(content);
+    if (match === null) {
+        return { content, lines: [] };
+    }
+
+    const frontmatterText = match[1] ?? '';
+
+    return {
+        content: content.slice(match[0].length),
+        lines: frontmatterText.split(/\r?\n/u),
+    };
+};
 
 const deriveTitleFromRelativePath = (relativePath: string): string => {
     if (relativePath === 'index.md') {
@@ -336,7 +356,6 @@ const main = async (): Promise<void> => {
             titleByPath.get(relativePath) ??
             deriveTitleFromRelativePath(relativePath);
         const order = deriveSidebarOrder(relativePath);
-        const isGeneratedRoot = relativePath === 'index.md';
         const moduleName = moduleNameByReferencePath.get(relativePath);
         const generatedModuleSummary =
             moduleName !== undefined
@@ -344,6 +363,8 @@ const main = async (): Promise<void> => {
                 : undefined;
 
         let content = await fs.readFile(file, 'utf8');
+        const generatedFrontmatter = extractGeneratedFrontmatter(content);
+        content = generatedFrontmatter.content;
         content = content.replace(generatedPreamblePattern, '');
         content = rewriteMarkdownLinks(content, relativePath);
         content = rewriteSentenceCase(content);
@@ -352,17 +373,11 @@ const main = async (): Promise<void> => {
         const frontmatterLines = [
             '---',
             `title: ${JSON.stringify(title)}`,
-            isGeneratedRoot
-                ? 'description: "Export-driven symbol reference for the public API."'
-                : generatedModuleSummary !== undefined
-                  ? `description: ${JSON.stringify(generatedModuleSummary)}`
-                  : null,
-            'editUrl: false',
-            isGeneratedRoot
-                ? 'sidebar:\n  hidden: true'
-                : order !== undefined
-                  ? `sidebar:\n  order: ${order}`
-                  : null,
+            generatedModuleSummary !== undefined
+                ? `description: ${JSON.stringify(generatedModuleSummary)}`
+                : null,
+            ...generatedFrontmatter.lines,
+            order !== undefined ? `sidebar:\n  order: ${order}` : null,
             '---',
             '',
         ].filter((line): line is string => line !== null);

@@ -8,7 +8,7 @@ import {
 } from '../ballot-privacy-proof-record-generation-fixtures';
 
 import {
-    digest,
+    hash,
     fieldProofStatement,
     mandatoryProfileFixtureTimeoutMs,
     receiverEncryptionProofStatement,
@@ -391,37 +391,37 @@ describe('mandatory-profile ballot proof record generation input', () => {
 
     it('rejects mandatory-profile public context binding drift', () => {
         for (const [fieldName, label] of [
-            ['manifestDigest', 'Manifest digest'],
-            ['rosterDigest', 'Roster digest'],
-            ['actionContextDigest', 'Action context digest'],
-            ['rosterExternalAcceptanceDigest', 'Roster acceptance digest'],
+            ['manifestHash', 'Manifest hash'],
+            ['rosterHash', 'Roster hash'],
+            ['actionContextHash', 'Action context hash'],
+            ['rosterExternalAcceptanceHash', 'Roster acceptance hash'],
             [
-                'ballotScoreEncodingProfileDigest',
-                'Ballot score encoding profile digest',
+                'ballotScoreEncodingProfileHash',
+                'Ballot score encoding profile hash',
             ],
             [
-                'ballotShareLayoutProfileDigest',
-                'Ballot share layout profile digest',
+                'ballotShareLayoutProfileHash',
+                'Ballot share layout profile hash',
             ],
             [
-                'aggregateInputEncodingProfileDigest',
-                'Aggregate input encoding profile digest',
+                'aggregateInputEncodingProfileHash',
+                'Aggregate input encoding profile hash',
             ],
             [
-                'encodedShareVectorLayoutDigest',
-                'Encoded share vector layout digest',
+                'encodedShareVectorLayoutHash',
+                'Encoded share vector layout hash',
             ],
-            ['encodedAggregateLayoutDigest', 'Encoded aggregate layout digest'],
+            ['encodedAggregateLayoutHash', 'Encoded aggregate layout hash'],
             [
-                'shareCommitmentMessageBoundCertDigest',
-                'Share commitment message-bound certificate digest',
+                'shareCommitmentMessageBoundCertHash',
+                'Share commitment message-bound certificate hash',
             ],
         ] as const) {
             expect(() =>
                 buildMandatoryRequest({
                     publicContext: {
                         ...fixture.publicContext,
-                        [fieldName]: digest(`wrong-${fieldName}`),
+                        [fieldName]: hash(`wrong-${fieldName}`),
                     },
                 }),
             ).toThrow(new RegExp(label, 'u'));
@@ -439,7 +439,7 @@ describe('mandatory-profile ballot proof record generation input', () => {
                                 receiverPayloadIndex === 0
                                     ? {
                                           ...receiverPayload,
-                                          receiverPayloadDigest: digest(
+                                          receiverPayloadHash: hash(
                                               'wrong-receiver-payload',
                                           ),
                                       }
@@ -447,7 +447,7 @@ describe('mandatory-profile ballot proof record generation input', () => {
                         ),
                 },
             }),
-        ).toThrow(/Receiver payload digest/u);
+        ).toThrow(/Receiver payload hash/u);
 
         expect(() =>
             buildMandatoryRequest({
@@ -459,7 +459,7 @@ describe('mandatory-profile ballot proof record generation input', () => {
                                 receiverPublicKeyIndex === 0
                                     ? {
                                           ...receiverPublicKey,
-                                          receiverPublicKeyDigest: digest(
+                                          receiverPublicKeyHash: hash(
                                               'wrong-receiver-public-key',
                                           ),
                                       }
@@ -467,7 +467,7 @@ describe('mandatory-profile ballot proof record generation input', () => {
                         ),
                 },
             }),
-        ).toThrow(/Receiver public-key digest/u);
+        ).toThrow(/Receiver public-key hash/u);
 
         expect(() =>
             buildMandatoryRequest({
@@ -479,7 +479,7 @@ describe('mandatory-profile ballot proof record generation input', () => {
                                 shareCommitmentIndex === 0
                                     ? {
                                           ...shareCommitment,
-                                          shareCommitmentDigest: digest(
+                                          shareCommitmentHash: hash(
                                               'wrong-share-commitment',
                                           ),
                                       }
@@ -487,7 +487,7 @@ describe('mandatory-profile ballot proof record generation input', () => {
                         ),
                 },
             }),
-        ).toThrow(/Share commitment digest/u);
+        ).toThrow(/Share commitment hash/u);
 
         expect(() =>
             buildMandatoryRequest({

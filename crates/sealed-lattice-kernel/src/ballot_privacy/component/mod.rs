@@ -15,8 +15,7 @@ pub(crate) use backend_sparse::{
 };
 pub(crate) use bundle_validation::{
     collect_ballot_component_bundle_refusals, collect_ballot_component_proof_bundle_refusals,
-    collect_component_proof_statement_plan_shape_refusals,
-    supplied_component_proof_statement_digest,
+    collect_component_proof_statement_plan_shape_refusals, supplied_component_proof_statement_hash,
 };
 pub(crate) use contracts::{
     ALLOWED_BALLOT_PROOF_COMPONENT_STATEMENT_FORMATS, COMPONENT_BUNDLE_INCOMPLETE_COVERAGE,
@@ -43,8 +42,8 @@ pub(crate) use structured_share_commitment_statement::parse_structured_share_com
 
 #[cfg(test)]
 pub(crate) use backend_sparse::{
-    dense_matrix_from_sparse_component_statement, derive_sparse_statement_matrix_digest,
-    derive_sparse_target_vector_digest,
+    dense_matrix_from_sparse_component_statement, derive_sparse_statement_matrix_hash,
+    derive_sparse_target_vector_hash,
 };
 #[cfg(test)]
 pub(crate) use linear_proof_verification::verify_component_linear_proof_bytes;

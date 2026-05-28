@@ -1,12 +1,12 @@
 import path from 'node:path';
 import { performance } from 'node:perf_hooks';
 
-import { deriveProtocolDigest } from '#packages/crypto/src/index';
+import { deriveProtocolHash } from '#packages/crypto/src/index';
 import type { AggregateDerivationWitnessInput } from '#packages/protocol/src/ballot-privacy/index';
 import type {
     AggregateContribution,
     AggregateDerivationComponent,
-    ProtocolDigest,
+    ProtocolHash,
 } from '#packages/types/src/index';
 import { loadTranscriptCoreKernel } from '#packages/wasm/src/index';
 
@@ -35,7 +35,7 @@ export type MatrixRow = {
     readonly selectedContributionCount: number;
     readonly shareVectorWidth: number;
     readonly status: 'passed' | 'failed';
-    readonly thresholdProfileHash: ProtocolDigest;
+    readonly thresholdProfileHash: ProtocolHash;
     readonly trusteeAggregateThreshold: number;
     readonly verifierTime: number;
 };
@@ -50,18 +50,18 @@ export type NegativeCheck = {
 };
 
 export type ShapeConfigRow = {
-    readonly aggregateInputLayoutDigest: ProtocolDigest;
-    readonly bridgeProofStatementDigest: ProtocolDigest;
-    readonly bridgeProofTargetContractDigest: ProtocolDigest;
+    readonly aggregateInputLayoutHash: ProtocolHash;
+    readonly bridgeProofStatementHash: ProtocolHash;
+    readonly bridgeProofTargetContractHash: ProtocolHash;
     readonly claimTier: string;
     readonly failureReason: string | null;
     readonly optionCount: number;
     readonly rosterSize: number;
     readonly selectedContributionCount: number;
     readonly shareVectorWidth: number;
-    readonly statementDimensionDigest: ProtocolDigest;
+    readonly statementDimensionHash: ProtocolHash;
     readonly status: 'passed' | 'failed';
-    readonly thresholdProfileHash: ProtocolDigest;
+    readonly thresholdProfileHash: ProtocolHash;
     readonly trusteeAggregateThreshold: number;
 };
 
@@ -159,8 +159,8 @@ export const benchmarkVariantKeys = new Set([
     '9:20',
 ]);
 
-export const lowerHexDigest = (label: string): ProtocolDigest =>
-    deriveProtocolDigest('ChallengeDomainDigest', {
+export const lowerHexHash = (label: string): ProtocolHash =>
+    deriveProtocolHash('ChallengeDomainHash', {
         label,
         purpose: 'encrypted-aggregate-bridge-matrix',
     });

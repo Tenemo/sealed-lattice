@@ -1,12 +1,12 @@
-import { protocolDigestNamespaceValues } from '@sealed-lattice/types';
+import { protocolHashNamespaceValues } from '@sealed-lattice/types';
 import type { ShareCommitmentMessageBoundCert } from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
 import {
     createBallotPrivacyProfileSet,
     createShareCommitmentMessageBoundCert,
-    deriveBallotPrivacyProfileDigests,
-    deriveShareCommitmentMessageBoundCertDigest,
+    deriveBallotPrivacyProfileHashes,
+    deriveShareCommitmentMessageBoundCertHash,
     verifyShareCommitmentMessageBoundCert,
 } from '../../src/ballot-privacy/index';
 
@@ -25,43 +25,43 @@ const ballotPrivacyProfileVector = ballotPrivacyProfileVectorJson as {
         readonly encodedAggregateLayoutProfileId: string;
         readonly ballotProofProfileId: string;
     };
-    readonly profileDigests: {
-        readonly receiverEncryptionProfileDigest: string;
-        readonly shareCommitmentProfileDigest: string;
-        readonly scoreMembershipProfileDigest: string;
-        readonly ballotScoreEncodingProfileDigest: string;
-        readonly ballotShareLayoutProfileDigest: string;
-        readonly aggregateInputEncodingProfileDigest: string;
-        readonly encodedShareVectorLayoutDigest: string;
-        readonly encodedAggregateLayoutDigest: string;
-        readonly ballotProofProfileDigest: string;
+    readonly profileHashes: {
+        readonly receiverEncryptionProfileHash: string;
+        readonly shareCommitmentProfileHash: string;
+        readonly scoreMembershipProfileHash: string;
+        readonly ballotScoreEncodingProfileHash: string;
+        readonly ballotShareLayoutProfileHash: string;
+        readonly aggregateInputEncodingProfileHash: string;
+        readonly encodedShareVectorLayoutHash: string;
+        readonly encodedAggregateLayoutHash: string;
+        readonly ballotProofProfileHash: string;
     };
     readonly mandatoryBoundCert: {
-        readonly shareCommitmentMessageBoundCertDigest: string;
+        readonly shareCommitmentMessageBoundCertHash: string;
         readonly maximumCanonicalTurnout: number;
         readonly maximumAggregateInteger: number;
         readonly openingRandomnessAggregateBound: number;
     };
     readonly certificateGatedBoundCert: {
-        readonly shareCommitmentMessageBoundCertDigest: string;
+        readonly shareCommitmentMessageBoundCertHash: string;
         readonly maximumCanonicalTurnout: number;
         readonly maximumAggregateInteger: number;
         readonly openingRandomnessAggregateBound: number;
     };
 };
 
-const rehashCertificate = (
+const reHashCertificate = (
     certificate: ShareCommitmentMessageBoundCert,
 ): ShareCommitmentMessageBoundCert => {
-    const certificateWithoutDigest: Omit<
+    const certificateWithoutHash: Omit<
         ShareCommitmentMessageBoundCert,
-        'shareCommitmentMessageBoundCertDigest'
+        'shareCommitmentMessageBoundCertHash'
     > = {
         objectType: certificate.objectType,
         objectVersion: certificate.objectVersion,
         profileId: certificate.profileId,
-        profileDigest: certificate.profileDigest,
-        shareCommitmentProfileDigest: certificate.shareCommitmentProfileDigest,
+        profileHash: certificate.profileHash,
+        shareCommitmentProfileHash: certificate.shareCommitmentProfileHash,
         fieldModulus: certificate.fieldModulus,
         shareVectorWidth: certificate.shareVectorWidth,
         perBallotShareRepresentativeRange:
@@ -78,18 +78,16 @@ const rehashCertificate = (
     };
 
     return {
-        ...certificateWithoutDigest,
-        shareCommitmentMessageBoundCertDigest:
-            deriveShareCommitmentMessageBoundCertDigest(
-                certificateWithoutDigest,
-            ),
+        ...certificateWithoutHash,
+        shareCommitmentMessageBoundCertHash:
+            deriveShareCommitmentMessageBoundCertHash(certificateWithoutHash),
     };
 };
 
 describe('ballot privacy profile freeze', () => {
     it('freezes production-shaped profile choices without using transport KEM as receiver encryption', () => {
         const profileSet = createBallotPrivacyProfileSet();
-        const profileDigests = deriveBallotPrivacyProfileDigests();
+        const profileHashes = deriveBallotPrivacyProfileHashes();
 
         expect(profileSet.receiverEncryptionProfile.profileId).toBe(
             ballotPrivacyProfileVector.profileIds.receiverEncryptionProfileId,
@@ -105,7 +103,7 @@ describe('ballot privacy profile freeze', () => {
         ).toMatchObject({
             encryptsReceiverShareVector: true,
             encryptsShareCommitmentOpening: true,
-            bindsActionContextDigest: true,
+            bindsActionContextHash: true,
         });
         expect(profileSet.shareCommitmentProfile.profileId).toBe(
             ballotPrivacyProfileVector.profileIds.shareCommitmentProfileId,
@@ -163,9 +161,7 @@ describe('ballot privacy profile freeze', () => {
         );
         expect(profileSet.ballotProofProfile.challengeBits).toBe(256);
         expect(profileSet.ballotProofProfile.soundnessBits).toBe(128);
-        expect(profileDigests).toEqual(
-            ballotPrivacyProfileVector.profileDigests,
-        );
+        expect(profileHashes).toEqual(ballotPrivacyProfileVector.profileHashes);
     });
 
     it('creates bound certificates for mandatory and certificate-gated turnout without tally-style share bounds', () => {
@@ -189,18 +185,18 @@ describe('ballot privacy profile freeze', () => {
             verifyShareCommitmentMessageBoundCert({
                 certificate: mandatoryCertificate,
                 expectedMaximumCanonicalTurnout: 20,
-                expectedShareCommitmentProfileDigest:
+                expectedShareCommitmentProfileHash:
                     profileSet.shareCommitmentProfile
-                        .shareCommitmentProfileDigest,
+                        .shareCommitmentProfileHash,
             }).ok,
         ).toBe(true);
         expect(
             verifyShareCommitmentMessageBoundCert({
                 certificate: certificateGatedCertificate,
                 expectedMaximumCanonicalTurnout: 50,
-                expectedShareCommitmentProfileDigest:
+                expectedShareCommitmentProfileHash:
                     profileSet.shareCommitmentProfile
-                        .shareCommitmentProfileDigest,
+                        .shareCommitmentProfileHash,
             }).ok,
         ).toBe(true);
         expect(mandatoryCertificate).toMatchObject(
@@ -217,17 +213,17 @@ describe('ballot privacy profile freeze', () => {
             maximumCanonicalTurnout: 20,
             shareCommitmentProfile: profileSet.shareCommitmentProfile,
         });
-        const wrongDigestCertificate: ShareCommitmentMessageBoundCert = {
+        const wrongHashCertificate: ShareCommitmentMessageBoundCert = {
             ...certificate,
-            shareCommitmentMessageBoundCertDigest: '0'.repeat(128),
+            shareCommitmentMessageBoundCertHash: '0'.repeat(128),
         };
-        const wrappingCertificate = rehashCertificate({
+        const wrappingCertificate = reHashCertificate({
             ...certificate,
             commitmentMessageBound: String(
                 certificate.maximumAggregateInteger - 1,
             ),
         });
-        const inconsistentOpeningCertificate = rehashCertificate({
+        const inconsistentOpeningCertificate = reHashCertificate({
             ...certificate,
             openingRandomnessAggregateBound:
                 certificate.openingRandomnessAggregateBound + 1,
@@ -235,7 +231,7 @@ describe('ballot privacy profile freeze', () => {
 
         expect(
             verifyShareCommitmentMessageBoundCert({
-                certificate: wrongDigestCertificate,
+                certificate: wrongHashCertificate,
             }).refusedObjects.map((refusal) => refusal.code),
         ).toContain('BallotPrivacyProfileInvalid');
         expect(
@@ -255,7 +251,7 @@ describe('ballot privacy profile freeze', () => {
         expect(
             verifyShareCommitmentMessageBoundCert({
                 certificate,
-                expectedShareCommitmentProfileDigest: '1'.repeat(128),
+                expectedShareCommitmentProfileHash: '1'.repeat(128),
             }).refusedObjects.map((refusal) => refusal.message),
         ).toContain(
             'Share commitment message-bound certificate is not bound to the expected share commitment profile.',
@@ -291,26 +287,26 @@ describe('ballot privacy profile freeze', () => {
         }
     });
 
-    it('reserves every ballot privacy digest namespace in the shared registry', () => {
-        expect(protocolDigestNamespaceValues).toEqual(
+    it('reserves every ballot privacy hash namespace in the shared registry', () => {
+        expect(protocolHashNamespaceValues).toEqual(
             expect.arrayContaining([
-                'ReceiverEncryptionProfileDigest',
-                'ShareCommitmentProfileDigest',
-                'BallotProofProfileDigest',
-                'ScoreMembershipProfileDigest',
-                'BallotScoreEncodingProfileDigest',
-                'BallotShareLayoutProfileDigest',
-                'AggregateInputEncodingProfileDigest',
-                'EncodedShareVectorLayoutDigest',
-                'EncodedAggregateLayoutDigest',
-                'ShareCommitmentMessageBoundCertDigest',
-                'ReceiverPayloadDigest',
+                'ReceiverEncryptionProfileHash',
+                'ShareCommitmentProfileHash',
+                'BallotProofProfileHash',
+                'ScoreMembershipProfileHash',
+                'BallotScoreEncodingProfileHash',
+                'BallotShareLayoutProfileHash',
+                'AggregateInputEncodingProfileHash',
+                'EncodedShareVectorLayoutHash',
+                'EncodedAggregateLayoutHash',
+                'ShareCommitmentMessageBoundCertHash',
+                'ReceiverPayloadHash',
                 'ReceiverPayloadCiphertextRoot',
                 'ReceiverKeyProofRoot',
-                'BallotProofStatementDigest',
-                'BallotProofRecordDigest',
-                'ProofBytesDigest',
-                'ChallengeDomainDigest',
+                'BallotProofStatementHash',
+                'BallotProofRecordHash',
+                'ProofBytesHash',
+                'ChallengeDomainHash',
             ]),
         );
     });

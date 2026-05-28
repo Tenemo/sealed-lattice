@@ -14,8 +14,6 @@
         "tests/**/*.ts",
         "vitest.config.ts",
         "eslint.config.js",
-        ".dependency-cruiser.cjs",
-        "lighthouserc.cjs",
         "typedoc.config.mjs"
     ],
     "references": [

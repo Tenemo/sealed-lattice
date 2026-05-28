@@ -1,6 +1,6 @@
-import { deriveProtocolDigest } from '@sealed-lattice/crypto';
+import { deriveProtocolHash } from '@sealed-lattice/crypto';
 import type {
-    ProtocolDigest,
+    ProtocolHash,
     ReceiverEncryptionProfile,
     ReceiverEncryptionPublicKey,
     ShareCommitmentProfile,
@@ -90,30 +90,30 @@ const encodePlaintextChunkPolynomial = (
         },
     );
 
-const deriveReceiverMatrixSeedDigest = (input: {
+const deriveReceiverMatrixSeedHash = (input: {
     readonly ceremonyId: string;
-    readonly manifestDigest: ProtocolDigest;
-    readonly receiverEncryptionProfileDigest: ProtocolDigest;
+    readonly manifestHash: ProtocolHash;
+    readonly receiverEncryptionProfileHash: ProtocolHash;
     readonly receiverIdentity: string;
     readonly receiverRosterPosition: number;
     readonly recoveryEpoch: number;
-    readonly rosterDigest: ProtocolDigest;
-}): ProtocolDigest =>
-    deriveProtocolDigest('ReceiverEncryptionProfileDigest', {
+    readonly rosterHash: ProtocolHash;
+}): ProtocolHash =>
+    deriveProtocolHash('ReceiverEncryptionProfileHash', {
         purpose: 'receiver-public-matrix-seed',
         ...input,
     });
 
-const deriveReceiverKeyMaterialDigest = (input: {
+const deriveReceiverKeyMaterialHash = (input: {
     readonly publicKeyVector: readonly (readonly number[])[];
-    readonly publicMatrixSeedDigest: ProtocolDigest;
-    readonly receiverEncryptionProfileDigest: ProtocolDigest;
-}): ProtocolDigest => deriveProtocolDigest('PublicKeyDigest', input);
+    readonly publicMatrixSeedHash: ProtocolHash;
+    readonly receiverEncryptionProfileHash: ProtocolHash;
+}): ProtocolHash => deriveProtocolHash('PublicKeyHash', input);
 
 export const generateReceiverState = (input: {
     readonly ceremonyId: string;
-    readonly manifestDigest: ProtocolDigest;
-    readonly rosterDigest: ProtocolDigest;
+    readonly manifestHash: ProtocolHash;
+    readonly rosterHash: ProtocolHash;
     readonly receiverIdentity: string;
     readonly receiverRosterPosition: number;
     readonly recoveryEpoch: number;
@@ -121,21 +121,21 @@ export const generateReceiverState = (input: {
     readonly randomnessSource?: BallotPrivacyRandomnessSource;
 }): ReceiverEncryptionState => {
     const randomnessSource = input.randomnessSource ?? { kind: 'production' };
-    const publicMatrixSeedDigest = deriveReceiverMatrixSeedDigest({
+    const publicMatrixSeedHash = deriveReceiverMatrixSeedHash({
         ceremonyId: input.ceremonyId,
-        manifestDigest: input.manifestDigest,
-        receiverEncryptionProfileDigest:
-            input.receiverEncryptionProfile.receiverEncryptionProfileDigest,
+        manifestHash: input.manifestHash,
+        receiverEncryptionProfileHash:
+            input.receiverEncryptionProfile.receiverEncryptionProfileHash,
         receiverIdentity: input.receiverIdentity,
         receiverRosterPosition: input.receiverRosterPosition,
         recoveryEpoch: input.recoveryEpoch,
-        rosterDigest: input.rosterDigest,
+        rosterHash: input.rosterHash,
     });
     const secretVector = sampleCenteredBinomialVector(
         randomnessSource,
         'sealed.vote/internal/receiver-encryption/secret-vector-v1',
         {
-            publicMatrixSeedDigest,
+            publicMatrixSeedHash,
             receiverIdentity: input.receiverIdentity,
             receiverRosterPosition: input.receiverRosterPosition,
         },
@@ -146,7 +146,7 @@ export const generateReceiverState = (input: {
         randomnessSource,
         'sealed.vote/internal/receiver-encryption/key-error-vector-v1',
         {
-            publicMatrixSeedDigest,
+            publicMatrixSeedHash,
             receiverIdentity: input.receiverIdentity,
             receiverRosterPosition: input.receiverRosterPosition,
         },
@@ -154,8 +154,8 @@ export const generateReceiverState = (input: {
         receiverEncryptionModuleDegree,
     );
     const publicMatrix = deriveReceiverPublicMatrix(
-        input.receiverEncryptionProfile.receiverEncryptionProfileDigest,
-        publicMatrixSeedDigest,
+        input.receiverEncryptionProfile.receiverEncryptionProfileHash,
+        publicMatrixSeedHash,
     );
     const publicKeyVector = multiplyMatrixByVector(
         publicMatrix,
@@ -168,28 +168,28 @@ export const generateReceiverState = (input: {
             receiverEncryptionModulus,
         ),
     );
-    const keyMaterialDigest = deriveReceiverKeyMaterialDigest({
+    const keyMaterialHash = deriveReceiverKeyMaterialHash({
         publicKeyVector,
-        publicMatrixSeedDigest,
-        receiverEncryptionProfileDigest:
-            input.receiverEncryptionProfile.receiverEncryptionProfileDigest,
+        publicMatrixSeedHash,
+        receiverEncryptionProfileHash:
+            input.receiverEncryptionProfile.receiverEncryptionProfileHash,
     });
     const receiverPublicKey = createReceiverEncryptionPublicKeyShell({
         ceremonyId: input.ceremonyId,
-        manifestDigest: input.manifestDigest,
-        rosterDigest: input.rosterDigest,
+        manifestHash: input.manifestHash,
+        rosterHash: input.rosterHash,
         receiverIdentity: input.receiverIdentity,
         receiverRosterPosition: input.receiverRosterPosition,
         recoveryEpoch: input.recoveryEpoch,
-        receiverEncryptionProfileDigest:
-            input.receiverEncryptionProfile.receiverEncryptionProfileDigest,
-        keyMaterialDigest,
+        receiverEncryptionProfileHash:
+            input.receiverEncryptionProfile.receiverEncryptionProfileHash,
+        keyMaterialHash,
     });
 
     return {
         publicKeyMaterial: {
             publicKeyVector,
-            publicMatrixSeedDigest,
+            publicMatrixSeedHash,
         },
         receiverPublicKey,
         secretState: {
@@ -268,12 +268,12 @@ const validateReceiverSecretState = (
 
 const deriveExpectedReceiverPublicKeyMaterial = (input: {
     readonly receiverEncryptionProfile: ReceiverEncryptionProfile;
-    readonly publicMatrixSeedDigest: ProtocolDigest;
+    readonly publicMatrixSeedHash: ProtocolHash;
     readonly secretState: ReceiverEncryptionSecretState;
 }): ReceiverEncryptionPublicKeyMaterial => {
     const publicMatrix = deriveReceiverPublicMatrix(
-        input.receiverEncryptionProfile.receiverEncryptionProfileDigest,
-        input.publicMatrixSeedDigest,
+        input.receiverEncryptionProfile.receiverEncryptionProfileHash,
+        input.publicMatrixSeedHash,
     );
     const publicKeyVector = multiplyMatrixByVector(
         publicMatrix,
@@ -289,57 +289,56 @@ const deriveExpectedReceiverPublicKeyMaterial = (input: {
 
     return {
         publicKeyVector,
-        publicMatrixSeedDigest: input.publicMatrixSeedDigest,
+        publicMatrixSeedHash: input.publicMatrixSeedHash,
     };
 };
 
 const deriveReceiverKeyProofRoot = (input: {
-    readonly backendStatementDigest: ProtocolDigest;
-    readonly linearStatementDigest: ProtocolDigest;
+    readonly backendStatementHash: ProtocolHash;
+    readonly linearStatementHash: ProtocolHash;
     readonly receiverEncryptionProfile: ReceiverEncryptionProfile;
     readonly receiverPublicKey: ReceiverEncryptionPublicKey;
     readonly publicKeyMaterial: ReceiverEncryptionPublicKeyMaterial;
-}): ProtocolDigest =>
-    deriveProtocolDigest('ReceiverKeyProofRoot', {
-        backendStatementDigest: input.backendStatementDigest,
+}): ProtocolHash =>
+    deriveProtocolHash('ReceiverKeyProofRoot', {
+        backendStatementHash: input.backendStatementHash,
         coefficientModulus: receiverEncryptionModulus,
         errorInfinityNormBound: receiverEncryptionCenteredBinomialEta,
-        keyMaterialDigest: input.receiverPublicKey.keyMaterialDigest,
-        linearStatementDigest: input.linearStatementDigest,
+        keyMaterialHash: input.receiverPublicKey.keyMaterialHash,
+        linearStatementHash: input.linearStatementHash,
         moduleDegree: receiverEncryptionModuleDegree,
         moduleRank: receiverEncryptionModuleRank,
         proofRelation:
             'receiver_public_key_vector = public_matrix * secret_vector + error_vector mod q_receiver',
         proofRootKind: 'ReceiverKeyRelationLinearStatementAndBackendStatement',
-        publicMatrixSeedDigest: input.publicKeyMaterial.publicMatrixSeedDigest,
-        receiverEncryptionProfileDigest:
-            input.receiverEncryptionProfile.receiverEncryptionProfileDigest,
-        receiverPublicKeyDigest:
-            input.receiverPublicKey.receiverPublicKeyDigest,
+        publicMatrixSeedHash: input.publicKeyMaterial.publicMatrixSeedHash,
+        receiverEncryptionProfileHash:
+            input.receiverEncryptionProfile.receiverEncryptionProfileHash,
+        receiverPublicKeyHash: input.receiverPublicKey.receiverPublicKeyHash,
         secretInfinityNormBound: receiverEncryptionCenteredBinomialEta,
     });
 
 const deriveReceiverKeyProofBytesRoot = (input: {
-    readonly linearStatementDigest: ProtocolDigest;
-    readonly proofBytesDigest: ProtocolDigest;
-    readonly proofEncodingProfileDigest: ProtocolDigest;
-    readonly proofParameterSetDigest: ProtocolDigest;
-    readonly publicRandomnessDigest: ProtocolDigest;
-}): ProtocolDigest =>
-    deriveProtocolDigest('ReceiverKeyProofRoot', {
-        linearStatementDigest: input.linearStatementDigest,
-        proofBytesDigest: input.proofBytesDigest,
-        proofEncodingProfileDigest: input.proofEncodingProfileDigest,
-        proofParameterSetDigest: input.proofParameterSetDigest,
-        publicRandomnessDigest: input.publicRandomnessDigest,
+    readonly linearStatementHash: ProtocolHash;
+    readonly proofBytesHash: ProtocolHash;
+    readonly proofEncodingProfileHash: ProtocolHash;
+    readonly proofParameterSetHash: ProtocolHash;
+    readonly publicRandomnessHash: ProtocolHash;
+}): ProtocolHash =>
+    deriveProtocolHash('ReceiverKeyProofRoot', {
+        linearStatementHash: input.linearStatementHash,
+        proofBytesHash: input.proofBytesHash,
+        proofEncodingProfileHash: input.proofEncodingProfileHash,
+        proofParameterSetHash: input.proofParameterSetHash,
+        publicRandomnessHash: input.publicRandomnessHash,
         purpose: 'receiver-key-linear-proof-record-root-v1',
     });
 
 export {
     encodePayloadPlaintextBits,
     encodePlaintextChunkPolynomial,
-    deriveReceiverMatrixSeedDigest,
-    deriveReceiverKeyMaterialDigest,
+    deriveReceiverMatrixSeedHash,
+    deriveReceiverKeyMaterialHash,
     validateReceiverPublicKeyMaterial,
     validateReceiverSecretState,
     deriveExpectedReceiverPublicKeyMaterial,

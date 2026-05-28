@@ -2,7 +2,6 @@ import path from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import publicSurface from '#packages/sdk/public-surface.json' with { type: 'json' };
 import {
     computeRelativeTypesSpecifier,
     rewriteTypesImports,
@@ -10,6 +9,7 @@ import {
     transpileBridgeSource,
     transpileSdkInternalSource,
 } from '#tools/ci/build-sdk-bridge';
+import { vendoredProtocolRuntimeModules } from '#tools/ci/verify-public-package-policy';
 
 const distRoot = path.resolve('/fake-repo/packages/sdk/dist');
 const typesRuntime = path.resolve(distRoot, 'internal/types.js');
@@ -70,7 +70,7 @@ describe('SDK bridge build helpers', () => {
 
     it('vendors only SDK-safe protocol runtime modules', () => {
         expect(sdkProtocolRuntimeSourceRelativePaths).toEqual(
-            publicSurface.vendoredProtocolRuntimeModules,
+            vendoredProtocolRuntimeModules,
         );
         expect(sdkProtocolRuntimeSourceRelativePaths).toContain(
             'board/index.ts',

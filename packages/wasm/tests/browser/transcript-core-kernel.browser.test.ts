@@ -41,14 +41,14 @@ const fullyVerifiedDevelopmentIntegrationFixture = findFixture(
 );
 const invalidEnumFixture = findFixture(malformedObjectFixtures, 'invalid-enum');
 const browserM7BgvVectors = {
-    profileDigest:
-        'd875931773a704df5f3b5d3dad4ef526bbe671a66465b75c19b2c1190929f86326822cd3ede1233eba2905a4b3c086e0426af5a3f7150f537d76b8349f73b3c2',
-    batchLayoutBindingDigest:
-        '14e66d0972e0a8afc5799add5cea3d09c3ae1f08c6850558d988e47b8f953dc847922c1fba7b372051a565e6b7e1ea5a2f6a864f31dc3b26607c933d9b462e8f',
+    profileHash:
+        '4a2efbb3218fcbde79d396688ebd4bf5f5ed7300f23316e6900aa0cb7dd0057bccc3892df183a6a4f628cc26c8163cf9b226e37f54519216067be5efd5ca743e',
+    batchLayoutBindingHash:
+        '3bb25a676dc61ef33169966d56979638fc95efa887339506919d0c1ba64ec881c96d98453a7f2cc1d31b5eca7ce8b132022a12d3b58a1fe22c4355beaee58d6e',
     encodedPlaintextRoot:
-        '59a29e210357f4e860c4c7b44b541956fc2d2ca425eefcb344dbd303420ffa44419674197bf746a0ca4dee937832b925a34ac008194c411c96ad9c6f94285c75',
+        '92cf108ea1bf78bf8b4acff606df99b2b5d342fe8caac81f1dbc3eaa166b31bf61b2453d57630109422b14e9cbdf8cf327ce56793cb676a10888c5f6c1c12edd',
     encodedPlaintextHash:
-        '73a193fc97dad594fe063c04e1b0184d57901441ac520e8355f0e176378c1e1877bc86be1ebf9d873c7007551024cdb08b4af32935e7b56993e233c5a1771b70',
+        'd77e7936e25849fa95ac455dd4b1e2502b9f502491d0657c41035b0c91aa625762f77bdd6e24c236417eeab50d7afdeea376cabf1d737df587de3932b9fc641e',
 } as const;
 
 describe('transcript-core kernel in browsers', () => {
@@ -82,16 +82,16 @@ describe('transcript-core kernel in browsers', () => {
         });
     });
 
-    it('derives protocol digest and field checks through WASM', async () => {
+    it('derives protocol hash and field checks through WASM', async () => {
         const kernel = await loadTranscriptCoreKernel();
 
         expect(
-            kernel.deriveProtocolDigest({
-                namespace: 'PollSpecDigest',
+            kernel.deriveProtocolHash({
+                namespace: 'PollSpecHash',
                 value: { poll: 'main' },
             }),
         ).toBe(
-            '423c71de65abadb5adc05d9b6b704252420bb738af888c62614c8afc53a2be808662585305e76738b23e4f20154f8779e3827c0c8f313455d84675924f4a2c83',
+            '43b28c9a3dcb3e34d75c9936a9930b68fb9f2010b87d43a6a61cbaa85d343d9fd0be2b312a90f404367b9c68793b0dcf02c4dae7351f6e96ded894b92f898cb4',
         );
         expect(
             kernel.interpolateShamirConstantTerm({
@@ -124,9 +124,9 @@ describe('transcript-core kernel in browsers', () => {
             includeCanonicalBytesHex: true,
         });
 
-        expect(profile.profileDigest).toBe(browserM7BgvVectors.profileDigest);
-        expect(profile.batchLayoutBindingDigest).toBe(
-            browserM7BgvVectors.batchLayoutBindingDigest,
+        expect(profile.profileHash).toBe(browserM7BgvVectors.profileHash);
+        expect(profile.batchLayoutBindingHash).toBe(
+            browserM7BgvVectors.batchLayoutBindingHash,
         );
         expect(encodedResult).not.toMatchObject({ ok: false });
         const encoded = encodedResult as {

@@ -105,7 +105,7 @@ export const negativeInventory: readonly NegativeInventoryItem[] = [
     },
     {
         description:
-            'Mutated shared-witness commitments, Fiat-Shamir challenges, transcript labels, proof/status digests, status evidence, and out-of-bound response vectors must reject.',
+            'Mutated shared-witness commitments, Fiat-Shamir challenges, transcript labels, proof/status Hashes, status evidence, and out-of-bound response vectors must reject.',
         id: 'shared-witness-proof-binding',
         rdrSource: 'RDR-M9 section 10',
         requiredSurfaces: ['matrix-sentinel', 'rust-wasm-verifier'],
@@ -113,7 +113,7 @@ export const negativeInventory: readonly NegativeInventoryItem[] = [
     },
     {
         description:
-            'Mutated BGV randomness-bound commitments, support-polynomial commitments, status evidence, status digests, and unsupported boundedness proof-byte decorations must reject.',
+            'Mutated BGV randomness-bound commitments, support-polynomial commitments, status evidence, status Hashes, and unsupported boundedness proof-byte decorations must reject.',
         id: 'bgv-boundedness-status-binding',
         rdrSource: 'RDR-M9 section 10',
         requiredSurfaces: ['matrix-sentinel', 'rust-wasm-verifier'],
@@ -137,7 +137,7 @@ export const negativeInventory: readonly NegativeInventoryItem[] = [
     },
     {
         description:
-            'The public SDK bridge verifier must reject malformed proofs, unrelated contexts, wrong digest roots, sampled-only evidence, and unpinned package-kernel behavior without exposing generation or witness material.',
+            'The public SDK bridge verifier must reject malformed proofs, unrelated contexts, wrong hash roots, sampled-only evidence, and unpinned package-kernel behavior without exposing generation or witness material.',
         id: 'public-sdk-misuse-coverage',
         rdrSource: 'RDR-M9 section 10',
         requiredSurfaces: ['sdk-verifier'],

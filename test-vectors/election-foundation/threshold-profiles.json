@@ -11,7 +11,7 @@
         "rosterProfileKind": "MandatoryBenchmarkRoster",
         "claimBoundary": "MandatoryBenchmark",
         "claimBearing": true,
-        "dynamicRosterProfileCertificateDigest": null,
+        "dynamicRosterProfileCertificateHash": null,
         "structuralCorruptionBound": 6,
         "backendCorruptionBound": 6,
         "privacyCorruptionBound": 6,
@@ -37,14 +37,14 @@
       "caseName": "n30-certified-dynamic-profile",
       "input": {
         "rosterSize": 30,
-        "dynamicRosterProfileCertificateDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        "dynamicRosterProfileCertificateHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
       },
       "expected": {
         "rosterSize": 30,
         "rosterProfileKind": "SupportedDynamicRosterRange",
         "claimBoundary": "DynamicRosterCertificate",
         "claimBearing": true,
-        "dynamicRosterProfileCertificateDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "dynamicRosterProfileCertificateHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "structuralCorruptionBound": 10,
         "backendCorruptionBound": 9,
         "privacyCorruptionBound": 9,
@@ -70,14 +70,14 @@
       "caseName": "n40-certified-dynamic-profile",
       "input": {
         "rosterSize": 40,
-        "dynamicRosterProfileCertificateDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        "dynamicRosterProfileCertificateHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
       },
       "expected": {
         "rosterSize": 40,
         "rosterProfileKind": "SupportedDynamicRosterRange",
         "claimBoundary": "DynamicRosterCertificate",
         "claimBearing": true,
-        "dynamicRosterProfileCertificateDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "dynamicRosterProfileCertificateHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "structuralCorruptionBound": 13,
         "backendCorruptionBound": 13,
         "privacyCorruptionBound": 13,
@@ -103,14 +103,14 @@
       "caseName": "n50-certified-dynamic-profile",
       "input": {
         "rosterSize": 50,
-        "dynamicRosterProfileCertificateDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        "dynamicRosterProfileCertificateHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
       },
       "expected": {
         "rosterSize": 50,
         "rosterProfileKind": "SupportedDynamicRosterRange",
         "claimBoundary": "DynamicRosterCertificate",
         "claimBearing": true,
-        "dynamicRosterProfileCertificateDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "dynamicRosterProfileCertificateHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "structuralCorruptionBound": 16,
         "backendCorruptionBound": 16,
         "privacyCorruptionBound": 16,
@@ -143,7 +143,7 @@
         "rosterProfileKind": "CasualMicroRoster",
         "claimBoundary": "CasualMicroRoster",
         "claimBearing": false,
-        "dynamicRosterProfileCertificateDigest": null,
+        "dynamicRosterProfileCertificateHash": null,
         "structuralCorruptionBound": 3,
         "backendCorruptionBound": 2,
         "privacyCorruptionBound": 2,
@@ -172,9 +172,9 @@
         "rosterSize": 20,
         "targetBoundShareSelectionProfile": {
           "profileId": "target-bound-first-valid-share-selection-v1",
-          "certificateDigest": "target-bound-certificate-digest",
+          "certificateHash": "target-bound-certificate-hash",
           "cpadProfileId": "KLLPS26-AsyncLagrangeTarget-CPAD-v1",
-          "targetBasisDigest": "target-basis-digest",
+          "targetBasisHash": "target-basis-hash",
           "decryptionShareQuorum": 9,
           "minimumSharesForInterpolation": 7,
           "minimumArrivalsForRobustDecode": 9,
@@ -187,7 +187,7 @@
         "rosterProfileKind": "MandatoryBenchmarkRoster",
         "claimBoundary": "MandatoryBenchmark",
         "claimBearing": true,
-        "dynamicRosterProfileCertificateDigest": null,
+        "dynamicRosterProfileCertificateHash": null,
         "structuralCorruptionBound": 6,
         "backendCorruptionBound": 6,
         "privacyCorruptionBound": 6,
@@ -200,9 +200,9 @@
         "decryptionShareQuorum": 9,
         "targetBoundShareSelectionProfile": {
           "profileId": "target-bound-first-valid-share-selection-v1",
-          "certificateDigest": "target-bound-certificate-digest",
+          "certificateHash": "target-bound-certificate-hash",
           "cpadProfileId": "KLLPS26-AsyncLagrangeTarget-CPAD-v1",
-          "targetBasisDigest": "target-basis-digest",
+          "targetBasisHash": "target-basis-hash",
           "decryptionShareQuorum": 9,
           "minimumSharesForInterpolation": 7,
           "minimumArrivalsForRobustDecode": 9,

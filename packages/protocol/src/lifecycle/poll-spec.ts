@@ -1,10 +1,10 @@
-import { deriveProtocolDigest } from '@sealed-lattice/crypto';
+import { deriveProtocolHash } from '@sealed-lattice/crypto';
 import type {
     DuplicateBallotPolicy,
     PollSpec,
     PollSpecValidation,
     PollSpecValidationError,
-    ProtocolDigest,
+    ProtocolHash,
     RosterPolicy,
     ScoreDomain,
     SmallRosterPolicy,
@@ -94,8 +94,8 @@ const isSupportedSmallRosterPolicy = (
 const normalizeRosterBound = (value: unknown, defaultValue: number): number =>
     typeof value === 'number' ? value : defaultValue;
 
-export const derivePollSpecDigest = (pollSpec: PollSpec): ProtocolDigest =>
-    deriveProtocolDigest('PollSpecDigest', {
+export const derivePollSpecHash = (pollSpec: PollSpec): ProtocolHash =>
+    deriveProtocolHash('PollSpecHash', {
         duplicateBallotPolicy: pollSpec.duplicateBallotPolicy,
         maxRosterSize: pollSpec.maxRosterSize,
         minRosterSize: pollSpec.minRosterSize,

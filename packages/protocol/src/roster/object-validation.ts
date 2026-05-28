@@ -11,7 +11,7 @@ import {
 import type {
     ElectionManifest,
     InclusionProof,
-    ProtocolDigest,
+    ProtocolHash,
     ReceiverKeyRegistration,
     RefusalRecord,
     RegistrationEntry,
@@ -23,68 +23,68 @@ import type {
 
 import {
     createRefusal,
-    defaultSignedRootContextDigest,
+    defaultSignedRootContextHash,
     isNonNegativeInteger,
     signedObjectRootByteLength,
 } from '../common/verification-helpers.js';
 
 import {
-    deriveElectionManifestDigest,
-    deriveReceiverKeyRegistrationDigest,
-    deriveRegistrationEntryDigest,
-    deriveRosterExternalAcceptanceDigest,
-    deriveTrusteeSetupEntryDigest,
-} from './digests.js';
+    deriveElectionManifestHash,
+    deriveReceiverKeyRegistrationHash,
+    deriveRegistrationEntryHash,
+    deriveRosterExternalAcceptanceHash,
+    deriveTrusteeSetupEntryHash,
+} from './hashes.js';
 
-const protocolDigestPattern = /^[0-9a-f]{128}$/u;
+const protocolHashPattern = /^[0-9a-f]{128}$/u;
 
-const isProtocolDigestString = (value: ProtocolDigest): boolean =>
-    protocolDigestPattern.test(value);
+const isProtocolHashString = (value: ProtocolHash): boolean =>
+    protocolHashPattern.test(value);
 
 const manifestOpaqueBindingFieldNames = new Set([
     'encryptedAggregateBridgeProfileId',
     'bgvPassiveSetupProfileId',
     'bridgeWitnessPrivacyProfileId',
-    'heParamDigest',
-    'bgvPassiveSetupPackageDigest',
-    'bgvSetupParameterCertificateDigest',
-    'bgvProfileDigest',
-    'rustBgvBackendProfileDigest',
+    'heParamHash',
+    'bgvPassiveSetupPackageHash',
+    'bgvSetupParameterCertificateHash',
+    'bgvProfileHash',
+    'rustBgvBackendProfileHash',
     'bgvPublicKeyRoot',
     'collectivePublicKeyRoot',
-    'collectiveSecretDistributionCertificateDigest',
-    'errorDistributionCertificateDigest',
-    'keySwitchDecompositionDigest',
-    'canonicalCiphertextConventionDigest',
-    'encryptedAggregateBridgeDigest',
-    'bridgeWitnessPrivacyProfileDigest',
-    'bgvBatchEncoderDigest',
-    'bridgeLayoutDigest',
+    'collectiveSecretDistributionCertificateHash',
+    'errorDistributionCertificateHash',
+    'keySwitchDecompositionHash',
+    'canonicalCiphertextConventionHash',
+    'encryptedAggregateBridgeHash',
+    'bridgeWitnessPrivacyProfileHash',
+    'bgvBatchEncoderHash',
+    'bridgeLayoutHash',
     'encryptedAggregateInputRoot',
     'encryptedAggregateShareCiphertextRoot',
-    'encryptedAggregateReconstructionDigest',
-    'scoreBitDerivationCircuitDigest',
-    'encryptedScoreBitInputDigest',
-    'comparisonInputDerivationCircuitDigest',
-    'encryptedComparisonInputDigest',
-    'evaluationNoiseProfileDigest',
-    'heEvaluationNoiseCertDigest',
-    'allowedEvaluatorOpsDigest',
-    'rotSetDigest',
+    'encryptedAggregateReconstructionHash',
+    'scoreBitDerivationCircuitHash',
+    'encryptedScoreBitInputHash',
+    'comparisonInputDerivationCircuitHash',
+    'encryptedComparisonInputHash',
+    'evaluationNoiseProfileHash',
+    'heEvaluationNoiseCertHash',
+    'allowedEvaluatorOpsHash',
+    'rotSetHash',
     'evaluationKeyRoot',
-    'evaluationKeySizeProfileDigest',
+    'evaluationKeySizeProfileHash',
     'thresholdShareVerificationKeyRoot',
-    'thresholdShareVerificationKeyDigest',
+    'thresholdShareVerificationKeyHash',
     'evaluationProofProfileId',
-    'evaluationProofProfileDigest',
+    'evaluationProofProfileHash',
     'thresholdDecryptionProfileId',
-    'thresholdDecryptionProfileDigest',
-    'kllpsTargetDecryptionProfileDigest',
+    'thresholdDecryptionProfileHash',
+    'kllpsTargetDecryptionProfileHash',
     'cpadProfileId',
-    'cpadProfileDigest',
-    'targetBasisDigest',
+    'cpadProfileHash',
+    'targetBasisHash',
     'mobileProfileId',
-    'bridgeBenchmarkReportPolicyDigest',
+    'bridgeBenchmarkReportPolicyHash',
 ]);
 
 const manifestOpaqueBindingFieldCount = manifestOpaqueBindingFieldNames.size;
@@ -109,9 +109,9 @@ const collectManifestOpaqueBindingRefusals = (
     ) {
         refusedObjects.push(
             createRefusal(
-                'ManifestDigestMismatch',
+                'ManifestHashMismatch',
                 'Election manifest must bind the fixed packed BGV bridge, evaluation-proof, threshold-decryption, CPAD, and mobile profile identifiers.',
-                manifest.electionManifestDigest,
+                manifest.electionManifestHash,
                 'ElectionManifest',
             ),
         );
@@ -125,63 +125,61 @@ const collectManifestOpaqueBindingRefusals = (
     ) {
         refusedObjects.push(
             createRefusal(
-                'ManifestDigestMismatch',
+                'ManifestHashMismatch',
                 'Election manifest opaque bindings must use the current encrypted-aggregate profile schema.',
-                manifest.electionManifestDigest,
+                manifest.electionManifestHash,
                 'ElectionManifest',
             ),
         );
     }
 
-    const requiredDigestFields = [
-        bindings.heParamDigest,
-        bindings.bgvPassiveSetupPackageDigest,
-        bindings.bgvSetupParameterCertificateDigest,
-        bindings.bgvProfileDigest,
-        bindings.rustBgvBackendProfileDigest,
+    const requiredHashFields = [
+        bindings.heParamHash,
+        bindings.bgvPassiveSetupPackageHash,
+        bindings.bgvSetupParameterCertificateHash,
+        bindings.bgvProfileHash,
+        bindings.rustBgvBackendProfileHash,
         bindings.bgvPublicKeyRoot,
         bindings.collectivePublicKeyRoot,
-        bindings.collectiveSecretDistributionCertificateDigest,
-        bindings.errorDistributionCertificateDigest,
-        bindings.keySwitchDecompositionDigest,
-        bindings.canonicalCiphertextConventionDigest,
-        bindings.encryptedAggregateBridgeDigest,
-        bindings.bridgeWitnessPrivacyProfileDigest,
-        bindings.bgvBatchEncoderDigest,
-        bindings.bridgeLayoutDigest,
+        bindings.collectiveSecretDistributionCertificateHash,
+        bindings.errorDistributionCertificateHash,
+        bindings.keySwitchDecompositionHash,
+        bindings.canonicalCiphertextConventionHash,
+        bindings.encryptedAggregateBridgeHash,
+        bindings.bridgeWitnessPrivacyProfileHash,
+        bindings.bgvBatchEncoderHash,
+        bindings.bridgeLayoutHash,
         bindings.encryptedAggregateInputRoot,
         bindings.encryptedAggregateShareCiphertextRoot,
-        bindings.encryptedAggregateReconstructionDigest,
-        bindings.scoreBitDerivationCircuitDigest,
-        bindings.encryptedScoreBitInputDigest,
-        bindings.comparisonInputDerivationCircuitDigest,
-        bindings.encryptedComparisonInputDigest,
-        bindings.evaluationNoiseProfileDigest,
-        bindings.heEvaluationNoiseCertDigest,
-        bindings.allowedEvaluatorOpsDigest,
-        bindings.rotSetDigest,
+        bindings.encryptedAggregateReconstructionHash,
+        bindings.scoreBitDerivationCircuitHash,
+        bindings.encryptedScoreBitInputHash,
+        bindings.comparisonInputDerivationCircuitHash,
+        bindings.encryptedComparisonInputHash,
+        bindings.evaluationNoiseProfileHash,
+        bindings.heEvaluationNoiseCertHash,
+        bindings.allowedEvaluatorOpsHash,
+        bindings.rotSetHash,
         bindings.evaluationKeyRoot,
-        bindings.evaluationKeySizeProfileDigest,
+        bindings.evaluationKeySizeProfileHash,
         bindings.thresholdShareVerificationKeyRoot,
-        bindings.thresholdShareVerificationKeyDigest,
-        bindings.evaluationProofProfileDigest,
-        bindings.thresholdDecryptionProfileDigest,
-        bindings.kllpsTargetDecryptionProfileDigest,
-        bindings.cpadProfileDigest,
-        bindings.targetBasisDigest,
-        bindings.bridgeBenchmarkReportPolicyDigest,
+        bindings.thresholdShareVerificationKeyHash,
+        bindings.evaluationProofProfileHash,
+        bindings.thresholdDecryptionProfileHash,
+        bindings.kllpsTargetDecryptionProfileHash,
+        bindings.cpadProfileHash,
+        bindings.targetBasisHash,
+        bindings.bridgeBenchmarkReportPolicyHash,
     ];
 
     if (
-        requiredDigestFields.some(
-            (digestField) => !isProtocolDigestString(digestField),
-        )
+        requiredHashFields.some((HashField) => !isProtocolHashString(HashField))
     ) {
         refusedObjects.push(
             createRefusal(
-                'ManifestDigestMismatch',
-                'Election manifest opaque bindings must include canonical downstream profile and certificate digests.',
-                manifest.electionManifestDigest,
+                'ManifestHashMismatch',
+                'Election manifest opaque bindings must include canonical downstream profile and certificate Hashes.',
+                manifest.electionManifestHash,
                 'ElectionManifest',
             ),
         );
@@ -195,7 +193,7 @@ export const verifyRegistrationEntry = (
     entry: RegistrationEntry,
 ): readonly RefusalRecord[] => {
     const refusedObjects: RefusalRecord[] = [];
-    const expectedDigest = deriveRegistrationEntryDigest({
+    const expectedHash = deriveRegistrationEntryHash({
         boardPosition: entry.boardPosition,
         boardSequence: entry.boardSequence,
         ceremonyId: entry.ceremonyId,
@@ -204,15 +202,15 @@ export const verifyRegistrationEntry = (
         objectVersion: entry.objectVersion,
         participantIdentity: entry.participantIdentity,
         recoveryEpoch: entry.recoveryEpoch,
-        signingPublicKeyDigest: entry.signingPublicKeyDigest,
+        signingPublicKeyHash: entry.signingPublicKeyHash,
     });
 
-    if (entry.registrationEntryDigest !== expectedDigest) {
+    if (entry.registrationEntryHash !== expectedHash) {
         refusedObjects.push(
             createRefusal(
                 'InvalidSignedRoot',
-                'Registration entry digest does not match its canonical payload.',
-                entry.registrationEntryDigest,
+                'Registration entry hash does not match its canonical payload.',
+                entry.registrationEntryHash,
                 'RegistrationEntry',
             ),
         );
@@ -229,7 +227,7 @@ export const verifyRegistrationEntry = (
             createRefusal(
                 'InvalidSignedRoot',
                 'Registration entry object shape is not canonical.',
-                entry.registrationEntryDigest,
+                entry.registrationEntryHash,
                 'RegistrationEntry',
             ),
         );
@@ -239,7 +237,7 @@ export const verifyRegistrationEntry = (
             createRefusal(
                 'WrongCeremony',
                 'Registration entry ceremony does not match the transcript.',
-                entry.registrationEntryDigest,
+                entry.registrationEntryHash,
                 'RegistrationEntry',
             ),
         );
@@ -249,7 +247,7 @@ export const verifyRegistrationEntry = (
             createRefusal(
                 'LateRegistration',
                 'Registration entry must appear before the roster freeze board sequence.',
-                entry.registrationEntryDigest,
+                entry.registrationEntryHash,
                 'RegistrationEntry',
             ),
         );
@@ -261,14 +259,14 @@ export const verifyRegistrationEntry = (
         signerRole: 'Participant',
         signerIdentity: entry.participantIdentity,
         ceremonyId: input.ceremonyId,
-        manifestDigest: null,
-        objectRoot: entry.registrationEntryDigest,
-        boardHeadDigest: null,
+        manifestHash: null,
+        objectRoot: entry.registrationEntryHash,
+        boardHeadHash: null,
         byteLength: signedObjectRootByteLength,
         recoveryEpoch: entry.recoveryEpoch,
         deviceEpoch: entry.deviceEpoch,
-        contextDigest: defaultSignedRootContextDigest,
-        publicKeyDigest: entry.signingPublicKeyDigest,
+        contextHash: defaultSignedRootContextHash,
+        publicKeyHash: entry.signingPublicKeyHash,
     });
     refusedObjects.push(...signatureResult.refusedObjects);
 
@@ -278,10 +276,10 @@ export const verifyRegistrationEntry = (
 export const verifyReceiverKeyRegistration = (
     input: RosterManifestTranscriptInput,
     entry: ReceiverKeyRegistration,
-    expectedPublicKeyDigest: ProtocolDigest | undefined,
+    expectedPublicKeyHash: ProtocolHash | undefined,
 ): readonly RefusalRecord[] => {
     const refusedObjects: RefusalRecord[] = [];
-    const expectedDigest = deriveReceiverKeyRegistrationDigest({
+    const expectedHash = deriveReceiverKeyRegistrationHash({
         boardPosition: entry.boardPosition,
         boardSequence: entry.boardSequence,
         ceremonyId: entry.ceremonyId,
@@ -293,12 +291,12 @@ export const verifyReceiverKeyRegistration = (
         recoveryEpoch: entry.recoveryEpoch,
     });
 
-    if (entry.receiverKeyRegistrationDigest !== expectedDigest) {
+    if (entry.receiverKeyRegistrationHash !== expectedHash) {
         refusedObjects.push(
             createRefusal(
                 'InvalidSignedRoot',
-                'Receiver-key registration digest does not match its canonical payload.',
-                entry.receiverKeyRegistrationDigest,
+                'Receiver-key registration hash does not match its canonical payload.',
+                entry.receiverKeyRegistrationHash,
                 'ReceiverKeyRegistration',
             ),
         );
@@ -315,7 +313,7 @@ export const verifyReceiverKeyRegistration = (
             createRefusal(
                 'InvalidSignedRoot',
                 'Receiver-key registration object shape is not canonical.',
-                entry.receiverKeyRegistrationDigest,
+                entry.receiverKeyRegistrationHash,
                 'ReceiverKeyRegistration',
             ),
         );
@@ -325,7 +323,7 @@ export const verifyReceiverKeyRegistration = (
             createRefusal(
                 'WrongCeremony',
                 'Receiver-key registration ceremony does not match the transcript.',
-                entry.receiverKeyRegistrationDigest,
+                entry.receiverKeyRegistrationHash,
                 'ReceiverKeyRegistration',
             ),
         );
@@ -335,17 +333,17 @@ export const verifyReceiverKeyRegistration = (
             createRefusal(
                 'LateRegistration',
                 'Receiver-key registration must appear before the roster freeze board sequence.',
-                entry.receiverKeyRegistrationDigest,
+                entry.receiverKeyRegistrationHash,
                 'ReceiverKeyRegistration',
             ),
         );
     }
-    if (expectedPublicKeyDigest === undefined) {
+    if (expectedPublicKeyHash === undefined) {
         refusedObjects.push(
             createRefusal(
-                'RosterDigestMismatch',
+                'RosterHashMismatch',
                 'Receiver-key registration identity is not in the frozen roster.',
-                entry.receiverKeyRegistrationDigest,
+                entry.receiverKeyRegistrationHash,
                 'ReceiverKeyRegistration',
             ),
         );
@@ -357,14 +355,14 @@ export const verifyReceiverKeyRegistration = (
         signerRole: 'Participant',
         signerIdentity: entry.participantIdentity,
         ceremonyId: input.ceremonyId,
-        manifestDigest: null,
-        objectRoot: entry.receiverKeyRegistrationDigest,
-        boardHeadDigest: null,
+        manifestHash: null,
+        objectRoot: entry.receiverKeyRegistrationHash,
+        boardHeadHash: null,
         byteLength: signedObjectRootByteLength,
         recoveryEpoch: entry.recoveryEpoch,
         deviceEpoch: entry.deviceEpoch,
-        contextDigest: defaultSignedRootContextDigest,
-        publicKeyDigest: expectedPublicKeyDigest,
+        contextHash: defaultSignedRootContextHash,
+        publicKeyHash: expectedPublicKeyHash,
     });
     refusedObjects.push(...signatureResult.refusedObjects);
 
@@ -374,40 +372,40 @@ export const verifyReceiverKeyRegistration = (
 export const verifyTrusteeSetupEntry = (
     input: RosterManifestTranscriptInput,
     entry: TrusteeSetupEntry,
-    expectedPublicKeyDigest: ProtocolDigest | undefined,
+    expectedPublicKeyHash: ProtocolHash | undefined,
 ): readonly RefusalRecord[] => {
     const refusedObjects: RefusalRecord[] = [];
-    const expectedDigest = deriveTrusteeSetupEntryDigest({
+    const expectedHash = deriveTrusteeSetupEntryHash({
         boardPosition: entry.boardPosition,
         boardSequence: entry.boardSequence,
-        bgvProfileDigest: entry.bgvProfileDigest,
+        bgvProfileHash: entry.bgvProfileHash,
         collectivePublicKeyRoot: entry.collectivePublicKeyRoot,
         ceremonyId: entry.ceremonyId,
         deviceEpoch: entry.deviceEpoch,
         evaluationKeyRoot: entry.evaluationKeyRoot,
         objectType: entry.objectType,
         objectVersion: entry.objectVersion,
-        participantSetupRecordDigest: entry.participantSetupRecordDigest,
+        participantSetupRecordHash: entry.participantSetupRecordHash,
         publicKeyShareRoot: entry.publicKeyShareRoot,
         recoveryEpoch: entry.recoveryEpoch,
-        rotSetDigest: entry.rotSetDigest,
-        rustBgvBackendProfileDigest: entry.rustBgvBackendProfileDigest,
+        rotSetHash: entry.rotSetHash,
+        rustBgvBackendProfileHash: entry.rustBgvBackendProfileHash,
         setupProfileId: entry.setupProfileId,
         thresholdDecryptionProfileId: entry.thresholdDecryptionProfileId,
         thresholdShareVerificationKeyRoot:
             entry.thresholdShareVerificationKeyRoot,
-        trusteeThresholdVerificationKeyDigest:
-            entry.trusteeThresholdVerificationKeyDigest,
+        trusteeThresholdVerificationKeyHash:
+            entry.trusteeThresholdVerificationKeyHash,
         trusteeIdentity: entry.trusteeIdentity,
         trusteeSetupRoot: entry.trusteeSetupRoot,
     });
 
-    if (entry.trusteeSetupEntryDigest !== expectedDigest) {
+    if (entry.trusteeSetupEntryHash !== expectedHash) {
         refusedObjects.push(
             createRefusal(
                 'InvalidSignedRoot',
-                'Trustee setup entry digest does not match its canonical payload.',
-                entry.trusteeSetupEntryDigest,
+                'Trustee setup entry hash does not match its canonical payload.',
+                entry.trusteeSetupEntryHash,
                 'TrusteeSetupEntry',
             ),
         );
@@ -426,54 +424,54 @@ export const verifyTrusteeSetupEntry = (
             createRefusal(
                 'InvalidSignedRoot',
                 'Trustee setup entry object shape is not canonical.',
-                entry.trusteeSetupEntryDigest,
+                entry.trusteeSetupEntryHash,
                 'TrusteeSetupEntry',
             ),
         );
     }
-    const requiredSetupDigests = [
+    const requiredSetupHashes = [
         entry.trusteeSetupRoot,
-        entry.bgvProfileDigest,
-        entry.rustBgvBackendProfileDigest,
-        entry.participantSetupRecordDigest,
+        entry.bgvProfileHash,
+        entry.rustBgvBackendProfileHash,
+        entry.participantSetupRecordHash,
         entry.publicKeyShareRoot,
         entry.collectivePublicKeyRoot,
-        entry.trusteeThresholdVerificationKeyDigest,
+        entry.trusteeThresholdVerificationKeyHash,
         entry.thresholdShareVerificationKeyRoot,
         entry.evaluationKeyRoot,
-        entry.rotSetDigest,
+        entry.rotSetHash,
     ];
     if (
-        requiredSetupDigests.some(
-            (digestField) => !isProtocolDigestString(digestField),
+        requiredSetupHashes.some(
+            (HashField) => !isProtocolHashString(HashField),
         )
     ) {
         refusedObjects.push(
             createRefusal(
                 'InvalidSignedRoot',
-                'Trustee setup entry must bind complete M8 setup roots and digests.',
-                entry.trusteeSetupEntryDigest,
+                'Trustee setup entry must bind complete M8 setup roots and Hashes.',
+                entry.trusteeSetupEntryHash,
                 'TrusteeSetupEntry',
             ),
         );
     }
     const manifestBindings = input.electionManifest.manifestOpaqueBindings;
     if (
-        entry.bgvProfileDigest !== manifestBindings.bgvProfileDigest ||
-        entry.rustBgvBackendProfileDigest !==
-            manifestBindings.rustBgvBackendProfileDigest ||
+        entry.bgvProfileHash !== manifestBindings.bgvProfileHash ||
+        entry.rustBgvBackendProfileHash !==
+            manifestBindings.rustBgvBackendProfileHash ||
         entry.collectivePublicKeyRoot !==
             manifestBindings.collectivePublicKeyRoot ||
         entry.thresholdShareVerificationKeyRoot !==
             manifestBindings.thresholdShareVerificationKeyRoot ||
         entry.evaluationKeyRoot !== manifestBindings.evaluationKeyRoot ||
-        entry.rotSetDigest !== manifestBindings.rotSetDigest
+        entry.rotSetHash !== manifestBindings.rotSetHash
     ) {
         refusedObjects.push(
             createRefusal(
                 'InvalidSignedRoot',
                 'Trustee setup entry M8 roots must match the election manifest setup bindings.',
-                entry.trusteeSetupEntryDigest,
+                entry.trusteeSetupEntryHash,
                 'TrusteeSetupEntry',
             ),
         );
@@ -483,7 +481,7 @@ export const verifyTrusteeSetupEntry = (
             createRefusal(
                 'WrongCeremony',
                 'Trustee setup entry ceremony does not match the transcript.',
-                entry.trusteeSetupEntryDigest,
+                entry.trusteeSetupEntryHash,
                 'TrusteeSetupEntry',
             ),
         );
@@ -493,17 +491,17 @@ export const verifyTrusteeSetupEntry = (
             createRefusal(
                 'LateRegistration',
                 'Trustee setup entry must appear before the roster freeze board sequence.',
-                entry.trusteeSetupEntryDigest,
+                entry.trusteeSetupEntryHash,
                 'TrusteeSetupEntry',
             ),
         );
     }
-    if (expectedPublicKeyDigest === undefined) {
+    if (expectedPublicKeyHash === undefined) {
         refusedObjects.push(
             createRefusal(
-                'RosterDigestMismatch',
+                'RosterHashMismatch',
                 'Trustee setup identity is not in the frozen roster.',
-                entry.trusteeSetupEntryDigest,
+                entry.trusteeSetupEntryHash,
                 'TrusteeSetupEntry',
             ),
         );
@@ -515,14 +513,14 @@ export const verifyTrusteeSetupEntry = (
         signerRole: 'Trustee',
         signerIdentity: entry.trusteeIdentity,
         ceremonyId: input.ceremonyId,
-        manifestDigest: null,
-        objectRoot: entry.trusteeSetupEntryDigest,
-        boardHeadDigest: null,
+        manifestHash: null,
+        objectRoot: entry.trusteeSetupEntryHash,
+        boardHeadHash: null,
         byteLength: signedObjectRootByteLength,
         recoveryEpoch: entry.recoveryEpoch,
         deviceEpoch: entry.deviceEpoch,
-        contextDigest: defaultSignedRootContextDigest,
-        publicKeyDigest: expectedPublicKeyDigest,
+        contextHash: defaultSignedRootContextHash,
+        publicKeyHash: expectedPublicKeyHash,
     });
     refusedObjects.push(...signatureResult.refusedObjects);
 
@@ -531,30 +529,30 @@ export const verifyTrusteeSetupEntry = (
 
 export const verifyManifest = (
     input: RosterManifestTranscriptInput,
-    rosterDigest: ProtocolDigest | undefined,
+    rosterHash: ProtocolHash | undefined,
     manifest: ElectionManifest = input.electionManifest,
     manifestInclusionProof: InclusionProof = input.manifestInclusionProof,
 ): readonly RefusalRecord[] => {
     const refusedObjects: RefusalRecord[] = [];
-    const expectedDigest = deriveElectionManifestDigest({
+    const expectedHash = deriveElectionManifestHash({
         boardPosition: manifest.boardPosition,
         boardSequence: manifest.boardSequence,
         ceremonyId: manifest.ceremonyId,
         manifestOpaqueBindings: manifest.manifestOpaqueBindings,
-        manifestPolicyDigests: manifest.manifestPolicyDigests,
+        manifestPolicyHashes: manifest.manifestPolicyHashes,
         objectType: manifest.objectType,
         objectVersion: manifest.objectVersion,
-        pollSpecDigest: manifest.pollSpecDigest,
-        rosterDigest: manifest.rosterDigest,
-        thresholdProfileDigest: manifest.thresholdProfileDigest,
+        pollSpecHash: manifest.pollSpecHash,
+        rosterHash: manifest.rosterHash,
+        thresholdProfileHash: manifest.thresholdProfileHash,
     });
 
-    if (manifest.electionManifestDigest !== expectedDigest) {
+    if (manifest.electionManifestHash !== expectedHash) {
         refusedObjects.push(
             createRefusal(
-                'ManifestDigestMismatch',
-                'Election manifest digest does not match its canonical payload.',
-                manifest.electionManifestDigest,
+                'ManifestHashMismatch',
+                'Election manifest hash does not match its canonical payload.',
+                manifest.electionManifestHash,
                 'ElectionManifest',
             ),
         );
@@ -567,9 +565,9 @@ export const verifyManifest = (
     ) {
         refusedObjects.push(
             createRefusal(
-                'ManifestDigestMismatch',
+                'ManifestHashMismatch',
                 'Election manifest object shape is not canonical.',
-                manifest.electionManifestDigest,
+                manifest.electionManifestHash,
                 'ElectionManifest',
             ),
         );
@@ -580,17 +578,17 @@ export const verifyManifest = (
             createRefusal(
                 'WrongCeremony',
                 'Election manifest ceremony does not match the transcript.',
-                manifest.electionManifestDigest,
+                manifest.electionManifestHash,
                 'ElectionManifest',
             ),
         );
     }
-    if (rosterDigest !== undefined && manifest.rosterDigest !== rosterDigest) {
+    if (rosterHash !== undefined && manifest.rosterHash !== rosterHash) {
         refusedObjects.push(
             createRefusal(
-                'RosterDigestMismatch',
-                'Election manifest roster digest does not match the frozen roster.',
-                manifest.electionManifestDigest,
+                'RosterHashMismatch',
+                'Election manifest roster hash does not match the frozen roster.',
+                manifest.electionManifestHash,
                 'ElectionManifest',
             ),
         );
@@ -598,23 +596,23 @@ export const verifyManifest = (
     if (manifest.boardSequence < input.rosterFreezeBoardSequence) {
         refusedObjects.push(
             createRefusal(
-                'ManifestDigestMismatch',
+                'ManifestHashMismatch',
                 'Election manifest must not precede the roster freeze board sequence.',
-                manifest.electionManifestDigest,
+                manifest.electionManifestHash,
                 'ElectionManifest',
             ),
         );
     }
     if (
         manifestInclusionProof.includedObjectType !== 'ElectionManifest' ||
-        manifestInclusionProof.includedObjectDigest !==
-            manifest.electionManifestDigest
+        manifestInclusionProof.includedObjectHash !==
+            manifest.electionManifestHash
     ) {
         refusedObjects.push(
             createRefusal(
                 'InclusionProofInvalid',
-                'Manifest inclusion proof does not bind the election manifest digest.',
-                manifestInclusionProof.inclusionProofDigest,
+                'Manifest inclusion proof does not bind the election manifest hash.',
+                manifestInclusionProof.inclusionProofHash,
             ),
         );
     }
@@ -625,14 +623,14 @@ export const verifyManifest = (
         signerRole: 'Organizer',
         signerIdentity: input.organizerIdentity,
         ceremonyId: input.ceremonyId,
-        manifestDigest: null,
-        objectRoot: manifest.electionManifestDigest,
-        boardHeadDigest: null,
+        manifestHash: null,
+        objectRoot: manifest.electionManifestHash,
+        boardHeadHash: null,
         byteLength: signedObjectRootByteLength,
         recoveryEpoch: 0,
         deviceEpoch: 0,
-        contextDigest: defaultSignedRootContextDigest,
-        publicKeyDigest: input.organizerPublicKeyDigest,
+        contextHash: defaultSignedRootContextHash,
+        publicKeyHash: input.organizerPublicKeyHash,
     });
     refusedObjects.push(...signatureResult.refusedObjects);
 
@@ -645,23 +643,23 @@ export const verifyRosterExternalAcceptance = (
     try {
         const { acceptance } = input;
         const refusedObjects: RefusalRecord[] = [];
-        const expectedDigest = deriveRosterExternalAcceptanceDigest({
-            acceptedBoardHeadDigest: acceptance.acceptedBoardHeadDigest,
+        const expectedHash = deriveRosterExternalAcceptanceHash({
+            acceptedBoardHeadHash: acceptance.acceptedBoardHeadHash,
             ceremonyId: acceptance.ceremonyId,
-            electionManifestDigest: acceptance.electionManifestDigest,
+            electionManifestHash: acceptance.electionManifestHash,
             objectType: acceptance.objectType,
             objectVersion: acceptance.objectVersion,
             participantIdentity: acceptance.participantIdentity,
-            rosterDigest: acceptance.rosterDigest,
+            rosterHash: acceptance.rosterHash,
             warningTextVersion: acceptance.warningTextVersion,
         });
 
-        if (acceptance.rosterExternalAcceptanceDigest !== expectedDigest) {
+        if (acceptance.rosterExternalAcceptanceHash !== expectedHash) {
             refusedObjects.push(
                 createRefusal(
                     'RosterExternalAcceptanceInvalid',
-                    'Roster external acceptance digest does not match its canonical payload.',
-                    acceptance.rosterExternalAcceptanceDigest,
+                    'Roster external acceptance hash does not match its canonical payload.',
+                    acceptance.rosterExternalAcceptanceHash,
                     'RosterExternalAcceptance',
                 ),
             );
@@ -670,18 +668,18 @@ export const verifyRosterExternalAcceptance = (
             acceptance.objectType !== 'RosterExternalAcceptance' ||
             acceptance.objectVersion !== 1 ||
             acceptance.ceremonyId !== input.expectedCeremonyId ||
-            acceptance.rosterDigest !== input.expectedRosterDigest ||
-            acceptance.electionManifestDigest !==
-                input.expectedElectionManifestDigest ||
-            acceptance.acceptedBoardHeadDigest !==
-                input.expectedAcceptedBoardHeadDigest ||
+            acceptance.rosterHash !== input.expectedRosterHash ||
+            acceptance.electionManifestHash !==
+                input.expectedElectionManifestHash ||
+            acceptance.acceptedBoardHeadHash !==
+                input.expectedAcceptedBoardHeadHash ||
             acceptance.warningTextVersion.trim().length === 0
         ) {
             refusedObjects.push(
                 createRefusal(
                     'RosterExternalAcceptanceInvalid',
                     'Roster external acceptance does not bind the expected frozen roster view.',
-                    acceptance.rosterExternalAcceptanceDigest,
+                    acceptance.rosterExternalAcceptanceHash,
                     'RosterExternalAcceptance',
                 ),
             );
@@ -695,14 +693,14 @@ export const verifyRosterExternalAcceptance = (
                 signerRole: 'Participant',
                 signerIdentity: acceptance.participantIdentity,
                 ceremonyId: acceptance.ceremonyId,
-                manifestDigest: acceptance.electionManifestDigest,
-                objectRoot: acceptance.rosterExternalAcceptanceDigest,
-                boardHeadDigest: acceptance.acceptedBoardHeadDigest,
+                manifestHash: acceptance.electionManifestHash,
+                objectRoot: acceptance.rosterExternalAcceptanceHash,
+                boardHeadHash: acceptance.acceptedBoardHeadHash,
                 byteLength: signedObjectRootByteLength,
                 recoveryEpoch: 0,
                 deviceEpoch: 0,
-                contextDigest: defaultSignedRootContextDigest,
-                publicKeyDigest: input.expectedParticipantPublicKeyDigest,
+                contextHash: defaultSignedRootContextHash,
+                publicKeyHash: input.expectedParticipantPublicKeyHash,
             },
         );
         refusedObjects.push(...signatureResult.refusedObjects);
@@ -710,21 +708,21 @@ export const verifyRosterExternalAcceptance = (
         return {
             ok: refusedObjects.length === 0,
             statusLabels: refusedObjects.length === 0 ? ['rosterFrozen'] : [],
-            acceptedDigests:
+            acceptedHashes:
                 refusedObjects.length === 0
-                    ? [acceptance.rosterExternalAcceptanceDigest]
+                    ? [acceptance.rosterExternalAcceptanceHash]
                     : [],
             refusedObjects,
-            rosterExternalAcceptanceDigest:
+            rosterExternalAcceptanceHash:
                 refusedObjects.length === 0
-                    ? acceptance.rosterExternalAcceptanceDigest
+                    ? acceptance.rosterExternalAcceptanceHash
                     : undefined,
         };
     } catch {
         return {
             ok: false,
             statusLabels: [],
-            acceptedDigests: [],
+            acceptedHashes: [],
             refusedObjects: [
                 createRefusal(
                     'RosterExternalAcceptanceInvalid',

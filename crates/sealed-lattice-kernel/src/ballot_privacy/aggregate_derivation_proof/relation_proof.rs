@@ -4,13 +4,13 @@ pub(super) struct AggregateRelationProofGeneration {
     pub(super) proof_hex: String,
     pub(super) proof_size_bytes: usize,
     pub(super) challenge_hex: String,
-    pub(super) relation_commitment_digest: String,
+    pub(super) relation_commitment_hash: String,
 }
 
 pub(crate) struct AggregateRelationProofVerification {
     pub(crate) proof_size_bytes: usize,
     pub(crate) challenge_hex: String,
-    pub(crate) relation_commitment_digest: String,
+    pub(crate) relation_commitment_hash: String,
 }
 
 pub(super) struct VerifyAggregateRelationProofInput<'a> {
@@ -43,9 +43,9 @@ pub(super) fn generate_aggregate_relation_proof(
     let proof_statement = required_json_field(proof_input, "proofStatement", "proofInput")?;
     let public_randomness_hex =
         required_string_field(proof_input, "publicRandomnessHex", "proofInput")?;
-    let statement_digest = required_string_field(
+    let statement_hash = required_string_field(
         proof_statement,
-        "statementDigest",
+        "statementHash",
         "proofInput.proofStatement",
     )?;
     let parsed_sparse_statement = sparse_matrix_from_sparse_component_statement(proof_statement)
@@ -69,7 +69,7 @@ pub(super) fn generate_aggregate_relation_proof(
             let mask_vector = sample_aggregate_mask_vector(
                 source_ring,
                 parsed_sparse_statement.source_statement_matrix.columns(),
-                statement_digest,
+                statement_hash,
                 public_randomness_hex,
                 prover_randomness_hex,
                 check_index,
@@ -78,7 +78,7 @@ pub(super) fn generate_aggregate_relation_proof(
                 .source_statement_matrix
                 .multiply_vector(&mask_vector)?;
             let challenge = aggregate_relation_challenge_scalar(
-                statement_digest,
+                statement_hash,
                 public_randomness_hex,
                 relation_commitment_vector.entries(),
                 source_ring.modulus(),
@@ -100,15 +100,15 @@ pub(super) fn generate_aggregate_relation_proof(
         })
         .collect::<crate::encoding::CanonicalResult<Vec<_>>>()?;
     let proof_value =
-        aggregate_relation_proof_value(statement_digest, public_randomness_hex, &proof_checks);
+        aggregate_relation_proof_value(statement_hash, public_randomness_hex, &proof_checks);
     let proof_json = canonical_json(&proof_value)?;
-    let relation_commitment_digest = aggregate_relation_commitment_digest(&proof_checks)?;
+    let relation_commitment_hash = aggregate_relation_commitment_hash(&proof_checks)?;
 
     Ok(AggregateRelationProofGeneration {
         proof_hex: to_hex(proof_json.as_bytes()),
         proof_size_bytes: proof_json.len(),
         challenge_hex: aggregate_relation_challenge_hex(&proof_checks),
-        relation_commitment_digest,
+        relation_commitment_hash,
     })
 }
 
@@ -124,9 +124,9 @@ pub(super) fn verify_aggregate_relation_proof(
             "aggregate derivation proof must use centered source-modulus coefficient representations",
         ));
     }
-    let statement_digest = required_string_field(
+    let statement_hash = required_string_field(
         input.proof_statement,
-        "statementDigest",
+        "statementHash",
         "proofInput.proofStatement",
     )?;
     let source_ring = input.source_statement_matrix.ring();
@@ -134,7 +134,7 @@ pub(super) fn verify_aggregate_relation_proof(
         PolynomialVector::new(source_ring, input.target_vector_coefficients.to_vec())?;
     let parsed_proof = parse_aggregate_relation_proof(
         input.proof_hex,
-        statement_digest,
+        statement_hash,
         input.public_randomness_hex,
         source_ring,
         input.source_statement_matrix.rows(),
@@ -142,7 +142,7 @@ pub(super) fn verify_aggregate_relation_proof(
     )?;
     for proof_check in &parsed_proof.checks {
         let recomputed_challenge = aggregate_relation_challenge_scalar(
-            statement_digest,
+            statement_hash,
             input.public_randomness_hex,
             proof_check.relation_commitment_vector.entries(),
             source_ring.modulus(),
@@ -169,7 +169,7 @@ pub(super) fn verify_aggregate_relation_proof(
     Ok(AggregateRelationProofVerification {
         proof_size_bytes: parsed_proof.proof_size_bytes,
         challenge_hex: aggregate_relation_challenge_hex(&parsed_proof.checks),
-        relation_commitment_digest: aggregate_relation_commitment_digest(&parsed_proof.checks)?,
+        relation_commitment_hash: aggregate_relation_commitment_hash(&parsed_proof.checks)?,
     })
 }
 
@@ -221,7 +221,7 @@ fn signed_witness_to_source_vector(
 fn sample_aggregate_mask_vector(
     source_ring: PolynomialRing,
     vector_length: usize,
-    statement_digest: &str,
+    statement_hash: &str,
     public_randomness_hex: &str,
     prover_randomness_hex: &str,
     check_index: usize,
@@ -230,7 +230,7 @@ fn sample_aggregate_mask_vector(
         .map(|column_index| {
             sample_aggregate_mask_polynomial(
                 source_ring,
-                statement_digest,
+                statement_hash,
                 public_randomness_hex,
                 prover_randomness_hex,
                 check_index,
@@ -244,7 +244,7 @@ fn sample_aggregate_mask_vector(
 
 fn sample_aggregate_mask_polynomial(
     source_ring: PolynomialRing,
-    statement_digest: &str,
+    statement_hash: &str,
     public_randomness_hex: &str,
     prover_randomness_hex: &str,
     check_index: usize,
@@ -259,7 +259,7 @@ fn sample_aggregate_mask_polynomial(
         let block = hash512(
             "sealed-lattice-root/aggregate-derivation-mask-v1",
             &[
-                statement_digest.as_bytes(),
+                statement_hash.as_bytes(),
                 public_randomness_hex.as_bytes(),
                 prover_randomness_hex.as_bytes(),
                 &check_index_bytes,
@@ -288,7 +288,7 @@ fn sample_aggregate_mask_polynomial(
 }
 
 pub(super) fn aggregate_relation_challenge_scalar(
-    statement_digest: &str,
+    statement_hash: &str,
     public_randomness_hex: &str,
     relation_commitment_vector: &[Vec<u64>],
     modulus: u64,
@@ -306,7 +306,7 @@ pub(super) fn aggregate_relation_challenge_scalar(
         let challenge_block = hash512(
             "sealed-lattice-root/aggregate-derivation-proof-challenge-v1",
             &[
-                statement_digest.as_bytes(),
+                statement_hash.as_bytes(),
                 public_randomness_hex.as_bytes(),
                 commitment_json.as_bytes(),
                 &check_index_bytes,
@@ -399,7 +399,7 @@ fn scale_polynomial_vector(
 }
 
 fn aggregate_relation_proof_value(
-    statement_digest: &str,
+    statement_hash: &str,
     public_randomness_hex: &str,
     proof_checks: &[AggregateRelationProofCheck],
 ) -> Value {
@@ -415,7 +415,7 @@ fn aggregate_relation_proof_value(
             "relationCommitmentVector": canonical_polynomial_vector_value(check.relation_commitment_vector.entries()),
             "responseVector": canonical_polynomial_vector_value(check.response_vector.entries()),
         })).collect::<Vec<_>>(),
-        "statementDigest": statement_digest
+        "statementHash": statement_hash
     })
 }
 
@@ -427,7 +427,7 @@ fn aggregate_relation_challenge_hex(proof_checks: &[AggregateRelationProofCheck]
         .join("")
 }
 
-fn aggregate_relation_commitment_digest(
+fn aggregate_relation_commitment_hash(
     proof_checks: &[AggregateRelationProofCheck],
 ) -> crate::encoding::CanonicalResult<String> {
     let relation_commitment_vectors = proof_checks
@@ -435,8 +435,8 @@ fn aggregate_relation_commitment_digest(
         .map(|check| canonical_polynomial_vector_value(check.relation_commitment_vector.entries()))
         .collect::<Vec<_>>();
 
-    derive_digest(
-        "AggregateDerivationComponentDigest",
+    derive_hash(
+        "AggregateDerivationComponentHash",
         &json!({
             "purpose": "aggregate-derivation-relation-commitment-v1",
             "challengeRepetitionCount": AGGREGATE_DERIVATION_CHALLENGE_REPETITION_COUNT,
@@ -444,7 +444,7 @@ fn aggregate_relation_commitment_digest(
             "relationCommitmentVectors": relation_commitment_vectors
         }),
     )
-    .ok_or_else(|| invalid_preflight("aggregate relation commitment digest did not derive"))
+    .ok_or_else(|| invalid_preflight("aggregate relation commitment hash did not derive"))
 }
 
 fn canonical_polynomial_vector_value(entries: &[Vec<u64>]) -> Value {
@@ -465,7 +465,7 @@ fn canonical_polynomial_vector_value(entries: &[Vec<u64>]) -> Value {
 
 fn parse_aggregate_relation_proof(
     proof_hex: &str,
-    statement_digest: &str,
+    statement_hash: &str,
     public_randomness_hex: &str,
     source_ring: PolynomialRing,
     expected_rows: usize,
@@ -495,7 +495,7 @@ fn parse_aggregate_relation_proof(
             != Some(AGGREGATE_DERIVATION_CHALLENGE_REPETITION_COUNT as u64)
         || u64_object_field(&proof_value, "challengeSoundnessBits")
             != Some(AGGREGATE_DERIVATION_CHALLENGE_SOUNDNESS_BITS)
-        || string_field(&proof_value, "statementDigest") != Some(statement_digest)
+        || string_field(&proof_value, "statementHash") != Some(statement_hash)
         || string_field(&proof_value, "publicRandomnessHex") != Some(public_randomness_hex)
     {
         return Err(invalid_preflight(

@@ -45,7 +45,8 @@ const lazerDemoDirectory = path.join(
     'demo',
 );
 const imageName = 'sealed-lattice-lazer-oracle:local';
-const sageImageName = 'sagemath/sagemath:latest';
+const sageImageName =
+    'sagemath/sagemath@sha256:2401ffa8e9fc85c7ea17d3649bde5958b4dbf0858b3e504098c4102720151711';
 const supportedProfileNames = [
     'demo-linear',
     'receiver-key-linear',

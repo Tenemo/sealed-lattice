@@ -5,18 +5,18 @@ import {
     type RecoveryEpochMapEntry,
     type RecoveryEpochUpdate,
     ceremonyId,
-    contextDigest,
+    contextHash,
     createBoardEvidence,
     createBoardHead,
     createBoardHeadWithObjects,
     createKeyFixture,
     createSignature,
-    deriveActionContextDigest,
-    deriveProtocolDigest,
-    deriveRecoveryEpochUpdateDigest,
+    deriveActionContextHash,
+    deriveProtocolHash,
+    deriveRecoveryEpochUpdateHash,
     deriveValidatedFirstValidOrder,
     isActionCurrentForRecoveryEpoch,
-    manifestPolicyDigests,
+    manifestPolicyHashes,
     recoveryRootKeyFixture,
     verifyRecoveryEpochUpdate,
 } from './election-foundation-test-helpers';
@@ -25,11 +25,10 @@ describe('recovery epoch shells', () => {
     it('rejects mixed stale recovery and current device epochs before the old-action cutoff', () => {
         expect(
             deriveValidatedFirstValidOrder({
-                requiredContextDigest: contextDigest,
-                selectionPolicyDigest:
-                    manifestPolicyDigests.firstValidPolicyDigest,
-                expectedSelectionPolicyDigest:
-                    manifestPolicyDigests.firstValidPolicyDigest,
+                requiredContextHash: contextHash,
+                selectionPolicyHash: manifestPolicyHashes.firstValidPolicyHash,
+                expectedSelectionPolicyHash:
+                    manifestPolicyHashes.firstValidPolicyHash,
                 currentRecoveryEpochMap: {
                     'participant-1': {
                         signerIdentity: 'participant-1',
@@ -40,7 +39,7 @@ describe('recovery epoch shells', () => {
                 },
                 objects: [
                     {
-                        objectDigest: 'object-mixed-epoch',
+                        objectHash: 'object-mixed-epoch',
                         objectType: 'TargetFinalityRecord',
                         boardSequence: 9,
                         boardPosition: 0,
@@ -48,7 +47,7 @@ describe('recovery epoch shells', () => {
                         recoveryEpoch: 0,
                         deviceEpoch: 1,
                         actionSequence: 0,
-                        contextDigest,
+                        contextHash,
                         isByteIdenticalRetransmission: false,
                     },
                 ],
@@ -67,16 +66,10 @@ describe('recovery epoch shells', () => {
             currentDeviceEpoch: 0,
         };
         const recoveryGenesisHead = createBoardHead(0, null);
-        const recoveryHead1 = createBoardHead(
-            1,
-            recoveryGenesisHead.headDigest,
-        );
-        const recoveryHead2 = createBoardHead(2, recoveryHead1.headDigest);
-        const recoveryHead3 = createBoardHead(3, recoveryHead2.headDigest);
-        const recoveryContextHead = createBoardHead(
-            4,
-            recoveryHead3.headDigest,
-        );
+        const recoveryHead1 = createBoardHead(1, recoveryGenesisHead.headHash);
+        const recoveryHead2 = createBoardHead(2, recoveryHead1.headHash);
+        const recoveryHead3 = createBoardHead(3, recoveryHead2.headHash);
+        const recoveryContextHead = createBoardHead(4, recoveryHead3.headHash);
         const newSigningKeyFixture = createKeyFixture(
             'participant:participant-1:new-signing',
         );
@@ -85,46 +78,45 @@ describe('recovery epoch shells', () => {
             objectVersion: 1,
             ceremonyId,
             signerIdentity: 'participant-1',
-            recoveryRootPublicKeyDigest: recoveryRootKeyFixture.publicKeyDigest,
-            recoveryPolicyDigest: manifestPolicyDigests.recoveryPolicyDigest,
+            recoveryRootPublicKeyHash: recoveryRootKeyFixture.publicKeyHash,
+            recoveryPolicyHash: manifestPolicyHashes.recoveryPolicyHash,
             previousRecoveryEpoch: 0,
             newRecoveryEpoch: 1,
             previousDeviceEpoch: 0,
             newDeviceEpoch: 1,
             oldActionCutoffBoardSequence: 5,
-            boardHeadDigest: recoveryContextHead.headDigest,
-            newSigningPublicKeyDigest: newSigningKeyFixture.publicKeyDigest,
-            restoredFrozenReceiverStateCommitment: deriveProtocolDigest(
+            boardHeadHash: recoveryContextHead.headHash,
+            newSigningPublicKeyHash: newSigningKeyFixture.publicKeyHash,
+            restoredFrozenReceiverStateCommitment: deriveProtocolHash(
                 'EncryptedEnvelopeRoot',
                 { receiverState: 'restored' },
             ),
-            newTrusteeSetupCommitment: deriveProtocolDigest(
+            newTrusteeSetupCommitment: deriveProtocolHash(
                 'CollectivePublicKeyRoot',
                 { trusteeSetup: 'new' },
             ),
         } satisfies Omit<
             RecoveryEpochUpdate,
-            'recoveryEpochUpdateDigest' | 'signature'
+            'recoveryEpochUpdateHash' | 'signature'
         >;
-        const recoveryEpochUpdateDigest =
-            deriveRecoveryEpochUpdateDigest(payload);
+        const recoveryEpochUpdateHash = deriveRecoveryEpochUpdateHash(payload);
         const update: RecoveryEpochUpdate = {
             ...payload,
-            recoveryEpochUpdateDigest,
+            recoveryEpochUpdateHash,
             signature: createSignature(
                 'RecoveryEpochUpdate',
                 'RecoveryRoot',
                 'participant-1',
-                recoveryRootKeyFixture.publicKeyDigest,
-                recoveryEpochUpdateDigest,
-                { boardHeadDigest: payload.boardHeadDigest },
+                recoveryRootKeyFixture.publicKeyHash,
+                recoveryEpochUpdateHash,
+                { boardHeadHash: payload.boardHeadHash },
             ),
         };
         const { head: recoveryUpdateHead, inclusionProofs } =
-            createBoardHeadWithObjects(5, recoveryContextHead.headDigest, [
+            createBoardHeadWithObjects(5, recoveryContextHead.headHash, [
                 {
                     objectType: 'RecoveryEpochUpdate',
-                    objectDigest: recoveryEpochUpdateDigest,
+                    objectHash: recoveryEpochUpdateHash,
                     boardPosition: 0,
                 },
             ]);
@@ -132,10 +124,9 @@ describe('recovery epoch shells', () => {
         const verification = verifyRecoveryEpochUpdate({
             update,
             currentEntry,
-            expectedRecoveryRootPublicKeyDigest:
-                recoveryRootKeyFixture.publicKeyDigest,
-            expectedRecoveryPolicyDigest:
-                manifestPolicyDigests.recoveryPolicyDigest,
+            expectedRecoveryRootPublicKeyHash:
+                recoveryRootKeyFixture.publicKeyHash,
+            expectedRecoveryPolicyHash: manifestPolicyHashes.recoveryPolicyHash,
             boardEvidence: createBoardEvidence([
                 recoveryGenesisHead,
                 recoveryHead1,
@@ -155,20 +146,19 @@ describe('recovery epoch shells', () => {
         const {
             head: delayedRecoveryUpdateHead,
             inclusionProofs: delayedRecoveryUpdateProofs,
-        } = createBoardHeadWithObjects(6, recoveryUpdateHead.headDigest, [
+        } = createBoardHeadWithObjects(6, recoveryUpdateHead.headHash, [
             {
                 objectType: 'RecoveryEpochUpdate',
-                objectDigest: recoveryEpochUpdateDigest,
+                objectHash: recoveryEpochUpdateHash,
                 boardPosition: 0,
             },
         ]);
         const delayedRecoveryUpdateResult = verifyRecoveryEpochUpdate({
             update,
             currentEntry,
-            expectedRecoveryRootPublicKeyDigest:
-                recoveryRootKeyFixture.publicKeyDigest,
-            expectedRecoveryPolicyDigest:
-                manifestPolicyDigests.recoveryPolicyDigest,
+            expectedRecoveryRootPublicKeyHash:
+                recoveryRootKeyFixture.publicKeyHash,
+            expectedRecoveryPolicyHash: manifestPolicyHashes.recoveryPolicyHash,
             boardEvidence: createBoardEvidence([
                 recoveryGenesisHead,
                 recoveryHead1,
@@ -182,7 +172,7 @@ describe('recovery epoch shells', () => {
         });
 
         expect(delayedRecoveryUpdateResult.ok).toBe(false);
-        expect(delayedRecoveryUpdateResult.acceptedDigests).toEqual([]);
+        expect(delayedRecoveryUpdateResult.acceptedHashes).toEqual([]);
         expect(delayedRecoveryUpdateResult.refusedObjects).toEqual(
             expect.arrayContaining([
                 expect.objectContaining({ code: 'RecoveryUpdateInvalid' }),
@@ -190,22 +180,22 @@ describe('recovery epoch shells', () => {
         );
         const conflictingPayload = {
             ...payload,
-            newSigningPublicKeyDigest: createKeyFixture(
+            newSigningPublicKeyHash: createKeyFixture(
                 'participant:participant-1:different-new-signing',
-            ).publicKeyDigest,
+            ).publicKeyHash,
         };
-        const conflictingRecoveryEpochUpdateDigest =
-            deriveRecoveryEpochUpdateDigest(conflictingPayload);
+        const conflictingRecoveryEpochUpdateHash =
+            deriveRecoveryEpochUpdateHash(conflictingPayload);
         const conflictingUpdate: RecoveryEpochUpdate = {
             ...conflictingPayload,
-            recoveryEpochUpdateDigest: conflictingRecoveryEpochUpdateDigest,
+            recoveryEpochUpdateHash: conflictingRecoveryEpochUpdateHash,
             signature: createSignature(
                 'RecoveryEpochUpdate',
                 'RecoveryRoot',
                 'participant-1',
-                recoveryRootKeyFixture.publicKeyDigest,
-                conflictingRecoveryEpochUpdateDigest,
-                { boardHeadDigest: payload.boardHeadDigest },
+                recoveryRootKeyFixture.publicKeyHash,
+                conflictingRecoveryEpochUpdateHash,
+                { boardHeadHash: payload.boardHeadHash },
             ),
         };
 
@@ -213,10 +203,10 @@ describe('recovery epoch shells', () => {
             verifyRecoveryEpochUpdate({
                 update,
                 currentEntry,
-                expectedRecoveryRootPublicKeyDigest:
-                    recoveryRootKeyFixture.publicKeyDigest,
-                expectedRecoveryPolicyDigest:
-                    manifestPolicyDigests.recoveryPolicyDigest,
+                expectedRecoveryRootPublicKeyHash:
+                    recoveryRootKeyFixture.publicKeyHash,
+                expectedRecoveryPolicyHash:
+                    manifestPolicyHashes.recoveryPolicyHash,
                 boardEvidence: createBoardEvidence([
                     recoveryGenesisHead,
                     recoveryHead1,
@@ -237,11 +227,11 @@ describe('recovery epoch shells', () => {
             verifyRecoveryEpochUpdate({
                 update,
                 currentEntry,
-                expectedRecoveryRootPublicKeyDigest: createKeyFixture(
+                expectedRecoveryRootPublicKeyHash: createKeyFixture(
                     'recovery-root:wrong',
-                ).publicKeyDigest,
-                expectedRecoveryPolicyDigest:
-                    manifestPolicyDigests.recoveryPolicyDigest,
+                ).publicKeyHash,
+                expectedRecoveryPolicyHash:
+                    manifestPolicyHashes.recoveryPolicyHash,
                 boardEvidence: createBoardEvidence([
                     recoveryGenesisHead,
                     recoveryHead1,
@@ -259,32 +249,32 @@ describe('recovery epoch shells', () => {
         );
         const wrongRecoveryPolicyPayload = {
             ...payload,
-            recoveryPolicyDigest: deriveProtocolDigest('RecoveryPolicyDigest', {
+            recoveryPolicyHash: deriveProtocolHash('RecoveryPolicyHash', {
                 policy: 'wrong-recovery-policy',
             }),
         };
-        const wrongRecoveryPolicyUpdateDigest = deriveRecoveryEpochUpdateDigest(
+        const wrongRecoveryPolicyUpdateHash = deriveRecoveryEpochUpdateHash(
             wrongRecoveryPolicyPayload,
         );
         const wrongRecoveryPolicyUpdate: RecoveryEpochUpdate = {
             ...wrongRecoveryPolicyPayload,
-            recoveryEpochUpdateDigest: wrongRecoveryPolicyUpdateDigest,
+            recoveryEpochUpdateHash: wrongRecoveryPolicyUpdateHash,
             signature: createSignature(
                 'RecoveryEpochUpdate',
                 'RecoveryRoot',
                 'participant-1',
-                recoveryRootKeyFixture.publicKeyDigest,
-                wrongRecoveryPolicyUpdateDigest,
-                { boardHeadDigest: payload.boardHeadDigest },
+                recoveryRootKeyFixture.publicKeyHash,
+                wrongRecoveryPolicyUpdateHash,
+                { boardHeadHash: payload.boardHeadHash },
             ),
         };
         const {
             head: wrongPolicyUpdateHead,
             inclusionProofs: wrongPolicyProofs,
-        } = createBoardHeadWithObjects(5, recoveryContextHead.headDigest, [
+        } = createBoardHeadWithObjects(5, recoveryContextHead.headHash, [
             {
                 objectType: 'RecoveryEpochUpdate',
-                objectDigest: wrongRecoveryPolicyUpdateDigest,
+                objectHash: wrongRecoveryPolicyUpdateHash,
                 boardPosition: 0,
             },
         ]);
@@ -293,10 +283,10 @@ describe('recovery epoch shells', () => {
             verifyRecoveryEpochUpdate({
                 update: wrongRecoveryPolicyUpdate,
                 currentEntry,
-                expectedRecoveryRootPublicKeyDigest:
-                    recoveryRootKeyFixture.publicKeyDigest,
-                expectedRecoveryPolicyDigest:
-                    manifestPolicyDigests.recoveryPolicyDigest,
+                expectedRecoveryRootPublicKeyHash:
+                    recoveryRootKeyFixture.publicKeyHash,
+                expectedRecoveryPolicyHash:
+                    manifestPolicyHashes.recoveryPolicyHash,
                 boardEvidence: createBoardEvidence([
                     recoveryGenesisHead,
                     recoveryHead1,
@@ -316,19 +306,19 @@ describe('recovery epoch shells', () => {
             ...payload,
             ceremonyId: 'ceremony-other',
         };
-        const wrongCeremonyRecoveryUpdateDigest =
-            deriveRecoveryEpochUpdateDigest(wrongCeremonyPayload);
+        const wrongCeremonyRecoveryUpdateHash =
+            deriveRecoveryEpochUpdateHash(wrongCeremonyPayload);
         const wrongCeremonyUpdate: RecoveryEpochUpdate = {
             ...wrongCeremonyPayload,
-            recoveryEpochUpdateDigest: wrongCeremonyRecoveryUpdateDigest,
+            recoveryEpochUpdateHash: wrongCeremonyRecoveryUpdateHash,
             signature: createSignature(
                 'RecoveryEpochUpdate',
                 'RecoveryRoot',
                 'participant-1',
-                recoveryRootKeyFixture.publicKeyDigest,
-                wrongCeremonyRecoveryUpdateDigest,
+                recoveryRootKeyFixture.publicKeyHash,
+                wrongCeremonyRecoveryUpdateHash,
                 {
-                    boardHeadDigest: payload.boardHeadDigest,
+                    boardHeadHash: payload.boardHeadHash,
                     ceremonyId: 'ceremony-other',
                 },
             ),
@@ -336,10 +326,10 @@ describe('recovery epoch shells', () => {
         const {
             head: wrongCeremonyUpdateHead,
             inclusionProofs: wrongCeremonyProofs,
-        } = createBoardHeadWithObjects(5, recoveryContextHead.headDigest, [
+        } = createBoardHeadWithObjects(5, recoveryContextHead.headHash, [
             {
                 objectType: 'RecoveryEpochUpdate',
-                objectDigest: wrongCeremonyRecoveryUpdateDigest,
+                objectHash: wrongCeremonyRecoveryUpdateHash,
                 boardPosition: 0,
             },
         ]);
@@ -348,10 +338,10 @@ describe('recovery epoch shells', () => {
             verifyRecoveryEpochUpdate({
                 update: wrongCeremonyUpdate,
                 currentEntry,
-                expectedRecoveryRootPublicKeyDigest:
-                    recoveryRootKeyFixture.publicKeyDigest,
-                expectedRecoveryPolicyDigest:
-                    manifestPolicyDigests.recoveryPolicyDigest,
+                expectedRecoveryRootPublicKeyHash:
+                    recoveryRootKeyFixture.publicKeyHash,
+                expectedRecoveryPolicyHash:
+                    manifestPolicyHashes.recoveryPolicyHash,
                 boardEvidence: createBoardEvidence([
                     recoveryGenesisHead,
                     recoveryHead1,
@@ -370,27 +360,26 @@ describe('recovery epoch shells', () => {
 
         const staleActionPayload = {
             ceremonyId,
-            electionManifestDigest: deriveProtocolDigest(
-                'ElectionManifestDigest',
-                { manifest: 'main' },
-            ),
+            electionManifestHash: deriveProtocolHash('ElectionManifestHash', {
+                manifest: 'main',
+            }),
             signerIdentity: 'participant-1',
-            boardHeadDigest: payload.boardHeadDigest,
+            boardHeadHash: payload.boardHeadHash,
             boardSequence: 6,
             recoveryEpoch: 0,
             deviceEpoch: 0,
             actionSequence: 1,
-            recoveryPolicyDigest: manifestPolicyDigests.recoveryPolicyDigest,
-            acceptedRecoveryEpochUpdateDigest: recoveryEpochUpdateDigest,
-            rosterExternalAcceptanceDigest: deriveProtocolDigest(
-                'RosterExternalAcceptanceDigest',
+            recoveryPolicyHash: manifestPolicyHashes.recoveryPolicyHash,
+            acceptedRecoveryEpochUpdateHash: recoveryEpochUpdateHash,
+            rosterExternalAcceptanceHash: deriveProtocolHash(
+                'RosterExternalAcceptanceHash',
                 { participant: 'participant-1', roster: 'main' },
             ),
-            contextDigest,
+            contextHash,
         };
         const staleActionContext: ActionContext = {
             ...staleActionPayload,
-            actionContextDigest: deriveActionContextDigest(staleActionPayload),
+            actionContextHash: deriveActionContextHash(staleActionPayload),
         };
 
         expect(
@@ -408,8 +397,8 @@ describe('recovery epoch shells', () => {
             isActionCurrentForRecoveryEpoch({
                 actionContext: staleActionContext,
                 recoveryEpochState: currentEntry,
-                expectedRosterExternalAcceptanceDigest: deriveProtocolDigest(
-                    'RosterExternalAcceptanceDigest',
+                expectedRosterExternalAcceptanceHash: deriveProtocolHash(
+                    'RosterExternalAcceptanceHash',
                     { participant: 'participant-1', roster: 'different' },
                 ),
             }).refusedObjects,

@@ -1,4 +1,4 @@
-import type { ProtocolDigest } from '@sealed-lattice/types';
+import type { ProtocolHash } from '@sealed-lattice/types';
 
 import { deriveReceiverPublicMatrix } from '../lattice-primitives.js';
 import {
@@ -42,11 +42,11 @@ import {
     shareCommitmentModuleRank,
 } from './statement-contracts.js';
 import {
-    deriveLinearStatementDigest,
-    deriveStatementMatrixDigest,
-    deriveStructuredShareCommitmentStatementDigest,
-    deriveTargetVectorDigest,
-} from './statement-digests.js';
+    deriveLinearStatementHash,
+    deriveStatementMatrixHash,
+    deriveStructuredShareCommitmentStatementHash,
+    deriveTargetVectorHash,
+} from './statement-hashes.js';
 import { witnessValueForVariable } from './statement-witness-values.js';
 import {
     componentById,
@@ -96,7 +96,7 @@ const verifyStructuredReceiverEncryptionRowBatch = (input: {
         const receiverPayload = payloadsByReceiver.get(receiverKey);
         if (
             publicKey?.publicKeyVector === undefined ||
-            publicKey.publicMatrixSeedDigest === undefined ||
+            publicKey.publicMatrixSeedHash === undefined ||
             receiverPayload?.ciphertextChunks === undefined
         ) {
             throw new Error(
@@ -104,9 +104,8 @@ const verifyStructuredReceiverEncryptionRowBatch = (input: {
             );
         }
         const publicMatrix = deriveReceiverPublicMatrix(
-            input.loweredStatement.publicContext
-                .receiverEncryptionProfileDigest,
-            publicKey.publicMatrixSeedDigest,
+            input.loweredStatement.publicContext.receiverEncryptionProfileHash,
+            publicKey.publicMatrixSeedHash,
         );
         const plaintextBits = receiverPayloadPlaintextBits({
             plaintextBitLength: receiverRow.plaintextBitLength,
@@ -264,7 +263,7 @@ const verifyStructuredReceiverEncryptionRowBatch = (input: {
 };
 
 export const buildBallotProofComponentLinearProofProjection = (input: {
-    readonly ballotProofStatementDigest?: ProtocolDigest;
+    readonly ballotProofStatementHash?: ProtocolHash;
     readonly componentId: BallotProofExplicitComponentId;
     readonly loweredStatement: BallotPrivacyLoweredLinearRelationStatement;
     readonly parameterProfileId: string;
@@ -383,22 +382,20 @@ export const buildBallotProofComponentLinearProofProjection = (input: {
         witnessVector: privateWitnessVectorCoefficients,
     });
 
-    const statementMatrixDigest = deriveStatementMatrixDigest(
+    const statementMatrixHash = deriveStatementMatrixHash(
         statementMatrixCoefficients,
     );
-    const targetVectorDigest = deriveTargetVectorDigest(
-        targetVectorCoefficients,
-    );
+    const targetVectorHash = deriveTargetVectorHash(targetVectorCoefficients);
     const statementPayload: Omit<
         BallotProofLinearProofStatement,
-        'statementDigest'
+        'statementHash'
     > = {
-        backendStatementDigest:
-            input.loweredStatement.backendStatement.backendStatementDigest,
-        ...(input.ballotProofStatementDigest === undefined
+        backendStatementHash:
+            input.loweredStatement.backendStatement.backendStatementHash,
+        ...(input.ballotProofStatementHash === undefined
             ? {}
             : {
-                  ballotProofStatementDigest: input.ballotProofStatementDigest,
+                  ballotProofStatementHash: input.ballotProofStatementHash,
               }),
         coefficientModulus: component.coefficientModulus,
         objectType: 'BallotProofLinearProofStatement',
@@ -406,16 +403,16 @@ export const buildBallotProofComponentLinearProofProjection = (input: {
         parameterProfileId: input.parameterProfileId,
         projectionCoverage: projectionCoverageForComponent(input.componentId),
         relation: linearProofRelation,
-        relationStatementDigest: input.loweredStatement.relationStatementDigest,
+        relationStatementHash: input.loweredStatement.relationStatementHash,
         ringDegree: input.sourceRingDegree,
         statementColumns: sourceBackendColumnIndices.length,
         statementMatrixCoefficients,
-        statementMatrixDigest,
+        statementMatrixHash,
         statementRows: explicitRows.length,
         matrixCoefficientRepresentation: 'centeredSignedSourceModulus',
         targetCoefficientRepresentation: 'centeredSignedSourceModulus',
         targetVectorCoefficients,
-        targetVectorDigest,
+        targetVectorHash,
         witnessL2BoundSquared: input.witnessL2BoundSquared,
     };
 
@@ -423,7 +420,7 @@ export const buildBallotProofComponentLinearProofProjection = (input: {
         componentId: input.componentId,
         linearStatement: {
             ...statementPayload,
-            statementDigest: deriveLinearStatementDigest(statementPayload),
+            statementHash: deriveLinearStatementHash(statementPayload),
         },
         privateWitnessVectorCoefficients,
         sourceBackendColumnIndices,
@@ -432,7 +429,7 @@ export const buildBallotProofComponentLinearProofProjection = (input: {
 };
 
 const buildStructuredShareCommitmentSparseStatement = (input: {
-    readonly ballotProofStatementDigest?: ProtocolDigest;
+    readonly ballotProofStatementHash?: ProtocolHash;
     readonly component: BallotPrivacyBackendProofComponent;
     readonly loweredStatement: BallotPrivacyLoweredLinearRelationStatement;
     readonly parameterProfileId: string;
@@ -515,18 +512,18 @@ const buildStructuredShareCommitmentSparseStatement = (input: {
     }
     const statementPayload: Omit<
         BallotProofStructuredShareCommitmentProofStatement,
-        'statementDigest'
+        'statementHash'
     > = {
-        backendStatementDigest:
-            input.loweredStatement.backendStatement.backendStatementDigest,
-        ...(input.ballotProofStatementDigest === undefined
+        backendStatementHash:
+            input.loweredStatement.backendStatement.backendStatementHash,
+        ...(input.ballotProofStatementHash === undefined
             ? {}
             : {
-                  ballotProofStatementDigest: input.ballotProofStatementDigest,
+                  ballotProofStatementHash: input.ballotProofStatementHash,
               }),
         coefficientModulus: input.component.coefficientModulus,
         componentId: 'share-commitment-component',
-        matrixDigest: structuredRowBatch.matrixDigest,
+        matrixHash: structuredRowBatch.matrixHash,
         objectType: 'BallotProofStructuredShareCommitmentProofStatement',
         objectVersion: 1,
         parameterProfileId: input.parameterProfileId,
@@ -535,9 +532,9 @@ const buildStructuredShareCommitmentSparseStatement = (input: {
         projectionCoverage: 'share-commitment-rows-only',
         receiverRows,
         relation: linearProofRelation,
-        relationStatementDigest: input.loweredStatement.relationStatementDigest,
-        shareCommitmentProfileDigest:
-            input.loweredStatement.publicContext.shareCommitmentProfileDigest,
+        relationStatementHash: input.loweredStatement.relationStatementHash,
+        shareCommitmentProfileHash:
+            input.loweredStatement.publicContext.shareCommitmentProfileHash,
         shareVectorWidth: input.loweredStatement.shareVectorWidth,
         sourceBackendColumnIndices,
         sourceRingDegree: input.sourceRingDegree,
@@ -548,14 +545,14 @@ const buildStructuredShareCommitmentSparseStatement = (input: {
         ),
         matrixCoefficientRepresentation: 'centeredSignedSourceModulus',
         targetCoefficientRepresentation: 'centeredSignedSourceModulus',
-        targetVectorDigest: structuredRowBatch.targetVectorDigest,
+        targetVectorHash: structuredRowBatch.targetVectorHash,
         witnessL2BoundSquared: input.witnessL2BoundSquared,
     };
 
     return {
         ...statementPayload,
-        statementDigest:
-            deriveStructuredShareCommitmentStatementDigest(statementPayload),
+        statementHash:
+            deriveStructuredShareCommitmentStatementHash(statementPayload),
     };
 };
 

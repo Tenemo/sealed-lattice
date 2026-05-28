@@ -21,51 +21,50 @@ import {
 } from '../common/verification-helpers.js';
 
 import {
-    deriveLocalReplayRecordDigest,
-    deriveTargetAcceptedRecordDigest,
-    deriveTopKDecryptionShareDigest,
-} from './digests.js';
+    deriveLocalReplayRecordHash,
+    deriveTargetAcceptedRecordHash,
+    deriveTopKDecryptionShareHash,
+} from './hashes.js';
 export {
-    deriveLocalReplayRecordDigest,
-    deriveTargetAcceptedRecordDigest,
-    deriveTopKDecryptionShareDigest,
-} from './digests.js';
+    deriveLocalReplayRecordHash,
+    deriveTargetAcceptedRecordHash,
+    deriveTopKDecryptionShareHash,
+} from './hashes.js';
 
 const targetFinalityIsAccepted = (
     record: TargetFinalityRecord,
     verification: TargetFinalityVerification,
 ): boolean =>
     verification.ok &&
-    verification.targetFinalityRecordDigest ===
-        record.targetFinalityRecordDigest &&
-    verification.targetProposalDigest === record.targetProposalDigest;
+    verification.targetFinalityRecordHash === record.targetFinalityRecordHash &&
+    verification.targetProposalHash === record.targetProposalHash;
 
 const verifyLocalReplayRecordShape = (
     input: LocalReplayRecordVerificationInput,
 ): readonly RefusalRecord[] => {
     const { evaluationProofRecord, record, targetFinalityRecord } = input;
     const refusedObjects: RefusalRecord[] = [];
-    const expectedDigest = deriveLocalReplayRecordDigest({
+    const expectedHash = deriveLocalReplayRecordHash({
         ceremonyId: record.ceremonyId,
         deviceEpoch: record.deviceEpoch,
-        electionManifestDigest: record.electionManifestDigest,
-        evaluationProofRecordDigest: record.evaluationProofRecordDigest,
-        localReplayDiagnosticDigest: record.localReplayDiagnosticDigest,
+        electionManifestHash: record.electionManifestHash,
+        evaluationProofRecordHash: record.evaluationProofRecordHash,
+        localReplayDiagnosticHash: record.localReplayDiagnosticHash,
         objectType: record.objectType,
         objectVersion: record.objectVersion,
         participantIdentity: record.participantIdentity,
         recoveryEpoch: record.recoveryEpoch,
-        replayContextDigest: record.replayContextDigest,
-        targetFinalityRecordDigest: record.targetFinalityRecordDigest,
-        targetProposalDigest: record.targetProposalDigest,
+        replayContextHash: record.replayContextHash,
+        targetFinalityRecordHash: record.targetFinalityRecordHash,
+        targetProposalHash: record.targetProposalHash,
     });
 
-    if (record.localReplayRecordDigest !== expectedDigest) {
+    if (record.localReplayRecordHash !== expectedHash) {
         refusedObjects.push(
             createRefusal(
                 'LocalReplayRecordInvalid',
-                'Local replay record digest does not match its canonical payload.',
-                record.localReplayRecordDigest,
+                'Local replay record hash does not match its canonical payload.',
+                record.localReplayRecordHash,
                 'LocalReplayRecord',
             ),
         );
@@ -80,7 +79,7 @@ const verifyLocalReplayRecordShape = (
             createRefusal(
                 'LocalReplayRecordInvalid',
                 'Local replay record object shape is not canonical.',
-                record.localReplayRecordDigest,
+                record.localReplayRecordHash,
                 'LocalReplayRecord',
             ),
         );
@@ -88,17 +87,17 @@ const verifyLocalReplayRecordShape = (
     if (
         record.ceremonyId !== targetFinalityRecord.ceremonyId ||
         record.ceremonyId !== evaluationProofRecord.ceremonyId ||
-        record.electionManifestDigest !==
+        record.electionManifestHash !==
             targetFinalityRecord.targetFinalityCheckpoint
-                .electionManifestDigest ||
-        record.electionManifestDigest !==
-            evaluationProofRecord.electionManifestDigest
+                .electionManifestHash ||
+        record.electionManifestHash !==
+            evaluationProofRecord.electionManifestHash
     ) {
         refusedObjects.push(
             createRefusal(
                 'LocalReplayRecordInvalid',
                 'Local replay record ceremony and manifest must match the accepted target evidence.',
-                record.localReplayRecordDigest,
+                record.localReplayRecordHash,
                 'LocalReplayRecord',
             ),
         );
@@ -113,38 +112,37 @@ const verifyLocalReplayRecordShape = (
             createRefusal(
                 'TargetAcceptanceAuthorizationFailure',
                 'Local replay record requires an accepted target-finality record.',
-                record.localReplayRecordDigest,
+                record.localReplayRecordHash,
                 'LocalReplayRecord',
             ),
         );
     }
     if (
-        record.targetProposalDigest !==
-            targetFinalityRecord.targetProposalDigest ||
-        record.targetFinalityRecordDigest !==
-            targetFinalityRecord.targetFinalityRecordDigest ||
-        record.evaluationProofRecordDigest !==
-            evaluationProofRecord.evaluationProofRecordDigest
+        record.targetProposalHash !== targetFinalityRecord.targetProposalHash ||
+        record.targetFinalityRecordHash !==
+            targetFinalityRecord.targetFinalityRecordHash ||
+        record.evaluationProofRecordHash !==
+            evaluationProofRecord.evaluationProofRecordHash
     ) {
         refusedObjects.push(
             createRefusal(
                 'LocalReplayRecordInvalid',
                 'Local replay record must bind the exact accepted target and evaluation proof.',
-                record.localReplayRecordDigest,
+                record.localReplayRecordHash,
                 'LocalReplayRecord',
             ),
         );
     }
     if (
         input.recordInclusionProof.includedObjectType !== 'LocalReplayRecord' ||
-        input.recordInclusionProof.includedObjectDigest !==
-            record.localReplayRecordDigest
+        input.recordInclusionProof.includedObjectHash !==
+            record.localReplayRecordHash
     ) {
         refusedObjects.push(
             createRefusal(
                 'InclusionProofInvalid',
                 'Local replay record inclusion proof does not bind the record.',
-                input.recordInclusionProof.inclusionProofDigest,
+                input.recordInclusionProof.inclusionProofHash,
                 'LocalReplayRecord',
             ),
         );
@@ -168,34 +166,34 @@ export const verifyLocalReplayRecordShell = (
                 signerRole: 'Participant',
                 signerIdentity: input.record.participantIdentity,
                 ceremonyId: input.record.ceremonyId,
-                publicKeyDigest: input.expectedSignerPublicKeyDigest,
-                manifestDigest: input.record.electionManifestDigest,
-                objectRoot: input.record.localReplayRecordDigest,
-                boardHeadDigest: input.recordInclusionProof.boardHeadDigest,
-                contextDigest: input.record.replayContextDigest,
+                publicKeyHash: input.expectedSignerPublicKeyHash,
+                manifestHash: input.record.electionManifestHash,
+                objectRoot: input.record.localReplayRecordHash,
+                boardHeadHash: input.recordInclusionProof.boardHeadHash,
+                contextHash: input.record.replayContextHash,
                 byteLength: signedObjectRootByteLength,
                 recoveryEpoch: input.record.recoveryEpoch,
                 deviceEpoch: input.record.deviceEpoch,
             },
-            acceptedObjectDigest: input.record.localReplayRecordDigest,
+            acceptedObjectHash: input.record.localReplayRecordHash,
         });
         const verificationBase =
             buildSignedBoardShellVerificationBase(evidence);
 
         return {
             ...verificationBase,
-            localReplayRecordDigest: verificationBase.ok
-                ? input.record.localReplayRecordDigest
+            localReplayRecordHash: verificationBase.ok
+                ? input.record.localReplayRecordHash
                 : undefined,
-            targetFinalityRecordDigest: verificationBase.ok
-                ? input.record.targetFinalityRecordDigest
+            targetFinalityRecordHash: verificationBase.ok
+                ? input.record.targetFinalityRecordHash
                 : undefined,
         };
     } catch {
         return {
             ok: false,
             statusLabels: [],
-            acceptedDigests: [],
+            acceptedHashes: [],
             refusedObjects: [
                 createRefusal(
                     'LocalReplayRecordInvalid',
@@ -217,48 +215,46 @@ const verifyTargetAcceptedRecordShape = (
         targetFinalityRecord,
     } = input;
     const refusedObjects: RefusalRecord[] = [];
-    const expectedDigest = deriveTargetAcceptedRecordDigest({
+    const expectedHash = deriveTargetAcceptedRecordHash({
         boardPosition: targetAcceptedRecord.boardPosition,
         boardSequence: targetAcceptedRecord.boardSequence,
         acceptanceMode: targetAcceptedRecord.acceptanceMode,
-        kllpsTargetDecryptionProfileDigest:
-            targetAcceptedRecord.kllpsTargetDecryptionProfileDigest,
+        kllpsTargetDecryptionProfileHash:
+            targetAcceptedRecord.kllpsTargetDecryptionProfileHash,
         ceremonyId: targetAcceptedRecord.ceremonyId,
-        cpadProfileDigest: targetAcceptedRecord.cpadProfileDigest,
+        cpadProfileHash: targetAcceptedRecord.cpadProfileHash,
         cpadProfileId: targetAcceptedRecord.cpadProfileId,
-        targetCiphertextDigest: targetAcceptedRecord.targetCiphertextDigest,
-        electionManifestDigest: targetAcceptedRecord.electionManifestDigest,
-        evaluationProofProfileDigest:
-            targetAcceptedRecord.evaluationProofProfileDigest,
-        evaluationProofRecordDigest:
-            targetAcceptedRecord.evaluationProofRecordDigest,
+        targetCiphertextHash: targetAcceptedRecord.targetCiphertextHash,
+        electionManifestHash: targetAcceptedRecord.electionManifestHash,
+        evaluationProofProfileHash:
+            targetAcceptedRecord.evaluationProofProfileHash,
+        evaluationProofRecordHash:
+            targetAcceptedRecord.evaluationProofRecordHash,
         objectType: targetAcceptedRecord.objectType,
         objectVersion: targetAcceptedRecord.objectVersion,
         organizerIdentity: targetAcceptedRecord.organizerIdentity,
-        targetBasisDigest: targetAcceptedRecord.targetBasisDigest,
-        targetContextDigest: targetAcceptedRecord.targetContextDigest,
-        targetFinalityCheckpointDigest:
-            targetAcceptedRecord.targetFinalityCheckpointDigest,
-        targetFinalityRecordDigest:
-            targetAcceptedRecord.targetFinalityRecordDigest,
-        targetLayoutDigest: targetAcceptedRecord.targetLayoutDigest,
+        targetBasisHash: targetAcceptedRecord.targetBasisHash,
+        targetContextHash: targetAcceptedRecord.targetContextHash,
+        targetFinalityCheckpointHash:
+            targetAcceptedRecord.targetFinalityCheckpointHash,
+        targetFinalityRecordHash: targetAcceptedRecord.targetFinalityRecordHash,
+        targetLayoutHash: targetAcceptedRecord.targetLayoutHash,
         targetFinalityScope: targetAcceptedRecord.targetFinalityScope,
-        targetPreimageDigest: targetAcceptedRecord.targetPreimageDigest,
-        targetProposalDigest: targetAcceptedRecord.targetProposalDigest,
-        thresholdDecryptionProfileDigest:
-            targetAcceptedRecord.thresholdDecryptionProfileDigest,
+        targetPreimageHash: targetAcceptedRecord.targetPreimageHash,
+        targetProposalHash: targetAcceptedRecord.targetProposalHash,
+        thresholdDecryptionProfileHash:
+            targetAcceptedRecord.thresholdDecryptionProfileHash,
         thresholdDecryptionProfileId:
             targetAcceptedRecord.thresholdDecryptionProfileId,
-        topKEvaluationRecordDigest:
-            targetAcceptedRecord.topKEvaluationRecordDigest,
+        topKEvaluationRecordHash: targetAcceptedRecord.topKEvaluationRecordHash,
     });
 
-    if (targetAcceptedRecord.targetAcceptedRecordDigest !== expectedDigest) {
+    if (targetAcceptedRecord.targetAcceptedRecordHash !== expectedHash) {
         refusedObjects.push(
             createRefusal(
                 'TargetAcceptedRecordInvalid',
-                'Target-accepted record digest does not match its canonical payload.',
-                targetAcceptedRecord.targetAcceptedRecordDigest,
+                'Target-accepted record hash does not match its canonical payload.',
+                targetAcceptedRecord.targetAcceptedRecordHash,
                 'TargetAcceptedRecord',
             ),
         );
@@ -274,7 +270,7 @@ const verifyTargetAcceptedRecordShape = (
             createRefusal(
                 'TargetAcceptedRecordInvalid',
                 'Target-accepted record object shape is not canonical.',
-                targetAcceptedRecord.targetAcceptedRecordDigest,
+                targetAcceptedRecord.targetAcceptedRecordHash,
                 'TargetAcceptedRecord',
             ),
         );
@@ -282,11 +278,11 @@ const verifyTargetAcceptedRecordShape = (
     if (
         targetAcceptedRecord.ceremonyId !== targetFinalityRecord.ceremonyId ||
         targetAcceptedRecord.ceremonyId !== evaluationProofRecord.ceremonyId ||
-        targetAcceptedRecord.electionManifestDigest !==
+        targetAcceptedRecord.electionManifestHash !==
             targetFinalityRecord.targetFinalityCheckpoint
-                .electionManifestDigest ||
-        targetAcceptedRecord.electionManifestDigest !==
-            evaluationProofRecord.electionManifestDigest ||
+                .electionManifestHash ||
+        targetAcceptedRecord.electionManifestHash !==
+            evaluationProofRecord.electionManifestHash ||
         targetAcceptedRecord.targetFinalityScope !==
             targetFinalityRecord.targetFinalityScope
     ) {
@@ -294,7 +290,7 @@ const verifyTargetAcceptedRecordShape = (
             createRefusal(
                 'TargetAcceptedRecordInvalid',
                 'Target-accepted record ceremony, manifest, and scope must match the accepted target evidence.',
-                targetAcceptedRecord.targetAcceptedRecordDigest,
+                targetAcceptedRecord.targetAcceptedRecordHash,
                 'TargetAcceptedRecord',
             ),
         );
@@ -309,35 +305,35 @@ const verifyTargetAcceptedRecordShape = (
             createRefusal(
                 'TargetAcceptanceAuthorizationFailure',
                 'Target acceptance requires an accepted target-finality record.',
-                targetAcceptedRecord.targetAcceptedRecordDigest,
+                targetAcceptedRecord.targetAcceptedRecordHash,
                 'TargetAcceptedRecord',
             ),
         );
     }
     if (
-        targetAcceptedRecord.targetProposalDigest !==
-            targetFinalityRecord.targetProposalDigest ||
-        targetAcceptedRecord.targetFinalityRecordDigest !==
-            targetFinalityRecord.targetFinalityRecordDigest ||
-        targetAcceptedRecord.targetFinalityCheckpointDigest !==
+        targetAcceptedRecord.targetProposalHash !==
+            targetFinalityRecord.targetProposalHash ||
+        targetAcceptedRecord.targetFinalityRecordHash !==
+            targetFinalityRecord.targetFinalityRecordHash ||
+        targetAcceptedRecord.targetFinalityCheckpointHash !==
             targetFinalityRecord.targetFinalityCheckpoint
-                .targetFinalityCheckpointDigest ||
-        targetAcceptedRecord.evaluationProofRecordDigest !==
-            evaluationProofRecord.evaluationProofRecordDigest ||
-        targetAcceptedRecord.evaluationProofProfileDigest !==
-            evaluationProofRecord.evaluationProofProfileDigest ||
-        targetAcceptedRecord.topKEvaluationRecordDigest !==
-            evaluationProofRecord.topKEvaluationRecordDigest ||
-        targetAcceptedRecord.targetCiphertextDigest !==
-            evaluationProofRecord.targetCiphertextDigest ||
-        targetAcceptedRecord.targetLayoutDigest !==
-            evaluationProofRecord.targetLayoutDigest
+                .targetFinalityCheckpointHash ||
+        targetAcceptedRecord.evaluationProofRecordHash !==
+            evaluationProofRecord.evaluationProofRecordHash ||
+        targetAcceptedRecord.evaluationProofProfileHash !==
+            evaluationProofRecord.evaluationProofProfileHash ||
+        targetAcceptedRecord.topKEvaluationRecordHash !==
+            evaluationProofRecord.topKEvaluationRecordHash ||
+        targetAcceptedRecord.targetCiphertextHash !==
+            evaluationProofRecord.targetCiphertextHash ||
+        targetAcceptedRecord.targetLayoutHash !==
+            evaluationProofRecord.targetLayoutHash
     ) {
         refusedObjects.push(
             createRefusal(
                 'TargetAcceptedRecordInvalid',
                 'Target-accepted record must bind exact finality and mandatory evaluation proof evidence.',
-                targetAcceptedRecord.targetAcceptedRecordDigest,
+                targetAcceptedRecord.targetAcceptedRecordHash,
                 'TargetAcceptedRecord',
             ),
         );
@@ -345,14 +341,14 @@ const verifyTargetAcceptedRecordShape = (
     if (
         input.targetAcceptedRecordInclusionProof.includedObjectType !==
             'TargetAcceptedRecord' ||
-        input.targetAcceptedRecordInclusionProof.includedObjectDigest !==
-            targetAcceptedRecord.targetAcceptedRecordDigest
+        input.targetAcceptedRecordInclusionProof.includedObjectHash !==
+            targetAcceptedRecord.targetAcceptedRecordHash
     ) {
         refusedObjects.push(
             createRefusal(
                 'InclusionProofInvalid',
                 'Target-accepted record inclusion proof does not bind the record.',
-                input.targetAcceptedRecordInclusionProof.inclusionProofDigest,
+                input.targetAcceptedRecordInclusionProof.inclusionProofHash,
                 'TargetAcceptedRecord',
             ),
         );
@@ -367,7 +363,7 @@ const verifyTargetAcceptedRecordShape = (
             createRefusal(
                 'InclusionProofInvalid',
                 'Target-accepted record board position must match its inclusion proof.',
-                input.targetAcceptedRecordInclusionProof.inclusionProofDigest,
+                input.targetAcceptedRecordInclusionProof.inclusionProofHash,
                 'TargetAcceptedRecord',
             ),
         );
@@ -391,38 +387,36 @@ export const verifyTargetAcceptedRecordShell = (
                 signerRole: 'Organizer',
                 signerIdentity: input.targetAcceptedRecord.organizerIdentity,
                 ceremonyId: input.targetAcceptedRecord.ceremonyId,
-                publicKeyDigest: input.expectedOrganizerPublicKeyDigest,
-                manifestDigest:
-                    input.targetAcceptedRecord.electionManifestDigest,
-                objectRoot:
-                    input.targetAcceptedRecord.targetAcceptedRecordDigest,
-                boardHeadDigest:
-                    input.targetAcceptedRecordInclusionProof.boardHeadDigest,
-                contextDigest: input.targetAcceptedRecord.targetContextDigest,
+                publicKeyHash: input.expectedOrganizerPublicKeyHash,
+                manifestHash: input.targetAcceptedRecord.electionManifestHash,
+                objectRoot: input.targetAcceptedRecord.targetAcceptedRecordHash,
+                boardHeadHash:
+                    input.targetAcceptedRecordInclusionProof.boardHeadHash,
+                contextHash: input.targetAcceptedRecord.targetContextHash,
                 byteLength: signedObjectRootByteLength,
                 recoveryEpoch: 0,
                 deviceEpoch: 0,
             },
-            acceptedObjectDigest:
-                input.targetAcceptedRecord.targetAcceptedRecordDigest,
+            acceptedObjectHash:
+                input.targetAcceptedRecord.targetAcceptedRecordHash,
         });
         const verificationBase =
             buildSignedBoardShellVerificationBase(evidence);
 
         return {
             ...verificationBase,
-            targetAcceptedRecordDigest: verificationBase.ok
-                ? input.targetAcceptedRecord.targetAcceptedRecordDigest
+            targetAcceptedRecordHash: verificationBase.ok
+                ? input.targetAcceptedRecord.targetAcceptedRecordHash
                 : undefined,
-            targetFinalityRecordDigest: verificationBase.ok
-                ? input.targetAcceptedRecord.targetFinalityRecordDigest
+            targetFinalityRecordHash: verificationBase.ok
+                ? input.targetAcceptedRecord.targetFinalityRecordHash
                 : undefined,
         };
     } catch {
         return {
             ok: false,
             statusLabels: [],
-            acceptedDigests: [],
+            acceptedHashes: [],
             refusedObjects: [
                 createRefusal(
                     'TargetAcceptedRecordInvalid',
@@ -440,52 +434,51 @@ const verifyTopKDecryptionShareShape = (
 ): readonly RefusalRecord[] => {
     const { decryptionShare, targetAcceptedRecord } = input;
     const refusedObjects: RefusalRecord[] = [];
-    const expectedDigest = deriveTopKDecryptionShareDigest({
-        kllpsTargetDecryptionProfileDigest:
-            decryptionShare.kllpsTargetDecryptionProfileDigest,
+    const expectedHash = deriveTopKDecryptionShareHash({
+        kllpsTargetDecryptionProfileHash:
+            decryptionShare.kllpsTargetDecryptionProfileHash,
         boardPosition: decryptionShare.boardPosition,
         boardSequence: decryptionShare.boardSequence,
         ceremonyId: decryptionShare.ceremonyId,
-        cpadProfileDigest: decryptionShare.cpadProfileDigest,
-        targetCiphertextDigest: decryptionShare.targetCiphertextDigest,
+        cpadProfileHash: decryptionShare.cpadProfileHash,
+        targetCiphertextHash: decryptionShare.targetCiphertextHash,
         deviceEpoch: decryptionShare.deviceEpoch,
-        electionManifestDigest: decryptionShare.electionManifestDigest,
-        evaluationProofRecordDigest:
-            decryptionShare.evaluationProofRecordDigest,
+        electionManifestHash: decryptionShare.electionManifestHash,
+        evaluationProofRecordHash: decryptionShare.evaluationProofRecordHash,
         objectType: decryptionShare.objectType,
         objectVersion: decryptionShare.objectVersion,
-        targetBasisDigest: decryptionShare.targetBasisDigest,
+        targetBasisHash: decryptionShare.targetBasisHash,
         recoveryEpoch: decryptionShare.recoveryEpoch,
         shareRoot: decryptionShare.shareRoot,
-        targetAcceptedRecordDigest: decryptionShare.targetAcceptedRecordDigest,
-        targetContextDigest: decryptionShare.targetContextDigest,
-        targetDecryptionCiphertextDigest:
-            decryptionShare.targetDecryptionCiphertextDigest,
-        targetDecryptionPreparationRecordDigest:
-            decryptionShare.targetDecryptionPreparationRecordDigest,
-        targetFinalityCheckpointDigest:
-            decryptionShare.targetFinalityCheckpointDigest,
-        targetFinalityRecordDigest: decryptionShare.targetFinalityRecordDigest,
-        targetPreimageDigest: decryptionShare.targetPreimageDigest,
-        targetProposalDigest: decryptionShare.targetProposalDigest,
-        thresholdShareVerificationKeyDigest:
-            decryptionShare.thresholdShareVerificationKeyDigest,
+        targetAcceptedRecordHash: decryptionShare.targetAcceptedRecordHash,
+        targetContextHash: decryptionShare.targetContextHash,
+        targetDecryptionCiphertextHash:
+            decryptionShare.targetDecryptionCiphertextHash,
+        targetDecryptionPreparationRecordHash:
+            decryptionShare.targetDecryptionPreparationRecordHash,
+        targetFinalityCheckpointHash:
+            decryptionShare.targetFinalityCheckpointHash,
+        targetFinalityRecordHash: decryptionShare.targetFinalityRecordHash,
+        targetPreimageHash: decryptionShare.targetPreimageHash,
+        targetProposalHash: decryptionShare.targetProposalHash,
+        thresholdShareVerificationKeyHash:
+            decryptionShare.thresholdShareVerificationKeyHash,
         thresholdShareVerificationKeyRoot:
             decryptionShare.thresholdShareVerificationKeyRoot,
-        thresholdDecryptionProfileDigest:
-            decryptionShare.thresholdDecryptionProfileDigest,
-        topKEvaluationRecordDigest: decryptionShare.topKEvaluationRecordDigest,
-        trusteeThresholdVerificationKeyDigest:
-            decryptionShare.trusteeThresholdVerificationKeyDigest,
+        thresholdDecryptionProfileHash:
+            decryptionShare.thresholdDecryptionProfileHash,
+        topKEvaluationRecordHash: decryptionShare.topKEvaluationRecordHash,
+        trusteeThresholdVerificationKeyHash:
+            decryptionShare.trusteeThresholdVerificationKeyHash,
         trusteeIdentity: decryptionShare.trusteeIdentity,
     });
 
-    if (decryptionShare.topKDecryptionShareDigest !== expectedDigest) {
+    if (decryptionShare.topKDecryptionShareHash !== expectedHash) {
         refusedObjects.push(
             createRefusal(
                 'DecryptionShareInvalid',
-                'Decryption-share shell digest does not match its canonical payload.',
-                decryptionShare.topKDecryptionShareDigest,
+                'Decryption-share shell hash does not match its canonical payload.',
+                decryptionShare.topKDecryptionShareHash,
                 'TopKDecryptionShare',
             ),
         );
@@ -502,61 +495,61 @@ const verifyTopKDecryptionShareShape = (
             createRefusal(
                 'DecryptionShareInvalid',
                 'Decryption-share shell object shape is not canonical.',
-                decryptionShare.topKDecryptionShareDigest,
+                decryptionShare.topKDecryptionShareHash,
                 'TopKDecryptionShare',
             ),
         );
     }
     if (
         decryptionShare.ceremonyId !== targetAcceptedRecord.ceremonyId ||
-        decryptionShare.electionManifestDigest !==
-            targetAcceptedRecord.electionManifestDigest ||
-        decryptionShare.targetAcceptedRecordDigest !==
-            targetAcceptedRecord.targetAcceptedRecordDigest ||
-        decryptionShare.targetProposalDigest !==
-            targetAcceptedRecord.targetProposalDigest ||
-        decryptionShare.targetPreimageDigest !==
-            targetAcceptedRecord.targetPreimageDigest ||
-        decryptionShare.targetFinalityRecordDigest !==
-            targetAcceptedRecord.targetFinalityRecordDigest ||
-        decryptionShare.targetFinalityCheckpointDigest !==
-            targetAcceptedRecord.targetFinalityCheckpointDigest ||
-        decryptionShare.evaluationProofRecordDigest !==
-            targetAcceptedRecord.evaluationProofRecordDigest ||
-        decryptionShare.topKEvaluationRecordDigest !==
-            targetAcceptedRecord.topKEvaluationRecordDigest ||
-        decryptionShare.targetCiphertextDigest !==
-            targetAcceptedRecord.targetCiphertextDigest ||
-        decryptionShare.cpadProfileDigest !==
-            targetAcceptedRecord.cpadProfileDigest ||
-        decryptionShare.targetBasisDigest !==
-            targetAcceptedRecord.targetBasisDigest ||
-        decryptionShare.targetContextDigest !==
-            targetAcceptedRecord.targetContextDigest ||
-        decryptionShare.kllpsTargetDecryptionProfileDigest !==
-            targetAcceptedRecord.kllpsTargetDecryptionProfileDigest ||
-        decryptionShare.thresholdDecryptionProfileDigest !==
-            targetAcceptedRecord.thresholdDecryptionProfileDigest
+        decryptionShare.electionManifestHash !==
+            targetAcceptedRecord.electionManifestHash ||
+        decryptionShare.targetAcceptedRecordHash !==
+            targetAcceptedRecord.targetAcceptedRecordHash ||
+        decryptionShare.targetProposalHash !==
+            targetAcceptedRecord.targetProposalHash ||
+        decryptionShare.targetPreimageHash !==
+            targetAcceptedRecord.targetPreimageHash ||
+        decryptionShare.targetFinalityRecordHash !==
+            targetAcceptedRecord.targetFinalityRecordHash ||
+        decryptionShare.targetFinalityCheckpointHash !==
+            targetAcceptedRecord.targetFinalityCheckpointHash ||
+        decryptionShare.evaluationProofRecordHash !==
+            targetAcceptedRecord.evaluationProofRecordHash ||
+        decryptionShare.topKEvaluationRecordHash !==
+            targetAcceptedRecord.topKEvaluationRecordHash ||
+        decryptionShare.targetCiphertextHash !==
+            targetAcceptedRecord.targetCiphertextHash ||
+        decryptionShare.cpadProfileHash !==
+            targetAcceptedRecord.cpadProfileHash ||
+        decryptionShare.targetBasisHash !==
+            targetAcceptedRecord.targetBasisHash ||
+        decryptionShare.targetContextHash !==
+            targetAcceptedRecord.targetContextHash ||
+        decryptionShare.kllpsTargetDecryptionProfileHash !==
+            targetAcceptedRecord.kllpsTargetDecryptionProfileHash ||
+        decryptionShare.thresholdDecryptionProfileHash !==
+            targetAcceptedRecord.thresholdDecryptionProfileHash
     ) {
         refusedObjects.push(
             createRefusal(
                 'DecryptionShareInvalid',
-                'Decryption-share shell must bind the accepted target and profile digests.',
-                decryptionShare.topKDecryptionShareDigest,
+                'Decryption-share shell must bind the accepted target and profile Hashes.',
+                decryptionShare.topKDecryptionShareHash,
                 'TopKDecryptionShare',
             ),
         );
     }
     if (
         !input.targetAcceptedRecordVerification.ok ||
-        input.targetAcceptedRecordVerification.targetAcceptedRecordDigest !==
-            targetAcceptedRecord.targetAcceptedRecordDigest
+        input.targetAcceptedRecordVerification.targetAcceptedRecordHash !==
+            targetAcceptedRecord.targetAcceptedRecordHash
     ) {
         refusedObjects.push(
             createRefusal(
                 'TargetAcceptanceAuthorizationFailure',
                 'Decryption-share shell requires an accepted target record.',
-                decryptionShare.topKDecryptionShareDigest,
+                decryptionShare.topKDecryptionShareHash,
                 'TopKDecryptionShare',
             ),
         );
@@ -564,14 +557,14 @@ const verifyTopKDecryptionShareShape = (
     if (
         input.decryptionShareInclusionProof.includedObjectType !==
             'TopKDecryptionShare' ||
-        input.decryptionShareInclusionProof.includedObjectDigest !==
-            decryptionShare.topKDecryptionShareDigest
+        input.decryptionShareInclusionProof.includedObjectHash !==
+            decryptionShare.topKDecryptionShareHash
     ) {
         refusedObjects.push(
             createRefusal(
                 'InclusionProofInvalid',
                 'Decryption-share shell inclusion proof does not bind the share.',
-                input.decryptionShareInclusionProof.inclusionProofDigest,
+                input.decryptionShareInclusionProof.inclusionProofHash,
                 'TopKDecryptionShare',
             ),
         );
@@ -586,7 +579,7 @@ const verifyTopKDecryptionShareShape = (
             createRefusal(
                 'InclusionProofInvalid',
                 'Decryption-share shell board position must match its inclusion proof.',
-                input.decryptionShareInclusionProof.inclusionProofDigest,
+                input.decryptionShareInclusionProof.inclusionProofHash,
                 'TopKDecryptionShare',
             ),
         );
@@ -610,39 +603,38 @@ export const verifyTopKDecryptionShareShell = (
                 signerRole: 'Trustee',
                 signerIdentity: input.decryptionShare.trusteeIdentity,
                 ceremonyId: input.decryptionShare.ceremonyId,
-                publicKeyDigest: input.expectedTrusteePublicKeyDigest,
-                manifestDigest: input.decryptionShare.electionManifestDigest,
-                objectRoot: input.decryptionShare.topKDecryptionShareDigest,
-                boardHeadDigest:
-                    input.decryptionShareInclusionProof.boardHeadDigest,
-                contextDigest: input.decryptionShare.targetContextDigest,
+                publicKeyHash: input.expectedTrusteePublicKeyHash,
+                manifestHash: input.decryptionShare.electionManifestHash,
+                objectRoot: input.decryptionShare.topKDecryptionShareHash,
+                boardHeadHash:
+                    input.decryptionShareInclusionProof.boardHeadHash,
+                contextHash: input.decryptionShare.targetContextHash,
                 byteLength: signedObjectRootByteLength,
                 recoveryEpoch: input.decryptionShare.recoveryEpoch,
                 deviceEpoch: input.decryptionShare.deviceEpoch,
             },
-            acceptedObjectDigest:
-                input.decryptionShare.topKDecryptionShareDigest,
+            acceptedObjectHash: input.decryptionShare.topKDecryptionShareHash,
         });
         const verificationBase =
             buildSignedBoardShellVerificationBase(evidence);
 
         return {
             ...verificationBase,
-            topKDecryptionShareDigest: verificationBase.ok
-                ? input.decryptionShare.topKDecryptionShareDigest
+            topKDecryptionShareHash: verificationBase.ok
+                ? input.decryptionShare.topKDecryptionShareHash
                 : undefined,
-            targetAcceptedRecordDigest: verificationBase.ok
-                ? input.decryptionShare.targetAcceptedRecordDigest
+            targetAcceptedRecordHash: verificationBase.ok
+                ? input.decryptionShare.targetAcceptedRecordHash
                 : undefined,
-            targetFinalityRecordDigest: verificationBase.ok
-                ? input.decryptionShare.targetFinalityRecordDigest
+            targetFinalityRecordHash: verificationBase.ok
+                ? input.decryptionShare.targetFinalityRecordHash
                 : undefined,
         };
     } catch {
         return {
             ok: false,
             statusLabels: [],
-            acceptedDigests: [],
+            acceptedHashes: [],
             refusedObjects: [
                 createRefusal(
                     'DecryptionShareInvalid',

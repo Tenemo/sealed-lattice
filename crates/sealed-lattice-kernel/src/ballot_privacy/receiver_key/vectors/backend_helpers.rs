@@ -31,22 +31,22 @@ pub(super) fn derive_bytes(
 pub(super) fn validate_expected_public_matrix_seed(
     backend_statement: &Map<String, Value>,
 ) -> Result<(), String> {
-    let expected_public_matrix_seed_digest = derive_protocol_digest(
-        "ReceiverEncryptionProfileDigest",
+    let expected_public_matrix_seed_hash = derive_protocol_hash(
+        "ReceiverEncryptionProfileHash",
         &json!({
             "ceremonyId": string_property(backend_statement, "ceremonyId")?,
-            "manifestDigest": string_property(backend_statement, "manifestDigest")?,
+            "manifestHash": string_property(backend_statement, "manifestHash")?,
             "purpose": "receiver-public-matrix-seed",
-            "receiverEncryptionProfileDigest": string_property(backend_statement, "receiverEncryptionProfileDigest")?,
+            "receiverEncryptionProfileHash": string_property(backend_statement, "receiverEncryptionProfileHash")?,
             "receiverIdentity": string_property(backend_statement, "receiverIdentity")?,
             "receiverRosterPosition": u64_property(backend_statement, "receiverRosterPosition")?,
             "recoveryEpoch": u64_property(backend_statement, "recoveryEpoch")?,
-            "rosterDigest": string_property(backend_statement, "rosterDigest")?,
+            "rosterHash": string_property(backend_statement, "rosterHash")?,
         }),
     )
     .map_err(|error| format!("receiver-key matrix seed could not be recomputed: {error}"))?;
-    if string_property(backend_statement, "publicMatrixSeedDigest")?
-        != expected_public_matrix_seed_digest
+    if string_property(backend_statement, "publicMatrixSeedHash")?
+        != expected_public_matrix_seed_hash
     {
         return Err(
             "receiver-key backend statement public matrix seed is not canonical".to_string(),
@@ -56,24 +56,24 @@ pub(super) fn validate_expected_public_matrix_seed(
     Ok(())
 }
 
-pub(super) fn validate_receiver_key_context_digest(
+pub(super) fn validate_receiver_key_context_hash(
     backend_statement: &Map<String, Value>,
 ) -> Result<(), String> {
-    let expected_context_digest = derive_receiver_key_backend_digest(
-        RECEIVER_KEY_PUBLIC_CONTEXT_DIGEST_PURPOSE,
+    let expected_context_hash = derive_receiver_key_backend_hash(
+        RECEIVER_KEY_PUBLIC_CONTEXT_HASH_PURPOSE,
         &json!({
             "ceremonyId": string_property(backend_statement, "ceremonyId")?,
-            "manifestDigest": string_property(backend_statement, "manifestDigest")?,
-            "receiverEncryptionProfileDigest": string_property(backend_statement, "receiverEncryptionProfileDigest")?,
+            "manifestHash": string_property(backend_statement, "manifestHash")?,
+            "receiverEncryptionProfileHash": string_property(backend_statement, "receiverEncryptionProfileHash")?,
             "receiverIdentity": string_property(backend_statement, "receiverIdentity")?,
-            "receiverPublicKeyDigest": string_property(backend_statement, "receiverPublicKeyDigest")?,
+            "receiverPublicKeyHash": string_property(backend_statement, "receiverPublicKeyHash")?,
             "receiverRosterPosition": u64_property(backend_statement, "receiverRosterPosition")?,
             "recoveryEpoch": u64_property(backend_statement, "recoveryEpoch")?,
-            "rosterDigest": string_property(backend_statement, "rosterDigest")?,
+            "rosterHash": string_property(backend_statement, "rosterHash")?,
         }),
     )?;
-    if string_property(backend_statement, "receiverKeyContextDigest")? != expected_context_digest {
-        return Err("receiver-key backend context digest does not match public inputs".to_string());
+    if string_property(backend_statement, "receiverKeyContextHash")? != expected_context_hash {
+        return Err("receiver-key backend context hash does not match public inputs".to_string());
     }
 
     Ok(())
@@ -127,7 +127,7 @@ pub(super) fn validate_row_batch(backend_statement: &Map<String, Value>) -> Resu
         return Err("receiver-key backend statement must contain one row batch".to_string());
     }
     let row_batch = object_field(&row_batches[0], "rowBatch")?;
-    if string_property(row_batch, "batchKind")? != "DigestExpandedRows"
+    if string_property(row_batch, "batchKind")? != "HashExpandedRows"
         || string_property(row_batch, "batchName")? != "receiver_key_equation_rows"
         || string_property(row_batch, "coefficientExpansionDomain")?
             != RECEIVER_KEY_EQUATION_COEFFICIENT_EXPANSION_DOMAIN
@@ -146,27 +146,27 @@ pub(super) fn validate_row_batch(backend_statement: &Map<String, Value>) -> Resu
         != string_property(backend_statement, "receiverIdentity")?
         || u64_property(row_batch, "receiverRosterPosition")?
             != u64_property(backend_statement, "receiverRosterPosition")?
-        || string_property(row_batch, "targetDigest")?
-            != string_property(backend_statement, "keyMaterialDigest")?
+        || string_property(row_batch, "targetHash")?
+            != string_property(backend_statement, "keyMaterialHash")?
     {
         return Err("receiver-key backend row batch is not context-bound".to_string());
     }
-    let public_input_digests = object_property(row_batch, "publicInputDigests")?;
+    let public_input_hashes = object_property(row_batch, "publicInputHashes")?;
     for (field_name, statement_field_name) in [
-        ("keyMaterialDigest", "keyMaterialDigest"),
-        ("publicMatrixSeedDigest", "publicMatrixSeedDigest"),
+        ("keyMaterialHash", "keyMaterialHash"),
+        ("publicMatrixSeedHash", "publicMatrixSeedHash"),
         (
-            "receiverEncryptionProfileDigest",
-            "receiverEncryptionProfileDigest",
+            "receiverEncryptionProfileHash",
+            "receiverEncryptionProfileHash",
         ),
-        ("receiverKeyContextDigest", "receiverKeyContextDigest"),
-        ("receiverPublicKeyDigest", "receiverPublicKeyDigest"),
+        ("receiverKeyContextHash", "receiverKeyContextHash"),
+        ("receiverPublicKeyHash", "receiverPublicKeyHash"),
     ] {
-        if string_property(public_input_digests, field_name)?
+        if string_property(public_input_hashes, field_name)?
             != string_property(backend_statement, statement_field_name)?
         {
             return Err(
-                "receiver-key backend row batch public digest binding is invalid".to_string(),
+                "receiver-key backend row batch public hash binding is invalid".to_string(),
             );
         }
     }
@@ -179,29 +179,29 @@ pub(super) fn validate_row_batch(backend_statement: &Map<String, Value>) -> Resu
     let row_batch_payload = json!({
         "coefficientExpansionDomain": string_property(row_batch, "coefficientExpansionDomain")?,
         "modulus": string_property(row_batch, "modulus")?,
-        "publicInputDigests": public_input_digests,
+        "publicInputHashes": public_input_hashes,
         "receiverIdentity": string_property(row_batch, "receiverIdentity")?,
         "receiverRosterPosition": u64_property(row_batch, "receiverRosterPosition")?,
         "rowCount": u64_property(row_batch, "rowCount")?,
         "rowKind": string_property(row_batch, "rowKind")?,
         "sourceAlgebraicRowName": string_property(row_batch, "sourceAlgebraicRowName")?,
-        "targetDigest": string_property(row_batch, "targetDigest")?,
+        "targetHash": string_property(row_batch, "targetHash")?,
         "targetExpansionDomain": string_property(row_batch, "targetExpansionDomain")?,
         "variableColumnIndices": array_property(row_batch, "variableColumnIndices")?,
     });
-    let matrix_digest = derive_receiver_key_backend_digest(
-        RECEIVER_KEY_DIGEST_EXPANDED_MATRIX_DIGEST_PURPOSE,
+    let matrix_hash = derive_receiver_key_backend_hash(
+        RECEIVER_KEY_HASH_EXPANDED_MATRIX_HASH_PURPOSE,
         &row_batch_payload,
     )?;
-    let target_vector_digest = derive_receiver_key_backend_digest(
-        RECEIVER_KEY_DIGEST_EXPANDED_TARGET_VECTOR_DIGEST_PURPOSE,
+    let target_vector_hash = derive_receiver_key_backend_hash(
+        RECEIVER_KEY_HASH_EXPANDED_TARGET_VECTOR_HASH_PURPOSE,
         &row_batch_payload,
     )?;
-    if string_property(row_batch, "matrixDigest")? != matrix_digest {
-        return Err("receiver-key backend row-batch matrix digest is invalid".to_string());
+    if string_property(row_batch, "matrixHash")? != matrix_hash {
+        return Err("receiver-key backend row-batch matrix hash is invalid".to_string());
     }
-    if string_property(row_batch, "targetVectorDigest")? != target_vector_digest {
-        return Err("receiver-key backend row-batch target digest is invalid".to_string());
+    if string_property(row_batch, "targetVectorHash")? != target_vector_hash {
+        return Err("receiver-key backend row-batch target hash is invalid".to_string());
     }
 
     Ok(())
@@ -264,39 +264,34 @@ pub(super) fn validate_bound(
     Ok(())
 }
 
-pub(super) fn validate_digest_change_trace(
+pub(super) fn validate_hash_change_trace(
     case_object: &Map<String, Value>,
-    accepted_digests: &ReceiverKeyAcceptedDigests,
+    accepted_hashes: &ReceiverKeyAcceptedHashes,
 ) -> Result<(), String> {
     let trace = object_property(case_object, "trace")?;
-    if let Ok(expected_digest_changed) = bool_property(trace, "expectedDigestChanged")
-        && expected_digest_changed
+    if let Ok(expected_hash_changed) = bool_property(trace, "expectedHashChanged")
+        && expected_hash_changed
     {
-        if let Ok(baseline_backend_digest) =
-            string_property(trace, "baselineBackendStatementDigest")
-            && baseline_backend_digest == accepted_digests.backend_statement_digest
+        if let Ok(baseline_backend_hash) = string_property(trace, "baselineBackendStatementHash")
+            && baseline_backend_hash == accepted_hashes.backend_statement_hash
         {
-            return Err(
-                "receiver-key digest-change vector did not change backend digest".to_string(),
-            );
+            return Err("receiver-key hash-change vector did not change backend hash".to_string());
         }
-        if let Ok(baseline_linear_digest) = string_property(trace, "baselineLinearStatementDigest")
-            && baseline_linear_digest == accepted_digests.linear_statement_digest
+        if let Ok(baseline_linear_hash) = string_property(trace, "baselineLinearStatementHash")
+            && baseline_linear_hash == accepted_hashes.linear_statement_hash
         {
-            return Err(
-                "receiver-key digest-change vector did not change linear digest".to_string(),
-            );
+            return Err("receiver-key hash-change vector did not change linear hash".to_string());
         }
     }
-    if let Ok(trace_digest) = string_property(trace, "backendStatementDigest")
-        && trace_digest != accepted_digests.backend_statement_digest
+    if let Ok(trace_hash) = string_property(trace, "backendStatementHash")
+        && trace_hash != accepted_hashes.backend_statement_hash
     {
-        return Err("receiver-key trace digest does not match backend statement".to_string());
+        return Err("receiver-key trace hash does not match backend statement".to_string());
     }
-    if let Ok(trace_digest) = string_property(trace, "linearStatementDigest")
-        && trace_digest != accepted_digests.linear_statement_digest
+    if let Ok(trace_hash) = string_property(trace, "linearStatementHash")
+        && trace_hash != accepted_hashes.linear_statement_hash
     {
-        return Err("receiver-key trace digest does not match linear statement".to_string());
+        return Err("receiver-key trace hash does not match linear statement".to_string());
     }
 
     Ok(())
@@ -319,18 +314,18 @@ pub(super) fn validate_column_indices(
     Ok(())
 }
 
-pub(super) fn derive_receiver_key_backend_digest(
+pub(super) fn derive_receiver_key_backend_hash(
     purpose: &str,
     payload: &Value,
 ) -> Result<String, String> {
-    derive_protocol_digest(
-        "ChallengeDomainDigest",
+    derive_protocol_hash(
+        "ChallengeDomainHash",
         &json!({
             "payload": payload,
             "purpose": purpose
         }),
     )
-    .map_err(|error| format!("receiver-key backend digest could not be recomputed: {error}"))
+    .map_err(|error| format!("receiver-key backend hash could not be recomputed: {error}"))
 }
 
 pub(super) fn reject_forbidden_witness_keys(value: &Value) -> Result<(), String> {
@@ -368,7 +363,7 @@ pub(super) fn reject_forbidden_witness_keys(value: &Value) -> Result<(), String>
     Ok(())
 }
 
-pub(super) fn is_protocol_digest(value: &str) -> bool {
+pub(super) fn is_protocol_hash(value: &str) -> bool {
     value.len() == 128
         && value.bytes().any(|byte| byte != b'0')
         && value

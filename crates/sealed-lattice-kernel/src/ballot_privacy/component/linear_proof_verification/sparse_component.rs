@@ -6,7 +6,7 @@ pub(super) fn verify_sparse_compatible_component_proof(
     component_proof: &Value,
     proof_input: &Value,
 ) -> Value {
-    let component_proof_record_digest = string_field(component_proof, "componentProofRecordDigest");
+    let component_proof_record_hash = string_field(component_proof, "componentProofRecordHash");
     let proof_statement_format =
         string_field(proof_input, "proofStatementFormat").expect("statement format checked");
     let proof_statement = match object_map(proof_input)
@@ -20,7 +20,7 @@ pub(super) fn verify_sparse_compatible_component_proof(
                 format!(
                     "Ballot proof component proof input for {component_id} must supply its sparse-compatible public proof statement object."
                 ),
-                component_proof_record_digest,
+                component_proof_record_hash,
             );
         }
     };
@@ -38,7 +38,7 @@ pub(super) fn verify_sparse_compatible_component_proof(
                     vec![json!({
                         "code": error.code,
                         "message": error.message,
-                        "objectDigest": string_field(component_proof, "componentProofRecordDigest")
+                        "objectHash": string_field(component_proof, "componentProofRecordHash")
                     })],
                     json!(error.code),
                 );
@@ -51,7 +51,7 @@ pub(super) fn verify_sparse_compatible_component_proof(
                 operation,
                 component_id,
                 format!("Ballot proof component {component_id} has no proof bytes."),
-                component_proof_record_digest,
+                component_proof_record_hash,
             );
         }
     };
@@ -62,7 +62,7 @@ pub(super) fn verify_sparse_compatible_component_proof(
                 operation,
                 component_id,
                 format!("Ballot proof component {component_id} has no public randomness."),
-                component_proof_record_digest,
+                component_proof_record_hash,
             );
         }
     };
@@ -74,7 +74,7 @@ pub(super) fn verify_sparse_compatible_component_proof(
                     operation,
                     component_id,
                     format!("Ballot proof component {component_id} has no parameter set."),
-                    component_proof_record_digest,
+                    component_proof_record_hash,
                 );
             }
         };
@@ -86,7 +86,7 @@ pub(super) fn verify_sparse_compatible_component_proof(
                     operation,
                     component_id,
                     format!("Ballot proof component {component_id} has no proof encoding."),
-                    component_proof_record_digest,
+                    component_proof_record_hash,
                 );
             }
         };
@@ -100,7 +100,7 @@ pub(super) fn verify_sparse_compatible_component_proof(
                     format!(
                         "Ballot proof component {component_id} parameter set is invalid: {error}."
                     ),
-                    component_proof_record_digest,
+                    component_proof_record_hash,
                 );
             }
         };
@@ -114,7 +114,7 @@ pub(super) fn verify_sparse_compatible_component_proof(
                     format!(
                         "Ballot proof component {component_id} proof encoding is invalid: {error}."
                     ),
-                    component_proof_record_digest,
+                    component_proof_record_hash,
                 );
             }
         };
@@ -131,7 +131,7 @@ pub(super) fn verify_sparse_compatible_component_proof(
                 format!(
                     "Sparse-compatible component proof statement for {component_id} is missing targetCoefficientRepresentation."
                 ),
-                component_proof_record_digest,
+                component_proof_record_hash,
             );
         }
     };
@@ -145,7 +145,7 @@ pub(super) fn verify_sparse_compatible_component_proof(
                     format!(
                         "Sparse-compatible component proof statement for {component_id} has invalid targetCoefficientRepresentation: {error}."
                     ),
-                    component_proof_record_digest,
+                    component_proof_record_hash,
                 );
             }
         };
@@ -162,7 +162,7 @@ pub(super) fn verify_sparse_compatible_component_proof(
                     "Sparse-compatible component proof statement for {component_id} has invalid matrixCoefficientRepresentation: {}.",
                     error.message
                 ),
-                component_proof_record_digest,
+                component_proof_record_hash,
             );
         }
     };
@@ -170,8 +170,8 @@ pub(super) fn verify_sparse_compatible_component_proof(
         .and_then(|object| object.get("proofSizeBytes"))
         .and_then(Value::as_u64)
         .and_then(|proof_size| usize::try_from(proof_size).ok());
-    let proof_verification = linear_proof::verifier::verify_sparse_linear_proof_components(
-        linear_proof::verifier::SparseLinearProofVerificationInput {
+    let proof_verification = linear_proof_verifier::verify_sparse_linear_proof_components(
+        linear_proof_verifier::SparseLinearProofVerificationInput {
             case_name: &format!("{component_id}-component-proof"),
             parameter_set: &parameter_set,
             proof_encoding: &proof_encoding,
@@ -237,11 +237,11 @@ pub(super) fn verify_sparse_compatible_component_proof(
         "operation": operation,
         "componentId": component_id,
         "statusLabels": status_labels,
-        "acceptedDigests": [
-            string_field(component_proof, "componentProofRecordDigest"),
-            string_field(component_proof, "proofBytesDigest"),
-            string_field(proof_input, "componentProofStatementDigest"),
-            string_field(proof_input, "statementDigest")
+        "acceptedHashes": [
+            string_field(component_proof, "componentProofRecordHash"),
+            string_field(component_proof, "proofBytesHash"),
+            string_field(proof_input, "componentProofStatementHash"),
+            string_field(proof_input, "statementHash")
         ],
         "refusedObjects": [],
         "unresolvedReason": Value::Null

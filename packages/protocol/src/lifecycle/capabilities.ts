@@ -313,19 +313,19 @@ const evaluateClaimBearingEnvironment = (
         return refuseAction(action, 'LocalRosterNotAccepted');
     }
     if (
-        context.rosterExternalAcceptanceDigest === undefined ||
-        context.rosterExternalAcceptanceDigest.length === 0 ||
-        context.actionContextRosterExternalAcceptanceDigest === undefined ||
-        context.actionContextRosterExternalAcceptanceDigest === null ||
-        context.actionContextRosterExternalAcceptanceDigest.length === 0
+        context.rosterExternalAcceptanceHash === undefined ||
+        context.rosterExternalAcceptanceHash.length === 0 ||
+        context.actionContextRosterExternalAcceptanceHash === undefined ||
+        context.actionContextRosterExternalAcceptanceHash === null ||
+        context.actionContextRosterExternalAcceptanceHash.length === 0
     ) {
-        return refuseAction(action, 'RosterExternalAcceptanceDigestMissing');
+        return refuseAction(action, 'RosterExternalAcceptanceHashMissing');
     }
     if (
-        context.actionContextRosterExternalAcceptanceDigest !==
-        context.rosterExternalAcceptanceDigest
+        context.actionContextRosterExternalAcceptanceHash !==
+        context.rosterExternalAcceptanceHash
     ) {
-        return refuseAction(action, 'RosterExternalAcceptanceDigestMismatch');
+        return refuseAction(action, 'RosterExternalAcceptanceHashMismatch');
     }
     if (!context.thresholdProfile.claimBearing) {
         return refuseAction(action, 'ProfileNotClaimBearing');
@@ -336,8 +336,8 @@ const evaluateClaimBearingEnvironment = (
     return undefined;
 };
 
-const nonEmptyDigest = (digest: string | undefined): boolean =>
-    digest !== undefined && digest.length > 0;
+const nonEmptyHash = (hash: string | undefined): boolean =>
+    hash !== undefined && hash.length > 0;
 
 const evaluateOpenVoting = (
     action: ProtocolAction,
@@ -350,8 +350,8 @@ const evaluateOpenVoting = (
         return refuseAction(action, 'ProfileNotClaimBearing');
     }
     if (
-        !nonEmptyDigest(context.finalRosterDigest) ||
-        !nonEmptyDigest(context.frozenRosterProfileDigest) ||
+        !nonEmptyHash(context.finalRosterHash) ||
+        !nonEmptyHash(context.frozenRosterProfileHash) ||
         context.ballotProofProfileFrozen !== true ||
         context.shareLayoutFrozen !== true ||
         context.targetOutputLayoutFrozen !== true ||

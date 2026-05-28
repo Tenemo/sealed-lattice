@@ -4,7 +4,7 @@ pub(super) fn development_key_arithmetic_fixture(
     input: &PassiveSetupInput,
     fixture_id: &str,
     fixture_scope: &str,
-    key_switch_decomposition_digest: &str,
+    key_switch_decomposition_hash: &str,
 ) -> CanonicalResult<Value> {
     let modulus = DATA_PRIMES[0];
     let digit_base = 1_u64 << 23;
@@ -12,7 +12,7 @@ pub(super) fn development_key_arithmetic_fixture(
         .into_iter()
         .map(|position| {
             let source_coefficient =
-                sample_residue(&input.setup_seed_digest, fixture_scope, position, modulus);
+                sample_residue(&input.setup_seed_hash, fixture_scope, position, modulus);
             let first_digit = source_coefficient % digit_base;
             let second_digit = (source_coefficient / digit_base) % digit_base;
             let third_digit = (source_coefficient / digit_base / digit_base) % digit_base;
@@ -20,7 +20,7 @@ pub(super) fn development_key_arithmetic_fixture(
                 (first_digit + digit_base * second_digit + digit_base * digit_base * third_digit)
                     % modulus;
             let multiplier = sample_residue(
-                &input.setup_seed_digest,
+                &input.setup_seed_hash,
                 &format!("{fixture_scope}-m7-multiplier"),
                 position,
                 modulus,
@@ -42,8 +42,8 @@ pub(super) fn development_key_arithmetic_fixture(
         "fixtureId": fixture_id,
         "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
         "ceremonyId": input.ceremony_id,
-        "rosterDigest": input.roster_digest,
-        "keySwitchDecompositionDigest": key_switch_decomposition_digest,
+        "rosterHash": input.roster_hash,
+        "keySwitchDecompositionHash": key_switch_decomposition_hash,
         "basisId": BgvBasisKind::Extended.basis_id(),
         "digitBaseBits": 23,
         "digitCountPerPrime": 3,
@@ -53,11 +53,11 @@ pub(super) fn development_key_arithmetic_fixture(
         "protocolEvidence": false,
         "maliciousEvaluationKeyProofIncluded": false,
     });
-    let fixture_digest = development_fixture_digest(&fixture_record)?;
+    let fixture_hash = development_fixture_hash(&fixture_record)?;
 
     Ok(json!({
         "fixture": fixture_record,
-        "fixtureDigest": fixture_digest,
+        "fixtureHash": fixture_hash,
     }))
 }
 
@@ -69,29 +69,29 @@ pub(super) fn development_encryption_fixture(
     let message = encode_batch_plaintext_slots(&message_slots, 0)?;
     let modulus = DATA_PRIMES[0];
     let public_key_coefficients = dense_public_residues(
-        &input.setup_seed_digest,
+        &input.setup_seed_hash,
         "development-collective-public-key-coefficients",
         modulus,
     );
     let public_sample_coefficients = dense_public_residues(
-        &input.setup_seed_digest,
+        &input.setup_seed_hash,
         "development-encryption-public-sample",
         modulus,
     );
     let encryption_randomness_coefficients = dense_small_coefficients(
-        &input.setup_seed_digest,
+        &input.setup_seed_hash,
         DEVELOPMENT_ENCRYPTION_FIXTURE_ID,
         "encryption-randomness",
         -1,
         1,
     );
     let encryption_error_zero_coefficients = dense_centered_binomial_coefficients(
-        &input.setup_seed_digest,
+        &input.setup_seed_hash,
         DEVELOPMENT_ENCRYPTION_FIXTURE_ID,
         "encryption-error-zero",
     );
     let encryption_error_one_coefficients = dense_centered_binomial_coefficients(
-        &input.setup_seed_digest,
+        &input.setup_seed_hash,
         DEVELOPMENT_ENCRYPTION_FIXTURE_ID,
         "encryption-error-one",
     );
@@ -138,17 +138,17 @@ pub(super) fn development_encryption_fixture(
         .zip(error_one_residues.iter())
         .map(|(product, error)| add_mod(*product, *error, modulus))
         .collect::<CanonicalResult<Vec<_>>>()?;
-    let layout_digest = layout_digest()?;
+    let layout_hash = layout_hash()?;
     let component_zero = RnsPolynomial::coefficient_domain(
         BgvBasisKind::Data,
         0,
-        layout_digest.clone(),
+        layout_hash.clone(),
         vec![ciphertext_component_zero],
     )?;
     let component_one = RnsPolynomial::coefficient_domain(
         BgvBasisKind::Data,
         0,
-        layout_digest,
+        layout_hash,
         vec![ciphertext_component_one],
     )?;
     let canonical_bytes =
@@ -157,7 +157,7 @@ pub(super) fn development_encryption_fixture(
         BgvObjectKind::Plaintext,
         std::slice::from_ref(&message.polynomial),
     )?;
-    let public_key_material_root = derive_protocol_digest(
+    let public_key_material_root = derive_protocol_hash(
         "BGVPublicKeyRoot",
         &json!({
             "fixtureId": DEVELOPMENT_ENCRYPTION_FIXTURE_ID,
@@ -183,8 +183,8 @@ pub(super) fn development_encryption_fixture(
         "fixtureId": DEVELOPMENT_ENCRYPTION_FIXTURE_ID,
         "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
         "ceremonyId": input.ceremony_id,
-        "manifestDigest": input.manifest_digest,
-        "rosterDigest": input.roster_digest,
+        "manifestHash": input.manifest_hash,
+        "rosterHash": input.roster_hash,
         "collectivePublicKeyRoot": string_at_path(collective_public_key, &["collectivePublicKeyRoot"])?,
         "bgvPublicKeyRoot": string_at_path(collective_public_key, &["bgvPublicKeyRoot"])?,
         "publicKeyMaterialRoot": public_key_material_root,
@@ -207,12 +207,12 @@ pub(super) fn development_encryption_fixture(
         "m9BridgeEncryptionClaim": false,
         "m10EvaluatorClaim": false,
     });
-    let fixture_digest =
-        derive_protocol_digest("BGVDevelopmentEncryptionFixtureDigest", &fixture_record)?;
+    let fixture_hash =
+        derive_protocol_hash("BGVDevelopmentEncryptionFixtureHash", &fixture_record)?;
 
     Ok(json!({
         "fixture": fixture_record,
-        "fixtureDigest": fixture_digest,
+        "fixtureHash": fixture_hash,
         "statusLabels": [
             "DevelopmentEncryptionFixtureBound",
             "CollectivePublicKeyRootBound",

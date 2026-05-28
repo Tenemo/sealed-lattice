@@ -270,7 +270,7 @@ pub(crate) fn generate_ballot_proof_inner(
         "proofHex": proof_hex,
         "expectedProofSizeBytes": generation.summary.proof_size_bytes
     });
-    let verification = linear_proof::verifier::verify_linear_proof_vector_case_value(&vector_case);
+    let verification = linear_proof_verifier::verify_linear_proof_vector_case_value(&vector_case);
     if verification
         .as_object()
         .and_then(|object| object.get("ok"))
@@ -344,7 +344,7 @@ pub(crate) fn generate_ballot_component_proof_inner(
             "statusLabels": [
                 "BallotComponentPublicZeroProofBytesGenerated"
             ],
-            "acceptedDigests": [],
+            "acceptedHashes": [],
             "refusedObjects": [],
             "unresolvedReason": Value::Null,
             "generatedProofBytes": true,
@@ -459,7 +459,7 @@ pub(crate) fn generate_ballot_component_proof_inner(
                 "expectedProofSizeBytes": generation.summary.proof_size_bytes
             });
             let verification =
-                linear_proof::verifier::verify_linear_proof_vector_case_value(&vector_case);
+                linear_proof_verifier::verify_linear_proof_vector_case_value(&vector_case);
             if verification
                 .as_object()
                 .and_then(|object| object.get("ok"))
@@ -604,8 +604,8 @@ pub(crate) fn verify_generated_sparse_component_proof(
     input: GeneratedSparseComponentProofCheck<'_>,
 ) -> crate::encoding::CanonicalResult<()> {
     let proof_hex = crate::hashing::to_hex(&input.generation.proof_bytes);
-    let verification = linear_proof::verifier::verify_sparse_linear_proof_components(
-        linear_proof::verifier::SparseLinearProofVerificationInput {
+    let verification = linear_proof_verifier::verify_sparse_linear_proof_components(
+        linear_proof_verifier::SparseLinearProofVerificationInput {
             case_name: &format!("{}-generated-component-proof", input.component_id),
             parameter_set: input.parameter_set,
             proof_encoding: input.proof_encoding,
@@ -639,8 +639,8 @@ where
     Statement: StreamedLinearProofStatement,
 {
     let proof_hex = crate::hashing::to_hex(&input.generation.proof_bytes);
-    let verification = linear_proof::verifier::verify_streamed_linear_proof_components(
-        linear_proof::verifier::StreamedLinearProofVerificationInput {
+    let verification = linear_proof_verifier::verify_streamed_linear_proof_components(
+        linear_proof_verifier::StreamedLinearProofVerificationInput {
             case_name: input.case_name,
             parameter_set: input.parameter_set,
             proof_encoding: input.proof_encoding,
@@ -686,7 +686,7 @@ pub(crate) fn generated_proof_success(
             "LinearProofBytesGenerated",
             verified_status_label
         ],
-        "acceptedDigests": [],
+        "acceptedHashes": [],
         "refusedObjects": [],
         "unresolvedReason": Value::Null,
         "generatedProofBytes": true,

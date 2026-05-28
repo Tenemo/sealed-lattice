@@ -167,10 +167,10 @@ pub(crate) fn generate_ballot_proof_record_inner(
             "BallotProofRecordGenerated",
             "BallotProofRecordGeneratedProofVerified"
         ],
-        "acceptedDigests": [
-            string_field(&ballot_proof, "ballotProofRecordDigest"),
-            string_field(&component_proof_bundle, "componentProofBundleDigest"),
-            string_field(&ballot_proof, "proofBytesDigest")
+        "acceptedHashes": [
+            string_field(&ballot_proof, "ballotProofRecordHash"),
+            string_field(&component_proof_bundle, "componentProofBundleHash"),
+            string_field(&ballot_proof, "proofBytesHash")
         ],
         "refusedObjects": [],
         "unresolvedReason": Value::Null,

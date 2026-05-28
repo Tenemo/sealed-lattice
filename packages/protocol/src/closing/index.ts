@@ -1,4 +1,4 @@
-import { deriveProtocolDigest } from '@sealed-lattice/crypto';
+import { deriveProtocolHash } from '@sealed-lattice/crypto';
 import type {
     CastReceipt,
     CastReceiptVerification,
@@ -6,7 +6,7 @@ import type {
     CloseRecord,
     CloseRecordVerification,
     CloseRecordVerificationInput,
-    ProtocolDigest,
+    ProtocolHash,
     RefusalRecord,
 } from '@sealed-lattice/types';
 
@@ -16,55 +16,55 @@ import {
 } from '../board/shell-evidence.js';
 import {
     createRefusal,
-    defaultSignedRootContextDigest,
+    defaultSignedRootContextHash,
     isNonNegativeInteger,
     signedObjectRootByteLength,
     verificationExceptionMessage,
 } from '../common/verification-helpers.js';
 
-export const deriveCastReceiptDigest = (
-    receipt: Omit<CastReceipt, 'castReceiptDigest' | 'signature'>,
-): ProtocolDigest =>
-    deriveProtocolDigest('CastReceiptDigest', {
-        ballotPackageDigest: receipt.ballotPackageDigest,
+export const deriveCastReceiptHash = (
+    receipt: Omit<CastReceipt, 'castReceiptHash' | 'signature'>,
+): ProtocolHash =>
+    deriveProtocolHash('CastReceiptHash', {
+        ballotPackageHash: receipt.ballotPackageHash,
         boardPosition: receipt.boardPosition,
         boardSequence: receipt.boardSequence,
         ceremonyId: receipt.ceremonyId,
-        contextDigest: receipt.contextDigest,
+        contextHash: receipt.contextHash,
         deviceEpoch: receipt.deviceEpoch,
-        electionManifestDigest: receipt.electionManifestDigest,
+        electionManifestHash: receipt.electionManifestHash,
         objectType: receipt.objectType,
         objectVersion: receipt.objectVersion,
         recoveryEpoch: receipt.recoveryEpoch,
         voterIdentity: receipt.voterIdentity,
     });
 
-export const derivePostVotingClosedContextDigest = (input: {
+export const derivePostVotingClosedContextHash = (input: {
     readonly ceremonyId: string;
-    readonly closeRecordDigest: ProtocolDigest;
-    readonly electionManifestDigest: ProtocolDigest;
-    readonly votingClosedBoardHeadDigest: ProtocolDigest;
-}): ProtocolDigest =>
-    deriveProtocolDigest('PostVotingClosedContextDigest', {
+    readonly closeRecordHash: ProtocolHash;
+    readonly electionManifestHash: ProtocolHash;
+    readonly votingClosedBoardHeadHash: ProtocolHash;
+}): ProtocolHash =>
+    deriveProtocolHash('PostVotingClosedContextHash', {
         ceremonyId: input.ceremonyId,
-        closeRecordDigest: input.closeRecordDigest,
-        electionManifestDigest: input.electionManifestDigest,
-        votingClosedBoardHeadDigest: input.votingClosedBoardHeadDigest,
+        closeRecordHash: input.closeRecordHash,
+        electionManifestHash: input.electionManifestHash,
+        votingClosedBoardHeadHash: input.votingClosedBoardHeadHash,
     });
 
-export const deriveCloseRecordDigest = (
+export const deriveCloseRecordHash = (
     closeRecord: Omit<
         CloseRecord,
-        'closeRecordDigest' | 'postVotingClosedContextDigest' | 'signature'
+        'closeRecordHash' | 'postVotingClosedContextHash' | 'signature'
     >,
-): ProtocolDigest =>
-    deriveProtocolDigest('CloseRecordDigest', {
+): ProtocolHash =>
+    deriveProtocolHash('CloseRecordHash', {
         boardPosition: closeRecord.boardPosition,
         boardSequence: closeRecord.boardSequence,
         ceremonyId: closeRecord.ceremonyId,
         closeKind: closeRecord.closeKind,
-        closedBoardHeadDigest: closeRecord.closedBoardHeadDigest,
-        electionManifestDigest: closeRecord.electionManifestDigest,
+        closedBoardHeadHash: closeRecord.closedBoardHeadHash,
+        electionManifestHash: closeRecord.electionManifestHash,
         objectType: closeRecord.objectType,
         objectVersion: closeRecord.objectVersion,
         organizerIdentity: closeRecord.organizerIdentity,
@@ -75,26 +75,26 @@ const verifyCastReceiptShape = (
 ): readonly RefusalRecord[] => {
     const { receipt } = input;
     const refusedObjects: RefusalRecord[] = [];
-    const expectedDigest = deriveCastReceiptDigest({
-        ballotPackageDigest: receipt.ballotPackageDigest,
+    const expectedHash = deriveCastReceiptHash({
+        ballotPackageHash: receipt.ballotPackageHash,
         boardPosition: receipt.boardPosition,
         boardSequence: receipt.boardSequence,
         ceremonyId: receipt.ceremonyId,
-        contextDigest: receipt.contextDigest,
+        contextHash: receipt.contextHash,
         deviceEpoch: receipt.deviceEpoch,
-        electionManifestDigest: receipt.electionManifestDigest,
+        electionManifestHash: receipt.electionManifestHash,
         objectType: receipt.objectType,
         objectVersion: receipt.objectVersion,
         recoveryEpoch: receipt.recoveryEpoch,
         voterIdentity: receipt.voterIdentity,
     });
 
-    if (receipt.castReceiptDigest !== expectedDigest) {
+    if (receipt.castReceiptHash !== expectedHash) {
         refusedObjects.push(
             createRefusal(
                 'CastReceiptInvalid',
-                'Cast receipt digest does not match its canonical payload.',
-                receipt.castReceiptDigest,
+                'Cast receipt hash does not match its canonical payload.',
+                receipt.castReceiptHash,
                 'CastReceipt',
             ),
         );
@@ -111,7 +111,7 @@ const verifyCastReceiptShape = (
             createRefusal(
                 'CastReceiptInvalid',
                 'Cast receipt object shape is not canonical.',
-                receipt.castReceiptDigest,
+                receipt.castReceiptHash,
                 'CastReceipt',
             ),
         );
@@ -121,33 +121,31 @@ const verifyCastReceiptShape = (
             createRefusal(
                 'WrongCeremony',
                 'Cast receipt ceremony does not match the board evidence.',
-                receipt.castReceiptDigest,
+                receipt.castReceiptHash,
                 'CastReceipt',
             ),
         );
     }
-    if (
-        receipt.electionManifestDigest !== input.expectedElectionManifestDigest
-    ) {
+    if (receipt.electionManifestHash !== input.expectedElectionManifestHash) {
         refusedObjects.push(
             createRefusal(
                 'CastReceiptInvalid',
                 'Cast receipt does not bind the expected election manifest.',
-                receipt.castReceiptDigest,
+                receipt.castReceiptHash,
                 'CastReceipt',
             ),
         );
     }
     if (
         input.receiptInclusionProof.includedObjectType !== 'CastReceipt' ||
-        input.receiptInclusionProof.includedObjectDigest !==
-            receipt.castReceiptDigest
+        input.receiptInclusionProof.includedObjectHash !==
+            receipt.castReceiptHash
     ) {
         refusedObjects.push(
             createRefusal(
                 'InclusionProofInvalid',
                 'Cast receipt inclusion proof does not bind the receipt.',
-                input.receiptInclusionProof.inclusionProofDigest,
+                input.receiptInclusionProof.inclusionProofHash,
                 'CastReceipt',
             ),
         );
@@ -160,7 +158,7 @@ const verifyCastReceiptShape = (
             createRefusal(
                 'InclusionProofInvalid',
                 'Cast receipt board position must match its inclusion proof.',
-                input.receiptInclusionProof.inclusionProofDigest,
+                input.receiptInclusionProof.inclusionProofHash,
                 'CastReceipt',
             ),
         );
@@ -183,23 +181,23 @@ const verifyCastReceiptShellUnchecked = (
             signerRole: 'Voter',
             signerIdentity: input.receipt.voterIdentity,
             ceremonyId: input.receipt.ceremonyId,
-            publicKeyDigest: input.expectedVoterPublicKeyDigest,
-            manifestDigest: input.expectedElectionManifestDigest,
-            objectRoot: input.receipt.castReceiptDigest,
-            boardHeadDigest: input.receiptInclusionProof.boardHeadDigest,
-            contextDigest: input.receipt.contextDigest,
+            publicKeyHash: input.expectedVoterPublicKeyHash,
+            manifestHash: input.expectedElectionManifestHash,
+            objectRoot: input.receipt.castReceiptHash,
+            boardHeadHash: input.receiptInclusionProof.boardHeadHash,
+            contextHash: input.receipt.contextHash,
             byteLength: signedObjectRootByteLength,
             recoveryEpoch: input.receipt.recoveryEpoch,
             deviceEpoch: input.receipt.deviceEpoch,
         },
-        acceptedObjectDigest: input.receipt.castReceiptDigest,
+        acceptedObjectHash: input.receipt.castReceiptHash,
     });
     const verificationBase = buildSignedBoardShellVerificationBase(evidence);
 
     return {
         ...verificationBase,
-        castReceiptDigest: verificationBase.ok
-            ? input.receipt.castReceiptDigest
+        castReceiptHash: verificationBase.ok
+            ? input.receipt.castReceiptHash
             : undefined,
     };
 };
@@ -213,7 +211,7 @@ export const verifyCastReceiptShell = (
         return {
             ok: false,
             statusLabels: [],
-            acceptedDigests: [],
+            acceptedHashes: [],
             refusedObjects: [
                 createRefusal(
                     'CastReceiptInvalid',
@@ -232,24 +230,24 @@ const verifyCloseRecordShape = (
 ): readonly RefusalRecord[] => {
     const { closeRecord } = input;
     const refusedObjects: RefusalRecord[] = [];
-    const expectedDigest = deriveCloseRecordDigest({
+    const expectedHash = deriveCloseRecordHash({
         boardPosition: closeRecord.boardPosition,
         boardSequence: closeRecord.boardSequence,
         ceremonyId: closeRecord.ceremonyId,
         closeKind: closeRecord.closeKind,
-        closedBoardHeadDigest: closeRecord.closedBoardHeadDigest,
-        electionManifestDigest: closeRecord.electionManifestDigest,
+        closedBoardHeadHash: closeRecord.closedBoardHeadHash,
+        electionManifestHash: closeRecord.electionManifestHash,
         objectType: closeRecord.objectType,
         objectVersion: closeRecord.objectVersion,
         organizerIdentity: closeRecord.organizerIdentity,
     });
 
-    if (closeRecord.closeRecordDigest !== expectedDigest) {
+    if (closeRecord.closeRecordHash !== expectedHash) {
         refusedObjects.push(
             createRefusal(
                 'CloseRecordInvalid',
-                'Close record digest does not match its canonical payload.',
-                closeRecord.closeRecordDigest,
+                'Close record hash does not match its canonical payload.',
+                closeRecord.closeRecordHash,
                 'CloseRecord',
             ),
         );
@@ -264,7 +262,7 @@ const verifyCloseRecordShape = (
             createRefusal(
                 'CloseRecordInvalid',
                 'Close record object shape is not canonical.',
-                closeRecord.closeRecordDigest,
+                closeRecord.closeRecordHash,
                 'CloseRecord',
             ),
         );
@@ -274,20 +272,19 @@ const verifyCloseRecordShape = (
             createRefusal(
                 'WrongCeremony',
                 'Close record ceremony does not match the board evidence.',
-                closeRecord.closeRecordDigest,
+                closeRecord.closeRecordHash,
                 'CloseRecord',
             ),
         );
     }
     if (
-        closeRecord.electionManifestDigest !==
-        input.expectedElectionManifestDigest
+        closeRecord.electionManifestHash !== input.expectedElectionManifestHash
     ) {
         refusedObjects.push(
             createRefusal(
                 'CloseRecordInvalid',
                 'Close record does not bind the expected election manifest.',
-                closeRecord.closeRecordDigest,
+                closeRecord.closeRecordHash,
                 'CloseRecord',
             ),
         );
@@ -297,21 +294,21 @@ const verifyCloseRecordShape = (
             createRefusal(
                 'CloseRecordInvalid',
                 'Close record organizer does not match the expected identity.',
-                closeRecord.closeRecordDigest,
+                closeRecord.closeRecordHash,
                 'CloseRecord',
             ),
         );
     }
     if (
         input.closeRecordInclusionProof.includedObjectType !== 'CloseRecord' ||
-        input.closeRecordInclusionProof.includedObjectDigest !==
-            closeRecord.closeRecordDigest
+        input.closeRecordInclusionProof.includedObjectHash !==
+            closeRecord.closeRecordHash
     ) {
         refusedObjects.push(
             createRefusal(
                 'InclusionProofInvalid',
                 'Close record inclusion proof does not bind the record.',
-                input.closeRecordInclusionProof.inclusionProofDigest,
+                input.closeRecordInclusionProof.inclusionProofHash,
                 'CloseRecord',
             ),
         );
@@ -326,40 +323,40 @@ const verifyCloseRecordShape = (
             createRefusal(
                 'InclusionProofInvalid',
                 'Close record board placement must match its inclusion proof.',
-                input.closeRecordInclusionProof.inclusionProofDigest,
+                input.closeRecordInclusionProof.inclusionProofHash,
                 'CloseRecord',
             ),
         );
     }
     if (closeRecord.closeKind === 'VotingClosed') {
-        const expectedPostVotingClosedContextDigest =
-            derivePostVotingClosedContextDigest({
+        const expectedPostVotingClosedContextHash =
+            derivePostVotingClosedContextHash({
                 ceremonyId: closeRecord.ceremonyId,
-                closeRecordDigest: closeRecord.closeRecordDigest,
-                electionManifestDigest: closeRecord.electionManifestDigest,
-                votingClosedBoardHeadDigest:
-                    input.closeRecordInclusionProof.boardHeadDigest,
+                closeRecordHash: closeRecord.closeRecordHash,
+                electionManifestHash: closeRecord.electionManifestHash,
+                votingClosedBoardHeadHash:
+                    input.closeRecordInclusionProof.boardHeadHash,
             });
 
         if (
-            closeRecord.postVotingClosedContextDigest !==
-            expectedPostVotingClosedContextDigest
+            closeRecord.postVotingClosedContextHash !==
+            expectedPostVotingClosedContextHash
         ) {
             refusedObjects.push(
                 createRefusal(
                     'CloseRecordInvalid',
-                    'Voting-closed record must bind the post-voting closed context digest.',
-                    closeRecord.closeRecordDigest,
+                    'Voting-closed record must bind the post-voting closed context hash.',
+                    closeRecord.closeRecordHash,
                     'CloseRecord',
                 ),
             );
         }
-    } else if (closeRecord.postVotingClosedContextDigest !== null) {
+    } else if (closeRecord.postVotingClosedContextHash !== null) {
         refusedObjects.push(
             createRefusal(
                 'CloseRecordInvalid',
-                'Registration-closed record must not bind a post-voting closed context digest.',
-                closeRecord.closeRecordDigest,
+                'Registration-closed record must not bind a post-voting closed context hash.',
+                closeRecord.closeRecordHash,
                 'CloseRecord',
             ),
         );
@@ -373,10 +370,10 @@ const verifyCloseRecordShellUnchecked = (
 ): CloseRecordVerification => {
     const evidence = collectSignedBoardInclusionEvidence({
         boardEvidence: input.boardEvidence,
-        extraAcceptedDigests:
-            input.closeRecord.postVotingClosedContextDigest === null
+        extraAcceptedHashes:
+            input.closeRecord.postVotingClosedContextHash === null
                 ? []
-                : [input.closeRecord.postVotingClosedContextDigest],
+                : [input.closeRecord.postVotingClosedContextHash],
         inclusionProof: input.closeRecordInclusionProof,
         objectRefusals: verifyCloseRecordShape(input),
         signature: input.closeRecord.signature,
@@ -386,42 +383,42 @@ const verifyCloseRecordShellUnchecked = (
             signerRole: 'Organizer',
             signerIdentity: input.closeRecord.organizerIdentity,
             ceremonyId: input.closeRecord.ceremonyId,
-            publicKeyDigest: input.expectedOrganizerPublicKeyDigest,
-            manifestDigest: input.expectedElectionManifestDigest,
-            objectRoot: input.closeRecord.closeRecordDigest,
-            boardHeadDigest: input.closeRecordInclusionProof.boardHeadDigest,
-            contextDigest:
-                input.closeRecord.postVotingClosedContextDigest ??
-                defaultSignedRootContextDigest,
+            publicKeyHash: input.expectedOrganizerPublicKeyHash,
+            manifestHash: input.expectedElectionManifestHash,
+            objectRoot: input.closeRecord.closeRecordHash,
+            boardHeadHash: input.closeRecordInclusionProof.boardHeadHash,
+            contextHash:
+                input.closeRecord.postVotingClosedContextHash ??
+                defaultSignedRootContextHash,
             byteLength: signedObjectRootByteLength,
             recoveryEpoch: 0,
             deviceEpoch: 0,
         },
-        acceptedObjectDigest: input.closeRecord.closeRecordDigest,
+        acceptedObjectHash: input.closeRecord.closeRecordHash,
     });
-    const { headsByDigest, refusedObjects } = evidence;
-    if (!headsByDigest.has(input.closeRecord.closedBoardHeadDigest)) {
+    const { headsByHash, refusedObjects } = evidence;
+    if (!headsByHash.has(input.closeRecord.closedBoardHeadHash)) {
         refusedObjects.push(
             createRefusal(
                 'UnknownBoardHead',
                 'Close record binds an unknown closed board head.',
-                input.closeRecord.closedBoardHeadDigest,
+                input.closeRecord.closedBoardHeadHash,
                 'BoardHead',
             ),
         );
     }
-    const closeRecordInclusionHead = headsByDigest.get(
-        input.closeRecordInclusionProof.boardHeadDigest,
+    const closeRecordInclusionHead = headsByHash.get(
+        input.closeRecordInclusionProof.boardHeadHash,
     );
     if (
-        closeRecordInclusionHead?.previousHeadDigest !==
-        input.closeRecord.closedBoardHeadDigest
+        closeRecordInclusionHead?.previousHeadHash !==
+        input.closeRecord.closedBoardHeadHash
     ) {
         refusedObjects.push(
             createRefusal(
                 'CloseRecordInvalid',
                 'Close record inclusion must extend the closed board head.',
-                input.closeRecord.closeRecordDigest,
+                input.closeRecord.closeRecordHash,
                 'CloseRecord',
             ),
         );
@@ -430,11 +427,11 @@ const verifyCloseRecordShellUnchecked = (
 
     return {
         ...verificationBase,
-        closeRecordDigest: verificationBase.ok
-            ? input.closeRecord.closeRecordDigest
+        closeRecordHash: verificationBase.ok
+            ? input.closeRecord.closeRecordHash
             : undefined,
-        postVotingClosedContextDigest: verificationBase.ok
-            ? (input.closeRecord.postVotingClosedContextDigest ?? undefined)
+        postVotingClosedContextHash: verificationBase.ok
+            ? (input.closeRecord.postVotingClosedContextHash ?? undefined)
             : undefined,
     };
 };
@@ -448,7 +445,7 @@ export const verifyCloseRecordShell = (
         return {
             ok: false,
             statusLabels: [],
-            acceptedDigests: [],
+            acceptedHashes: [],
             refusedObjects: [
                 createRefusal(
                     'CloseRecordInvalid',

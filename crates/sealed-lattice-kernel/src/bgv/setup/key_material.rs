@@ -3,8 +3,8 @@ use super::*;
 
 pub(super) fn collective_public_key(
     input: &PassiveSetupInput,
-    profile_digest: &str,
-    backend_profile_digest: &str,
+    profile_hash: &str,
+    backend_profile_hash: &str,
     public_common_random_polynomial_root: &str,
     public_key_share_roots: &[String],
 ) -> CanonicalResult<Value> {
@@ -13,10 +13,10 @@ pub(super) fn collective_public_key(
         "objectVersion": 1,
         "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
         "ceremonyId": input.ceremony_id,
-        "manifestDigest": input.manifest_digest,
-        "rosterDigest": input.roster_digest,
-        "profileDigest": profile_digest,
-        "backendProfileDigest": backend_profile_digest,
+        "manifestHash": input.manifest_hash,
+        "rosterHash": input.roster_hash,
+        "profileHash": profile_hash,
+        "backendProfileHash": backend_profile_hash,
         "publicCommonRandomPolynomialRoot": public_common_random_polynomial_root,
         "publicKeyShareRoots": public_key_share_roots,
         "aggregationRule": "coefficient-wise-public-key-share-sum-with-shared-crp",
@@ -25,13 +25,13 @@ pub(super) fn collective_public_key(
         "rawSecretShareExported": false,
     });
     let collective_public_key_root =
-        derive_protocol_digest("CollectivePublicKeyRoot", &record_without_roots)?;
-    let bgv_public_key_root = derive_protocol_digest(
+        derive_protocol_hash("CollectivePublicKeyRoot", &record_without_roots)?;
+    let bgv_public_key_root = derive_protocol_hash(
         "BGVPublicKeyRoot",
         &json!({
             "collectivePublicKeyRoot": collective_public_key_root,
-            "profileDigest": profile_digest,
-            "backendProfileDigest": backend_profile_digest,
+            "profileHash": profile_hash,
+            "backendProfileHash": backend_profile_hash,
             "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
         }),
     )?;
@@ -42,7 +42,7 @@ pub(super) fn collective_public_key(
         "bgvPublicKeyRoot": bgv_public_key_root,
         "statusLabels": [
             "CollectivePublicKeyShareAggregationBound",
-            "BgvPublicKeyRootDigestOnly",
+            "BgvPublicKeyRootHashOnly",
             "BgvAlgebraicPublicKeyProofMissing",
             "NoTrustedDealerSecretReconstruction"
         ],
@@ -51,10 +51,10 @@ pub(super) fn collective_public_key(
 
 pub(super) fn threshold_verification_material(
     input: &PassiveSetupInput,
-    threshold_decryption_profile_digest: &str,
-    kllps_target_decryption_profile_digest: &str,
-    participant_setup_record_digests: &[String],
-    trustee_threshold_verification_key_digests: &[String],
+    threshold_decryption_profile_hash: &str,
+    kllps_target_decryption_profile_hash: &str,
+    participant_setup_record_hashes: &[String],
+    trustee_threshold_verification_key_hashes: &[String],
 ) -> CanonicalResult<Value> {
     let participant_points = input
         .participants
@@ -74,12 +74,12 @@ pub(super) fn threshold_verification_material(
         "objectVersion": 1,
         "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
         "thresholdDecryptionProfileId": THRESHOLD_DECRYPTION_PROFILE_ID,
-        "thresholdDecryptionProfileDigest": threshold_decryption_profile_digest,
-        "kllpsTargetDecryptionProfileDigest": kllps_target_decryption_profile_digest,
+        "thresholdDecryptionProfileHash": threshold_decryption_profile_hash,
+        "kllpsTargetDecryptionProfileHash": kllps_target_decryption_profile_hash,
         "ceremonyId": input.ceremony_id,
-        "rosterDigest": input.roster_digest,
-        "participantSetupRecordDigests": participant_setup_record_digests,
-        "trusteeThresholdVerificationKeyDigests": trustee_threshold_verification_key_digests,
+        "rosterHash": input.roster_hash,
+        "participantSetupRecordHashes": participant_setup_record_hashes,
+        "trusteeThresholdVerificationKeyHashes": trustee_threshold_verification_key_hashes,
         "participantInterpolationUniverse": participant_points,
         "secretShareDomain": "BGV-RNS-secret-share-polynomial-over-selected-Q-data",
         "passiveSetupVerificationScope": [
@@ -92,25 +92,25 @@ pub(super) fn threshold_verification_material(
         "maliciousDkgProofIncluded": false,
     });
     let threshold_share_verification_key_root =
-        derive_protocol_digest("ThresholdShareVerificationKeyRoot", &verification_key_set)?;
-    let threshold_share_verification_key_digest = derive_protocol_digest(
-        "ThresholdShareVerificationKeyDigest",
+        derive_protocol_hash("ThresholdShareVerificationKeyRoot", &verification_key_set)?;
+    let threshold_share_verification_key_hash = derive_protocol_hash(
+        "ThresholdShareVerificationKeyHash",
         &json!({
             "thresholdShareVerificationKeyRoot": threshold_share_verification_key_root,
-            "thresholdDecryptionProfileDigest": threshold_decryption_profile_digest,
-            "kllpsTargetDecryptionProfileDigest": kllps_target_decryption_profile_digest,
+            "thresholdDecryptionProfileHash": threshold_decryption_profile_hash,
+            "kllpsTargetDecryptionProfileHash": kllps_target_decryption_profile_hash,
         }),
     )?;
 
     Ok(json!({
         "verificationKeySet": verification_key_set,
         "thresholdShareVerificationKeyRoot": threshold_share_verification_key_root,
-        "thresholdShareVerificationKeyDigest": threshold_share_verification_key_digest,
-        "trusteeThresholdVerificationKeyDigests": trustee_threshold_verification_key_digests,
+        "thresholdShareVerificationKeyHash": threshold_share_verification_key_hash,
+        "trusteeThresholdVerificationKeyHashes": trustee_threshold_verification_key_hashes,
         "statusLabels": [
             "ThresholdVerificationMaterialBound",
             "PassiveSetupVerificationScopeOnly",
-            "KllpsCompatibleVerificationRootsBound"
+            "KllpsVerificationRootsBound"
         ],
     }))
 }
@@ -118,10 +118,10 @@ pub(super) fn threshold_verification_material(
 pub(super) fn evaluation_keys(
     input: &PassiveSetupInput,
     collective_public_key: &Value,
-    key_switch_decomposition_digest: &str,
+    key_switch_decomposition_hash: &str,
 ) -> CanonicalResult<Value> {
     let rot_set = provisional_rotation_set()?;
-    let rot_set_digest = derive_protocol_digest("RotSetDigest", &rot_set)?;
+    let rot_set_hash = derive_protocol_hash("RotSetHash", &rot_set)?;
     let collective_public_key_root =
         string_at_path(collective_public_key, &["collectivePublicKeyRoot"])?;
     let bgv_public_key_root = string_at_path(collective_public_key, &["bgvPublicKeyRoot"])?;
@@ -129,30 +129,30 @@ pub(super) fn evaluation_keys(
         input,
         DEVELOPMENT_RELINEARIZATION_ARITHMETIC_FIXTURE_ID,
         "relinearization-key-fixture",
-        key_switch_decomposition_digest,
+        key_switch_decomposition_hash,
     )?;
     let key_switch_arithmetic_fixture = development_key_arithmetic_fixture(
         input,
         DEVELOPMENT_KEY_SWITCH_ARITHMETIC_FIXTURE_ID,
         "key-switch-fixture",
-        key_switch_decomposition_digest,
+        key_switch_decomposition_hash,
     )?;
     let relinearization_key_record = json!({
         "objectType": "BgvRelinearizationKey",
         "objectVersion": 1,
         "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
         "ceremonyId": input.ceremony_id,
-        "rosterDigest": input.roster_digest,
+        "rosterHash": input.roster_hash,
         "collectivePublicKeyRoot": collective_public_key_root,
         "bgvPublicKeyRoot": bgv_public_key_root,
-        "keySwitchDecompositionDigest": key_switch_decomposition_digest,
+        "keySwitchDecompositionHash": key_switch_decomposition_hash,
         "publicBasisId": BgvBasisKind::Extended.basis_id(),
         "publicRlweSampleCount": 2,
-        "arithmeticFixtureDigest": relinearization_arithmetic_fixture["fixtureDigest"],
+        "arithmeticFixtureHash": relinearization_arithmetic_fixture["fixtureHash"],
         "maliciousEvaluationKeyProofIncluded": false,
     });
     let relinearization_key_root =
-        derive_protocol_digest("RelinearizationKeyRoot", &relinearization_key_record)?;
+        derive_protocol_hash("RelinearizationKeyRoot", &relinearization_key_record)?;
     let rotation_key_records = rot_set["rotations"]
         .as_array()
         .expect("rotation set uses array")
@@ -163,16 +163,16 @@ pub(super) fn evaluation_keys(
                 "objectVersion": 1,
                 "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
                 "ceremonyId": input.ceremony_id,
-                "rosterDigest": input.roster_digest,
+                "rosterHash": input.roster_hash,
                 "collectivePublicKeyRoot": collective_public_key_root,
-                "rotSetDigest": rot_set_digest,
+                "rotSetHash": rot_set_hash,
                 "rotation": rotation,
-                "keySwitchDecompositionDigest": key_switch_decomposition_digest,
+                "keySwitchDecompositionHash": key_switch_decomposition_hash,
                 "publicBasisId": BgvBasisKind::Extended.basis_id(),
                 "publicRlweSampleCount": 1,
                 "maliciousEvaluationKeyProofIncluded": false,
             });
-            let root = derive_protocol_digest("RotationKeyRoot", &record)?;
+            let root = derive_protocol_hash("RotationKeyRoot", &record)?;
             Ok(json!({
                 "rotation": rotation,
                 "rotationKeyRoot": root,
@@ -184,44 +184,44 @@ pub(super) fn evaluation_keys(
         "objectVersion": 1,
         "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
         "ceremonyId": input.ceremony_id,
-        "rosterDigest": input.roster_digest,
+        "rosterHash": input.roster_hash,
         "collectivePublicKeyRoot": collective_public_key_root,
-        "keySwitchDecompositionDigest": key_switch_decomposition_digest,
+        "keySwitchDecompositionHash": key_switch_decomposition_hash,
         "publicBasisId": BgvBasisKind::Extended.basis_id(),
         "publicRlweSampleCount": 1,
-        "arithmeticFixtureDigest": key_switch_arithmetic_fixture["fixtureDigest"],
+        "arithmeticFixtureHash": key_switch_arithmetic_fixture["fixtureHash"],
         "genericKeySwitchApiExported": false,
         "maliciousEvaluationKeyProofIncluded": false,
     });
-    let key_switch_key_root = derive_protocol_digest("KeySwitchKeyRoot", &key_switch_key_record)?;
+    let key_switch_key_root = derive_protocol_hash("KeySwitchKeyRoot", &key_switch_key_record)?;
     let evaluation_key_record = json!({
         "objectType": "BgvEvaluationKeySet",
         "objectVersion": 1,
         "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
         "ceremonyId": input.ceremony_id,
-        "manifestDigest": input.manifest_digest,
-        "rosterDigest": input.roster_digest,
+        "manifestHash": input.manifest_hash,
+        "rosterHash": input.roster_hash,
         "collectivePublicKeyRoot": collective_public_key_root,
         "bgvPublicKeyRoot": bgv_public_key_root,
-        "keySwitchDecompositionDigest": key_switch_decomposition_digest,
-        "rotSetDigest": rot_set_digest,
+        "keySwitchDecompositionHash": key_switch_decomposition_hash,
+        "rotSetHash": rot_set_hash,
         "relinearizationKeyRoot": relinearization_key_root,
-        "relinearizationArithmeticFixtureDigest": relinearization_arithmetic_fixture["fixtureDigest"],
+        "relinearizationArithmeticFixtureHash": relinearization_arithmetic_fixture["fixtureHash"],
         "rotationKeyRoots": rotation_key_records,
         "keySwitchKeyRoot": key_switch_key_root,
-        "keySwitchArithmeticFixtureDigest": key_switch_arithmetic_fixture["fixtureDigest"],
+        "keySwitchArithmeticFixtureHash": key_switch_arithmetic_fixture["fixtureHash"],
         "generatedFor": "provisionalRotSet",
         "finalRotSetClosure": "M10-AppendixD",
         "regenerateIfRotSetChanges": true,
         "maliciousEvaluationKeyProofIncluded": false,
     });
-    let evaluation_key_root = derive_protocol_digest("EvalKeyRoot", &evaluation_key_record)?;
+    let evaluation_key_root = derive_protocol_hash("EvalKeyRoot", &evaluation_key_record)?;
 
     Ok(json!({
         "record": evaluation_key_record,
         "rotSet": rot_set,
-        "rotSetDigest": rot_set_digest,
-        "keySwitchDecompositionDigest": key_switch_decomposition_digest,
+        "rotSetHash": rot_set_hash,
+        "keySwitchDecompositionHash": key_switch_decomposition_hash,
         "relinearizationKeyRoot": relinearization_key_root,
         "keySwitchKeyRoot": key_switch_key_root,
         "relinearizationArithmeticFixture": relinearization_arithmetic_fixture,

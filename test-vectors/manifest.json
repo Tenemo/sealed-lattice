@@ -3,43 +3,43 @@
   "entries": [
     {
       "path": "ballot-privacy/ballot-field-linear-proof-vectors.json",
-      "sha256": "1a9d1b67b5669b6706c4ad350b9600e351df0484c251bf7b1948662c68534f8d"
+      "sha256": "b3b647d985a3ffa80831a8df245e0b1927e25998284ec3791879c6185ca4e008"
     },
     {
       "path": "ballot-privacy/encoded-ballot-linear-relation-vectors.json",
-      "sha256": "e3c9688d7f96cdebc05a668abf62e0f3b9faacce8c20a8264227b16885bc92b2"
+      "sha256": "d70e2d1341875e12e851e16e461940e28298724472248a093ffd46515c4bd350"
     },
     {
       "path": "ballot-privacy/proof-backend-linear-vectors.json",
-      "sha256": "d03eb345e866595fce3b11778c902b738251a8da996733fac63dde82b01d6fda"
+      "sha256": "9b73587d99a7e1590a25a95d31b84f516f520d4b1c159cadd5bafbf1bbc55592"
     },
     {
       "path": "ballot-privacy/proof-stack-profile.json",
-      "sha256": "3ca998d64a9b90a92998fcc5cade86e2908a47b45fda0cafe6ce9c2674e353cd"
+      "sha256": "5b4da2830511572b6df1d08e180e0bbef67c9aaadabcaca451779e3778f0ccbd"
     },
     {
       "path": "ballot-privacy/README.md",
-      "sha256": "bd6869ead21e13247831aacfa77506a676253128984c83cbfc0e3b65c342b540"
+      "sha256": "ed04842cbc86f36aaa6f2eacc7c65ebd734640ef02f96125e7028306d08c6357"
     },
     {
       "path": "ballot-privacy/receiver-key-linear-proof-vectors.json",
-      "sha256": "7f22b3b8d54146ba4f7feb35b287b39bc4a6e1533bc3b16ed925483552780944"
+      "sha256": "75c4db5307819481ae63210b4c1446418333099d8d9661ff8b455a69436f7197"
     },
     {
       "path": "ballot-privacy/receiver-key-proof-vectors.json",
-      "sha256": "406fa13964b989796d69d07e4a2cbb8803e4c3572e23bf96708f80eefb32a3db"
+      "sha256": "3f982d53449303b55a4e518e072bf627a04705a244376a8c6bd653989ec0d55b"
     },
     {
       "path": "election-foundation/board-finality.json",
-      "sha256": "416b3835245927d8e11530836958cc6d07e0cb35a78bf12dc897525e216b23ef"
+      "sha256": "a7224559d05080268b92314b128f5dd735988486064e5df33b8c961156130ee8"
     },
     {
       "path": "election-foundation/capability-refusals.json",
-      "sha256": "e9d4184eb33ffe6182fcfd4e8ce09d6e2c20b1690a0ed5a83055dcb41d3da496"
+      "sha256": "946ab8366d452cb2441bd0c1aeec7d08e03d6e076d063a610f85fdb900fa9ff7"
     },
     {
       "path": "election-foundation/deterministic-fixtures.json",
-      "sha256": "d3fbc86b85093f4525d04bf2aefc52d2e59de0b98f5351c5d5e3022c275523e2"
+      "sha256": "94819ad0e9ee8edc67695f82e0dd9d12acb4f421e78c4816e9160c36913bfe1e"
     },
     {
       "path": "election-foundation/lifecycle-transitions.json",
@@ -51,11 +51,11 @@
     },
     {
       "path": "election-foundation/threshold-profiles.json",
-      "sha256": "4d1ac90b45909dacf5d3279faec274dae9c3b8c075d987c742910e90a5543f96"
+      "sha256": "29b4ed33bb0902e5efa1819aab97d79f64714fdc6e49217cd8ba53c3bd1e481a"
     },
     {
       "path": "plaintext-oracle/comparator-polynomials.json",
-      "sha256": "048eb1911632bf569d6b1a4820beb0ec11dbad93f156d8a247f1175e77916549"
+      "sha256": "da5e86c839149e31489c84c7ea23335b7ab9f3eeda18c2efae40904822925acd"
     },
     {
       "path": "plaintext-oracle/field.json",
@@ -63,27 +63,27 @@
     },
     {
       "path": "plaintext-oracle/shamir.json",
-      "sha256": "f9c816d1d16ec78fae1b55780feba3a891896c262fe287173bd013e2b34e0aa7"
+      "sha256": "3d6a7100cc2348ce95d43e9c7c509ae6364ddacc01f7e261842edc1db4c85450"
     },
     {
       "path": "plaintext-oracle/sparse-target.json",
-      "sha256": "d46eac721c0f7ae71d20d1a23ebf4c8307b9ccd1c5ca30ef63b3bce8e77432a4"
+      "sha256": "a4bc54399a41ff0b62e534d2db5ae3231114fd74f2d36455045ef6e327afe545"
     },
     {
       "path": "plaintext-oracle/top-k.json",
-      "sha256": "28f0d21429440dd033ea89801f8725e7238673c761bd723686f5387bc6fac0ea"
+      "sha256": "b8582beb7a1767cb9e9b87ce0ea86dc60b2f69b876ea45855ca15be01adda442"
     },
     {
       "path": "pvss-ballot/aggregate-shares.json",
-      "sha256": "4ef3bb65fb94a1d10f86d6a18fa1279f3dccb0fd7986365c432c086a676a5140"
+      "sha256": "93c7b78071d93595b9b467da7b2d077a73e1187514a73fab431eac62e9adef09"
     },
     {
       "path": "pvss-ballot/ballot-algebra.json",
-      "sha256": "4e804a4dd16ea980e8d434b66c4043ff45b3a0dcf0bfb68f29eb1940b02188be"
+      "sha256": "75de7be57915e92241c0d6f7df9e8bda96e7eb54fbe048d07ed76ee3244a4e0f"
     },
     {
       "path": "pvss-ballot/canonical-ballot-set.json",
-      "sha256": "fa453a1ca9d7591b867ab65d576b3ba7094d0d7929fe6b41de6d8250be02a515"
+      "sha256": "13f8ab3e46a964942b00b9245363591e4a0ad3cfb5063f8a81143562edf85100"
     },
     {
       "path": "transcript-core/golden-transcript-core.json",

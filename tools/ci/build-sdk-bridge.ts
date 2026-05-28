@@ -20,7 +20,10 @@ import {
 import { collectFiles } from '../internal/files.js';
 import { rewriteModuleSpecifiers } from '../internal/module-specifiers.js';
 
-import publicSurface from '#packages/sdk/public-surface.json' with { type: 'json' };
+import {
+    vendoredProtocolRuntimeEntryExports,
+    vendoredProtocolRuntimeModules,
+} from './verify-public-package-policy.js';
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const sdkDistDirectoryPath = path.resolve(repoRoot, 'packages', 'sdk', 'dist');
@@ -105,9 +108,9 @@ const runtimeImportTargets = new Map([
     ['@sealed-lattice/wasm', bridgeOutputPath],
 ]);
 export const sdkProtocolRuntimeSourceRelativePaths =
-    publicSurface.vendoredProtocolRuntimeModules;
+    vendoredProtocolRuntimeModules;
 const sdkProtocolRuntimeIndexSource =
-    publicSurface.vendoredProtocolRuntimeEntryExports
+    vendoredProtocolRuntimeEntryExports
         .map(
             (entry) =>
                 `export { ${entry.exports.join(', ')} } from './${entry.source}';`,

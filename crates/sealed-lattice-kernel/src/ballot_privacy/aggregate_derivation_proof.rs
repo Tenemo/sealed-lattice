@@ -21,7 +21,7 @@ use super::*;
 
 const AGGREGATE_DERIVATION_COMPONENT_ID: &str = "aggregate-derivation-component";
 const AGGREGATE_DERIVATION_PARAMETER_PROFILE_ID: &str =
-    "aggregate-derivation-linear-compatibility-v1";
+    "aggregate-derivation-linear-proof-parameter-v1";
 const AGGREGATE_DERIVATION_PROOF_ENCODING_PROFILE_ID: &str =
     "aggregate-derivation-linear-proof-encoding-v1";
 const AGGREGATE_DERIVATION_PROOF_STATEMENT_FORMAT: &str =
@@ -87,7 +87,7 @@ pub(crate) fn generate_aggregate_derivation_proof_from_command_request(request: 
             "statusLabels": [
                 "AggregateDerivationProofGenerated"
             ],
-            "acceptedDigests": [],
+            "acceptedHashes": [],
             "refusedObjects": [],
             "unresolvedReason": Value::Null,
             "generatedProofBytes": true,
@@ -95,7 +95,7 @@ pub(crate) fn generate_aggregate_derivation_proof_from_command_request(request: 
             "proofSizeBytes": generation.proof_size_bytes,
             "summary": {
                 "challengeHex": generation.challenge_hex,
-                "relationCommitmentDigest": generation.relation_commitment_digest
+                "relationCommitmentHash": generation.relation_commitment_hash
             }
         }),
         Err(error) => structural_rejection(
@@ -135,8 +135,8 @@ pub(crate) fn verify_aggregate_derivation_proof_from_command_request(request: &V
             );
         }
     };
-    let object_digest = string_field(component, "aggregateDerivationComponentDigest")
-        .or_else(|| string_field(proof_input, "statementDigest"));
+    let object_hash = string_field(component, "aggregateDerivationComponentHash")
+        .or_else(|| string_field(proof_input, "statementHash"));
     let mut refused_objects =
         collect_aggregate_proof_input_refusals(proof_input, Some(component), true);
     refused_objects.extend(collect_aggregate_component_refusals(component));
@@ -208,7 +208,7 @@ pub(crate) fn verify_aggregate_derivation_proof_from_command_request(request: &V
             "verifyAggregateDerivationProof",
             vec![structural_refusal(
                 format!("Aggregate derivation parameter set is malformed: {error}"),
-                object_digest,
+                object_hash,
             )],
         );
     }
@@ -218,7 +218,7 @@ pub(crate) fn verify_aggregate_derivation_proof_from_command_request(request: &V
             "verifyAggregateDerivationProof",
             vec![structural_refusal(
                 format!("Aggregate derivation proof encoding is malformed: {error}"),
-                object_digest,
+                object_hash,
             )],
         );
     }
@@ -232,7 +232,7 @@ pub(crate) fn verify_aggregate_derivation_proof_from_command_request(request: &V
                     vec![json!({
                         "code": error.code,
                         "message": error.message,
-                        "objectDigest": object_digest
+                        "objectHash": object_hash
                     })],
                     json!("BallotPackageInvalid"),
                 );
@@ -288,7 +288,7 @@ pub(crate) fn verify_aggregate_derivation_proof_from_command_request(request: &V
                     "Aggregate derivation relation proof is invalid: {}",
                     error.message
                 ),
-                object_digest,
+                object_hash,
             )],
         );
     }
@@ -312,7 +312,7 @@ pub(crate) fn verify_aggregate_derivation_proof_from_command_request(request: &V
             "AggregateDerivationRelationChecked",
             "AggregateDerivationProofClaimClosureMissing"
         ],
-        "acceptedDigests": object_digest.map(|digest| vec![digest]).unwrap_or_default(),
+        "acceptedHashes": object_hash.map(|hash| vec![hash]).unwrap_or_default(),
         "refusedObjects": [],
         "unresolvedReason": Value::Null
     })
@@ -377,7 +377,7 @@ pub(crate) struct AggregateDerivationWitnessRelationCheck {
     pub(crate) proof_hex: String,
     pub(crate) proof_size_bytes: usize,
     pub(crate) challenge_hex: String,
-    pub(crate) relation_commitment_digest: String,
+    pub(crate) relation_commitment_hash: String,
     pub(crate) reduced_field_vector: Vec<u64>,
     pub(crate) quotient_vector: Vec<u64>,
 }
@@ -460,7 +460,7 @@ pub(crate) fn check_aggregate_derivation_witness_relation(
         proof_hex: generation.proof_hex,
         proof_size_bytes: generation.proof_size_bytes,
         challenge_hex: generation.challenge_hex,
-        relation_commitment_digest: generation.relation_commitment_digest,
+        relation_commitment_hash: generation.relation_commitment_hash,
         reduced_field_vector,
         quotient_vector,
     })

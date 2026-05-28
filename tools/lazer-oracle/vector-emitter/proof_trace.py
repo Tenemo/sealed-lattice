@@ -12,23 +12,23 @@ def sha256_text(value: str) -> str:
 
 
 def shake128_bytes_hex(*parts: bytes) -> str:
-    digest = hashlib.shake_128()
+    hash = hashlib.shake_128()
     for part in parts:
-        digest.update(part)
+        hash.update(part)
 
-    return digest.hexdigest(32)
+    return hash.hexdigest(32)
 
 
 def shake128_framed_bytes_hex(*parts: tuple[str, bytes]) -> str:
-    digest = hashlib.shake_128()
+    hash = hashlib.shake_128()
     for label, part in parts:
         label_bytes = label.encode("utf-8")
-        digest.update(len(label_bytes).to_bytes(8, "little"))
-        digest.update(label_bytes)
-        digest.update(len(part).to_bytes(8, "little"))
-        digest.update(part)
+        hash.update(len(label_bytes).to_bytes(8, "little"))
+        hash.update(label_bytes)
+        hash.update(len(part).to_bytes(8, "little"))
+        hash.update(part)
 
-    return digest.hexdigest(32)
+    return hash.hexdigest(32)
 
 
 def bytes_hex(value: bytes) -> str:
@@ -39,13 +39,13 @@ def canonical_json_text(value: Any) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"))
 
 
-def canonical_json_digest(value: Any) -> str:
+def canonical_json_hash(value: Any) -> str:
     canonical = canonical_json_text(value)
 
     return sha256_text(canonical)
 
 
-def canonical_json_shake128_digest(value: Any) -> str:
+def canonical_json_shake128_hash(value: Any) -> str:
     return shake128_bytes_hex(canonical_json_text(value).encode("utf-8"))
 
 
@@ -66,12 +66,12 @@ def build_sealed_lattice_preflight_transcript(
     return {
         "domain": LINEAR_PROOF_PREFLIGHT_DOMAIN,
         "hash": "SHAKE128-256",
-        "parameterDigest": canonical_json_shake128_digest(parameter_set),
-        "statementDigest": canonical_json_shake128_digest(statement_matrix_coefficients),
-        "targetDigest": canonical_json_shake128_digest(target_vector_coefficients),
-        "proofDigest": shake128_bytes_hex(proof),
-        "publicRandomnessDigest": shake128_bytes_hex(public_randomness),
-        "preflightTranscriptDigest": shake128_framed_bytes_hex(
+        "parameterHash": canonical_json_shake128_hash(parameter_set),
+        "statementHash": canonical_json_shake128_hash(statement_matrix_coefficients),
+        "targetHash": canonical_json_shake128_hash(target_vector_coefficients),
+        "proofHash": shake128_bytes_hex(proof),
+        "publicRandomnessHash": shake128_bytes_hex(public_randomness),
+        "preflightTranscriptHash": shake128_framed_bytes_hex(
             ("domain", LINEAR_PROOF_PREFLIGHT_DOMAIN.encode("utf-8")),
             ("parameterSet", parameter_set_canonical),
             ("statementMatrix", statement_matrix_canonical),
@@ -334,9 +334,9 @@ def build_trace(
         }
 
     trace = {
-        "parameterDigest": canonical_json_digest(parameter_set),
-        "statementDigest": canonical_json_digest(statement_matrix_coefficients),
-        "targetDigest": canonical_json_digest(target_vector_coefficients),
+        "parameterHash": canonical_json_hash(parameter_set),
+        "statementHash": canonical_json_hash(statement_matrix_coefficients),
+        "targetHash": canonical_json_hash(target_vector_coefficients),
         "proofBytesSha256": hashlib.sha256(proof).hexdigest(),
         "proofSizeBytes": len(proof),
         "publicRandomnessSha256": hashlib.sha256(public_randomness).hexdigest(),

@@ -8,8 +8,8 @@ import {
     createRegistrationEntry,
     createRosterManifestTranscriptInput,
     createSignature,
-    deriveProtocolDigest,
-    deriveRosterDigest,
+    deriveProtocolHash,
+    deriveRosterHash,
     manifestOpaqueBindings,
     verifyRosterManifestTranscript,
 } from './election-foundation-test-helpers';
@@ -41,8 +41,8 @@ describe('roster and manifest shells', () => {
             'participant-3',
             'organizer',
         ]);
-        expect(result.rosterDigest).toBe(
-            deriveRosterDigest(input.registrationEntries),
+        expect(result.rosterHash).toBe(
+            deriveRosterHash(input.registrationEntries),
         );
     });
 
@@ -76,8 +76,8 @@ describe('roster and manifest shells', () => {
                 'ElectionManifest',
                 'Participant',
                 'participant-1',
-                transportOnlyKey.publicKeyDigest,
-                input.electionManifest.electionManifestDigest,
+                transportOnlyKey.publicKeyHash,
+                input.electionManifest.electionManifestHash,
             ),
         };
 
@@ -127,7 +127,7 @@ describe('roster and manifest shells', () => {
             expect(result.refusedObjects).toEqual(
                 expect.arrayContaining([
                     expect.objectContaining({
-                        code: 'ManifestDigestMismatch',
+                        code: 'ManifestHashMismatch',
                     }),
                 ]),
             );
@@ -142,7 +142,7 @@ describe('roster and manifest shells', () => {
         ]);
         const changedFrozenRosterProfile = {
             ...input.frozenRosterProfile,
-            pollSpecDigest: deriveProtocolDigest('PollSpecDigest', {
+            pollSpecHash: deriveProtocolHash('PollSpecHash', {
                 poll: 'changed',
             }),
         };
@@ -155,9 +155,8 @@ describe('roster and manifest shells', () => {
         expect(result.refusedObjects).toEqual(
             expect.arrayContaining([
                 expect.objectContaining({
-                    code: 'ManifestDigestMismatch',
-                    objectDigest:
-                        changedFrozenRosterProfile.thresholdProfileDigest,
+                    code: 'ManifestHashMismatch',
+                    objectHash: changedFrozenRosterProfile.thresholdProfileHash,
                     objectType: 'FrozenRosterProfile',
                 }),
             ]),
@@ -189,11 +188,10 @@ describe('roster and manifest shells', () => {
         expect(result.refusedObjects).toEqual(
             expect.arrayContaining([
                 expect.objectContaining({
-                    code: 'ManifestDigestMismatch',
+                    code: 'ManifestHashMismatch',
                     message:
                         'Frozen roster profile payload must match the roster-freeze derived profile.',
-                    objectDigest:
-                        changedFrozenRosterProfile.thresholdProfileDigest,
+                    objectHash: changedFrozenRosterProfile.thresholdProfileHash,
                     objectType: 'FrozenRosterProfile',
                 }),
             ]),
@@ -214,12 +212,12 @@ describe('roster and manifest shells', () => {
         const result = verifyRosterManifestTranscript(input);
 
         expect(result.ok).toBe(false);
-        expect(result.acceptedDigests).toEqual([]);
-        expect(result.electionManifestDigest).toBeUndefined();
-        expect(result.rosterDigest).toBeUndefined();
+        expect(result.acceptedHashes).toEqual([]);
+        expect(result.electionManifestHash).toBeUndefined();
+        expect(result.rosterHash).toBeUndefined();
         expect(result.refusedObjects).toEqual(
             expect.arrayContaining([
-                expect.objectContaining({ code: 'RosterDigestMismatch' }),
+                expect.objectContaining({ code: 'RosterHashMismatch' }),
             ]),
         );
     });
@@ -244,10 +242,9 @@ describe('roster and manifest shells', () => {
         ]);
         const changedManifest = createElectionManifest(registrations, {
             boardSequence: 4,
-            thresholdProfileDigest: deriveProtocolDigest(
-                'ThresholdProfileDigest',
-                { profile: 'different-threshold-profile' },
-            ),
+            thresholdProfileHash: deriveProtocolHash('ThresholdProfileHash', {
+                profile: 'different-threshold-profile',
+            }),
         });
         const wrongFixedProfileManifest = createElectionManifest(
             registrations,
@@ -266,8 +263,8 @@ describe('roster and manifest shells', () => {
                 boardSequence: 4,
                 manifestOpaqueBindings: {
                     ...manifestOpaqueBindings,
-                    unexpectedBridgeBindingDigest: deriveProtocolDigest(
-                        'BridgeLayoutDigest',
+                    unexpectedBridgeBindingHash: deriveProtocolHash(
+                        'BridgeLayoutHash',
                         { profile: 'unexpected-profile-binding' },
                     ),
                 } as typeof manifestOpaqueBindings,
@@ -276,7 +273,7 @@ describe('roster and manifest shells', () => {
         const incompleteOpaqueBindings = {
             ...manifestOpaqueBindings,
         } as Record<string, unknown>;
-        delete incompleteOpaqueBindings.encryptedAggregateBridgeDigest;
+        delete incompleteOpaqueBindings.encryptedAggregateBridgeHash;
         const manifestWithIncompleteOpaqueBindings = createElectionManifest(
             registrations,
             {
@@ -287,7 +284,7 @@ describe('roster and manifest shells', () => {
         );
         const changedPollSpecManifest = createElectionManifest(registrations, {
             boardSequence: 4,
-            pollSpecDigest: deriveProtocolDigest('PollSpecDigest', {
+            pollSpecHash: deriveProtocolHash('PollSpecHash', {
                 poll: 'different',
             }),
         });
@@ -299,20 +296,20 @@ describe('roster and manifest shells', () => {
             throw new Error('Expected roster fixture to include board heads.');
         }
         const { head: conflictHead, inclusionProofs: conflictProofs } =
-            createBoardHeadWithObjects(4, lastHead.headDigest, [
+            createBoardHeadWithObjects(4, lastHead.headHash, [
                 {
                     objectType: 'ElectionManifest',
-                    objectDigest: changedManifest.electionManifestDigest,
+                    objectHash: changedManifest.electionManifestHash,
                     boardPosition: changedManifest.boardPosition,
                 },
             ]);
         const {
             head: differentPollSpecHead,
             inclusionProofs: differentPollSpecProofs,
-        } = createBoardHeadWithObjects(4, lastHead.headDigest, [
+        } = createBoardHeadWithObjects(4, lastHead.headHash, [
             {
                 objectType: 'ElectionManifest',
-                objectDigest: changedPollSpecManifest.electionManifestDigest,
+                objectHash: changedPollSpecManifest.electionManifestHash,
                 boardPosition: changedPollSpecManifest.boardPosition,
             },
         ]);
@@ -336,7 +333,7 @@ describe('roster and manifest shells', () => {
             expect.arrayContaining([
                 expect.objectContaining({ code: 'DuplicateRegistration' }),
                 expect.objectContaining({ code: 'LateRegistration' }),
-                expect.objectContaining({ code: 'RosterDigestMismatch' }),
+                expect.objectContaining({ code: 'RosterHashMismatch' }),
                 expect.objectContaining({ code: 'ConflictingManifest' }),
             ]),
         );
@@ -366,7 +363,7 @@ describe('roster and manifest shells', () => {
             }).refusedObjects,
         ).toEqual(
             expect.arrayContaining([
-                expect.objectContaining({ code: 'ManifestDigestMismatch' }),
+                expect.objectContaining({ code: 'ManifestHashMismatch' }),
             ]),
         );
         for (const manifest of [
@@ -381,7 +378,7 @@ describe('roster and manifest shells', () => {
             ).toEqual(
                 expect.arrayContaining([
                     expect.objectContaining({
-                        code: 'ManifestDigestMismatch',
+                        code: 'ManifestHashMismatch',
                         message:
                             'Election manifest opaque bindings must use the current encrypted-aggregate profile schema.',
                     }),
@@ -415,11 +412,11 @@ describe('roster and manifest shells', () => {
         }
         const { head: lateHead, inclusionProofs } = createBoardHeadWithObjects(
             4,
-            lastHead.headDigest,
+            lastHead.headHash,
             [
                 {
                     objectType: 'RegistrationEntry',
-                    objectDigest: registration.registrationEntryDigest,
+                    objectHash: registration.registrationEntryHash,
                     boardPosition: 0,
                 },
             ],

@@ -4,12 +4,12 @@ use super::backend_helpers::{derive_bytes, string_property};
 use super::{
     RECEIVER_ENCRYPTION_MODULE_DEGREE, RECEIVER_ENCRYPTION_MODULE_RANK, RECEIVER_ENCRYPTION_MODULUS,
 };
-use crate::hashing::derive_protocol_digest;
+use crate::hashing::derive_protocol_hash;
 
 const RECEIVER_PUBLIC_MATRIX_EXPANSION_DOMAIN: &str =
     "sealed.vote/internal/receiver-encryption/public-matrix-v1";
 
-pub(super) fn validate_key_material_digest_from_target(
+pub(super) fn validate_key_material_hash_from_target(
     linear_statement: &Map<String, Value>,
     target_vector: &[Vec<u64>],
 ) -> Result<(), String> {
@@ -31,20 +31,20 @@ pub(super) fn validate_key_material_digest_from_target(
             })
             .collect(),
     );
-    let expected_key_material_digest = derive_protocol_digest(
-        "PublicKeyDigest",
+    let expected_key_material_hash = derive_protocol_hash(
+        "PublicKeyHash",
         &json!({
             "publicKeyVector": public_key_vector,
-            "publicMatrixSeedDigest": string_property(linear_statement, "publicMatrixSeedDigest")?,
-            "receiverEncryptionProfileDigest": string_property(linear_statement, "receiverEncryptionProfileDigest")?,
+            "publicMatrixSeedHash": string_property(linear_statement, "publicMatrixSeedHash")?,
+            "receiverEncryptionProfileHash": string_property(linear_statement, "receiverEncryptionProfileHash")?,
         }),
     )
     .map_err(|error| {
-        format!("receiver-key linear key material digest could not be recomputed: {error}")
+        format!("receiver-key linear key material hash could not be recomputed: {error}")
     })?;
-    if string_property(linear_statement, "keyMaterialDigest")? != expected_key_material_digest {
+    if string_property(linear_statement, "keyMaterialHash")? != expected_key_material_hash {
         return Err(
-            "receiver-key linear target vector is not bound to the key material digest".to_string(),
+            "receiver-key linear target vector is not bound to the key material hash".to_string(),
         );
     }
 
@@ -61,8 +61,8 @@ pub(super) fn identity_polynomial(has_unit_coefficient: bool) -> Vec<u64> {
 }
 
 pub(super) fn derive_receiver_public_matrix(
-    receiver_encryption_profile_digest: &str,
-    public_matrix_seed_digest: &str,
+    receiver_encryption_profile_hash: &str,
+    public_matrix_seed_hash: &str,
 ) -> Result<Vec<Vec<Vec<u64>>>, String> {
     let mut public_matrix = Vec::with_capacity(RECEIVER_ENCRYPTION_MODULE_RANK as usize);
     for row_index in 0..RECEIVER_ENCRYPTION_MODULE_RANK {
@@ -72,8 +72,8 @@ pub(super) fn derive_receiver_public_matrix(
                 RECEIVER_PUBLIC_MATRIX_EXPANSION_DOMAIN,
                 &json!({
                     "columnIndex": column_index,
-                    "publicMatrixSeedDigest": public_matrix_seed_digest,
-                    "receiverEncryptionProfileDigest": receiver_encryption_profile_digest,
+                    "publicMatrixSeedHash": public_matrix_seed_hash,
+                    "receiverEncryptionProfileHash": receiver_encryption_profile_hash,
                     "rowIndex": row_index,
                 }),
             )?);
@@ -85,13 +85,10 @@ pub(super) fn derive_receiver_public_matrix(
 }
 
 pub(crate) fn derive_receiver_encryption_public_matrix(
-    receiver_encryption_profile_digest: &str,
-    public_matrix_seed_digest: &str,
+    receiver_encryption_profile_hash: &str,
+    public_matrix_seed_hash: &str,
 ) -> Result<Vec<Vec<Vec<u64>>>, String> {
-    derive_receiver_public_matrix(
-        receiver_encryption_profile_digest,
-        public_matrix_seed_digest,
-    )
+    derive_receiver_public_matrix(receiver_encryption_profile_hash, public_matrix_seed_hash)
 }
 
 pub(super) fn derive_number_polynomial(domain: &str, payload: &Value) -> Result<Vec<u64>, String> {
