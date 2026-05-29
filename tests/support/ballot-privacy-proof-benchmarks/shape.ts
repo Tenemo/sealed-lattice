@@ -1,9 +1,8 @@
+import type { BallotPrivacyProofGeneration } from '#packages/wasm/src/transcript-core-bridge';
 import type {
     ComponentProofBenchmarkMetric,
     MandatoryBallotProofRecordBenchmarkReport,
-} from '../ballot-privacy-proof-benchmarks';
-
-import type { BallotPrivacyProofGeneration } from '#packages/wasm/src/transcript-core-bridge';
+} from '#tests/support/ballot-privacy-proof-benchmarks';
 
 type ComponentProofRecord = {
     readonly componentId: string;
@@ -252,7 +251,7 @@ export const verifyMandatoryBallotProofBenchmarkShape = (
     }
     if (receiverKeyBindingComponent?.proofSizeBytes !== 0) {
         throw new Error(
-            'Mandatory receiver-key binding benchmark should remain public-zero.',
+            'Mandatory receiver-key binding benchmark should remain a public binding check.',
         );
     }
 };

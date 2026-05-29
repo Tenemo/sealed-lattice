@@ -266,13 +266,18 @@ describe('ballot privacy linear proof backend vectors', () => {
             'truncated-proof',
         ]);
 
-        for (const vectorCase of linearProofBackendVectors.cases) {
-            if (expectedRejectedByUpstream.has(vectorCase.caseName)) {
-                expect(vectorCase.trace).toMatchObject({
-                    upstreamVerifierAccepted: false,
-                });
-            }
-        }
+        const upstreamAcceptanceByCaseName = new Map(
+            linearProofBackendVectors.cases.map((vectorCase) => [
+                vectorCase.caseName,
+                vectorCase.trace?.upstreamVerifierAccepted,
+            ]),
+        );
+
+        expect(
+            [...expectedRejectedByUpstream].map((caseName) =>
+                upstreamAcceptanceByCaseName.get(caseName),
+            ),
+        ).toEqual([...expectedRejectedByUpstream].map(() => false));
     });
 
     it('records a sealed-lattice preflight transcript for public vector binding', () => {
@@ -377,15 +382,14 @@ describe('ballot privacy linear proof backend vectors', () => {
             'infinityResponseVector',
         ]);
         const fields = validCase?.trace?.decodedProofFieldLengths?.fields ?? [];
-        for (const [fieldIndex, field] of fields.entries()) {
+        for (const field of fields) {
             expect(field.bitLength).toBeGreaterThan(0);
-            if (fieldIndex > 0) {
-                expect(field.bitOffset).toBe(
-                    fields[fieldIndex - 1]?.bitOffset +
-                        (fields[fieldIndex - 1]?.bitLength ?? 0),
-                );
-            }
         }
+        expect(fields.slice(1).map((field) => field.bitOffset)).toEqual(
+            fields
+                .slice(0, -1)
+                .map((field) => field.bitOffset + field.bitLength),
+        );
     });
 
     it('records receiver-key upstream oracle provenance without treating it as production closure', () => {
@@ -740,13 +744,17 @@ describe('ballot privacy linear proof backend vectors', () => {
             'euclideanResponseVector',
             'infinityResponseVector',
         ]);
-        for (const vectorCase of ballotFieldLinearProofBackendVectors.cases) {
-            if (rejectedByUpstream.has(vectorCase.caseName)) {
-                expect(vectorCase.trace).toMatchObject({
-                    upstreamVerifierAccepted: false,
-                });
-            }
-        }
+        const ballotFieldAcceptanceByCaseName = new Map(
+            ballotFieldLinearProofBackendVectors.cases.map((vectorCase) => [
+                vectorCase.caseName,
+                vectorCase.trace.upstreamVerifierAccepted,
+            ]),
+        );
+        expect(
+            [...rejectedByUpstream].map((caseName) =>
+                ballotFieldAcceptanceByCaseName.get(caseName),
+            ),
+        ).toEqual([...rejectedByUpstream].map(() => false));
         expect(extendedProofCase?.trace).toMatchObject({
             expectedLogicalRejectionLayer: 'proof-decoder',
             upstreamVerifierAccepted: true,

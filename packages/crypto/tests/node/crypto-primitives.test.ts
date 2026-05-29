@@ -13,7 +13,7 @@ import {
     hash512Hex,
     resolveProtocolHashDomain,
     verifySignedObjectSignature,
-} from '../../src/index';
+} from '#packages/crypto/src/index';
 
 const contextHash = deriveProtocolHash('ActionContextHash', {
     context: 'crypto-test',
@@ -323,16 +323,16 @@ describe('crypto primitive boundary', () => {
             {
                 ...createSignedRoot(),
                 objectRoot: 'not-a-hash',
-            } as CanonicalSignedRootObject,
+            },
             {
                 ...createSignedRoot(),
                 objectRoot: null,
                 chunkMerkleRoot: 'A'.repeat(128),
-            } as CanonicalSignedRootObject,
+            },
             {
                 ...createSignedRoot(),
                 contextHash: 'not-a-hash',
-            } as CanonicalSignedRootObject,
+            },
         ];
 
         for (const signedRoot of malformedRoots) {

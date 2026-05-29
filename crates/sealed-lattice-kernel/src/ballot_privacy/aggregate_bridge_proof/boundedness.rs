@@ -33,6 +33,7 @@ pub(super) fn bridge_bgv_randomness_bound_status(
     bridge_shared_witness_proof_hash: &str,
     encrypted_aggregate_share_ciphertext_root: &str,
     collective_public_key_root: &str,
+    collective_public_key_coefficient_root: &str,
     bgv_public_key_root: &str,
 ) -> Value {
     let polynomial_degree =
@@ -50,6 +51,7 @@ pub(super) fn bridge_bgv_randomness_bound_status(
         "bridgeSharedWitnessProofHash": bridge_shared_witness_proof_hash,
         "encryptedAggregateShareCiphertextRoot": encrypted_aggregate_share_ciphertext_root,
         "collectivePublicKeyRoot": collective_public_key_root,
+        "collectivePublicKeyCoefficientRoot": collective_public_key_coefficient_root,
         "bgvPublicKeyRoot": bgv_public_key_root,
         "randomizerCoefficientCount": polynomial_degree,
         "errorPolynomialCount": BRIDGE_BGV_CIPHERTEXT_COMPONENT_COUNT,
@@ -108,12 +110,17 @@ pub(super) fn validate_bridge_bgv_randomness_bound_status(
             "collectivePublicKeyRoot",
             "bridgeEncryption",
         )?,
+        required_string_field(
+            bridge_encryption,
+            "collectivePublicKeyCoefficientRoot",
+            "bridgeEncryption",
+        )?,
         required_string_field(bridge_encryption, "bgvPublicKeyRoot", "bridgeEncryption")?,
     );
     if status_evidence != &expected_status {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
-            "M9 bridge BGV randomness-bound status evidence does not match the proof-bound public inputs",
+            "encrypted aggregate bridge BGV randomness-bound status evidence does not match the proof-bound public inputs",
         ));
     }
 
@@ -304,7 +311,7 @@ fn validate_bgv_boundedness_witness_dimensions(
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
-            "M9 bridge BGV boundedness witness dimensions do not match the BGV profile",
+            "encrypted aggregate bridge BGV boundedness witness dimensions do not match the BGV profile",
         ));
     }
 
@@ -322,7 +329,7 @@ fn validate_bgv_support_response_dimensions(
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
-            "M9 bridge BGV boundedness response dimensions do not match the BGV profile",
+            "encrypted aggregate bridge BGV boundedness response dimensions do not match the BGV profile",
         ));
     }
 
@@ -365,7 +372,7 @@ fn validate_support_polynomial_for_role(
     if expansion_commitments.len() != responses.len() * expansion_coefficient_count {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
-            "M9 bridge BGV boundedness expansion commitment length is invalid",
+            "encrypted aggregate bridge BGV boundedness expansion commitment length is invalid",
         ));
     }
     let challenge_residue = challenge_scalar % modulus;
@@ -392,7 +399,7 @@ fn validate_support_polynomial_for_role(
             return Err(CanonicalError::new(
                 CanonicalErrorCode::ProfileComponentMismatch,
                 format!(
-                    "M9 bridge BGV boundedness support polynomial check failed for {role} coefficient {coefficient_index}"
+                    "encrypted aggregate bridge BGV boundedness support polynomial check failed for {role} coefficient {coefficient_index}"
                 ),
             ));
         }
@@ -418,13 +425,13 @@ fn validate_bgv_bound_commitment_shell(
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
-            "M9 bridge BGV boundedness commitment shell is not supported",
+            "encrypted aggregate bridge BGV boundedness commitment shell is not supported",
         ));
     }
     if commitment.get("weightModel").is_some() {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
-            "M9 bridge BGV boundedness commitment must use coefficientwise support checks, not weighted batching",
+            "encrypted aggregate bridge BGV boundedness commitment must use coefficientwise support checks, not weighted batching",
         ));
     }
     require_equal_string(
@@ -438,7 +445,7 @@ fn validate_bgv_bound_commitment_shell(
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
-            "M9 bridge BGV boundedness commitment check index does not match the shared-witness check",
+            "encrypted aggregate bridge BGV boundedness commitment check index does not match the shared-witness check",
         ));
     }
     let support_modulus_values = commitment
@@ -453,14 +460,14 @@ fn validate_bgv_bound_commitment_shell(
     if support_modulus_values.len() != BGV_BOUND_SUPPORT_MODULUS_COUNT {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
-            "M9 bridge BGV boundedness support modulus count is invalid",
+            "encrypted aggregate bridge BGV boundedness support modulus count is invalid",
         ));
     }
     for (modulus_value, expected_modulus) in support_modulus_values.iter().zip(support_moduli()) {
         if modulus_value.as_u64() != Some(*expected_modulus) {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::ProfileComponentMismatch,
-                "M9 bridge BGV boundedness support modulus list does not match the BGV profile",
+                "encrypted aggregate bridge BGV boundedness support modulus list does not match the BGV profile",
             ));
         }
     }
@@ -519,7 +526,7 @@ fn decode_support_expansion_commitments_hex(
         .ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::MalformedLength,
-                "M9 bridge BGV boundedness expansion commitment byte length overflowed",
+                "encrypted aggregate bridge BGV boundedness expansion commitment byte length overflowed",
             )
         })?;
     if commitments_hex.len() != expected_byte_length * 2 {

@@ -51,19 +51,19 @@ pub fn validate_abdlop_linear_opening(
         decoded_proof.compressed_commitment_vector().to_vec(),
     )?;
 
-    let commitment_product = public_parameters
+    let mut recovery_input = public_parameters
         .commitment_key_matrix
         .multiply_vector(&short_response_vector)?;
     let opening_product = public_parameters
         .opening_key_matrix
         .multiply_vector(&randomness_response_vector)?;
-    let product_sum = commitment_product.add(&opening_product)?;
+    recovery_input.add_assign(&opening_product)?;
     let challenge_commitment_product = multiply_polynomial_by_vector(
         proof_ring,
         &challenge_polynomial,
         &compressed_commitment_vector,
     )?;
-    let recovery_input = product_sum.sub(&challenge_commitment_product)?;
+    recovery_input.sub_assign(&challenge_commitment_product)?;
     let recovered_high_bits = recover_decompressed_high_bits(
         recovery_input.entries(),
         decoded_proof.hint_vector(),

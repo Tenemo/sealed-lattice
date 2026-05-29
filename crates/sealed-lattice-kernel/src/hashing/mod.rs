@@ -3,7 +3,7 @@ use sha3::{
     Shake256,
     digest::{ExtendableOutput, Update, XofReader},
 };
-use std::cmp::Ordering;
+use std::{borrow::Cow, cmp::Ordering};
 use unicode_normalization::UnicodeNormalization;
 
 use crate::encoding::{
@@ -24,7 +24,6 @@ macro_rules! reserved_root_namespaces {
 reserved_root_namespaces! {
     BOARD_ENTRY_HASH_NAMESPACE => "sealed-lattice-root/board-entry-hash-v1",
     BOARD_ROOT_HASH_NAMESPACE => "sealed-lattice-root/board-root-hash-v1",
-    BOARD_POLICY_HASH_NAMESPACE => "sealed-lattice-root/board-policy-hash-v1",
     POLL_SPEC_HASH_NAMESPACE => "sealed-lattice-root/poll-spec-hash-v1",
     PUBLIC_KEY_HASH_NAMESPACE => "sealed-lattice-root/public-key-hash-v1",
     REGISTRATION_ENTRY_HASH_NAMESPACE => "sealed-lattice-root/registration-entry-hash-v1",
@@ -45,30 +44,18 @@ reserved_root_namespaces! {
     WITNESS_EQUIVOCATION_EVIDENCE_HASH_NAMESPACE => "sealed-lattice-root/witness-equivocation-evidence-hash-v1",
     INCLUSION_PROOF_HASH_NAMESPACE => "sealed-lattice-root/inclusion-proof-hash-v1",
     FIRST_VALID_ORDER_HASH_NAMESPACE => "sealed-lattice-root/first-valid-order-hash-v1",
-    DUPLICATE_BALLOT_POLICY_HASH_NAMESPACE => "sealed-lattice-root/duplicate-ballot-policy-hash-v1",
-    FIRST_VALID_POLICY_HASH_NAMESPACE => "sealed-lattice-root/first-valid-policy-hash-v1",
     TARGET_FINALITY_POLICY_HASH_NAMESPACE => "sealed-lattice-root/target-finality-policy-hash-v1",
     WITNESS_POLICY_HASH_NAMESPACE => "sealed-lattice-root/witness-policy-hash-v1",
-    RECOVERY_POLICY_HASH_NAMESPACE => "sealed-lattice-root/recovery-policy-hash-v1",
     SIGNED_ROOT_HASH_NAMESPACE => "sealed-lattice-root/signed-root-hash-v1",
     PROTOCOL_SIGNATURE_ENVELOPE_HASH_NAMESPACE => "sealed-lattice-root/protocol-signature-envelope-hash-v1",
     PROVIDER_BUILD_HASH_NAMESPACE => "sealed-lattice-root/provider-build-hash-v1",
-    ML_DSA_FIXTURE_SEED_HASH_NAMESPACE => "sealed-lattice-root/ml-dsa-fixture-seed-hash-v1",
     THRESHOLD_PROFILE_HASH_NAMESPACE => "sealed-lattice-root/threshold-profile-hash-v1",
-    HE_PARAM_HASH_NAMESPACE => "sealed-lattice-root/he-param-hash-v1",
     BGV_PROFILE_HASH_NAMESPACE => "sealed-lattice-root/bgv-profile-hash-v1",
     RUST_BGV_BACKEND_PROFILE_HASH_NAMESPACE => "sealed-lattice-root/rust-bgv-backend-profile-hash-v1",
-    REFERENCE_ORACLE_COMMIT_HASH_NAMESPACE => "sealed-lattice-root/reference-oracle-commit-hash-v1",
-    REFERENCE_ORACLE_CONTAINER_HASH_NAMESPACE => "sealed-lattice-root/reference-oracle-container-hash-v1",
-    REFERENCE_ORACLE_COMMAND_HASH_NAMESPACE => "sealed-lattice-root/reference-oracle-command-hash-v1",
-    REFERENCE_ORACLE_VECTOR_ROOT_NAMESPACE => "sealed-lattice-root/reference-oracle-vector-root-v1",
-    REFERENCE_ORACLE_PROFILE_HASH_NAMESPACE => "sealed-lattice-root/reference-oracle-profile-hash-v1",
     ENCRYPTED_AGGREGATE_BRIDGE_HASH_NAMESPACE => "sealed-lattice-root/encrypted-aggregate-bridge-hash-v1",
-    ENCRYPTED_AGGREGATE_INPUT_ROOT_NAMESPACE => "sealed-lattice-root/encrypted-aggregate-input-root-v1",
     ENCRYPTED_AGGREGATE_SHARE_CIPHERTEXT_ROOT_NAMESPACE => "sealed-lattice-root/encrypted-aggregate-share-ciphertext-root-v1",
     ENCRYPTED_AGGREGATE_TARGET_BASIS_ROOT_NAMESPACE => "sealed-lattice-root/encrypted-aggregate-target-basis-root-v1",
     ENCRYPTED_AGGREGATE_RECONSTRUCTION_HASH_NAMESPACE => "sealed-lattice-root/encrypted-aggregate-reconstruction-hash-v1",
-    BRIDGE_WITNESS_PRIVACY_PROFILE_HASH_NAMESPACE => "sealed-lattice-root/bridge-witness-privacy-profile-hash-v1",
     SCORE_BIT_DERIVATION_CIRCUIT_HASH_NAMESPACE => "sealed-lattice-root/score-bit-derivation-circuit-hash-v1",
     COMPARISON_INPUT_DERIVATION_CIRCUIT_HASH_NAMESPACE => "sealed-lattice-root/comparison-input-derivation-circuit-hash-v1",
     ENCRYPTED_SCORE_BIT_INPUT_HASH_NAMESPACE => "sealed-lattice-root/encrypted-score-bit-input-hash-v1",
@@ -101,29 +88,18 @@ reserved_root_namespaces! {
     TOP_K_CIRCUIT_HASH_NAMESPACE => "sealed-lattice-root/top-k-circuit-hash-v1",
     ROT_SET_HASH_NAMESPACE => "sealed-lattice-root/rot-set-hash-v1",
     TARGET_LAYOUT_HASH_NAMESPACE => "sealed-lattice-root/target-layout-hash-v1",
-    PUBLIC_SLOT_MASK_HASH_NAMESPACE => "sealed-lattice-root/public-slot-mask-hash-v1",
     AGGREGATE_DERIVATION_COMPONENT_HASH_NAMESPACE => "sealed-lattice-root/aggregate-derivation-component-hash-v1",
     AGGREGATE_CONTRIBUTION_HASH_NAMESPACE => "sealed-lattice-root/aggregate-contribution-hash-v1",
     AGGREGATE_READY_RECORD_HASH_NAMESPACE => "sealed-lattice-root/aggregate-ready-record-hash-v1",
-    AGGREGATE_SELECTION_POLICY_HASH_NAMESPACE => "sealed-lattice-root/aggregate-selection-policy-hash-v1",
     POST_VOTING_CLOSED_CONTEXT_HASH_NAMESPACE => "sealed-lattice-root/post-voting-closed-context-hash-v1",
-    M8_EVALUATOR_BINDING_CONTEXT_HASH_NAMESPACE => "sealed-lattice-root/m8-evaluator-binding-context-hash-v1",
+    PASSIVE_SETUP_EVALUATOR_BINDING_CONTEXT_HASH_NAMESPACE => "sealed-lattice-root/passive-setup-evaluator-binding-context-hash-v1",
     EVALUATION_CONTEXT_HASH_NAMESPACE => "sealed-lattice-root/evaluation-context-hash-v1",
-    TOP_K_EVALUATION_RECORD_HASH_NAMESPACE => "sealed-lattice-root/top-k-evaluation-record-hash-v1",
     TARGET_PROPOSAL_HASH_NAMESPACE => "sealed-lattice-root/target-proposal-hash-v1",
     TARGET_FINALITY_CHECKPOINT_HASH_NAMESPACE => "sealed-lattice-root/target-finality-checkpoint-hash-v1",
     TARGET_FINALITY_RECORD_HASH_NAMESPACE => "sealed-lattice-root/target-finality-record-hash-v1",
-    EVALUATION_PROOF_RECORD_HASH_NAMESPACE => "sealed-lattice-root/evaluation-proof-record-hash-v1",
-    EVALUATION_PROOF_PROFILE_HASH_NAMESPACE => "sealed-lattice-root/evaluation-proof-profile-hash-v1",
     TARGET_ACCEPTED_RECORD_HASH_NAMESPACE => "sealed-lattice-root/target-accepted-record-hash-v1",
-    TARGET_PREIMAGE_HASH_NAMESPACE => "sealed-lattice-root/target-preimage-hash-v1",
-    TARGET_CONTEXT_HASH_NAMESPACE => "sealed-lattice-root/target-context-hash-v1",
     LOCAL_REPLAY_RECORD_HASH_NAMESPACE => "sealed-lattice-root/local-replay-record-hash-v1",
-    LOCAL_REPLAY_DIAGNOSTIC_HASH_NAMESPACE => "sealed-lattice-root/local-replay-diagnostic-hash-v1",
     TOP_K_DECRYPTION_SHARE_HASH_NAMESPACE => "sealed-lattice-root/top-k-decryption-share-hash-v1",
-    VERIFIED_TOP_K_RESULT_HASH_NAMESPACE => "sealed-lattice-root/verified-top-k-result-hash-v1",
-    CPAD_PROFILE_HASH_NAMESPACE => "sealed-lattice-root/cpad-profile-hash-v1",
-    CPAD_PROFILE_VERIFICATION_HASH_NAMESPACE => "sealed-lattice-root/cpad-profile-verification-hash-v1",
     THRESHOLD_DECRYPTION_PROFILE_HASH_NAMESPACE => "sealed-lattice-root/threshold-decryption-profile-hash-v1",
     KLLPS_TARGET_DECRYPTION_PROFILE_HASH_NAMESPACE => "sealed-lattice-root/kllps-target-decryption-profile-hash-v1",
     BRIDGE_PROOF_PROFILE_HASH_NAMESPACE => "sealed-lattice-root/bridge-proof-profile-hash-v1",
@@ -131,28 +107,14 @@ reserved_root_namespaces! {
     CANONICAL_CIPHERTEXT_CONVENTION_HASH_NAMESPACE => "sealed-lattice-root/canonical-ciphertext-convention-hash-v1",
     BGV_BATCH_ENCODER_HASH_NAMESPACE => "sealed-lattice-root/bgv-batch-encoder-hash-v1",
     BGV_BATCH_ENCODER_LAYOUT_BINDING_HASH_NAMESPACE => "sealed-lattice-root/bgv-batch-encoder-layout-binding-hash-v1",
-    EVALUATION_NOISE_PROFILE_HASH_NAMESPACE => "sealed-lattice-root/evaluation-noise-profile-hash-v1",
-    HE_EVALUATION_NOISE_CERT_HASH_NAMESPACE => "sealed-lattice-root/he-evaluation-noise-cert-hash-v1",
     ALLOWED_EVALUATOR_OPS_HASH_NAMESPACE => "sealed-lattice-root/allowed-evaluator-ops-hash-v1",
-    EVALUATOR_PROGRAM_HASH_NAMESPACE => "sealed-lattice-root/evaluator-program-hash-v1",
-    BRIDGE_LAYOUT_HASH_NAMESPACE => "sealed-lattice-root/bridge-layout-hash-v1",
     AGGREGATE_SHARE_COMMITMENT_HASH_NAMESPACE => "sealed-lattice-root/aggregate-share-commitment-hash-v1",
     SHARE_COMMITMENT_HASH_NAMESPACE => "sealed-lattice-root/share-commitment-hash-v1",
     BALLOT_POLYNOMIAL_SET_HASH_NAMESPACE => "sealed-lattice-root/ballot-polynomial-set-hash-v1",
-    TEST_RECEIVER_SHARE_OPENING_PAYLOAD_HASH_NAMESPACE => "sealed-lattice-root/test-receiver-share-opening-payload-hash-v1",
     THRESHOLD_SHARE_VERIFICATION_KEY_ROOT_NAMESPACE => "sealed-lattice-root/threshold-share-verification-key-root-v1",
     THRESHOLD_SHARE_VERIFICATION_KEY_HASH_NAMESPACE => "sealed-lattice-root/threshold-share-verification-key-hash-v1",
     TRUSTEE_THRESHOLD_VERIFICATION_KEY_HASH_NAMESPACE => "sealed-lattice-root/trustee-threshold-verification-key-hash-v1",
-    TARGET_DECRYPTION_PREPARATION_RECORD_HASH_NAMESPACE => "sealed-lattice-root/target-decryption-preparation-record-hash-v1",
-    TARGET_DECRYPTION_CIPHERTEXT_HASH_NAMESPACE => "sealed-lattice-root/target-decryption-ciphertext-hash-v1",
-    SHARE_REPLAY_EVIDENCE_HASH_NAMESPACE => "sealed-lattice-root/share-replay-evidence-hash-v1",
-    SHARE_REPLAY_REFUSAL_HASH_NAMESPACE => "sealed-lattice-root/share-replay-refusal-hash-v1",
     TARGET_BASIS_HASH_NAMESPACE => "sealed-lattice-root/target-basis-hash-v1",
-    MOBILE_PROFILE_CERT_HASH_NAMESPACE => "sealed-lattice-root/mobile-profile-cert-hash-v1",
-    BRIDGE_BENCHMARK_REPORT_POLICY_HASH_NAMESPACE => "sealed-lattice-root/bridge-benchmark-report-policy-hash-v1",
-    BRIDGE_BATCHING_CERT_HASH_NAMESPACE => "sealed-lattice-root/bridge-batching-cert-hash-v1",
-    AGGREGATE_BRIDGE_PROVER_CERT_HASH_NAMESPACE => "sealed-lattice-root/aggregate-bridge-prover-cert-hash-v1",
-    ENCRYPTED_ENVELOPE_ROOT_NAMESPACE => "sealed-lattice-root/encrypted-envelope-root-v1",
     RECEIVER_ENCRYPTION_PROFILE_HASH_NAMESPACE => "sealed-lattice-root/receiver-encryption-profile-hash-v1",
     SHARE_COMMITMENT_PROFILE_HASH_NAMESPACE => "sealed-lattice-root/share-commitment-profile-hash-v1",
     BALLOT_PROOF_PROFILE_HASH_NAMESPACE => "sealed-lattice-root/ballot-proof-profile-hash-v1",
@@ -175,9 +137,11 @@ reserved_root_namespaces! {
 }
 
 pub fn to_hex(bytes: &[u8]) -> String {
+    const LOWER_HEX: &[u8; 16] = b"0123456789abcdef";
     let mut output = String::with_capacity(bytes.len() * 2);
     for byte in bytes {
-        output.push_str(&format!("{byte:02x}"));
+        output.push(LOWER_HEX[(byte >> 4) as usize] as char);
+        output.push(LOWER_HEX[(byte & 0x0f) as usize] as char);
     }
 
     output
@@ -211,6 +175,49 @@ pub fn hash512(domain: &str, parts: &[&[u8]]) -> [u8; 64] {
 
 pub fn hash512_hex(domain: &str, parts: &[&[u8]]) -> String {
     to_hex(&hash512(domain, parts))
+}
+
+fn update_varuint(hasher: &mut Shake256, value: u64) {
+    for byte in encode_varuint_for_hash(value) {
+        hasher.update(&[byte]);
+    }
+}
+
+fn encode_varuint_for_hash(mut value: u64) -> Vec<u8> {
+    let mut output = Vec::new();
+    loop {
+        let mut byte = (value & 0x7f) as u8;
+        value >>= 7;
+        if value != 0 {
+            byte |= 0x80;
+        }
+        output.push(byte);
+        if value == 0 {
+            break;
+        }
+    }
+
+    output
+}
+
+fn update_bytes_prefix(hasher: &mut Shake256, value_length: usize) -> CanonicalResult<()> {
+    let length = u64::try_from(value_length).map_err(|_| {
+        CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "hash input length does not fit u64",
+        )
+    })?;
+    update_varuint(hasher, length);
+
+    Ok(())
+}
+
+fn finalize_hash512_hex(hasher: Shake256) -> String {
+    let mut reader = hasher.finalize_xof();
+    let mut output = [0_u8; 64];
+    reader.read(&mut output);
+
+    to_hex(&output)
 }
 
 pub fn canonical_root(type_id: u64, version: u64, canonical_bytes: &[u8]) -> String {
@@ -250,8 +257,12 @@ fn compare_utf16(left: &str, right: &str) -> Ordering {
     }
 }
 
-fn normalize_json_string(value: &str) -> String {
-    value.nfc().collect()
+fn normalize_json_string(value: &str) -> Cow<'_, str> {
+    if value.is_ascii() {
+        Cow::Borrowed(value)
+    } else {
+        Cow::Owned(value.nfc().collect())
+    }
 }
 
 fn serialize_json_string(value: &str) -> CanonicalResult<String> {
@@ -293,28 +304,153 @@ fn serialize_json_number(value: &serde_json::Number) -> CanonicalResult<String> 
     ))
 }
 
-pub fn canonical_json(value: &Value) -> CanonicalResult<String> {
+trait CanonicalJsonSink {
+    fn write_str(&mut self, value: &str) -> CanonicalResult<()>;
+
+    fn write_char(&mut self, value: char) -> CanonicalResult<()> {
+        let mut buffer = [0_u8; 4];
+        self.write_str(value.encode_utf8(&mut buffer))
+    }
+}
+
+impl CanonicalJsonSink for String {
+    fn write_str(&mut self, value: &str) -> CanonicalResult<()> {
+        self.push_str(value);
+
+        Ok(())
+    }
+}
+
+struct HashingCanonicalJsonSink<'hasher> {
+    hasher: &'hasher mut Shake256,
+}
+
+impl CanonicalJsonSink for HashingCanonicalJsonSink<'_> {
+    fn write_str(&mut self, value: &str) -> CanonicalResult<()> {
+        self.hasher.update(value.as_bytes());
+
+        Ok(())
+    }
+}
+
+struct ByteComparisonCanonicalJsonSink<'expected> {
+    expected_bytes: &'expected [u8],
+    offset: usize,
+    matches: bool,
+}
+
+impl<'expected> ByteComparisonCanonicalJsonSink<'expected> {
+    fn new(expected_bytes: &'expected [u8]) -> Self {
+        Self {
+            expected_bytes,
+            offset: 0,
+            matches: true,
+        }
+    }
+
+    fn complete(self) -> bool {
+        self.matches && self.offset == self.expected_bytes.len()
+    }
+}
+
+impl CanonicalJsonSink for ByteComparisonCanonicalJsonSink<'_> {
+    fn write_str(&mut self, value: &str) -> CanonicalResult<()> {
+        if !self.matches {
+            return Ok(());
+        }
+
+        let value_bytes = value.as_bytes();
+        let end = self.offset.saturating_add(value_bytes.len());
+        if self.expected_bytes.get(self.offset..end) != Some(value_bytes) {
+            self.matches = false;
+            return Ok(());
+        }
+        self.offset = end;
+
+        Ok(())
+    }
+}
+
+fn checked_len_add(left: usize, right: usize) -> CanonicalResult<usize> {
+    left.checked_add(right).ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "canonical JSON length overflowed usize",
+        )
+    })
+}
+
+fn serialized_json_string_len(value: &str) -> CanonicalResult<usize> {
+    Ok(serialize_json_string(value)?.len())
+}
+
+fn canonical_json_len(value: &Value) -> CanonicalResult<usize> {
     match value {
-        Value::Null => Ok("null".to_string()),
-        Value::Bool(boolean) => Ok(boolean.to_string()),
-        Value::Number(number) => serialize_json_number(number),
-        Value::String(string) => serialize_json_string(&normalize_json_string(string)),
+        Value::Null => Ok(4),
+        Value::Bool(boolean) => Ok(boolean.to_string().len()),
+        Value::Number(number) => Ok(serialize_json_number(number)?.len()),
+        Value::String(string) => serialized_json_string_len(&normalize_json_string(string)),
         Value::Array(items) => {
-            let mut output = String::from("[");
+            let mut length = 2_usize;
             for (item_index, item) in items.iter().enumerate() {
                 if item_index > 0 {
-                    output.push(',');
+                    length = checked_len_add(length, 1)?;
                 }
-                output.push_str(&canonical_json(item)?);
+                length = checked_len_add(length, canonical_json_len(item)?)?;
             }
-            output.push(']');
 
-            Ok(output)
+            Ok(length)
         }
         Value::Object(map) => {
-            let mut entries = Vec::<(String, String)>::with_capacity(map.len());
+            let mut entries = Vec::<String>::with_capacity(map.len());
+            let mut length = 2_usize;
             for (key, entry_value) in map {
-                let normalized_key = normalize_json_string(key);
+                let normalized_key = normalize_json_string(key).into_owned();
+                if entries
+                    .iter()
+                    .any(|existing_key| existing_key == &normalized_key)
+                {
+                    return Err(CanonicalError::new(
+                        CanonicalErrorCode::DuplicateField,
+                        "canonical JSON object keys collide after normalization",
+                    ));
+                }
+                entries.push(normalized_key.clone());
+                if entries.len() > 1 {
+                    length = checked_len_add(length, 1)?;
+                }
+                length = checked_len_add(length, serialized_json_string_len(&normalized_key)?)?;
+                length = checked_len_add(length, 1)?;
+                length = checked_len_add(length, canonical_json_len(entry_value)?)?;
+            }
+
+            Ok(length)
+        }
+    }
+}
+
+fn write_canonical_json(value: &Value, sink: &mut impl CanonicalJsonSink) -> CanonicalResult<()> {
+    match value {
+        Value::Null => sink.write_str("null"),
+        Value::Bool(boolean) => sink.write_str(&boolean.to_string()),
+        Value::Number(number) => sink.write_str(&serialize_json_number(number)?),
+        Value::String(string) => {
+            sink.write_str(&serialize_json_string(&normalize_json_string(string))?)
+        }
+        Value::Array(items) => {
+            sink.write_char('[')?;
+            for (item_index, item) in items.iter().enumerate() {
+                if item_index > 0 {
+                    sink.write_char(',')?;
+                }
+                write_canonical_json(item, sink)?;
+            }
+            sink.write_char(']')
+        }
+        Value::Object(map) => {
+            let mut entries = Vec::<(String, &Value)>::with_capacity(map.len());
+            for (key, entry_value) in map {
+                let normalized_key = normalize_json_string(key).into_owned();
                 if entries
                     .iter()
                     .any(|(existing_key, _)| existing_key == &normalized_key)
@@ -324,24 +460,39 @@ pub fn canonical_json(value: &Value) -> CanonicalResult<String> {
                         "canonical JSON object keys collide after normalization",
                     ));
                 }
-                entries.push((normalized_key, canonical_json(entry_value)?));
+                entries.push((normalized_key, entry_value));
             }
             entries.sort_by(|left, right| compare_utf16(&left.0, &right.0));
 
-            let mut output = String::from("{");
+            sink.write_char('{')?;
             for (entry_index, (key, entry_value)) in entries.iter().enumerate() {
                 if entry_index > 0 {
-                    output.push(',');
+                    sink.write_char(',')?;
                 }
-                output.push_str(&serialize_json_string(key)?);
-                output.push(':');
-                output.push_str(entry_value);
+                sink.write_str(&serialize_json_string(key)?)?;
+                sink.write_char(':')?;
+                write_canonical_json(entry_value, sink)?;
             }
-            output.push('}');
-
-            Ok(output)
+            sink.write_char('}')
         }
     }
+}
+
+pub fn canonical_json(value: &Value) -> CanonicalResult<String> {
+    let mut output = String::with_capacity(canonical_json_len(value)?);
+    write_canonical_json(value, &mut output)?;
+
+    Ok(output)
+}
+
+pub fn canonical_json_matches_bytes(value: &Value, expected_bytes: &[u8]) -> CanonicalResult<bool> {
+    if canonical_json_len(value)? != expected_bytes.len() {
+        return Ok(false);
+    }
+    let mut sink = ByteComparisonCanonicalJsonSink::new(expected_bytes);
+    write_canonical_json(value, &mut sink)?;
+
+    Ok(sink.complete())
 }
 
 fn is_pascal_case_namespace(namespace: &str) -> bool {
@@ -418,9 +569,139 @@ pub fn resolve_protocol_hash_domain(namespace: &str) -> CanonicalResult<String> 
 
 pub fn derive_protocol_hash(namespace: &str, value: &Value) -> CanonicalResult<String> {
     let domain = resolve_protocol_hash_domain(namespace)?;
-    let canonical_json = canonical_json(value)?;
+    let canonical_json_length = canonical_json_len(value)?;
+    let mut hasher = Shake256::default();
+    hasher.update(HASH512_PREIMAGE_PREFIX);
+    update_bytes_prefix(&mut hasher, domain.len())?;
+    hasher.update(domain.as_bytes());
+    update_varuint(&mut hasher, 1);
+    update_bytes_prefix(&mut hasher, canonical_json_length)?;
+    write_canonical_json(
+        value,
+        &mut HashingCanonicalJsonSink {
+            hasher: &mut hasher,
+        },
+    )?;
 
-    Ok(namespace_root(&domain, canonical_json.as_bytes()))
+    Ok(finalize_hash512_hex(hasher))
+}
+
+fn write_ascii_json_string(value: &str, sink: &mut impl CanonicalJsonSink) -> CanonicalResult<()> {
+    if !value.is_ascii()
+        || value
+            .bytes()
+            .any(|byte| byte < 0x20 || byte == b'"' || byte == b'\\')
+    {
+        sink.write_str(&serialize_json_string(value)?)?;
+        return Ok(());
+    }
+
+    sink.write_char('"')?;
+    sink.write_str(value)?;
+    sink.write_char('"')
+}
+
+fn ascii_json_string_len(value: &str) -> CanonicalResult<usize> {
+    if !value.is_ascii()
+        || value
+            .bytes()
+            .any(|byte| byte < 0x20 || byte == b'"' || byte == b'\\')
+    {
+        return serialized_json_string_len(value);
+    }
+
+    checked_len_add(value.len(), 2)
+}
+
+pub fn derive_protocol_hash_for_ascii_string_payload(
+    namespace: &str,
+    purpose: &str,
+    field_name: &str,
+    field_value: &str,
+) -> CanonicalResult<String> {
+    let domain = resolve_protocol_hash_domain(namespace)?;
+    let mut entries = [(field_name, field_value), ("purpose", purpose)];
+    entries.sort_by(|left, right| compare_utf16(left.0, right.0));
+
+    let mut canonical_json_length = 2_usize;
+    for (entry_index, (key, value)) in entries.iter().enumerate() {
+        if entry_index > 0 {
+            canonical_json_length = checked_len_add(canonical_json_length, 1)?;
+        }
+        canonical_json_length =
+            checked_len_add(canonical_json_length, ascii_json_string_len(key)?)?;
+        canonical_json_length = checked_len_add(canonical_json_length, 1)?;
+        canonical_json_length =
+            checked_len_add(canonical_json_length, ascii_json_string_len(value)?)?;
+    }
+
+    let mut hasher = Shake256::default();
+    hasher.update(HASH512_PREIMAGE_PREFIX);
+    update_bytes_prefix(&mut hasher, domain.len())?;
+    hasher.update(domain.as_bytes());
+    update_varuint(&mut hasher, 1);
+    update_bytes_prefix(&mut hasher, canonical_json_length)?;
+    let mut sink = HashingCanonicalJsonSink {
+        hasher: &mut hasher,
+    };
+    sink.write_char('{')?;
+    for (entry_index, (key, value)) in entries.iter().enumerate() {
+        if entry_index > 0 {
+            sink.write_char(',')?;
+        }
+        write_ascii_json_string(key, &mut sink)?;
+        sink.write_char(':')?;
+        write_ascii_json_string(value, &mut sink)?;
+    }
+    sink.write_char('}')?;
+
+    Ok(finalize_hash512_hex(hasher))
+}
+
+pub fn derive_protocol_hash_for_proof_bytes_payload(
+    proof_bytes_hex: &str,
+    proof_size_bytes: u64,
+) -> CanonicalResult<String> {
+    const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
+    if proof_size_bytes > MAX_SAFE_INTEGER {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "canonical JSON integers must be JavaScript-safe",
+        ));
+    }
+
+    let domain = resolve_protocol_hash_domain("ProofBytesHash")?;
+    let proof_size_bytes_string = proof_size_bytes.to_string();
+    let fixed_prefix = "{\"objectType\":\"ProofBytes\",\"objectVersion\":1,\"proofBytesHex\":";
+    let fixed_middle = ",\"proofSizeBytes\":";
+    let fixed_suffix = "}";
+    let canonical_json_length = checked_len_add(
+        checked_len_add(
+            checked_len_add(
+                checked_len_add(fixed_prefix.len(), ascii_json_string_len(proof_bytes_hex)?)?,
+                fixed_middle.len(),
+            )?,
+            proof_size_bytes_string.len(),
+        )?,
+        fixed_suffix.len(),
+    )?;
+
+    let mut hasher = Shake256::default();
+    hasher.update(HASH512_PREIMAGE_PREFIX);
+    update_bytes_prefix(&mut hasher, domain.len())?;
+    hasher.update(domain.as_bytes());
+    update_varuint(&mut hasher, 1);
+    update_bytes_prefix(&mut hasher, canonical_json_length)?;
+    let mut sink = HashingCanonicalJsonSink {
+        hasher: &mut hasher,
+    };
+    sink.write_str(fixed_prefix)?;
+    write_ascii_json_string(proof_bytes_hex, &mut sink)?;
+    sink.write_str(fixed_middle)?;
+    sink.write_str(&proof_size_bytes_string)?;
+    sink.write_str(fixed_suffix)?;
+
+    Ok(finalize_hash512_hex(hasher))
 }
 
 fn chunk_leaf(index: u64, chunk: &[u8]) -> [u8; 64] {
@@ -484,8 +765,10 @@ mod tests {
     use std::collections::BTreeSet;
 
     use super::{
-        POLL_SPEC_HASH_NAMESPACE, RESERVED_ROOT_NAMESPACES, canonical_json, canonical_root,
-        chunk_root, derive_protocol_hash, hash512, hash512_hex, namespace_root,
+        POLL_SPEC_HASH_NAMESPACE, RESERVED_ROOT_NAMESPACES, canonical_json,
+        canonical_json_matches_bytes, canonical_root, chunk_root, derive_protocol_hash,
+        derive_protocol_hash_for_ascii_string_payload,
+        derive_protocol_hash_for_proof_bytes_payload, hash512, hash512_hex, namespace_root,
         resolve_protocol_hash_domain,
     };
 
@@ -514,6 +797,67 @@ mod tests {
 
         assert_eq!(canonical, "{\"a\":{\"z\":true},\"b\":[2,1]}");
         assert!(canonical_json(&serde_json::json!({ "fraction": 1.5 })).is_err());
+    }
+
+    #[test]
+    fn canonical_json_byte_comparison_matches_streamed_encoding() {
+        let value = serde_json::json!({
+            "z": [true, null, "plain-ascii"],
+            "a": { "nested": 17 }
+        });
+        let canonical = canonical_json(&value).expect("canonical JSON should serialize");
+
+        assert!(
+            canonical_json_matches_bytes(&value, canonical.as_bytes())
+                .expect("byte comparison should run")
+        );
+        assert!(
+            !canonical_json_matches_bytes(&value, b"{\"a\":0}")
+                .expect("byte comparison should reject mismatched bytes")
+        );
+    }
+
+    #[test]
+    fn ascii_string_payload_hash_matches_canonical_json_hash() {
+        let specialized = derive_protocol_hash_for_ascii_string_payload(
+            "ProofBytesHash",
+            "sealed-lattice-test-proof-bytes-v1",
+            "proofBytesHex",
+            "abcdef012345",
+        )
+        .expect("specialized hash should derive");
+        let generic = derive_protocol_hash(
+            "ProofBytesHash",
+            &serde_json::json!({
+                "purpose": "sealed-lattice-test-proof-bytes-v1",
+                "proofBytesHex": "abcdef012345",
+            }),
+        )
+        .expect("generic hash should derive");
+
+        assert_eq!(specialized, generic);
+    }
+
+    #[test]
+    fn proof_bytes_payload_hash_matches_canonical_json_hash() {
+        let proof_bytes_hex = "abcdef012345";
+        let specialized = derive_protocol_hash_for_proof_bytes_payload(
+            proof_bytes_hex,
+            proof_bytes_hex.len() as u64 / 2,
+        )
+        .expect("specialized hash should derive");
+        let generic = derive_protocol_hash(
+            "ProofBytesHash",
+            &serde_json::json!({
+                "objectType": "ProofBytes",
+                "objectVersion": 1,
+                "proofBytesHex": proof_bytes_hex,
+                "proofSizeBytes": proof_bytes_hex.len() / 2,
+            }),
+        )
+        .expect("generic hash should derive");
+
+        assert_eq!(specialized, generic);
     }
 
     #[test]

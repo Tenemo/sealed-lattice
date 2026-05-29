@@ -26,7 +26,10 @@ export const deriveAggregateShareCommitmentHash = (
         'aggregateShareCommitmentHash'
     >,
 ): ProtocolHash =>
-    deriveProtocolHash('AggregateShareCommitmentHash', aggregateCommitment);
+    deriveProtocolHash('AggregateShareCommitmentHash', {
+        aggregateCommitment,
+        purpose: 'aggregate-share-commitment-v1',
+    });
 
 export const deriveAggregateDerivationStatementHash = (
     statement: Omit<
@@ -99,7 +102,7 @@ export const deriveAggregateDerivationBallotSetHash = (input: {
         manifestHash: input.manifestHash,
         pollSpecHash: input.pollSpecHash,
         postVotingClosedContextHash: input.postVotingClosedContextHash,
-        purpose: 'm6-post-close-counted-m5-ballot-set-v1',
+        purpose: 'post-close-counted-accepted-ballot-package-set-v1',
         rosterHash: input.rosterHash,
         thresholdProfileHash: input.thresholdProfileHash,
         votingClosedBoardHeadHash: input.votingClosedBoardHeadHash,

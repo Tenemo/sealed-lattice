@@ -20,24 +20,20 @@ pub(crate) fn proof_bytes_hash(
     proof_bytes_hex: &str,
     allow_empty: bool,
 ) -> crate::encoding::CanonicalResult<String> {
-    let proof_bytes = decode_hex(proof_bytes_hex).map_err(|_| {
-        invalid_preflight("generated proof bytes must be lowercase hexadecimal bytes")
-    })?;
-    if !allow_empty && proof_bytes.is_empty() {
+    let Some(proof_size_bytes) =
+        super::hash_helpers::proof_bytes_size_from_lower_hex(proof_bytes_hex, true)
+    else {
+        return Err(invalid_preflight(
+            "generated proof bytes must be lowercase hexadecimal bytes",
+        ));
+    };
+    if !allow_empty && proof_size_bytes == 0 {
         return Err(invalid_preflight(
             "generated proof bytes must be non-empty for this proof record",
         ));
     }
-    derive_hash(
-        "ProofBytesHash",
-        &json!({
-            "objectType": "ProofBytes",
-            "objectVersion": 1,
-            "proofBytesHex": proof_bytes_hex,
-            "proofSizeBytes": proof_bytes.len(),
-        }),
-    )
-    .ok_or_else(|| invalid_preflight("generated proof bytes hash could not be derived"))
+    derive_protocol_hash_for_proof_bytes_payload(proof_bytes_hex, proof_size_bytes)
+        .map_err(|_| invalid_preflight("generated proof bytes hash could not be derived"))
 }
 
 pub(crate) fn generated_component_proof_input(

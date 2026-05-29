@@ -1,14 +1,14 @@
 // This file is one targeted part of the split test suite.
 import { describe, expect, it } from 'vitest';
 
-import { loadTranscriptCoreKernel } from '../../../src/index';
-
 import type { NamedFixture } from './shared.js';
 import {
     cloneJsonValue,
     findFixture,
     receiverKeyLinearProofBackendVectors,
 } from './shared.js';
+
+import { loadTranscriptCoreKernel } from '#packages/wasm/src/index';
 
 describe('transcript-core kernel in Node', () => {
     it('verifies proof-byte-bearing receiver-key records through the WASM linear proof backend', async () => {

@@ -1,14 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-    decodeSparseTopKTarget,
-    derivePlaintextTopKOracle,
-} from '../../src/plaintext-oracle/index';
-
-import {
     assertValidPollSpec,
     topKVectors,
 } from './plaintext-oracle-test-vectors';
+
+import {
+    decodeSparseTopKTarget,
+    derivePlaintextTopKOracle,
+} from '#packages/protocol/src/plaintext-oracle/index';
 
 describe('plaintext tally and top-k oracle', () => {
     it('matches deterministic top-k vectors including skipped-score normalization', () => {

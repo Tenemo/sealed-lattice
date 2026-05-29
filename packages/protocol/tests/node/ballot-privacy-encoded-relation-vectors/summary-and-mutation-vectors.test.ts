@@ -16,15 +16,15 @@ describe('ballot privacy encoded relation vectors', () => {
         expect(fullExplicitCase.loweredStatement).toBeUndefined();
         expect(fullExplicitCase.loweredStatementSummary).toMatchObject({
             backendHashExpandedRowCount: 0,
-            backendExplicitRowCount: 21_989,
+            backendExplicitRowCount: 25_930,
             backendProofComponentCount: 5,
             backendRowBatchCount: 6,
-            backendRowCount: 21_989,
-            encodedCoordinateCount: 11,
-            optionCount: 1,
+            backendRowCount: 25_930,
+            encodedCoordinateCount: 22,
+            optionCount: 2,
             rosterSize: 3,
-            shareVectorWidth: 11,
-            variableCount: 31_018,
+            shareVectorWidth: 22,
+            variableCount: 38_612,
         });
         expect(fullExplicitCase.componentBundleSummary).toMatchObject({
             bundleCoverage: 'full-encoded-score-ballot-relation',
@@ -47,7 +47,7 @@ describe('ballot privacy encoded relation vectors', () => {
             fullExplicitCase.loweredStatementSummary?.firstBackendRowBatch,
         ).toMatchObject({
             batchKind: 'ExplicitSparseRows',
-            rowCount: 35,
+            rowCount: 70,
             rowKind: 'EncodedScoreFieldRows',
         });
         expect(
@@ -69,22 +69,22 @@ describe('ballot privacy encoded relation vectors', () => {
                 expect.objectContaining({
                     componentId: 'score-and-shamir-field-component',
                     projectionCoverage: 'encoded-score-field-rows-only',
-                    sourceBackendColumnCount: 88,
-                    statementColumns: 88,
-                    statementRows: 35,
+                    sourceBackendColumnCount: 176,
+                    statementColumns: 176,
+                    statementRows: 70,
                 }),
                 expect.objectContaining({
                     componentId: 'payload-plaintext-field-component',
                     projectionCoverage: 'payload-plaintext-field-rows-only',
-                    sourceBackendColumnCount: 3_315,
-                    statementColumns: 3_315,
-                    statementRows: 450,
+                    sourceBackendColumnCount: 3_942,
+                    statementColumns: 3_942,
+                    statementRows: 516,
                 }),
                 expect.objectContaining({
                     componentId: 'share-commitment-component',
                     projectionCoverage: 'share-commitment-rows-only',
-                    sourceBackendColumnCount: 225,
-                    statementColumns: 225,
+                    sourceBackendColumnCount: 258,
+                    statementColumns: 258,
                     statementRows: 3_072,
                 }),
             ]),
@@ -92,7 +92,7 @@ describe('ballot privacy encoded relation vectors', () => {
         expect(fullExplicitCase.proofReadinessSummary).toEqual({
             denseMatrixOracleComponentCount: 1,
             fullComponentProofBytesAvailable: false,
-            publicZeroWitnessComponentCount: 1,
+            publicBindingCheckComponentCount: 1,
             sparseOrStructuredComponentCount: 3,
             totalComponentCount: 5,
         });
@@ -100,7 +100,7 @@ describe('ballot privacy encoded relation vectors', () => {
             {
                 coefficientModulus: '65537',
                 componentId: 'score-and-shamir-field-component',
-                denseCoefficientCount: '197120',
+                denseCoefficientCount: '788480',
                 denseMatrixOracleStatus: 'available-for-small-field-component',
                 objectType: 'BallotProofComponentProofReadinessManifest',
                 objectVersion: 1,
@@ -108,13 +108,13 @@ describe('ballot privacy encoded relation vectors', () => {
                 proofStatementFormat: 'dense-polynomial-matrix-linear-proof-v1',
                 recommendedSourceRingDegree: 64,
                 rowBatchNames: ['encoded_score_field_rows'],
-                rowCount: 35,
-                variableColumnCount: 88,
+                rowCount: 70,
+                variableColumnCount: 176,
             },
             {
                 coefficientModulus: '65537',
                 componentId: 'payload-plaintext-field-component',
-                denseCoefficientCount: '95472000',
+                denseCoefficientCount: '130180608',
                 denseMatrixOracleStatus:
                     'blocked-pending-sparse-proof-statement',
                 objectType: 'BallotProofComponentProofReadinessManifest',
@@ -127,13 +127,13 @@ describe('ballot privacy encoded relation vectors', () => {
                     'receiver_payload_plaintext_binding_rows',
                     'receiver_payload_plaintext_bit_decomposition_rows',
                 ],
-                rowCount: 450,
-                variableColumnCount: 3_315,
+                rowCount: 516,
+                variableColumnCount: 3_942,
             },
             {
                 coefficientModulus: '18446744069414584321',
                 componentId: 'share-commitment-component',
-                denseCoefficientCount: '176947200',
+                denseCoefficientCount: '202899456',
                 denseMatrixOracleStatus:
                     'blocked-pending-sparse-proof-statement',
                 objectType: 'BallotProofComponentProofReadinessManifest',
@@ -144,12 +144,12 @@ describe('ballot privacy encoded relation vectors', () => {
                 recommendedSourceRingDegree: 256,
                 rowBatchNames: ['share_commitment_equation_rows'],
                 rowCount: 3_072,
-                variableColumnCount: 225,
+                variableColumnCount: 258,
             },
             {
                 coefficientModulus: '12289',
                 componentId: 'receiver-encryption-component',
-                denseCoefficientCount: '119981998080',
+                denseCoefficientCount: '186708787200',
                 denseMatrixOracleStatus:
                     'not-applicable-for-structured-component',
                 objectType: 'BallotProofComponentProofReadinessManifest',
@@ -158,48 +158,48 @@ describe('ballot privacy encoded relation vectors', () => {
                 proofStatementFormat: 'structured-module-lwe-linear-proof-v1',
                 recommendedSourceRingDegree: 256,
                 rowBatchNames: ['receiver_payload_encryption_equation_rows'],
-                rowCount: 15_360,
-                variableColumnCount: 30_513,
+                rowCount: 19_200,
+                variableColumnCount: 37_986,
             },
             {
                 coefficientModulus: '12289',
                 componentId: 'receiver-key-binding-component',
                 denseCoefficientCount: null,
                 denseMatrixOracleStatus:
-                    'not-applicable-for-public-zero-witness-component',
+                    'not-applicable-for-public-binding-check-component',
                 objectType: 'BallotProofComponentProofReadinessManifest',
                 objectVersion: 1,
                 proofLoweringStatus: 'explicitRowsAvailable',
-                proofStatementFormat: 'public-zero-witness-binding-check-v1',
+                proofStatementFormat: 'public-binding-check-only-v1',
                 recommendedSourceRingDegree: null,
                 rowBatchNames: ['receiver_key_binding_rows'],
                 rowCount: 3_072,
                 variableColumnCount: 0,
             },
         ]);
-        expect(fullExplicitCase.componentProofStatementPlans).toEqual([
+        expect(fullExplicitCase.componentProofStatementDescriptors).toEqual([
             expect.objectContaining({
                 coefficientModulus: '65537',
                 componentId: 'score-and-shamir-field-component',
-                denseCoefficientCount: '197120',
-                objectType: 'BallotProofComponentProofStatementPlan',
+                denseCoefficientCount: '788480',
+                objectType: 'BallotProofComponentProofStatementDescriptor',
                 objectVersion: 1,
-                proofBytesAvailability: 'available-for-small-dense-oracle',
+                proofBackendRequirement: 'dense-proof-bytes-available-lab-only',
                 proofStatementFormat: 'dense-polynomial-matrix-linear-proof-v1',
                 proofSystemRingDegree: 64,
                 rowBatchNames: ['encoded_score_field_rows'],
-                rowBatchTermCounts: ['153'],
-                rowCount: 35,
+                rowBatchTermCounts: ['306'],
+                rowCount: 70,
                 sourceRingDegree: 64,
-                variableColumnCount: 88,
+                variableColumnCount: 176,
             }),
             expect.objectContaining({
                 coefficientModulus: '65537',
                 componentId: 'payload-plaintext-field-component',
-                denseCoefficientCount: '95472000',
-                objectType: 'BallotProofComponentProofStatementPlan',
+                denseCoefficientCount: '130180608',
+                objectType: 'BallotProofComponentProofStatementDescriptor',
                 objectVersion: 1,
-                proofBytesAvailability: 'requires-sparse-proof-statement',
+                proofBackendRequirement: 'sparse-proof-statement-required',
                 proofStatementFormat:
                     'sparse-polynomial-matrix-linear-proof-v1',
                 proofSystemRingDegree: 64,
@@ -207,55 +207,55 @@ describe('ballot privacy encoded relation vectors', () => {
                     'receiver_payload_plaintext_binding_rows',
                     'receiver_payload_plaintext_bit_decomposition_rows',
                 ],
-                rowBatchTermCounts: ['450', '3090'],
-                rowCount: 450,
-                sparseTermCount: '3540',
+                rowBatchTermCounts: ['516', '3684'],
+                rowCount: 516,
+                sparseTermCount: '4200',
                 sourceRingDegree: 64,
-                variableColumnCount: 3_315,
+                variableColumnCount: 3_942,
             }),
             expect.objectContaining({
                 coefficientModulus: '18446744069414584321',
                 componentId: 'share-commitment-component',
-                denseCoefficientCount: '176947200',
-                objectType: 'BallotProofComponentProofStatementPlan',
+                denseCoefficientCount: '202899456',
+                objectType: 'BallotProofComponentProofStatementDescriptor',
                 objectVersion: 1,
-                proofBytesAvailability: 'requires-sparse-proof-statement',
+                proofBackendRequirement: 'sparse-proof-statement-required',
                 proofStatementFormat:
                     'sparse-polynomial-matrix-linear-proof-v1',
                 proofSystemRingDegree: 64,
                 rowBatchNames: ['share_commitment_equation_rows'],
-                rowBatchTermCounts: ['230400'],
+                rowBatchTermCounts: ['264192'],
                 rowCount: 3_072,
-                sparseTermCount: '230400',
+                sparseTermCount: '264192',
                 sourceRingDegree: 256,
-                variableColumnCount: 225,
+                variableColumnCount: 258,
             }),
             expect.objectContaining({
                 coefficientModulus: '12289',
                 componentId: 'receiver-encryption-component',
-                denseCoefficientCount: '119981998080',
-                objectType: 'BallotProofComponentProofStatementPlan',
+                denseCoefficientCount: '186708787200',
+                objectType: 'BallotProofComponentProofStatementDescriptor',
                 objectVersion: 1,
-                proofBytesAvailability: 'requires-structured-proof-statement',
+                proofBackendRequirement: 'structured-proof-statement-required',
                 proofStatementFormat: 'structured-module-lwe-linear-proof-v1',
                 proofSystemRingDegree: 64,
                 rowBatchNames: ['receiver_payload_encryption_equation_rows'],
-                rowBatchTermCounts: ['15746865'],
-                rowCount: 15_360,
+                rowBatchTermCounts: ['19683426'],
+                rowCount: 19_200,
                 sourceRingDegree: 256,
-                structuredCiphertextChunkCount: 12,
+                structuredCiphertextChunkCount: 15,
                 structuredReceiverCount: 3,
-                structuredWitnessTermCount: '15746865',
-                variableColumnCount: 30_513,
+                structuredWitnessTermCount: '19683426',
+                variableColumnCount: 37_986,
             }),
             expect.objectContaining({
                 coefficientModulus: '12289',
                 componentId: 'receiver-key-binding-component',
                 denseCoefficientCount: null,
-                objectType: 'BallotProofComponentProofStatementPlan',
+                objectType: 'BallotProofComponentProofStatementDescriptor',
                 objectVersion: 1,
-                proofBytesAvailability: 'public-zero-witness-binding-check',
-                proofStatementFormat: 'public-zero-witness-binding-check-v1',
+                proofBackendRequirement: 'public-binding-check-only',
+                proofStatementFormat: 'public-binding-check-only-v1',
                 proofSystemRingDegree: null,
                 rowBatchNames: ['receiver_key_binding_rows'],
                 rowBatchTermCounts: ['0'],
@@ -264,19 +264,19 @@ describe('ballot privacy encoded relation vectors', () => {
                 variableColumnCount: 0,
             }),
         ]);
-        for (const proofStatementPlan of fullExplicitCase.componentProofStatementPlans ??
+        for (const proofStatementDescriptor of fullExplicitCase.componentProofStatementDescriptors ??
             []) {
-            expect(proofStatementPlan.componentProofStatementHash).toMatch(
-                /^[a-f0-9]{128}$/u,
-            );
             expect(
-                proofStatementPlan.rowBatchTermCounts.every((termCount) =>
+                proofStatementDescriptor.componentProofStatementHash,
+            ).toMatch(/^[a-f0-9]{128}$/u);
+            expect(
+                proofStatementDescriptor.rowBatchTermCounts.every((termCount) =>
                     /^(0|[1-9][0-9]*)$/u.test(termCount),
                 ),
             ).toBe(true);
         }
         expect(
-            JSON.stringify(fullExplicitCase.componentProofStatementPlans),
+            JSON.stringify(fullExplicitCase.componentProofStatementDescriptors),
         ).not.toMatch(
             /normalizedScores|scoreOneHotWitnesses|receiverShareVector|privateWitness/u,
         );
@@ -285,7 +285,7 @@ describe('ballot privacy encoded relation vectors', () => {
                 {
                     checkedRowBatchNames: ['encoded_score_field_rows'],
                     componentId: 'score-and-shamir-field-component',
-                    rowCount: 35,
+                    rowCount: 70,
                     verificationStatus: 'explicitRowsSatisfied',
                 },
                 {
@@ -294,7 +294,7 @@ describe('ballot privacy encoded relation vectors', () => {
                         'receiver_payload_plaintext_bit_decomposition_rows',
                     ],
                     componentId: 'payload-plaintext-field-component',
-                    rowCount: 450,
+                    rowCount: 516,
                     verificationStatus: 'explicitRowsSatisfied',
                 },
                 {
@@ -308,7 +308,7 @@ describe('ballot privacy encoded relation vectors', () => {
                         'receiver_payload_encryption_equation_rows',
                     ],
                     componentId: 'receiver-encryption-component',
-                    rowCount: 15_360,
+                    rowCount: 19_200,
                     verificationStatus: 'explicitRowsSatisfied',
                 },
                 {

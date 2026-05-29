@@ -26,6 +26,8 @@
                 "@fontsource/jetbrains-mono",
                 // The packed-package verifier invokes publint through the shared package-manager runner.
                 "publint",
+                // The Wasm kernel build resolves binaryen's wasm-opt script by path.
+                "binaryen",
                 // Root-level public API tests intentionally import the workspace package by its published name.
                 "sealed-lattice"
             ]

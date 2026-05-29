@@ -1,24 +1,23 @@
 import { describe, expect, it } from 'vitest';
 
+import { deriveProtocolHash } from '#packages/crypto/src/index';
 import {
     loadTranscriptCoreKernel,
     TranscriptCoreKernelCommandError,
     type TranscriptCoreKernel,
-} from '../../../src/index';
-import type { BgvPassiveSetupPackage } from '../../../src/transcript-core-bridge/kernel-contracts';
-
-import { deriveProtocolHash } from '#packages/crypto/src/index';
+} from '#packages/wasm/src/index';
+import type { BgvPassiveSetupPackage } from '#packages/wasm/src/transcript-core-bridge/kernel-contracts';
 
 const setupRequest = {
     ceremonyId: 'ceremony-main',
     manifestHash: deriveProtocolHash('ElectionManifestHash', {
-        manifest: 'm8-passive-setup-test',
+        manifest: 'passive-bgv-setup-test',
     }),
     rosterHash: deriveProtocolHash('RosterHash', {
-        roster: 'm8-passive-setup-test',
+        roster: 'passive-bgv-setup-test',
     }),
     thresholdProfileHash: deriveProtocolHash('ThresholdProfileHash', {
-        threshold: 'm8-passive-setup-test',
+        threshold: 'passive-bgv-setup-test',
     }),
     participants: [
         {
@@ -37,7 +36,7 @@ const setupRequest = {
             boardPosition: 5,
         },
     ],
-    setupSeed: 'm8-passive-setup-test-seed',
+    setupSeed: 'passive-bgv-setup-test-seed',
 } as const;
 
 const rebindSetupPackageHash = (
@@ -110,7 +109,7 @@ const expectReboundSetupPackageToBeRejected = (
     ).toThrow(TranscriptCoreKernelCommandError);
 };
 
-describe('BGV passive M8 setup kernel commands', () => {
+describe('BGV passive passive BGV setup kernel commands', () => {
     it('describes the frozen passive setup object model', async () => {
         const kernel = await loadTranscriptCoreKernel();
         const objectModel = kernel.describeBgvPassiveSetupObjectModel() as {
@@ -139,7 +138,7 @@ describe('BGV passive M8 setup kernel commands', () => {
                 .transcriptValidCentralizedSecretReconstruction,
         ).toBe(false);
         expect(objectModel.statusLabels).toContain(
-            'M8CanonicalObjectModelFrozen',
+            'PassiveBgvSetupCanonicalObjectModelFrozen',
         );
     });
 
@@ -169,11 +168,11 @@ describe('BGV passive M8 setup kernel commands', () => {
         expect(repeated.setupPackageHash).toBe(setup.setupPackageHash);
         expect(setup.statusLabels).toEqual(
             expect.arrayContaining([
-                'M8PassiveSetupGenerated',
+                'PassiveBgvSetupGenerated',
                 'CollectivePublicKeyRootBound',
                 'EvaluationKeyRootBound',
-                'AppendixBSetupInputReady',
-                'FinalAppendixBPendingQTarget',
+                'PassiveSetupInputReady',
+                'FinalSetupSecurityPendingTargetModulus',
             ]),
         );
         expect(setup.nonClaims).toContain('KLLPSPartDecNotImplemented');
@@ -196,7 +195,14 @@ describe('BGV passive M8 setup kernel commands', () => {
         ).toBeGreaterThan(0);
         expect(
             certificates.publicRlweSamplesByBasis.QTarget.sampleCountStatus,
-        ).toBe('pendingUntilAppendixC');
+        ).toBe('pendingUntilFinalNoiseAnalysis');
+        expect(
+            setup.collectivePublicKey.collectivePublicKeyCoefficientRoot,
+        ).toHaveLength(128);
+        expect(setup.collectivePublicKey.coefficientMaterial).toMatchObject({
+            objectType: 'BgvCollectivePublicKeyCoefficientMaterial',
+            objectVersion: 1,
+        });
 
         const verification = kernel.verifyBgvPassiveSetup({
             setupPackage: setup,
@@ -213,7 +219,7 @@ describe('BGV passive M8 setup kernel commands', () => {
             operation: 'verifyBgvPassiveSetupPackage',
         });
         expect(verification.statusLabels).toContain(
-            'M8PassiveSetupPackageVerified',
+            'PassiveBgvSetupPackageVerified',
         );
     });
 
@@ -254,6 +260,20 @@ describe('BGV passive M8 setup kernel commands', () => {
         expect(() =>
             kernel.verifyBgvPassiveSetup({
                 setupPackage: mutatedSetup,
+            }),
+        ).toThrow(TranscriptCoreKernelCommandError);
+
+        const mutatedCoefficientSetup = {
+            ...setup,
+            collectivePublicKey: {
+                ...setup.collectivePublicKey,
+                collectivePublicKeyCoefficientRoot: '0'.repeat(128),
+            },
+        } as BgvPassiveSetupPackage;
+
+        expect(() =>
+            kernel.verifyBgvPassiveSetup({
+                setupPackage: mutatedCoefficientSetup,
             }),
         ).toThrow(TranscriptCoreKernelCommandError);
     });
@@ -445,7 +465,7 @@ describe('BGV passive M8 setup kernel commands', () => {
                         [
                             'developmentEncryptionFixture',
                             'fixture',
-                            'm9BridgeEncryptionClaim',
+                            'bridgeEncryptionClaim',
                         ],
                         true,
                     ),
@@ -503,7 +523,7 @@ describe('BGV passive M8 setup kernel commands', () => {
             'encryptedComparisonInputHash',
             'bitSlicedComparatorHash',
             'encryptedSparseTargetProjectionHash',
-            'm8EvaluatorContextBindingHash',
+            'passiveSetupEvaluatorContextBindingHash',
         ]) {
             const mutatedSetup = structuredClone(setup);
             setPathValue(

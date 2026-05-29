@@ -21,7 +21,7 @@ pub(super) fn development_key_arithmetic_fixture(
                     % modulus;
             let multiplier = sample_residue(
                 &input.setup_seed_hash,
-                &format!("{fixture_scope}-m7-multiplier"),
+                &format!("{fixture_scope}-bgv-rns-multiplier"),
                 position,
                 modulus,
             );
@@ -32,7 +32,7 @@ pub(super) fn development_key_arithmetic_fixture(
                 "decompositionDigits": [first_digit, second_digit, third_digit],
                 "recomposedCoefficient": recomposed,
                 "recompositionMatches": recomposed == source_coefficient,
-                "m7MulCheck": mul_mod(source_coefficient, multiplier, modulus)?,
+                "rnsMulCheck": mul_mod(source_coefficient, multiplier, modulus)?,
             }))
         })
         .collect::<CanonicalResult<Vec<_>>>()?;
@@ -49,7 +49,7 @@ pub(super) fn development_key_arithmetic_fixture(
         "digitCountPerPrime": 3,
         "sampleModulus": modulus,
         "sampledCoefficientChecks": samples,
-        "m7ArithmeticStatus": "sampled-decompose-recompose-and-modmul-passed",
+        "rnsArithmeticStatus": "sampled-decompose-recompose-and-modmul-passed",
         "protocolEvidence": false,
         "maliciousEvaluationKeyProofIncluded": false,
     });
@@ -204,8 +204,8 @@ pub(super) fn development_encryption_fixture(
             &error_one_residues,
         )?,
         "fixtureScope": "development-collective-public-key-encryption-fixture",
-        "m9BridgeEncryptionClaim": false,
-        "m10EvaluatorClaim": false,
+        "bridgeEncryptionClaim": false,
+        "encryptedAggregateEvaluatorClaim": false,
     });
     let fixture_hash =
         derive_protocol_hash("BGVDevelopmentEncryptionFixtureHash", &fixture_record)?;

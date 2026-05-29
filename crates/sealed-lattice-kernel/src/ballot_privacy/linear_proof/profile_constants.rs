@@ -218,7 +218,7 @@ pub(crate) const GENERATED_FIELD_COMPONENT_EXACT_NORM_BOUND_SQUARED: u64 =
 // structured share-commitment component statements.
 pub(crate) const GENERATED_SHARE_COMMITMENT_COMPONENT_EXACT_NORM_BOUND_SQUARED: u64 = 1_048_576;
 
-// M6 aggregate derivation uses the share-commitment source ring and an
+// aggregate derivation uses the share-commitment source ring and an
 // aggregate witness covering S, rho, Y, and quotient for up to 50 counted
 // ballots and 20 options. This is an implementation-side bound
 // for the current Rust/WASM proof experiment, not standalone final theorem

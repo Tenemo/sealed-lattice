@@ -2,16 +2,6 @@
 import { evaluationProofProfileId } from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
-import {
-    loadTranscriptCoreKernel,
-    roundTripBytesThroughKernel,
-    verifyTranscriptCoreFixture,
-} from '../../../src/index';
-import {
-    normalizeTranscriptCoreKernelBytesForHash,
-    TranscriptCoreKernelCommandError,
-} from '../../../src/transcript-core-bridge';
-
 import type { NamedFixture } from './shared.js';
 import {
     ballotFieldLinearProofBackendVectors,
@@ -30,6 +20,15 @@ import {
 } from './shared.js';
 
 import { canonicalJson, deriveProtocolHash } from '#packages/crypto/src/index';
+import {
+    loadTranscriptCoreKernel,
+    roundTripBytesThroughKernel,
+    verifyTranscriptCoreFixture,
+} from '#packages/wasm/src/index';
+import {
+    normalizeTranscriptCoreKernelBytesForHash,
+    TranscriptCoreKernelCommandError,
+} from '#packages/wasm/src/transcript-core-bridge';
 
 describe('transcript-core kernel in Node', () => {
     it('normalizes host-specific Rust source paths before hashing', () => {
@@ -274,18 +273,21 @@ describe('transcript-core kernel in Node', () => {
         for (const { value, expectedKernelCode } of rejectedValues) {
             expect(() => canonicalJson(value)).toThrow(TypeError);
 
+            let protocolHashError: unknown;
             try {
                 kernel.deriveProtocolHash({
                     namespace: 'PollSpecHash',
                     value,
                 });
-                throw new Error('Expected kernel canonical JSON rejection.');
             } catch (error) {
-                expect(error).toBeInstanceOf(TranscriptCoreKernelCommandError);
-                expect((error as TranscriptCoreKernelCommandError).code).toBe(
-                    expectedKernelCode,
-                );
+                protocolHashError = error;
             }
+            expect(protocolHashError).toBeInstanceOf(
+                TranscriptCoreKernelCommandError,
+            );
+            expect(
+                (protocolHashError as TranscriptCoreKernelCommandError).code,
+            ).toBe(expectedKernelCode);
         }
     });
 
@@ -321,17 +323,21 @@ describe('transcript-core kernel in Node', () => {
             }),
         ).toThrow(TranscriptCoreKernelCommandError);
 
+        let invalidEnumError: unknown;
         try {
             kernel.analyzeCanonicalObject({
                 canonicalBytesHex: invalidEnumFixture.canonicalBytesHex,
                 chunkSize: 8,
             });
         } catch (error) {
-            expect(error).toBeInstanceOf(TranscriptCoreKernelCommandError);
-            expect((error as TranscriptCoreKernelCommandError).code).toBe(
-                'InvalidEnum',
-            );
+            invalidEnumError = error;
         }
+        expect(invalidEnumError).toBeInstanceOf(
+            TranscriptCoreKernelCommandError,
+        );
+        expect(
+            (invalidEnumError as TranscriptCoreKernelCommandError).code,
+        ).toBe('InvalidEnum');
     });
 
     it('keeps byte round-trip as an allocation smoke path', async () => {

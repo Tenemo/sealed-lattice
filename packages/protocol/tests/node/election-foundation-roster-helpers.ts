@@ -10,19 +10,6 @@ import type {
 } from '@sealed-lattice/types';
 
 import {
-    derivePollSpecHash,
-    validatePollSpec,
-} from '../../src/lifecycle/poll-spec';
-import { deriveFrozenRosterProfile } from '../../src/lifecycle/thresholds';
-import {
-    deriveElectionManifestHash,
-    deriveReceiverKeyRegistrationHash,
-    deriveRegistrationEntryHash,
-    deriveRosterHash,
-    deriveTrusteeSetupEntryHash,
-} from '../../src/roster/index';
-
-import {
     createBoardEvidence,
     createBoardHead,
     createBoardHeadWithObjects,
@@ -35,6 +22,19 @@ import {
     manifestPolicyHashes,
     organizerPublicKeyHash,
 } from './election-foundation-fixture-constants';
+
+import {
+    derivePollSpecHash,
+    validatePollSpec,
+} from '#packages/protocol/src/lifecycle/poll-spec';
+import { deriveFrozenRosterProfile } from '#packages/protocol/src/lifecycle/thresholds';
+import {
+    deriveElectionManifestHash,
+    deriveReceiverKeyRegistrationHash,
+    deriveRegistrationEntryHash,
+    deriveRosterHash,
+    deriveTrusteeSetupEntryHash,
+} from '#packages/protocol/src/roster/index';
 
 export const createRosterPollSpec = (): PollSpec => {
     const validation = validatePollSpec({
@@ -125,8 +125,11 @@ export const createReceiverKeyRegistration = (
         objectVersion: 1,
         ceremonyId,
         participantIdentity,
-        receiverKeyRoot: deriveProtocolHash('EncryptedEnvelopeRoot', {
-            participantIdentity,
+        receiverKeyRoot: deriveProtocolHash('ChallengeDomainHash', {
+            payload: {
+                participantIdentity,
+            },
+            purpose: 'fixture-receiver-key-root-v1',
         }),
         boardSequence,
         boardPosition,

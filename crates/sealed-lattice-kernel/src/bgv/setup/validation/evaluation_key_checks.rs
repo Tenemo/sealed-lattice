@@ -211,7 +211,7 @@ fn validate_required_rotation_groups(
             expected_required_rotation_group(purpose).ok_or_else(|| {
                 CanonicalError::new(
                     CanonicalErrorCode::ProfileComponentMismatch,
-                    format!("required rotation group {purpose} is not part of M8"),
+                    format!("required rotation group {purpose} is not part of the passive BGV setup profile"),
                 )
             })?;
         let mut actual_group_rotations = BTreeSet::new();
@@ -237,7 +237,9 @@ fn validate_required_rotation_groups(
         if actual_group_rotations != expected_group_rotations {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::ProfileComponentMismatch,
-                format!("required rotation group {purpose} does not match the M8 fixture set"),
+                format!(
+                    "required rotation group {purpose} does not match the passive BGV setup fixture set"
+                ),
             ));
         }
     }
@@ -296,7 +298,7 @@ fn validate_development_key_arithmetic_fixture(
     )?;
     compare_string_at_path(
         fixture_record,
-        &["m7ArithmeticStatus"],
+        &["rnsArithmeticStatus"],
         "sampled-decompose-recompose-and-modmul-passed",
         "development key arithmetic status",
     )?;

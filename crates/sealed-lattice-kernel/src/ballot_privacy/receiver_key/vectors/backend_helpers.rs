@@ -1,5 +1,6 @@
 use super::*;
 use serde_json::json;
+#[cfg(test)]
 pub(super) fn derive_bytes(
     domain: &str,
     payload: &Value,

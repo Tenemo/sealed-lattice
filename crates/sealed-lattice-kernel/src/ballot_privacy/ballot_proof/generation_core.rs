@@ -329,10 +329,10 @@ pub(crate) fn generate_ballot_component_proof_inner(
                 "proofInput.proofStatementFormat is required for component proof generation",
             )
         })?;
-    if proof_statement_format == PUBLIC_ZERO_PROOF_STATEMENT_FORMAT {
+    if proof_statement_format == PUBLIC_BINDING_CHECK_PROOF_STATEMENT_FORMAT {
         if component_id != "receiver-key-binding-component" {
             return Err(invalid_preflight(
-                "public-zero component proof generation is only valid for the receiver-key binding component",
+                "public binding check proof generation is only valid for the receiver-key binding component",
             ));
         }
         return Ok(json!({
@@ -342,7 +342,7 @@ pub(crate) fn generate_ballot_component_proof_inner(
             "operation": "generateBallotComponentProof",
             "componentId": component_id,
             "statusLabels": [
-                "BallotComponentPublicZeroProofBytesGenerated"
+                "BallotComponentPublicBindingCheckProofBytesGenerated"
             ],
             "acceptedHashes": [],
             "refusedObjects": [],

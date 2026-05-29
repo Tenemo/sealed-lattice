@@ -1,18 +1,18 @@
 // Shared ballot privacy relation lowering fixtures.
 import { deriveProtocolHash } from '@sealed-lattice/crypto';
 
-import { type BallotProofComponentProjectionWitness } from '../../../src/ballot-privacy/ballot-proof-linear-statement';
+import { type BallotProofComponentProjectionWitness } from '#packages/protocol/src/ballot-privacy/ballot-proof-linear-statement';
 import {
     createBallotPrivacyProfileSet,
     createShareCommitmentMessageBoundCert,
     type BallotPrivacyRelationCompilerInput,
-} from '../../../src/ballot-privacy/index';
+} from '#packages/protocol/src/ballot-privacy/index';
 import {
     createFixtureRandomnessSource,
     createShareCommitmentPolynomialVector,
     deriveShareCommitmentBodyHash,
     generateReceiverState,
-} from '../../../src/ballot-privacy/lattice-primitives';
+} from '#packages/protocol/src/ballot-privacy/lattice-primitives';
 import {
     receiverEncryptionMessageScale,
     receiverEncryptionModuleDegree,
@@ -21,8 +21,8 @@ import {
     receiverShareRepresentativeBitLength,
     shareCommitmentModulus,
     shareCommitmentOpeningDimension,
-} from '../../../src/ballot-privacy/protocol-parameters';
-import { type BallotPrivacyRelationBackendPublicContext } from '../../../src/ballot-privacy/relation-backend-lowering';
+} from '#packages/protocol/src/ballot-privacy/protocol-parameters';
+import { type BallotPrivacyRelationBackendPublicContext } from '#packages/protocol/src/ballot-privacy/relation-backend-lowering';
 
 const hash = (label: string): string =>
     deriveProtocolHash('ChallengeDomainHash', {

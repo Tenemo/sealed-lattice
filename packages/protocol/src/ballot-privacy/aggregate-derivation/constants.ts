@@ -1,6 +1,6 @@
 import type { ProtocolHash, RefusalRecord } from '@sealed-lattice/types';
 
-import { createRefusal } from '../../common/verification-helpers.js';
+import { createRefusal } from '../verification-helpers.js';
 
 export const aggregateDerivationComponentId =
     'aggregate-derivation-component' as const;

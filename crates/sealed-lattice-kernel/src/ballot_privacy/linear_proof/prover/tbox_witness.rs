@@ -86,25 +86,19 @@ pub(crate) fn generate_sparse_linear_proof(
         input.target_vector_coefficients,
         input.target_coefficient_representation,
     )?;
-    let transformed_relation_witness = PolynomialVector::new(
-        proof_ring,
-        short_witness.entries()[..short_witness.len() - 1].to_vec(),
-    )?;
-    let tbox_z4_secret = transformed_statement_matrix
-        .multiply_vector(&transformed_relation_witness)?
-        .add(&transformed_target_vector)?;
+    let tbox_z4_secret = witness_preparation.transformed_relation_output();
     let euclidean_response_vector = compute_receiver_key_tbox_z3_response(
         proof_ring,
         short_witness,
         beta_signs.0,
         &z34_challenge_hash,
     )?;
-    let infinity_response_vector = if is_zero_polynomial_vector(&tbox_z4_secret) {
+    let infinity_response_vector = if is_zero_polynomial_vector(tbox_z4_secret) {
         vec![vec![0_i64; proof_ring.degree()]; input.proof_encoding.infinity_response_vector_length]
     } else {
         compute_receiver_key_tbox_z4_response(
             proof_ring,
-            &tbox_z4_secret,
+            tbox_z4_secret,
             beta_signs.1,
             &z34_challenge_hash,
         )?
@@ -364,29 +358,19 @@ where
         input.proof_encoding,
         input.target_coefficient_representation,
     )?;
-    let transformed_relation_witness = PolynomialVector::new(
-        proof_ring,
-        short_witness.entries()[..short_witness.len() - 1].to_vec(),
-    )?;
-    let tbox_z4_secret = input.statement.transformed_relation_output(
-        input.parameter_set,
-        input.proof_encoding,
-        input.matrix_coefficient_representation,
-        &transformed_relation_witness,
-        &transformed_target_vector,
-    )?;
+    let tbox_z4_secret = witness_preparation.transformed_relation_output();
     let euclidean_response_vector = compute_receiver_key_tbox_z3_response(
         proof_ring,
         short_witness,
         beta_signs.0,
         &z34_challenge_hash,
     )?;
-    let infinity_response_vector = if is_zero_polynomial_vector(&tbox_z4_secret) {
+    let infinity_response_vector = if is_zero_polynomial_vector(tbox_z4_secret) {
         vec![vec![0_i64; proof_ring.degree()]; input.proof_encoding.infinity_response_vector_length]
     } else {
         compute_receiver_key_tbox_z4_response(
             proof_ring,
-            &tbox_z4_secret,
+            tbox_z4_secret,
             beta_signs.1,
             &z34_challenge_hash,
         )?
@@ -650,13 +634,17 @@ pub(super) fn receiver_key_target_commitment_rows(
         let matrix_row_index = row_start + message_row_index;
         let mut row_product = vec![0_u64; proof_ring.degree()];
         for column_index in 0..message_key_matrix.columns() {
-            let product = proof_ring.mul_negacyclic(
+            proof_ring.mul_negacyclic_accumulate(
+                &mut row_product,
                 message_key_matrix.entry(matrix_row_index, column_index)?,
                 &opening_randomness_prefix.entries()[column_index],
             )?;
-            row_product = proof_ring.add(&row_product, &product)?;
         }
-        entries.push(proof_ring.add(&row_product, &message_vector.entries()[message_row_index])?);
+        proof_ring.add_assign(
+            &mut row_product,
+            &message_vector.entries()[message_row_index],
+        )?;
+        entries.push(row_product);
     }
 
     Ok(entries)

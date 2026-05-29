@@ -1,14 +1,14 @@
 // This file is one targeted part of the split test suite.
 import { describe, expect, it } from 'vitest';
 
-import { loadTranscriptCoreKernel } from '../../../src/index';
-
 import type { NamedFixture } from './shared.js';
 import {
     cloneJsonValue,
     findFixture,
     linearProofBackendVectors,
 } from './shared.js';
+
+import { loadTranscriptCoreKernel } from '#packages/wasm/src/index';
 
 describe('transcript-core kernel in Node', () => {
     it('rejects field-incomplete ballot records after WASM linear proof verification', async () => {
@@ -298,6 +298,7 @@ describe('transcript-core kernel in Node', () => {
                         proofPayloadWithoutChallenge.statementMatrixHash,
                     targetVectorHash:
                         proofPayloadWithoutChallenge.targetVectorHash,
+                    purpose: 'ballot-proof-challenge-v1',
                 },
             });
             const proofPayload = {

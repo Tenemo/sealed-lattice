@@ -1,6 +1,7 @@
 export { canonicalErrorCodes } from './kernel-errors.js';
 export {
     componentProverRandomnessHexes,
+    suppliedOrFreshBridgeRandomness,
     suppliedOrFreshRandomnessHex,
 } from './kernel-randomness.js';
 export {

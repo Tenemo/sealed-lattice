@@ -543,7 +543,7 @@ pub(crate) fn scale_signed_polynomial_by_source_modulus_inverse(
         .collect()
 }
 
-pub(super) fn source_modulus_inverse_mod_proof_modulus(
+pub(crate) fn source_modulus_inverse_mod_proof_modulus(
     source_modulus: u64,
     proof_modulus: u64,
 ) -> CanonicalResult<i128> {
@@ -650,10 +650,14 @@ pub(super) fn encode_transformed_statement(
                     "linear statement transformed coefficient is not canonical",
                 ));
             }
-            writer.write_unsigned_little_endian_bits(
-                *coefficient,
-                proof_encoding.full_size_coefficient_bit_length,
-            )?;
+            if *coefficient == 0 {
+                writer.write_zero_bits(proof_encoding.full_size_coefficient_bit_length)?;
+            } else {
+                writer.write_unsigned_little_endian_bits(
+                    *coefficient,
+                    proof_encoding.full_size_coefficient_bit_length,
+                )?;
+            }
         }
     }
 
@@ -688,6 +692,24 @@ impl StatementBitWriter {
             self.output[byte_index] |= 1_u8 << bit_index;
         }
         self.bit_offset += 1;
+
+        Ok(())
+    }
+
+    fn write_zero_bits(&mut self, bit_count: usize) -> CanonicalResult<()> {
+        if bit_count == 0 || bit_count > 63 {
+            return Err(invalid_statement(
+                "linear statement coder bit length must be between one and sixty-three",
+            ));
+        }
+        self.bit_offset = self
+            .bit_offset
+            .checked_add(bit_count)
+            .ok_or_else(|| invalid_statement("linear statement bit offset overflowed"))?;
+        let required_bytes = self.bit_offset.div_ceil(8);
+        if self.output.len() < required_bytes {
+            self.output.resize(required_bytes, 0);
+        }
 
         Ok(())
     }

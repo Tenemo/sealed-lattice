@@ -7,7 +7,7 @@ import type {
     BallotProofComponentBundleStatement,
     BallotProofComponentProofBundlePayload,
     BallotProofComponentProofRecordPayload,
-    BallotProofComponentProofStatementPlan,
+    BallotProofComponentProofStatementDescriptor,
     BallotProofComponentStatement,
     BallotProofLinearProofStatement,
     BallotProofSparseComponentLinearProofStatement,
@@ -153,13 +153,13 @@ const deriveComponentTargetVectorHash = (input: {
 
 const deriveComponentProofStatementHash = (
     statementPayload: Omit<
-        BallotProofComponentProofStatementPlan,
+        BallotProofComponentProofStatementDescriptor,
         'componentProofStatementHash'
     >,
 ): ProtocolHash =>
     deriveProtocolHash('ChallengeDomainHash', {
         payload: statementPayload,
-        purpose: 'ballot-proof-component-proof-statement-plan-v1',
+        purpose: 'ballot-proof-component-proof-statement-descriptor-v1',
     });
 
 export {

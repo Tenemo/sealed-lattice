@@ -4,11 +4,8 @@ import type {
     RefusalRecord,
 } from '@sealed-lattice/types';
 
-import {
-    createRefusal,
-    uniqueStrings,
-} from '../../../common/verification-helpers.js';
 import { deriveValidatedFirstValidOrder } from '../../../ordering/index.js';
+import { createRefusal, uniqueStrings } from '../../verification-helpers.js';
 import { deriveSelectedAggregateContributionOrderHash } from '../hashes.js';
 
 import { verifyAggregateContributionStructure } from './aggregate-contribution.js';

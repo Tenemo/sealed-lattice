@@ -167,7 +167,7 @@ export const deriveMlDsaPublicKeyHash = (
 export const createMlDsaKeyPairFixture = (
     seedLabel: string,
 ): MlDsaKeyPairFixture => {
-    const seed = deriveProtocolHash('MlDsaFixtureSeedHash', {
+    const seed = deriveProtocolHash('ChallengeDomainHash', {
         purpose: 'ml-dsa-fixture-seed',
         seedLabel,
     }).slice(0, 64);

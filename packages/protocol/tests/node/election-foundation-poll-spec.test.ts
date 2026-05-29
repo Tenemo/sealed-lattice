@@ -1,7 +1,7 @@
 import type { PollSpecInput } from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
-import { validatePollSpec } from '../../src/lifecycle/poll-spec';
+import { validatePollSpec } from '#packages/protocol/src/lifecycle/poll-spec';
 
 const createValidPollSpecInput = (
     overrides: Partial<PollSpecInput> = {},

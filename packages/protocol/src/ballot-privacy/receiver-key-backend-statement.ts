@@ -216,51 +216,52 @@ const receiverErrorVariableName = (
 
 const buildVariableColumns =
     (): readonly ReceiverKeyProofBackendStatementVariableColumn[] => {
-        const secretColumns = Array.from(
-            { length: receiverKeyEquationRowCount },
-            (_unusedValue, linearIndex) => {
-                const polynomialIndex = Math.floor(
-                    linearIndex / receiverEncryptionModuleDegree,
-                );
-                const coefficientIndex =
-                    linearIndex % receiverEncryptionModuleDegree;
+        const secretColumns: ReceiverKeyProofBackendStatementVariableColumn[] =
+            Array.from(
+                { length: receiverKeyEquationRowCount },
+                (_unusedValue, linearIndex) => {
+                    const polynomialIndex = Math.floor(
+                        linearIndex / receiverEncryptionModuleDegree,
+                    );
+                    const coefficientIndex =
+                        linearIndex % receiverEncryptionModuleDegree;
 
-                return {
-                    coefficientIndex,
-                    columnIndex: linearIndex,
-                    polynomialIndex,
-                    variableName: receiverSecretVariableName(
-                        polynomialIndex,
+                    return {
                         coefficientIndex,
-                    ),
-                    variableRole:
-                        'ReceiverSecretCoefficient' as ReceiverKeyProofBackendStatementVariableRole,
-                };
-            },
-        );
-        const errorColumns = Array.from(
-            { length: receiverKeyEquationRowCount },
-            (_unusedValue, linearIndex) => {
-                const polynomialIndex = Math.floor(
-                    linearIndex / receiverEncryptionModuleDegree,
-                );
-                const coefficientIndex =
-                    linearIndex % receiverEncryptionModuleDegree;
-                const columnIndex = receiverKeyEquationRowCount + linearIndex;
+                        columnIndex: linearIndex,
+                        polynomialIndex,
+                        variableName: receiverSecretVariableName(
+                            polynomialIndex,
+                            coefficientIndex,
+                        ),
+                        variableRole: 'ReceiverSecretCoefficient',
+                    };
+                },
+            );
+        const errorColumns: ReceiverKeyProofBackendStatementVariableColumn[] =
+            Array.from(
+                { length: receiverKeyEquationRowCount },
+                (_unusedValue, linearIndex) => {
+                    const polynomialIndex = Math.floor(
+                        linearIndex / receiverEncryptionModuleDegree,
+                    );
+                    const coefficientIndex =
+                        linearIndex % receiverEncryptionModuleDegree;
+                    const columnIndex =
+                        receiverKeyEquationRowCount + linearIndex;
 
-                return {
-                    coefficientIndex,
-                    columnIndex,
-                    polynomialIndex,
-                    variableName: receiverErrorVariableName(
-                        polynomialIndex,
+                    return {
                         coefficientIndex,
-                    ),
-                    variableRole:
-                        'ReceiverErrorCoefficient' as ReceiverKeyProofBackendStatementVariableRole,
-                };
-            },
-        );
+                        columnIndex,
+                        polynomialIndex,
+                        variableName: receiverErrorVariableName(
+                            polynomialIndex,
+                            coefficientIndex,
+                        ),
+                        variableRole: 'ReceiverErrorCoefficient',
+                    };
+                },
+            );
 
         return [...secretColumns, ...errorColumns];
     };

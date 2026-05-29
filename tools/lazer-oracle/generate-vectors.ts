@@ -4,8 +4,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 // The source file is .mts, but tsc emits and resolves the runtime import as .mjs.
-// eslint-disable-next-line import-x/extensions
-import { generateBallotFieldLinearProofOracleInput } from '../ballot-privacy-vectors/generate-ballot-field-linear-proof-input.mjs';
+
+import { generateBallotFieldLinearProofOracleInput } from '#tools/ballot-privacy-vectors/generate-ballot-field-linear-proof-input.mjs';
 
 type Command = {
     readonly args: readonly string[];

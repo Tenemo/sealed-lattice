@@ -53,17 +53,18 @@ pnpm run smoke:pack:npm
 - `pnpm run test:proof-benchmark:node`: Node proof benchmark lane, suitable for a separate CI worker
 - `pnpm run test:proof-benchmark:browser:desktop`: desktop Chromium proof benchmark lane, suitable for a separate CI worker
 - `pnpm run test:proof-benchmark:browser:mobile:throttled`: manual-only calibrated mobile CPU-throttled benchmark lane
+- `pnpm run coverage:badge`: runs the fast Node coverage lane and writes the Shields-compatible badge and summary JSON that GitHub Pages publishes for the README badge
 - `pnpm run test:encrypted-aggregate-bridge`: builds once, runs the cheap all-row bridge shape/config guardrail, then runs the full encrypted aggregate bridge matrix with a default 16-worker floor
 - `pnpm run test:encrypted-aggregate-bridge:representative`: builds once, then runs the ten selected representative bridge rows with a default ten-worker floor
 - `pnpm run verify:docs`: generated API pages, docs link structure, and the production docs site build stay consistent
-- `pnpm run docs:build:site`: builds the docs site without the surrounding verification checks when that narrower target is needed
+- `pnpm run docs:build`: builds the docs site without the surrounding verification checks when that narrower target is needed
 - `pnpm run smoke:pack:npm`: the published package tarball installs cleanly through npm and exposes safe-by-default helpers for transcript-core fixture verification, election foundation checks, and verification-oriented ballot privacy APIs
 
 ## Local hooks
 
 The pre-commit hook runs `pnpm run check` and `pnpm exec vitest --project node --project browser-desktop --project browser-mobile --run`.
 This leaves a full package build in place through the check command, runs static verification once, runs Rust verification once, then exercises fast Node and browser Vitest projects against the built output.
-Split Node and proof benchmark lanes remain explicit commands so they can use checkpoints and targeted reruns instead of slowing every local commit. The Node kernel command runs its merged heavy WASM project sequentially, while the proof benchmark command and encrypted aggregate bridge matrix default to parallel local execution. The coverage lane covers the fast Node project only; heavy protocol, kernel, and proof-benchmark coverage comes from their explicit test lanes rather than V8 coverage instrumentation.
+Split Node and proof benchmark lanes remain explicit commands so they can use checkpoints and targeted reruns instead of slowing every local commit. The Node kernel command runs its merged heavy WASM project sequentially, while the proof benchmark command and encrypted aggregate bridge matrix default to parallel local execution. The coverage lane covers the fast Node project only; heavy protocol, kernel, and proof-benchmark coverage comes from their explicit test lanes rather than V8 coverage instrumentation. The coverage badge is generated locally in the Pages workflow, not by Codecov.
 
 ## Heavy proof checkpoints
 

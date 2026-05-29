@@ -17,12 +17,12 @@ import type {
     ShareCommitment,
 } from '@sealed-lattice/types';
 
-import { createRefusal } from '../../common/verification-helpers.js';
 import {
     shareCommitmentModuleDegree,
     shareCommitmentModuleRank,
     shareCommitmentModulus,
 } from '../protocol-parameters.js';
+import { createRefusal } from '../verification-helpers.js';
 
 type ReceiverEncryptionPublicKeyPayload = Omit<
     ReceiverEncryptionPublicKey,
@@ -129,7 +129,7 @@ export type BallotProofComponentProofVerificationInput = {
         | 'sparse-polynomial-matrix-linear-proof-v1'
         | 'structured-module-sis-share-commitment-v1'
         | 'structured-module-lwe-linear-proof-v1'
-        | 'public-zero-witness-binding-check-v1';
+        | 'public-binding-check-only-v1';
     readonly publicRandomnessHex: string;
     readonly statementHash: ProtocolHash;
 };
@@ -168,14 +168,14 @@ const allowedBallotProofComponentStatementFormats = new Set<
     'sparse-polynomial-matrix-linear-proof-v1',
     'structured-module-sis-share-commitment-v1',
     'structured-module-lwe-linear-proof-v1',
-    'public-zero-witness-binding-check-v1',
+    'public-binding-check-only-v1',
 ]);
 
-type BallotProofComponentProofBytesAvailability =
-    | 'available-for-small-dense-oracle'
-    | 'requires-sparse-proof-statement'
-    | 'requires-structured-proof-statement'
-    | 'public-zero-witness-binding-check';
+type BallotProofComponentProofBackendRequirement =
+    | 'dense-proof-bytes-available-lab-only'
+    | 'sparse-proof-statement-required'
+    | 'structured-proof-statement-required'
+    | 'public-binding-check-only';
 
 const componentProofBytesMustBeEmpty = (
     componentId: BallotProofComponentId,
@@ -210,9 +210,7 @@ const componentProofStatementFormatIsExpected = (
                 proofStatementFormat === 'structured-module-lwe-linear-proof-v1'
             );
         case 'receiver-key-binding-component':
-            return (
-                proofStatementFormat === 'public-zero-witness-binding-check-v1'
-            );
+            return proofStatementFormat === 'public-binding-check-only-v1';
     }
 };
 
@@ -229,37 +227,37 @@ const expectedComponentProofStatementFormatLabel = (
         case 'receiver-encryption-component':
             return 'structured-module-lwe-linear-proof-v1';
         case 'receiver-key-binding-component':
-            return 'public-zero-witness-binding-check-v1';
+            return 'public-binding-check-only-v1';
     }
 };
 
-const componentProofBytesAvailabilityForStatementFormat = (
+const componentProofBackendRequirementForStatementFormat = (
     proofStatementFormat: BallotProofComponentProofVerificationInput['proofStatementFormat'],
-): BallotProofComponentProofBytesAvailability => {
+): BallotProofComponentProofBackendRequirement => {
     switch (proofStatementFormat) {
         case 'dense-polynomial-matrix-linear-proof-v1':
-            return 'available-for-small-dense-oracle';
+            return 'dense-proof-bytes-available-lab-only';
         case 'sparse-polynomial-matrix-linear-proof-v1':
         case 'structured-module-sis-share-commitment-v1':
-            return 'requires-sparse-proof-statement';
+            return 'sparse-proof-statement-required';
         case 'structured-module-lwe-linear-proof-v1':
-            return 'requires-structured-proof-statement';
-        case 'public-zero-witness-binding-check-v1':
-            return 'public-zero-witness-binding-check';
+            return 'structured-proof-statement-required';
+        case 'public-binding-check-only-v1':
+            return 'public-binding-check-only';
     }
 };
 
-const componentProofBytesAvailabilityIsExpected = (
+const componentProofBackendRequirementIsExpected = (
     componentId: BallotProofComponentId,
     proofStatementFormat: BallotProofComponentProofVerificationInput['proofStatementFormat'],
-    proofBytesAvailability: string,
+    proofBackendRequirement: string,
 ): boolean =>
     componentProofStatementFormatIsExpected(
         componentId,
         proofStatementFormat,
     ) &&
-    componentProofBytesAvailabilityForStatementFormat(proofStatementFormat) ===
-        proofBytesAvailability;
+    componentProofBackendRequirementForStatementFormat(proofStatementFormat) ===
+        proofBackendRequirement;
 
 export const describeBallotPrivacyProofBackend =
     (): BallotPrivacyProofBackendStatus => ({
@@ -472,6 +470,7 @@ const deriveBallotProofChallengeHash = (input: {
         challengeDomainHash: input.statement.challengeDomainHash,
         proofBytesHash: input.proofBytesHash,
         proofRoot: input.proofRoot,
+        purpose: 'ballot-proof-challenge-v1',
         relationStatementHash: input.relationStatementHash,
     };
 
@@ -661,7 +660,7 @@ export {
     componentProofBytesMustBeEmpty,
     componentProofStatementFormatIsExpected,
     expectedComponentProofStatementFormatLabel,
-    componentProofBytesAvailabilityIsExpected,
+    componentProofBackendRequirementIsExpected,
     deriveReceiverKeyProofRoot,
     deriveReceiverKeyProofRootEvidenceHash,
     deriveReceiverPayloadCiphertextRoot,

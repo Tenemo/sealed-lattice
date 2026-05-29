@@ -16,6 +16,8 @@ target/
 *.tsbuildinfo
 docs/.astro/
 docs/dist/
+docs/public/coverage-badge.json
+docs/public/coverage-summary.json
 docs/src/content/docs/api/reference/
 .vitest-attachments/
 **/__screenshots__/

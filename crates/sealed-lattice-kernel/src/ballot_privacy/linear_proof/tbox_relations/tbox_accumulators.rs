@@ -242,7 +242,6 @@ pub(super) fn apply_tbox_beta3_relations(
     tbox_profile: TboxRelationProfile,
 ) -> CanonicalResult<()> {
     let proof_ring = tbox_profile.proof_ring;
-    let inverse_two = proof_ring.modulus().div_ceil(2);
     let challenge_values = sample_linear_proof_uniform_u64_values(
         (DEFAULT_LINEAR_PROOF_RING_DEGREE - 1) * TBOX_QUADRATIC_EVALUATION_REPETITIONS,
         proof_ring.modulus(),
@@ -251,51 +250,74 @@ pub(super) fn apply_tbox_beta3_relations(
         u64::from(TBOX_BETA3_DOMAIN_OFFSET),
     )?;
 
-    for coefficient_index in 1..DEFAULT_LINEAR_PROOF_RING_DEGREE {
-        for accumulator_pair_index in 0..accumulator_set.primary_schwartz_zippel_accumulators.len()
-        {
-            let primary_challenge_index = (coefficient_index - 1)
-                * TBOX_QUADRATIC_EVALUATION_REPETITIONS
-                + 2 * accumulator_pair_index;
-            let primary_coefficient = multiply_mod(
-                inverse_two,
-                challenge_values[primary_challenge_index],
-                proof_ring.modulus(),
-            );
-            let primary_relation =
-                build_beta3_linear_relation(coefficient_index, primary_coefficient, tbox_profile)?;
-            accumulator_set.primary_schwartz_zippel_accumulators[accumulator_pair_index] =
-                accumulator_set.primary_schwartz_zippel_accumulators[accumulator_pair_index]
-                    .accumulate_weighted_partial_equations(&[
-                        WeightedLinearProofQuadraticEquation {
-                            challenge_scalar: 1,
-                            equation: &primary_relation,
-                        },
-                    ])?;
+    for accumulator_pair_index in 0..accumulator_set.primary_schwartz_zippel_accumulators.len() {
+        let primary_relation = build_accumulated_beta3_relation(
+            &challenge_values,
+            accumulator_pair_index,
+            0,
+            tbox_profile,
+        )?;
+        accumulator_set.primary_schwartz_zippel_accumulators[accumulator_pair_index] =
+            accumulator_set.primary_schwartz_zippel_accumulators[accumulator_pair_index]
+                .accumulate_weighted_partial_equations(&[WeightedLinearProofQuadraticEquation {
+                    challenge_scalar: 1,
+                    equation: &primary_relation,
+                }])?;
 
-            let secondary_challenge_index = primary_challenge_index + 1;
-            let secondary_coefficient = multiply_mod(
-                inverse_two,
-                challenge_values[secondary_challenge_index],
-                proof_ring.modulus(),
-            );
-            let secondary_relation = build_beta3_linear_relation(
-                coefficient_index,
-                secondary_coefficient,
-                tbox_profile,
-            )?;
-            accumulator_set.secondary_schwartz_zippel_accumulators[accumulator_pair_index] =
-                accumulator_set.secondary_schwartz_zippel_accumulators[accumulator_pair_index]
-                    .accumulate_weighted_partial_equations(&[
-                        WeightedLinearProofQuadraticEquation {
-                            challenge_scalar: 1,
-                            equation: &secondary_relation,
-                        },
-                    ])?;
-        }
+        let secondary_relation = build_accumulated_beta3_relation(
+            &challenge_values,
+            accumulator_pair_index,
+            1,
+            tbox_profile,
+        )?;
+        accumulator_set.secondary_schwartz_zippel_accumulators[accumulator_pair_index] =
+            accumulator_set.secondary_schwartz_zippel_accumulators[accumulator_pair_index]
+                .accumulate_weighted_partial_equations(&[WeightedLinearProofQuadraticEquation {
+                    challenge_scalar: 1,
+                    equation: &secondary_relation,
+                }])?;
     }
 
     Ok(())
+}
+
+fn build_accumulated_beta3_relation(
+    challenge_values: &[u64],
+    accumulator_pair_index: usize,
+    challenge_lane_offset: usize,
+    tbox_profile: TboxRelationProfile,
+) -> CanonicalResult<LinearProofQuadraticEquation> {
+    let proof_ring = tbox_profile.proof_ring;
+    let inverse_two = proof_ring.modulus().div_ceil(2);
+    let beta_offset = tbox_profile.beta_offset();
+    let equation_dimension = tbox_profile.quadratic_evaluation_dimension();
+    let mut beta_polynomial = vec![0_u64; proof_ring.degree()];
+
+    for (coefficient_index, coefficient) in beta_polynomial.iter_mut().enumerate().skip(1) {
+        let challenge_index = (coefficient_index - 1) * TBOX_QUADRATIC_EVALUATION_REPETITIONS
+            + 2 * accumulator_pair_index
+            + challenge_lane_offset;
+        *coefficient = multiply_mod(
+            inverse_two,
+            challenge_values[challenge_index],
+            proof_ring.modulus(),
+        );
+    }
+
+    let entries = if is_zero_polynomial(&beta_polynomial) {
+        Vec::new()
+    } else {
+        vec![
+            SparsePolynomialVectorEntry::new(beta_offset, beta_polynomial.clone()),
+            SparsePolynomialVectorEntry::new(beta_offset + 1, beta_polynomial),
+        ]
+    };
+
+    LinearProofQuadraticEquation::new(
+        SparsePolynomialMatrix::zero(proof_ring, equation_dimension, equation_dimension)?,
+        SparsePolynomialVector::new(proof_ring, equation_dimension, entries)?,
+        None,
+    )
 }
 
 #[cfg(test)]
@@ -312,7 +334,6 @@ pub(super) fn apply_tbox_beta4_relations(
     tbox_profile: TboxRelationProfile,
 ) -> CanonicalResult<()> {
     let proof_ring = tbox_profile.proof_ring;
-    let inverse_two = proof_ring.modulus().div_ceil(2);
     let challenge_values = sample_linear_proof_uniform_u64_values(
         (DEFAULT_LINEAR_PROOF_RING_DEGREE - 1) * TBOX_QUADRATIC_EVALUATION_REPETITIONS,
         proof_ring.modulus(),
@@ -321,51 +342,96 @@ pub(super) fn apply_tbox_beta4_relations(
         u64::from(TBOX_BETA4_DOMAIN_OFFSET),
     )?;
 
-    for coefficient_index in 1..DEFAULT_LINEAR_PROOF_RING_DEGREE {
-        for accumulator_pair_index in 0..accumulator_set.primary_schwartz_zippel_accumulators.len()
-        {
-            let primary_challenge_index = (coefficient_index - 1)
-                * TBOX_QUADRATIC_EVALUATION_REPETITIONS
-                + 2 * accumulator_pair_index;
-            let primary_coefficient = multiply_mod(
-                inverse_two,
-                challenge_values[primary_challenge_index],
-                proof_ring.modulus(),
-            );
-            let primary_relation =
-                build_beta4_linear_relation(coefficient_index, primary_coefficient, tbox_profile)?;
-            accumulator_set.primary_schwartz_zippel_accumulators[accumulator_pair_index] =
-                accumulator_set.primary_schwartz_zippel_accumulators[accumulator_pair_index]
-                    .accumulate_weighted_partial_equations(&[
-                        WeightedLinearProofQuadraticEquation {
-                            challenge_scalar: 1,
-                            equation: &primary_relation,
-                        },
-                    ])?;
+    for accumulator_pair_index in 0..accumulator_set.primary_schwartz_zippel_accumulators.len() {
+        let primary_relation = build_accumulated_beta4_relation(
+            &challenge_values,
+            accumulator_pair_index,
+            0,
+            tbox_profile,
+        )?;
+        accumulator_set.primary_schwartz_zippel_accumulators[accumulator_pair_index] =
+            accumulator_set.primary_schwartz_zippel_accumulators[accumulator_pair_index]
+                .accumulate_weighted_partial_equations(&[WeightedLinearProofQuadraticEquation {
+                    challenge_scalar: 1,
+                    equation: &primary_relation,
+                }])?;
 
-            let secondary_challenge_index = primary_challenge_index + 1;
-            let secondary_coefficient = multiply_mod(
-                inverse_two,
-                challenge_values[secondary_challenge_index],
-                proof_ring.modulus(),
-            );
-            let secondary_relation = build_beta4_linear_relation(
-                coefficient_index,
-                secondary_coefficient,
-                tbox_profile,
-            )?;
-            accumulator_set.secondary_schwartz_zippel_accumulators[accumulator_pair_index] =
-                accumulator_set.secondary_schwartz_zippel_accumulators[accumulator_pair_index]
-                    .accumulate_weighted_partial_equations(&[
-                        WeightedLinearProofQuadraticEquation {
-                            challenge_scalar: 1,
-                            equation: &secondary_relation,
-                        },
-                    ])?;
-        }
+        let secondary_relation = build_accumulated_beta4_relation(
+            &challenge_values,
+            accumulator_pair_index,
+            1,
+            tbox_profile,
+        )?;
+        accumulator_set.secondary_schwartz_zippel_accumulators[accumulator_pair_index] =
+            accumulator_set.secondary_schwartz_zippel_accumulators[accumulator_pair_index]
+                .accumulate_weighted_partial_equations(&[WeightedLinearProofQuadraticEquation {
+                    challenge_scalar: 1,
+                    equation: &secondary_relation,
+                }])?;
     }
 
     Ok(())
+}
+
+fn build_accumulated_beta4_relation(
+    challenge_values: &[u64],
+    accumulator_pair_index: usize,
+    challenge_lane_offset: usize,
+    tbox_profile: TboxRelationProfile,
+) -> CanonicalResult<LinearProofQuadraticEquation> {
+    let proof_ring = tbox_profile.proof_ring;
+    let inverse_two = proof_ring.modulus().div_ceil(2);
+    let beta_offset = tbox_profile.beta_offset();
+    let equation_dimension = tbox_profile.quadratic_evaluation_dimension();
+    let half_degree = proof_ring.degree() / 2;
+    let mut first_polynomial = vec![0_u64; proof_ring.degree()];
+    let mut second_polynomial = vec![0_u64; proof_ring.degree()];
+
+    for coefficient_index in 1..proof_ring.degree() {
+        let challenge_index = (coefficient_index - 1) * TBOX_QUADRATIC_EVALUATION_REPETITIONS
+            + 2 * accumulator_pair_index
+            + challenge_lane_offset;
+        let coefficient_value = multiply_mod(
+            inverse_two,
+            challenge_values[challenge_index],
+            proof_ring.modulus(),
+        );
+        let shifted_coefficient_index = if coefficient_index < half_degree {
+            coefficient_index + half_degree
+        } else {
+            coefficient_index - half_degree
+        };
+        first_polynomial[shifted_coefficient_index] = if coefficient_index < half_degree {
+            negate_mod(coefficient_value, proof_ring.modulus())
+        } else {
+            coefficient_value
+        };
+        second_polynomial[shifted_coefficient_index] = if coefficient_index < half_degree {
+            coefficient_value
+        } else {
+            negate_mod(coefficient_value, proof_ring.modulus())
+        };
+    }
+
+    let mut entries = Vec::with_capacity(2);
+    if !is_zero_polynomial(&first_polynomial) {
+        entries.push(SparsePolynomialVectorEntry::new(
+            beta_offset,
+            first_polynomial,
+        ));
+    }
+    if !is_zero_polynomial(&second_polynomial) {
+        entries.push(SparsePolynomialVectorEntry::new(
+            beta_offset + 1,
+            second_polynomial,
+        ));
+    }
+
+    LinearProofQuadraticEquation::new(
+        SparsePolynomialMatrix::zero(proof_ring, equation_dimension, equation_dimension)?,
+        SparsePolynomialVector::new(proof_ring, equation_dimension, entries)?,
+        None,
+    )
 }
 
 #[cfg(test)]

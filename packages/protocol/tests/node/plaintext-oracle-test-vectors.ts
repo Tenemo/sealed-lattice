@@ -8,13 +8,12 @@ import type {
 } from '@sealed-lattice/types';
 import { expect } from 'vitest';
 
-import { validatePollSpec } from '../../src/lifecycle/poll-spec';
+import { validatePollSpec } from '#packages/protocol/src/lifecycle/poll-spec';
 import {
     createShamirPolynomial,
     deriveSparseTopKTargetHash,
     normalizeFieldElement,
-} from '../../src/plaintext-oracle/index';
-
+} from '#packages/protocol/src/plaintext-oracle/index';
 import comparatorPolynomialVectorsJson from '#test-vectors/plaintext-oracle/comparator-polynomials.json';
 import fieldVectorsJson from '#test-vectors/plaintext-oracle/field.json';
 import shamirVectorsJson from '#test-vectors/plaintext-oracle/shamir.json';

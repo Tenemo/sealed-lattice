@@ -24,7 +24,9 @@ import type { ProtocolHash } from '#packages/types/src/index';
 const bridgeProofProfileId = 'EncryptedAggregateBridge-v1';
 const proofBackend = 'SealedLatticeBridgeRelation';
 const bgvEncryptionProofSubrelation =
-    'SealedLatticeDevelopmentCiphertextEquationRelation';
+    'SealedLatticePassiveCollectiveCiphertextEquationRelation';
+const bgvEncryptionKeyMaterialKind =
+    'passive-transcript-derived-collective-public-key';
 const maximumRosterSize = 20;
 const minimumRosterSize = 3;
 
@@ -56,6 +58,12 @@ const syntheticHash = (
     deriveProtocolHash(hashType, {
         label,
         purpose: 'encrypted-aggregate-bridge-shape-config-matrix',
+    });
+
+const syntheticSupportHash = (purpose: string, label: string): ProtocolHash =>
+    deriveProtocolHash('ChallengeDomainHash', {
+        label,
+        purpose,
     });
 
 const thresholdHashForVariant = (variant: Variant): ProtocolHash => {
@@ -157,9 +165,13 @@ const syntheticBridgeProofStatementHash = (input: {
         optionCount: input.variant.optionCount,
     });
     const bridgeProofProfileHash = deriveBridgeProofProfileHash({
+        bgvEncryptionKeyMaterialKind,
         bgvEncryptionProofSubrelation,
         bridgeProofProfileId,
+        claimBearingBridgeEncryption: false,
+        developmentKeyOnly: false,
         proofBackend,
+        thresholdDecryptable: false,
     });
 
     return deriveBridgeProofStatementHash({
@@ -173,7 +185,7 @@ const syntheticBridgeProofStatementHash = (input: {
         aggregateQuotientCoordinateCount: input.statement.shareVectorWidth,
         aggregateReducedCoordinateCount: input.statement.shareVectorWidth,
         aggregateSelectionPolicyHash: syntheticHash(
-            'AggregateSelectionPolicyHash',
+            'ChallengeDomainHash',
             `selection-policy-${input.variant.rosterSize}-${input.variant.optionCount}`,
         ),
         aggregateShareCommitmentHash: syntheticHash(
@@ -181,7 +193,7 @@ const syntheticBridgeProofStatementHash = (input: {
             `aggregate-share-commitment-${input.variant.rosterSize}-${input.variant.optionCount}`,
         ),
         aggregateToPlaintextBindingStatus:
-            'AggregateToPlaintextBindingProofChecked',
+            'AggregateToPlaintextModularBindingChecked',
         ballotScoreEncodingProfileHash:
             profileSet.ballotScoreEncodingProfile
                 .ballotScoreEncodingProfileHash,
@@ -193,6 +205,7 @@ const syntheticBridgeProofStatementHash = (input: {
             'BGVBatchEncoderHash',
             'shape-config-batch-encoder',
         ),
+        bgvEncryptionKeyMaterialKind,
         bgvEncryptionProofStatus: 'BgvCiphertextEquationChecked',
         bgvProfileHash: syntheticHash(
             'BGVProfileHash',
@@ -207,8 +220,8 @@ const syntheticBridgeProofStatementHash = (input: {
         bridgeClaimClosureStatus: 'BridgeProofClaimClosureMissing',
         bridgeLayoutHash: input.aggregateInputLayoutHash,
         bridgeProofTargetContractHash: input.bridgeProofTargetContractHash,
-        bridgeWitnessPrivacyProfileHash: syntheticHash(
-            'BridgeWitnessPrivacyProfileHash',
+        bridgeWitnessPrivacyProfileHash: syntheticSupportHash(
+            'encrypted-aggregate-bridge-shape-config-witness-privacy-v1',
             `witness-privacy-${input.variant.rosterSize}-${input.variant.optionCount}`,
         ),
         canonicalByteLength: 8_388_608,
@@ -222,11 +235,16 @@ const syntheticBridgeProofStatementHash = (input: {
             'CiphertextRoot',
             `ciphertext-${input.variant.rosterSize}-${input.variant.optionCount}`,
         ),
+        claimBearingBridgeEncryption: false,
         coefficientCount: 32_768,
         coefficientDomainCanonical: true,
         collectivePublicKeyRoot: syntheticHash(
             'CollectivePublicKeyRoot',
             `collective-public-key-${input.variant.rosterSize}`,
+        ),
+        collectivePublicKeyCoefficientRoot: syntheticHash(
+            'CollectivePublicKeyRoot',
+            `collective-public-key-coefficients-${input.variant.rosterSize}`,
         ),
         contributorActionContextHash:
             input.statement.contributorActionContextHash,
@@ -234,6 +252,7 @@ const syntheticBridgeProofStatementHash = (input: {
         contributorRosterExternalAcceptanceHash:
             input.statement.contributorRosterExternalAcceptanceHash,
         contributorRosterPosition: input.statement.contributorRosterPosition,
+        developmentKeyOnly: false,
         encodedAggregateLayoutHash:
             profileSet.encodedAggregateLayoutProfile.encodedAggregateLayoutHash,
         encodedShareVectorLayoutHash:
@@ -244,7 +263,7 @@ const syntheticBridgeProofStatementHash = (input: {
         ),
         encryptedAggregateInputLayoutHash: input.aggregateInputLayoutHash,
         encryptedAggregateInputRoot: syntheticHash(
-            'EncryptedAggregateInputRoot',
+            'ChallengeDomainHash',
             `aggregate-input-${input.variant.rosterSize}-${input.variant.optionCount}`,
         ),
         encryptedAggregateReconstructionHash: syntheticHash(
@@ -259,8 +278,8 @@ const syntheticBridgeProofStatementHash = (input: {
             'EncryptedAggregateTargetBasisRoot',
             `target-basis-${input.variant.rosterSize}-${input.variant.optionCount}`,
         ),
-        heParamHash: syntheticHash(
-            'HEParamHash',
+        heParamHash: syntheticSupportHash(
+            'encrypted-aggregate-bridge-shape-config-he-param-v1',
             `he-params-${input.variant.rosterSize}-${input.variant.optionCount}`,
         ),
         hwangPiopStatus: 'DeferredUntilSealedLatticeBgvRnsProfileFreeze',
@@ -301,11 +320,18 @@ const syntheticBridgeProofStatementHash = (input: {
         sharedWitnessBindingStatus: 'SharedWitnessBindingRelationChecked',
         sharedWitnessChallengeBitsPerCheck: 64,
         sharedWitnessCheckCount: 2,
-        sharedWitnessSoundnessBits: 128,
+        sharedWitnessChallengeEntropyBits: 128,
+        sharedWitnessRejectionAttemptLimit: 64,
+        sharedWitnessGrindingDiscountBitsPerCheck: 6,
+        sharedWitnessUnadjustedWeakestRelationSoundnessBitsFloor: 32,
+        sharedWitnessEffectiveBindingSoundnessBitsFloor: 20,
+        sharedWitnessWeakestRelation: 'BGVBatchEncode65537InverseNegacyclicNtt',
+        sharedWitnessWeakestRelationModulus: 65_537,
         sharedWitnessZeroKnowledgeStatus:
             'SharedWitnessZeroKnowledgeResponseDistributionChecked',
         slotCount: 32_768,
         thresholdProfileHash: input.statement.thresholdProfileHash,
+        thresholdDecryptable: false,
         topKEvaluatorInputLayoutHash: syntheticHash(
             'TopKEvaluatorInputLayoutHash',
             `top-k-layout-${input.variant.optionCount}`,
@@ -380,14 +406,13 @@ export const buildShapeConfigRow = (variant: Variant): ShapeConfigRow => {
             variant,
         });
         const aggregateInputLayoutHash = deriveProtocolHash(
-            'BridgeLayoutHash',
+            'ChallengeDomainHash',
             {
                 coordinateOrder:
                     'score, score_bucket_1, ..., score_bucket_10 for each option',
                 layout: 'AggregatedScalarAndScoreBucketCoordinates',
                 optionCount: variant.optionCount,
-                purpose:
-                    'sealed-lattice-aggregate-bridge-shape-config-layout-v1',
+                purpose: 'aggregate-bridge-shape-config-layout-v1',
                 shareVectorWidth: statement.shareVectorWidth,
             },
         );

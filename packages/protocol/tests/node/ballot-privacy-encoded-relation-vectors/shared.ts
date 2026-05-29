@@ -56,7 +56,7 @@ type EncodedRelationVectorCase = {
             | 'available-for-small-field-component'
             | 'blocked-pending-sparse-proof-statement'
             | 'not-applicable-for-structured-component'
-            | 'not-applicable-for-public-zero-witness-component';
+            | 'not-applicable-for-public-binding-check-component';
         readonly objectType: 'BallotProofComponentProofReadinessManifest';
         readonly objectVersion: 1;
         readonly proofLoweringStatus: string;
@@ -64,29 +64,29 @@ type EncodedRelationVectorCase = {
             | 'dense-polynomial-matrix-linear-proof-v1'
             | 'sparse-polynomial-matrix-linear-proof-v1'
             | 'structured-module-lwe-linear-proof-v1'
-            | 'public-zero-witness-binding-check-v1';
+            | 'public-binding-check-only-v1';
         readonly recommendedSourceRingDegree: number | null;
         readonly rowBatchNames: readonly string[];
         readonly rowCount: number;
         readonly variableColumnCount: number;
     }[];
-    readonly componentProofStatementPlans?: readonly {
+    readonly componentProofStatementDescriptors?: readonly {
         readonly coefficientModulus: string;
         readonly componentId: string;
         readonly componentProofStatementHash: string;
         readonly denseCoefficientCount: string | null;
-        readonly objectType: 'BallotProofComponentProofStatementPlan';
+        readonly objectType: 'BallotProofComponentProofStatementDescriptor';
         readonly objectVersion: 1;
-        readonly proofBytesAvailability:
-            | 'available-for-small-dense-oracle'
-            | 'requires-sparse-proof-statement'
-            | 'requires-structured-proof-statement'
-            | 'public-zero-witness-binding-check';
+        readonly proofBackendRequirement:
+            | 'dense-proof-bytes-available-lab-only'
+            | 'sparse-proof-statement-required'
+            | 'structured-proof-statement-required'
+            | 'public-binding-check-only';
         readonly proofStatementFormat:
             | 'dense-polynomial-matrix-linear-proof-v1'
             | 'sparse-polynomial-matrix-linear-proof-v1'
             | 'structured-module-lwe-linear-proof-v1'
-            | 'public-zero-witness-binding-check-v1';
+            | 'public-binding-check-only-v1';
         readonly proofSystemRingDegree: number | null;
         readonly rowBatchNames: readonly string[];
         readonly rowBatchTermCounts: readonly string[];
@@ -101,7 +101,7 @@ type EncodedRelationVectorCase = {
     readonly proofReadinessSummary?: {
         readonly denseMatrixOracleComponentCount: number;
         readonly fullComponentProofBytesAvailable: false;
-        readonly publicZeroWitnessComponentCount: number;
+        readonly publicBindingCheckComponentCount: number;
         readonly sparseOrStructuredComponentCount: number;
         readonly totalComponentCount: number;
     };

@@ -1,4 +1,4 @@
-use super::certificates::{m8_evaluator_context_bindings, threshold_decryption_profile};
+use super::certificates::{passive_setup_evaluator_context_bindings, threshold_decryption_profile};
 use super::input::ensure_nfc_identity;
 use super::*;
 
@@ -75,7 +75,7 @@ pub(super) fn validate_setup_package_internal_bindings(
         "encrypted aggregate input layout hash",
     )?;
     let expected_evaluator_bindings =
-        m8_evaluator_context_bindings(value_at_path(setup_package, &["setupInputs"])?)?;
+        passive_setup_evaluator_context_bindings(value_at_path(setup_package, &["setupInputs"])?)?;
     for (field_name, description) in [
         (
             "evaluatorBindingContextHash",
@@ -115,8 +115,8 @@ pub(super) fn validate_setup_package_internal_bindings(
             "encrypted sparse target projection hash",
         ),
         (
-            "m8EvaluatorContextBindingHash",
-            "M8 evaluator context binding hash",
+            "passiveSetupEvaluatorContextBindingHash",
+            "passive setup evaluator context binding hash",
         ),
     ] {
         compare_hash_at_path(
@@ -191,13 +191,13 @@ pub(super) fn validate_setup_package_shape(setup_package: &Value) -> CanonicalRe
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "setupPackage is not an M8 passive BGV setup package",
+            "setupPackage is not a passive BGV setup package",
         ));
     }
     if !bool_at_path(setup_package, &["kllpsStatus", "setupMaterialMatchesKLLPS"])? {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
-            "M8 setup package must mark KLLPS material matching",
+            "passive BGV setup package must mark KLLPS material matching",
         ));
     }
     if bool_at_path(
@@ -207,7 +207,7 @@ pub(super) fn validate_setup_package_shape(setup_package: &Value) -> CanonicalRe
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
-            "M8 setup package must not claim KLLPS PartDec or C1-C4 certification",
+            "passive BGV setup package must not claim KLLPS PartDec or C1-C4 certification",
         ));
     }
     if bool_at_path(
@@ -222,7 +222,7 @@ pub(super) fn validate_setup_package_shape(setup_package: &Value) -> CanonicalRe
     )? {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
-            "M8 setup package must not claim centralized secret reconstruction or raw share export",
+            "passive BGV setup package must not claim centralized secret reconstruction or raw share export",
         ));
     }
     if string_at_path(
@@ -236,7 +236,7 @@ pub(super) fn validate_setup_package_shape(setup_package: &Value) -> CanonicalRe
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
-            "M8 setup package must keep final Appendix B security pending Q_target",
+            "passive BGV setup package must keep final final setup security pending target modulus",
         ));
     }
     let participants = setup_package
@@ -254,7 +254,7 @@ pub(super) fn validate_setup_package_shape(setup_package: &Value) -> CanonicalRe
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "setupPackage participant count is outside the M8 passive setup roster bounds",
+            "setupPackage participant count is outside the passive BGV setup roster bounds",
         ));
     }
     if participant_count != participants.len() {

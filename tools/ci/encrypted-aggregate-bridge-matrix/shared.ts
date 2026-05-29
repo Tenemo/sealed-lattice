@@ -94,7 +94,7 @@ export const outputDirectory = path.join(
     'aggregate-bridge',
 );
 
-export const workerOutputPrefix = 'SEALED_LATTICE_M9_ROW_RESULT=';
+export const workerOutputPrefix = 'SEALED_LATTICE_BRIDGE_ROW_RESULT=';
 
 const forbiddenPublicArtifactFieldNames = new Set([
     'aggregateInputPlaintext',

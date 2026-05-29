@@ -1,6 +1,11 @@
 use super::development_fixtures::development_key_arithmetic_fixture;
 use super::*;
 
+pub(super) struct CollectivePublicKeyCoefficients {
+    pub(super) component_zero_coefficients: Vec<u64>,
+    pub(super) component_one_coefficients: Vec<u64>,
+}
+
 pub(super) fn collective_public_key(
     input: &PassiveSetupInput,
     profile_hash: &str,
@@ -8,6 +13,32 @@ pub(super) fn collective_public_key(
     public_common_random_polynomial_root: &str,
     public_key_share_roots: &[String],
 ) -> CanonicalResult<Value> {
+    let participant_descriptors = input
+        .participants
+        .iter()
+        .map(|participant| {
+            json!({
+                "trusteeIdentity": participant.trustee_identity,
+                "rosterPosition": participant.roster_position,
+                "recoveryEpoch": participant.recovery_epoch,
+                "deviceEpoch": participant.device_epoch,
+            })
+        })
+        .collect::<Vec<_>>();
+    let participant_identities = input
+        .participants
+        .iter()
+        .map(|participant| participant.trustee_identity.clone())
+        .collect::<Vec<_>>();
+    let coefficient_material = collective_public_key_coefficient_material(
+        &input.setup_seed_hash,
+        public_common_random_polynomial_root,
+        public_key_share_roots,
+        participant_descriptors,
+        &participant_identities,
+    )?;
+    let collective_public_key_coefficient_root =
+        collective_public_key_coefficient_root(&coefficient_material)?;
     let record_without_roots = json!({
         "objectType": "BgvCollectivePublicKey",
         "objectVersion": 1,
@@ -19,10 +50,14 @@ pub(super) fn collective_public_key(
         "backendProfileHash": backend_profile_hash,
         "publicCommonRandomPolynomialRoot": public_common_random_polynomial_root,
         "publicKeyShareRoots": public_key_share_roots,
+        "collectivePublicKeyCoefficientRoot": collective_public_key_coefficient_root,
         "aggregationRule": "coefficient-wise-public-key-share-sum-with-shared-crp",
+        "publicKeyComponentModel": "componentZero=sum_i(-a*s_i+e_i),componentOne=a-over-selected-BGV-RNS-data-basis",
+        "publicKeyCoefficientMaterialBinding": "passive-transcript-derived-from-setup-seed-hash-and-public-key-share-roots",
         "participantCount": public_key_share_roots.len(),
         "centralizedSecretReconstruction": false,
         "rawSecretShareExported": false,
+        "maliciousDkgProofIncluded": false,
     });
     let collective_public_key_root =
         derive_protocol_hash("CollectivePublicKeyRoot", &record_without_roots)?;
@@ -30,6 +65,7 @@ pub(super) fn collective_public_key(
         "BGVPublicKeyRoot",
         &json!({
             "collectivePublicKeyRoot": collective_public_key_root,
+            "collectivePublicKeyCoefficientRoot": collective_public_key_coefficient_root,
             "profileHash": profile_hash,
             "backendProfileHash": backend_profile_hash,
             "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
@@ -38,15 +74,257 @@ pub(super) fn collective_public_key(
 
     Ok(json!({
         "record": record_without_roots,
+        "coefficientMaterial": coefficient_material,
+        "collectivePublicKeyCoefficientRoot": collective_public_key_coefficient_root,
         "collectivePublicKeyRoot": collective_public_key_root,
         "bgvPublicKeyRoot": bgv_public_key_root,
         "statusLabels": [
             "CollectivePublicKeyShareAggregationBound",
-            "BgvPublicKeyRootHashOnly",
+            "BgvPublicKeyCoefficientMaterialBound",
             "BgvAlgebraicPublicKeyProofMissing",
             "NoTrustedDealerSecretReconstruction"
         ],
     }))
+}
+
+pub(super) fn collective_public_key_coefficients_by_modulus_from_setup_package(
+    setup_package: &Value,
+) -> CanonicalResult<Vec<CollectivePublicKeyCoefficients>> {
+    let setup_seed_hash = string_at_path(setup_package, &["setupInputs", "setupSeedHash"])?;
+    let participants = array_at_path(setup_package, &["participants"])?;
+    let participant_identities = participants
+        .iter()
+        .map(|participant| {
+            string_at_path(participant, &["trusteeIdentity"]).map(ToString::to_string)
+        })
+        .collect::<CanonicalResult<Vec<_>>>()?;
+    let (collective_secret_coefficients, collective_error_coefficients) =
+        collective_signed_secret_and_error_coefficients(setup_seed_hash, &participant_identities);
+
+    DATA_PRIMES
+        .iter()
+        .copied()
+        .map(|modulus| {
+            collective_public_key_coefficients_from_signed(
+                setup_seed_hash,
+                &collective_secret_coefficients,
+                &collective_error_coefficients,
+                modulus,
+            )
+        })
+        .collect()
+}
+
+pub(super) fn expected_collective_public_key_coefficient_material(
+    setup_package: &Value,
+    participant_bindings: &[VerifiedParticipantSetupBinding],
+) -> CanonicalResult<Value> {
+    let setup_seed_hash = string_at_path(setup_package, &["setupInputs", "setupSeedHash"])?;
+    let collective_public_key = value_at_path(setup_package, &["collectivePublicKey"])?;
+    let collective_public_key_record = value_at_path(collective_public_key, &["record"])?;
+    let public_common_random_polynomial_root = string_at_path(
+        collective_public_key_record,
+        &["publicCommonRandomPolynomialRoot"],
+    )?;
+    let public_key_share_roots = participant_bindings
+        .iter()
+        .map(|participant| participant.public_key_share_root.clone())
+        .collect::<Vec<_>>();
+    let participant_descriptors = participant_bindings
+        .iter()
+        .map(|participant| {
+            json!({
+                "trusteeIdentity": participant.trustee_identity,
+                "rosterPosition": participant.roster_position,
+                "recoveryEpoch": participant.recovery_epoch,
+                "deviceEpoch": participant.device_epoch,
+            })
+        })
+        .collect::<Vec<_>>();
+    let participant_identities = participant_bindings
+        .iter()
+        .map(|participant| participant.trustee_identity.clone())
+        .collect::<Vec<_>>();
+
+    collective_public_key_coefficient_material(
+        setup_seed_hash,
+        public_common_random_polynomial_root,
+        &public_key_share_roots,
+        participant_descriptors,
+        &participant_identities,
+    )
+}
+
+pub(super) fn collective_public_key_coefficient_root(
+    coefficient_material: &Value,
+) -> CanonicalResult<String> {
+    derive_protocol_hash("BGVPublicKeyRoot", coefficient_material)
+}
+
+fn collective_public_key_coefficient_material(
+    setup_seed_hash: &str,
+    public_common_random_polynomial_root: &str,
+    public_key_share_roots: &[String],
+    participant_descriptors: Vec<Value>,
+    participant_identities: &[String],
+) -> CanonicalResult<Value> {
+    let modulus_summaries = DATA_PRIMES
+        .iter()
+        .copied()
+        .map(|modulus| {
+            collective_public_key_coefficient_derivation_summary(
+                setup_seed_hash,
+                public_common_random_polynomial_root,
+                public_key_share_roots,
+                participant_identities,
+                modulus,
+            )
+        })
+        .collect::<CanonicalResult<Vec<_>>>()?;
+
+    Ok(json!({
+        "objectType": "BgvCollectivePublicKeyCoefficientMaterial",
+        "objectVersion": 1,
+        "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
+        "basisId": BgvBasisKind::Data.basis_id(),
+        "level": DATA_PRIMES.len() - 1,
+        "coefficientCount": POLYNOMIAL_DEGREE,
+        "componentModel": "componentZero=sum_i(-a*s_i+e_i),componentOne=a-over-selected-BGV-RNS-data-basis",
+        "componentDerivation": "passive-transcript-derived-from-setup-seed-hash",
+        "fullCoefficientVectorHashesComputed": false,
+        "fullCoefficientExpansionOwner": "encrypted aggregate bridge relation arithmetic",
+        "publicCommonRandomPolynomialRoot": public_common_random_polynomial_root,
+        "publicKeyShareRoots": public_key_share_roots,
+        "participantCount": participant_identities.len(),
+        "participants": participant_descriptors,
+        "modulusSummaries": modulus_summaries,
+        "algebraicPublicKeyProofStatus": "BgvAlgebraicPublicKeyProofMissing",
+        "rawSecretShareExported": false,
+    }))
+}
+
+fn collective_public_key_coefficient_derivation_summary(
+    setup_seed_hash: &str,
+    public_common_random_polynomial_root: &str,
+    public_key_share_roots: &[String],
+    participant_identities: &[String],
+    modulus: u64,
+) -> CanonicalResult<Value> {
+    let modulus_bytes = modulus.to_le_bytes();
+    let participant_count_bytes = (participant_identities.len() as u64).to_le_bytes();
+    let public_key_share_root_count_bytes = (public_key_share_roots.len() as u64).to_le_bytes();
+    let component_zero_derivation_hash = hash512_hex(
+        "sealed-lattice-bgv-rns/collective-public-key-coefficient-derivation-v1",
+        &[
+            b"component-zero",
+            setup_seed_hash.as_bytes(),
+            public_common_random_polynomial_root.as_bytes(),
+            &modulus_bytes,
+            &participant_count_bytes,
+            &public_key_share_root_count_bytes,
+        ],
+    );
+    let component_one_derivation_hash = hash512_hex(
+        "sealed-lattice-bgv-rns/collective-public-key-coefficient-derivation-v1",
+        &[
+            b"component-one",
+            setup_seed_hash.as_bytes(),
+            public_common_random_polynomial_root.as_bytes(),
+            &modulus_bytes,
+            &participant_count_bytes,
+            &public_key_share_root_count_bytes,
+        ],
+    );
+    let sampled_component_one_coefficients =
+        sample_public_residues(setup_seed_hash, "public-common-random-polynomial", modulus);
+    let sampled_component_zero_derivation_residues = sample_public_residues(
+        setup_seed_hash,
+        "collective-public-key-component-zero-derivation-diagnostic",
+        modulus,
+    );
+
+    Ok(json!({
+        "modulus": modulus,
+        "componentZeroCoefficientDerivationHash512": component_zero_derivation_hash,
+        "componentOneCoefficientDerivationHash512": component_one_derivation_hash,
+        "sampledComponentZeroDerivationResidues": sampled_component_zero_derivation_residues,
+        "sampledComponentOneCoefficients": sampled_component_one_coefficients,
+        "fullCoefficientVectorHashStatus": "deferred-to-bridge-arithmetic-expansion",
+    }))
+}
+
+fn collective_signed_secret_and_error_coefficients(
+    setup_seed_hash: &str,
+    participant_identities: &[String],
+) -> (Vec<i64>, Vec<i64>) {
+    let mut collective_secret_coefficients = vec![0_i64; POLYNOMIAL_DEGREE];
+    let mut collective_error_coefficients = vec![0_i64; POLYNOMIAL_DEGREE];
+    for participant_identity in participant_identities {
+        let local_secret_coefficients = dense_small_coefficients(
+            setup_seed_hash,
+            participant_identity,
+            "local-secret-share",
+            -1,
+            1,
+        );
+        let local_error_coefficients = dense_centered_binomial_coefficients(
+            setup_seed_hash,
+            participant_identity,
+            "local-error",
+        );
+        for coefficient_index in 0..POLYNOMIAL_DEGREE {
+            collective_secret_coefficients[coefficient_index] +=
+                local_secret_coefficients[coefficient_index];
+            collective_error_coefficients[coefficient_index] +=
+                local_error_coefficients[coefficient_index];
+        }
+    }
+
+    (
+        collective_secret_coefficients,
+        collective_error_coefficients,
+    )
+}
+
+fn collective_public_key_coefficients_from_signed(
+    setup_seed_hash: &str,
+    collective_secret_coefficients: &[i64],
+    collective_error_coefficients: &[i64],
+    modulus: u64,
+) -> CanonicalResult<CollectivePublicKeyCoefficients> {
+    if collective_secret_coefficients.len() != POLYNOMIAL_DEGREE
+        || collective_error_coefficients.len() != POLYNOMIAL_DEGREE
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "collective public key signed coefficient width is invalid",
+        ));
+    }
+    let collective_secret_residues = collective_secret_coefficients
+        .iter()
+        .map(|coefficient| signed_to_modulus_residue(*coefficient, modulus))
+        .collect::<Vec<_>>();
+    let collective_error_residues = collective_error_coefficients
+        .iter()
+        .map(|coefficient| signed_to_modulus_residue(*coefficient, modulus))
+        .collect::<Vec<_>>();
+    let component_one_coefficients =
+        dense_public_residues(setup_seed_hash, "public-common-random-polynomial", modulus);
+    let public_sample_secret_product = negacyclic_product_mod(
+        &component_one_coefficients,
+        &collective_secret_residues,
+        modulus,
+    )?;
+    let component_zero_coefficients = collective_error_residues
+        .iter()
+        .zip(public_sample_secret_product.iter())
+        .map(|(error_residue, product_residue)| sub_mod(*error_residue, *product_residue, modulus))
+        .collect::<CanonicalResult<Vec<_>>>()?;
+
+    Ok(CollectivePublicKeyCoefficients {
+        component_zero_coefficients,
+        component_one_coefficients,
+    })
 }
 
 pub(super) fn threshold_verification_material(
@@ -211,7 +489,7 @@ pub(super) fn evaluation_keys(
         "keySwitchKeyRoot": key_switch_key_root,
         "keySwitchArithmeticFixtureHash": key_switch_arithmetic_fixture["fixtureHash"],
         "generatedFor": "provisionalRotSet",
-        "finalRotSetClosure": "M10-AppendixD",
+        "finalRotSetClosure": "encrypted-aggregate-evaluator-closure",
         "regenerateIfRotSetChanges": true,
         "maliciousEvaluationKeyProofIncluded": false,
     });
@@ -240,10 +518,10 @@ pub(super) fn evaluation_keys(
 fn provisional_rotation_set() -> CanonicalResult<Value> {
     Ok(json!({
         "rotSetId": PROVISIONAL_ROT_SET_ID,
-        "sourceRdr": "RDR-M10-Top-K-Circuit-And-Sparse-Target",
+        "sourceRdr": "internal-design-note-top-k-circuit-and-sparse-target",
         "generatedFor": "provisionalRotSet",
-        "finalizedBy": "M10-AppendixD",
-        "regenerateM8KeysIfChanged": true,
+        "finalizedBy": "encrypted-aggregate-evaluator-closure",
+        "regeneratePassiveSetupKeysIfChanged": true,
         "rotations": [
             1, 2, 4, 8, 16, 32, 64, 128,
             256, 512, 1024, 2048, 4096, 8192,

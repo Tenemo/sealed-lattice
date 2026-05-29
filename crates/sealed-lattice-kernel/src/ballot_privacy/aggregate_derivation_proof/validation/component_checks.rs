@@ -162,7 +162,15 @@ fn collect_aggregate_commitment_refusals(
     let commitment_hash = string_field(aggregate_commitment, "aggregateShareCommitmentHash");
     let expected_commitment_hash =
         value_without_field(aggregate_commitment, "aggregateShareCommitmentHash").and_then(
-            |commitment_payload| derive_hash("AggregateShareCommitmentHash", &commitment_payload),
+            |commitment_payload| {
+                derive_hash(
+                    "AggregateShareCommitmentHash",
+                    &json!({
+                        "aggregateCommitment": commitment_payload,
+                        "purpose": "aggregate-share-commitment-v1"
+                    }),
+                )
+            },
         );
     let commitment_polynomial_vector =
         array_field(aggregate_commitment, "commitmentPolynomialVector");
@@ -378,15 +386,8 @@ fn derive_proof_bytes_hash(proof_bytes_hex: &str) -> Option<String> {
     {
         return None;
     }
-    derive_hash(
-        "ProofBytesHash",
-        &json!({
-            "objectType": "ProofBytes",
-            "objectVersion": 1,
-            "proofBytesHex": proof_bytes_hex,
-            "proofSizeBytes": proof_bytes_hex.len() / 2,
-        }),
-    )
+    derive_protocol_hash_for_proof_bytes_payload(proof_bytes_hex, proof_bytes_hex.len() as u64 / 2)
+        .ok()
 }
 
 fn collect_forbidden_witness_field_refusals(

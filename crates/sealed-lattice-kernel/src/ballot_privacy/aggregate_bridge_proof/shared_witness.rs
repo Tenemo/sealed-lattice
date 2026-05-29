@@ -21,7 +21,7 @@ pub(super) struct BridgeSharedWitnessProverInput<'value> {
     pub(super) aggregate_opening_randomness: &'value [i64],
     pub(super) aggregate_reduced_coordinates: &'value [u64],
     pub(super) aggregate_quotient_vector: &'value [u64],
-    pub(super) trace: &'value crate::bgv::commands::M9BridgeCiphertextRelationTrace,
+    pub(super) trace: &'value crate::bgv::commands::EncryptedAggregateBridgeCiphertextRelationTrace,
     pub(super) prover_randomness_hex: &'value str,
 }
 
@@ -51,7 +51,6 @@ const BRIDGE_SHARED_WITNESS_MASK_RANDOM_BIT_LENGTH: usize =
 const BRIDGE_SHARED_WITNESS_RESPONSE_BYTE_LENGTH: usize = 32;
 const BRIDGE_SHARED_WITNESS_MASK_BYTES_PER_COORDINATE: usize = 31;
 const BRIDGE_SHARED_WITNESS_MASK_COORDINATES_PER_HASH: usize = 2;
-const BRIDGE_SHARED_WITNESS_REJECTION_ATTEMPT_LIMIT: usize = 64;
 
 pub(super) fn generate_bridge_shared_witness_proof(
     input: BridgeSharedWitnessProverInput<'_>,
@@ -159,12 +158,12 @@ pub(super) fn generate_bridge_shared_witness_proof(
                 0,
             )?;
             let batch_commitment_hash =
-                crate::bgv::commands::m9_bridge_batch_encoding_commitment_hash_from_responses(
+                crate::bgv::commands::encrypted_aggregate_bridge_batch_encoding_commitment_hash_from_responses(
                     &aggregate_reduced_mask,
                     &plaintext_coefficient_mask,
                 )?;
             let bgv_commitment_hash =
-                crate::bgv::commands::m9_bridge_ciphertext_commitment_hash_from_responses(
+                crate::bgv::commands::encrypted_aggregate_bridge_ciphertext_commitment_hash_from_responses(
                     input.setup_package,
                     input.contributor_identity,
                     input.aggregate_derivation_statement_hash,
@@ -286,7 +285,7 @@ pub(super) fn generate_bridge_shared_witness_proof(
         let check = accepted_check.ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
-                "M9 bridge shared-witness rejection sampler did not find an in-bound response transcript",
+                "encrypted aggregate bridge shared-witness rejection sampler did not find an in-bound response transcript",
             )
         })?;
         checks.push(check);
@@ -387,7 +386,7 @@ pub(super) fn validate_bridge_shared_witness_zero_knowledge_status(
     if status_evidence != &expected_status {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
-            "M9 bridge shared-witness zero-knowledge status evidence does not match the proof-bound public inputs",
+            "encrypted aggregate bridge shared-witness zero-knowledge status evidence does not match the proof-bound public inputs",
         ));
     }
 
@@ -435,7 +434,7 @@ pub(super) fn verify_bridge_shared_witness_proof(
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
-            "M9 bridge shared-witness proof shell is not the supported verifier relation",
+            "encrypted aggregate bridge shared-witness proof shell is not the supported verifier relation",
         ));
     }
     require_equal_string(
@@ -476,21 +475,21 @@ pub(super) fn verify_bridge_shared_witness_proof(
     if relation_check_count != BRIDGE_SHARED_WITNESS_CHECK_COUNT {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
-            "M9 bridge shared-witness proof has an unsupported check count",
+            "encrypted aggregate bridge shared-witness proof has an unsupported check count",
         ));
     }
     let expected_aggregate_count =
         usize::try_from(aggregate_reduced_coordinate_count).map_err(|_| {
             CanonicalError::new(
                 CanonicalErrorCode::MalformedLength,
-                "M9 bridge aggregate reduced coordinate count does not fit usize",
+                "encrypted aggregate bridge aggregate reduced coordinate count does not fit usize",
             )
         })?;
     let expected_quotient_count =
         usize::try_from(aggregate_quotient_coordinate_count).map_err(|_| {
             CanonicalError::new(
                 CanonicalErrorCode::MalformedLength,
-                "M9 bridge aggregate quotient coordinate count does not fit usize",
+                "encrypted aggregate bridge aggregate quotient coordinate count does not fit usize",
             )
         })?;
     let expected_shared_response_scalar_count = shared_response_scalar_count(
@@ -517,7 +516,7 @@ pub(super) fn verify_bridge_shared_witness_proof(
     if checks.len() != BRIDGE_SHARED_WITNESS_CHECK_COUNT {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
-            "M9 bridge shared-witness proof check array has the wrong length",
+            "encrypted aggregate bridge shared-witness proof check array has the wrong length",
         ));
     }
     let aggregate_relation_context = bridge_aggregate_relation_commitment_context(proof_input)?;
@@ -537,7 +536,7 @@ pub(super) fn verify_bridge_shared_witness_proof(
         if rejection_attempt_index >= BRIDGE_SHARED_WITNESS_REJECTION_ATTEMPT_LIMIT {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::ProfileComponentMismatch,
-                "M9 bridge shared-witness rejection attempt index is outside the supported range",
+                "encrypted aggregate bridge shared-witness rejection attempt index is outside the supported range",
             ));
         }
         let challenge_scalar_hex = required_string_field(
@@ -626,12 +625,12 @@ pub(super) fn verify_bridge_shared_witness_proof(
             challenge_scalar,
         )?;
         let batch_commitment_hash =
-            crate::bgv::commands::m9_bridge_batch_encoding_commitment_hash_from_responses(
+            crate::bgv::commands::encrypted_aggregate_bridge_batch_encoding_commitment_hash_from_responses(
                 &aggregate_reduced_response,
                 &batch_coefficient_response,
             )?;
         let bgv_commitment_hash =
-            crate::bgv::commands::m9_bridge_ciphertext_commitment_hash_from_responses(
+            crate::bgv::commands::encrypted_aggregate_bridge_ciphertext_commitment_hash_from_responses(
                 setup_package,
                 contributor_identity,
                 aggregate_derivation_statement_hash,
@@ -681,7 +680,7 @@ pub(super) fn verify_bridge_shared_witness_proof(
         if challenge_scalar != recomputed_challenge_scalar {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::ProfileComponentMismatch,
-                "M9 bridge shared-witness proof challenge does not match the Fiat-Shamir transcript",
+                "encrypted aggregate bridge shared-witness proof challenge does not match the Fiat-Shamir transcript",
             ));
         }
         challenge_hex.push_str(challenge_scalar_hex);
@@ -741,7 +740,7 @@ fn aggregate_relation_commitment_hash_from_responses(
         u64::try_from(u128::from(challenge_scalar) % u128::from(ring.modulus())).map_err(|_| {
             CanonicalError::new(
                 CanonicalErrorCode::MalformedLength,
-                "M9 bridge challenge residue does not fit u64",
+                "encrypted aggregate bridge challenge residue does not fit u64",
             )
         })?;
     let scaled_target_entries = context
@@ -898,19 +897,19 @@ fn parse_bridge_challenge_scalar(challenge_scalar_hex: &str) -> CanonicalResult<
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidHex,
-            "M9 bridge shared-witness challenge scalar must be 16 lowercase hex characters",
+            "encrypted aggregate bridge shared-witness challenge scalar must be 16 lowercase hex characters",
         ));
     }
     let challenge = u64::from_str_radix(challenge_scalar_hex, 16).map_err(|_| {
         CanonicalError::new(
             CanonicalErrorCode::InvalidHex,
-            "M9 bridge shared-witness challenge scalar is malformed",
+            "encrypted aggregate bridge shared-witness challenge scalar is malformed",
         )
     })?;
     if challenge == 0 {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "M9 bridge shared-witness challenge scalar must be non-zero",
+            "encrypted aggregate bridge shared-witness challenge scalar must be non-zero",
         ));
     }
 
@@ -926,7 +925,7 @@ fn response_vector(
     if masks.len() != witness.len() {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
-            "M9 bridge proof mask and witness dimensions do not match",
+            "encrypted aggregate bridge proof mask and witness dimensions do not match",
         ));
     }
     let negative_shift_bound = -shift_bound;
@@ -938,7 +937,7 @@ fn response_vector(
             if &scaled_witness >= shift_bound || scaled_witness <= negative_shift_bound {
                 return Err(CanonicalError::new(
                     CanonicalErrorCode::ProfileComponentMismatch,
-                    "M9 bridge proof witness shift exceeds the supported response-distribution slack",
+                    "encrypted aggregate bridge proof witness shift exceeds the supported response-distribution slack",
                 ));
             }
             Ok(mask + scaled_witness)
@@ -977,7 +976,7 @@ fn signed_i256_vector_hex(values: &[BigInt]) -> CanonicalResult<String> {
         if value_bytes.len() > BRIDGE_SHARED_WITNESS_RESPONSE_BYTE_LENGTH {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::MalformedLength,
-                "M9 bridge shared-witness response does not fit signed i256 encoding",
+                "encrypted aggregate bridge shared-witness response does not fit signed i256 encoding",
             ));
         }
         let mut fixed_bytes = [sign_extension; BRIDGE_SHARED_WITNESS_RESPONSE_BYTE_LENGTH];
@@ -1032,7 +1031,7 @@ fn validate_response_lengths(
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
-            "M9 bridge shared-witness proof response dimensions do not match the public statement",
+            "encrypted aggregate bridge shared-witness proof response dimensions do not match the public statement",
         ));
     }
 
@@ -1095,7 +1094,7 @@ fn validate_response_vector_bounds_with_bound(
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
             format!(
-                "M9 bridge shared-witness {role} response exceeds the supported response bound"
+                "encrypted aggregate bridge shared-witness {role} response exceeds the supported response bound"
             ),
         ));
     }
@@ -1153,14 +1152,14 @@ fn shared_response_scalar_count(
         .ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::MalformedLength,
-                "M9 bridge shared response scalar count overflowed",
+                "encrypted aggregate bridge shared response scalar count overflowed",
             )
         })?;
 
     u64::try_from(total).map_err(|_| {
         CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
-            "M9 bridge shared response scalar count does not fit u64",
+            "encrypted aggregate bridge shared response scalar count does not fit u64",
         )
     })
 }

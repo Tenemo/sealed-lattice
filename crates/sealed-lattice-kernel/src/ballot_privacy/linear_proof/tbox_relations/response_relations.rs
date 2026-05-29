@@ -1,4 +1,7 @@
 use super::*;
+use crate::ballot_privacy::polynomial_ring::{
+    LINEAR_PROOF_MODULUS, positive_mod_linear_proof_i128,
+};
 
 #[cfg(test)]
 pub(crate) fn validate_tbox_relation_builder_self_check() -> CanonicalResult<()> {
@@ -299,32 +302,42 @@ pub(super) fn compute_linear_proof_response_rotation_products(
         } else {
             response_coordinate_index
         };
-        let rotation_row = sample_linear_proof_binary_difference_values(
+        for_each_linear_proof_binary_difference_nonzero(
             rotation_column_count,
             challenge_seed,
             u64::try_from(row_domain_separator)
                 .map_err(|_| invalid_tbox_relation("rotation row domain does not fit in u64"))?,
-        )?;
-        for repetition_index in 0..TBOX_QUADRATIC_EVALUATION_REPETITIONS {
-            let challenge =
-                i128::from(challenge_matrix[repetition_index][response_coordinate_index]);
-            for (rotation_column_index, rotation_value) in rotation_row.iter().enumerate() {
-                if *rotation_value != 0 {
+            |rotation_column_index, rotation_value| {
+                for repetition_index in 0..TBOX_QUADRATIC_EVALUATION_REPETITIONS {
+                    let challenge =
+                        i128::from(challenge_matrix[repetition_index][response_coordinate_index]);
                     signed_products[repetition_index][rotation_column_index] +=
-                        challenge * i128::from(*rotation_value);
+                        challenge * i128::from(rotation_value);
                 }
-            }
-        }
+                Ok(())
+            },
+        )?;
     }
 
-    signed_products
-        .iter()
-        .map(|row| {
-            row.iter()
-                .map(|value| positive_mod_i128(*value, i128::from(modulus)))
-                .collect::<CanonicalResult<Vec<_>>>()
-        })
-        .collect()
+    if modulus == LINEAR_PROOF_MODULUS {
+        Ok(signed_products
+            .iter()
+            .map(|row| {
+                row.iter()
+                    .map(|value| positive_mod_linear_proof_i128(*value))
+                    .collect::<Vec<_>>()
+            })
+            .collect())
+    } else {
+        signed_products
+            .iter()
+            .map(|row| {
+                row.iter()
+                    .map(|value| positive_mod_i128(*value, i128::from(modulus)))
+                    .collect::<CanonicalResult<Vec<_>>>()
+            })
+            .collect()
+    }
 }
 
 pub(super) fn convert_z4_rotation_products_to_polynomials(
@@ -397,9 +410,11 @@ pub(super) fn multiply_rows_by_polynomial_matrix(
         for column_index in 0..matrix.columns() {
             let mut accumulated_polynomial = vec![0_u64; ring.degree()];
             for (row_index, row_polynomial) in polynomial_row.iter().enumerate() {
-                let product =
-                    ring.mul_negacyclic(row_polynomial, matrix.entry(row_index, column_index)?)?;
-                accumulated_polynomial = ring.add(&accumulated_polynomial, &product)?;
+                ring.mul_negacyclic_accumulate(
+                    &mut accumulated_polynomial,
+                    row_polynomial,
+                    matrix.entry(row_index, column_index)?,
+                )?;
             }
             output_row.push(accumulated_polynomial);
         }
@@ -423,10 +438,11 @@ pub(crate) fn multiply_rows_by_sparse_polynomial_matrix(
         }
         let mut output_row = vec![vec![0_u64; ring.degree()]; matrix.columns()];
         for entry in matrix.entries() {
-            let product =
-                ring.mul_negacyclic(&polynomial_row[entry.row_index()], entry.coefficients())?;
-            output_row[entry.column_index()] =
-                ring.add(&output_row[entry.column_index()], &product)?;
+            ring.mul_negacyclic_accumulate(
+                &mut output_row[entry.column_index()],
+                &polynomial_row[entry.row_index()],
+                entry.coefficients(),
+            )?;
         }
         output_rows.push(output_row);
     }
@@ -439,15 +455,43 @@ pub(super) fn dot_rotation_products_with_target(
     response_rotation_matrix_products: &[Vec<u64>],
     transformed_target_vector: &PolynomialVector,
 ) -> CanonicalResult<Vec<u64>> {
-    let flattened_target = transformed_target_vector
-        .entries()
-        .iter()
-        .flat_map(|polynomial| polynomial.iter().copied())
-        .collect::<Vec<_>>();
-    response_rotation_matrix_products
-        .iter()
-        .map(|row| dot_canonical_vectors_mod(row, &flattened_target, ring.modulus()))
-        .collect()
+    let expected_row_length = transformed_target_vector
+        .len()
+        .checked_mul(ring.degree())
+        .ok_or_else(|| invalid_tbox_relation("target dot-product length overflowed"))?;
+    let mut products = Vec::with_capacity(response_rotation_matrix_products.len());
+    for row in response_rotation_matrix_products {
+        if row.len() != expected_row_length {
+            return Err(invalid_tbox_relation(
+                "canonical vector dot-product lengths do not match",
+            ));
+        }
+
+        let mut accumulated_value = 0_u64;
+        for (polynomial_index, target_polynomial) in
+            transformed_target_vector.entries().iter().enumerate()
+        {
+            let row_start = polynomial_index
+                .checked_mul(ring.degree())
+                .ok_or_else(|| invalid_tbox_relation("target dot-product offset overflowed"))?;
+            for (rotation_coefficient, target_coefficient) in row[row_start..]
+                .iter()
+                .zip(target_polynomial)
+                .take(ring.degree())
+            {
+                let product =
+                    multiply_mod(*rotation_coefficient, *target_coefficient, ring.modulus());
+                accumulated_value = crate::ballot_privacy::polynomial_ring::add_mod(
+                    accumulated_value,
+                    product,
+                    ring.modulus(),
+                );
+            }
+        }
+        products.push(accumulated_value);
+    }
+
+    Ok(products)
 }
 
 pub(super) fn build_linear_proof_z4_response_relation(
@@ -681,32 +725,54 @@ pub(super) fn challenge_polynomial_from_row(
     Ok(challenge_row[start..end].to_vec())
 }
 
+#[cfg(test)]
 pub(super) fn sample_linear_proof_binary_difference_values(
     value_count: usize,
     seed: &[u8; 32],
     domain_separator: u64,
 ) -> CanonicalResult<Vec<i8>> {
+    let mut values = vec![0_i8; value_count];
+    for_each_linear_proof_binary_difference_nonzero(
+        value_count,
+        seed,
+        domain_separator,
+        |value_index, value| {
+            values[value_index] = value;
+            Ok(())
+        },
+    )?;
+
+    Ok(values)
+}
+
+fn for_each_linear_proof_binary_difference_nonzero(
+    value_count: usize,
+    seed: &[u8; 32],
+    domain_separator: u64,
+    mut visit_nonzero: impl FnMut(usize, i8) -> CanonicalResult<()>,
+) -> CanonicalResult<()> {
     let bit_count = value_count
         .checked_mul(2)
         .ok_or_else(|| invalid_tbox_relation("binary-difference bit count overflowed"))?;
     let byte_count = bit_count.div_ceil(8);
     let random_bytes =
         super::rng::generate_linear_proof_aes256ctr_stream(seed, domain_separator, byte_count);
-    let mut values = vec![0_i8; value_count];
-    for (value_index, value) in values.iter_mut().enumerate().take(value_count) {
-        let positive_bit = read_bit(&random_bytes, value_index)?;
-        let negative_bit = read_bit(
-            &random_bytes,
-            value_count
-                .checked_add(value_index)
-                .ok_or_else(|| invalid_tbox_relation("binary-difference bit index overflowed"))?,
-        )?;
-        *value = positive_bit as i8 - negative_bit as i8;
+    for value_index in 0..value_count {
+        let positive_bit = (random_bytes[value_index / 8] >> (value_index % 8)) & 1;
+        let negative_bit_index = value_count
+            .checked_add(value_index)
+            .ok_or_else(|| invalid_tbox_relation("binary-difference bit index overflowed"))?;
+        let negative_bit = (random_bytes[negative_bit_index / 8] >> (negative_bit_index % 8)) & 1;
+        let value = positive_bit as i8 - negative_bit as i8;
+        if value != 0 {
+            visit_nonzero(value_index, value)?;
+        }
     }
 
-    Ok(values)
+    Ok(())
 }
 
+#[cfg(test)]
 pub(super) fn read_bit(bytes: &[u8], bit_index: usize) -> CanonicalResult<u8> {
     let byte_index = bit_index / 8;
     if byte_index >= bytes.len() {
@@ -729,34 +795,22 @@ pub(super) fn dot_signed_response_with_challenge(
         ));
     }
     let mut accumulated_value = 0_i128;
+    let mut accumulated_product_count = 0_usize;
     for (response_coefficient, challenge_coefficient) in
         flattened_response.iter().zip(challenge_row)
     {
+        if *response_coefficient == 0 || *challenge_coefficient == 0 {
+            continue;
+        }
         accumulated_value += i128::from(*response_coefficient) * i128::from(*challenge_coefficient);
-        accumulated_value %= i128::from(modulus);
+        accumulated_product_count += 1;
+        if accumulated_product_count == 64 {
+            accumulated_value %= i128::from(modulus);
+            accumulated_product_count = 0;
+        }
     }
 
     positive_mod_i128(accumulated_value, i128::from(modulus))
-}
-
-pub(super) fn dot_canonical_vectors_mod(
-    left: &[u64],
-    right: &[u64],
-    modulus: u64,
-) -> CanonicalResult<u64> {
-    if left.len() != right.len() {
-        return Err(invalid_tbox_relation(
-            "canonical vector dot-product lengths do not match",
-        ));
-    }
-    let mut accumulated_value = 0_u128;
-    for (left_coefficient, right_coefficient) in left.iter().zip(right) {
-        accumulated_value = (accumulated_value
-            + u128::from(*left_coefficient) * u128::from(*right_coefficient))
-            % u128::from(modulus);
-    }
-
-    Ok(accumulated_value as u64)
 }
 
 pub(super) fn push_sparse_matrix_entry_if_nonzero(

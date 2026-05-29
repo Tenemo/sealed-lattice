@@ -3,19 +3,6 @@ import { deriveProtocolHash } from '@sealed-lattice/crypto';
 import { describe, expect, it } from 'vitest';
 
 import {
-    buildBallotProofComponentBundleStatement,
-    buildBallotProofComponentLinearProofProjection,
-    buildBallotProofSparseComponentLinearProofStatement,
-    buildBallotProofStructuredReceiverEncryptionProofStatement,
-} from '../../../src/ballot-privacy/ballot-proof-linear-statement';
-import { deriveShareCommitmentBodyHash } from '../../../src/ballot-privacy/lattice-primitives';
-import {
-    ballotPrivacyBackendProofComponentOrder,
-    lowerBallotPrivacyRelationToBackendStatement,
-    type BallotPrivacyRelationBackendPublicContext,
-} from '../../../src/ballot-privacy/relation-backend-lowering';
-
-import {
     explicitReceiverEncryptionFixture,
     projectionWitness,
     publicContext,
@@ -25,6 +12,19 @@ import {
     minimumOptionRelationInput,
     validRelationInput,
 } from './shared.js';
+
+import {
+    buildBallotProofComponentBundleStatement,
+    buildBallotProofComponentLinearProofProjection,
+    buildBallotProofSparseComponentLinearProofStatement,
+    buildBallotProofStructuredReceiverEncryptionProofStatement,
+} from '#packages/protocol/src/ballot-privacy/ballot-proof-linear-statement';
+import { deriveShareCommitmentBodyHash } from '#packages/protocol/src/ballot-privacy/lattice-primitives';
+import {
+    ballotPrivacyBackendProofComponentOrder,
+    lowerBallotPrivacyRelationToBackendStatement,
+    type BallotPrivacyRelationBackendPublicContext,
+} from '#packages/protocol/src/ballot-privacy/relation-backend-lowering';
 
 describe('ballot privacy relation backend lowering', () => {
     it('projects receiver payload plaintext binding rows into an explicit component statement', () => {

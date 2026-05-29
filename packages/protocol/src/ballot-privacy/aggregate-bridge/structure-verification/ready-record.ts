@@ -7,11 +7,11 @@ import type {
     RefusalRecord,
 } from '@sealed-lattice/types';
 
-import { deriveInterpolationCoefficientReport } from '../../../plaintext-oracle/index.js';
 import {
     createAggregateRefusal,
     protocolHashPattern,
 } from '../../aggregate-derivation/constants.js';
+import { deriveInterpolationCoefficientReport } from '../../plaintext-oracle-helpers.js';
 import {
     deriveAggregateReadyRecordHash,
     deriveEncryptedAggregateReconstructionRoot,
@@ -87,6 +87,7 @@ const requireSameSelectedContext = (
         'topKEvaluatorInputLayoutHash',
         'bgvProfileHash',
         'collectivePublicKeyRoot',
+        'collectivePublicKeyCoefficientRoot',
     ] as const;
 
     for (const contribution of selectedContributions) {
@@ -203,6 +204,8 @@ export const createAggregateReadyRecord = (
             interpolationCoefficientReport.centeredL1CoefficientSum,
         ceremonyId: firstContribution.ceremonyId,
         collectivePublicKeyRoot: firstContribution.collectivePublicKeyRoot,
+        collectivePublicKeyCoefficientRoot:
+            firstContribution.collectivePublicKeyCoefficientRoot,
         encryptedAggregateBridgeHash:
             firstContribution.encryptedAggregateBridgeHash,
         encryptedAggregateInputLayoutHash:
@@ -270,7 +273,7 @@ export const verifyAggregateReadyRecordStructure = (
             'aggregateReadyRecord',
         ),
         ...collectHashShapeRefusals(
-            record as unknown as Record<string, unknown>,
+            record,
             aggregateReadyHashFieldNames,
             recordHash,
         ),

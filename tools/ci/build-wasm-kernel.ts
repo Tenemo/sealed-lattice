@@ -1,13 +1,12 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-import { isWithinDirectory } from '../internal/files.js';
-
 import { normalizeTranscriptCoreKernelBytesForHash } from '#packages/wasm/src/transcript-core-bridge.js';
+import { isWithinDirectory } from '#tools/internal/files.js';
 
 const repoRoot = path.resolve(
     fileURLToPath(new URL('../../', import.meta.url)),
@@ -52,6 +51,13 @@ const wasmKernelDistLoaderFilePath = path.resolve(
 const kernelHashAssignmentPattern =
     /const packagedTranscriptCoreKernelNormalizedSha256Hex(?:\s*:\s*string\s*\|\s*undefined)?\s*=\s*(?:undefined|'[a-f0-9]{64}');/u;
 const sha256HexPattern = /^[a-f0-9]{64}$/u;
+const wasmOptimizerScriptFilePath = path.resolve(
+    repoRoot,
+    'node_modules',
+    'binaryen',
+    'bin',
+    'wasm-opt',
+);
 
 export const resolveOutputFilePath = (
     commandLineArguments: readonly string[],
@@ -143,6 +149,46 @@ const runCargoBuild = (): void => {
     }
 };
 
+const runWasmOptimizer = (
+    inputFilePath: string,
+    outputFilePath: string,
+): void => {
+    const result = spawnSync(
+        process.execPath,
+        [
+            wasmOptimizerScriptFilePath,
+            '-O3',
+            inputFilePath,
+            '-o',
+            outputFilePath,
+        ],
+        {
+            cwd: repoRoot,
+            encoding: 'utf8',
+            maxBuffer: 100 * 1024 * 1024,
+        },
+    );
+
+    if (result.error !== undefined) {
+        throw new Error(`Failed to start wasm-opt: ${result.error.message}`);
+    }
+    if (result.signal !== null) {
+        throw new Error(`wasm-opt terminated by signal ${result.signal}`);
+    }
+    if (result.status !== 0) {
+        const stdout = result.stdout?.trim();
+        const stderr = result.stderr?.trim();
+        const formattedOutput =
+            stdout !== '' || stderr !== ''
+                ? `\n${[stdout, stderr].filter(Boolean).join('\n')}`
+                : '';
+
+        throw new Error(
+            `wasm-opt exited with status ${result.status ?? 'null'}${formattedOutput}`,
+        );
+    }
+};
+
 const resolveSourceFilePath = (): string =>
     path.resolve(
         cargoTargetDirectory,
@@ -192,6 +238,20 @@ export const pinKernelHashInLoaderSource = (
     return pinnedSourceText;
 };
 
+const writePinnedKernelHashIfChanged = async (
+    loaderFilePath: string,
+    sha256Hex: string,
+): Promise<void> => {
+    const sourceText = await readFile(loaderFilePath, 'utf8');
+    const pinnedSourceText = pinKernelHashInLoaderSource(sourceText, sha256Hex);
+
+    if (pinnedSourceText === sourceText) {
+        return;
+    }
+
+    await writeFile(loaderFilePath, pinnedSourceText, 'utf8');
+};
+
 const pinSdkKernelHashIfNeeded = async (
     outputFilePath: string,
     sha256Hex: string,
@@ -200,12 +260,7 @@ const pinSdkKernelHashIfNeeded = async (
         return;
     }
 
-    const sourceText = await readFile(sdkKernelLoaderFilePath, 'utf8');
-    await writeFile(
-        sdkKernelLoaderFilePath,
-        pinKernelHashInLoaderSource(sourceText, sha256Hex),
-        'utf8',
-    );
+    await writePinnedKernelHashIfChanged(sdkKernelLoaderFilePath, sha256Hex);
 };
 
 const pinInternalWasmKernelHashIfNeeded = async (
@@ -220,22 +275,26 @@ const pinInternalWasmKernelHashIfNeeded = async (
         wasmKernelSourceLoaderFilePath,
         wasmKernelDistLoaderFilePath,
     ]) {
-        const sourceText = await readFile(loaderFilePath, 'utf8');
-        await writeFile(
-            loaderFilePath,
-            pinKernelHashInLoaderSource(sourceText, sha256Hex),
-            'utf8',
-        );
+        await writePinnedKernelHashIfChanged(loaderFilePath, sha256Hex);
     }
 };
 
 export const buildWasmKernel = async (): Promise<void> => {
     const outputFilePath = resolveOutputFilePath(process.argv.slice(2));
     const outputDirectory = path.dirname(outputFilePath);
+    const unoptimizedOutputFilePath = path.join(
+        outputDirectory,
+        `${path.basename(outputFilePath)}.unoptimized`,
+    );
 
     runCargoBuild();
     await mkdir(outputDirectory, { recursive: true });
-    await copyFile(resolveSourceFilePath(), outputFilePath);
+    await copyFile(resolveSourceFilePath(), unoptimizedOutputFilePath);
+    try {
+        runWasmOptimizer(unoptimizedOutputFilePath, outputFilePath);
+    } finally {
+        await rm(unoptimizedOutputFilePath, { force: true });
+    }
     const sha256Hex = await hashFileSha256Hex(outputFilePath);
     await pinSdkKernelHashIfNeeded(outputFilePath, sha256Hex);
     await pinInternalWasmKernelHashIfNeeded(outputFilePath, sha256Hex);

@@ -613,46 +613,44 @@ fn component_linear_proof_bytes_verify_dense_and_sparse_public_statements() {
             .contains("target vector hash")
     );
 
-    let public_zero_component_id = "receiver-key-binding-component";
+    let public_binding_check_component_id = "receiver-key-binding-component";
     let public_zero_component_statement_hash =
         json!(test_hash("receiver-key-binding-component-statement"));
     let public_zero_component_proof =
-        component_proof_record_for_vector(public_zero_component_id, "");
-    let public_zero_proof_input = component_proof_input_for_test(
-        public_zero_component_id,
+        component_proof_record_for_vector(public_binding_check_component_id, "");
+    let public_binding_check_proof_input = component_proof_input_for_test(
+        public_binding_check_component_id,
         &public_zero_component_statement_hash,
     );
-    let public_zero_verification = super::verify_component_linear_proof_bytes(
+    let public_binding_check_verification = super::verify_component_linear_proof_bytes(
         "verifyBallotProof",
-        public_zero_component_id,
+        public_binding_check_component_id,
         &public_zero_component_proof,
-        &public_zero_proof_input,
+        &public_binding_check_proof_input,
     );
 
-    assert_eq!(public_zero_verification["ok"], true);
+    assert_eq!(public_binding_check_verification["ok"], true);
     assert!(
-        public_zero_verification["statusLabels"]
+        public_binding_check_verification["statusLabels"]
             .as_array()
-            .expect("public-zero status labels should be an array")
-            .contains(&json!(
-                "BallotProofComponentPublicZeroWitnessBindingChecked"
-            ))
+            .expect("public binding check status labels should be an array")
+            .contains(&json!("BallotProofComponentPublicBindingCheckSatisfied"))
     );
 
-    let mut public_zero_input_with_proof_bytes = public_zero_proof_input;
-    public_zero_input_with_proof_bytes["proofBytesHex"] = json!("00");
-    let public_zero_rejection = super::verify_component_linear_proof_bytes(
+    let mut public_binding_check_input_with_proof_bytes = public_binding_check_proof_input;
+    public_binding_check_input_with_proof_bytes["proofBytesHex"] = json!("00");
+    let public_binding_check_rejection = super::verify_component_linear_proof_bytes(
         "verifyBallotProof",
-        public_zero_component_id,
+        public_binding_check_component_id,
         &public_zero_component_proof,
-        &public_zero_input_with_proof_bytes,
+        &public_binding_check_input_with_proof_bytes,
     );
 
-    assert_eq!(public_zero_rejection["ok"], false);
+    assert_eq!(public_binding_check_rejection["ok"], false);
     assert!(
-        public_zero_rejection["refusedObjects"][0]["message"]
+        public_binding_check_rejection["refusedObjects"][0]["message"]
             .as_str()
-            .expect("public-zero refusal message should be a string")
+            .expect("public binding check refusal message should be a string")
             .contains("must be empty")
     );
 
@@ -814,7 +812,7 @@ pub(super) fn component_proof_input_for_test(
     let proof_statement_format = if component_id == "receiver-encryption-component" {
         "structured-module-lwe-linear-proof-v1"
     } else if component_id == "receiver-key-binding-component" {
-        "public-zero-witness-binding-check-v1"
+        "public-binding-check-only-v1"
     } else if component_id == "score-and-shamir-field-component" {
         "dense-polynomial-matrix-linear-proof-v1"
     } else {
@@ -824,7 +822,7 @@ pub(super) fn component_proof_input_for_test(
         component_id,
         component_statement_hash,
         if proof_statement_format == "structured-module-lwe-linear-proof-v1"
-            || proof_statement_format == "public-zero-witness-binding-check-v1"
+            || proof_statement_format == "public-binding-check-only-v1"
         {
             None
         } else {
@@ -841,7 +839,7 @@ pub(super) fn component_proof_input_for_test(
     json!({
         "componentId": component_id,
         "componentProofStatementHash": component_proof_statement_hash,
-        "proofBytesHex": if proof_statement_format == "public-zero-witness-binding-check-v1" {
+        "proofBytesHex": if proof_statement_format == "public-binding-check-only-v1" {
             "".to_string()
         } else {
             test_hash(&format!("{component_id}-proof-bytes-material"))

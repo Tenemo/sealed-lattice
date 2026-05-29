@@ -224,6 +224,7 @@ export const deriveConflictingHeadEvidenceHash = (
         equivocatingWitnessIdentities:
             evidence.equivocatingWitnessIdentities ?? [],
         leftBoardHeadHash: evidence.leftBoardHeadHash,
+        purpose: 'board-conflicting-head-evidence-v1',
         rightBoardHeadHash: evidence.rightBoardHeadHash,
         targetFinalityScope: evidence.targetFinalityScope ?? null,
     });

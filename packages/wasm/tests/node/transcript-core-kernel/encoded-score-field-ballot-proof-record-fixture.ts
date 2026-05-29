@@ -1,8 +1,3 @@
-import {
-    loadTranscriptCoreKernel,
-    type TranscriptCoreKernel,
-} from '../../../src/index';
-
 import type { NamedFixture } from './shared.js';
 import {
     ballotFieldLinearProofBackendVectors,
@@ -10,6 +5,11 @@ import {
     expandBallotFieldLinearProofVectorCase,
     findFixture,
 } from './shared.js';
+
+import {
+    loadTranscriptCoreKernel,
+    type TranscriptCoreKernel,
+} from '#packages/wasm/src/index';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -388,6 +388,7 @@ export const createEncodedScoreFieldBallotProofRecordFixture =
                         proofPayloadWithoutChallenge.statementMatrixHash,
                     targetVectorHash:
                         proofPayloadWithoutChallenge.targetVectorHash,
+                    purpose: 'ballot-proof-challenge-v1',
                 },
             });
             const proofPayload = {
@@ -565,13 +566,13 @@ export const createEncodedScoreFieldBallotProofRecordFixture =
                         ? '1024'
                         : null,
                 matrixHash: hash(`${input.componentId}-matrix`),
-                objectType: 'BallotProofComponentProofStatementPlan',
+                objectType: 'BallotProofComponentProofStatementDescriptor',
                 objectVersion: 1,
-                proofBytesAvailability:
+                proofBackendRequirement:
                     input.proofStatementFormat ===
                     'structured-module-lwe-linear-proof-v1'
-                        ? 'requires-structured-proof-statement'
-                        : 'public-zero-witness-binding-check',
+                        ? 'structured-proof-statement-required'
+                        : 'public-binding-check-only',
                 proofLoweringStatus: 'explicitRowsAvailable',
                 proofStatementFormat: input.proofStatementFormat,
                 proofSystemRingDegree:
@@ -641,7 +642,7 @@ export const createEncodedScoreFieldBallotProofRecordFixture =
                         value: {
                             payload: statementPayload,
                             purpose:
-                                'ballot-proof-component-proof-statement-plan-v1',
+                                'ballot-proof-component-proof-statement-descriptor-v1',
                         },
                     }),
             };
@@ -658,7 +659,7 @@ export const createEncodedScoreFieldBallotProofRecordFixture =
                 componentId === 'receiver-encryption-component'
                     ? 'structured-module-lwe-linear-proof-v1'
                     : componentId === 'receiver-key-binding-component'
-                      ? 'public-zero-witness-binding-check-v1'
+                      ? 'public-binding-check-only-v1'
                       : componentId === 'score-and-shamir-field-component'
                         ? 'dense-polynomial-matrix-linear-proof-v1'
                         : 'sparse-polynomial-matrix-linear-proof-v1';
@@ -670,8 +671,7 @@ export const createEncodedScoreFieldBallotProofRecordFixture =
                 componentProofStatementHash:
                     proofStatementFormat ===
                         'structured-module-lwe-linear-proof-v1' ||
-                    proofStatementFormat ===
-                        'public-zero-witness-binding-check-v1'
+                    proofStatementFormat === 'public-binding-check-only-v1'
                         ? undefined
                         : componentProofStatementHash,
                 componentStatementHash,
@@ -684,7 +684,7 @@ export const createEncodedScoreFieldBallotProofRecordFixture =
                     ? suppliedComponentProofStatementHash
                     : componentProofStatementHash;
             const componentProofBytesHex =
-                proofStatementFormat === 'public-zero-witness-binding-check-v1'
+                proofStatementFormat === 'public-binding-check-only-v1'
                     ? ''
                     : hash(`${componentId}-proof-bytes-material`);
 

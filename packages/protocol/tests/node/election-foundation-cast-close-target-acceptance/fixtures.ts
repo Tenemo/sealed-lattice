@@ -119,7 +119,7 @@ export const createVotingCloseScenario = (input?: {
 export const deriveEvaluationProofRecordHash = (
     proofRecord: Omit<EvaluationProofRecord, 'evaluationProofRecordHash'>,
 ): string =>
-    deriveProtocolHash('EvaluationProofRecordHash', {
+    deriveProtocolHash('ChallengeDomainHash', {
         targetCiphertextHash: proofRecord.targetCiphertextHash,
         topKCiphertextHash: proofRecord.topKCiphertextHash,
         ceremonyId: proofRecord.ceremonyId,
@@ -130,6 +130,7 @@ export const deriveEvaluationProofRecordHash = (
         objectVersion: proofRecord.objectVersion,
         proofRoot: proofRecord.proofRoot,
         publicSlotMaskHash: proofRecord.publicSlotMaskHash,
+        purpose: 'fixture-evaluation-proof-record-v1',
         targetFinalityRecordHash: proofRecord.targetFinalityRecordHash,
         targetLayoutHash: proofRecord.targetLayoutHash,
         targetProposalHash: proofRecord.targetProposalHash,
@@ -154,8 +155,9 @@ export const createEvaluationProofRecord = (
         publicSlotMaskHash: checkpoint.publicSlotMaskHash,
         targetCiphertextHash: checkpoint.targetCiphertextHash,
         targetLayoutHash: checkpoint.targetLayoutHash,
-        proofRoot: deriveProtocolHash('EvaluationProofRecordHash', {
-            proof: 'mandatory-pq-evaluation-proof',
+        proofRoot: deriveProtocolHash('ChallengeDomainHash', {
+            payload: { proof: 'mandatory-pq-evaluation-proof' },
+            purpose: 'fixture-evaluation-proof-root-v1',
         }),
         boardSequence: 2,
         boardPosition: 0,
@@ -180,8 +182,9 @@ export const createTargetAcceptedRecord = (
         targetFinalityScope: 'target',
         targetProposalHash: targetFinalityRecord.targetProposalHash,
         topKEvaluationRecordHash: checkpoint.topKEvaluationRecordHash,
-        targetContextHash: deriveProtocolHash('TargetContextHash', {
-            target: 'accepted-target-context',
+        targetContextHash: deriveProtocolHash('ChallengeDomainHash', {
+            payload: { target: 'accepted-target-context' },
+            purpose: 'fixture-target-context-v1',
         }),
         targetFinalityRecordHash: targetFinalityRecord.targetFinalityRecordHash,
         targetFinalityCheckpointHash: checkpoint.targetFinalityCheckpointHash,
@@ -189,8 +192,9 @@ export const createTargetAcceptedRecord = (
             evaluationProofRecord.evaluationProofRecordHash,
         evaluationProofProfileHash:
             evaluationProofRecord.evaluationProofProfileHash,
-        targetPreimageHash: deriveProtocolHash('TargetPreimageHash', {
-            target: 'accepted-target-preimage',
+        targetPreimageHash: deriveProtocolHash('ChallengeDomainHash', {
+            payload: { target: 'accepted-target-preimage' },
+            purpose: 'fixture-target-preimage-v1',
         }),
         targetCiphertextHash: evaluationProofRecord.targetCiphertextHash,
         targetLayoutHash: evaluationProofRecord.targetLayoutHash,
@@ -272,12 +276,18 @@ export const createDecryptionShare = (
         kllpsTargetDecryptionProfileHash:
             targetAcceptedRecord.kllpsTargetDecryptionProfileHash,
         targetDecryptionPreparationRecordHash: deriveProtocolHash(
-            'TargetDecryptionPreparationRecordHash',
-            { target: 'accepted-target-decryption-preparation' },
+            'ChallengeDomainHash',
+            {
+                payload: { target: 'accepted-target-decryption-preparation' },
+                purpose: 'fixture-target-decryption-preparation-record-v1',
+            },
         ),
         targetDecryptionCiphertextHash: deriveProtocolHash(
-            'TargetDecryptionCiphertextHash',
-            { target: 'accepted-target-decryption-ciphertext' },
+            'ChallengeDomainHash',
+            {
+                payload: { target: 'accepted-target-decryption-ciphertext' },
+                purpose: 'fixture-target-decryption-ciphertext-v1',
+            },
         ),
         targetBasisHash: targetAcceptedRecord.targetBasisHash,
         thresholdShareVerificationKeyRoot: deriveProtocolHash(
@@ -358,12 +368,10 @@ export const createLocalReplayRecord = (
         }),
         recoveryEpoch: 0,
         deviceEpoch: 0,
-        localReplayDiagnosticHash: deriveProtocolHash(
-            'LocalReplayDiagnosticHash',
-            {
-                replay: 'participant-1',
-            },
-        ),
+        localReplayDiagnosticHash: deriveProtocolHash('ChallengeDomainHash', {
+            payload: { replay: 'participant-1' },
+            purpose: 'fixture-local-replay-diagnostic-v1',
+        }),
     } as const;
     const localReplayRecordHash = deriveLocalReplayRecordHash(payload);
 

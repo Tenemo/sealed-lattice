@@ -177,32 +177,24 @@ pub(crate) fn collect_proof_bytes_refusals(
         return Vec::new();
     };
     let mut refused_objects = Vec::new();
-    let proof_bytes = match decode_hex(proof_bytes_hex) {
-        Ok(proof_bytes) if allow_empty_proof_bytes || !proof_bytes.is_empty() => proof_bytes,
-        _ => {
-            let required_shape = if allow_empty_proof_bytes {
-                "lowercase hexadecimal bytes"
-            } else {
-                "non-empty lowercase hexadecimal bytes"
-            };
-            refused_objects.push(structural_refusal(
-                format!("{proof_label} proof bytes must be {required_shape}."),
-                proof_record_hash,
-            ));
+    let Some(proof_size_bytes) = super::hash_helpers::proof_bytes_size_from_lower_hex(
+        proof_bytes_hex,
+        allow_empty_proof_bytes,
+    ) else {
+        let required_shape = if allow_empty_proof_bytes {
+            "lowercase hexadecimal bytes"
+        } else {
+            "non-empty lowercase hexadecimal bytes"
+        };
+        refused_objects.push(structural_refusal(
+            format!("{proof_label} proof bytes must be {required_shape}."),
+            proof_record_hash,
+        ));
 
-            return refused_objects;
-        }
+        return refused_objects;
     };
-    let proof_size_bytes = proof_bytes.len() as u64;
-    let proof_bytes_hash = derive_hash(
-        "ProofBytesHash",
-        &json!({
-            "objectType": "ProofBytes",
-            "objectVersion": 1,
-            "proofBytesHex": proof_bytes_hex,
-            "proofSizeBytes": proof_size_bytes,
-        }),
-    );
+    let proof_bytes_hash =
+        derive_protocol_hash_for_proof_bytes_payload(proof_bytes_hex, proof_size_bytes).ok();
 
     if Some(proof_size_bytes) != expected_proof_size_bytes {
         refused_objects.push(structural_refusal(

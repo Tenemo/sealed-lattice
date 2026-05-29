@@ -255,26 +255,29 @@ export const buildReferenceOracleHashBindings = (
     };
 
     return {
-        referenceOracleCommitHash: deriveProtocolHash(
-            'ReferenceOracleCommitHash',
-            commitRecord,
-        ),
+        referenceOracleCommitHash: deriveProtocolHash('ChallengeDomainHash', {
+            payload: commitRecord,
+            purpose: 'lattigo-reference-oracle-commit-v1',
+        }),
         referenceOracleContainerHash: deriveProtocolHash(
-            'ReferenceOracleContainerHash',
-            containerRecord,
+            'ChallengeDomainHash',
+            {
+                payload: containerRecord,
+                purpose: 'lattigo-reference-oracle-container-v1',
+            },
         ),
-        referenceOracleCommandHash: deriveProtocolHash(
-            'ReferenceOracleCommandHash',
-            commandRecord,
-        ),
-        referenceOracleVectorRoot: deriveProtocolHash(
-            'ReferenceOracleVectorRoot',
-            vectorRecord,
-        ),
-        referenceOracleProfileHash: deriveProtocolHash(
-            'ReferenceOracleProfileHash',
-            profileRecord,
-        ),
+        referenceOracleCommandHash: deriveProtocolHash('ChallengeDomainHash', {
+            payload: commandRecord,
+            purpose: 'lattigo-reference-oracle-command-v1',
+        }),
+        referenceOracleVectorRoot: deriveProtocolHash('ChallengeDomainHash', {
+            payload: vectorRecord,
+            purpose: 'lattigo-reference-oracle-vector-root-v1',
+        }),
+        referenceOracleProfileHash: deriveProtocolHash('ChallengeDomainHash', {
+            payload: profileRecord,
+            purpose: 'lattigo-reference-oracle-profile-v1',
+        }),
         records: {
             commitRecord,
             containerRecord,
@@ -380,7 +383,7 @@ export const verifyPinnedReference = async (): Promise<{
 
 const runDockerOracle = async (): Promise<void> => {
     await new Promise<void>((resolve, reject) => {
-        const imageName = 'sealed-lattice-lattigo-oracle:m7';
+        const imageName = 'sealed-lattice-lattigo-oracle:bgv-rns';
         const build = spawn(
             'docker',
             [
@@ -411,7 +414,7 @@ const runDockerOracle = async (): Promise<void> => {
     await new Promise<void>((resolve, reject) => {
         const run = spawn(
             'docker',
-            ['run', '--rm', 'sealed-lattice-lattigo-oracle:m7'],
+            ['run', '--rm', 'sealed-lattice-lattigo-oracle:bgv-rns'],
             {
                 cwd: repoRoot,
                 stdio: 'inherit',

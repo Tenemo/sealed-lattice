@@ -23,7 +23,7 @@ pub(crate) const BALLOT_SCORE_ENCODING_PROFILE_ID: &str =
 pub(crate) const BALLOT_SHARE_LAYOUT_PROFILE_ID: &str =
     "ballot-share-layout-score-plus-one-hot-buckets-v1";
 pub(crate) const AGGREGATE_INPUT_ENCODING_PROFILE_ID: &str =
-    "aggregate-input-encoding-profile-m6-derived-shares-v1";
+    "aggregate-input-encoding-profile-aggregate-derivation-shares-v1";
 pub(crate) const ENCODED_AGGREGATE_LAYOUT_ID: &str =
     "encoded-aggregate-layout-encrypted-aggregate-input-v1";
 pub(crate) const TOP_K_EVALUATOR_INPUT_LAYOUT_ID: &str =
@@ -385,7 +385,7 @@ pub(crate) fn layout_hash() -> CanonicalResult<String> {
             "profileHash": profile_hash()?,
             "slotCount": POLYNOMIAL_DEGREE,
             "coordinateField": "GF(65537)",
-            "source": "M6AggregateShareCoordinates",
+            "source": "AggregateDerivationShareCoordinates",
             "bridgePath": "EncryptedAggregateBridge-v1",
             "witnessPrivacy": "contributor-private-aggregate-shares",
         }),
@@ -425,8 +425,8 @@ pub(crate) fn aggregate_input_encoding_profile_hash() -> CanonicalResult<String>
         "AggregateInputEncodingProfileHash",
         &json!({
             "profileId": AGGREGATE_INPUT_ENCODING_PROFILE_ID,
-            "sourceMilestone": "M6",
-            "sourceObject": "M6DerivedAggregateShareCoordinates",
+            "sourceRelation": "aggregate derivation",
+            "sourceObject": "AggregateDerivationShareCoordinates",
             "bridgePath": "EncryptedAggregateBridge-v1",
             "witnessPrivacy": "contributor-private-aggregate-shares",
         }),
@@ -721,59 +721,81 @@ mod tests {
     fn selected_profile_hashes_are_stable_hex_roots() {
         let stable_hashes = [
             (
+                "profile",
                 profile_hash(),
                 "4a2efbb3218fcbde79d396688ebd4bf5f5ed7300f23316e6900aa0cb7dd0057bccc3892df183a6a4f628cc26c8163cf9b226e37f54519216067be5efd5ca743e",
             ),
             (
+                "batch encoder",
                 batch_encoder_hash(),
-                "a4174e452575ce1e5a879a7c21c0d30c00fd05547a276f630cf5d5f5cb25810870715436230bc4db244209bdd75794c3b59f5d4b2435052a8eac00041fd137f5",
+                "b76e6b5f37b480032f9f1770f854f6102483f737c0c3d7740ee9f837141648e55ce6b502649661ebd0284e0870a70ea6d8a9370e1afd3e130f62f6ef90885e0c",
             ),
             (
+                "layout",
                 layout_hash(),
-                "e973e1db3fa94a687ce6052db18107180fe1f49e62173777736ae7aef21bb329517826cdd10da64d083ddb7275817cec346873e43b3d47c3218a9ba82d70ef6e",
+                "cb0146fae3f1751991d30d0bc19d5005a733db746a5f91ceb8bb6fba557bf4326852ad22dc2530c3fe94ca9a066751befe8f3558cc9865a6091da385d65f6fe6",
             ),
             (
+                "batch layout binding",
                 batch_layout_binding_hash(),
-                "3bb25a676dc61ef33169966d56979638fc95efa887339506919d0c1ba64ec881c96d98453a7f2cc1d31b5eca7ce8b132022a12d3b58a1fe22c4355beaee58d6e",
+                "2bdddaf7eba3787d244cb6622e252b6ee9391a8d3aa22a23fa9e46a777d036a7d8852e38f664dec7fd50e2308bec608f896cbd3b3ae925844bc77f673330baab",
             ),
             (
+                "ballot score encoding profile",
                 ballot_score_encoding_profile_hash(),
                 "5d97f29a451d5e4bc1a5683e3edf1469296ee6347201beebf6091cf72a2e963cd67ed00ca353457cdb27230f8a58ebc88f498ffac4f9661e60e70dad27b373fa",
             ),
             (
+                "ballot share layout profile",
                 ballot_share_layout_profile_hash(),
                 "cfedd8025cebd77752d753d7e3a83a8a2c858e404d3a1d8ae5fae4ce297541d813b0f5505179dbd31842e8cf2aca71e0f259dfa109112c2e88fcea39a0e17dd5",
             ),
             (
+                "aggregate input encoding profile",
                 aggregate_input_encoding_profile_hash(),
-                "63fa5a814ccd438fd41c55b920a52cedff3c579041a814418a39b895ba6ab522c045ba0935fd36b3de4c447dd915e83570e8f6eca90bef39478e7883c816d139",
+                "3b4685fe3a76ba943b21bcf2cc775401671cb54fb2b4acea30b13637d86219b3d4f1fecfebdd538b7da83118ce3427e7f5935032296cc697f03c0d952764ddb4",
             ),
             (
+                "encoded aggregate layout",
                 encoded_aggregate_layout_hash(),
-                "4148f281d5a2bee306e19b55b2f74b8dff3454c4aa647873fa146819cbc163604772ef84cb6499296fa64a6402c197028d6c3cb852c85537bce3d3388656f49c",
+                "5326486ddf587930a12be856d2c79cf255c4d74aa0ab36c140f0882d90ad5a5bfb84785ac57143eb520e202afcb7101e409f8f77361f29f32001972ed869ad36",
             ),
             (
+                "top-k evaluator input layout",
                 top_k_evaluator_input_layout_hash(),
-                "6247fcd31bfc8f451440ab8523b120ceb6a2f75b18477a1b7d947076b7f302dd65eb6a9e5d18be2e475572fefa46c7db3f48ec5827c84469bae410ac6226c85f",
+                "f6b51420ef079f4553dc3383ec4d7a3db6ca0951b8f6d99ae6c60b42d058739ebeb66e0d95a0697c3891e798b910054781b925a7ce7601b128922cef50ad5640",
             ),
             (
+                "canonical ciphertext convention",
                 canonical_ciphertext_convention_hash(),
                 "f12e731e1096504c1ade1fb25422d610888e44bcc1936234b160774f2e60e83dc8bd9d9b3ff43ddb6195b5ea6baec08544088e562f86b439a252de76c20d3bc8",
             ),
             (
+                "allowed operation registry",
                 allowed_operation_registry_hash(),
-                "b0cd268f310023b6341b730d146d0376721fc67ac5a7a9aaef468047cc0bbb8c9f5bbd333aaf0d3d2dbbe558705148731e7d40bd23d04dedd619f6b41873696f",
+                "ca576ed087e0fbddd7e82bb439610a4e3c3c761bce521363a2ed7d6fbc1c836dbf97c42fa0acb645007452f52365ba27ca42d8382ea582ab27b23ddf38b30498",
             ),
             (
+                "security estimator input",
                 security_estimator_input_hash(),
                 "4bce752346f1caf9652f456f27645da0a19ff8c9cf5376eef941d9cb4411e22fa4c2f8eaf8707df98b7a48318ef3987ba85e656143e71587d68e16edfdb2f428",
             ),
         ];
 
-        for (actual_hash, expected_hash) in stable_hashes {
+        let mut mismatched_hashes = Vec::new();
+        for (profile_hash_label, actual_hash, expected_hash) in stable_hashes {
             let actual_hash = actual_hash.expect("hash should derive");
-            assert_eq!(actual_hash, expected_hash);
+            if actual_hash != expected_hash {
+                mismatched_hashes.push(format!(
+                    "{profile_hash_label}: expected {expected_hash}, received {actual_hash}"
+                ));
+            }
         }
+        assert!(
+            mismatched_hashes.is_empty(),
+            "{}",
+            mismatched_hashes.join("\n")
+        );
     }
 
     #[test]

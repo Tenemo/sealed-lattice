@@ -17,24 +17,24 @@ import {
     verifyShareCommitmentWitness,
     type ReceiverPayloadPlaintextWitness,
     type ShareCommitmentOpeningWitness,
-} from '../../src/ballot-privacy/lattice-primitives';
+} from '#packages/protocol/src/ballot-privacy/lattice-primitives';
 import {
     deriveProofBytesHash,
     deriveReceiverKeyProofEncodingProfileHash,
     deriveReceiverKeyProofParameterSetHash,
     deriveReceiverKeyProofPublicRandomnessHash,
-} from '../../src/ballot-privacy/objects';
-import { createBallotPrivacyProfileSet } from '../../src/ballot-privacy/profiles';
-import { createReceiverKeyProofBackendStatement } from '../../src/ballot-privacy/receiver-key-backend-statement';
+} from '#packages/protocol/src/ballot-privacy/objects';
+import { createBallotPrivacyProfileSet } from '#packages/protocol/src/ballot-privacy/profiles';
+import { createReceiverKeyProofBackendStatement } from '#packages/protocol/src/ballot-privacy/receiver-key-backend-statement';
 import {
     createReceiverKeyLinearProofStatement,
     verifyReceiverKeyLinearWitness,
-} from '../../src/ballot-privacy/receiver-key-linear-statement';
+} from '#packages/protocol/src/ballot-privacy/receiver-key-linear-statement';
 import {
     createReceiverKeyLinearProofEncoding,
     createReceiverKeyLinearProofParameterSet,
     createReceiverKeyProofMaterial,
-} from '../../src/ballot-privacy/receiver-key-proof-parameters';
+} from '#packages/protocol/src/ballot-privacy/receiver-key-proof-parameters';
 
 const hash = (label: string): ProtocolHash =>
     deriveProtocolHash('ActionContextHash', { label });

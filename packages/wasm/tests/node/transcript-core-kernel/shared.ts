@@ -13,8 +13,7 @@ import {
     createTranscriptCoreKernelLoader,
     type BallotPrivacyKernelVerification,
     type TranscriptCoreKernel,
-} from '../../../src/transcript-core-bridge';
-
+} from '#packages/wasm/src/transcript-core-bridge';
 import ballotFieldLinearProofBackendVectorsJson from '#test-vectors/ballot-privacy/ballot-field-linear-proof-vectors.json';
 import encodedRelationVectorsJson from '#test-vectors/ballot-privacy/encoded-ballot-linear-relation-vectors.json';
 import linearProofBackendVectorsJson from '#test-vectors/ballot-privacy/proof-backend-linear-vectors.json';
@@ -25,18 +24,6 @@ import malformedObjectFixturesJson from '#test-vectors/transcript-core/malformed
 
 type NamedFixture = {
     readonly caseName: string;
-};
-
-type TranscriptCoreKernelExportsForTests = WebAssembly.Exports & {
-    memory: WebAssembly.Memory;
-    sealed_lattice_allocate: (length: number) => number;
-    sealed_lattice_deallocate: (pointer: number, length: number) => void;
-    sealed_lattice_transcript_core_command_with_length: (
-        pointer: number,
-        length: number,
-        outputLengthPointer: number,
-    ) => number;
-    sealed_lattice_roundtrip: (pointer: number, length: number) => number;
 };
 
 const goldenTranscriptCoreFixtures =
@@ -297,8 +284,8 @@ const createMockKernelExports = ({
                     },
                 ),
                 sealed_lattice_roundtrip: vi.fn(() => roundTripPointer),
-            } as TranscriptCoreKernelExportsForTests,
-        } as WebAssembly.Instance,
+            },
+        },
         module: fakeModule,
     };
 

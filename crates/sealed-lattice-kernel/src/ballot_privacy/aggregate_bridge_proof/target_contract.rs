@@ -15,7 +15,7 @@ pub(super) fn bridge_proof_target_contract_value(
     );
     let shared_witness_layout_hash = shared_witness_layout_hash(&shared_witness_layout)?;
 
-    Ok(json!({
+    let mut target_contract = json!({
         "objectType": "AggregateBridgeProofTargetContract",
         "objectVersion": 1,
         "bridgeProofProfileId": BRIDGE_PROOF_PROFILE_ID,
@@ -41,7 +41,6 @@ pub(super) fn bridge_proof_target_contract_value(
         "sharedWitnessBindingStatus": SHARED_WITNESS_BINDING_CHECKED_STATUS,
         "sharedWitnessChallengeBitsPerCheck": SHARED_WITNESS_CHALLENGE_BITS_PER_CHECK,
         "sharedWitnessCheckCount": BRIDGE_SHARED_WITNESS_CHECK_COUNT as u64,
-        "sharedWitnessSoundnessBits": BRIDGE_SHARED_WITNESS_SOUNDNESS_BITS,
         "sharedWitnessZeroKnowledgeStatus": SHARED_WITNESS_ZERO_KNOWLEDGE_STATUS,
         "sameWitnessLinkageModel": SAME_WITNESS_LINKAGE_MODEL,
         "separateSubproofsClosureStatus": SEPARATE_SUBPROOFS_CLOSURE_STATUS,
@@ -58,7 +57,57 @@ pub(super) fn bridge_proof_target_contract_value(
         "bridgeClaimClosureStatus": BRIDGE_CLAIM_CLOSURE_STATUS,
         "hwangPiopStatus": HWANG_PIOP_DEFERRED_STATUS,
         "naiveLinearExpansionBackendStatus": NAIVE_LINEAR_EXPANSION_BACKEND_STATUS,
-    }))
+    });
+    let target_contract_object = target_contract.as_object_mut().ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "encrypted aggregate bridge target contract must be an object",
+        )
+    })?;
+    for (field_name, field_value) in [
+        (
+            "bgvEncryptionKeyMaterialKind",
+            Value::String(BGV_ENCRYPTION_KEY_MATERIAL_KIND.to_string()),
+        ),
+        ("developmentKeyOnly", Value::Bool(DEVELOPMENT_KEY_ONLY)),
+        ("thresholdDecryptable", Value::Bool(THRESHOLD_DECRYPTABLE)),
+        (
+            "claimBearingBridgeEncryption",
+            Value::Bool(CLAIM_BEARING_BRIDGE_ENCRYPTION),
+        ),
+        (
+            "sharedWitnessChallengeEntropyBits",
+            json!(BRIDGE_SHARED_WITNESS_CHALLENGE_ENTROPY_BITS),
+        ),
+        (
+            "sharedWitnessWeakestRelation",
+            Value::String(PLAINTEXT_ENCODING_RELATION.to_string()),
+        ),
+        (
+            "sharedWitnessWeakestRelationModulus",
+            json!(BRIDGE_SHARED_WITNESS_WEAKEST_RELATION_MODULUS),
+        ),
+        (
+            "sharedWitnessRejectionAttemptLimit",
+            json!(BRIDGE_SHARED_WITNESS_REJECTION_ATTEMPT_LIMIT as u64),
+        ),
+        (
+            "sharedWitnessGrindingDiscountBitsPerCheck",
+            json!(SHARED_WITNESS_REJECTION_ATTEMPT_GRINDING_BITS_PER_CHECK),
+        ),
+        (
+            "sharedWitnessUnadjustedWeakestRelationSoundnessBitsFloor",
+            json!(BRIDGE_SHARED_WITNESS_UNADJUSTED_WEAKEST_RELATION_SOUNDNESS_BITS_FLOOR),
+        ),
+        (
+            "sharedWitnessEffectiveBindingSoundnessBitsFloor",
+            json!(BRIDGE_SHARED_WITNESS_EFFECTIVE_BINDING_SOUNDNESS_BITS_FLOOR),
+        ),
+    ] {
+        target_contract_object.insert(field_name.to_string(), field_value);
+    }
+
+    Ok(target_contract)
 }
 
 fn shared_witness_layout_value(
@@ -158,7 +207,7 @@ pub(super) fn validate_bridge_proof_target_contract(
     if target_contract != &expected_target_contract {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
-            "M9 bridge proof target contract does not match the relation requirements",
+            "encrypted aggregate bridge proof target contract does not match the relation requirements",
         ));
     }
     let expected_target_contract_hash =

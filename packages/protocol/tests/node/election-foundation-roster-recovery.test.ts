@@ -259,8 +259,11 @@ describe('roster and manifest shells', () => {
                 manifestOpaqueBindings: {
                     ...manifestOpaqueBindings,
                     unexpectedBridgeBindingHash: deriveProtocolHash(
-                        'BridgeLayoutHash',
-                        { profile: 'unexpected-profile-binding' },
+                        'ChallengeDomainHash',
+                        {
+                            payload: { profile: 'unexpected-profile-binding' },
+                            purpose: 'fixture-unexpected-bridge-binding-v1',
+                        },
                     ),
                 } as typeof manifestOpaqueBindings,
             },

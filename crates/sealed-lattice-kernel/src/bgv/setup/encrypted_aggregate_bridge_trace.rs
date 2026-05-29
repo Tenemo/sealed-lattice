@@ -4,7 +4,7 @@ use num_bigint::BigInt;
 use num_traits::ToPrimitive;
 
 #[derive(Clone, Debug)]
-pub(crate) struct M9BridgeCiphertextRelationTrace {
+pub(crate) struct EncryptedAggregateBridgeCiphertextRelationTrace {
     pub(crate) public_artifact: Value,
     pub(crate) supplied_plaintext_slots: Vec<u64>,
     pub(crate) padded_plaintext_slots: Vec<u64>,
@@ -14,7 +14,7 @@ pub(crate) struct M9BridgeCiphertextRelationTrace {
     pub(crate) encryption_error_one_coefficients: Vec<i64>,
 }
 
-impl M9BridgeCiphertextRelationTrace {
+impl EncryptedAggregateBridgeCiphertextRelationTrace {
     fn validate_shape(&self, supplied_slot_count: usize) -> CanonicalResult<()> {
         if self.supplied_plaintext_slots.len() != supplied_slot_count
             || self.padded_plaintext_slots.len() != POLYNOMIAL_DEGREE
@@ -25,7 +25,7 @@ impl M9BridgeCiphertextRelationTrace {
         {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::MalformedLength,
-                "M9 bridge ciphertext relation trace has inconsistent witness dimensions",
+                "encrypted aggregate bridge ciphertext relation trace has inconsistent witness dimensions",
             ));
         }
         if self
@@ -37,7 +37,7 @@ impl M9BridgeCiphertextRelationTrace {
         {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
-                "M9 bridge ciphertext relation trace contains a non-canonical plaintext coefficient",
+                "encrypted aggregate bridge ciphertext relation trace contains a non-canonical plaintext coefficient",
             ));
         }
         if self
@@ -47,7 +47,7 @@ impl M9BridgeCiphertextRelationTrace {
         {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
-                "M9 bridge ciphertext relation trace randomizer is outside the declared support",
+                "encrypted aggregate bridge ciphertext relation trace randomizer is outside the declared support",
             ));
         }
         if self
@@ -58,7 +58,7 @@ impl M9BridgeCiphertextRelationTrace {
         {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
-                "M9 bridge ciphertext relation trace error coefficient is outside the declared support",
+                "encrypted aggregate bridge ciphertext relation trace error coefficient is outside the declared support",
             ));
         }
 
@@ -67,16 +67,16 @@ impl M9BridgeCiphertextRelationTrace {
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn generate_m9_bridge_ciphertext_relation_trace_from_slots(
+pub(crate) fn generate_encrypted_aggregate_bridge_ciphertext_relation_trace_from_slots(
     setup_package: &Value,
     contributor_identity: &str,
     aggregate_derivation_component_hash: &str,
     aggregate_derivation_statement_hash: &str,
     post_voting_closed_context_hash: &str,
     reduced_aggregate_slots: &[u64],
-    prover_randomness_hex: &str,
+    encryption_randomness_seed_hex: &str,
     include_canonical_bytes_hex: bool,
-) -> CanonicalResult<M9BridgeCiphertextRelationTrace> {
+) -> CanonicalResult<EncryptedAggregateBridgeCiphertextRelationTrace> {
     validation::validate_setup_package_shape(setup_package)?;
     validation::validate_setup_package_internal_bindings(setup_package)?;
 
@@ -84,6 +84,10 @@ pub(crate) fn generate_m9_bridge_ciphertext_relation_trace_from_slots(
     let collective_public_key_root = string_at_path(
         setup_package,
         &["collectivePublicKey", "collectivePublicKeyRoot"],
+    )?;
+    let collective_public_key_coefficient_root = string_at_path(
+        setup_package,
+        &["collectivePublicKey", "collectivePublicKeyCoefficientRoot"],
     )?;
     let bgv_public_key_root =
         string_at_path(setup_package, &["collectivePublicKey", "bgvPublicKeyRoot"])?;
@@ -105,7 +109,7 @@ pub(crate) fn generate_m9_bridge_ciphertext_relation_trace_from_slots(
             aggregate_derivation_component_hash.as_bytes(),
             aggregate_derivation_statement_hash.as_bytes(),
             post_voting_closed_context_hash.as_bytes(),
-            prover_randomness_hex.as_bytes(),
+            encryption_randomness_seed_hex.as_bytes(),
         ],
     );
     let encryption_randomness_coefficients = dense_small_coefficients(
@@ -125,21 +129,25 @@ pub(crate) fn generate_m9_bridge_ciphertext_relation_trace_from_slots(
         "aggregate-bridge-encryption",
         "encryption-error-one",
     );
-    let public_sample_label = format!(
-        "aggregate-bridge-encryption-public-sample:{aggregate_derivation_statement_hash}:{contributor_identity}"
-    );
     let mut component_zero_residues_by_modulus = Vec::with_capacity(DATA_PRIMES.len());
     let mut component_one_residues_by_modulus = Vec::with_capacity(DATA_PRIMES.len());
     let mut sampled_relation_checks = Vec::new();
+    let collective_key_coefficients_by_modulus =
+        super::key_material::collective_public_key_coefficients_by_modulus_from_setup_package(
+            setup_package,
+        )?;
 
     for (modulus_index, modulus) in DATA_PRIMES.iter().copied().enumerate() {
-        let public_key_coefficients = dense_public_residues(
-            setup_seed_hash,
-            "development-collective-public-key-coefficients",
-            modulus,
-        );
-        let public_sample_coefficients =
-            dense_public_residues(setup_seed_hash, &public_sample_label, modulus);
+        let collective_key_coefficients = collective_key_coefficients_by_modulus
+            .get(modulus_index)
+            .ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::MalformedLength,
+                    "encrypted aggregate bridge collective public key coefficient table is missing a data limb",
+                )
+            })?;
+        let public_key_coefficients = &collective_key_coefficients.component_zero_coefficients;
+        let public_sample_coefficients = &collective_key_coefficients.component_one_coefficients;
         let randomness_residues = encryption_randomness_coefficients
             .iter()
             .map(|coefficient| signed_to_modulus_residue(*coefficient, modulus))
@@ -153,9 +161,9 @@ pub(crate) fn generate_m9_bridge_ciphertext_relation_trace_from_slots(
             .map(|coefficient| signed_to_modulus_residue(*coefficient, modulus))
             .collect::<Vec<_>>();
         let public_key_product =
-            negacyclic_product_mod(&public_key_coefficients, &randomness_residues, modulus)?;
+            negacyclic_product_mod(public_key_coefficients, &randomness_residues, modulus)?;
         let public_sample_product =
-            negacyclic_product_mod(&public_sample_coefficients, &randomness_residues, modulus)?;
+            negacyclic_product_mod(public_sample_coefficients, &randomness_residues, modulus)?;
         let message_residues = encoded
             .polynomial
             .residues_by_modulus
@@ -163,7 +171,7 @@ pub(crate) fn generate_m9_bridge_ciphertext_relation_trace_from_slots(
             .ok_or_else(|| {
                 CanonicalError::new(
                     CanonicalErrorCode::MalformedLength,
-                    "M9 bridge plaintext is missing a selected data-basis residue limb",
+                    "encrypted aggregate bridge plaintext is missing a selected data-basis residue limb",
                 )
             })?;
         let ciphertext_component_zero = public_key_product
@@ -224,6 +232,7 @@ pub(crate) fn generate_m9_bridge_ciphertext_relation_trace_from_slots(
             "rosterHash": roster_hash,
             "thresholdProfileHash": threshold_profile_hash,
             "collectivePublicKeyRoot": collective_public_key_root,
+            "collectivePublicKeyCoefficientRoot": collective_public_key_coefficient_root,
             "bgvPublicKeyRoot": bgv_public_key_root,
             "plaintextRoot": plaintext_root,
             "ciphertextRoot": ciphertext_root,
@@ -241,6 +250,7 @@ pub(crate) fn generate_m9_bridge_ciphertext_relation_trace_from_slots(
         "rustBgvBackendProfileHash": backend_profile_hash()?,
         "canonicalCiphertextConventionHash": canonical_ciphertext_convention_hash()?,
         "collectivePublicKeyRoot": collective_public_key_root,
+        "collectivePublicKeyCoefficientRoot": collective_public_key_coefficient_root,
         "bgvPublicKeyRoot": bgv_public_key_root,
         "plaintextRoot": plaintext_root,
         "ciphertextRoot": ciphertext_root,
@@ -275,7 +285,9 @@ pub(crate) fn generate_m9_bridge_ciphertext_relation_trace_from_slots(
             "AggregateBridgePlaintextAssembled",
             "AggregateBridgeCiphertextGenerated",
             "CollectivePublicKeyRootBound",
-            "DevelopmentBgvCiphertextEquationRelation",
+            "BgvPublicKeyCoefficientMaterialBound",
+            "NotThresholdDecryptableBridgeCiphertext",
+            "PassiveCollectiveBgvCiphertextEquationRelation",
             "BgvRandomnessBoundProofMissing",
             "CoefficientDomainCanonical",
             "BridgeProofBackendStillRequired"
@@ -285,7 +297,7 @@ pub(crate) fn generate_m9_bridge_ciphertext_relation_trace_from_slots(
         result["canonicalBytesHex"] = Value::String(canonical_bytes_hex(&canonical_bytes));
     }
 
-    let trace = M9BridgeCiphertextRelationTrace {
+    let trace = EncryptedAggregateBridgeCiphertextRelationTrace {
         public_artifact: result,
         supplied_plaintext_slots: reduced_aggregate_slots.to_vec(),
         padded_plaintext_slots: encoded.slots,
@@ -299,7 +311,7 @@ pub(crate) fn generate_m9_bridge_ciphertext_relation_trace_from_slots(
     Ok(trace)
 }
 
-pub(crate) fn m9_bridge_batch_encoding_commitment_hash_from_responses(
+pub(crate) fn encrypted_aggregate_bridge_batch_encoding_commitment_hash_from_responses(
     reduced_slot_response: &[BigInt],
     plaintext_coefficient_response: &[BigInt],
 ) -> CanonicalResult<String> {
@@ -308,7 +320,7 @@ pub(crate) fn m9_bridge_batch_encoding_commitment_hash_from_responses(
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
-            "M9 bridge batch encoding proof response dimensions are invalid",
+            "encrypted aggregate bridge batch encoding proof response dimensions are invalid",
         ));
     }
     let plaintext_modulus_bigint = BigInt::from(PLAINTEXT_MODULUS);
@@ -346,10 +358,10 @@ pub(crate) fn m9_bridge_batch_encoding_commitment_hash_from_responses(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn m9_bridge_ciphertext_commitment_hash_from_responses(
+pub(crate) fn encrypted_aggregate_bridge_ciphertext_commitment_hash_from_responses(
     setup_package: &Value,
-    contributor_identity: &str,
-    aggregate_derivation_statement_hash: &str,
+    _contributor_identity: &str,
+    _aggregate_derivation_statement_hash: &str,
     bridge_encryption: &Value,
     challenge_scalar: u64,
     plaintext_coefficient_response: &[BigInt],
@@ -366,7 +378,7 @@ pub(crate) fn m9_bridge_ciphertext_commitment_hash_from_responses(
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
-            "M9 bridge ciphertext proof response dimensions are invalid",
+            "encrypted aggregate bridge ciphertext proof response dimensions are invalid",
         ));
     }
     let canonical_bytes_hex = string_at_path(bridge_encryption, &["canonicalBytesHex"])?;
@@ -374,7 +386,7 @@ pub(crate) fn m9_bridge_ciphertext_commitment_hash_from_responses(
     if ciphertext.object_kind != BgvObjectKind::Ciphertext || ciphertext.components.len() != 2 {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "M9 bridge proof response verifier requires a two-component ciphertext",
+            "encrypted aggregate bridge proof response verifier requires a two-component ciphertext",
         ));
     }
     for component in &ciphertext.components {
@@ -386,27 +398,30 @@ pub(crate) fn m9_bridge_ciphertext_commitment_hash_from_responses(
         {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::ProfileComponentMismatch,
-                "M9 bridge proof ciphertext must cover the full data basis",
+                "encrypted aggregate bridge proof ciphertext must cover the full data basis",
             ));
         }
     }
 
-    let setup_seed_hash = string_at_path(setup_package, &["setupInputs", "setupSeedHash"])?;
-    let public_sample_label = format!(
-        "aggregate-bridge-encryption-public-sample:{aggregate_derivation_statement_hash}:{contributor_identity}"
-    );
     let mut component_zero_residues_by_modulus = Vec::with_capacity(DATA_PRIMES.len());
     let mut component_one_residues_by_modulus = Vec::with_capacity(DATA_PRIMES.len());
+    let collective_key_coefficients_by_modulus =
+        super::key_material::collective_public_key_coefficients_by_modulus_from_setup_package(
+            setup_package,
+        )?;
 
     for (modulus_index, modulus) in DATA_PRIMES.iter().copied().enumerate() {
         let modulus_bigint = BigInt::from(modulus);
-        let public_key_coefficients = dense_public_residues(
-            setup_seed_hash,
-            "development-collective-public-key-coefficients",
-            modulus,
-        );
-        let public_sample_coefficients =
-            dense_public_residues(setup_seed_hash, &public_sample_label, modulus);
+        let collective_key_coefficients = collective_key_coefficients_by_modulus
+            .get(modulus_index)
+            .ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::MalformedLength,
+                    "encrypted aggregate bridge proof collective public key coefficient table is missing a data limb",
+                )
+            })?;
+        let public_key_coefficients = &collective_key_coefficients.component_zero_coefficients;
+        let public_sample_coefficients = &collective_key_coefficients.component_one_coefficients;
         let randomizer_residues = randomizer_response
             .iter()
             .map(|coefficient| signed_bigint_to_modulus_residue(coefficient, &modulus_bigint))
@@ -424,9 +439,9 @@ pub(crate) fn m9_bridge_ciphertext_commitment_hash_from_responses(
             .map(|coefficient| signed_bigint_to_modulus_residue(coefficient, &modulus_bigint))
             .collect::<Vec<_>>();
         let public_key_product =
-            negacyclic_product_mod(&public_key_coefficients, &randomizer_residues, modulus)?;
+            negacyclic_product_mod(public_key_coefficients, &randomizer_residues, modulus)?;
         let public_sample_product =
-            negacyclic_product_mod(&public_sample_coefficients, &randomizer_residues, modulus)?;
+            negacyclic_product_mod(public_sample_coefficients, &randomizer_residues, modulus)?;
         let challenge_residue = challenge_scalar % modulus;
         let ciphertext_component_zero = ciphertext.components[0]
             .residues_by_modulus
@@ -434,7 +449,7 @@ pub(crate) fn m9_bridge_ciphertext_commitment_hash_from_responses(
             .ok_or_else(|| {
                 CanonicalError::new(
                     CanonicalErrorCode::MalformedLength,
-                    "M9 bridge proof ciphertext component zero is missing a data limb",
+                    "encrypted aggregate bridge proof ciphertext component zero is missing a data limb",
                 )
             })?;
         let ciphertext_component_one = ciphertext.components[1]
@@ -443,7 +458,7 @@ pub(crate) fn m9_bridge_ciphertext_commitment_hash_from_responses(
             .ok_or_else(|| {
                 CanonicalError::new(
                     CanonicalErrorCode::MalformedLength,
-                    "M9 bridge proof ciphertext component one is missing a data limb",
+                    "encrypted aggregate bridge proof ciphertext component one is missing a data limb",
                 )
             })?;
 
@@ -516,7 +531,7 @@ fn signed_bigint_to_modulus_residue(value: &BigInt, modulus_bigint: &BigInt) -> 
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn verify_m9_bridge_ciphertext_public_bindings(
+pub(crate) fn verify_encrypted_aggregate_bridge_ciphertext_public_bindings(
     setup_package: &Value,
     aggregate_derivation_component_hash: &str,
     aggregate_derivation_statement_hash: &str,
@@ -529,6 +544,10 @@ pub(crate) fn verify_m9_bridge_ciphertext_public_bindings(
     let collective_public_key_root = string_at_path(
         setup_package,
         &["collectivePublicKey", "collectivePublicKeyRoot"],
+    )?;
+    let collective_public_key_coefficient_root = string_at_path(
+        setup_package,
+        &["collectivePublicKey", "collectivePublicKeyCoefficientRoot"],
     )?;
     let bgv_public_key_root =
         string_at_path(setup_package, &["collectivePublicKey", "bgvPublicKeyRoot"])?;
@@ -549,6 +568,7 @@ pub(crate) fn verify_m9_bridge_ciphertext_public_bindings(
             "rosterHash": roster_hash,
             "thresholdProfileHash": threshold_profile_hash,
             "collectivePublicKeyRoot": collective_public_key_root,
+            "collectivePublicKeyCoefficientRoot": collective_public_key_coefficient_root,
             "bgvPublicKeyRoot": bgv_public_key_root,
             "plaintextRoot": plaintext_root,
             "ciphertextRoot": ciphertext_root,
@@ -558,37 +578,43 @@ pub(crate) fn verify_m9_bridge_ciphertext_public_bindings(
         }),
     )?;
 
-    compare_m9_bridge_string_at_path(
+    compare_encrypted_aggregate_bridge_string_at_path(
         bridge_encryption,
         &["profileHash"],
         &profile_hash()?,
         "BGV profile hash",
     )?;
-    compare_m9_bridge_string_at_path(
+    compare_encrypted_aggregate_bridge_string_at_path(
         bridge_encryption,
         &["rustBgvBackendProfileHash"],
         &backend_profile_hash()?,
         "Rust BGV backend profile hash",
     )?;
-    compare_m9_bridge_string_at_path(
+    compare_encrypted_aggregate_bridge_string_at_path(
         bridge_encryption,
         &["canonicalCiphertextConventionHash"],
         &canonical_ciphertext_convention_hash()?,
         "canonical ciphertext convention hash",
     )?;
-    compare_m9_bridge_string_at_path(
+    compare_encrypted_aggregate_bridge_string_at_path(
         bridge_encryption,
         &["collectivePublicKeyRoot"],
         collective_public_key_root,
         "collective public key root",
     )?;
-    compare_m9_bridge_string_at_path(
+    compare_encrypted_aggregate_bridge_string_at_path(
+        bridge_encryption,
+        &["collectivePublicKeyCoefficientRoot"],
+        collective_public_key_coefficient_root,
+        "collective public key coefficient root",
+    )?;
+    compare_encrypted_aggregate_bridge_string_at_path(
         bridge_encryption,
         &["bgvPublicKeyRoot"],
         bgv_public_key_root,
         "BGV public key root",
     )?;
-    compare_m9_bridge_string_at_path(
+    compare_encrypted_aggregate_bridge_string_at_path(
         bridge_encryption,
         &["basisId"],
         BgvBasisKind::Data.basis_id(),
@@ -597,7 +623,7 @@ pub(crate) fn verify_m9_bridge_ciphertext_public_bindings(
     if usize_at_path(bridge_encryption, &["level"])? != DATA_PRIMES.len() - 1 {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
-            "M9 bridge ciphertext level does not match the full data basis",
+            "encrypted aggregate bridge ciphertext level does not match the full data basis",
         ));
     }
     if usize_at_path(bridge_encryption, &["coefficientCount"])? != POLYNOMIAL_DEGREE
@@ -605,10 +631,10 @@ pub(crate) fn verify_m9_bridge_ciphertext_public_bindings(
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
-            "M9 bridge ciphertext dimensions do not match the selected BGV profile",
+            "encrypted aggregate bridge ciphertext dimensions do not match the selected BGV profile",
         ));
     }
-    compare_m9_bridge_string_at_path(
+    compare_encrypted_aggregate_bridge_string_at_path(
         bridge_encryption,
         &["encryptedAggregateShareCiphertextRoot"],
         &expected_encrypted_aggregate_share_ciphertext_root,
@@ -618,7 +644,7 @@ pub(crate) fn verify_m9_bridge_ciphertext_public_bindings(
     Ok(())
 }
 
-fn compare_m9_bridge_string_at_path(
+fn compare_encrypted_aggregate_bridge_string_at_path(
     value: &Value,
     path: &[&str],
     expected: &str,
@@ -628,9 +654,56 @@ fn compare_m9_bridge_string_at_path(
     if actual != expected {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
-            format!("M9 bridge {description} does not match its canonical binding"),
+            format!(
+                "encrypted aggregate bridge {description} does not match its canonical binding"
+            ),
         ));
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn batch_encoding_commitment_accepts_false_plaintext_when_challenge_is_zero_mod_plaintext_modulus()
+     {
+        let aggregate_slot_mask_response = vec![BigInt::from(0_u8)];
+        let plaintext_coefficient_mask_response = vec![BigInt::from(0_u8); POLYNOMIAL_DEGREE];
+        let honest_mask_commitment =
+            encrypted_aggregate_bridge_batch_encoding_commitment_hash_from_responses(
+                &aggregate_slot_mask_response,
+                &plaintext_coefficient_mask_response,
+            )
+            .expect("zero mask commitment should hash");
+
+        let false_plaintext_witness = BigInt::from(1_u8);
+        let weak_challenge = BigInt::from(PLAINTEXT_MODULUS);
+        let weak_aggregate_slot_response = vec![BigInt::from(0_u8)];
+        let mut weak_plaintext_coefficient_response = vec![BigInt::from(0_u8); POLYNOMIAL_DEGREE];
+        weak_plaintext_coefficient_response[0] = &weak_challenge * &false_plaintext_witness;
+        let weak_commitment =
+            encrypted_aggregate_bridge_batch_encoding_commitment_hash_from_responses(
+                &weak_aggregate_slot_response,
+                &weak_plaintext_coefficient_response,
+            )
+            .expect("weak challenge response should hash");
+
+        let ordinary_challenge = BigInt::from(1_u8);
+        let ordinary_aggregate_slot_response = vec![BigInt::from(0_u8)];
+        let mut ordinary_plaintext_coefficient_response =
+            vec![BigInt::from(0_u8); POLYNOMIAL_DEGREE];
+        ordinary_plaintext_coefficient_response[0] = &ordinary_challenge * &false_plaintext_witness;
+        let ordinary_commitment =
+            encrypted_aggregate_bridge_batch_encoding_commitment_hash_from_responses(
+                &ordinary_aggregate_slot_response,
+                &ordinary_plaintext_coefficient_response,
+            )
+            .expect("ordinary challenge response should hash");
+
+        assert_eq!(weak_commitment, honest_mask_commitment);
+        assert_ne!(ordinary_commitment, honest_mask_commitment);
+    }
 }

@@ -469,6 +469,6 @@ export const evaluateActionCapability = (
         case 'VerifyEncryptedEnvelope':
             return refuseAction(action, 'OperationUnavailable');
         default:
-            return refuseAction(action as ProtocolAction, 'ForbiddenOperation');
+            return refuseAction(action, 'ForbiddenOperation');
     }
 };

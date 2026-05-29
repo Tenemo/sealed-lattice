@@ -7,8 +7,8 @@ import type {
     ShareCommitmentProfile,
 } from '@sealed-lattice/types';
 
-import { createRefusal } from '../../common/verification-helpers.js';
 import { createReceiverPayloadShell } from '../objects.js';
+import { createRefusal } from '../verification-helpers.js';
 
 import type {
     BallotPrivacyRandomnessSource,

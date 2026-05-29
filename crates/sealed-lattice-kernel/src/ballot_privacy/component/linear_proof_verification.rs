@@ -3,12 +3,12 @@ use super::*;
 mod bundle_backend;
 mod dense_component;
 mod dense_vector_case;
-mod public_zero_witness;
+mod public_binding_check;
 mod sparse_component;
 mod structured_receiver_encryption;
 
 use dense_component::verify_dense_component_proof;
-use public_zero_witness::verify_public_zero_witness_component_proof;
+use public_binding_check::verify_public_binding_check_component_proof;
 use sparse_component::verify_sparse_compatible_component_proof;
 use structured_receiver_encryption::verify_structured_receiver_encryption_component_proof;
 
@@ -53,8 +53,8 @@ pub(crate) fn verify_component_linear_proof_bytes(
         );
     }
 
-    if proof_statement_format == Some(PUBLIC_ZERO_PROOF_STATEMENT_FORMAT) {
-        return verify_public_zero_witness_component_proof(
+    if proof_statement_format == Some(PUBLIC_BINDING_CHECK_PROOF_STATEMENT_FORMAT) {
+        return verify_public_binding_check_component_proof(
             operation,
             component_id,
             component_proof,

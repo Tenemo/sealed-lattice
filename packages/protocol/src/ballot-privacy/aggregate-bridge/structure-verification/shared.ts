@@ -26,7 +26,21 @@ export type BridgeSetupEvidence = {
     readonly collectivePublicKey: {
         readonly bgvPublicKeyRoot: ProtocolHash;
         readonly collectivePublicKeyRoot: ProtocolHash;
+        readonly collectivePublicKeyCoefficientRoot: ProtocolHash;
     };
+};
+
+export type BridgeRandomnessSource =
+    | 'fresh-csprng'
+    | 'development-deterministic-fixture';
+
+export type BridgeRandomnessSourceEvidence = {
+    readonly objectType: 'AggregateBridgeRandomnessSourceEvidence';
+    readonly objectVersion: 1;
+    readonly proverRandomnessSource: BridgeRandomnessSource;
+    readonly encryptionRandomnessSeedSource: BridgeRandomnessSource;
+    readonly callerSuppliedDevelopmentRandomness: boolean;
+    readonly claimBearingEntropyEvidence: false;
 };
 
 export type BridgeEncryptionEvidence = {
@@ -38,6 +52,7 @@ export type BridgeEncryptionEvidence = {
     readonly aggregateRelationCommitmentHash: ProtocolHash;
     readonly aggregateRelationSubproofSizeBytes: number;
     readonly basisId: string;
+    readonly bgvEncryptionKeyMaterialKind: 'passive-transcript-derived-collective-public-key';
     readonly bgvPublicKeyRoot: ProtocolHash;
     readonly bridgeProofBytesHash: ProtocolHash;
     readonly bridgeProofBytesHex: string;
@@ -49,6 +64,7 @@ export type BridgeEncryptionEvidence = {
     readonly bridgeProofStatementHash: ProtocolHash;
     readonly bridgeProofTargetContractHash: ProtocolHash;
     readonly bridgeProofVerificationStatus: 'BridgeProofRelationChecked';
+    readonly claimBearingBridgeEncryption: false;
     readonly aggregateDerivationVerificationScope?: 'AggregateDerivationFullVerificationPreconditionNotBound';
     readonly plaintextCanonicalLiftProofStatus?: 'PlaintextCanonicalLiftProofMissing';
     readonly bridgeClaimClosureVerified?: false;
@@ -62,6 +78,11 @@ export type BridgeEncryptionEvidence = {
     readonly ciphertextRoot: ProtocolHash;
     readonly coefficientCount: number;
     readonly collectivePublicKeyRoot: ProtocolHash;
+    readonly collectivePublicKeyCoefficientRoot: ProtocolHash;
+    readonly developmentKeyOnly: false;
+    readonly proverRandomnessSource: BridgeRandomnessSource;
+    readonly encryptionRandomnessSeedSource: BridgeRandomnessSource;
+    readonly randomnessSourceEvidence: BridgeRandomnessSourceEvidence;
     readonly encryptedAggregateInputRoot: ProtocolHash;
     readonly encryptedAggregateShareCiphertextRoot: ProtocolHash;
     readonly level: number;
@@ -80,6 +101,7 @@ export type BridgeEncryptionEvidence = {
     };
     readonly sampledPublicRelationChecks: readonly unknown[];
     readonly slotCount: number;
+    readonly thresholdDecryptable: false;
 };
 
 export type BridgeEvidenceVerification = {
@@ -88,6 +110,7 @@ export type BridgeEvidenceVerification = {
     readonly aggregateRelationChallengeHex: string;
     readonly aggregateRelationCommitmentHash: ProtocolHash;
     readonly aggregateRelationSubproofSizeBytes: number;
+    readonly bgvEncryptionKeyMaterialKind: 'passive-transcript-derived-collective-public-key';
     readonly bridgeEvidenceVerificationStatus: 'BridgeProofEvidenceChecked';
     readonly bridgeProofBytesHash: ProtocolHash;
     readonly bridgeProofProfileHash: ProtocolHash;
@@ -98,6 +121,7 @@ export type BridgeEvidenceVerification = {
     readonly bridgeProofStatementHash: ProtocolHash;
     readonly bridgeProofTargetContractHash: ProtocolHash;
     readonly bridgeProofVerificationStatus: 'BridgeProofRelationChecked';
+    readonly claimBearingBridgeEncryption: false;
     readonly aggregateDerivationVerificationScope?: 'AggregateDerivationFullVerificationPreconditionNotBound';
     readonly plaintextCanonicalLiftProofStatus?: 'PlaintextCanonicalLiftProofMissing';
     readonly bridgeClaimClosureVerified?: false;
@@ -107,7 +131,13 @@ export type BridgeEvidenceVerification = {
         | 'full-matrix-row-evidence-missing';
     readonly encryptedAggregateInputRoot: ProtocolHash;
     readonly encryptedAggregateShareCiphertextRoot: ProtocolHash;
+    readonly collectivePublicKeyCoefficientRoot: ProtocolHash;
+    readonly developmentKeyOnly: false;
+    readonly proverRandomnessSource: BridgeRandomnessSource;
+    readonly encryptionRandomnessSeedSource: BridgeRandomnessSource;
+    readonly randomnessSourceEvidence: BridgeRandomnessSourceEvidence;
     readonly ok: true;
+    readonly thresholdDecryptable: false;
 };
 
 export type PendingBridgeProofRecordFromEvidenceInput = {
@@ -162,6 +192,7 @@ export const bridgeHashFieldNames = [
     'canonicalCiphertextConventionHash',
     'bgvPublicKeyRoot',
     'collectivePublicKeyRoot',
+    'collectivePublicKeyCoefficientRoot',
     'aggregateSelectionPolicyHash',
     'postVotingClosedContextHash',
     'manifestHash',
@@ -209,6 +240,7 @@ export const contributionHashFieldNames = [
     'canonicalCiphertextConventionHash',
     'bgvPublicKeyRoot',
     'collectivePublicKeyRoot',
+    'collectivePublicKeyCoefficientRoot',
     'aggregateSelectionPolicyHash',
     'postVotingClosedContextHash',
     'manifestHash',
@@ -246,6 +278,7 @@ export const aggregateReadyHashFieldNames = [
     'bgvProfileHash',
     'setupPackageHash',
     'collectivePublicKeyRoot',
+    'collectivePublicKeyCoefficientRoot',
 ] as const;
 
 export const collectForbiddenWitnessFieldRefusals = (

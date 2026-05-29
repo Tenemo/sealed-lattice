@@ -114,8 +114,8 @@ pub(crate) fn fold_many_quadratic_equations(
                 invalid_many_quadratic("many-quadratic challenge index does not fit in u64")
             })?,
         )?;
-        let scaled_equation = equation.scale_by_polynomial(&challenge_polynomial)?;
-        folded_equation = folded_equation.add(&scaled_equation)?;
+        folded_equation =
+            folded_equation.add_polynomial_scaled_partial(equation, &challenge_polynomial)?;
         challenge_polynomials.push(challenge_polynomial);
     }
 

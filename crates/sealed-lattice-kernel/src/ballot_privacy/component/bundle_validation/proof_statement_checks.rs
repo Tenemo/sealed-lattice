@@ -22,7 +22,7 @@ pub(crate) fn collect_supplied_component_proof_statement_refusals(
     }
 
     let proof_statement_format = string_field(proof_input, "proofStatementFormat").unwrap_or("");
-    refused_objects.extend(collect_component_proof_statement_plan_shape_refusals(
+    refused_objects.extend(collect_component_proof_statement_descriptor_shape_refusals(
         proof_statement,
         expected_component_id,
         proof_record_hash,
@@ -238,7 +238,7 @@ pub(crate) fn collect_ballot_component_proof_input_refusals(
         {
             refused_objects.push(structural_refusal(
                 format!(
-                    "Ballot proof component proof bytes for {expected_component_id} must be empty for the public-zero witness binding check."
+                    "Ballot proof component proof bytes for {expected_component_id} must be empty for the public binding check."
                 ),
                 proof_record_hash,
             ));

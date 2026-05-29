@@ -170,20 +170,45 @@ impl PolynomialRing {
         self.validate_coefficients(right)?;
 
         let mut result = vec![0_u64; self.degree];
-        for (left_index, left_coefficient) in left.iter().enumerate() {
-            for (right_index, right_coefficient) in right.iter().enumerate() {
+        self.mul_negacyclic_accumulate_unchecked(&mut result, left, right);
+
+        Ok(result)
+    }
+
+    pub fn mul_negacyclic_accumulate(
+        &self,
+        output: &mut [u64],
+        left: &[u64],
+        right: &[u64],
+    ) -> CanonicalResult<()> {
+        self.validate_coefficients(output)?;
+        self.validate_coefficients(left)?;
+        self.validate_coefficients(right)?;
+
+        self.mul_negacyclic_accumulate_unchecked(output, left, right);
+
+        Ok(())
+    }
+
+    fn mul_negacyclic_accumulate_unchecked(&self, output: &mut [u64], left: &[u64], right: &[u64]) {
+        for (left_index, left_coefficient) in left.iter().copied().enumerate() {
+            if left_coefficient == 0 {
+                continue;
+            }
+            for (right_index, right_coefficient) in right.iter().copied().enumerate() {
+                if right_coefficient == 0 {
+                    continue;
+                }
                 let raw_index = left_index + right_index;
-                let target_index = raw_index % self.degree;
-                let product = mul_mod(*left_coefficient, *right_coefficient, self.modulus);
+                let target_index = raw_index & (self.degree - 1);
+                let product = mul_mod(left_coefficient, right_coefficient, self.modulus);
                 if raw_index >= self.degree {
-                    result[target_index] = sub_mod(result[target_index], product, self.modulus);
+                    output[target_index] = sub_mod(output[target_index], product, self.modulus);
                 } else {
-                    result[target_index] = add_mod(result[target_index], product, self.modulus);
+                    output[target_index] = add_mod(output[target_index], product, self.modulus);
                 }
             }
         }
-
-        Ok(result)
     }
 
     pub fn centered_abs(&self, coefficient: u64) -> CanonicalResult<u64> {
@@ -197,7 +222,18 @@ impl PolynomialRing {
     }
 }
 
+const GOLDILOCKS_MODULUS: u64 = 18_446_744_069_414_584_321;
+const GOLDILOCKS_FOLD_FACTOR: u128 = (1_u128 << 32) - 1;
+
 fn add_mod(left: u64, right: u64, modulus: u64) -> u64 {
+    if modulus == GOLDILOCKS_MODULUS {
+        return reduce_goldilocks_u128(u128::from(left) + u128::from(right));
+    }
+    if modulus <= u64::MAX / 2 {
+        let sum = left + right;
+        return if sum >= modulus { sum - modulus } else { sum };
+    }
+
     ((u128::from(left) + u128::from(right)) % u128::from(modulus)) as u64
 }
 
@@ -210,7 +246,26 @@ fn sub_mod(left: u64, right: u64, modulus: u64) -> u64 {
 }
 
 fn mul_mod(left: u64, right: u64, modulus: u64) -> u64 {
+    if modulus == GOLDILOCKS_MODULUS {
+        return reduce_goldilocks_u128(u128::from(left) * u128::from(right));
+    }
+
     ((u128::from(left) * u128::from(right)) % u128::from(modulus)) as u64
+}
+
+fn reduce_goldilocks_u128(value: u128) -> u64 {
+    let first_fold =
+        u128::from(value as u64) + u128::from((value >> 64) as u64) * GOLDILOCKS_FOLD_FACTOR;
+    let second_fold = u128::from(first_fold as u64)
+        + u128::from((first_fold >> 64) as u64) * GOLDILOCKS_FOLD_FACTOR;
+    let modulus = u128::from(GOLDILOCKS_MODULUS);
+    let reduced = if second_fold >= modulus {
+        second_fold - modulus
+    } else {
+        second_fold
+    };
+
+    reduced as u64
 }
 
 fn invalid_ring(message: impl Into<String>) -> CanonicalError {
@@ -229,6 +284,25 @@ mod tests {
             .expect("multiplication should succeed");
 
         assert_eq!(product, vec![12, 15, 2, 9]);
+    }
+
+    #[test]
+    fn goldilocks_reduction_matches_generic_modular_arithmetic_edges() {
+        let modulus = super::GOLDILOCKS_MODULUS;
+        let ring = PolynomialRing::new(4, modulus).expect("ring should validate");
+        let product = ring
+            .mul_negacyclic(
+                &[modulus - 1, modulus - 2, 3, 4],
+                &[modulus - 3, 5, modulus - 6, 7],
+            )
+            .expect("multiplication should succeed");
+        let expected = direct_negacyclic_product(
+            &[modulus - 1, modulus - 2, 3, 4],
+            &[modulus - 3, 5, modulus - 6, 7],
+            modulus,
+        );
+
+        assert_eq!(product, expected);
     }
 
     #[test]
@@ -312,5 +386,32 @@ mod tests {
             .expect("automorphism should succeed");
 
         assert_eq!(transformed, vec![1, 9, 10, 11, 12, 13, 14, 15]);
+    }
+
+    fn direct_negacyclic_product(left: &[u64], right: &[u64], modulus: u64) -> Vec<u64> {
+        let mut output = vec![0_u64; left.len()];
+        for (left_index, left_value) in left.iter().copied().enumerate() {
+            for (right_index, right_value) in right.iter().copied().enumerate() {
+                let product =
+                    ((u128::from(left_value) * u128::from(right_value)) % u128::from(modulus))
+                        as u64;
+                let raw_index = left_index + right_index;
+                let output_index = raw_index % left.len();
+                if raw_index >= left.len() {
+                    output[output_index] = if output[output_index] >= product {
+                        output[output_index] - product
+                    } else {
+                        (u128::from(modulus) + u128::from(output[output_index])
+                            - u128::from(product)) as u64
+                    };
+                } else {
+                    output[output_index] =
+                        ((u128::from(output[output_index]) + u128::from(product))
+                            % u128::from(modulus)) as u64;
+                }
+            }
+        }
+
+        output
     }
 }

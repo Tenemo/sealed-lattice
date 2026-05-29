@@ -1,9 +1,6 @@
 // This file is one targeted part of the split test suite.
 import { describe, expect, it } from 'vitest';
 
-import { buildEncodedScoreFieldLinearProofProjection } from '../../../src/ballot-privacy/ballot-proof-linear-statement';
-import { lowerBallotPrivacyRelationToBackendStatement } from '../../../src/ballot-privacy/relation-backend-lowering';
-
 import type { BackendProofComponentView } from './shared.js';
 import {
     publicContext,
@@ -11,6 +8,9 @@ import {
     shareCommitmentOpeningForReceiver,
     validRelationInput,
 } from './shared.js';
+
+import { buildEncodedScoreFieldLinearProofProjection } from '#packages/protocol/src/ballot-privacy/ballot-proof-linear-statement';
+import { lowerBallotPrivacyRelationToBackendStatement } from '#packages/protocol/src/ballot-privacy/relation-backend-lowering';
 
 describe('ballot privacy relation backend lowering', () => {
     it('lowers encoded score constraints into sparse backend rows without witness values', () => {

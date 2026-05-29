@@ -163,7 +163,7 @@ export const deriveSparseTopKTarget = (input: {
     const targetWithoutHash = {
         forbiddenSemanticSlots: Array.from(
             { length: forbiddenSemanticSlotCount },
-            () => 0 as FieldElement,
+            () => 0,
         ),
         layoutHash,
         layoutId: sparseTopKTargetLayoutId,

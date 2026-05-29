@@ -1,26 +1,28 @@
+import type { EncodedBallotRelationVectorCase } from './vector-case-types.mjs';
+
+import { deriveProtocolHash } from '#packages/crypto/src/hashes.js';
+import {
+    denseCoefficientCountForComponentProofStatement,
+    proofStatementFormatForComponent,
+    sourceRingDegreeForComponentProofStatement,
+} from '#packages/protocol/src/ballot-privacy/ballot-proof-linear-statement/component-proof-descriptor-policy.js';
+import { rowBatchesForComponent } from '#packages/protocol/src/ballot-privacy/ballot-proof-linear-statement/component-statement-builder.js';
 import {
     buildBallotProofComponentLinearProofProjection,
     verifyBallotProofComponentExplicitRows,
     type BallotProofComponentBundleStatement,
     type BallotProofComponentProjectionWitness,
-} from "#packages/protocol/src/ballot-privacy/ballot-proof-linear-statement.js";
-import {
-    denseCoefficientCountForComponentProofStatement,
-    proofStatementFormatForComponent,
-    sourceRingDegreeForComponentProofStatement,
-} from "#packages/protocol/src/ballot-privacy/ballot-proof-linear-statement/component-proof-plan-policy.js";
-import { rowBatchesForComponent } from "#packages/protocol/src/ballot-privacy/ballot-proof-linear-statement/component-statement-builder.js";
-import { deriveProtocolHash } from "#packages/crypto/src/hashes.js";
-import {
-    createBallotPrivacyProfileSet,
-    createShareCommitmentMessageBoundCert,
-} from "#packages/protocol/src/ballot-privacy/profiles.js";
+} from '#packages/protocol/src/ballot-privacy/ballot-proof-linear-statement.js';
 import {
     createFixtureRandomnessSource,
     createShareCommitmentPolynomialVector,
     deriveShareCommitmentBodyHash,
     generateReceiverState,
-} from "#packages/protocol/src/ballot-privacy/lattice-primitives.js";
+} from '#packages/protocol/src/ballot-privacy/lattice-primitives.js';
+import {
+    createBallotPrivacyProfileSet,
+    createShareCommitmentMessageBoundCert,
+} from '#packages/protocol/src/ballot-privacy/profiles.js';
 import {
     ballotPrivacyMandatoryOptionCount,
     ballotPrivacyMandatoryReceiverCount,
@@ -32,19 +34,17 @@ import {
     receiverOpeningRandomnessBitLength,
     receiverShareRepresentativeBitLength,
     shareCommitmentOpeningDimension,
-} from "#packages/protocol/src/ballot-privacy/protocol-parameters.js";
+} from '#packages/protocol/src/ballot-privacy/protocol-parameters.js';
 import type {
     BallotPrivacyLoweredLinearRelationStatement,
     BallotPrivacyRelationBackendPublicContext,
-} from "#packages/protocol/src/ballot-privacy/relation-backend-lowering.js";
-import type { BallotPrivacyRelationCompilerInput } from "#packages/protocol/src/ballot-privacy/relation-compiler.js";
-
-import type { EncodedBallotRelationVectorCase } from "./vector-case-types.mjs";
+} from '#packages/protocol/src/ballot-privacy/relation-backend-lowering.js';
+import type { BallotPrivacyRelationCompilerInput } from '#packages/protocol/src/ballot-privacy/relation-compiler.js';
 
 export const hash = (label: string): string =>
-    deriveProtocolHash("ChallengeDomainHash", {
+    deriveProtocolHash('ChallengeDomainHash', {
         label,
-        purpose: "encoded-ballot-linear-relation-vector",
+        purpose: 'encoded-ballot-linear-relation-vector',
     });
 
 export const oneHotScore = (score: number): readonly number[] =>
@@ -83,7 +83,7 @@ export const miniRelationInput = (): BallotPrivacyRelationCompilerInput => ({
     pvssThreshold: 2,
     receivers: [
         {
-            receiverIdentity: "receiver-1",
+            receiverIdentity: 'receiver-1',
             receiverRosterPosition: 1,
             receiverShareVector: miniEncodedShareVector({
                 firstOptionScoreShare: 6,
@@ -91,7 +91,7 @@ export const miniRelationInput = (): BallotPrivacyRelationCompilerInput => ({
             }),
         },
         {
-            receiverIdentity: "receiver-2",
+            receiverIdentity: 'receiver-2',
             receiverRosterPosition: 2,
             receiverShareVector: miniEncodedShareVector({
                 firstOptionScoreShare: 5,
@@ -99,7 +99,7 @@ export const miniRelationInput = (): BallotPrivacyRelationCompilerInput => ({
             }),
         },
         {
-            receiverIdentity: "receiver-3",
+            receiverIdentity: 'receiver-3',
             receiverRosterPosition: 3,
             receiverShareVector: miniEncodedShareVector({
                 firstOptionScoreShare: 4,
@@ -110,31 +110,6 @@ export const miniRelationInput = (): BallotPrivacyRelationCompilerInput => ({
     rosterSize: 3,
     scoreOneHotWitnesses: [oneHotScore(7), oneHotScore(3)],
 });
-
-export const singleOptionRelationInput =
-    (): BallotPrivacyRelationCompilerInput => ({
-        encodedCoordinateShamirCoefficients: [
-            [2],
-            ...Array.from({ length: 10 }, () => [0] as const),
-        ],
-        normalizedScores: [5],
-        optionCount: 1,
-        pvssThreshold: 2,
-        receivers: Array.from({ length: 3 }, (_unusedValue, receiverOffset) => {
-            const receiverRosterPosition = receiverOffset + 1;
-
-            return {
-                receiverIdentity: `receiver-${receiverRosterPosition}`,
-                receiverRosterPosition,
-                receiverShareVector: [
-                    5 + 2 * receiverRosterPosition,
-                    ...oneHotScore(5),
-                ],
-            };
-        }),
-        rosterSize: 3,
-        scoreOneHotWitnesses: [oneHotScore(5)],
-    });
 
 export const mandatoryRelationInput =
     (): BallotPrivacyRelationCompilerInput => {
@@ -233,7 +208,7 @@ const deterministicReceiverPayloadCiphertext = (input: {
     readonly receiverPayloadCiphertextRoot: string;
     readonly receiverPayloadHash: string;
     readonly witness: NonNullable<
-        BallotProofComponentProjectionWitness["receiverEncryptionWitnesses"]
+        BallotProofComponentProjectionWitness['receiverEncryptionWitnesses']
     >[number];
 } => {
     const chunkCount = Math.ceil(
@@ -257,7 +232,7 @@ const deterministicReceiverPayloadCiphertext = (input: {
         }),
     );
     const ciphertextBodyHash = deriveProtocolHash(
-        "ReceiverPayloadCiphertextRoot",
+        'ReceiverPayloadCiphertextRoot',
         {
             ciphertextChunks,
             plaintextBitLength: input.plaintextBits.length,
@@ -265,14 +240,14 @@ const deterministicReceiverPayloadCiphertext = (input: {
         },
     );
     const receiverPayloadCiphertextRoot = deriveProtocolHash(
-        "ReceiverPayloadCiphertextRoot",
+        'ReceiverPayloadCiphertextRoot',
         {
             ciphertextBodyHash,
             receiverIdentity: input.receiverIdentity,
             receiverRosterPosition: input.receiverRosterPosition,
         },
     );
-    const receiverPayloadHash = deriveProtocolHash("ReceiverPayloadHash", {
+    const receiverPayloadHash = deriveProtocolHash('ReceiverPayloadHash', {
         receiverPayloadCiphertextRoot,
         receiverIdentity: input.receiverIdentity,
         receiverRosterPosition: input.receiverRosterPosition,
@@ -280,10 +255,10 @@ const deterministicReceiverPayloadCiphertext = (input: {
 
     return {
         ciphertextBodyHash,
-        ciphertextChunkHash: deriveProtocolHash("ChallengeDomainHash", {
+        ciphertextChunkHash: deriveProtocolHash('ChallengeDomainHash', {
             ciphertextChunks,
             plaintextBitLength: input.plaintextBits.length,
-            purpose: "ballot-privacy-vector-receiver-ciphertext-chunks",
+            purpose: 'ballot-privacy-vector-receiver-ciphertext-chunks',
         }),
         ciphertextChunks,
         plaintextBitLength: input.plaintextBits.length,
@@ -418,11 +393,11 @@ export const publicContextForRoster = (
                 commitmentBodyHash,
                 commitmentPolynomialVector,
                 commitmentPolynomialVectorHash: deriveProtocolHash(
-                    "ChallengeDomainHash",
+                    'ChallengeDomainHash',
                     {
                         commitmentPolynomialVector,
                         purpose:
-                            "ballot-privacy-vector-share-commitment-polynomial-vector",
+                            'ballot-privacy-vector-share-commitment-polynomial-vector',
                     },
                 ),
                 receiverIdentity: receiver.receiverIdentity,
@@ -437,7 +412,10 @@ export const publicContextForRoster = (
 
 export const traceDimensions = (
     relationInput: BallotPrivacyRelationCompilerInput,
-) => ({
+): Pick<
+    EncodedBallotRelationVectorCase['trace'],
+    'optionCount' | 'pvssThreshold' | 'rosterSize' | 'shareVectorWidth'
+> => ({
     optionCount: relationInput.optionCount,
     pvssThreshold: relationInput.pvssThreshold,
     rosterSize: relationInput.rosterSize,
@@ -446,7 +424,7 @@ export const traceDimensions = (
 
 export const summarizeStatement = (
     statement: BallotPrivacyLoweredLinearRelationStatement,
-): NonNullable<EncodedBallotRelationVectorCase["loweredStatementSummary"]> => {
+): NonNullable<EncodedBallotRelationVectorCase['loweredStatementSummary']> => {
     const lastAlgebraicRow =
         statement.algebraicRows[statement.algebraicRows.length - 1];
     const firstBackendRowBatch = statement.backendStatement.rowBatches[0];
@@ -496,14 +474,14 @@ export const summarizeStatement = (
 
 export const summarizeComponentBundle = (
     componentBundleStatement: BallotProofComponentBundleStatement,
-): NonNullable<EncodedBallotRelationVectorCase["componentBundleSummary"]> => {
+): NonNullable<EncodedBallotRelationVectorCase['componentBundleSummary']> => {
     const lastComponentStatement =
         componentBundleStatement.componentStatements[
             componentBundleStatement.componentStatements.length - 1
         ];
 
     if (lastComponentStatement === undefined) {
-        throw new Error("Component bundle statement must not be empty.");
+        throw new Error('Component bundle statement must not be empty.');
     }
 
     return {
@@ -515,7 +493,7 @@ export const summarizeComponentBundle = (
             componentBundleStatement.componentStatements.filter(
                 (componentStatement) =>
                     componentStatement.proofLoweringStatus ===
-                    "explicitRowsAvailable",
+                    'explicitRowsAvailable',
             ).length,
         firstComponentStatement:
             componentBundleStatement.componentStatements[0] ??
@@ -525,7 +503,7 @@ export const summarizeComponentBundle = (
             .filter(
                 (componentStatement) =>
                     componentStatement.proofLoweringStatus !==
-                    "explicitRowsAvailable",
+                    'explicitRowsAvailable',
             )
             .map((componentStatement) => componentStatement.componentId),
         requiredComponentIds: componentBundleStatement.requiredComponentIds,
@@ -644,25 +622,25 @@ export const componentProjectionSummaries = (input: {
     readonly publicContext: BallotPrivacyRelationBackendPublicContext;
     readonly relationInput: BallotPrivacyRelationCompilerInput;
 }): NonNullable<
-    EncodedBallotRelationVectorCase["componentProjectionSummaries"]
+    EncodedBallotRelationVectorCase['componentProjectionSummaries']
 > => {
     const explicitComponentProfiles = [
         {
-            componentId: "score-and-shamir-field-component",
+            componentId: 'score-and-shamir-field-component',
             parameterProfileId:
-                "encoded-score-field-linear-projection-summary-v1",
-            witnessL2BoundSquared: "65536",
+                'encoded-score-field-linear-projection-summary-v1',
+            witnessL2BoundSquared: '65536',
         },
         {
-            componentId: "payload-plaintext-field-component",
+            componentId: 'payload-plaintext-field-component',
             parameterProfileId:
-                "payload-plaintext-field-linear-projection-summary-v1",
-            witnessL2BoundSquared: "65536",
+                'payload-plaintext-field-linear-projection-summary-v1',
+            witnessL2BoundSquared: '65536',
         },
         {
-            componentId: "share-commitment-component",
-            parameterProfileId: "share-commitment-linear-projection-summary-v1",
-            witnessL2BoundSquared: "1048576",
+            componentId: 'share-commitment-component',
+            parameterProfileId: 'share-commitment-linear-projection-summary-v1',
+            witnessL2BoundSquared: '1048576',
         },
     ] as const;
 
@@ -704,31 +682,31 @@ const denseMatrixOracleStatusForComponent = (input: {
     readonly componentId: string;
     readonly proofStatementFormat: string;
 }): NonNullable<
-    EncodedBallotRelationVectorCase["componentProofReadinessManifests"]
->[number]["denseMatrixOracleStatus"] => {
+    EncodedBallotRelationVectorCase['componentProofReadinessManifests']
+>[number]['denseMatrixOracleStatus'] => {
     if (
-        input.proofStatementFormat === "dense-polynomial-matrix-linear-proof-v1"
+        input.proofStatementFormat === 'dense-polynomial-matrix-linear-proof-v1'
     ) {
-        return "available-for-small-field-component";
+        return 'available-for-small-field-component';
     }
     if (
         input.proofStatementFormat ===
-            "structured-module-sis-share-commitment-v1" ||
-        input.proofStatementFormat === "structured-module-lwe-linear-proof-v1"
+            'structured-module-sis-share-commitment-v1' ||
+        input.proofStatementFormat === 'structured-module-lwe-linear-proof-v1'
     ) {
-        return "not-applicable-for-structured-component";
+        return 'not-applicable-for-structured-component';
     }
-    if (input.proofStatementFormat === "public-zero-witness-binding-check-v1") {
-        return "not-applicable-for-public-zero-witness-component";
+    if (input.proofStatementFormat === 'public-binding-check-only-v1') {
+        return 'not-applicable-for-public-binding-check-component';
     }
 
-    return "blocked-pending-sparse-proof-statement";
+    return 'blocked-pending-sparse-proof-statement';
 };
 
 export const componentProofReadinessManifests = (input: {
     readonly loweredStatement: BallotPrivacyLoweredLinearRelationStatement;
 }): NonNullable<
-    EncodedBallotRelationVectorCase["componentProofReadinessManifests"]
+    EncodedBallotRelationVectorCase['componentProofReadinessManifests']
 > =>
     input.loweredStatement.backendStatement.proofComponents.map((component) => {
         const componentRowBatches = rowBatchesForComponent({
@@ -755,7 +733,7 @@ export const componentProofReadinessManifests = (input: {
                 componentId: component.componentId,
                 proofStatementFormat,
             }),
-            objectType: "BallotProofComponentProofReadinessManifest",
+            objectType: 'BallotProofComponentProofReadinessManifest',
             objectVersion: 1,
             proofLoweringStatus: component.proofLoweringStatus,
             proofStatementFormat,
@@ -768,26 +746,26 @@ export const componentProofReadinessManifests = (input: {
 
 export const proofReadinessSummary = (
     manifests: NonNullable<
-        EncodedBallotRelationVectorCase["componentProofReadinessManifests"]
+        EncodedBallotRelationVectorCase['componentProofReadinessManifests']
     >,
-): NonNullable<EncodedBallotRelationVectorCase["proofReadinessSummary"]> => ({
+): NonNullable<EncodedBallotRelationVectorCase['proofReadinessSummary']> => ({
     denseMatrixOracleComponentCount: manifests.filter(
         (manifest) =>
             manifest.denseMatrixOracleStatus ===
-            "available-for-small-field-component",
+            'available-for-small-field-component',
     ).length,
     fullComponentProofBytesAvailable: false,
-    publicZeroWitnessComponentCount: manifests.filter(
+    publicBindingCheckComponentCount: manifests.filter(
         (manifest) =>
             manifest.denseMatrixOracleStatus ===
-            "not-applicable-for-public-zero-witness-component",
+            'not-applicable-for-public-binding-check-component',
     ).length,
     sparseOrStructuredComponentCount: manifests.filter(
         (manifest) =>
             manifest.denseMatrixOracleStatus ===
-                "blocked-pending-sparse-proof-statement" ||
+                'blocked-pending-sparse-proof-statement' ||
             manifest.denseMatrixOracleStatus ===
-                "not-applicable-for-structured-component",
+                'not-applicable-for-structured-component',
     ).length,
     totalComponentCount: manifests.length,
 });
@@ -797,15 +775,15 @@ export const explicitComponentVerificationSummaries = (input: {
     readonly projectionWitness: BallotProofComponentProjectionWitness;
     readonly relationInput: BallotPrivacyRelationCompilerInput;
 }): NonNullable<
-    EncodedBallotRelationVectorCase["explicitComponentVerificationSummaries"]
+    EncodedBallotRelationVectorCase['explicitComponentVerificationSummaries']
 > =>
     (
         [
-            "score-and-shamir-field-component",
-            "payload-plaintext-field-component",
-            "share-commitment-component",
-            "receiver-encryption-component",
-            "receiver-key-binding-component",
+            'score-and-shamir-field-component',
+            'payload-plaintext-field-component',
+            'share-commitment-component',
+            'receiver-encryption-component',
+            'receiver-key-binding-component',
         ] as const
     ).map((componentId) => {
         const verification = verifyBallotProofComponentExplicitRows({

@@ -9,7 +9,7 @@ pub(super) fn read_passive_setup_input(request: &Value) -> CanonicalResult<Passi
     let setup_seed = request
         .get("setupSeed")
         .and_then(Value::as_str)
-        .unwrap_or("sealed-lattice-m8-passive-development-seed-v1");
+        .unwrap_or("sealed-lattice-passive-bgv-setup-development-seed-v1");
     if setup_seed.trim().is_empty() {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
@@ -30,13 +30,13 @@ pub(super) fn read_passive_setup_input(request: &Value) -> CanonicalResult<Passi
     if participants.len() < MINIMUM_PASSIVE_SETUP_ROSTER_SIZE {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "M8 passive setup requires at least three frozen roster participants",
+            "passive BGV setup requires at least three frozen roster participants",
         ));
     }
     if participants.len() > MAXIMUM_PASSIVE_SETUP_ROSTER_SIZE {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "M8 passive setup supports at most fifty frozen roster participants",
+            "passive BGV setup supports at most fifty frozen roster participants",
         ));
     }
     let mut identities = BTreeSet::new();
@@ -45,7 +45,7 @@ pub(super) fn read_passive_setup_input(request: &Value) -> CanonicalResult<Passi
         if !identities.insert(participant.trustee_identity.as_str()) {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
-                "M8 passive setup participant identities must be unique",
+                "passive BGV setup participant identities must be unique",
             ));
         }
         if participant.roster_position >= participants.len()
@@ -53,7 +53,7 @@ pub(super) fn read_passive_setup_input(request: &Value) -> CanonicalResult<Passi
         {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
-                "M8 passive setup roster positions must be unique and cover the frozen roster",
+                "passive BGV setup roster positions must be unique and cover the frozen roster",
             ));
         }
     }

@@ -68,7 +68,7 @@ export const buildVariant = (input: {
         );
     }
     const aggregateSelectionPolicyHash = deriveProtocolHash(
-        'AggregateSelectionPolicyHash',
+        'ChallengeDomainHash',
         {
             optionCount: input.variant.optionCount,
             purpose: 'encrypted-aggregate-bridge-selection-policy-v1',
@@ -77,14 +77,14 @@ export const buildVariant = (input: {
         },
     );
     const bridgeWitnessPrivacyProfileHash = deriveProtocolHash(
-        'BridgeWitnessPrivacyProfileHash',
+        'ChallengeDomainHash',
         {
             optionCount: input.variant.optionCount,
             purpose: 'encrypted-aggregate-bridge-witness-privacy-v1',
             rosterSize: input.variant.rosterSize,
         },
     );
-    const heParamHash = deriveProtocolHash('HEParamHash', {
+    const heParamHash = deriveProtocolHash('ChallengeDomainHash', {
         optionCount: input.variant.optionCount,
         purpose: 'encrypted-aggregate-bridge-he-param-v1',
         rosterSize: input.variant.rosterSize,
@@ -196,6 +196,8 @@ export const buildVariant = (input: {
             bridgeWitnessPrivacyProfileHash,
             heParamHash,
             proverRandomnessHex: '77'.repeat(32),
+            encryptionRandomnessSeedHex: '88'.repeat(32),
+            developmentRandomnessOverrideAcknowledged: true,
             setupPackage,
         }),
     );

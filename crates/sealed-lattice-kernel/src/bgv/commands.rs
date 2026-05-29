@@ -31,7 +31,7 @@ use crate::{
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
 };
 
-pub(crate) use crate::bgv::setup::M9BridgeCiphertextRelationTrace;
+pub(crate) use crate::bgv::setup::EncryptedAggregateBridgeCiphertextRelationTrace;
 
 pub(crate) fn describe_bgv_rns_profile() -> CanonicalResult<Value> {
     Ok(json!({
@@ -106,7 +106,7 @@ pub(crate) fn validate_bgv_evaluator_operation_from_request(
             "UncertifiedEvaluatorOperation"
         },
         format!(
-            "BGV evaluator operation {operation_name} is not part of the selected M7/M10 operation registry"
+            "BGV evaluator operation {operation_name} is not part of the selected BGV-RNS/evaluator operation registry"
         ),
         None,
     ))
@@ -322,37 +322,37 @@ pub(crate) fn reject_bgv_reference_oracle_artifact_from_request(request: &Value)
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn generate_m9_bridge_ciphertext_relation_trace_from_slots(
+pub(crate) fn generate_encrypted_aggregate_bridge_ciphertext_relation_trace_from_slots(
     setup_package: &Value,
     contributor_identity: &str,
     aggregate_derivation_component_hash: &str,
     aggregate_derivation_statement_hash: &str,
     post_voting_closed_context_hash: &str,
     reduced_aggregate_slots: &[u64],
-    prover_randomness_hex: &str,
+    encryption_randomness_seed_hex: &str,
     include_canonical_bytes_hex: bool,
-) -> CanonicalResult<M9BridgeCiphertextRelationTrace> {
-    crate::bgv::setup::generate_m9_bridge_ciphertext_relation_trace_from_slots(
+) -> CanonicalResult<EncryptedAggregateBridgeCiphertextRelationTrace> {
+    crate::bgv::setup::generate_encrypted_aggregate_bridge_ciphertext_relation_trace_from_slots(
         setup_package,
         contributor_identity,
         aggregate_derivation_component_hash,
         aggregate_derivation_statement_hash,
         post_voting_closed_context_hash,
         reduced_aggregate_slots,
-        prover_randomness_hex,
+        encryption_randomness_seed_hex,
         include_canonical_bytes_hex,
     )
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn verify_m9_bridge_ciphertext_public_bindings(
+pub(crate) fn verify_encrypted_aggregate_bridge_ciphertext_public_bindings(
     setup_package: &Value,
     aggregate_derivation_component_hash: &str,
     aggregate_derivation_statement_hash: &str,
     post_voting_closed_context_hash: &str,
     bridge_encryption: &Value,
 ) -> CanonicalResult<()> {
-    crate::bgv::setup::verify_m9_bridge_ciphertext_public_bindings(
+    crate::bgv::setup::verify_encrypted_aggregate_bridge_ciphertext_public_bindings(
         setup_package,
         aggregate_derivation_component_hash,
         aggregate_derivation_statement_hash,
@@ -361,18 +361,18 @@ pub(crate) fn verify_m9_bridge_ciphertext_public_bindings(
     )
 }
 
-pub(crate) fn m9_bridge_batch_encoding_commitment_hash_from_responses(
+pub(crate) fn encrypted_aggregate_bridge_batch_encoding_commitment_hash_from_responses(
     reduced_slot_response: &[BigInt],
     plaintext_coefficient_response: &[BigInt],
 ) -> CanonicalResult<String> {
-    crate::bgv::setup::m9_bridge_batch_encoding_commitment_hash_from_responses(
+    crate::bgv::setup::encrypted_aggregate_bridge_batch_encoding_commitment_hash_from_responses(
         reduced_slot_response,
         plaintext_coefficient_response,
     )
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn m9_bridge_ciphertext_commitment_hash_from_responses(
+pub(crate) fn encrypted_aggregate_bridge_ciphertext_commitment_hash_from_responses(
     setup_package: &Value,
     contributor_identity: &str,
     aggregate_derivation_statement_hash: &str,
@@ -383,7 +383,7 @@ pub(crate) fn m9_bridge_ciphertext_commitment_hash_from_responses(
     perturbation_zero_response: &[BigInt],
     perturbation_one_response: &[BigInt],
 ) -> CanonicalResult<String> {
-    crate::bgv::setup::m9_bridge_ciphertext_commitment_hash_from_responses(
+    crate::bgv::setup::encrypted_aggregate_bridge_ciphertext_commitment_hash_from_responses(
         setup_package,
         contributor_identity,
         aggregate_derivation_statement_hash,
@@ -534,7 +534,7 @@ mod tests {
     }
 
     #[test]
-    fn native_commands_produce_stable_m7_canonical_roots() {
+    fn native_commands_produce_stable_bgv_rns_canonical_roots() {
         let profile = describe_bgv_rns_profile().expect("profile description");
         let layout_binding = profile["batchLayoutBinding"].clone();
         let encoded = encode_bgv_batch_plaintext_from_request(&serde_json::json!({
@@ -547,11 +547,11 @@ mod tests {
 
         assert_eq!(
             encoded["plaintextRoot"],
-            "92cf108ea1bf78bf8b4acff606df99b2b5d342fe8caac81f1dbc3eaa166b31bf61b2453d57630109422b14e9cbdf8cf327ce56793cb676a10888c5f6c1c12edd"
+            "58c345519637224053f85635ecd8493f74a42bc6b44fcd889571bf73e44ea0534de25677efec1b2efff76f64d17735debb527c787db0b8057a59458e004bfb3c"
         );
         assert_eq!(
             encoded["canonicalBytesHash512"],
-            "d77e7936e25849fa95ac455dd4b1e2502b9f502491d0657c41035b0c91aa625762f77bdd6e24c236417eeab50d7afdeea376cabf1d737df587de3932b9fc641e"
+            "02dd5e48be07c2bc343db89c7566f907b0bc319b56feb4ea0d6fa9a40a9f65829346a2ea08a576342c8dccce1a098e31f553c60726b1a76c1a77ae4a57cf426e"
         );
         assert_eq!(encoded["canonicalByteLength"], 90_441);
 
@@ -564,11 +564,11 @@ mod tests {
             .expect("ciphertext fixture");
         assert_eq!(
             ciphertext["ciphertextRoot"],
-            "656a13bf2071f4def2cc2de14c41bea2c866c5c78eeedd64074a85c43caf5011eca8d78241f9e0705070d66bc9fb6dceb55cabf5f5fc2dcfa9c7e235284cc87f"
+            "ea667f7e46ffa85907186697546c29f810e32559acf366bd7fe646be10638a0e6b6d4946fc7a3cade59e468ac65b12cc5115c8ed89f4d1111bd92a7a2b4dd0b6"
         );
         assert_eq!(
             ciphertext["canonicalBytesHash512"],
-            "842135a9284e37b74a4ad6ab7c350449d1126efa3d15a68b1004d8b481adb40e790bd6b0cbc266b6d138ce297d6e9b6c6333900603ab3d5775a76882729159ed"
+            "63844b4aa643a6e261ddc4d9acf28c2cb6836a50079ce34aa9a18296505b83eda7c14686e212c728d3fd877bbfa2f2c41a33f58817fc328c66ff738f460472ba"
         );
         assert_eq!(ciphertext["canonicalByteLength"], 180_781);
 
@@ -579,11 +579,11 @@ mod tests {
             .expect("base conversion fixture");
         assert_eq!(
             base_conversion["sourcePlaintextRoot"],
-            "170b5c709ce3230aa0f731a4973ccb2fb3e1620fc9c8b60c57406b2443c51c69dcc3e97f2134de9af53f1f2735ed618033b89d4cdcadd7d641ad00848c35ba06"
+            "84e9322792461a7bfaf4026c23edeed8ec836c6cae265ad7dfdb3402fa78a0f2aac858db22395c30b5154d46528fc0b989b44866a6bce536fb4fc8a863a45416"
         );
         assert_eq!(
             base_conversion["convertedPlaintextRoot"],
-            "f3c721f6e0cf872460caf3b4d52bb7aaabea964d0f1977639f17ae43fa4812a657fbe82f51216c1470a56b9cbf3823ca9dd787f8a10199260b09ee6600118c80"
+            "4f5642198725dddac839c179cc88138f8617d84b564e5b974d193c1d6003a599714c6ce4b7992dfec7bd03b1b4966e8e71dbc992930b1991ad5a72bac27a6672"
         );
     }
 

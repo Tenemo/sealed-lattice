@@ -20,11 +20,11 @@ pub(super) fn verify_structured_receiver_encryption_component_proof(
         object_map(proof_input).and_then(|object| object.get("proofStatement"))
     {
         if string_field(proof_statement, "objectType")
-            == Some("BallotProofComponentProofStatementPlan")
+            == Some("BallotProofComponentProofStatementDescriptor")
         {
             refused_objects.push(component_backend_refusal(
                 format!(
-                    "Structured receiver-encryption proof bytes for {component_id} require a public structured proof statement, not only the proof statement plan."
+                    "Structured receiver-encryption proof bytes for {component_id} require a public structured proof statement, not only the proof statement descriptor."
                 ),
                 component_proof_record_hash,
             ));

@@ -8,7 +8,7 @@ pub(in crate::ballot_privacy::aggregate_derivation_proof) fn collect_aggregate_c
     let mut refused_objects = Vec::new();
     let Some(packages) = counted_ballot_packages.and_then(Value::as_array) else {
         refused_objects.push(structural_refusal(
-            "Aggregate derivation verification requires countedBallotPackages so the verifier can route the counted set through accepted M5 package verification.",
+            "Aggregate derivation verification requires countedBallotPackages so the verifier can route the counted set through accepted ballot package verification.",
             object_hash,
         ));
 
@@ -59,7 +59,7 @@ pub(in crate::ballot_privacy::aggregate_derivation_proof) fn collect_aggregate_c
         if !missing_field_names.is_empty() {
             refused_objects.push(structural_refusal(
                 format!(
-                    "Aggregate derivation counted ballot packages must carry proof-byte-bearing M5 verifier inputs; missing {}.",
+                    "Aggregate derivation counted ballot packages must carry proof-byte-bearing accepted ballot verifier inputs; missing {}.",
                     missing_field_names.join(", ")
                 ),
                 Some(package_hash),
@@ -107,7 +107,7 @@ pub(in crate::ballot_privacy::aggregate_derivation_proof) fn collect_aggregate_c
         if verification.get("ok").and_then(Value::as_bool) != Some(true) {
             refused_objects.push(structural_refusal(
                 format!(
-                    "Aggregate derivation counted package must verify through the accepted M5 Rust/WASM verifier before inclusion. {}",
+                    "Aggregate derivation counted package must verify through the accepted ballot Rust/WASM verifier before inclusion. {}",
                     verification_refusal_summary(&verification)
                 ),
                 package_hash.or(object_hash),
@@ -220,7 +220,7 @@ fn collect_counted_package_binding_refusals(
     let statement_package_references = array_field(statement, "packageReferences");
     if statement_package_references != Some(&expected_package_references) {
         refused_objects.push(structural_refusal(
-            "Aggregate derivation statement package references are not derived from the accepted counted M5 packages.",
+            "Aggregate derivation statement package references are not derived from the accepted counted ballot packages.",
             object_hash,
         ));
     }
@@ -230,7 +230,7 @@ fn collect_counted_package_binding_refusals(
         && string_field(statement, "ballotSetHash") != Some(expected_ballot_set_hash.as_str())
     {
         refused_objects.push(structural_refusal(
-            "Aggregate derivation ballot-set hash is not derived from the accepted counted M5 packages and post-close context.",
+            "Aggregate derivation ballot-set hash is not derived from the accepted counted ballot packages and post-close context.",
             object_hash,
         ));
     }
@@ -442,7 +442,7 @@ fn derive_counted_package_ballot_set_hash(
             "manifestHash": string_field(statement, "manifestHash")?,
             "pollSpecHash": string_field(statement, "pollSpecHash")?,
             "postVotingClosedContextHash": string_field(statement, "postVotingClosedContextHash")?,
-            "purpose": "m6-post-close-counted-m5-ballot-set-v1",
+            "purpose": "post-close-counted-accepted-ballot-package-set-v1",
             "rosterHash": string_field(statement, "rosterHash")?,
             "thresholdProfileHash": string_field(statement, "thresholdProfileHash")?,
             "votingClosedBoardHeadHash": string_field(statement, "votingClosedBoardHeadHash")?

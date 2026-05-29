@@ -3,14 +3,14 @@ export type {
     BallotProofComponentProjectionWitness,
     BallotProofComponentStatement,
     BallotProofComponentBundleStatement,
-    BallotProofComponentProofStatementPlan,
+    BallotProofComponentProofStatementDescriptor,
     BallotProofRecordGenerationProofContracts,
     BallotProofRecordGenerationRandomness,
     BallotProofRecordGenerationRequest,
 } from './ballot-proof-linear-statement/statement-contracts.js';
 export {
     buildBallotProofComponentBundleStatement,
-    buildBallotProofComponentProofStatementPlans,
+    buildBallotProofComponentProofStatementDescriptors,
     createBallotProofComponentProofRecord,
     createBallotProofComponentProofBundle,
 } from './ballot-proof-linear-statement/component-bundle.js';

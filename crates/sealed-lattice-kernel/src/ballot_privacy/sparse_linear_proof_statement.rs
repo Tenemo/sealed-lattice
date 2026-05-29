@@ -15,7 +15,7 @@ use super::{
     linear_proof_statement::{
         LinearProofMatrixCoefficientRepresentation, LinearProofTargetCoefficientRepresentation,
         LinearStatementTranscript, rotate_left_negacyclic_signed_polynomial,
-        scale_signed_polynomial_by_source_modulus_inverse, source_polynomial_split_factor,
+        source_modulus_inverse_mod_proof_modulus, source_polynomial_split_factor,
         split_source_polynomial_into_proof_ring_with_coefficient_representation,
         transform_target_vector_to_proof_ring, validate_source_polynomial,
     },
@@ -116,6 +116,10 @@ pub fn transform_sparse_statement_matrix_to_proof_ring_with_coefficient_represen
         proof_encoding.ring_degree,
         proof_encoding.coefficient_modulus,
     )?;
+    let source_modulus_inverse = source_modulus_inverse_mod_proof_modulus(
+        parameter_set.coefficient_modulus,
+        proof_encoding.coefficient_modulus,
+    )?;
     let mut transformed_entries = Vec::new();
 
     for source_entry in source_statement_matrix.entries() {
@@ -146,10 +150,10 @@ pub fn transform_sparse_statement_matrix_to_proof_ring_with_coefficient_represen
                         invalid_sparse_statement("sparse statement rotated split index overflowed")
                     })?]
                 };
-                let transformed_coefficients = scale_signed_polynomial_by_source_modulus_inverse(
+                let transformed_coefficients = scale_signed_polynomial_by_precomputed_inverse(
                     signed_polynomial,
-                    parameter_set,
-                    proof_encoding,
+                    source_modulus_inverse,
+                    proof_encoding.coefficient_modulus,
                 )?;
                 if transformed_coefficients
                     .iter()
@@ -199,6 +203,32 @@ pub fn transform_sparse_target_vector_to_proof_ring(
         )?,
         transformed_target_vector,
     )
+}
+
+fn scale_signed_polynomial_by_precomputed_inverse(
+    signed_polynomial: &[i128],
+    source_modulus_inverse: i128,
+    proof_modulus: u64,
+) -> CanonicalResult<Vec<u64>> {
+    signed_polynomial
+        .iter()
+        .map(|coefficient| {
+            let scaled = coefficient
+                .checked_mul(source_modulus_inverse)
+                .ok_or_else(|| {
+                    invalid_sparse_statement("sparse statement coefficient scaling overflowed")
+                })?;
+            let proof_modulus = i128::from(proof_modulus);
+            let mut reduced = scaled % proof_modulus;
+            if reduced < 0 {
+                reduced += proof_modulus;
+            }
+
+            u64::try_from(reduced).map_err(|_| {
+                invalid_sparse_statement("sparse statement coefficient does not fit in u64")
+            })
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -322,11 +352,30 @@ pub fn derive_dense_compatible_sparse_linear_statement_transcript_with_matrix_co
         target_vector_coefficients,
         target_coefficient_representation,
     )?;
+    derive_dense_compatible_sparse_linear_statement_transcript_from_transformed(
+        proof_encoding,
+        &transformed_statement_matrix,
+        &transformed_target_vector,
+        public_randomness,
+    )
+}
+
+pub fn derive_dense_compatible_sparse_linear_statement_transcript_from_transformed(
+    proof_encoding: &LinearProofEncoding,
+    transformed_statement_matrix: &SparsePolynomialMatrix,
+    transformed_target_vector: &PolynomialVector,
+    public_randomness: &[u8],
+) -> CanonicalResult<LinearStatementTranscript> {
+    if public_randomness.len() != 32 {
+        return Err(invalid_sparse_statement(
+            "sparse statement public randomness must be exactly 32 bytes",
+        ));
+    }
     let (arithmetic_statement_hash, encoded_statement_bytes) =
         hash_sparse_transformed_statement_as_dense(
             proof_encoding,
-            &transformed_statement_matrix,
-            &transformed_target_vector,
+            transformed_statement_matrix,
+            transformed_target_vector,
         )?;
     let public_parameters_and_statement_hash =
         shake128_32_from_parts(public_randomness, &arithmetic_statement_hash);
@@ -522,11 +571,53 @@ impl DenseCompatibleStatementBitHasher {
                     "dense-compatible sparse statement transformed coefficient is not canonical",
                 ));
             }
-            self.write_unsigned_little_endian_bits(
-                *coefficient,
-                proof_encoding.full_size_coefficient_bit_length,
-            )?;
+            if *coefficient == 0 {
+                self.write_zero_bits(proof_encoding.full_size_coefficient_bit_length)?;
+            } else {
+                self.write_unsigned_little_endian_bits(
+                    *coefficient,
+                    proof_encoding.full_size_coefficient_bit_length,
+                )?;
+            }
         }
+
+        Ok(())
+    }
+
+    fn write_zero_bits(&mut self, bit_count: usize) -> CanonicalResult<()> {
+        if bit_count == 0 || bit_count > 63 {
+            return Err(invalid_sparse_statement(
+                "dense-compatible sparse statement coder bit length must be between one and sixty-three",
+            ));
+        }
+
+        let mut remaining_bits = bit_count;
+        if self.bit_offset_in_byte != 0 {
+            let bits_until_flush = 8 - self.bit_offset_in_byte;
+            let consumed_bits = remaining_bits.min(bits_until_flush);
+            self.bit_offset_in_byte += consumed_bits;
+            remaining_bits -= consumed_bits;
+            if self.bit_offset_in_byte == 8 {
+                self.flush_byte();
+            }
+            if remaining_bits == 0 {
+                return Ok(());
+            }
+        }
+
+        let whole_zero_bytes = remaining_bits / 8;
+        if whole_zero_bytes != 0 {
+            let zero_bytes = [0_u8; 64];
+            let mut remaining_zero_bytes = whole_zero_bytes;
+            while remaining_zero_bytes != 0 {
+                let chunk_bytes = remaining_zero_bytes.min(zero_bytes.len());
+                self.hasher.update(&zero_bytes[..chunk_bytes]);
+                self.encoded_bytes += chunk_bytes;
+                remaining_zero_bytes -= chunk_bytes;
+            }
+        }
+        self.bit_offset_in_byte = remaining_bits % 8;
+        self.byte_value = 0;
 
         Ok(())
     }

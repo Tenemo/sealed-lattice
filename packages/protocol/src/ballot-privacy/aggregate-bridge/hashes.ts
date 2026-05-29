@@ -16,16 +16,24 @@ type AggregateContributionHashInput = AggregateContributionUnsignedPayload &
 
 export const deriveBridgeProofProfileHash = (input: {
     readonly bgvEncryptionProofSubrelation:
-        | 'SealedLatticeDevelopmentCiphertextEquationRelation'
+        | 'SealedLatticePassiveCollectiveCiphertextEquationRelation'
         | 'SealedLatticeBoundedEncryptionRelation'
         | 'HwangPiopCandidate';
+    readonly bgvEncryptionKeyMaterialKind: 'passive-transcript-derived-collective-public-key';
     readonly bridgeProofProfileId: string;
+    readonly claimBearingBridgeEncryption: false;
+    readonly developmentKeyOnly: false;
     readonly proofBackend: 'SealedLatticeBridgeRelation';
+    readonly thresholdDecryptable: false;
 }): ProtocolHash =>
     deriveProtocolHash('BridgeProofProfileHash', {
+        bgvEncryptionKeyMaterialKind: input.bgvEncryptionKeyMaterialKind,
         bgvEncryptionProofSubrelation: input.bgvEncryptionProofSubrelation,
         bridgeProofProfileId: input.bridgeProofProfileId,
+        claimBearingBridgeEncryption: input.claimBearingBridgeEncryption,
+        developmentKeyOnly: input.developmentKeyOnly,
         proofBackend: input.proofBackend,
+        thresholdDecryptable: input.thresholdDecryptable,
         purpose: 'sealed-lattice-aggregate-bridge-proof-profile-v1',
     });
 
@@ -39,8 +47,17 @@ const sameWitnessLinkageModel =
     'SingleTranscriptSharedWitnessOrExplicitSameWitnessLinkRequired';
 const bridgeSharedWitnessCheckCount = 2;
 const bridgeSharedWitnessChallengeBitsPerCheck = 64;
-const bridgeSharedWitnessSoundnessBits =
+const bridgeSharedWitnessChallengeEntropyBits =
     bridgeSharedWitnessCheckCount * bridgeSharedWitnessChallengeBitsPerCheck;
+const bridgeSharedWitnessWeakestRelation =
+    'BGVBatchEncode65537InverseNegacyclicNtt';
+const bridgeSharedWitnessWeakestRelationModulus = ballotPrivacyFieldModulus;
+const bridgeSharedWitnessRejectionAttemptLimit = 64;
+const bridgeSharedWitnessGrindingDiscountBitsPerCheck = 6;
+const bridgeSharedWitnessUnadjustedWeakestRelationSoundnessBitsFloor = 32;
+const bridgeSharedWitnessEffectiveBindingSoundnessBitsFloor = 20;
+const bgvEncryptionKeyMaterialKind =
+    'passive-transcript-derived-collective-public-key';
 
 type BridgeSharedWitnessLayout = {
     readonly aggregateIntegerShareCoordinateCount: number;
@@ -141,14 +158,16 @@ export const deriveBridgeProofTargetContractHash = (input: {
                 input.aggregateReducedCoordinateCount,
             aggregateReductionRowCount: input.aggregateReducedCoordinateCount,
             aggregateToPlaintextBindingStatus:
-                'AggregateToPlaintextBindingProofChecked',
+                'AggregateToPlaintextModularBindingChecked',
             bgvEncryptionProofStatus: 'BgvCiphertextEquationChecked',
             bgvEncryptionProofSubrelation:
-                'SealedLatticeDevelopmentCiphertextEquationRelation',
+                'SealedLatticePassiveCollectiveCiphertextEquationRelation',
+            bgvEncryptionKeyMaterialKind,
             bgvRandomnessBoundProofStatus:
                 'BgvRandomnessErrorSupportPolynomialChecked',
             bridgeClaimClosureStatus: 'BridgeProofClaimClosureMissing',
             bridgeProofProfileId: 'EncryptedAggregateBridge-v1',
+            claimBearingBridgeEncryption: false,
             ciphertextCoefficientEquationCount:
                 bridgeDataPrimeCount *
                 bridgePlaintextCoefficientCount *
@@ -158,6 +177,7 @@ export const deriveBridgeProofTargetContractHash = (input: {
             commitmentOpeningCoordinateCount:
                 shareCommitmentOpeningCoordinateCount,
             dataPrimeCount: bridgeDataPrimeCount,
+            developmentKeyOnly: false,
             fieldReductionModulus: ballotPrivacyFieldModulus,
             fullRnsCoverageRequired: true,
             hwangPiopStatus: 'DeferredUntilSealedLatticeBgvRnsProfileFreeze',
@@ -166,8 +186,7 @@ export const deriveBridgeProofTargetContractHash = (input: {
             objectType: 'AggregateBridgeProofTargetContract',
             objectVersion: 1,
             plaintextCoefficientCount: bridgePlaintextCoefficientCount,
-            plaintextEncodingRelation:
-                'BGVBatchEncode65537InverseNegacyclicNtt',
+            plaintextEncodingRelation: bridgeSharedWitnessWeakestRelation,
             plaintextCanonicalLiftProofStatus:
                 'PlaintextCanonicalLiftProofMissing',
             polynomialDegree: bridgePlaintextCoefficientCount,
@@ -185,29 +204,43 @@ export const deriveBridgeProofTargetContractHash = (input: {
             sharedWitnessChallengeBitsPerCheck:
                 bridgeSharedWitnessChallengeBitsPerCheck,
             sharedWitnessCheckCount: bridgeSharedWitnessCheckCount,
+            sharedWitnessChallengeEntropyBits:
+                bridgeSharedWitnessChallengeEntropyBits,
+            sharedWitnessGrindingDiscountBitsPerCheck:
+                bridgeSharedWitnessGrindingDiscountBitsPerCheck,
+            sharedWitnessRejectionAttemptLimit:
+                bridgeSharedWitnessRejectionAttemptLimit,
+            sharedWitnessEffectiveBindingSoundnessBitsFloor:
+                bridgeSharedWitnessEffectiveBindingSoundnessBitsFloor,
             sharedWitnessLayout,
             sharedWitnessLayoutHash,
-            sharedWitnessSoundnessBits: bridgeSharedWitnessSoundnessBits,
+            sharedWitnessUnadjustedWeakestRelationSoundnessBitsFloor:
+                bridgeSharedWitnessUnadjustedWeakestRelationSoundnessBitsFloor,
+            sharedWitnessWeakestRelation: bridgeSharedWitnessWeakestRelation,
+            sharedWitnessWeakestRelationModulus:
+                bridgeSharedWitnessWeakestRelationModulus,
             sharedWitnessZeroKnowledgeStatus:
                 'SharedWitnessZeroKnowledgeResponseDistributionChecked',
+            thresholdDecryptable: false,
         },
         purpose: 'sealed-lattice-aggregate-bridge-proof-target-contract-v1',
     });
 };
 
-export const deriveBridgeProofStatementHash = (input: {
+type BridgeProofStatementHashInput = {
     readonly aggregateDerivationComponentHash: ProtocolHash;
     readonly aggregateInputEncodingProfileHash: ProtocolHash;
     readonly aggregateQuotientCoordinateCount: number;
     readonly aggregateReducedCoordinateCount: number;
     readonly aggregateSelectionPolicyHash: ProtocolHash;
     readonly aggregateShareCommitmentHash: ProtocolHash;
-    readonly aggregateToPlaintextBindingStatus: 'AggregateToPlaintextBindingProofChecked';
+    readonly aggregateToPlaintextBindingStatus: 'AggregateToPlaintextModularBindingChecked';
     readonly ballotScoreEncodingProfileHash: ProtocolHash;
     readonly ballotSetHash: ProtocolHash;
     readonly ballotShareLayoutProfileHash: ProtocolHash;
     readonly basisId: string;
     readonly bgvBatchEncoderHash: ProtocolHash;
+    readonly bgvEncryptionKeyMaterialKind: typeof bgvEncryptionKeyMaterialKind;
     readonly bgvEncryptionProofStatus: 'BgvCiphertextEquationChecked';
     readonly bgvProfileHash: ProtocolHash;
     readonly bgvPublicKeyRoot: ProtocolHash;
@@ -221,12 +254,15 @@ export const deriveBridgeProofStatementHash = (input: {
     readonly canonicalCiphertextConventionHash: ProtocolHash;
     readonly ceremonyId: string;
     readonly ciphertextRoot: ProtocolHash;
+    readonly claimBearingBridgeEncryption: false;
     readonly coefficientCount: number;
     readonly collectivePublicKeyRoot: ProtocolHash;
+    readonly collectivePublicKeyCoefficientRoot: ProtocolHash;
     readonly contributorActionContextHash: ProtocolHash;
     readonly contributorIdentity: string;
     readonly contributorRosterExternalAcceptanceHash: ProtocolHash;
     readonly contributorRosterPosition: number;
+    readonly developmentKeyOnly: false;
     readonly optionCount: number;
     readonly participantCount: number;
     readonly encodedAggregateLayoutHash: ProtocolHash;
@@ -259,18 +295,141 @@ export const deriveBridgeProofStatementHash = (input: {
     readonly sharedWitnessBindingStatus: 'SharedWitnessBindingRelationChecked';
     readonly sharedWitnessChallengeBitsPerCheck: 64;
     readonly sharedWitnessCheckCount: 2;
-    readonly sharedWitnessSoundnessBits: 128;
+    readonly sharedWitnessChallengeEntropyBits: 128;
+    readonly sharedWitnessRejectionAttemptLimit: 64;
+    readonly sharedWitnessGrindingDiscountBitsPerCheck: 6;
+    readonly sharedWitnessUnadjustedWeakestRelationSoundnessBitsFloor: 32;
+    readonly sharedWitnessEffectiveBindingSoundnessBitsFloor: 20;
+    readonly sharedWitnessWeakestRelation: typeof bridgeSharedWitnessWeakestRelation;
+    readonly sharedWitnessWeakestRelationModulus: 65_537;
     readonly sharedWitnessZeroKnowledgeStatus: 'SharedWitnessZeroKnowledgeResponseDistributionChecked';
     readonly coefficientDomainCanonical: true;
     readonly slotCount: number;
     readonly thresholdProfileHash: ProtocolHash;
+    readonly thresholdDecryptable: false;
     readonly topKEvaluatorInputLayoutHash: ProtocolHash;
     readonly votingClosedBoardHeadHash: ProtocolHash;
-}): ProtocolHash =>
-    deriveProtocolHash('BridgeProofRecordHash', {
-        ...input,
+};
+
+const bridgeProofStatementStringHashFieldNames = [
+    'aggregateDerivationComponentHash',
+    'aggregateInputEncodingProfileHash',
+    'aggregateSelectionPolicyHash',
+    'aggregateShareCommitmentHash',
+    'ballotScoreEncodingProfileHash',
+    'ballotSetHash',
+    'ballotShareLayoutProfileHash',
+    'basisId',
+    'bgvBatchEncoderHash',
+    'bgvProfileHash',
+    'bgvPublicKeyRoot',
+    'bridgeLayoutHash',
+    'bridgeProofTargetContractHash',
+    'bridgeWitnessPrivacyProfileHash',
+    'canonicalBytesHash512',
+    'canonicalCiphertextConventionHash',
+    'ceremonyId',
+    'ciphertextRoot',
+    'collectivePublicKeyRoot',
+    'collectivePublicKeyCoefficientRoot',
+    'contributorActionContextHash',
+    'contributorIdentity',
+    'contributorRosterExternalAcceptanceHash',
+    'encodedAggregateLayoutHash',
+    'encodedShareVectorLayoutHash',
+    'encryptedAggregateBridgeHash',
+    'encryptedAggregateInputLayoutHash',
+    'encryptedAggregateInputRoot',
+    'encryptedAggregateReconstructionHash',
+    'encryptedAggregateShareCiphertextRoot',
+    'encryptedAggregateTargetBasisRoot',
+    'heParamHash',
+    'manifestHash',
+    'plaintextRoot',
+    'pollSpecHash',
+    'postVotingClosedContextHash',
+    'proofProfileHash',
+    'rosterHash',
+    'rustBgvBackendProfileHash',
+    'sampledPublicRelationCheckPolicyHash',
+    'setupPackageHash',
+    'shareCommitmentMessageBoundCertHash',
+    'thresholdProfileHash',
+    'topKEvaluatorInputLayoutHash',
+    'votingClosedBoardHeadHash',
+] as const satisfies readonly (keyof BridgeProofStatementHashInput)[];
+
+const bridgeProofStatementNumberHashFieldNames = [
+    'coefficientCount',
+    'contributorRosterPosition',
+    'canonicalByteLength',
+    'level',
+    'optionCount',
+    'participantCount',
+    'shareVectorWidth',
+    'slotCount',
+] as const satisfies readonly (keyof BridgeProofStatementHashInput)[];
+
+const bridgeProofStatementRelationStringHashFieldNames = [
+    'sharedWitnessBindingStatus',
+    'sharedWitnessZeroKnowledgeStatus',
+    'aggregateToPlaintextBindingStatus',
+    'bgvEncryptionKeyMaterialKind',
+    'bgvEncryptionProofStatus',
+    'bgvRandomnessBoundProofStatus',
+    'rnsCrtConsistencyProofStatus',
+    'bridgeClaimClosureStatus',
+    'hwangPiopStatus',
+    'sharedWitnessWeakestRelation',
+] as const satisfies readonly (keyof BridgeProofStatementHashInput)[];
+
+const bridgeProofStatementRelationNumberHashFieldNames = [
+    'aggregateReducedCoordinateCount',
+    'aggregateQuotientCoordinateCount',
+    'sharedWitnessChallengeBitsPerCheck',
+    'sharedWitnessCheckCount',
+    'sharedWitnessChallengeEntropyBits',
+    'sharedWitnessWeakestRelationModulus',
+    'sharedWitnessRejectionAttemptLimit',
+    'sharedWitnessGrindingDiscountBitsPerCheck',
+    'sharedWitnessUnadjustedWeakestRelationSoundnessBitsFloor',
+    'sharedWitnessEffectiveBindingSoundnessBitsFloor',
+] as const satisfies readonly (keyof BridgeProofStatementHashInput)[];
+
+const bridgeProofStatementRelationBooleanHashFieldNames = [
+    'sharedWitnessBindingRequired',
+    'sampledOnlyBridgeVerificationAccepted',
+    'coefficientDomainCanonical',
+    'developmentKeyOnly',
+    'thresholdDecryptable',
+    'claimBearingBridgeEncryption',
+] as const satisfies readonly (keyof BridgeProofStatementHashInput)[];
+
+export const deriveBridgeProofStatementHash = (
+    input: BridgeProofStatementHashInput,
+): ProtocolHash => {
+    const hashInput: Record<string, unknown> = {
         purpose: 'sealed-lattice-aggregate-bridge-proof-statement-v1',
-    });
+    };
+
+    for (const fieldName of bridgeProofStatementStringHashFieldNames) {
+        hashInput[fieldName] = input[fieldName];
+    }
+    for (const fieldName of bridgeProofStatementNumberHashFieldNames) {
+        hashInput[fieldName] = input[fieldName];
+    }
+    for (const fieldName of bridgeProofStatementRelationStringHashFieldNames) {
+        hashInput[fieldName] = input[fieldName];
+    }
+    for (const fieldName of bridgeProofStatementRelationNumberHashFieldNames) {
+        hashInput[fieldName] = input[fieldName];
+    }
+    for (const fieldName of bridgeProofStatementRelationBooleanHashFieldNames) {
+        hashInput[fieldName] = input[fieldName];
+    }
+
+    return deriveProtocolHash('BridgeProofRecordHash', hashInput);
+};
 
 export const deriveBridgeProofRecordHash = (
     proofRecord: Omit<BridgeProofRecord, 'bridgeProofRecordHash'>,

@@ -153,12 +153,12 @@ pub(super) fn verify_aggregate_relation_proof(
                 "aggregate derivation proof challenge does not match its relation commitment",
             ));
         }
-        let response_relation_output = input
+        let mut verification_left = input
             .source_statement_matrix
             .multiply_vector(&proof_check.response_vector)?;
         let scaled_target_vector =
             scale_polynomial_vector(source_ring, &target_vector, proof_check.challenge)?;
-        let verification_left = response_relation_output.add(&scaled_target_vector)?;
+        verification_left.add_assign(&scaled_target_vector)?;
         if verification_left.entries() != proof_check.relation_commitment_vector.entries() {
             return Err(invalid_preflight(
                 "aggregate derivation relation proof response does not satisfy the public statement",
@@ -178,9 +178,8 @@ fn require_aggregate_relation_satisfied(
     target_vector: &PolynomialVector,
     source_witness_vector: &PolynomialVector,
 ) -> crate::encoding::CanonicalResult<()> {
-    let relation_output = source_statement_matrix
-        .multiply_vector(source_witness_vector)?
-        .add(target_vector)?;
+    let mut relation_output = source_statement_matrix.multiply_vector(source_witness_vector)?;
+    relation_output.add_assign(target_vector)?;
     if relation_output
         .entries()
         .iter()
@@ -357,27 +356,19 @@ fn mask_plus_scaled_witness(
             "aggregate derivation mask and witness lengths do not match",
         ));
     }
-    let modulus = u128::from(source_ring.modulus());
     let entries = mask_vector
         .entries()
         .iter()
         .zip(source_witness_vector.entries())
         .map(|(mask_polynomial, witness_polynomial)| {
-            mask_polynomial
-                .iter()
-                .zip(witness_polynomial)
-                .map(|(mask_coefficient, witness_coefficient)| {
-                    let scaled =
-                        (u128::from(challenge) * u128::from(*witness_coefficient)) % modulus;
-                    u64::try_from((u128::from(*mask_coefficient) + scaled) % modulus).map_err(
-                        |_| {
-                            invalid_preflight(
-                                "aggregate derivation response coefficient overflowed",
-                            )
-                        },
-                    )
-                })
-                .collect::<crate::encoding::CanonicalResult<Vec<_>>>()
+            let mut response_polynomial = mask_polynomial.clone();
+            source_ring.scaled_add_assign(
+                &mut response_polynomial,
+                challenge,
+                witness_polynomial,
+            )?;
+
+            Ok(response_polynomial)
         })
         .collect::<crate::encoding::CanonicalResult<Vec<_>>>()?;
 

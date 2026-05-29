@@ -651,7 +651,7 @@ mod tests {
             "mini-encoded-ballot-relation",
         ));
 
-        assert_eq!(verification["ok"], true);
+        assert_eq!(verification["ok"], true, "{verification:#}");
         assert_eq!(verification["backendAvailable"], true);
         assert_eq!(verification["expectedOutcome"], "accept");
         assert!(
@@ -668,7 +668,7 @@ mod tests {
             "mandatory-profile-encoded-ballot-relation",
         ));
 
-        assert_eq!(verification["ok"], true);
+        assert_eq!(verification["ok"], true, "{verification:#}");
         assert_eq!(verification["backendAvailable"], true);
         assert_eq!(verification["expectedOutcome"], "accept");
     }
@@ -690,7 +690,7 @@ mod tests {
             "mini-encoded-ballot-full-explicit-relation",
         ));
 
-        assert_eq!(verification["ok"], true);
+        assert_eq!(verification["ok"], true, "{verification:#}");
         assert_eq!(verification["backendAvailable"], true);
         assert_eq!(verification["expectedOutcome"], "accept");
     }
@@ -775,20 +775,21 @@ mod tests {
     }
 
     #[test]
-    fn rejects_component_proof_statement_plan_mutations() {
+    fn rejects_component_proof_statement_descriptor_mutations() {
         expect_full_explicit_case_mutation_rejected(|vector_case| {
-            vector_case["componentProofStatementPlans"][1]["proofBytesAvailability"] =
-                json!("available-for-small-dense-oracle");
+            vector_case["componentProofStatementDescriptors"][1]["proofBackendRequirement"] =
+                json!("dense-proof-bytes-available-lab-only");
         });
         expect_full_explicit_case_mutation_rejected(|vector_case| {
-            vector_case["componentProofStatementPlans"][2]["sparseTermCount"] = json!("230401");
+            vector_case["componentProofStatementDescriptors"][2]["sparseTermCount"] =
+                json!("230401");
         });
         expect_full_explicit_case_mutation_rejected(|vector_case| {
-            vector_case["componentProofStatementPlans"][3]["structuredWitnessTermCount"] =
+            vector_case["componentProofStatementDescriptors"][3]["structuredWitnessTermCount"] =
                 json!("15746866");
         });
         expect_full_explicit_case_mutation_rejected(|vector_case| {
-            vector_case["componentProofStatementPlans"][3]["componentProofStatementHash"] =
+            vector_case["componentProofStatementDescriptors"][3]["componentProofStatementHash"] =
                 json!("0".repeat(128));
         });
     }

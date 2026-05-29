@@ -26,7 +26,7 @@ pub(crate) const ALLOWED_BALLOT_PROOF_COMPONENT_STATEMENT_FORMATS: &[&str] = &[
     "sparse-polynomial-matrix-linear-proof-v1",
     "structured-module-sis-share-commitment-v1",
     "structured-module-lwe-linear-proof-v1",
-    "public-zero-witness-binding-check-v1",
+    "public-binding-check-only-v1",
 ];
 pub(crate) const DENSE_COMPONENT_PROOF_STATEMENT_FORMAT: &str =
     "dense-polynomial-matrix-linear-proof-v1";
@@ -36,12 +36,12 @@ pub(crate) const STRUCTURED_SHARE_COMMITMENT_PROOF_STATEMENT_FORMAT: &str =
     "structured-module-sis-share-commitment-v1";
 pub(crate) const STRUCTURED_RECEIVER_ENCRYPTION_PROOF_STATEMENT_FORMAT: &str =
     "structured-module-lwe-linear-proof-v1";
-pub(crate) const PUBLIC_ZERO_PROOF_STATEMENT_FORMAT: &str = "public-zero-witness-binding-check-v1";
+pub(crate) const PUBLIC_BINDING_CHECK_PROOF_STATEMENT_FORMAT: &str = "public-binding-check-only-v1";
 pub(crate) const MAX_GENERIC_SPARSE_COMPONENT_SHORT_RESPONSE_VECTOR_LENGTH: usize = 4_096;
-pub(crate) const AVAILABLE_DENSE_PROOF_BYTES: &str = "available-for-small-dense-oracle";
-pub(crate) const REQUIRES_SPARSE_PROOF_STATEMENT: &str = "requires-sparse-proof-statement";
-pub(crate) const REQUIRES_STRUCTURED_PROOF_STATEMENT: &str = "requires-structured-proof-statement";
-pub(crate) const PUBLIC_ZERO_WITNESS_BINDING_CHECK: &str = "public-zero-witness-binding-check";
+pub(crate) const AVAILABLE_DENSE_PROOF_BYTES: &str = "dense-proof-bytes-available-lab-only";
+pub(crate) const REQUIRES_SPARSE_PROOF_STATEMENT: &str = "sparse-proof-statement-required";
+pub(crate) const REQUIRES_STRUCTURED_PROOF_STATEMENT: &str = "structured-proof-statement-required";
+pub(crate) const PUBLIC_BINDING_CHECK_ONLY: &str = "public-binding-check-only";
 pub(crate) const SHARE_COMMITMENT_MODULE_RANK: usize = 4;
 pub(crate) const SHARE_COMMITMENT_MODULE_DEGREE: usize = 256;
 pub(crate) const SHARE_COMMITMENT_OPENING_DIMENSION: usize = 64;
@@ -66,7 +66,7 @@ pub(crate) fn expected_component_proof_statement_format(
         "receiver-encryption-component" => {
             Some(STRUCTURED_RECEIVER_ENCRYPTION_PROOF_STATEMENT_FORMAT)
         }
-        "receiver-key-binding-component" => Some(PUBLIC_ZERO_PROOF_STATEMENT_FORMAT),
+        "receiver-key-binding-component" => Some(PUBLIC_BINDING_CHECK_PROOF_STATEMENT_FORMAT),
         _ => None,
     }
 }
@@ -92,7 +92,7 @@ pub(crate) fn component_proof_statement_format_is_expected(
             proof_statement_format == STRUCTURED_RECEIVER_ENCRYPTION_PROOF_STATEMENT_FORMAT
         }
         "receiver-key-binding-component" => {
-            proof_statement_format == PUBLIC_ZERO_PROOF_STATEMENT_FORMAT
+            proof_statement_format == PUBLIC_BINDING_CHECK_PROOF_STATEMENT_FORMAT
         }
         _ => false,
     }
@@ -110,10 +110,10 @@ pub(crate) fn expected_component_proof_statement_format_label(component_id: &str
     }
 }
 
-pub(crate) fn component_proof_bytes_availability_is_expected(
+pub(crate) fn component_proof_backend_requirement_is_expected(
     component_id: &str,
     proof_statement_format: &str,
-    proof_bytes_availability: &str,
+    proof_backend_requirement: &str,
 ) -> bool {
     let expected_availability = match proof_statement_format {
         DENSE_COMPONENT_PROOF_STATEMENT_FORMAT => AVAILABLE_DENSE_PROOF_BYTES,
@@ -122,12 +122,12 @@ pub(crate) fn component_proof_bytes_availability_is_expected(
         STRUCTURED_RECEIVER_ENCRYPTION_PROOF_STATEMENT_FORMAT => {
             REQUIRES_STRUCTURED_PROOF_STATEMENT
         }
-        PUBLIC_ZERO_PROOF_STATEMENT_FORMAT => PUBLIC_ZERO_WITNESS_BINDING_CHECK,
+        PUBLIC_BINDING_CHECK_PROOF_STATEMENT_FORMAT => PUBLIC_BINDING_CHECK_ONLY,
         _ => return false,
     };
 
     component_proof_statement_format_is_expected(component_id, proof_statement_format)
-        && proof_bytes_availability == expected_availability
+        && proof_backend_requirement == expected_availability
 }
 
 pub(crate) fn component_proof_bytes_must_be_empty(component_id: &str) -> bool {

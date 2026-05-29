@@ -131,12 +131,12 @@ fn validate_development_encryption_fixture(setup_package: &Value) -> CanonicalRe
         "development-collective-public-key-encryption-fixture",
         "development encryption fixture scope",
     )?;
-    if bool_at_path(fixture_record, &["m9BridgeEncryptionClaim"])?
-        || bool_at_path(fixture_record, &["m10EvaluatorClaim"])?
+    if bool_at_path(fixture_record, &["bridgeEncryptionClaim"])?
+        || bool_at_path(fixture_record, &["encryptedAggregateEvaluatorClaim"])?
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
-            "development encryption fixture must not claim M9 bridge or M10 evaluator closure",
+            "development encryption fixture must not claim encrypted aggregate bridge or encrypted aggregate evaluator closure",
         ));
     }
     compare_hash_at_path(

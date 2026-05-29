@@ -81,8 +81,9 @@ describe('first-valid ordering shells', () => {
 
         const badInput: FirstValidOrderingInput = {
             ...input,
-            selectionPolicyHash: deriveProtocolHash('FirstValidPolicyHash', {
-                policy: 'wrong',
+            selectionPolicyHash: deriveProtocolHash('ChallengeDomainHash', {
+                payload: { policy: 'wrong' },
+                purpose: 'fixture-first-valid-policy-v1',
             }),
             objects: [
                 {

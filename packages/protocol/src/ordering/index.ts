@@ -127,6 +127,7 @@ const deriveFirstValidOrderHash = (
         orderedObjectHashes: orderedCandidates.map(
             (candidate) => candidate.objectHash,
         ),
+        purpose: 'first-valid-order-v1',
         requiredContextHash: input.requiredContextHash,
         selectionPolicyHash: input.selectionPolicyHash,
     });

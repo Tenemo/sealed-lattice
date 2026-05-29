@@ -405,16 +405,16 @@ export type BallotProofComponentProofStatementFormat =
     | 'sparse-polynomial-matrix-linear-proof-v1'
     | 'structured-module-sis-share-commitment-v1'
     | 'structured-module-lwe-linear-proof-v1'
-    | 'public-zero-witness-binding-check-v1';
+    | 'public-binding-check-only-v1';
 
-export type BallotProofComponentProofBytesAvailability =
-    | 'available-for-small-dense-oracle'
-    | 'requires-sparse-proof-statement'
-    | 'requires-structured-proof-statement'
-    | 'public-zero-witness-binding-check';
+export type BallotProofComponentProofBackendRequirement =
+    | 'dense-proof-bytes-available-lab-only'
+    | 'sparse-proof-statement-required'
+    | 'structured-proof-statement-required'
+    | 'public-binding-check-only';
 
-export type BallotProofComponentProofStatementPlan = {
-    readonly objectType: 'BallotProofComponentProofStatementPlan';
+export type BallotProofComponentProofStatementDescriptor = {
+    readonly objectType: 'BallotProofComponentProofStatementDescriptor';
     readonly objectVersion: 1;
     readonly backendStatementHash: ProtocolHash;
     readonly ballotProofStatementHash?: ProtocolHash;
@@ -424,7 +424,7 @@ export type BallotProofComponentProofStatementPlan = {
     readonly componentStatementHash: ProtocolHash;
     readonly denseCoefficientCount: string | null;
     readonly matrixHash: ProtocolHash;
-    readonly proofBytesAvailability: BallotProofComponentProofBytesAvailability;
+    readonly proofBackendRequirement: BallotProofComponentProofBackendRequirement;
     readonly proofLoweringStatus: BallotPrivacyBackendProofComponent['proofLoweringStatus'];
     readonly proofStatementFormat: BallotProofComponentProofStatementFormat;
     readonly proofSystemRingDegree: number | null;
@@ -493,7 +493,7 @@ export type BallotProofRecordGenerationRequest = {
             >
         >
     >;
-    readonly componentStatementPlans: readonly BallotProofComponentProofStatementPlan[];
+    readonly componentStatementDescriptors: readonly BallotProofComponentProofStatementDescriptor[];
     readonly componentProverRandomnessHexes: Readonly<
         Partial<Record<BallotPrivacyBackendProofComponentId, string>>
     >;
@@ -557,32 +557,6 @@ const positiveModulo = (value: number, modulus: number): number => {
     return remainder < 0 ? remainder + modulus : remainder;
 };
 
-const negacyclicNumberCoefficient = (input: {
-    readonly outputCoefficientIndex: number;
-    readonly polynomial: readonly number[];
-    readonly witnessCoefficientIndex: number;
-}): number => {
-    if (input.outputCoefficientIndex >= input.witnessCoefficientIndex) {
-        return positiveModulo(
-            input.polynomial[
-                input.outputCoefficientIndex - input.witnessCoefficientIndex
-            ] ?? 0,
-            receiverEncryptionModulus,
-        );
-    }
-
-    return positiveModulo(
-        -(
-            input.polynomial[
-                receiverEncryptionModuleDegree +
-                    input.outputCoefficientIndex -
-                    input.witnessCoefficientIndex
-            ] ?? 0
-        ),
-        receiverEncryptionModulus,
-    );
-};
-
 const positiveModuloBigInt = (value: bigint, modulus: bigint): bigint => {
     const remainder = value % modulus;
 
@@ -626,7 +600,6 @@ export {
     componentProofEncodingProfileIds,
     thirtyTwoByteLowercaseHexPattern,
     positiveModulo,
-    negacyclicNumberCoefficient,
     positiveModuloBigInt,
     polynomialCoefficient,
 };

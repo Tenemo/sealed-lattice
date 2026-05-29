@@ -133,13 +133,15 @@ pub(crate) fn derive_ballot_structured_share_commitment_statement_hash(
     )
 }
 
-pub(crate) fn derive_ballot_component_proof_statement_plan_hash(plan: &Value) -> Option<String> {
-    let statement_payload = value_without_field(plan, "componentProofStatementHash")?;
+pub(crate) fn derive_ballot_component_proof_statement_descriptor_hash(
+    descriptor: &Value,
+) -> Option<String> {
+    let statement_payload = value_without_field(descriptor, "componentProofStatementHash")?;
     derive_hash(
         "ChallengeDomainHash",
         &json!({
             "payload": statement_payload,
-            "purpose": "ballot-proof-component-proof-statement-plan-v1"
+            "purpose": "ballot-proof-component-proof-statement-descriptor-v1"
         }),
     )
 }

@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 import {
     deriveThresholdProfile,
     evaluateActionCapability,
-} from '../../src/index';
+} from '#packages/protocol/src/index';
 
 const targetBoundShareSelectionProfile = {
     profileId: targetBoundShareSelectionProfileId,

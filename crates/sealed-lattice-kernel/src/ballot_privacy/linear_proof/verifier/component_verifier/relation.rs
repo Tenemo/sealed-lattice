@@ -335,16 +335,6 @@ pub(super) fn verify_sparse_linear_proof_components_inner(
     )?
     .decoded_proof;
 
-    let statement_transcript =
-        derive_dense_compatible_sparse_linear_statement_transcript_with_matrix_coefficient_representation(
-        input.parameter_set,
-        input.proof_encoding,
-        input.source_statement_matrix,
-        input.target_vector_coefficients,
-        input.matrix_coefficient_representation,
-        input.target_coefficient_representation,
-        &public_randomness,
-    )?;
     let transformed_statement_matrix =
         transform_sparse_statement_matrix_to_proof_ring_with_coefficient_representation(
             input.parameter_set,
@@ -358,6 +348,13 @@ pub(super) fn verify_sparse_linear_proof_components_inner(
         input.target_vector_coefficients,
         input.target_coefficient_representation,
     )?;
+    let statement_transcript =
+        derive_dense_compatible_sparse_linear_statement_transcript_from_transformed(
+            input.proof_encoding,
+            &transformed_statement_matrix,
+            &transformed_target_vector,
+            &public_randomness,
+        )?;
     verify_linear_proof_relation_core(
         LinearProofRelationCoreInput {
             public_parameters_and_statement_hash: &statement_transcript

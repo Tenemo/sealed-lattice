@@ -176,10 +176,7 @@ const multiplyPolynomialByLinearTerm = (
     coefficients: readonly FieldElement[],
     root: FieldElement,
 ): readonly FieldElement[] => {
-    const output = Array.from(
-        { length: coefficients.length + 1 },
-        () => 0 as FieldElement,
-    );
+    const output = Array.from({ length: coefficients.length + 1 }, () => 0);
 
     coefficients.forEach((coefficient, coefficientIndex) => {
         output[coefficientIndex] = addFieldElements(

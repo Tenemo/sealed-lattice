@@ -6,15 +6,15 @@ use crate::ballot_privacy::protocol_constants::{
     RECEIVER_ENCRYPTION_MODULE_RANK as ENCODED_RELATION_RECEIVER_ENCRYPTION_MODULE_RANK,
 };
 use serde_json::json;
-pub(super) fn validate_component_proof_statement_plans(
+pub(super) fn validate_component_proof_statement_descriptors(
     case_object: &serde_json::Map<String, Value>,
 ) -> Result<(), String> {
-    let Some(plans_value) = case_object.get("componentProofStatementPlans") else {
+    let Some(descriptors_value) = case_object.get("componentProofStatementDescriptors") else {
         return Ok(());
     };
-    reject_forbidden_witness_keys(plans_value)?;
-    let plans = plans_value.as_array().ok_or_else(|| {
-        "encoded relation component proof statement plans must be an array".to_string()
+    reject_forbidden_witness_keys(descriptors_value)?;
+    let descriptors = descriptors_value.as_array().ok_or_else(|| {
+        "encoded relation component proof statement descriptors must be an array".to_string()
     })?;
     let expected = [
         (
@@ -23,10 +23,10 @@ pub(super) fn validate_component_proof_statement_plans(
             Some(64_u64),
             Some(64_u64),
             "dense-polynomial-matrix-linear-proof-v1",
-            "available-for-small-dense-oracle",
+            "dense-proof-bytes-available-lab-only",
             vec!["encoded_score_field_rows".to_string()],
-            vec!["153".to_string()],
-            Some("197120"),
+            vec!["306".to_string()],
+            Some("788480"),
             None,
             None,
             None,
@@ -38,14 +38,14 @@ pub(super) fn validate_component_proof_statement_plans(
             Some(64_u64),
             Some(64_u64),
             "sparse-polynomial-matrix-linear-proof-v1",
-            "requires-sparse-proof-statement",
+            "sparse-proof-statement-required",
             vec![
                 "receiver_payload_plaintext_binding_rows".to_string(),
                 "receiver_payload_plaintext_bit_decomposition_rows".to_string(),
             ],
-            vec!["450".to_string(), "3090".to_string()],
-            Some("95472000"),
-            Some("3540"),
+            vec!["516".to_string(), "3684".to_string()],
+            Some("130180608"),
+            Some("4200"),
             None,
             None,
             None,
@@ -56,11 +56,11 @@ pub(super) fn validate_component_proof_statement_plans(
             Some(256_u64),
             Some(64_u64),
             "sparse-polynomial-matrix-linear-proof-v1",
-            "requires-sparse-proof-statement",
+            "sparse-proof-statement-required",
             vec!["share_commitment_equation_rows".to_string()],
-            vec!["230400".to_string()],
-            Some("176947200"),
-            Some("230400"),
+            vec!["264192".to_string()],
+            Some("202899456"),
+            Some("264192"),
             None,
             None,
             None,
@@ -71,13 +71,13 @@ pub(super) fn validate_component_proof_statement_plans(
             Some(256_u64),
             Some(64_u64),
             "structured-module-lwe-linear-proof-v1",
-            "requires-structured-proof-statement",
+            "structured-proof-statement-required",
             vec!["receiver_payload_encryption_equation_rows".to_string()],
-            vec!["15746865".to_string()],
-            Some("119981998080"),
+            vec!["19683426".to_string()],
+            Some("186708787200"),
             None,
-            Some("15746865"),
-            Some(12_u64),
+            Some("19683426"),
+            Some(15_u64),
             Some(3_u64),
         ),
         (
@@ -85,8 +85,8 @@ pub(super) fn validate_component_proof_statement_plans(
             "12289",
             None,
             None,
-            "public-zero-witness-binding-check-v1",
-            "public-zero-witness-binding-check",
+            "public-binding-check-only-v1",
+            "public-binding-check-only",
             vec!["receiver_key_binding_rows".to_string()],
             vec!["0".to_string()],
             None,
@@ -96,12 +96,14 @@ pub(super) fn validate_component_proof_statement_plans(
             None,
         ),
     ];
-    if plans.len() != expected.len() {
-        return Err("encoded relation component proof statement plan count is invalid".to_string());
+    if descriptors.len() != expected.len() {
+        return Err(
+            "encoded relation component proof statement descriptor count is invalid".to_string(),
+        );
     }
 
     for (
-        plan_value,
+        descriptor_value,
         (
             expected_component_id,
             expected_modulus,
@@ -117,66 +119,76 @@ pub(super) fn validate_component_proof_statement_plans(
             expected_structured_chunk_count,
             expected_structured_receiver_count,
         ),
-    ) in plans.iter().zip(expected)
+    ) in descriptors.iter().zip(expected)
     {
-        let plan = object_field(plan_value, "component proof statement plan")?;
-        let object_type = string_property(plan, "objectType")?;
-        let object_version = u64_property(plan, "objectVersion")?;
-        let component_id = string_property(plan, "componentId")?;
-        let coefficient_modulus = string_property(plan, "coefficientModulus")?;
-        let proof_lowering_status = string_property(plan, "proofLoweringStatus")?;
-        let proof_statement_format = string_property(plan, "proofStatementFormat")?;
-        let proof_bytes_availability = string_property(plan, "proofBytesAvailability")?;
-        let relation = string_property(plan, "relation")?;
-        let row_batch_names = array_property(plan, "rowBatchNames")?;
-        let row_batch_term_counts = array_property(plan, "rowBatchTermCounts")?;
-        let row_count = u64_property(plan, "rowCount")?;
-        let variable_column_count = u64_property(plan, "variableColumnCount")?;
-        if object_type != "BallotProofComponentProofStatementPlan"
+        let descriptor = object_field(descriptor_value, "component proof statement descriptor")?;
+        let object_type = string_property(descriptor, "objectType")?;
+        let object_version = u64_property(descriptor, "objectVersion")?;
+        let component_id = string_property(descriptor, "componentId")?;
+        let coefficient_modulus = string_property(descriptor, "coefficientModulus")?;
+        let proof_lowering_status = string_property(descriptor, "proofLoweringStatus")?;
+        let proof_statement_format = string_property(descriptor, "proofStatementFormat")?;
+        let proof_backend_requirement = string_property(descriptor, "proofBackendRequirement")?;
+        let relation = string_property(descriptor, "relation")?;
+        let row_batch_names = array_property(descriptor, "rowBatchNames")?;
+        let row_batch_term_counts = array_property(descriptor, "rowBatchTermCounts")?;
+        let row_count = u64_property(descriptor, "rowCount")?;
+        let variable_column_count = u64_property(descriptor, "variableColumnCount")?;
+        if object_type != "BallotProofComponentProofStatementDescriptor"
             || object_version != 1
             || component_id != expected_component_id
             || coefficient_modulus != expected_modulus
             || proof_lowering_status != "explicitRowsAvailable"
             || proof_statement_format != expected_statement_format
-            || proof_bytes_availability != expected_availability
+            || proof_backend_requirement != expected_availability
             || relation != "A*w + t = 0"
             || row_count == 0
             || !string_array_equals(row_batch_names, &expected_row_batch_names)
             || !string_array_equals(row_batch_term_counts, &expected_row_batch_term_counts)
         {
             return Err(
-                "encoded relation component proof statement plan has invalid shape".to_string(),
+                "encoded relation component proof statement descriptor has invalid shape"
+                    .to_string(),
             );
         }
         if expected_source_ring_degree.is_none() && variable_column_count != 0 {
             return Err(
-                "encoded relation zero-witness proof statement plan has variables".to_string(),
+                "encoded relation public binding check proof statement descriptor has variables"
+                    .to_string(),
             );
         }
-        validate_optional_u64_property(plan, "sourceRingDegree", expected_source_ring_degree)?;
-        validate_optional_u64_property(plan, "proofSystemRingDegree", expected_proof_ring_degree)?;
+        validate_optional_u64_property(
+            descriptor,
+            "sourceRingDegree",
+            expected_source_ring_degree,
+        )?;
+        validate_optional_u64_property(
+            descriptor,
+            "proofSystemRingDegree",
+            expected_proof_ring_degree,
+        )?;
         validate_optional_unsigned_decimal_property(
-            plan,
+            descriptor,
             "denseCoefficientCount",
             expected_dense_coefficient_count,
         )?;
         validate_optional_unsigned_decimal_property(
-            plan,
+            descriptor,
             "sparseTermCount",
             expected_sparse_term_count,
         )?;
         validate_optional_unsigned_decimal_property(
-            plan,
+            descriptor,
             "structuredWitnessTermCount",
             expected_structured_witness_term_count,
         )?;
         validate_optional_u64_property(
-            plan,
+            descriptor,
             "structuredCiphertextChunkCount",
             expected_structured_chunk_count,
         )?;
         validate_optional_u64_property(
-            plan,
+            descriptor,
             "structuredReceiverCount",
             expected_structured_receiver_count,
         )?;
@@ -188,14 +200,14 @@ pub(super) fn validate_component_proof_statement_plans(
             "relationStatementHash",
             "targetVectorHash",
         ] {
-            validate_hash_string(&string_property(plan, hash_field_name)?)?;
+            validate_hash_string(&string_property(descriptor, hash_field_name)?)?;
         }
         for hash_array_field_name in [
             "rowBatchMatrixHashes",
             "rowBatchTargetVectorHashes",
             "variableColumnIndices",
         ] {
-            let values = array_property(plan, hash_array_field_name)?;
+            let values = array_property(descriptor, hash_array_field_name)?;
             if hash_array_field_name == "variableColumnIndices" {
                 continue;
             }
@@ -208,12 +220,12 @@ pub(super) fn validate_component_proof_statement_plans(
             }
         }
         let expected_hash = derive_backend_hash(
-            "ballot-proof-component-proof-statement-plan-v1",
-            encoded_relation_value_without_field(plan_value, "componentProofStatementHash")?,
+            "ballot-proof-component-proof-statement-descriptor-v1",
+            encoded_relation_value_without_field(descriptor_value, "componentProofStatementHash")?,
         )?;
-        if string_property(plan, "componentProofStatementHash")? != expected_hash {
+        if string_property(descriptor, "componentProofStatementHash")? != expected_hash {
             return Err(
-                "encoded relation component proof statement plan hash is invalid".to_string(),
+                "encoded relation component proof statement descriptor hash is invalid".to_string(),
             );
         }
     }

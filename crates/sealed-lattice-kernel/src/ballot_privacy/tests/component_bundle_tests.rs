@@ -65,16 +65,16 @@ pub(super) fn component_proof_statement_for_test(
         } else {
             "12289"
         },
-        "objectType": "BallotProofComponentProofStatementPlan",
+        "objectType": "BallotProofComponentProofStatementDescriptor",
         "objectVersion": 1,
         "componentId": component_id,
         "componentStatementHash": component_statement_hash,
         "denseCoefficientCount": if is_structured { json!("1024") } else { Value::Null },
         "matrixHash": test_hash(&format!("{component_id}-matrix")),
-        "proofBytesAvailability": if is_structured {
-            "requires-structured-proof-statement"
+        "proofBackendRequirement": if is_structured {
+            "structured-proof-statement-required"
         } else {
-            "public-zero-witness-binding-check"
+            "public-binding-check-only"
         },
         "proofLoweringStatus": "explicitRowsAvailable",
         "proofStatementFormat": proof_statement_format,
@@ -103,14 +103,14 @@ pub(super) fn component_proof_statement_for_test(
         "ChallengeDomainHash",
         &json!({
             "payload": statement_payload,
-            "purpose": "ballot-proof-component-proof-statement-plan-v1"
+            "purpose": "ballot-proof-component-proof-statement-descriptor-v1"
         }),
     )
-    .expect("component proof statement plan hash should derive");
-    let mut statement_plan = statement_payload;
-    statement_plan
+    .expect("component proof statement descriptor hash should derive");
+    let mut statement_descriptor = statement_payload;
+    statement_descriptor
         .as_object_mut()
-        .expect("component proof statement plan should be an object")
+        .expect("component proof statement descriptor should be an object")
         .insert(
             "componentProofStatementHash".to_string(),
             json!(
@@ -118,7 +118,7 @@ pub(super) fn component_proof_statement_for_test(
             ),
         );
 
-    statement_plan
+    statement_descriptor
 }
 
 pub(super) fn component_proof_for_test(

@@ -449,7 +449,7 @@ export const verifyTrusteeSetupEntry = (
         refusedObjects.push(
             createRefusal(
                 'InvalidSignedRoot',
-                'Trustee setup entry must bind complete M8 setup roots and Hashes.',
+                'Trustee setup entry must bind complete passive BGV setup roots and Hashes.',
                 entry.trusteeSetupEntryHash,
                 'TrusteeSetupEntry',
             ),
@@ -470,7 +470,7 @@ export const verifyTrusteeSetupEntry = (
         refusedObjects.push(
             createRefusal(
                 'InvalidSignedRoot',
-                'Trustee setup entry M8 roots must match the election manifest setup bindings.',
+                'Trustee setup entry passive BGV setup roots must match the election manifest setup bindings.',
                 entry.trusteeSetupEntryHash,
                 'TrusteeSetupEntry',
             ),

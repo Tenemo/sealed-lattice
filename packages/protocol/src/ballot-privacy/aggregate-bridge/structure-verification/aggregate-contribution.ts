@@ -9,11 +9,11 @@ import {
     type RefusalRecord,
 } from '@sealed-lattice/types';
 
-import { signedObjectRootByteLength } from '../../../common/verification-helpers.js';
 import {
     createAggregateRefusal,
     protocolHashPattern,
 } from '../../aggregate-derivation/constants.js';
+import { signedObjectRootByteLength } from '../../verification-helpers.js';
 import {
     deriveAggregateContributionHash,
     deriveBridgeProofProfileHash,
@@ -79,6 +79,8 @@ const bridgeProofPublicFieldsMatchContribution = (
         proofRecord.bgvPublicKeyRoot === contribution.bgvPublicKeyRoot &&
         proofRecord.collectivePublicKeyRoot ===
             contribution.collectivePublicKeyRoot &&
+        proofRecord.collectivePublicKeyCoefficientRoot ===
+            contribution.collectivePublicKeyCoefficientRoot &&
         proofRecord.aggregateSelectionPolicyHash ===
             contribution.aggregateSelectionPolicyHash &&
         proofRecord.postVotingClosedContextHash ===
@@ -131,16 +133,20 @@ const collectBridgeProofRecordRefusals = (
 ): readonly RefusalRecord[] => {
     const refusedObjects: RefusalRecord[] = [
         ...collectHashShapeRefusals(
-            proofRecord as unknown as Record<string, unknown>,
+            proofRecord,
             bridgeHashFieldNames,
             proofRecord.bridgeProofRecordHash,
         ),
     ];
     const expectedBridgeProofProfileHash = deriveBridgeProofProfileHash({
+        bgvEncryptionKeyMaterialKind: proofRecord.bgvEncryptionKeyMaterialKind,
         bgvEncryptionProofSubrelation:
             proofRecord.bgvEncryptionProofSubrelation,
         bridgeProofProfileId: proofRecord.bridgeProofProfileId,
+        claimBearingBridgeEncryption: proofRecord.claimBearingBridgeEncryption,
+        developmentKeyOnly: proofRecord.developmentKeyOnly,
         proofBackend: proofRecord.proofBackend,
+        thresholdDecryptable: proofRecord.thresholdDecryptable,
     });
     const { bridgeProofRecordHash, ...proofRecordWithoutHash } = proofRecord;
     void bridgeProofRecordHash;
@@ -155,6 +161,11 @@ const collectBridgeProofRecordRefusals = (
             encryptedAggregateBridgeProfileId ||
         proofRecord.bridgeProofProfileHash !== expectedBridgeProofProfileHash ||
         proofRecord.proofBackend !== 'SealedLatticeBridgeRelation' ||
+        proofRecord.bgvEncryptionKeyMaterialKind !==
+            'passive-transcript-derived-collective-public-key' ||
+        proofRecord.developmentKeyOnly !== false ||
+        proofRecord.thresholdDecryptable !== false ||
+        proofRecord.claimBearingBridgeEncryption !== false ||
         !['BridgeProofBackendPending', 'BridgeProofRelationChecked'].includes(
             proofRecord.bridgeProofVerificationStatus,
         ) ||
@@ -293,7 +304,7 @@ export function verifyAggregateContributionStructure(
             'contribution',
         ),
         ...collectHashShapeRefusals(
-            contribution as unknown as Record<string, unknown>,
+            contribution,
             contributionHashFieldNames,
             contributionHash,
         ),
@@ -451,6 +462,8 @@ export const createAggregateContributionFromBridgeProofRecord = (
         ceremonyId: proofRecord.ceremonyId,
         closeRecordHash: input.closeRecordHash,
         collectivePublicKeyRoot: proofRecord.collectivePublicKeyRoot,
+        collectivePublicKeyCoefficientRoot:
+            proofRecord.collectivePublicKeyCoefficientRoot,
         contributorIdentity: proofRecord.contributorIdentity,
         contributorRosterExternalAcceptanceHash:
             proofRecord.contributorRosterExternalAcceptanceHash,

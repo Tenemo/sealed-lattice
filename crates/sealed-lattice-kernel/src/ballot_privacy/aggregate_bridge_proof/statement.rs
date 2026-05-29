@@ -19,6 +19,10 @@ pub(super) fn bridge_proof_profile_hash() -> CanonicalResult<String> {
             "bridgeProofProfileId": BRIDGE_PROOF_PROFILE_ID,
             "proofBackend": BRIDGE_PROOF_BACKEND,
             "bgvEncryptionProofSubrelation": BGV_ENCRYPTION_PROOF_SUBRELATION,
+            "bgvEncryptionKeyMaterialKind": BGV_ENCRYPTION_KEY_MATERIAL_KIND,
+            "developmentKeyOnly": DEVELOPMENT_KEY_ONLY,
+            "thresholdDecryptable": THRESHOLD_DECRYPTABLE,
+            "claimBearingBridgeEncryption": CLAIM_BEARING_BRIDGE_ENCRYPTION,
         }),
     )
 }
@@ -110,7 +114,7 @@ pub(super) fn build_bridge_proof_statement(
     if setup_participant_count != dimensions.participant_count {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
-            "M9 bridge setup participant count does not match the aggregate statement participantCount",
+            "encrypted aggregate bridge setup participant count does not match the aggregate statement participantCount",
         ));
     }
     require_matching_string_field(
@@ -154,7 +158,7 @@ pub(super) fn build_bridge_proof_statement(
     if encrypted_aggregate_input_root != encrypted_aggregate_share_ciphertext_root {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
-            "M9 bridge encrypted aggregate input root does not match the aggregate-share ciphertext root for the current prototype layout",
+            "encrypted aggregate bridge encrypted aggregate input root does not match the aggregate-share ciphertext root for the current prototype layout",
         ));
     }
     let encrypted_aggregate_bridge_hash = required_string_at_path(
@@ -227,6 +231,11 @@ pub(super) fn build_bridge_proof_statement(
         &["collectivePublicKey", "collectivePublicKeyRoot"],
         "setupPackage",
     )?;
+    let collective_public_key_coefficient_root = required_string_at_path(
+        setup_package,
+        &["collectivePublicKey", "collectivePublicKeyCoefficientRoot"],
+        "setupPackage",
+    )?;
     let bgv_public_key_root = required_string_at_path(
         setup_package,
         &["collectivePublicKey", "bgvPublicKeyRoot"],
@@ -251,6 +260,7 @@ pub(super) fn build_bridge_proof_statement(
     });
     let setup_binding = json!({
         "setupPackageHash": setup_package_hash,
+        "collectivePublicKeyCoefficientRoot": collective_public_key_coefficient_root,
         "encryptedAggregateBridgeHash": encrypted_aggregate_bridge_hash,
         "encryptedAggregateTargetBasisRoot": encrypted_aggregate_target_basis_root,
         "encryptedAggregateReconstructionHash": encrypted_aggregate_reconstruction_hash,
@@ -346,11 +356,21 @@ pub(super) fn build_bridge_proof_statement(
         "sharedWitnessBindingStatus": SHARED_WITNESS_BINDING_CHECKED_STATUS,
         "sharedWitnessChallengeBitsPerCheck": SHARED_WITNESS_CHALLENGE_BITS_PER_CHECK,
         "sharedWitnessCheckCount": BRIDGE_SHARED_WITNESS_CHECK_COUNT as u64,
-        "sharedWitnessSoundnessBits": BRIDGE_SHARED_WITNESS_SOUNDNESS_BITS,
+        "sharedWitnessChallengeEntropyBits": BRIDGE_SHARED_WITNESS_CHALLENGE_ENTROPY_BITS,
+        "sharedWitnessWeakestRelation": PLAINTEXT_ENCODING_RELATION,
+        "sharedWitnessWeakestRelationModulus": BRIDGE_SHARED_WITNESS_WEAKEST_RELATION_MODULUS,
+        "sharedWitnessRejectionAttemptLimit": BRIDGE_SHARED_WITNESS_REJECTION_ATTEMPT_LIMIT as u64,
+        "sharedWitnessGrindingDiscountBitsPerCheck": SHARED_WITNESS_REJECTION_ATTEMPT_GRINDING_BITS_PER_CHECK,
+        "sharedWitnessUnadjustedWeakestRelationSoundnessBitsFloor": BRIDGE_SHARED_WITNESS_UNADJUSTED_WEAKEST_RELATION_SOUNDNESS_BITS_FLOOR,
+        "sharedWitnessEffectiveBindingSoundnessBitsFloor": BRIDGE_SHARED_WITNESS_EFFECTIVE_BINDING_SOUNDNESS_BITS_FLOOR,
         "sharedWitnessZeroKnowledgeStatus": SHARED_WITNESS_ZERO_KNOWLEDGE_STATUS,
         "aggregateToPlaintextBindingStatus": AGGREGATE_TO_PLAINTEXT_BINDING_CHECKED_STATUS,
         "plaintextCanonicalLiftProofStatus": PLAINTEXT_CANONICAL_LIFT_PROOF_MISSING_STATUS,
         "bgvEncryptionProofStatus": BGV_ENCRYPTION_PROOF_CHECKED_STATUS,
+        "bgvEncryptionKeyMaterialKind": BGV_ENCRYPTION_KEY_MATERIAL_KIND,
+        "developmentKeyOnly": DEVELOPMENT_KEY_ONLY,
+        "thresholdDecryptable": THRESHOLD_DECRYPTABLE,
+        "claimBearingBridgeEncryption": CLAIM_BEARING_BRIDGE_ENCRYPTION,
         "bgvRandomnessBoundProofStatus": BGV_RANDOMNESS_BOUND_PROOF_STATUS,
         "rnsCrtConsistencyProofStatus": RNS_CRT_CONSISTENCY_PROOF_CHECKED_STATUS,
         "bridgeClaimClosureStatus": BRIDGE_CLAIM_CLOSURE_STATUS,
@@ -485,6 +505,10 @@ pub(super) fn build_bridge_proof_statement(
     bridge_statement.insert(
         "collectivePublicKeyRoot".to_string(),
         Value::String(collective_public_key_root.to_string()),
+    );
+    bridge_statement.insert(
+        "collectivePublicKeyCoefficientRoot".to_string(),
+        Value::String(collective_public_key_coefficient_root.to_string()),
     );
     bridge_statement.insert(
         "bgvPublicKeyRoot".to_string(),
@@ -717,6 +741,7 @@ pub(super) fn bridge_proof_statement_hash(
         "ceremonyId",
         "ciphertextRoot",
         "collectivePublicKeyRoot",
+        "collectivePublicKeyCoefficientRoot",
         "contributorActionContextHash",
         "contributorIdentity",
         "contributorRosterExternalAcceptanceHash",
@@ -790,11 +815,13 @@ pub(super) fn bridge_proof_statement_hash(
         "sharedWitnessBindingStatus",
         "sharedWitnessZeroKnowledgeStatus",
         "aggregateToPlaintextBindingStatus",
+        "bgvEncryptionKeyMaterialKind",
         "bgvEncryptionProofStatus",
         "bgvRandomnessBoundProofStatus",
         "rnsCrtConsistencyProofStatus",
         "bridgeClaimClosureStatus",
         "hwangPiopStatus",
+        "sharedWitnessWeakestRelation",
     ] {
         hash_input.insert(
             field_name.to_string(),
@@ -813,7 +840,12 @@ pub(super) fn bridge_proof_statement_hash(
         "aggregateQuotientCoordinateCount",
         "sharedWitnessChallengeBitsPerCheck",
         "sharedWitnessCheckCount",
-        "sharedWitnessSoundnessBits",
+        "sharedWitnessChallengeEntropyBits",
+        "sharedWitnessWeakestRelationModulus",
+        "sharedWitnessRejectionAttemptLimit",
+        "sharedWitnessGrindingDiscountBitsPerCheck",
+        "sharedWitnessUnadjustedWeakestRelationSoundnessBitsFloor",
+        "sharedWitnessEffectiveBindingSoundnessBitsFloor",
     ] {
         hash_input.insert(
             field_name.to_string(),
@@ -828,6 +860,9 @@ pub(super) fn bridge_proof_statement_hash(
         "sharedWitnessBindingRequired",
         "sampledOnlyBridgeVerificationAccepted",
         "coefficientDomainCanonical",
+        "developmentKeyOnly",
+        "thresholdDecryptable",
+        "claimBearingBridgeEncryption",
     ] {
         hash_input.insert(
             field_name.to_string(),
@@ -849,7 +884,7 @@ fn validate_bridge_share_commitment_bound_cert(
     let certificate_object = certificate.as_object().ok_or_else(|| {
         CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "M9 bridge share-commitment message-bound certificate must be an object",
+            "encrypted aggregate bridge share-commitment message-bound certificate must be an object",
         )
     })?;
     let mut certificate_payload = certificate_object.clone();
@@ -859,7 +894,7 @@ fn validate_bridge_share_commitment_bound_cert(
         .ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
-                "M9 bridge share-commitment message-bound certificate hash is missing",
+                "encrypted aggregate bridge share-commitment message-bound certificate hash is missing",
             )
         })?;
     let expected_certificate_hash = derive_protocol_hash(
@@ -896,7 +931,7 @@ fn validate_bridge_share_commitment_bound_cert(
         .ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::MalformedLength,
-                "M9 bridge maximum aggregate integer bound overflows",
+                "encrypted aggregate bridge maximum aggregate integer bound overflows",
             )
         })?;
     let expected_opening_aggregate_bound = maximum_canonical_turnout
@@ -904,7 +939,7 @@ fn validate_bridge_share_commitment_bound_cert(
         .ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::MalformedLength,
-                "M9 bridge opening randomness aggregate bound overflows",
+                "encrypted aggregate bridge opening randomness aggregate bound overflows",
             )
         })?;
     let commitment_message_bound = required_string_field(
@@ -916,7 +951,9 @@ fn validate_bridge_share_commitment_bound_cert(
     .map_err(|error| {
         CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            format!("M9 bridge commitment message bound is not an integer: {error}"),
+            format!(
+                "encrypted aggregate bridge commitment message bound is not an integer: {error}"
+            ),
         )
     })?;
     let no_wraparound_condition = required_json_field(
@@ -979,7 +1016,7 @@ fn validate_bridge_share_commitment_bound_cert(
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
-            "M9 bridge aggregate no-wraparound certificate is invalid or permits wraparound",
+            "encrypted aggregate bridge aggregate no-wraparound certificate is invalid or permits wraparound",
         ));
     }
 

@@ -2,6 +2,15 @@
 import type { ReceiverPayload } from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
+import type { ClaimBearingPackageVerificationInput } from './shared.js';
+import {
+    createComponentProofBundleFixture,
+    createComponentProofVerificationInputsFixture,
+    createStatement,
+    createStructurallyBoundObjects,
+    hash,
+} from './shared.js';
+
 import {
     createBallotProofRecordShell,
     createReceiverKeyProofShell,
@@ -14,16 +23,7 @@ import {
     verifyBallotProof,
     verifyClaimBearingBallotPackage,
     verifyReceiverKeyProof,
-} from '../../../src/ballot-privacy/index';
-
-import type { ClaimBearingPackageVerificationInput } from './shared.js';
-import {
-    createComponentProofBundleFixture,
-    createComponentProofVerificationInputsFixture,
-    createStatement,
-    createStructurallyBoundObjects,
-    hash,
-} from './shared.js';
+} from '#packages/protocol/src/ballot-privacy/index';
 
 const casualMicroRosterSizes = [3, 4, 5, 6, 7, 8, 9] as const;
 

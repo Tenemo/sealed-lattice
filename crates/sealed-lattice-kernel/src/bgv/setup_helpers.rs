@@ -28,7 +28,7 @@ pub(super) fn reject_forbidden_setup_fields(request: &Value) -> CanonicalResult<
             return Err(CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
                 format!(
-                    "{field_name} would centralize BGV secret material and cannot be accepted by M8 setup"
+                    "{field_name} would centralize BGV secret material and cannot be accepted by passive BGV setup"
                 ),
             ));
         }
@@ -250,7 +250,7 @@ pub(super) fn compare_required_string(
     if actual != expected {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
-            format!("M8 setup package {description} does not match its canonical binding"),
+            format!("passive BGV setup package {description} does not match its canonical binding"),
         ));
     }
 
@@ -285,7 +285,7 @@ pub(super) fn compare_derived_hash(
     if actual_hash != expected_hash {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
-            format!("M8 setup package {description} does not match its canonical payload"),
+            format!("passive BGV setup package {description} does not match its canonical payload"),
         ));
     }
 
@@ -313,7 +313,7 @@ pub(super) fn reject_forbidden_setup_package_secret_fields(value: &Value) -> Can
                     return Err(CanonicalError::new(
                         CanonicalErrorCode::InvalidFixture,
                         format!(
-                            "{field_name} would expose BGV secret material and cannot be accepted by M8 setup verification"
+                            "{field_name} would expose BGV secret material and cannot be accepted by passive BGV setup verification"
                         ),
                     ));
                 }
@@ -322,7 +322,7 @@ pub(super) fn reject_forbidden_setup_package_secret_fields(value: &Value) -> Can
                 {
                     return Err(CanonicalError::new(
                         CanonicalErrorCode::ProfileComponentMismatch,
-                        format!("M8 setup package field {field_name} must remain false"),
+                        format!("passive BGV setup package field {field_name} must remain false"),
                     ));
                 }
                 reject_forbidden_setup_package_secret_fields(field_value)?;

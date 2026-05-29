@@ -58,8 +58,3 @@ export const deriveProtocolHash = (
     hash512Hex(resolveProtocolHashDomain(namespace), [
         textEncoder.encode(canonicalJson(value)),
     ]);
-
-export const derivePolicyHash = (
-    namespace: ProtocolHashNamespace,
-    policy: unknown,
-): ProtocolHash => deriveProtocolHash(namespace, policy);

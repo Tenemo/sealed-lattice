@@ -294,11 +294,11 @@ impl SparsePolynomialMatrix {
         let mut output_entries = vec![vec![0_u64; self.ring.degree()]; self.rows];
         for entry in &self.entries {
             let vector_entry = &vector.entries()[entry.column_index];
-            let product = self
-                .ring
-                .mul_negacyclic(&entry.coefficients, vector_entry)?;
-            output_entries[entry.row_index] =
-                self.ring.add(&output_entries[entry.row_index], &product)?;
+            self.ring.mul_negacyclic_accumulate(
+                &mut output_entries[entry.row_index],
+                &entry.coefficients,
+                vector_entry,
+            )?;
         }
 
         PolynomialVector::new(self.ring, output_entries)

@@ -8,9 +8,6 @@ import type {
     TestAggregateShare,
 } from '@sealed-lattice/types';
 
-import { derivePollSpecHash } from '../../../src/lifecycle/poll-spec';
-import { deriveFrozenRosterProfile } from '../../../src/lifecycle/thresholds';
-import { deriveTestBallotPackage } from '../../../src/pvss-ballot/index';
 import {
     createBoardEvidence,
     createBoardHead,
@@ -23,6 +20,9 @@ import {
     manifestPolicyHashes,
 } from '../election-foundation-fixture-constants';
 
+import { derivePollSpecHash } from '#packages/protocol/src/lifecycle/poll-spec';
+import { deriveFrozenRosterProfile } from '#packages/protocol/src/lifecycle/thresholds';
+import { deriveTestBallotPackage } from '#packages/protocol/src/pvss-ballot/index';
 import aggregateSharesVectorJson from '#test-vectors/pvss-ballot/aggregate-shares.json' with { type: 'json' };
 import ballotAlgebraVectorJson from '#test-vectors/pvss-ballot/ballot-algebra.json' with { type: 'json' };
 import canonicalBallotSetVectorJson from '#test-vectors/pvss-ballot/canonical-ballot-set.json' with { type: 'json' };
@@ -302,6 +302,7 @@ export const deriveAggregateShareCommitmentHashForTest = (
         aggregateShareVector: aggregateShare.aggregateShareVector,
         ballotSetHash: aggregateShare.ballotSetHash,
         objectType: aggregateShare.objectType,
+        purpose: 'pvss-test-aggregate-share-commitment-v1',
         shareVectorWidth: aggregateShare.shareVectorWidth,
         trusteeIdentity: aggregateShare.trusteeIdentity,
         trusteeRosterPosition: aggregateShare.trusteeRosterPosition,

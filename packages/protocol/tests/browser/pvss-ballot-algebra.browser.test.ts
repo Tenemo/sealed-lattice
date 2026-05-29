@@ -5,13 +5,13 @@ import type {
 } from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
-import { derivePollSpecHash } from '../../src/lifecycle/poll-spec';
-import { deriveFrozenRosterProfile } from '../../src/lifecycle/thresholds';
+import { derivePollSpecHash } from '#packages/protocol/src/lifecycle/poll-spec';
+import { deriveFrozenRosterProfile } from '#packages/protocol/src/lifecycle/thresholds';
 import {
     deriveTestBallotPackage,
     verifyBallotPackageShell,
     verifyTestShareCommitmentOpening,
-} from '../../src/pvss-ballot/index';
+} from '#packages/protocol/src/pvss-ballot/index';
 
 const ceremonyId = 'browser-pvss-ceremony';
 const pollSpec = {
@@ -51,10 +51,10 @@ const electionManifestHash = deriveProtocolHash('ElectionManifestHash', {
     rosterHash,
     thresholdProfileHash,
 });
-const duplicateBallotPolicyHash = deriveProtocolHash(
-    'DuplicateBallotPolicyHash',
-    { policy: 'first-valid-before-close' },
-);
+const duplicateBallotPolicyHash = deriveProtocolHash('ChallengeDomainHash', {
+    payload: { policy: 'first-valid-before-close' },
+    purpose: 'browser-fixture-duplicate-ballot-policy-v1',
+});
 
 const createDummySignature = (
     ballotPackageHash: string,

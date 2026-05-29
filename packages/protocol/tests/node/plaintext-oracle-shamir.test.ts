@@ -1,20 +1,20 @@
 import { describe, expect, it } from 'vitest';
 
-import { deriveThresholdProfile } from '../../src/lifecycle/thresholds';
-import {
-    deriveInterpolationCoefficientReport,
-    deriveWorstCaseInterpolationCoefficientReport,
-    evaluateShamirPolynomialForRoster,
-    interpolateShamirConstantTerm,
-    normalizeFieldElement,
-} from '../../src/plaintext-oracle/index';
-
 import {
     collectContributorPositionSets,
     createDeterministicPolynomial,
     selectSpreadContributorPositions,
     shamirVectors,
 } from './plaintext-oracle-test-vectors';
+
+import { deriveThresholdProfile } from '#packages/protocol/src/lifecycle/thresholds';
+import {
+    deriveInterpolationCoefficientReport,
+    deriveWorstCaseInterpolationCoefficientReport,
+    evaluateShamirPolynomialForRoster,
+    interpolateShamirConstantTerm,
+    normalizeFieldElement,
+} from '#packages/protocol/src/plaintext-oracle/index';
 
 describe('plaintext oracle Shamir and interpolation', () => {
     it('matches deterministic Shamir vectors and reconstructs the secret', () => {

@@ -3,19 +3,6 @@ import { deriveProtocolHash } from '@sealed-lattice/crypto';
 import { describe, expect, it } from 'vitest';
 
 import {
-    buildBallotProofComponentBundleStatement,
-    buildBallotProofComponentProofStatementPlans,
-    verifyBallotProofComponentExplicitRows,
-    type BallotProofComponentProjectionWitness,
-} from '../../../src/ballot-privacy/ballot-proof-linear-statement';
-import { deriveShareCommitmentBodyHash } from '../../../src/ballot-privacy/lattice-primitives';
-import {
-    ballotPrivacyBackendProofComponentOrder,
-    lowerBallotPrivacyRelationToBackendStatement,
-    type BallotPrivacyRelationBackendPublicContext,
-} from '../../../src/ballot-privacy/relation-backend-lowering';
-
-import {
     hash,
     explicitReceiverEncryptionFixture,
     publicContext,
@@ -25,8 +12,21 @@ import {
     validRelationInput,
 } from './shared.js';
 
+import {
+    buildBallotProofComponentBundleStatement,
+    buildBallotProofComponentProofStatementDescriptors,
+    verifyBallotProofComponentExplicitRows,
+    type BallotProofComponentProjectionWitness,
+} from '#packages/protocol/src/ballot-privacy/ballot-proof-linear-statement';
+import { deriveShareCommitmentBodyHash } from '#packages/protocol/src/ballot-privacy/lattice-primitives';
+import {
+    ballotPrivacyBackendProofComponentOrder,
+    lowerBallotPrivacyRelationToBackendStatement,
+    type BallotPrivacyRelationBackendPublicContext,
+} from '#packages/protocol/src/ballot-privacy/relation-backend-lowering';
+
 describe('ballot privacy relation backend lowering', () => {
-    it('builds component proof statement plans for sparse and structured proof paths', () => {
+    it('builds component proof statement descriptors for sparse and structured proof paths', () => {
         const relationInput = minimumOptionRelationInput();
         const { context } = explicitReceiverEncryptionFixture(relationInput);
         const loweringResult = lowerBallotPrivacyRelationToBackendStatement({
@@ -43,56 +43,56 @@ describe('ballot privacy relation backend lowering', () => {
             ballotProofStatementHash: context.ballotProofStatementHash,
             loweredStatement: loweringResult.statement,
         });
-        const plans = buildBallotProofComponentProofStatementPlans({
+        const descriptors = buildBallotProofComponentProofStatementDescriptors({
             ballotProofStatementHash: context.ballotProofStatementHash,
             componentBundleStatement: componentBundle,
             loweredStatement: loweringResult.statement,
         });
 
-        expect(plans.map((plan) => plan.componentId)).toEqual(
+        expect(descriptors.map((descriptor) => descriptor.componentId)).toEqual(
             ballotPrivacyBackendProofComponentOrder,
         );
-        expect(plans[0]).toMatchObject({
+        expect(descriptors[0]).toMatchObject({
             denseCoefficientCount: '788480',
-            proofBytesAvailability: 'available-for-small-dense-oracle',
+            proofBackendRequirement: 'dense-proof-bytes-available-lab-only',
             proofStatementFormat: 'dense-polynomial-matrix-linear-proof-v1',
             rowBatchTermCounts: ['306'],
             sourceRingDegree: 64,
         });
-        expect(plans[1]).toMatchObject({
-            proofBytesAvailability: 'requires-sparse-proof-statement',
+        expect(descriptors[1]).toMatchObject({
+            proofBackendRequirement: 'sparse-proof-statement-required',
             proofStatementFormat: 'sparse-polynomial-matrix-linear-proof-v1',
             rowBatchTermCounts: ['516', '3684'],
             sparseTermCount: '4200',
         });
-        expect(plans[2]).toMatchObject({
-            proofBytesAvailability: 'requires-sparse-proof-statement',
+        expect(descriptors[2]).toMatchObject({
+            proofBackendRequirement: 'sparse-proof-statement-required',
             proofStatementFormat: 'sparse-polynomial-matrix-linear-proof-v1',
             rowBatchTermCounts: ['264192'],
             sparseTermCount: '264192',
         });
-        expect(plans[3]).toMatchObject({
-            proofBytesAvailability: 'requires-structured-proof-statement',
+        expect(descriptors[3]).toMatchObject({
+            proofBackendRequirement: 'structured-proof-statement-required',
             proofStatementFormat: 'structured-module-lwe-linear-proof-v1',
             rowBatchTermCounts: ['19683426'],
             structuredCiphertextChunkCount: 15,
             structuredReceiverCount: 3,
             structuredWitnessTermCount: '19683426',
         });
-        expect(plans[4]).toMatchObject({
+        expect(descriptors[4]).toMatchObject({
             denseCoefficientCount: null,
-            proofBytesAvailability: 'public-zero-witness-binding-check',
-            proofStatementFormat: 'public-zero-witness-binding-check-v1',
+            proofBackendRequirement: 'public-binding-check-only',
+            proofStatementFormat: 'public-binding-check-only-v1',
             rowBatchTermCounts: ['0'],
             sourceRingDegree: null,
             variableColumnCount: 0,
         });
         expect(
-            plans.every((plan) =>
-                /^[a-f0-9]{128}$/u.test(plan.componentProofStatementHash),
+            descriptors.every((descriptor) =>
+                /^[a-f0-9]{128}$/u.test(descriptor.componentProofStatementHash),
             ),
         ).toBe(true);
-        expect(JSON.stringify(plans)).not.toMatch(
+        expect(JSON.stringify(descriptors)).not.toMatch(
             /normalizedScores|scoreOneHotWitnesses|receiverShareVector|privateWitness/u,
         );
     });
@@ -578,11 +578,12 @@ describe('ballot privacy relation backend lowering', () => {
 
         expect(firstResult.ok).toBe(true);
         expect(secondResult.ok).toBe(true);
-        if (firstResult.ok && secondResult.ok) {
-            expect(firstResult.statement.relationStatementHash).not.toBe(
-                secondResult.statement.relationStatementHash,
-            );
+        if (!firstResult.ok || !secondResult.ok) {
+            throw new Error('Expected both relation lowerings to succeed.');
         }
+        expect(firstResult.statement.relationStatementHash).not.toBe(
+            secondResult.statement.relationStatementHash,
+        );
     });
 
     it('keeps hostile compiler inputs as relation refusals before lowering', () => {
@@ -612,14 +613,15 @@ describe('ballot privacy relation backend lowering', () => {
             ok: false,
             unresolvedReason: 'BallotPrivacyRelationInvalid',
         });
-        if (!result.ok) {
-            expect(
-                result.refusedObjects.some((refusal) =>
-                    refusal.message.includes(
-                        'Shamir quotient constraint is not exact',
-                    ),
-                ),
-            ).toBe(true);
+        if (result.ok) {
+            throw new Error('Expected hostile relation input to be refused.');
         }
+        expect(
+            result.refusedObjects.some((refusal) =>
+                refusal.message.includes(
+                    'Shamir quotient constraint is not exact',
+                ),
+            ),
+        ).toBe(true);
     });
 });

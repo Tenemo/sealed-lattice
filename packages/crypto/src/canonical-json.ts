@@ -119,13 +119,17 @@ const serializeCanonicalValue = (value: unknown): string => {
 export const canonicalJson = (value: unknown): string =>
     serializeCanonicalValue(value);
 
-const appendVarUint = (output: number[], value: number): void => {
+const appendVarUintToHash = (
+    hash: ReturnType<typeof shake256.create>,
+    value: number,
+): void => {
     if (!Number.isSafeInteger(value) || value < 0) {
         throw new TypeError(
             'Varuint values must be non-negative safe integers.',
         );
     }
 
+    const encodedBytes: number[] = [];
     let remainingValue = value;
     for (;;) {
         let byte = remainingValue & 0x7f;
@@ -133,33 +137,41 @@ const appendVarUint = (output: number[], value: number): void => {
         if (remainingValue !== 0) {
             byte |= 0x80;
         }
-        output.push(byte);
+        encodedBytes.push(byte);
         if (remainingValue === 0) {
             break;
         }
     }
+
+    hash.update(Uint8Array.from(encodedBytes));
 };
 
-const appendBytes = (output: number[], value: Uint8Array): void => {
-    appendVarUint(output, value.byteLength);
-    for (let index = 0; index < value.byteLength; index += 1) {
-        output.push(value[index] ?? 0);
-    }
+const appendBytesToHash = (
+    hash: ReturnType<typeof shake256.create>,
+    value: Uint8Array,
+): void => {
+    appendVarUintToHash(hash, value.byteLength);
+    hash.update(value);
 };
 
 export const hash512 = (
     domain: string,
     parts: readonly Uint8Array[],
 ): Uint8Array => {
-    const preimage = Array.from(hash512PreimagePrefix);
+    const hash = shake256.create({ dkLen: 64 });
 
-    appendBytes(preimage, textEncoder.encode(domain));
-    appendVarUint(preimage, parts.length);
-    for (const part of parts) {
-        appendBytes(preimage, part);
+    try {
+        hash.update(hash512PreimagePrefix);
+        appendBytesToHash(hash, textEncoder.encode(domain));
+        appendVarUintToHash(hash, parts.length);
+        for (const part of parts) {
+            appendBytesToHash(hash, part);
+        }
+
+        return hash.digest();
+    } finally {
+        hash.destroy();
     }
-
-    return shake256(Uint8Array.from(preimage), { dkLen: 64 });
 };
 
 export const hash512Hex = (

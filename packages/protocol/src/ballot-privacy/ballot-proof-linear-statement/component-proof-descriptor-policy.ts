@@ -5,7 +5,7 @@ import type {
 
 import type {
     BackendRowBatchForComponentStatement,
-    BallotProofComponentProofBytesAvailability,
+    BallotProofComponentProofBackendRequirement,
     BallotProofComponentProofStatementFormat,
     StructuredShareCommitmentRowBatch,
 } from './statement-contracts.js';
@@ -42,7 +42,7 @@ const proofStatementFormatForComponent = (input: {
         input.component.componentId === 'receiver-key-binding-component' &&
         input.component.variableColumnCount === 0
     ) {
-        return 'public-zero-witness-binding-check-v1';
+        return 'public-binding-check-only-v1';
     }
     if (
         input.rowBatches.some(
@@ -72,19 +72,19 @@ const proofStatementFormatForComponent = (input: {
     return 'sparse-polynomial-matrix-linear-proof-v1';
 };
 
-const proofBytesAvailabilityForStatementFormat = (
+const proofBackendRequirementForStatementFormat = (
     proofStatementFormat: BallotProofComponentProofStatementFormat,
-): BallotProofComponentProofBytesAvailability => {
+): BallotProofComponentProofBackendRequirement => {
     switch (proofStatementFormat) {
         case 'dense-polynomial-matrix-linear-proof-v1':
-            return 'available-for-small-dense-oracle';
+            return 'dense-proof-bytes-available-lab-only';
         case 'sparse-polynomial-matrix-linear-proof-v1':
         case 'structured-module-sis-share-commitment-v1':
-            return 'requires-sparse-proof-statement';
+            return 'sparse-proof-statement-required';
         case 'structured-module-lwe-linear-proof-v1':
-            return 'requires-structured-proof-statement';
-        case 'public-zero-witness-binding-check-v1':
-            return 'public-zero-witness-binding-check';
+            return 'structured-proof-statement-required';
+        case 'public-binding-check-only-v1':
+            return 'public-binding-check-only';
     }
 };
 
@@ -186,9 +186,7 @@ const rowBatchTermCount = (
         return explicitRowBatchTermCount(rowBatch);
     }
     if (rowBatch.batchKind === 'StructuredModuleSisShareCommitmentRows') {
-        return structuredShareCommitmentSparseTermCount(
-            rowBatch as StructuredShareCommitmentRowBatch,
-        );
+        return structuredShareCommitmentSparseTermCount(rowBatch);
     }
     if (rowBatch.batchKind === 'StructuredModuleLweReceiverEncryptionRows') {
         return structuredReceiverEncryptionWitnessTermCounts(rowBatch)
@@ -218,7 +216,7 @@ export {
     sourceRingDegreeForComponentProofStatement,
     proofSystemRingDegreeForComponentProofStatement,
     proofStatementFormatForComponent,
-    proofBytesAvailabilityForStatementFormat,
+    proofBackendRequirementForStatementFormat,
     structuredReceiverEncryptionWitnessTermCounts,
     rowBatchTermCount,
     denseCoefficientCountForComponentProofStatement,

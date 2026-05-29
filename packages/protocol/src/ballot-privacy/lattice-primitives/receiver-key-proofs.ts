@@ -5,7 +5,6 @@ import type {
     RefusalRecord,
 } from '@sealed-lattice/types';
 
-import { createRefusal } from '../../common/verification-helpers.js';
 import {
     createReceiverKeyProofShell,
     deriveProofBytesHash,
@@ -23,6 +22,7 @@ import {
     createReceiverKeyLinearProofParameterSet,
     type ReceiverKeyProofMaterial,
 } from '../receiver-key-proof-parameters.js';
+import { createRefusal } from '../verification-helpers.js';
 
 import type {
     ReceiverEncryptionPublicKeyMaterial,

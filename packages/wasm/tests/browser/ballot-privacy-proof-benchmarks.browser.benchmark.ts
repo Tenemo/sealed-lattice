@@ -1,8 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { cdp, server } from 'vitest/browser';
 
-import { loadTranscriptCoreKernel } from '../../src/index';
-
+import { loadTranscriptCoreKernel } from '#packages/wasm/src/index';
 import {
     formatProofBenchmarkReport,
     runAggregateDerivationProofBenchmark,
@@ -163,13 +162,16 @@ describe('ballot privacy proof benchmarks in browsers', () => {
             expectPositiveFiniteDuration(report.generationMs);
             expectPositiveFiniteDuration(report.verificationMs);
             expectPositiveFiniteDuration(report.packageVerificationMs);
-            for (const componentProof of report.componentProofs) {
-                if (
-                    componentProof.componentId !==
-                    'receiver-key-binding-component'
-                ) {
-                    expect(componentProof.proofSizeBytes).toBeGreaterThan(0);
-                }
+            const claimBearingProofSizes = report.componentProofs
+                .filter(
+                    (componentProof) =>
+                        componentProof.componentId !==
+                        'receiver-key-binding-component',
+                )
+                .map((componentProof) => componentProof.proofSizeBytes);
+            expect(claimBearingProofSizes).toHaveLength(4);
+            for (const proofSizeBytes of claimBearingProofSizes) {
+                expect(proofSizeBytes).toBeGreaterThan(0);
             }
             expect(aggregateBenchmark.report.proofSizeBytes).toBeGreaterThan(0);
             expect(aggregateBenchmark.report.statementRows).toBe(224);

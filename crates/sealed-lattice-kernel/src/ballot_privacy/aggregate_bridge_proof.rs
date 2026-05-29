@@ -2,9 +2,12 @@ use serde_json::{Map, Value, json};
 
 use crate::{
     ballot_privacy::component::ParsedSparseComponentProofStatement,
-    bgv::profile::{DATA_PRIMES, POLYNOMIAL_DEGREE},
+    bgv::profile::{DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE},
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
-    hashing::{canonical_json, derive_protocol_hash, hash512, to_hex},
+    hashing::{
+        canonical_json, canonical_json_matches_bytes, derive_protocol_hash,
+        derive_protocol_hash_for_ascii_string_payload, hash512, to_hex,
+    },
     transcript_core::decode_hex,
 };
 
@@ -24,7 +27,12 @@ use super::{
 
 const BRIDGE_PROOF_PROFILE_ID: &str = "EncryptedAggregateBridge-v1";
 const BRIDGE_PROOF_BACKEND: &str = "SealedLatticeBridgeRelation";
-const BGV_ENCRYPTION_PROOF_SUBRELATION: &str = "SealedLatticeDevelopmentCiphertextEquationRelation";
+const BGV_ENCRYPTION_PROOF_SUBRELATION: &str =
+    "SealedLatticePassiveCollectiveCiphertextEquationRelation";
+const BGV_ENCRYPTION_KEY_MATERIAL_KIND: &str = "passive-transcript-derived-collective-public-key";
+const DEVELOPMENT_KEY_ONLY: bool = false;
+const THRESHOLD_DECRYPTABLE: bool = false;
+const CLAIM_BEARING_BRIDGE_ENCRYPTION: bool = false;
 const BRIDGE_PROOF_PENDING_STATUS: &str = "BridgeProofBackendPending";
 const SHARED_WITNESS_BINDING_PENDING_STATUS: &str = "SharedWitnessBindingProofPending";
 const AGGREGATE_TO_PLAINTEXT_BINDING_PENDING_STATUS: &str =
@@ -34,7 +42,7 @@ const RNS_CRT_CONSISTENCY_PROOF_PENDING_STATUS: &str = "RnsCrtConsistencyProofPe
 const BRIDGE_PROOF_CHECKED_STATUS: &str = "BridgeProofRelationChecked";
 const SHARED_WITNESS_BINDING_CHECKED_STATUS: &str = "SharedWitnessBindingRelationChecked";
 const AGGREGATE_TO_PLAINTEXT_BINDING_CHECKED_STATUS: &str =
-    "AggregateToPlaintextBindingProofChecked";
+    "AggregateToPlaintextModularBindingChecked";
 const BGV_ENCRYPTION_PROOF_CHECKED_STATUS: &str = "BgvCiphertextEquationChecked";
 const RNS_CRT_CONSISTENCY_PROOF_CHECKED_STATUS: &str = "RnsCrtConsistencyRelationChecked";
 const SHARED_WITNESS_ZERO_KNOWLEDGE_STATUS: &str =
@@ -42,6 +50,9 @@ const SHARED_WITNESS_ZERO_KNOWLEDGE_STATUS: &str =
 const BGV_RANDOMNESS_BOUND_PROOF_MISSING_STATUS: &str = "BgvRandomnessBoundProofMissing";
 const BGV_RANDOMNESS_BOUND_PROOF_STATUS: &str = "BgvRandomnessErrorSupportPolynomialChecked";
 const BRIDGE_CLAIM_CLOSURE_STATUS: &str = "BridgeProofClaimClosureMissing";
+const BRIDGE_RANDOMNESS_SOURCE_FRESH_CSPRNG: &str = "fresh-csprng";
+const BRIDGE_RANDOMNESS_SOURCE_DEVELOPMENT_DETERMINISTIC: &str =
+    "development-deterministic-fixture";
 const HWANG_PIOP_DEFERRED_STATUS: &str = "DeferredUntilSealedLatticeBgvRnsProfileFreeze";
 const PLAINTEXT_ENCODING_RELATION: &str = "BGVBatchEncode65537InverseNegacyclicNtt";
 const NAIVE_LINEAR_EXPANSION_BACKEND_STATUS: &str = "InfeasibleForEncryptedAggregateBridgeClaim";
@@ -53,8 +64,13 @@ const AGGREGATE_DERIVATION_FULL_VERIFICATION_PRECONDITION_STATUS: &str =
     "AggregateDerivationFullVerificationPreconditionNotBound";
 const SHARED_WITNESS_CHALLENGE_BITS_PER_CHECK: u64 = 64;
 const BRIDGE_SHARED_WITNESS_CHECK_COUNT: usize = 2;
-const BRIDGE_SHARED_WITNESS_SOUNDNESS_BITS: u64 =
+const BRIDGE_SHARED_WITNESS_REJECTION_ATTEMPT_LIMIT: usize = 64;
+const SHARED_WITNESS_REJECTION_ATTEMPT_GRINDING_BITS_PER_CHECK: u64 = 6;
+const BRIDGE_SHARED_WITNESS_CHALLENGE_ENTROPY_BITS: u64 =
     SHARED_WITNESS_CHALLENGE_BITS_PER_CHECK * BRIDGE_SHARED_WITNESS_CHECK_COUNT as u64;
+const BRIDGE_SHARED_WITNESS_WEAKEST_RELATION_MODULUS: u64 = PLAINTEXT_MODULUS;
+const BRIDGE_SHARED_WITNESS_UNADJUSTED_WEAKEST_RELATION_SOUNDNESS_BITS_FLOOR: u64 = 32;
+const BRIDGE_SHARED_WITNESS_EFFECTIVE_BINDING_SOUNDNESS_BITS_FLOOR: u64 = 20;
 const BRIDGE_BGV_CIPHERTEXT_COMPONENT_COUNT: u64 = 2;
 
 mod boundedness;

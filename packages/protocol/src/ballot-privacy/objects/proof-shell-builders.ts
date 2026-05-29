@@ -11,8 +11,8 @@ import type {
     ShareCommitment,
 } from '@sealed-lattice/types';
 
-import { createRefusal } from '../../common/verification-helpers.js';
 import { getBallotPrivacyEncodedShareVectorWidth } from '../protocol-parameters.js';
+import { createRefusal } from '../verification-helpers.js';
 
 import type {
     BallotProofRecordPayload,
@@ -98,6 +98,7 @@ export const buildBallotProofStatement = (
         ballotShareLayoutProfileHash: input.ballotShareLayoutProfileHash,
         encodedAggregateLayoutHash: input.encodedAggregateLayoutHash,
         encodedShareVectorLayoutHash: input.encodedShareVectorLayoutHash,
+        purpose: 'ballot-proof-statement-challenge-domain-v1',
         receiverEncryptionProfileHash: input.receiverEncryptionProfileHash,
         scoreMembershipProfileHash: input.scoreMembershipProfileHash,
         shareCommitmentMessageBoundCertHash:

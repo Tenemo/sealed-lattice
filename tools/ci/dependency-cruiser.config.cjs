@@ -1,72 +1,72 @@
-const path = require("node:path");
+const path = require('node:path');
 
-const workspaceRoot = path.resolve(__dirname, "..", "..");
-const workspacePackageRoot = "^packages/[^/]+/";
+const workspaceRoot = path.resolve(__dirname, '..', '..');
+const workspacePackageRoot = '^packages/[^/]+/';
 
 module.exports = {
     forbidden: [
         {
-            name: "no-cycles",
-            severity: "error",
+            name: 'no-cycles',
+            severity: 'error',
             from: {},
             to: {
                 circular: true,
             },
         },
         {
-            name: "types-stays-foundational",
-            severity: "error",
+            name: 'types-stays-foundational',
+            severity: 'error',
             from: {
-                path: "^packages/types/",
+                path: '^packages/types/',
             },
             to: {
-                path: "^packages/(crypto|protocol|sdk|wasm)/",
+                path: '^packages/(crypto|protocol|sdk|wasm)/',
             },
         },
         {
-            name: "crypto-only-uses-types",
-            severity: "error",
+            name: 'crypto-only-uses-types',
+            severity: 'error',
             from: {
-                path: "^packages/crypto/",
+                path: '^packages/crypto/',
             },
             to: {
-                path: "^packages/(protocol|sdk|wasm)/",
+                path: '^packages/(protocol|sdk|wasm)/',
             },
         },
         {
-            name: "wasm-only-uses-types",
-            severity: "error",
+            name: 'wasm-only-uses-types',
+            severity: 'error',
             from: {
-                path: "^packages/wasm/",
+                path: '^packages/wasm/',
             },
             to: {
-                path: "^packages/(crypto|protocol|sdk)/",
+                path: '^packages/(crypto|protocol|sdk)/',
             },
         },
         {
-            name: "protocol-does-not-use-sdk-or-wasm",
-            severity: "error",
+            name: 'protocol-does-not-use-sdk-or-wasm',
+            severity: 'error',
             from: {
-                path: "^packages/protocol/",
+                path: '^packages/protocol/',
             },
             to: {
-                path: "^packages/(sdk|wasm)/",
+                path: '^packages/(sdk|wasm)/',
             },
         },
         {
-            name: "no-deep-workspace-package-imports",
-            severity: "error",
+            name: 'no-deep-workspace-package-imports',
+            severity: 'error',
             from: {
                 path: workspacePackageRoot,
             },
             to: {
                 path: workspacePackageRoot,
-                dependencyTypes: ["npm-no-pkg"],
+                dependencyTypes: ['npm-no-pkg'],
             },
         },
         {
-            name: "no-unresolved-imports",
-            severity: "error",
+            name: 'no-unresolved-imports',
+            severity: 'error',
             from: {},
             to: {
                 couldNotResolve: true,
@@ -76,13 +76,13 @@ module.exports = {
     options: {
         combinedDependencies: true,
         doNotFollow: {
-            path: "node_modules",
+            path: 'node_modules',
         },
         exclude: {
-            path: "(^|/)(dist|node_modules)(/|$)",
+            path: '(^|/)(dist|node_modules)(/|$)',
         },
         tsConfig: {
-            fileName: path.join(workspaceRoot, "tsconfig.tools.json"),
+            fileName: path.join(workspaceRoot, 'tsconfig.tools.json'),
         },
     },
 };

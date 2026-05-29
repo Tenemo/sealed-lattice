@@ -42,7 +42,7 @@ import {
 const protocolHashPattern = /^[0-9a-f]{128}$/u;
 
 const zeroShareVector = (): readonly FieldElement[] =>
-    Array.from({ length: pvssBallotShareVectorWidth }, () => 0 as FieldElement);
+    Array.from({ length: pvssBallotShareVectorWidth }, () => 0);
 
 const fieldVectorsEqual = (
     left: readonly FieldElement[],
@@ -379,6 +379,7 @@ const deriveAggregateShareCommitmentHash = (input: {
         aggregateShareVector: input.aggregateShare.aggregateShareVector,
         ballotSetHash: input.ballotSetHash,
         objectType: input.aggregateShare.objectType,
+        purpose: 'pvss-test-aggregate-share-commitment-v1',
         shareVectorWidth: input.aggregateShare.shareVectorWidth,
         trusteeIdentity: input.aggregateShare.trusteeIdentity,
         trusteeRosterPosition: input.aggregateShare.trusteeRosterPosition,

@@ -88,8 +88,11 @@ describe('recovery epoch shells', () => {
             boardHeadHash: recoveryContextHead.headHash,
             newSigningPublicKeyHash: newSigningKeyFixture.publicKeyHash,
             restoredFrozenReceiverStateCommitment: deriveProtocolHash(
-                'EncryptedEnvelopeRoot',
-                { receiverState: 'restored' },
+                'ChallengeDomainHash',
+                {
+                    payload: { receiverState: 'restored' },
+                    purpose: 'fixture-restored-receiver-state-root-v1',
+                },
             ),
             newTrusteeSetupCommitment: deriveProtocolHash(
                 'CollectivePublicKeyRoot',
@@ -249,8 +252,9 @@ describe('recovery epoch shells', () => {
         );
         const wrongRecoveryPolicyPayload = {
             ...payload,
-            recoveryPolicyHash: deriveProtocolHash('RecoveryPolicyHash', {
-                policy: 'wrong-recovery-policy',
+            recoveryPolicyHash: deriveProtocolHash('ChallengeDomainHash', {
+                payload: { policy: 'wrong-recovery-policy' },
+                purpose: 'fixture-recovery-policy-v1',
             }),
         };
         const wrongRecoveryPolicyUpdateHash = deriveRecoveryEpochUpdateHash(

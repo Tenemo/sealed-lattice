@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
-  "ballotPackageHash": "ce68814d73067d85a49e5cebbfa913b59f4a974ab07bffd5e7ba0ddc0d2b2e22aeee68ccb8e505dcc6d96219bce0b17c5d852ba5cc2fc9f9ab627b81eddb87f8",
-  "ballotPolynomialSetHash": "14999d9fca4ba207e8e96a6125eb100bce70d0c61fcd751ceec6d67d04e0a8917a7b6a61fe2c04fff0a1c4b0955ca7e829493d03e7ebd884627c419b9bc11217",
-  "firstReceiverPayloadHash": "7d0c001aad716535bb874149820f8bddf0ba546040854e0d85c11026c1bf64c40d89349b5c3e2aa35297d62020bbe9532ad15cc93178235be4ee5cbd9e1c9046",
+  "ballotPackageHash": "5a3366837e7a39efd56308e218e285579b15c2d7e0a03378d9fef4f8e678be372954e724406b00f1bbc14e19608e25597477af59879cc6758ca5884a59ffd1f0",
+  "ballotPolynomialSetHash": "0b6a346069fec54a26a88f8f113b513403c42ccc4b5f17e52e2eeb32f949a73b07b10c2acd5ac5dd85492e06701b14d462f40e47e7fde91a5cdb2a85e9ad0908",
+  "firstReceiverPayloadHash": "154cfbe29354def677eb369adfcf739c82506c096854fee40b36608766a18bb35dde5aebf13bee12ea9c2a225fe14d2d24489e3322c8c30a36cb3e237ae38b14",
   "firstReceiverShareVector": [
-    6096,
-    36920,
-    45992,
-    22057,
+    10542,
+    29309,
+    3758,
+    64310,
     0,
     0,
     0,
@@ -25,7 +25,7 @@
     0,
     0
   ],
-  "firstShareCommitmentHash": "5a0b439ff979b95db3125f54534a4d10bd41460038b2b00382732da05f0dc0641e81cd79ad81581bc47bc3013c1f70c23ef461e3c54509ede8bf08e58ba9817a",
+  "firstShareCommitmentHash": "5ead77a55fb4d919e39f430f368a4c23d470883400d91b1ab16b52e97719f8a097ec2a24872e428d2bc5ad43dc2494f6123368a087545d0fae553b686dc52e45",
   "normalizedScores": [
     10,
     1,

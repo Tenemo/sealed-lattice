@@ -38,19 +38,19 @@ pub(super) fn bridge_variant_dimensions(
         "shareVectorWidth",
         "aggregateDerivationStatement",
     )?;
-    let maximum_m9_participant_count = u64::try_from(BALLOT_PRIVACY_MANDATORY_RECEIVER_COUNT)
+    let maximum_bridge_participant_count = u64::try_from(BALLOT_PRIVACY_MANDATORY_RECEIVER_COUNT)
         .map_err(|_| {
-            CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                "M9 maximum participant count does not fit u64",
-            )
-        })?;
+        CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "Encrypted aggregate bridge maximum participant count does not fit u64",
+        )
+    })?;
     if participant_count < BALLOT_PRIVACY_MINIMUM_UNSAFE_PARTICIPANT_COUNT as u64
-        || participant_count > maximum_m9_participant_count
+        || participant_count > maximum_bridge_participant_count
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
-            "M9 bridge participantCount must be within the n=3..20 variant matrix",
+            "encrypted aggregate bridge participantCount must be within the n=3..20 variant matrix",
         ));
     }
     if option_count < BALLOT_PRIVACY_MINIMUM_OPTION_COUNT as u64
@@ -58,7 +58,7 @@ pub(super) fn bridge_variant_dimensions(
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
-            "M9 bridge optionCount must be within the m=2..20 variant matrix",
+            "encrypted aggregate bridge optionCount must be within the m=2..20 variant matrix",
         ));
     }
     let expected_share_vector_width = option_count
@@ -66,13 +66,13 @@ pub(super) fn bridge_variant_dimensions(
         .ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::MalformedLength,
-                "M9 bridge shareVectorWidth calculation overflowed",
+                "encrypted aggregate bridge shareVectorWidth calculation overflowed",
             )
         })?;
     if u64::try_from(share_vector_width).ok() != Some(expected_share_vector_width) {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
-            "M9 bridge shareVectorWidth must equal 11 * optionCount",
+            "encrypted aggregate bridge shareVectorWidth must equal 11 * optionCount",
         ));
     }
     let claim_tier = if participant_count < BALLOT_PRIVACY_MINIMUM_SAFE_PARTICIPANT_COUNT as u64 {

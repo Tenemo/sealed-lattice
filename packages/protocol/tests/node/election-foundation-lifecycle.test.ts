@@ -14,7 +14,7 @@ import {
     deriveLifecycleLabels,
     deriveThresholdProfile,
     isValidLifecycleTransition,
-} from '../../src/index';
+} from '#packages/protocol/src/index';
 
 const expectValidPath = (states: readonly LifecycleState[]): void => {
     for (let index = 0; index < states.length - 1; index += 1) {

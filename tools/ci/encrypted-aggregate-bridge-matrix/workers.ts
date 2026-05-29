@@ -105,7 +105,7 @@ const runVariantInChildProcess = async (
                 resolve(
                     failedVariantResult(
                         variant,
-                        `M9 worker exited with code ${String(exitCode)} without row output. ${standardError.slice(-2000)}`,
+                        `Encrypted aggregate bridge worker exited with code ${String(exitCode)} without row output. ${standardError.slice(-2000)}`,
                     ),
                 );
 

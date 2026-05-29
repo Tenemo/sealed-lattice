@@ -552,10 +552,10 @@ pub(crate) fn supplied_component_proof_statement_hash<'a>(
             Some("statementHash"),
         ),
         (
-            Some("BallotProofComponentProofStatementPlan"),
-            "structured-module-lwe-linear-proof-v1" | "public-zero-witness-binding-check-v1",
+            Some("BallotProofComponentProofStatementDescriptor"),
+            "structured-module-lwe-linear-proof-v1" | "public-binding-check-only-v1",
         ) => (
-            derive_ballot_component_proof_statement_plan_hash(proof_statement),
+            derive_ballot_component_proof_statement_descriptor_hash(proof_statement),
             Some("componentProofStatementHash"),
         ),
         (
@@ -617,12 +617,13 @@ pub(crate) fn null_field(value: &Value, field_name: &str) -> bool {
         .is_some_and(Value::is_null)
 }
 
-pub(crate) fn collect_component_proof_statement_plan_shape_refusals(
+pub(crate) fn collect_component_proof_statement_descriptor_shape_refusals(
     proof_statement: &Value,
     expected_component_id: &str,
     proof_record_hash: Option<&str>,
 ) -> Vec<Value> {
-    if string_field(proof_statement, "objectType") != Some("BallotProofComponentProofStatementPlan")
+    if string_field(proof_statement, "objectType")
+        != Some("BallotProofComponentProofStatementDescriptor")
     {
         return Vec::new();
     }
@@ -647,7 +648,7 @@ pub(crate) fn collect_component_proof_statement_plan_shape_refusals(
     let variable_column_count = non_negative_u64_field(proof_statement, "variableColumnCount");
 
     let proof_statement_format = string_field(proof_statement, "proofStatementFormat");
-    let proof_bytes_availability = string_field(proof_statement, "proofBytesAvailability");
+    let proof_backend_requirement = string_field(proof_statement, "proofBackendRequirement");
 
     let common_shape_is_valid = object_map(proof_statement)
         .and_then(|object| object.get("objectVersion"))
@@ -658,9 +659,9 @@ pub(crate) fn collect_component_proof_statement_plan_shape_refusals(
             component_proof_statement_format_is_expected(expected_component_id, format)
         })
         && proof_statement_format
-            .zip(proof_bytes_availability)
+            .zip(proof_backend_requirement)
             .is_some_and(|(format, availability)| {
-                component_proof_bytes_availability_is_expected(
+                component_proof_backend_requirement_is_expected(
                     expected_component_id,
                     format,
                     availability,
@@ -734,7 +735,7 @@ pub(crate) fn collect_component_proof_statement_plan_shape_refusals(
     } else {
         vec![structural_refusal(
             format!(
-                "Ballot proof component proof statement plan for {expected_component_id} has an invalid canonical shape."
+                "Ballot proof component proof statement descriptor for {expected_component_id} has an invalid canonical shape."
             ),
             proof_record_hash,
         )]

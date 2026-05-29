@@ -1,14 +1,13 @@
 // This file is one targeted part of the split test suite.
 import { describe, expect, it } from 'vitest';
 
-import { loadTranscriptCoreKernel } from '../../../src/index';
+import { cloneJsonValue, expectRefusalMessage } from './shared.js';
+
+import { loadTranscriptCoreKernel } from '#packages/wasm/src/index';
 import {
     type BallotPrivacyKernelVerification,
     type TranscriptCoreKernel,
-} from '../../../src/transcript-core-bridge';
-
-import { cloneJsonValue, expectRefusalMessage } from './shared.js';
-
+} from '#packages/wasm/src/transcript-core-bridge';
 import { createMandatoryProfileBallotProofRecordBenchmarkFixture } from '#tests/support/ballot-privacy-proof-record-generation-fixtures';
 import {
     createJsonCheckpointStore,
@@ -180,10 +179,7 @@ describe('transcript-core kernel in Node', () => {
                 'receiver-encryption-component',
                 'structured-module-lwe-linear-proof-v1',
             ],
-            [
-                'receiver-key-binding-component',
-                'public-zero-witness-binding-check-v1',
-            ],
+            ['receiver-key-binding-component', 'public-binding-check-only-v1'],
         ]);
         for (const componentId of [
             'score-and-shamir-field-component',

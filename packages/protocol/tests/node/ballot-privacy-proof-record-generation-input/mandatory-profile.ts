@@ -1,7 +1,5 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 
-import { buildBallotProofRecordGenerationRequest } from '../../../src/ballot-privacy/ballot-proof-linear-statement';
-import { lowerBallotPrivacyRelationToBackendStatement } from '../../../src/ballot-privacy/relation-backend-lowering';
 import {
     type BallotProofRecordGenerationFixture,
     createMandatoryProfileBallotProofRecordGenerationFixture,
@@ -14,6 +12,10 @@ import {
     receiverEncryptionProofStatement,
     shareCommitmentProofStatement,
 } from './helpers.js';
+
+import { buildBallotProofRecordGenerationRequest } from '#packages/protocol/src/ballot-privacy/ballot-proof-linear-statement';
+import { lowerBallotPrivacyRelationToBackendStatement } from '#packages/protocol/src/ballot-privacy/relation-backend-lowering';
+
 describe('mandatory-profile ballot proof record generation input', () => {
     let fixture: BallotProofRecordGenerationFixture;
 
@@ -92,7 +94,7 @@ describe('mandatory-profile ballot proof record generation input', () => {
             'sparse-polynomial-matrix-linear-proof-v1',
             'structured-module-sis-share-commitment-v1',
             'structured-module-lwe-linear-proof-v1',
-            'public-zero-witness-binding-check-v1',
+            'public-binding-check-only-v1',
         ]);
         expect(scoreStatement).toMatchObject({
             statementColumns: 404,

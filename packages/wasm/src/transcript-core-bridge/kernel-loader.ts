@@ -32,6 +32,7 @@ import type {
 } from './kernel-contracts.js';
 import {
     componentProverRandomnessHexes,
+    suppliedOrFreshBridgeRandomness,
     suppliedOrFreshRandomnessHex,
 } from './kernel-contracts.js';
 import type { TranscriptCoreKernelLoaderOptions } from './kernel-runtime.js';
@@ -71,7 +72,7 @@ export const createTranscriptCoreKernelLoader = (
             const deallocate = resolveNumberExport(
                 exports,
                 'sealed_lattice_deallocate',
-            ) as (pointer: number, length: number) => void;
+            );
             const transcriptCoreCommandWithLength = resolveNumberExport(
                 exports,
                 'sealed_lattice_transcript_core_command_with_length',
@@ -390,8 +391,18 @@ export const createTranscriptCoreKernelLoader = (
                         casualMicroRosterAcknowledged:
                             input.casualMicroRosterAcknowledged,
                     }),
-                generateAggregateBridgeEncryption: (input) =>
-                    executeCommand({
+                generateAggregateBridgeEncryption: (input) => {
+                    const proverRandomness = suppliedOrFreshBridgeRandomness(
+                        input.proverRandomnessHex,
+                        input.developmentRandomnessOverrideAcknowledged,
+                    );
+                    const encryptionRandomness =
+                        suppliedOrFreshBridgeRandomness(
+                            input.encryptionRandomnessSeedHex,
+                            input.developmentRandomnessOverrideAcknowledged,
+                        );
+
+                    return executeCommand({
                         command: 'GenerateAggregateBridgeEncryption',
                         aggregateSelectionPolicyHash:
                             input.aggregateSelectionPolicyHash,
@@ -402,14 +413,31 @@ export const createTranscriptCoreKernelLoader = (
                             input.bridgeWitnessPrivacyProfileHash,
                         heParamHash: input.heParamHash,
                         setupPackage: input.setupPackage,
-                        proverRandomnessHex: suppliedOrFreshRandomnessHex(
-                            input.proverRandomnessHex,
-                        ),
+                        proverRandomnessHex: proverRandomness.randomnessHex,
+                        proverRandomnessSource:
+                            proverRandomness.randomnessSource,
+                        encryptionRandomnessSeedHex:
+                            encryptionRandomness.randomnessHex,
+                        encryptionRandomnessSeedSource:
+                            encryptionRandomness.randomnessSource,
+                        developmentRandomnessOverrideAcknowledged:
+                            input.developmentRandomnessOverrideAcknowledged,
                         includeCanonicalBytesHex:
                             input.includeCanonicalBytesHex,
-                    }),
-                evaluateAggregateBridgeRelation: (input) =>
-                    executeCommand({
+                    });
+                },
+                evaluateAggregateBridgeRelation: (input) => {
+                    const proverRandomness = suppliedOrFreshBridgeRandomness(
+                        input.proverRandomnessHex,
+                        input.developmentRandomnessOverrideAcknowledged,
+                    );
+                    const encryptionRandomness =
+                        suppliedOrFreshBridgeRandomness(
+                            input.encryptionRandomnessSeedHex,
+                            input.developmentRandomnessOverrideAcknowledged,
+                        );
+
+                    return executeCommand({
                         command: 'EvaluateAggregateBridgeRelation',
                         aggregateSelectionPolicyHash:
                             input.aggregateSelectionPolicyHash,
@@ -421,10 +449,17 @@ export const createTranscriptCoreKernelLoader = (
                             input.bridgeWitnessPrivacyProfileHash,
                         heParamHash: input.heParamHash,
                         setupPackage: input.setupPackage,
-                        proverRandomnessHex: suppliedOrFreshRandomnessHex(
-                            input.proverRandomnessHex,
-                        ),
-                    }),
+                        proverRandomnessHex: proverRandomness.randomnessHex,
+                        proverRandomnessSource:
+                            proverRandomness.randomnessSource,
+                        encryptionRandomnessSeedHex:
+                            encryptionRandomness.randomnessHex,
+                        encryptionRandomnessSeedSource:
+                            encryptionRandomness.randomnessSource,
+                        developmentRandomnessOverrideAcknowledged:
+                            input.developmentRandomnessOverrideAcknowledged,
+                    });
+                },
                 verifyAggregateBridgeEncryption: (input) =>
                     executeCommand({
                         command: 'VerifyAggregateBridgeEncryption',

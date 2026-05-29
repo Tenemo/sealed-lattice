@@ -5,9 +5,9 @@ use unicode_normalization::UnicodeNormalization;
 
 mod certificates;
 mod development_fixtures;
+mod encrypted_aggregate_bridge_trace;
 mod input;
 mod key_material;
-mod m9_bridge_trace;
 mod package_builder;
 mod participant_material;
 mod sampling;
@@ -63,17 +63,17 @@ pub(crate) const THRESHOLD_DECRYPTION_PROFILE_ID: &str = "BGV-RNS-KLLPS26-AsyncL
 pub(crate) const KEY_SWITCH_DECOMPOSITION_PROFILE_ID: &str =
     "sealed-lattice-bgv-rns-key-switch-decomposition-v1";
 pub(crate) const PROVISIONAL_ROT_SET_ID: &str =
-    "sealed-lattice-provisional-m10-top-k-rotation-set-v1";
+    "sealed-lattice-provisional-encrypted-aggregate-evaluator-top-k-rotation-set-v1";
 const MAXIMUM_PASSIVE_SETUP_ROSTER_SIZE: usize = 50;
 const MINIMUM_PASSIVE_SETUP_ROSTER_SIZE: usize = 3;
 const DEVELOPMENT_ENCRYPTION_FIXTURE_ID: &str =
-    "sealed-lattice-m8-development-encryption-fixture-v1";
+    "sealed-lattice-passive-bgv-setup-development-encryption-fixture-v1";
 const DEVELOPMENT_RELINEARIZATION_ARITHMETIC_FIXTURE_ID: &str =
-    "sealed-lattice-m8-development-relinearization-arithmetic-fixture-v1";
+    "sealed-lattice-passive-bgv-setup-development-relinearization-arithmetic-fixture-v1";
 const DEVELOPMENT_KEY_SWITCH_ARITHMETIC_FIXTURE_ID: &str =
-    "sealed-lattice-m8-development-key-switch-arithmetic-fixture-v1";
+    "sealed-lattice-passive-bgv-setup-development-key-switch-arithmetic-fixture-v1";
 const EVALUATION_KEY_STREAMING_FIXTURE_ID: &str =
-    "sealed-lattice-m8-evaluation-key-streaming-fixture-v1";
+    "sealed-lattice-passive-bgv-setup-evaluation-key-streaming-fixture-v1";
 const EVALUATION_KEY_CHUNK_SIZE_BYTES: usize = 262_144;
 const DEVELOPMENT_MOBILE_STORAGE_QUOTA_BYTES: usize = 32 * 1024 * 1024;
 
@@ -116,7 +116,7 @@ struct VerifiedParticipantSetupBinding {
 
 pub(crate) fn describe_passive_setup_object_model() -> CanonicalResult<Value> {
     Ok(json!({
-        "objectModelId": "sealed-lattice-m8-passive-setup-object-model-v1",
+        "objectModelId": "sealed-lattice-passive-bgv-setup-object-model-v1",
         "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
         "thresholdDecryptionProfileId": THRESHOLD_DECRYPTION_PROFILE_ID,
         "keySwitchDecompositionProfileId": KEY_SWITCH_DECOMPOSITION_PROFILE_ID,
@@ -126,6 +126,7 @@ pub(crate) fn describe_passive_setup_object_model() -> CanonicalResult<Value> {
             "ParticipantBgvSetupRecord",
             "BgvPublicKeyShare",
             "BgvCollectivePublicKey",
+            "BgvCollectivePublicKeyCoefficientMaterial",
             "ThresholdShareVerificationKeySet",
             "TrusteeThresholdVerificationKey",
             "BgvRelinearizationKey",
@@ -175,7 +176,7 @@ pub(crate) fn describe_passive_setup_object_model() -> CanonicalResult<Value> {
             "rawSecretSharesExported": false
         },
         "statusLabels": [
-            "M8CanonicalObjectModelFrozen",
+            "PassiveBgvSetupCanonicalObjectModelFrozen",
             "PassiveSetupOnly",
             "KllpsSetupMaterialMatchedOnly"
         ],
@@ -307,24 +308,25 @@ pub(crate) fn verify_passive_setup_package_from_request(request: &Value) -> Cano
         "refusedObjects": [],
         "unresolvedReason": null,
         "statusLabels": [
-            "M8PassiveSetupPackageVerified",
+            "PassiveBgvSetupPackageVerified",
             "PassiveSetupDevelopmentFixtureOnly",
             "CollectivePublicKeyRootBound",
-            "BgvPublicKeyRootHashOnly",
+            "BgvPublicKeyCoefficientMaterialBound",
             "ThresholdVerificationMaterialBound",
             "EvaluationKeyRootBound",
-            "AppendixBSetupInputReady",
+            "PassiveSetupInputReady",
             "BgvAlgebraicPublicKeyProofMissing",
-            "FinalAppendixBPendingQTarget"
+            "FinalSetupSecurityPendingTargetModulus"
         ],
     }))
 }
 
-use input::read_passive_setup_input;
-pub(crate) use m9_bridge_trace::{
-    M9BridgeCiphertextRelationTrace, generate_m9_bridge_ciphertext_relation_trace_from_slots,
-    m9_bridge_batch_encoding_commitment_hash_from_responses,
-    m9_bridge_ciphertext_commitment_hash_from_responses,
-    verify_m9_bridge_ciphertext_public_bindings,
+pub(crate) use encrypted_aggregate_bridge_trace::{
+    EncryptedAggregateBridgeCiphertextRelationTrace,
+    encrypted_aggregate_bridge_batch_encoding_commitment_hash_from_responses,
+    encrypted_aggregate_bridge_ciphertext_commitment_hash_from_responses,
+    generate_encrypted_aggregate_bridge_ciphertext_relation_trace_from_slots,
+    verify_encrypted_aggregate_bridge_ciphertext_public_bindings,
 };
+use input::read_passive_setup_input;
 use package_builder::build_passive_setup_package;

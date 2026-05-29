@@ -14,13 +14,13 @@ import type { BallotPrivacyRelationCompilerInput } from '../relation-compiler.js
 
 import {
     denseCoefficientCountForComponentProofStatement,
-    proofBytesAvailabilityForStatementFormat,
+    proofBackendRequirementForStatementFormat,
     proofStatementFormatForComponent,
     proofSystemRingDegreeForComponentProofStatement,
     rowBatchTermCount,
     sourceRingDegreeForComponentProofStatement,
     structuredReceiverEncryptionWitnessTermCounts,
-} from './component-proof-plan-policy.js';
+} from './component-proof-descriptor-policy.js';
 import {
     buildComponentStatement,
     rowBatchesForComponent,
@@ -32,7 +32,7 @@ import type {
     BallotProofComponentProjectionWitness,
     BallotProofComponentProofBundlePayload,
     BallotProofComponentProofRecordPayload,
-    BallotProofComponentProofStatementPlan,
+    BallotProofComponentProofStatementDescriptor,
     BallotProofComponentStatement,
     BallotProofExplicitComponentId,
     DensePolynomialMatrix,
@@ -40,9 +40,7 @@ import type {
 } from './statement-contracts.js';
 import {
     linearProofRelation,
-    positiveModulo,
     positiveModuloBigInt,
-    receiverEncryptionModulus,
     receiverOpeningRandomnessBitLength,
     receiverPayloadOpeningEncodingOffset,
     receiverShareRepresentativeBitLength,
@@ -134,11 +132,11 @@ export const buildBallotProofComponentBundleStatement = (input: {
     };
 };
 
-const buildBallotProofComponentProofStatementPlan = (input: {
+const buildBallotProofComponentProofStatementDescriptor = (input: {
     readonly ballotProofStatementHash?: ProtocolHash;
     readonly componentStatement: BallotProofComponentStatement;
     readonly loweredStatement: BallotPrivacyLoweredLinearRelationStatement;
-}): BallotProofComponentProofStatementPlan => {
+}): BallotProofComponentProofStatementDescriptor => {
     const component = componentById({
         componentId: input.componentStatement.componentId,
         loweredStatement: input.loweredStatement,
@@ -193,7 +191,7 @@ const buildBallotProofComponentProofStatementPlan = (input: {
                   .toString()
             : null;
     const statementPayload: Omit<
-        BallotProofComponentProofStatementPlan,
+        BallotProofComponentProofStatementDescriptor,
         'componentProofStatementHash'
     > = {
         backendStatementHash:
@@ -212,10 +210,10 @@ const buildBallotProofComponentProofStatementPlan = (input: {
             variableColumnCount: component.variableColumnCount,
         }),
         matrixHash: input.componentStatement.matrixHash,
-        objectType: 'BallotProofComponentProofStatementPlan',
+        objectType: 'BallotProofComponentProofStatementDescriptor',
         objectVersion: 1,
-        proofBytesAvailability:
-            proofBytesAvailabilityForStatementFormat(proofStatementFormat),
+        proofBackendRequirement:
+            proofBackendRequirementForStatementFormat(proofStatementFormat),
         proofLoweringStatus: component.proofLoweringStatus,
         proofStatementFormat,
         proofSystemRingDegree: proofSystemRingDegreeForComponentProofStatement(
@@ -258,11 +256,11 @@ const buildBallotProofComponentProofStatementPlan = (input: {
     };
 };
 
-export const buildBallotProofComponentProofStatementPlans = (input: {
+export const buildBallotProofComponentProofStatementDescriptors = (input: {
     readonly ballotProofStatementHash?: ProtocolHash;
     readonly componentBundleStatement: BallotProofComponentBundleStatement;
     readonly loweredStatement: BallotPrivacyLoweredLinearRelationStatement;
-}): readonly BallotProofComponentProofStatementPlan[] => {
+}): readonly BallotProofComponentProofStatementDescriptor[] => {
     if (
         input.componentBundleStatement.backendStatementHash !==
             input.loweredStatement.backendStatement.backendStatementHash ||
@@ -270,13 +268,13 @@ export const buildBallotProofComponentProofStatementPlans = (input: {
             input.loweredStatement.relationStatementHash
     ) {
         throw new Error(
-            'Component proof statement plans require a bundle statement bound to the lowered relation.',
+            'Component proof statement descriptors require a bundle statement bound to the lowered relation.',
         );
     }
 
     return input.componentBundleStatement.componentStatements.map(
         (componentStatement) =>
-            buildBallotProofComponentProofStatementPlan({
+            buildBallotProofComponentProofStatementDescriptor({
                 ballotProofStatementHash: input.ballotProofStatementHash,
                 componentStatement,
                 loweredStatement: input.loweredStatement,
@@ -354,8 +352,8 @@ export const createBallotProofComponentProofBundle = (input: {
         objectVersion: 1,
         relationStatementHash:
             input.componentBundleStatement.relationStatementHash,
-        requiredComponentIds: input.componentBundleStatement
-            .requiredComponentIds as readonly BallotProofComponentId[],
+        requiredComponentIds:
+            input.componentBundleStatement.requiredComponentIds,
     };
 
     return {
@@ -526,16 +524,6 @@ const numberPolynomialCoefficient = (input: {
     return coefficient;
 };
 
-const addModularProduct = (input: {
-    readonly coefficient: number;
-    readonly currentValue: number;
-    readonly witness: number;
-}): number =>
-    positiveModulo(
-        input.currentValue + input.coefficient * input.witness,
-        receiverEncryptionModulus,
-    );
-
 export {
     assertProjectionSatisfiesRows,
     validateSourceRingDegree,
@@ -544,5 +532,4 @@ export {
     receiverPayloadPlaintextBits,
     numberVectorCoefficient,
     numberPolynomialCoefficient,
-    addModularProduct,
 };

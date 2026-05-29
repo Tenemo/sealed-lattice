@@ -410,6 +410,44 @@ impl LinearProofQuadraticEquation {
         })
     }
 
+    pub(crate) fn add_polynomial_scaled_partial(
+        &self,
+        partial: &Self,
+        polynomial: &[u64],
+    ) -> CanonicalResult<Self> {
+        self.require_same_shape(partial)?;
+        let ring = self.ring();
+        ring.validate_coefficients(polynomial)?;
+        let constant_term = match (&self.constant_term, &partial.constant_term) {
+            (Some(accumulated_constant), Some(partial_constant)) => {
+                let mut combined_constant = accumulated_constant.clone();
+                ring.mul_negacyclic_accumulate(
+                    &mut combined_constant,
+                    polynomial,
+                    partial_constant,
+                )?;
+                Some(combined_constant)
+            }
+            (Some(accumulated_constant), None) => Some(accumulated_constant.clone()),
+            (None, None) => None,
+            (None, Some(_)) => {
+                return Err(invalid_quadratic(
+                    "quadratic partial with a constant cannot be added to a constant-free accumulator",
+                ));
+            }
+        };
+
+        Ok(Self {
+            quadratic_terms: self
+                .quadratic_terms
+                .add_polynomial_scaled(&partial.quadratic_terms, polynomial)?,
+            linear_terms: self
+                .linear_terms
+                .add_polynomial_scaled(&partial.linear_terms, polynomial)?,
+            constant_term,
+        })
+    }
+
     fn require_same_shape(&self, other: &Self) -> CanonicalResult<()> {
         if self.quadratic_terms.rows() != other.quadratic_terms.rows()
             || self.quadratic_terms.columns() != other.quadratic_terms.columns()

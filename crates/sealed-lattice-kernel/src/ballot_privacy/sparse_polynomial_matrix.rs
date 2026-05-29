@@ -172,6 +172,77 @@ impl SparsePolynomialMatrix {
         Self::new(self.ring, self.rows, self.columns, merged_entries)
     }
 
+    pub(crate) fn add_scaled(&self, other: &Self, scalar: u64) -> CanonicalResult<Self> {
+        self.require_same_shape(other)?;
+        if scalar >= self.ring.modulus() {
+            return Err(invalid_sparse_matrix(
+                "scalar is not canonical for this modulus",
+            ));
+        }
+        if scalar == 0 {
+            return Ok(self.clone());
+        }
+
+        let mut merged_entries = Vec::with_capacity(self.entries.len() + other.entries.len());
+        let mut left_index = 0_usize;
+        let mut right_index = 0_usize;
+        while left_index < self.entries.len() || right_index < other.entries.len() {
+            match (self.entries.get(left_index), other.entries.get(right_index)) {
+                (Some(left_entry), Some(right_entry))
+                    if entry_position(left_entry) == entry_position(right_entry) =>
+                {
+                    let mut sum = left_entry.coefficients.clone();
+                    self.ring
+                        .scaled_add_assign(&mut sum, scalar, &right_entry.coefficients)?;
+                    if !is_zero_polynomial(&sum) {
+                        merged_entries.push(SparsePolynomialMatrixEntry::new(
+                            left_entry.row_index,
+                            left_entry.column_index,
+                            sum,
+                        ));
+                    }
+                    left_index += 1;
+                    right_index += 1;
+                }
+                (Some(left_entry), Some(right_entry))
+                    if entry_position(left_entry) < entry_position(right_entry) =>
+                {
+                    merged_entries.push(left_entry.clone());
+                    left_index += 1;
+                }
+                (Some(_), Some(right_entry)) => {
+                    let scaled_coefficients = self.ring.scale(scalar, &right_entry.coefficients)?;
+                    if !is_zero_polynomial(&scaled_coefficients) {
+                        merged_entries.push(SparsePolynomialMatrixEntry::new(
+                            right_entry.row_index,
+                            right_entry.column_index,
+                            scaled_coefficients,
+                        ));
+                    }
+                    right_index += 1;
+                }
+                (Some(left_entry), None) => {
+                    merged_entries.push(left_entry.clone());
+                    left_index += 1;
+                }
+                (None, Some(right_entry)) => {
+                    let scaled_coefficients = self.ring.scale(scalar, &right_entry.coefficients)?;
+                    if !is_zero_polynomial(&scaled_coefficients) {
+                        merged_entries.push(SparsePolynomialMatrixEntry::new(
+                            right_entry.row_index,
+                            right_entry.column_index,
+                            scaled_coefficients,
+                        ));
+                    }
+                    right_index += 1;
+                }
+                (None, None) => break,
+            }
+        }
+
+        Self::new(self.ring, self.rows, self.columns, merged_entries)
+    }
+
     pub fn scale(&self, scalar: u64) -> CanonicalResult<Self> {
         let mut scaled_entries = Vec::with_capacity(self.entries.len());
         for entry in &self.entries {
@@ -188,6 +259,7 @@ impl SparsePolynomialMatrix {
         Self::new(self.ring, self.rows, self.columns, scaled_entries)
     }
 
+    #[cfg(test)]
     pub(crate) fn scale_by_polynomial(&self, polynomial: &[u64]) -> CanonicalResult<Self> {
         self.ring.validate_coefficients(polynomial)?;
 
@@ -204,6 +276,84 @@ impl SparsePolynomialMatrix {
         }
 
         Self::new(self.ring, self.rows, self.columns, scaled_entries)
+    }
+
+    pub(crate) fn add_polynomial_scaled(
+        &self,
+        other: &Self,
+        polynomial: &[u64],
+    ) -> CanonicalResult<Self> {
+        self.require_same_shape(other)?;
+        self.ring.validate_coefficients(polynomial)?;
+        if is_zero_polynomial(polynomial) {
+            return Ok(self.clone());
+        }
+
+        let mut merged_entries = Vec::with_capacity(self.entries.len() + other.entries.len());
+        let mut left_index = 0_usize;
+        let mut right_index = 0_usize;
+        while left_index < self.entries.len() || right_index < other.entries.len() {
+            match (self.entries.get(left_index), other.entries.get(right_index)) {
+                (Some(left_entry), Some(right_entry))
+                    if entry_position(left_entry) == entry_position(right_entry) =>
+                {
+                    let mut sum = left_entry.coefficients.clone();
+                    self.ring.mul_negacyclic_accumulate(
+                        &mut sum,
+                        polynomial,
+                        &right_entry.coefficients,
+                    )?;
+                    if !is_zero_polynomial(&sum) {
+                        merged_entries.push(SparsePolynomialMatrixEntry::new(
+                            left_entry.row_index,
+                            left_entry.column_index,
+                            sum,
+                        ));
+                    }
+                    left_index += 1;
+                    right_index += 1;
+                }
+                (Some(left_entry), Some(right_entry))
+                    if entry_position(left_entry) < entry_position(right_entry) =>
+                {
+                    merged_entries.push(left_entry.clone());
+                    left_index += 1;
+                }
+                (Some(_), Some(right_entry)) => {
+                    let scaled_coefficients = self
+                        .ring
+                        .mul_negacyclic(polynomial, &right_entry.coefficients)?;
+                    if !is_zero_polynomial(&scaled_coefficients) {
+                        merged_entries.push(SparsePolynomialMatrixEntry::new(
+                            right_entry.row_index,
+                            right_entry.column_index,
+                            scaled_coefficients,
+                        ));
+                    }
+                    right_index += 1;
+                }
+                (Some(left_entry), None) => {
+                    merged_entries.push(left_entry.clone());
+                    left_index += 1;
+                }
+                (None, Some(right_entry)) => {
+                    let scaled_coefficients = self
+                        .ring
+                        .mul_negacyclic(polynomial, &right_entry.coefficients)?;
+                    if !is_zero_polynomial(&scaled_coefficients) {
+                        merged_entries.push(SparsePolynomialMatrixEntry::new(
+                            right_entry.row_index,
+                            right_entry.column_index,
+                            scaled_coefficients,
+                        ));
+                    }
+                    right_index += 1;
+                }
+                (None, None) => break,
+            }
+        }
+
+        Self::new(self.ring, self.rows, self.columns, merged_entries)
     }
 
     pub(crate) fn resize(
@@ -294,11 +444,11 @@ impl SparsePolynomialMatrix {
         let mut output_entries = vec![vec![0_u64; self.ring.degree()]; self.rows];
         for entry in &self.entries {
             let vector_entry = &vector.entries()[entry.column_index];
-            let product = self
-                .ring
-                .mul_negacyclic(&entry.coefficients, vector_entry)?;
-            output_entries[entry.row_index] =
-                self.ring.add(&output_entries[entry.row_index], &product)?;
+            self.ring.mul_negacyclic_accumulate(
+                &mut output_entries[entry.row_index],
+                &entry.coefficients,
+                vector_entry,
+            )?;
         }
 
         PolynomialVector::new(self.ring, output_entries)
@@ -413,6 +563,46 @@ mod tests {
         assert_eq!(sum.entries()[1].row_index(), 2);
         assert_eq!(sum.entries()[1].column_index(), 2);
         assert_eq!(sum.entries()[1].coefficients(), &[5, 0, 0, 0]);
+    }
+
+    #[test]
+    fn adds_scaled_sparse_matrices_without_storing_cancelled_entries() {
+        let ring = PolynomialRing::new(4, 17).expect("ring should validate");
+        let left = SparsePolynomialMatrix::new(
+            ring,
+            3,
+            3,
+            vec![
+                SparsePolynomialMatrixEntry::new(0, 0, vec![1, 0, 0, 0]),
+                SparsePolynomialMatrixEntry::new(1, 2, vec![3, 4, 0, 0]),
+            ],
+        )
+        .expect("left matrix should validate");
+        let right = SparsePolynomialMatrix::new(
+            ring,
+            3,
+            3,
+            vec![
+                SparsePolynomialMatrixEntry::new(1, 2, vec![7, 2, 0, 0]),
+                SparsePolynomialMatrixEntry::new(2, 2, vec![5, 0, 0, 0]),
+            ],
+        )
+        .expect("right matrix should validate");
+
+        let sum = left
+            .add_scaled(&right, 2)
+            .expect("scaled addition should succeed");
+
+        assert_eq!(sum.entries().len(), 3);
+        assert_eq!(sum.entries()[0].coefficients(), &[1, 0, 0, 0]);
+        assert_eq!(sum.entries()[1].coefficients(), &[0, 8, 0, 0]);
+        assert_eq!(sum.entries()[2].row_index(), 2);
+        assert_eq!(sum.entries()[2].coefficients(), &[10, 0, 0, 0]);
+        assert_eq!(
+            left.add_scaled(&right, 0)
+                .expect("zero scaled addition should keep left"),
+            left
+        );
     }
 
     #[test]
@@ -600,6 +790,44 @@ mod tests {
         assert_eq!(scaled.entries().len(), 2);
         assert_eq!(scaled.entries()[0].coefficients(), &[3, 10, 8, 0]);
         assert_eq!(scaled.entries()[1].coefficients(), &[0, 3, 4, 0]);
+    }
+
+    #[test]
+    fn adds_polynomial_scaled_sparse_matrix_without_intermediate_scale() {
+        let ring = PolynomialRing::new(4, 17).expect("ring should validate");
+        let left = SparsePolynomialMatrix::new(
+            ring,
+            2,
+            2,
+            vec![SparsePolynomialMatrixEntry::new(0, 0, vec![1, 0, 0, 0])],
+        )
+        .expect("left matrix should validate");
+        let right = SparsePolynomialMatrix::new(
+            ring,
+            2,
+            2,
+            vec![
+                SparsePolynomialMatrixEntry::new(0, 0, vec![2, 0, 0, 0]),
+                SparsePolynomialMatrixEntry::new(1, 1, vec![0, 1, 0, 0]),
+            ],
+        )
+        .expect("right matrix should validate");
+
+        let polynomial = [3, 4, 0, 0];
+        let fused = left
+            .add_polynomial_scaled(&right, &polynomial)
+            .expect("fused polynomial-scaled addition should succeed");
+        let scaled = right
+            .scale_by_polynomial(&polynomial)
+            .expect("polynomial scaling should succeed");
+        let expected = left.add(&scaled).expect("matrix addition should succeed");
+
+        assert_eq!(fused, expected);
+        assert_eq!(
+            left.add_polynomial_scaled(&right, &[0, 0, 0, 0])
+                .expect("zero polynomial should keep left"),
+            left
+        );
     }
 
     #[test]

@@ -1,6 +1,6 @@
 use super::*;
 
-pub(super) fn verify_public_zero_witness_component_proof(
+pub(super) fn verify_public_binding_check_component_proof(
     operation: &str,
     component_id: &str,
     component_proof: &Value,
@@ -11,7 +11,7 @@ pub(super) fn verify_public_zero_witness_component_proof(
     if component_id != "receiver-key-binding-component" {
         refused_objects.push(structural_refusal(
             format!(
-                "Public-zero witness binding checks are only valid for receiver-key-binding-component, not {component_id}."
+                "Public binding checks are only valid for receiver-key-binding-component, not {component_id}."
             ),
             component_proof_record_hash,
         ));
@@ -24,7 +24,7 @@ pub(super) fn verify_public_zero_witness_component_proof(
     {
         refused_objects.push(structural_refusal(
             format!(
-                "Ballot proof component proof bytes for {component_id} must be empty for the public-zero witness binding check."
+                "Ballot proof component proof bytes for {component_id} must be empty for the public binding check."
             ),
             component_proof_record_hash,
         ));
@@ -32,12 +32,12 @@ pub(super) fn verify_public_zero_witness_component_proof(
     if let Some(proof_statement) =
         object_map(proof_input).and_then(|object| object.get("proofStatement"))
     {
-        refused_objects.extend(collect_component_proof_statement_plan_shape_refusals(
+        refused_objects.extend(collect_component_proof_statement_descriptor_shape_refusals(
             proof_statement,
             component_id,
             component_proof_record_hash,
         ));
-        if derive_ballot_component_proof_statement_plan_hash(proof_statement).as_deref()
+        if derive_ballot_component_proof_statement_descriptor_hash(proof_statement).as_deref()
             != string_field(proof_statement, "componentProofStatementHash")
         {
             refused_objects.push(structural_refusal(
@@ -72,7 +72,7 @@ pub(super) fn verify_public_zero_witness_component_proof(
         "componentId": component_id,
         "statusLabels": [
             "BallotProofComponentProofBytesVerified",
-            "BallotProofComponentPublicZeroWitnessBindingChecked"
+            "BallotProofComponentPublicBindingCheckSatisfied"
         ],
         "acceptedHashes": [
             string_field(component_proof, "componentProofRecordHash"),

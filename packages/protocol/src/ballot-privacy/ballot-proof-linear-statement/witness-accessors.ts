@@ -1,4 +1,4 @@
-import { fieldModulus } from '../../plaintext-oracle/field.js';
+import { fieldModulus } from '../plaintext-oracle-helpers.js';
 import {
     type BallotPrivacyBackendProofComponent,
     type BallotPrivacyBackendProofComponentId,
@@ -107,47 +107,191 @@ const decimalBigInt = (value: string, fieldName: string): bigint => {
 const fieldVariableColumns = (
     loweredStatement: BallotPrivacyLoweredLinearRelationStatement,
 ): readonly FieldVariableColumn[] =>
-    loweredStatement.backendStatement
-        .variableColumns as readonly FieldVariableColumn[];
+    loweredStatement.backendStatement.variableColumns;
+
+type RowBatchLookup = ReadonlyMap<
+    string,
+    BallotPrivacyLoweredLinearRelationStatement['backendStatement']['rowBatches'][number]
+>;
+
+type ComponentLookup = ReadonlyMap<string, BallotPrivacyBackendProofComponent>;
+
+const rowBatchLookupCache = new WeakMap<
+    BallotPrivacyLoweredLinearRelationStatement,
+    RowBatchLookup
+>();
+
+const componentLookupCache = new WeakMap<
+    BallotPrivacyLoweredLinearRelationStatement,
+    ComponentLookup
+>();
+
+const rowBatchLookupForStatement = (
+    loweredStatement: BallotPrivacyLoweredLinearRelationStatement,
+): RowBatchLookup => {
+    const cachedLookup = rowBatchLookupCache.get(loweredStatement);
+    if (cachedLookup !== undefined) {
+        return cachedLookup;
+    }
+    const lookup = new Map(
+        loweredStatement.backendStatement.rowBatches.map((rowBatch) => [
+            rowBatch.batchName,
+            rowBatch,
+        ]),
+    );
+    rowBatchLookupCache.set(loweredStatement, lookup);
+
+    return lookup;
+};
+
+const componentLookupForStatement = (
+    loweredStatement: BallotPrivacyLoweredLinearRelationStatement,
+): ComponentLookup => {
+    const cachedLookup = componentLookupCache.get(loweredStatement);
+    if (cachedLookup !== undefined) {
+        return cachedLookup;
+    }
+    const lookup = new Map(
+        loweredStatement.backendStatement.proofComponents.map((component) => [
+            component.componentId,
+            component,
+        ]),
+    );
+    componentLookupCache.set(loweredStatement, lookup);
+
+    return lookup;
+};
+
+type ReceiverRelationInput =
+    BallotPrivacyRelationCompilerInput['receivers'][number];
+
+const receiverLookupCache = new WeakMap<
+    BallotPrivacyRelationCompilerInput,
+    ReadonlyMap<number, ReceiverRelationInput>
+>();
+
+const receiverByRosterPosition = (
+    relationInput: BallotPrivacyRelationCompilerInput,
+): ReadonlyMap<number, ReceiverRelationInput> => {
+    const cachedLookup = receiverLookupCache.get(relationInput);
+    if (cachedLookup !== undefined) {
+        return cachedLookup;
+    }
+    const lookup = new Map(
+        relationInput.receivers.map((receiver) => [
+            receiver.receiverRosterPosition,
+            receiver,
+        ]),
+    );
+    receiverLookupCache.set(relationInput, lookup);
+
+    return lookup;
+};
+
+type ShareCommitmentOpeningWitness =
+    BallotProofComponentProjectionWitness['shareCommitmentOpenings'][number];
+
+type ReceiverPayloadPlaintextWitness = NonNullable<
+    BallotProofComponentProjectionWitness['receiverPayloadPlaintexts']
+>[number];
+
+type ProjectionWitnessLookup = {
+    readonly receiverEncryptionWitnessesByReceiver: ReadonlyMap<
+        number,
+        {
+            readonly chunkWitnessesByIndex: ReadonlyMap<
+                number,
+                ReceiverEncryptionChunkProjectionWitness
+            >;
+        }
+    >;
+    readonly receiverPayloadPlaintextsByReceiver: ReadonlyMap<
+        number,
+        ReceiverPayloadPlaintextWitness
+    >;
+    readonly shareCommitmentOpeningsByReceiver: ReadonlyMap<
+        number,
+        ShareCommitmentOpeningWitness
+    >;
+};
+
+const projectionWitnessLookupCache = new WeakMap<
+    BallotProofComponentProjectionWitness,
+    ProjectionWitnessLookup
+>();
+
+const projectionWitnessLookup = (
+    projectionWitness: BallotProofComponentProjectionWitness,
+): ProjectionWitnessLookup => {
+    const cachedLookup = projectionWitnessLookupCache.get(projectionWitness);
+    if (cachedLookup !== undefined) {
+        return cachedLookup;
+    }
+    const receiverEncryptionWitnessesByReceiver = new Map(
+        (projectionWitness.receiverEncryptionWitnesses ?? []).map((witness) => [
+            witness.receiverRosterPosition,
+            {
+                chunkWitnessesByIndex: new Map(
+                    witness.chunkWitnesses.map((chunkWitness) => [
+                        chunkWitness.chunkIndex,
+                        chunkWitness,
+                    ]),
+                ),
+            },
+        ]),
+    );
+    const lookup = {
+        receiverEncryptionWitnessesByReceiver,
+        receiverPayloadPlaintextsByReceiver: new Map(
+            (projectionWitness.receiverPayloadPlaintexts ?? []).map(
+                (plaintext) => [plaintext.receiverRosterPosition, plaintext],
+            ),
+        ),
+        shareCommitmentOpeningsByReceiver: new Map(
+            projectionWitness.shareCommitmentOpenings.map((opening) => [
+                opening.receiverRosterPosition,
+                opening,
+            ]),
+        ),
+    };
+    projectionWitnessLookupCache.set(projectionWitness, lookup);
+
+    return lookup;
+};
 
 const explicitRowBatchByName = (
     loweredStatement: BallotPrivacyLoweredLinearRelationStatement,
     batchName: ExplicitFieldRowBatch['batchName'],
 ): ExplicitFieldRowBatch => {
-    const batch = loweredStatement.backendStatement.rowBatches.find(
-        (candidate) => candidate.batchName === batchName,
-    );
+    const batch = rowBatchLookupForStatement(loweredStatement).get(batchName);
     if (batch?.batchKind !== 'ExplicitSparseRows') {
         throw new Error(`The explicit row batch ${batchName} is missing.`);
     }
 
-    return batch as ExplicitFieldRowBatch;
+    return batch;
 };
 
 const structuredShareCommitmentRowBatchByName = (
     loweredStatement: BallotPrivacyLoweredLinearRelationStatement,
     batchName: 'share_commitment_equation_rows',
 ): StructuredShareCommitmentRowBatch => {
-    const batch = loweredStatement.backendStatement.rowBatches.find(
-        (candidate) => candidate.batchName === batchName,
-    );
+    const batch = rowBatchLookupForStatement(loweredStatement).get(batchName);
     if (batch?.batchKind !== 'StructuredModuleSisShareCommitmentRows') {
         throw new Error(
             `The structured share-commitment row batch ${batchName} is missing.`,
         );
     }
 
-    return batch as StructuredShareCommitmentRowBatch;
+    return batch;
 };
 
 const componentById = (input: {
     readonly componentId: BallotPrivacyBackendProofComponentId;
     readonly loweredStatement: BallotPrivacyLoweredLinearRelationStatement;
 }): BallotPrivacyBackendProofComponent => {
-    const component =
-        input.loweredStatement.backendStatement.proofComponents.find(
-            (candidate) => candidate.componentId === input.componentId,
-        );
+    const component = componentLookupForStatement(input.loweredStatement).get(
+        input.componentId,
+    );
     if (component === undefined) {
         throw new Error(
             `Proof component ${input.componentId} is missing from the backend statement.`,
@@ -208,9 +352,8 @@ const receiverShareValue = (
     receiverRosterPosition: number,
     encodedCoordinateIndex: number,
 ): number => {
-    const receiver = relationInput.receivers.find(
-        (candidate) =>
-            candidate.receiverRosterPosition === receiverRosterPosition,
+    const receiver = receiverByRosterPosition(relationInput).get(
+        receiverRosterPosition,
     );
     const shareRepresentative =
         receiver?.receiverShareVector[encodedCoordinateIndex];
@@ -290,10 +433,12 @@ const shareCommitmentOpeningValue = (
     receiverRosterPosition: number,
     openingCoordinateIndex: number,
 ): bigint => {
-    const receiverOpening = projectionWitness?.shareCommitmentOpenings.find(
-        (candidate) =>
-            candidate.receiverRosterPosition === receiverRosterPosition,
-    );
+    const receiverOpening =
+        projectionWitness === undefined
+            ? undefined
+            : projectionWitnessLookup(
+                  projectionWitness,
+              ).shareCommitmentOpeningsByReceiver.get(receiverRosterPosition);
     const openingCoordinate =
         receiverOpening?.openingRandomness[openingCoordinateIndex];
     if (openingCoordinate === undefined) {
@@ -320,10 +465,11 @@ const receiverPayloadPlaintext = (
           readonly receiverShareVector: readonly number[];
       }
     | undefined =>
-    projectionWitness?.receiverPayloadPlaintexts?.find(
-        (candidate) =>
-            candidate.receiverRosterPosition === receiverRosterPosition,
-    );
+    projectionWitness === undefined
+        ? undefined
+        : projectionWitnessLookup(
+              projectionWitness,
+          ).receiverPayloadPlaintextsByReceiver.get(receiverRosterPosition);
 
 const receiverPayloadPlaintextShareValue = (
     relationInput: BallotPrivacyRelationCompilerInput,
@@ -435,13 +581,14 @@ const receiverEncryptionChunkWitness = (
     chunkIndex: number,
 ): ReceiverEncryptionChunkProjectionWitness => {
     const receiverWitness =
-        projectionWitness?.receiverEncryptionWitnesses?.find(
-            (candidate) =>
-                candidate.receiverRosterPosition === receiverRosterPosition,
-        );
-    const chunkWitness = receiverWitness?.chunkWitnesses.find(
-        (candidate) => candidate.chunkIndex === chunkIndex,
-    );
+        projectionWitness === undefined
+            ? undefined
+            : projectionWitnessLookup(
+                  projectionWitness,
+              ).receiverEncryptionWitnessesByReceiver.get(
+                  receiverRosterPosition,
+              );
+    const chunkWitness = receiverWitness?.chunkWitnessesByIndex.get(chunkIndex);
     if (chunkWitness === undefined) {
         throw new Error(
             'Receiver encryption witness is missing for an explicit proof component.',

@@ -115,6 +115,7 @@ export const deriveWitnessEquivocationEvidenceHash = (
         equivocatingWitnessIdentities:
             evidence.equivocatingWitnessIdentities ?? [],
         leftBoardHeadHash: evidence.leftBoardHeadHash,
+        purpose: 'witness-equivocation-evidence-v1',
         rightBoardHeadHash: evidence.rightBoardHeadHash,
         targetFinalityScope: evidence.targetFinalityScope ?? null,
     });

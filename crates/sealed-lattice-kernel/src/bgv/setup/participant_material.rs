@@ -106,7 +106,7 @@ pub(super) fn participant_setup_material(
         "sampleDisclosure": "commitment-hashes-and-roots-only",
         "sampledLocalSecretCoefficientsIncluded": false,
         "sampledLocalErrorCoefficientsIncluded": false,
-        "setupProofProfileForM19": "passive-record-only-active-proof-pending-M19",
+        "setupProofProfileForActiveSetupProof": "passive-record-only-active-proof-pending",
     });
     let participant_setup_record_hash = derive_protocol_hash(
         "ParticipantBgvSetupRecordHash",

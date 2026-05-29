@@ -128,7 +128,7 @@ const main = async (): Promise<void> => {
     const proofCoreStatus = {
         bgvRandomnessBoundProofVerified,
         bridgeClaimClosureVerified: false,
-        fullM9MatrixDeferred: mode !== 'full',
+        fullBridgeMatrixDeferred: mode !== 'full',
         sharedWitnessZeroKnowledgeProofVerified,
     };
     const closureLedger = {
@@ -228,7 +228,7 @@ const main = async (): Promise<void> => {
             `aggregateBridgeScopedRelationFullMatrixLocalEvidence: ${closureLedger.labels.aggregateBridgeScopedRelationFullMatrixLocalEvidence ? 'true' : 'false'}`,
             `sharedWitnessZeroKnowledgeProofVerified: ${proofCoreStatus.sharedWitnessZeroKnowledgeProofVerified ? 'true' : 'false'}`,
             `bgvRandomnessBoundProofVerified: ${proofCoreStatus.bgvRandomnessBoundProofVerified ? 'true' : 'false'}`,
-            `M9 full matrix deferred: ${proofCoreStatus.fullM9MatrixDeferred ? 'true' : 'false'}`,
+            `Full bridge matrix deferred: ${proofCoreStatus.fullBridgeMatrixDeferred ? 'true' : 'false'}`,
             `bridgeClaimClosureVerified: ${proofCoreStatus.bridgeClaimClosureVerified ? 'true' : 'false'}`,
             '',
         ].join('\n'),

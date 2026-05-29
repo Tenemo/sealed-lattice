@@ -17,13 +17,13 @@ import {
     transpileModule,
 } from 'typescript';
 
-import { collectFiles } from '../internal/files.js';
-import { rewriteModuleSpecifiers } from '../internal/module-specifiers.js';
-
 import {
     vendoredProtocolRuntimeEntryExports,
     vendoredProtocolRuntimeModules,
 } from './verify-public-package-policy.js';
+
+import { collectFiles } from '#tools/internal/files.js';
+import { rewriteModuleSpecifiers } from '#tools/internal/module-specifiers.js';
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const sdkDistDirectoryPath = path.resolve(repoRoot, 'packages', 'sdk', 'dist');

@@ -1,25 +1,25 @@
-import { mkdir, writeFile } from "node:fs/promises";
-import path from "node:path";
+import { mkdir, writeFile } from 'node:fs/promises';
+import path from 'node:path';
 
-import { deriveProtocolHash } from "#packages/crypto/src/hashes.js";
+import { deriveProtocolHash } from '#packages/crypto/src/hashes.js';
+import { buildEncodedScoreFieldLinearProofProjection } from '#packages/protocol/src/ballot-privacy/ballot-proof-linear-statement.js';
 import {
     createBallotPrivacyProfileSet,
     createShareCommitmentMessageBoundCert,
-} from "#packages/protocol/src/ballot-privacy/profiles.js";
-import { buildEncodedScoreFieldLinearProofProjection } from "#packages/protocol/src/ballot-privacy/ballot-proof-linear-statement.js";
-import { lowerBallotPrivacyRelationToBackendStatement } from "#packages/protocol/src/ballot-privacy/relation-backend-lowering.js";
-import type { BallotPrivacyRelationBackendPublicContext } from "#packages/protocol/src/ballot-privacy/relation-backend-lowering.js";
-import type { BallotPrivacyRelationCompilerInput } from "#packages/protocol/src/ballot-privacy/relation-compiler.js";
-import type { ProtocolHash } from "#packages/types/src/index.js";
+} from '#packages/protocol/src/ballot-privacy/profiles.js';
+import { lowerBallotPrivacyRelationToBackendStatement } from '#packages/protocol/src/ballot-privacy/relation-backend-lowering.js';
+import type { BallotPrivacyRelationBackendPublicContext } from '#packages/protocol/src/ballot-privacy/relation-backend-lowering.js';
+import type { BallotPrivacyRelationCompilerInput } from '#packages/protocol/src/ballot-privacy/relation-compiler.js';
+import type { ProtocolHash } from '#packages/types/src/index.js';
 
-const parameterProfileId = "encoded-score-field-linear-proof-parameter-v1";
+const parameterProfileId = 'encoded-score-field-linear-proof-parameter-v1';
 const sourceRingDegree = 64;
-const witnessL2BoundSquared = "65536";
+const witnessL2BoundSquared = '65536';
 
 const hash = (label: string): ProtocolHash =>
-    deriveProtocolHash("ChallengeDomainHash", {
+    deriveProtocolHash('ChallengeDomainHash', {
         label,
-        purpose: "ballot-field-linear-proof-vector-input",
+        purpose: 'ballot-field-linear-proof-vector-input',
     });
 
 const oneHotScore = (score: number): readonly number[] =>
@@ -53,7 +53,7 @@ const miniRelationInput = (): BallotPrivacyRelationCompilerInput => ({
     pvssThreshold: 2,
     receivers: [
         {
-            receiverIdentity: "receiver-1",
+            receiverIdentity: 'receiver-1',
             receiverRosterPosition: 1,
             receiverShareVector: miniEncodedShareVector({
                 firstOptionScoreShare: 6,
@@ -61,7 +61,7 @@ const miniRelationInput = (): BallotPrivacyRelationCompilerInput => ({
             }),
         },
         {
-            receiverIdentity: "receiver-2",
+            receiverIdentity: 'receiver-2',
             receiverRosterPosition: 2,
             receiverShareVector: miniEncodedShareVector({
                 firstOptionScoreShare: 5,
@@ -69,7 +69,7 @@ const miniRelationInput = (): BallotPrivacyRelationCompilerInput => ({
             }),
         },
         {
-            receiverIdentity: "receiver-3",
+            receiverIdentity: 'receiver-3',
             receiverRosterPosition: 3,
             receiverShareVector: miniEncodedShareVector({
                 firstOptionScoreShare: 4,
@@ -189,7 +189,7 @@ export const generateBallotFieldLinearProofOracleInput = async (
         throw new Error(
             `Mini encoded-score relation did not lower: ${loweringResult.refusedObjects
                 .map((refusal) => refusal.message)
-                .join("; ")}`,
+                .join('; ')}`,
         );
     }
 
@@ -202,11 +202,11 @@ export const generateBallotFieldLinearProofOracleInput = async (
         witnessL2BoundSquared,
     });
     const output = {
-        generationStatus: "generated",
-        objectType: "BallotFieldLinearProofOracleInput",
+        generationStatus: 'generated',
+        objectType: 'BallotFieldLinearProofOracleInput',
         objectVersion: 1,
         parameterProfileId,
-        projectionCoverage: "encoded-score-field-rows-only",
+        projectionCoverage: 'encoded-score-field-rows-only',
         relationShape: {
             optionCount: relationInput.optionCount,
             rosterSize: relationInput.rosterSize,

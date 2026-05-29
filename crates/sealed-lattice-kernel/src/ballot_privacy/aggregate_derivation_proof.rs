@@ -402,30 +402,32 @@ pub(crate) fn check_aggregate_derivation_witness_relation(
         || aggregate_integer_share_vector.len() > AGGREGATE_DERIVATION_SOURCE_RING_DEGREE
     {
         return Err(invalid_preflight(
-            "M9 bridge aggregate witness share vector has an unsupported width",
+            "encrypted aggregate bridge aggregate witness share vector has an unsupported width",
         ));
     }
     if aggregate_opening_randomness.len() != SHARE_COMMITMENT_OPENING_DIMENSION {
         return Err(invalid_preflight(
-            "M9 bridge aggregate opening randomness has an invalid width",
+            "encrypted aggregate bridge aggregate opening randomness has an invalid width",
         ));
     }
     let maximum_aggregate_integer = canonical_turnout
         .checked_mul(BALLOT_PRIVACY_FIELD_MODULUS - 1)
-        .ok_or_else(|| invalid_preflight("M9 bridge aggregate witness bound overflowed"))?;
+        .ok_or_else(|| {
+            invalid_preflight("encrypted aggregate bridge aggregate witness bound overflowed")
+        })?;
     let mut reduced_field_vector = Vec::with_capacity(aggregate_integer_share_vector.len());
     let mut quotient_vector = Vec::with_capacity(aggregate_integer_share_vector.len());
     for share_coordinate in aggregate_integer_share_vector {
         if *share_coordinate > maximum_aggregate_integer {
             return Err(invalid_preflight(
-                "M9 bridge aggregate witness exceeds the no-wraparound certificate bound",
+                "encrypted aggregate bridge aggregate witness exceeds the no-wraparound certificate bound",
             ));
         }
         let reduced_coordinate = share_coordinate % BALLOT_PRIVACY_FIELD_MODULUS;
         let quotient = (share_coordinate - reduced_coordinate) / BALLOT_PRIVACY_FIELD_MODULUS;
         if quotient > canonical_turnout {
             return Err(invalid_preflight(
-                "M9 bridge aggregate quotient exceeds the turnout bound",
+                "encrypted aggregate bridge aggregate quotient exceeds the turnout bound",
             ));
         }
         reduced_field_vector.push(reduced_coordinate);

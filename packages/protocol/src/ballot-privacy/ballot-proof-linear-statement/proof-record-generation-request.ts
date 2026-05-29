@@ -4,13 +4,14 @@ import {
     ballotPrivacyBackendProofComponentOrder,
     lowerBallotPrivacyRelationToBackendStatement,
     type BallotPrivacyBackendProofComponentId,
+    type BallotPrivacyLoweredLinearRelationStatement,
     type BallotPrivacyRelationBackendPublicContext,
 } from '../relation-backend-lowering.js';
 import type { BallotPrivacyRelationCompilerInput } from '../relation-compiler.js';
 
 import {
     buildBallotProofComponentBundleStatement,
-    buildBallotProofComponentProofStatementPlans,
+    buildBallotProofComponentProofStatementDescriptors,
 } from './component-bundle.js';
 import { secretStateForStructuredShareCommitmentStatement } from './component-projections.js';
 import { rowBatchesForComponent } from './component-statement-builder.js';
@@ -19,10 +20,10 @@ import {
     assertBallotStatementMatchesPublicContext,
     assertFullReceiverPayloadsAreExplicit,
     buildFullRelationLinearProofStatement,
-    componentPlanById,
+    componentDescriptorById,
     componentStatementById,
     requiredComponentStatement,
-    requiredComponentStatementPlan,
+    requiredComponentStatementDescriptor,
     secretStateForStructuredReceiverEncryptionStatement,
     sourceRingDegreeFromParameterSet,
     witnessBoundSquaredFromParameterSet,
@@ -46,6 +47,8 @@ import {
 } from './receiver-encryption-proof-statement.js';
 import { buildBallotProofSparseComponentLinearProofStatement } from './sparse-component-statement.js';
 import type {
+    BallotProofComponentBundleStatement,
+    BallotProofComponentProofStatementDescriptor,
     BallotProofComponentProjectionWitness,
     BallotProofFullRelationLinearProofStatement,
     BallotProofRecordGenerationComponentProofInput,
@@ -53,7 +56,10 @@ import type {
     BallotProofRecordGenerationRandomness,
     BallotProofRecordGenerationRequest,
     BallotProofRecordGenerationSecretState,
+    BallotProofSparseComponentLinearProofStatement,
+    BallotProofStructuredReceiverEncryptionProofStatement,
     BallotProofStructuredShareCommitmentProofStatement,
+    BallotProofComponentProofStatementFormat,
 } from './statement-contracts.js';
 import {
     componentProofEncodingProfileIds,
@@ -62,6 +68,106 @@ import {
     fullBallotProofParameterProfileId,
 } from './statement-contracts.js';
 import { componentById } from './witness-accessors.js';
+
+type PreparedBallotProofRecordGenerationLowering = {
+    readonly componentBundleStatement: BallotProofComponentBundleStatement;
+    readonly componentProofStatements?: Readonly<
+        Partial<Record<BallotPrivacyBackendProofComponentId, unknown>>
+    >;
+    readonly componentStatementDescriptors: readonly BallotProofComponentProofStatementDescriptor[];
+    readonly loweredStatement: BallotPrivacyLoweredLinearRelationStatement;
+};
+
+const preparedLoweringOrBuild = (input: {
+    readonly ballotProofStatementHash: string;
+    readonly preparedLowering?: PreparedBallotProofRecordGenerationLowering;
+    readonly publicContext: BallotPrivacyRelationBackendPublicContext;
+    readonly relationInput: BallotPrivacyRelationCompilerInput;
+}): PreparedBallotProofRecordGenerationLowering => {
+    if (input.preparedLowering !== undefined) {
+        const {
+            componentBundleStatement,
+            componentStatementDescriptors,
+            loweredStatement,
+        } = input.preparedLowering;
+        if (
+            componentBundleStatement.backendStatementHash !==
+                loweredStatement.backendStatement.backendStatementHash ||
+            componentBundleStatement.relationStatementHash !==
+                loweredStatement.relationStatementHash ||
+            componentBundleStatement.ballotProofStatementHash !==
+                input.ballotProofStatementHash
+        ) {
+            throw new Error(
+                'Prepared ballot proof lowering is not bound to the requested statement.',
+            );
+        }
+        if (
+            componentStatementDescriptors.length !==
+            componentBundleStatement.componentStatements.length
+        ) {
+            throw new Error(
+                'Prepared ballot proof lowering has an invalid descriptor count.',
+            );
+        }
+        return input.preparedLowering;
+    }
+
+    const loweringResult = lowerBallotPrivacyRelationToBackendStatement({
+        publicContext: input.publicContext,
+        relationInput: input.relationInput,
+    });
+    if (!loweringResult.ok) {
+        throw new Error(
+            `Ballot privacy relation did not lower to a proof backend statement: ${loweringResult.refusedObjects
+                .map((refusal) => refusal.message)
+                .join('; ')}`,
+        );
+    }
+    const loweredStatement = loweringResult.statement;
+    const componentBundleStatement = buildBallotProofComponentBundleStatement({
+        ballotProofStatementHash: input.ballotProofStatementHash,
+        loweredStatement,
+    });
+    const componentStatementDescriptors =
+        buildBallotProofComponentProofStatementDescriptors({
+            ballotProofStatementHash: input.ballotProofStatementHash,
+            componentBundleStatement,
+            loweredStatement,
+        });
+
+    return {
+        componentBundleStatement,
+        componentStatementDescriptors,
+        loweredStatement,
+    };
+};
+
+const preparedComponentProofStatement = <Statement>(input: {
+    readonly componentId: BallotPrivacyBackendProofComponentId;
+    readonly expectedFormat: BallotProofComponentProofStatementFormat;
+    readonly preparedLowering?: PreparedBallotProofRecordGenerationLowering;
+}): Statement | undefined => {
+    const proofStatement =
+        input.preparedLowering?.componentProofStatements?.[input.componentId];
+    if (proofStatement === undefined) {
+        return undefined;
+    }
+    if (
+        typeof proofStatement !== 'object' ||
+        proofStatement === null ||
+        !('proofStatementFormat' in proofStatement) ||
+        proofStatement.proofStatementFormat !== input.expectedFormat ||
+        !('statementHash' in proofStatement) ||
+        typeof proofStatement.statementHash !== 'string'
+    ) {
+        throw new Error(
+            `Prepared proof statement for ${input.componentId} is not bound to the expected component format.`,
+        );
+    }
+
+    return proofStatement as Statement;
+};
 
 const validateGeneratedProofInputContracts = (input: {
     readonly componentProofInputs: readonly BallotProofRecordGenerationComponentProofInput[];
@@ -87,7 +193,7 @@ const validateGeneratedProofInputContracts = (input: {
     for (const componentProofInput of input.componentProofInputs) {
         if (
             componentProofInput.proofStatementFormat ===
-            'public-zero-witness-binding-check-v1'
+            'public-binding-check-only-v1'
         ) {
             requireContractProfileId({
                 contract: componentProofInput.proofParameterSet,
@@ -170,6 +276,7 @@ const validateGeneratedProofInputContracts = (input: {
 };
 
 export const buildBallotProofRecordGenerationRequest = (input: {
+    readonly preparedLowering?: PreparedBallotProofRecordGenerationLowering;
     readonly proofContracts: BallotProofRecordGenerationProofContracts;
     readonly projectionWitness: BallotProofComponentProjectionWitness;
     readonly publicContext: BallotPrivacyRelationBackendPublicContext;
@@ -208,21 +315,15 @@ export const buildBallotProofRecordGenerationRequest = (input: {
         }
     }
 
-    const loweringResult = lowerBallotPrivacyRelationToBackendStatement({
+    const {
+        componentBundleStatement,
+        componentStatementDescriptors,
+        loweredStatement,
+    } = preparedLoweringOrBuild({
+        ballotProofStatementHash: input.statement.ballotProofStatementHash,
+        preparedLowering: input.preparedLowering,
         publicContext: input.publicContext,
         relationInput: input.relationInput,
-    });
-    if (!loweringResult.ok) {
-        throw new Error(
-            `Ballot privacy relation did not lower to a proof backend statement: ${loweringResult.refusedObjects
-                .map((refusal) => refusal.message)
-                .join('; ')}`,
-        );
-    }
-    const loweredStatement = loweringResult.statement;
-    const componentBundleStatement = buildBallotProofComponentBundleStatement({
-        ballotProofStatementHash: input.statement.ballotProofStatementHash,
-        loweredStatement,
     });
     if (
         componentBundleStatement.bundleCoverage !==
@@ -232,12 +333,6 @@ export const buildBallotProofRecordGenerationRequest = (input: {
             'Ballot proof record generation requires every proof component to be explicitly lowered.',
         );
     }
-    const componentStatementPlans =
-        buildBallotProofComponentProofStatementPlans({
-            ballotProofStatementHash: input.statement.ballotProofStatementHash,
-            componentBundleStatement,
-            loweredStatement,
-        });
     for (const componentId of ballotPrivacyBackendProofComponentOrder) {
         verifyBallotProofComponentExplicitRows({
             componentId,
@@ -256,7 +351,9 @@ export const buildBallotProofRecordGenerationRequest = (input: {
     const componentStatementsById = componentStatementById(
         componentBundleStatement,
     );
-    const componentPlansById = componentPlanById(componentStatementPlans);
+    const componentDescriptorsById = componentDescriptorById(
+        componentStatementDescriptors,
+    );
     const componentSecretStates: Partial<
         Record<
             BallotPrivacyBackendProofComponentId,
@@ -269,10 +366,11 @@ export const buildBallotProofRecordGenerationRequest = (input: {
                 componentId,
                 componentStatementsById,
             });
-            const componentStatementPlan = requiredComponentStatementPlan({
-                componentId,
-                componentPlansById,
-            });
+            const componentStatementDescriptor =
+                requiredComponentStatementDescriptor({
+                    componentId,
+                    componentDescriptorsById,
+                });
             const proofParameterSet = requireComponentContract(
                 input.proofContracts.componentProofParameterSets,
                 componentId,
@@ -300,11 +398,19 @@ export const buildBallotProofRecordGenerationRequest = (input: {
                         `${componentId} parameter set`,
                     );
                 if (
-                    componentStatementPlan.proofStatementFormat ===
+                    componentStatementDescriptor.proofStatementFormat ===
                     'sparse-polynomial-matrix-linear-proof-v1'
                 ) {
                     const sparseStatement =
-                        input.relationInput.optionCount > 1 &&
+                        preparedComponentProofStatement<BallotProofSparseComponentLinearProofStatement>(
+                            {
+                                componentId,
+                                expectedFormat:
+                                    'sparse-polynomial-matrix-linear-proof-v1',
+                                preparedLowering: input.preparedLowering,
+                            },
+                        ) ??
+                        (input.relationInput.optionCount > 1 &&
                         sourceRingDegree === 64
                             ? buildPackedFieldSparseComponentLinearProofStatement(
                                   {
@@ -336,7 +442,7 @@ export const buildBallotProofRecordGenerationRequest = (input: {
                                       sourceRingDegree,
                                       witnessL2BoundSquared,
                                   },
-                              );
+                              ));
                     if (
                         sparseStatement.proofStatementFormat !==
                         'sparse-polynomial-matrix-linear-proof-v1'
@@ -409,8 +515,32 @@ export const buildBallotProofRecordGenerationRequest = (input: {
                         proofParameterSet,
                         `${componentId} parameter set`,
                     );
+                const componentRowBatches = rowBatchesForComponent({
+                    component: componentById({
+                        componentId,
+                        loweredStatement,
+                    }),
+                    loweredStatement,
+                });
+                const usesStructuredShareCommitmentRows =
+                    componentId === 'share-commitment-component' &&
+                    componentRowBatches.some(
+                        (rowBatch) =>
+                            rowBatch.batchKind ===
+                            'StructuredModuleSisShareCommitmentRows',
+                    );
                 const sparseStatement =
-                    componentId === 'payload-plaintext-field-component' &&
+                    preparedComponentProofStatement<
+                        | BallotProofSparseComponentLinearProofStatement
+                        | BallotProofStructuredShareCommitmentProofStatement
+                    >({
+                        componentId,
+                        expectedFormat: usesStructuredShareCommitmentRows
+                            ? 'structured-module-sis-share-commitment-v1'
+                            : 'sparse-polynomial-matrix-linear-proof-v1',
+                        preparedLowering: input.preparedLowering,
+                    }) ??
+                    (componentId === 'payload-plaintext-field-component' &&
                     input.relationInput.optionCount > 1 &&
                     sourceRingDegree === 64
                         ? buildPackedFieldSparseComponentLinearProofStatement({
@@ -437,21 +567,7 @@ export const buildBallotProofRecordGenerationRequest = (input: {
                                   ],
                               sourceRingDegree,
                               witnessL2BoundSquared,
-                          });
-                const componentRowBatches = rowBatchesForComponent({
-                    component: componentById({
-                        componentId,
-                        loweredStatement,
-                    }),
-                    loweredStatement,
-                });
-                const usesStructuredShareCommitmentRows =
-                    componentId === 'share-commitment-component' &&
-                    componentRowBatches.some(
-                        (rowBatch) =>
-                            rowBatch.batchKind ===
-                            'StructuredModuleSisShareCommitmentRows',
-                    );
+                          }));
                 if (usesStructuredShareCommitmentRows) {
                     componentSecretStates[componentId] =
                         secretStateForStructuredShareCommitmentStatement({
@@ -492,6 +608,14 @@ export const buildBallotProofRecordGenerationRequest = (input: {
             }
             if (componentId === 'receiver-encryption-component') {
                 const structuredStatement =
+                    preparedComponentProofStatement<BallotProofStructuredReceiverEncryptionProofStatement>(
+                        {
+                            componentId,
+                            expectedFormat:
+                                'structured-module-lwe-linear-proof-v1',
+                            preparedLowering: input.preparedLowering,
+                        },
+                    ) ??
                     buildBallotProofStructuredReceiverEncryptionProofStatement({
                         ballotProofStatementHash:
                             input.statement.ballotProofStatementHash,
@@ -529,11 +653,11 @@ export const buildBallotProofRecordGenerationRequest = (input: {
             return {
                 componentId,
                 componentProofStatementHash:
-                    componentStatementPlan.componentProofStatementHash,
+                    componentStatementDescriptor.componentProofStatementHash,
                 proofEncoding,
                 proofParameterSet,
-                proofStatement: componentStatementPlan,
-                proofStatementFormat: 'public-zero-witness-binding-check-v1',
+                proofStatement: componentStatementDescriptor,
+                proofStatementFormat: 'public-binding-check-only-v1',
                 publicRandomnessHex,
                 statementHash: componentStatement.componentStatementHash,
             };
@@ -549,7 +673,7 @@ export const buildBallotProofRecordGenerationRequest = (input: {
         componentBundleStatement,
         componentProofInputs,
         componentSecretStates,
-        componentStatementPlans,
+        componentStatementDescriptors,
         componentProverRandomnessHexes:
             input.randomness.componentProverRandomnessHexes,
         linearStatement,

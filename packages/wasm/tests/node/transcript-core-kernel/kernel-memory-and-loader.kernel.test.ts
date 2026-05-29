@@ -4,12 +4,12 @@ import { pathToFileURL } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
+import { createMockKernelExports } from './shared.js';
+
 import {
     createTranscriptCoreKernelLoader,
     type TranscriptCoreKernel,
-} from '../../../src/transcript-core-bridge';
-
-import { createMockKernelExports } from './shared.js';
+} from '#packages/wasm/src/transcript-core-bridge';
 
 describe('transcript-core kernel in Node', () => {
     it('deallocates command inputs and outputs', async () => {

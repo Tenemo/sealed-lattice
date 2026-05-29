@@ -7,7 +7,7 @@ import type {
     RefusalRecord,
 } from '@sealed-lattice/types';
 
-import { createRefusal } from '../../common/verification-helpers.js';
+import { createRefusal } from '../verification-helpers.js';
 
 import { collectSuppliedComponentProofStatementRefusals } from './ballot-proof-structure-checks.js';
 import type { BallotProofComponentProofVerificationInput } from './object-contracts.js';
@@ -174,7 +174,7 @@ function collectBallotProofComponentProofInputRefusals(input: {
                 refusedObjects.push(
                     createRefusal(
                         'BallotPackageInvalid',
-                        `Ballot proof component proof bytes for ${expectedComponentId} must be empty for the public-zero witness binding check.`,
+                        `Ballot proof component proof bytes for ${expectedComponentId} must be empty for the public binding check.`,
                         proofRecordHash,
                     ),
                 );

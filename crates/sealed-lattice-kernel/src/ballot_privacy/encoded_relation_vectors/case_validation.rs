@@ -158,7 +158,7 @@ pub(super) fn validate_accepting_case(
     validate_component_projection_summaries(case_object)?;
     validate_explicit_component_verification_summaries(case_object)?;
     validate_component_proof_readiness_manifests(case_object)?;
-    validate_component_proof_statement_plans(case_object)?;
+    validate_component_proof_statement_descriptors(case_object)?;
 
     Ok(accepted_hash)
 }
@@ -643,8 +643,8 @@ pub(super) fn validate_component_proof_readiness_manifests(
             "receiver-key-binding-component",
             "12289",
             0_u64,
-            "public-zero-witness-binding-check-v1",
-            "not-applicable-for-public-zero-witness-component",
+            "public-binding-check-only-v1",
+            "not-applicable-for-public-binding-check-component",
             vec!["receiver_key_binding_rows".to_string()],
         ),
     ];
@@ -656,7 +656,7 @@ pub(super) fn validate_component_proof_readiness_manifests(
 
     let mut dense_matrix_oracle_component_count = 0_u64;
     let mut sparse_or_structured_component_count = 0_u64;
-    let mut public_zero_witness_component_count = 0_u64;
+    let mut public_binding_check_component_count = 0_u64;
     for (
         manifest_value,
         (
@@ -705,10 +705,11 @@ pub(super) fn validate_component_proof_readiness_manifests(
                 || variable_column_count != 0
             {
                 return Err(
-                    "encoded relation zero-witness proof-readiness manifest is invalid".to_string(),
+                    "encoded relation public binding check proof-readiness manifest is invalid"
+                        .to_string(),
                 );
             }
-            public_zero_witness_component_count += 1;
+            public_binding_check_component_count += 1;
         } else {
             let source_ring_degree = u64_property(manifest, "recommendedSourceRingDegree")?;
             let dense_coefficient_count = string_property(manifest, "denseCoefficientCount")?;
@@ -728,10 +729,11 @@ pub(super) fn validate_component_proof_readiness_manifests(
 
         if dense_matrix_oracle_status == "available-for-small-field-component" {
             dense_matrix_oracle_component_count += 1;
-        } else if dense_matrix_oracle_status == "not-applicable-for-public-zero-witness-component" {
+        } else if dense_matrix_oracle_status == "not-applicable-for-public-binding-check-component"
+        {
             if expected_source_ring_degree != 0 {
                 return Err(
-                    "encoded relation component proof-readiness zero-witness status is invalid"
+                    "encoded relation component proof-readiness public binding status is invalid"
                         .to_string(),
                 );
             }
@@ -745,8 +747,8 @@ pub(super) fn validate_component_proof_readiness_manifests(
         || u64_property(summary, "totalComponentCount")? != manifests.len() as u64
         || u64_property(summary, "denseMatrixOracleComponentCount")?
             != dense_matrix_oracle_component_count
-        || u64_property(summary, "publicZeroWitnessComponentCount")?
-            != public_zero_witness_component_count
+        || u64_property(summary, "publicBindingCheckComponentCount")?
+            != public_binding_check_component_count
         || u64_property(summary, "sparseOrStructuredComponentCount")?
             != sparse_or_structured_component_count
     {

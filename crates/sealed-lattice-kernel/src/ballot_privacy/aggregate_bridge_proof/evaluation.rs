@@ -5,7 +5,9 @@ use super::{
     validation::{
         read_i64_array, read_u64_array, read_u64_object_field,
         reject_forbidden_public_bridge_fields, required_protocol_hash_field,
-        validate_bridge_encryption_public_shell, validate_prover_randomness_hex,
+        validate_bridge_encryption_public_shell, validate_bridge_randomness_source,
+        validate_development_randomness_acknowledgement, validate_distinct_bridge_randomness_seeds,
+        validate_encryption_randomness_seed_hex, validate_prover_randomness_hex,
     },
     verification::verify_aggregate_bridge_encryption,
 };
@@ -37,6 +39,37 @@ pub(super) fn evaluate_aggregate_bridge_relation(request: &Value) -> CanonicalRe
         "evaluateAggregateBridgeRelation",
     )?;
     validate_prover_randomness_hex(prover_randomness_hex)?;
+    let prover_randomness_source = required_string_field(
+        request,
+        "proverRandomnessSource",
+        "evaluateAggregateBridgeRelation",
+    )?;
+    validate_bridge_randomness_source(prover_randomness_source, "proverRandomnessSource")?;
+    let encryption_randomness_seed_hex = required_string_field(
+        request,
+        "encryptionRandomnessSeedHex",
+        "evaluateAggregateBridgeRelation",
+    )?;
+    validate_encryption_randomness_seed_hex(encryption_randomness_seed_hex)?;
+    let encryption_randomness_seed_source = required_string_field(
+        request,
+        "encryptionRandomnessSeedSource",
+        "evaluateAggregateBridgeRelation",
+    )?;
+    validate_bridge_randomness_source(
+        encryption_randomness_seed_source,
+        "encryptionRandomnessSeedSource",
+    )?;
+    validate_distinct_bridge_randomness_seeds(
+        prover_randomness_hex,
+        encryption_randomness_seed_hex,
+    )?;
+    validate_development_randomness_acknowledgement(
+        request,
+        prover_randomness_source,
+        encryption_randomness_seed_source,
+        "evaluateAggregateBridgeRelation",
+    )?;
     let aggregate_selection_policy_hash = required_protocol_hash_field(
         request,
         "aggregateSelectionPolicyHash",
@@ -62,13 +95,13 @@ pub(super) fn evaluate_aggregate_bridge_relation(request: &Value) -> CanonicalRe
     if aggregate_integer_share_vector.len() != dimensions.share_vector_width {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
-            "M9 bridge private evaluator aggregate witness width does not match the variant shareVectorWidth",
+            "encrypted aggregate bridge private evaluator aggregate witness width does not match the variant shareVectorWidth",
         ));
     }
     if aggregate_opening_randomness.len() != SHARE_COMMITMENT_OPENING_DIMENSION {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
-            "M9 bridge private evaluator aggregate opening randomness width is invalid",
+            "encrypted aggregate bridge private evaluator aggregate opening randomness width is invalid",
         ));
     }
 
@@ -77,6 +110,13 @@ pub(super) fn evaluate_aggregate_bridge_relation(request: &Value) -> CanonicalRe
         "setupPackage": setup_package,
         "aggregateWitness": witness,
         "proverRandomnessHex": prover_randomness_hex,
+        "proverRandomnessSource": prover_randomness_source,
+        "encryptionRandomnessSeedHex": encryption_randomness_seed_hex,
+        "encryptionRandomnessSeedSource": encryption_randomness_seed_source,
+        "developmentRandomnessOverrideAcknowledged": request
+            .get("developmentRandomnessOverrideAcknowledged")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
         "aggregateSelectionPolicyHash": aggregate_selection_policy_hash,
         "bridgeWitnessPrivacyProfileHash": bridge_witness_privacy_profile_hash,
         "heParamHash": he_param_hash,
@@ -101,7 +141,7 @@ pub(super) fn evaluate_aggregate_bridge_relation(request: &Value) -> CanonicalRe
     let proof_byte_length = u64::try_from(proof_bytes_hex.len() / 2).map_err(|_| {
         CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
-            "M9 bridge proof byte length does not fit u64",
+            "encrypted aggregate bridge proof byte length does not fit u64",
         )
     })?;
     let bridge_proof_statement_hash = required_string_field(
@@ -154,9 +194,11 @@ pub(super) fn evaluate_aggregate_bridge_relation(request: &Value) -> CanonicalRe
     let private_relation_status_labels = if public_verifier_checked_relation {
         vec![
             "AggregateBridgePrivateRelationSatisfied",
-            "M9PrivateRelationEvaluator",
+            "EncryptedAggregateBridgePrivateRelationEvaluator",
             "BridgeProofRelationChecked",
             "BridgeProofImplementationEvidenceOnly",
+            "BgvPublicKeyCoefficientMaterialBound",
+            "NotThresholdDecryptableBridgeCiphertext",
             SHARED_WITNESS_ZERO_KNOWLEDGE_STATUS,
             BGV_RANDOMNESS_BOUND_PROOF_STATUS,
             "BridgeProofClaimClosureMissing",
@@ -165,7 +207,7 @@ pub(super) fn evaluate_aggregate_bridge_relation(request: &Value) -> CanonicalRe
     } else {
         vec![
             "AggregateBridgePrivateRelationSatisfied",
-            "M9PrivateRelationEvaluator",
+            "EncryptedAggregateBridgePrivateRelationEvaluator",
             "BridgeProofBackendStillRequired",
             "FinalBridgeTheoremPending",
         ]
@@ -187,6 +229,13 @@ pub(super) fn evaluate_aggregate_bridge_relation(request: &Value) -> CanonicalRe
         "scopedBridgeRelationClosure": false,
         "bridgeClaimClosureVerified": false,
         "bridgeClaimVerificationStatus": BRIDGE_CLAIM_CLOSURE_STATUS,
+        "bgvEncryptionKeyMaterialKind": BGV_ENCRYPTION_KEY_MATERIAL_KIND,
+        "developmentKeyOnly": DEVELOPMENT_KEY_ONLY,
+        "proverRandomnessSource": prover_randomness_source,
+        "encryptionRandomnessSeedSource": encryption_randomness_seed_source,
+        "randomnessSourceEvidence": bridge_encryption["randomnessSourceEvidence"],
+        "thresholdDecryptable": THRESHOLD_DECRYPTABLE,
+        "claimBearingBridgeEncryption": CLAIM_BEARING_BRIDGE_ENCRYPTION,
         "participantCount": dimensions.participant_count,
         "optionCount": dimensions.option_count,
         "claimTier": dimensions.claim_tier,
@@ -231,13 +280,13 @@ pub(super) fn compare_bridge_relation_public_artifacts(
     let actual_object = actual.as_object().ok_or_else(|| {
         CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            format!("M9 bridge {object_name} must be an object"),
+            format!("encrypted aggregate bridge {object_name} must be an object"),
         )
     })?;
     let expected_object = expected.as_object().ok_or_else(|| {
         CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "M9 bridge expected relation artifact must be an object",
+            "encrypted aggregate bridge expected relation artifact must be an object",
         )
     })?;
     for actual_field_name in actual_object.keys() {
@@ -245,7 +294,7 @@ pub(super) fn compare_bridge_relation_public_artifacts(
             return Err(CanonicalError::new(
                 CanonicalErrorCode::ProfileComponentMismatch,
                 format!(
-                    "M9 bridge private evaluator public artifact has unexpected field {object_name}.{actual_field_name}"
+                    "encrypted aggregate bridge private evaluator public artifact has unexpected field {object_name}.{actual_field_name}"
                 ),
             ));
         }
@@ -254,14 +303,14 @@ pub(super) fn compare_bridge_relation_public_artifacts(
         let actual_value = actual_object.get(field_name).ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
-                format!("M9 bridge {object_name}.{field_name} is required"),
+                format!("encrypted aggregate bridge {object_name}.{field_name} is required"),
             )
         })?;
         if actual_value != expected_value {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::ProfileComponentMismatch,
                 format!(
-                    "M9 bridge private evaluator public artifact field {object_name}.{field_name} does not match the recomputed shared-witness relation"
+                    "encrypted aggregate bridge private evaluator public artifact field {object_name}.{field_name} does not match the recomputed shared-witness relation"
                 ),
             ));
         }

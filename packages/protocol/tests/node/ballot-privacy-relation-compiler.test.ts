@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
     compileBallotPrivacyRelation,
     type BallotPrivacyRelationCompilerInput,
-} from '../../src/ballot-privacy/index';
+} from '#packages/protocol/src/ballot-privacy/index';
 
 const oneHotScore = (score: number): readonly number[] =>
     Array.from({ length: 10 }, (_unusedValue, scoreIndex) =>
@@ -70,14 +70,15 @@ const expectRelationRefusal = (
     const result = compileBallotPrivacyRelation(input);
 
     expect(result.ok).toBe(false);
-    if (!result.ok) {
-        expect(result.unresolvedReason).toBe('BallotPrivacyRelationInvalid');
-        expect(
-            result.refusedObjects.some((refusal) =>
-                refusal.message.includes(expectedMessage),
-            ),
-        ).toBe(true);
+    if (result.ok) {
+        throw new Error('Expected relation compiler input to be refused.');
     }
+    expect(result.unresolvedReason).toBe('BallotPrivacyRelationInvalid');
+    expect(
+        result.refusedObjects.some((refusal) =>
+            refusal.message.includes(expectedMessage),
+        ),
+    ).toBe(true);
 };
 
 describe('ballot privacy relation compiler', () => {
@@ -94,65 +95,66 @@ describe('ballot privacy relation compiler', () => {
             encodedCoordinateCount: 22,
             maximumAbsoluteShamirQuotient: 3,
         });
-        if (result.ok) {
-            expect(result.scoreMembershipConstraints).toEqual([
-                {
-                    optionIndex: 0,
-                    oneHotSum: 1,
-                    reconstructedScore: 7,
-                },
-                {
-                    optionIndex: 1,
-                    oneHotSum: 1,
-                    reconstructedScore: 3,
-                },
-            ]);
-            expect(result.shamirQuotientConstraints).toHaveLength(3 * 22);
-            expect(result.shamirQuotientConstraints).toEqual(
-                expect.arrayContaining([
-                    {
-                        coordinateRole: 'ScalarScore',
-                        encodedCoordinateIndex: 0,
-                        evaluatedInteger: 65_543,
-                        optionIndex: 0,
-                        quotient: 1,
-                        receiverRosterPosition: 1,
-                        scoreBucketValue: undefined,
-                        shareRepresentative: 6,
-                    },
-                    {
-                        coordinateRole: 'ScoreBucket',
-                        encodedCoordinateIndex: 7,
-                        evaluatedInteger: 1,
-                        optionIndex: 0,
-                        quotient: 0,
-                        receiverRosterPosition: 1,
-                        scoreBucketValue: 7,
-                        shareRepresentative: 1,
-                    },
-                    {
-                        coordinateRole: 'ScalarScore',
-                        encodedCoordinateIndex: 11,
-                        evaluatedInteger: 30,
-                        optionIndex: 1,
-                        quotient: 0,
-                        receiverRosterPosition: 3,
-                        scoreBucketValue: undefined,
-                        shareRepresentative: 30,
-                    },
-                    {
-                        coordinateRole: 'ScoreBucket',
-                        encodedCoordinateIndex: 14,
-                        evaluatedInteger: 1,
-                        optionIndex: 1,
-                        quotient: 0,
-                        receiverRosterPosition: 3,
-                        scoreBucketValue: 3,
-                        shareRepresentative: 1,
-                    },
-                ]),
-            );
+        if (!result.ok) {
+            throw new Error('Expected valid relation input to compile.');
         }
+        expect(result.scoreMembershipConstraints).toEqual([
+            {
+                optionIndex: 0,
+                oneHotSum: 1,
+                reconstructedScore: 7,
+            },
+            {
+                optionIndex: 1,
+                oneHotSum: 1,
+                reconstructedScore: 3,
+            },
+        ]);
+        expect(result.shamirQuotientConstraints).toHaveLength(3 * 22);
+        expect(result.shamirQuotientConstraints).toEqual(
+            expect.arrayContaining([
+                {
+                    coordinateRole: 'ScalarScore',
+                    encodedCoordinateIndex: 0,
+                    evaluatedInteger: 65_543,
+                    optionIndex: 0,
+                    quotient: 1,
+                    receiverRosterPosition: 1,
+                    scoreBucketValue: undefined,
+                    shareRepresentative: 6,
+                },
+                {
+                    coordinateRole: 'ScoreBucket',
+                    encodedCoordinateIndex: 7,
+                    evaluatedInteger: 1,
+                    optionIndex: 0,
+                    quotient: 0,
+                    receiverRosterPosition: 1,
+                    scoreBucketValue: 7,
+                    shareRepresentative: 1,
+                },
+                {
+                    coordinateRole: 'ScalarScore',
+                    encodedCoordinateIndex: 11,
+                    evaluatedInteger: 30,
+                    optionIndex: 1,
+                    quotient: 0,
+                    receiverRosterPosition: 3,
+                    scoreBucketValue: undefined,
+                    shareRepresentative: 30,
+                },
+                {
+                    coordinateRole: 'ScoreBucket',
+                    encodedCoordinateIndex: 14,
+                    evaluatedInteger: 1,
+                    optionIndex: 1,
+                    quotient: 0,
+                    receiverRosterPosition: 3,
+                    scoreBucketValue: 3,
+                    shareRepresentative: 1,
+                },
+            ]),
+        );
     });
 
     it('rejects scores outside the frozen score domain', () => {

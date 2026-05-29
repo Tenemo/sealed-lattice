@@ -496,6 +496,8 @@ export const createContribution = (input: {
             heParamHash: input.heParamHash,
             includeCanonicalBytesHex: true,
             proverRandomnessHex: '77'.repeat(32),
+            encryptionRandomnessSeedHex: '88'.repeat(32),
+            developmentRandomnessOverrideAcknowledged: true,
             setupPackage: input.setupPackage,
         }),
     );

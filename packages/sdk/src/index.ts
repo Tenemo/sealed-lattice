@@ -405,7 +405,7 @@ export const verifyClaimBearingBallotPackage = async (
     return kernel.verifyClaimBearingBallotPackage(input);
 };
 
-/** Verifies an M6 aggregate derivation component with the packaged WASM proof backend. */
+/** Verifies an aggregate derivation component with the packaged WASM proof backend. */
 export const verifyAggregateDerivationComponent = async (
     input: AggregateDerivationComponentVerificationInput,
 ): Promise<BallotPrivacyKernelVerification> => {
@@ -414,7 +414,7 @@ export const verifyAggregateDerivationComponent = async (
     return kernel.verifyAggregateDerivationProof(input);
 };
 
-/** Verifies an M9 bridge proof with the packaged WASM proof backend. */
+/** Verifies an encrypted aggregate bridge proof with the packaged WASM proof backend. */
 export const verifyBridgeProof = async (
     input: BridgeProofVerificationInput,
 ): Promise<BridgeProofVerification> => {

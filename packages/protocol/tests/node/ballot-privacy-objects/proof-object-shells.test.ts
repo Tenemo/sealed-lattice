@@ -3,6 +3,16 @@ import type { BallotPrivacyRosterProfileEvidence } from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
 import {
+    createComponentProofBundleFixture,
+    createComponentProofStatementFixture,
+    createComponentProofVerificationInputsFixture,
+    createStatement,
+    createStructurallyBoundObjects,
+    hash,
+    requiredComponentIds,
+} from './shared.js';
+
+import {
     createBallotPrivacyProfileSet,
     createBallotProofRecordShell,
     createReceiverEncryptionPublicKeyShell,
@@ -15,17 +25,7 @@ import {
     deriveBallotProofPublicRandomnessHash,
     deriveProofBytesHash,
     verifyBallotProof,
-} from '../../../src/ballot-privacy/index';
-
-import {
-    createComponentProofBundleFixture,
-    createComponentProofStatementFixture,
-    createComponentProofVerificationInputsFixture,
-    createStatement,
-    createStructurallyBoundObjects,
-    hash,
-    requiredComponentIds,
-} from './shared.js';
+} from '#packages/protocol/src/ballot-privacy/index';
 
 const createDynamicRosterProfileEvidence = (
     input: Pick<
@@ -523,8 +523,7 @@ describe('ballot privacy proof object boundary', () => {
         ).ballotProofStatementHash;
         const missingBundleStatementHashResult = verifyBallotProof({
             ballotProof: proofRecord,
-            componentProofBundle:
-                componentProofBundleWithoutStatementHash as typeof componentProofBundle,
+            componentProofBundle: componentProofBundleWithoutStatementHash,
             componentProofInputs,
             proofBytesHex,
             statement,
@@ -541,7 +540,7 @@ describe('ballot privacy proof object boundary', () => {
             ),
         ).toBe(true);
 
-        const publicZeroWithProofBytesInputs = componentProofInputs.map(
+        const publicBindingCheckWithProofBytesInputs = componentProofInputs.map(
             (componentProofInput) =>
                 componentProofInput.componentId ===
                 'receiver-key-binding-component'
@@ -551,22 +550,23 @@ describe('ballot privacy proof object boundary', () => {
                       }
                     : componentProofInput,
         );
-        const publicZeroWithProofBytesResult = verifyBallotProof({
+        const publicBindingCheckWithProofBytesResult = verifyBallotProof({
             ballotProof: proofRecord,
             componentProofBundle,
-            componentProofInputs: publicZeroWithProofBytesInputs,
+            componentProofInputs: publicBindingCheckWithProofBytesInputs,
             proofBytesHex,
             statement,
         });
-        expect(publicZeroWithProofBytesResult).toMatchObject({
+        expect(publicBindingCheckWithProofBytesResult).toMatchObject({
             ok: false,
             unresolvedReason: 'BallotPackageInvalid',
         });
         expect(
-            publicZeroWithProofBytesResult.refusedObjects.some((refusal) =>
-                refusal.message.includes(
-                    'proof bytes for receiver-key-binding-component must be empty',
-                ),
+            publicBindingCheckWithProofBytesResult.refusedObjects.some(
+                (refusal) =>
+                    refusal.message.includes(
+                        'proof bytes for receiver-key-binding-component must be empty',
+                    ),
             ),
         ).toBe(true);
 

@@ -48,6 +48,7 @@ const deriveBallotSetHash = (input: {
         pollSpecHash: input.base.pollSpecHash,
         includeRejectedCandidateSummariesInHash:
             input.base.includeRejectedCandidateSummariesInHash === true,
+        purpose: 'canonical-ballot-set-v1',
         rejectedCandidates:
             input.base.includeRejectedCandidateSummariesInHash === true
                 ? input.rejectedCandidates.map((candidate) => ({
@@ -89,6 +90,7 @@ export const deriveBallotSetHashFromCanonicalSet = (
         includeRejectedCandidateSummariesInHash:
             ballotSet.includeRejectedCandidateSummariesInHash,
         pollSpecHash: ballotSet.pollSpecHash,
+        purpose: 'canonical-ballot-set-v1',
         rejectedCandidates:
             ballotSet.includeRejectedCandidateSummariesInHash === true
                 ? ballotSet.rejectedCandidates.map((candidate) => ({

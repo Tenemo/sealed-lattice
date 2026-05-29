@@ -5,14 +5,14 @@ import type {
 import { describe, expect, it } from 'vitest';
 
 import {
-    decodeSparseTopKTarget,
-    deriveSparseTopKTarget,
-} from '../../src/plaintext-oracle/index';
-
-import {
     mutateSparseTarget,
     sparseTargetVectors,
 } from './plaintext-oracle-test-vectors';
+
+import {
+    decodeSparseTopKTarget,
+    deriveSparseTopKTarget,
+} from '#packages/protocol/src/plaintext-oracle/index';
 
 describe('sparse target decoder oracle', () => {
     const validRanking = [
@@ -157,7 +157,7 @@ describe('sparse target decoder oracle', () => {
     ])('rejects malformed sparse target: $caseName', ({ overrides }) => {
         const mutatedTarget = mutateSparseTarget(
             sparseTargetVectors.target,
-            overrides as Partial<Omit<SparseTopKTarget, 'targetHash'>>,
+            overrides,
         );
         const decoding = decodeSparseTopKTarget({
             expectedLayoutHash: sparseTargetVectors.layoutHash,

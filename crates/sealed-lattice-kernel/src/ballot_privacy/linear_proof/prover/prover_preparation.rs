@@ -93,6 +93,7 @@ pub(crate) struct LinearProverWitnessSummary {
 pub(crate) struct LinearProverWitnessPreparation {
     short_witness_vector: PolynomialVector,
     summary: LinearProverWitnessSummary,
+    transformed_relation_output: PolynomialVector,
 }
 
 impl LinearProverWitnessPreparation {
@@ -106,6 +107,10 @@ impl LinearProverWitnessPreparation {
 
     pub(super) fn short_witness_vector(&self) -> &PolynomialVector {
         &self.short_witness_vector
+    }
+
+    pub(super) fn transformed_relation_output(&self) -> &PolynomialVector {
+        &self.transformed_relation_output
     }
 
     #[cfg(test)]
@@ -279,7 +284,7 @@ pub(crate) fn prepare_linear_prover_witness(
         input.target_coefficient_representation,
         input.public_randomness,
     )?;
-    let _transformed_relation_output = transformed_statement_matrix
+    let transformed_relation_output = transformed_statement_matrix
         .evaluate_linear_relation(&transformed_witness_vector, &transformed_target_vector)?;
     // Modular source rows can lift to a nonzero proof-ring residual equal to
     // the row quotient. The tbox z4 path binds that bounded residual.
@@ -314,6 +319,7 @@ pub(crate) fn prepare_linear_prover_witness(
     Ok(LinearProverWitnessPreparation {
         short_witness_vector,
         summary,
+        transformed_relation_output,
     })
 }
 
@@ -337,10 +343,10 @@ pub(crate) fn prepare_sparse_linear_prover_witness(
         source_witness_to_canonical_vector(input.parameter_set, input.source_witness_coefficients)?;
     let source_target_vector =
         source_target_vector(input.parameter_set, input.target_vector_coefficients)?;
-    let source_relation_output = input
+    let mut source_relation_output = input
         .source_statement_matrix
-        .multiply_vector(&source_witness_vector)?
-        .add(&source_target_vector)?;
+        .multiply_vector(&source_witness_vector)?;
+    source_relation_output.add_assign(&source_target_vector)?;
     if !is_zero_polynomial_vector(&source_relation_output) {
         return Err(invalid_prover(
             "linear prover source witness does not satisfy A*w + t = 0",
@@ -378,9 +384,9 @@ pub(crate) fn prepare_sparse_linear_prover_witness(
         input.target_vector_coefficients,
         input.target_coefficient_representation,
     )?;
-    let _transformed_relation_output = transformed_statement_matrix
-        .multiply_vector(&transformed_witness_vector)?
-        .add(&transformed_target_vector)?;
+    let mut transformed_relation_output =
+        transformed_statement_matrix.multiply_vector(&transformed_witness_vector)?;
+    transformed_relation_output.add_assign(&transformed_target_vector)?;
     // Modular source rows can lift to a nonzero proof-ring residual equal to
     // the row quotient. The tbox z4 path binds that bounded residual.
 
@@ -414,6 +420,7 @@ pub(crate) fn prepare_sparse_linear_prover_witness(
     Ok(LinearProverWitnessPreparation {
         short_witness_vector,
         summary,
+        transformed_relation_output,
     })
 }
 
@@ -460,7 +467,7 @@ where
         proof_encoding,
         target_coefficient_representation,
     )?;
-    let _transformed_relation_output = statement.transformed_relation_output(
+    let transformed_relation_output = statement.transformed_relation_output(
         parameter_set,
         proof_encoding,
         matrix_coefficient_representation,
@@ -498,6 +505,7 @@ where
     Ok(LinearProverWitnessPreparation {
         short_witness_vector,
         summary,
+        transformed_relation_output,
     })
 }
 
@@ -548,15 +556,14 @@ pub(crate) fn prepare_linear_prover_commitment(
             [input.proof_encoding.randomness_response_vector_length..]
             .to_vec(),
     )?;
-    let short_commitment_product = public_parameters
+    let mut uncompressed_commitment = public_parameters
         .commitment_key_matrix
         .multiply_vector(input.witness_preparation.short_witness_vector())?;
     let opening_product = public_parameters
         .opening_key_matrix
         .multiply_vector(&opening_randomness_prefix)?;
-    let uncompressed_commitment = short_commitment_product
-        .add(&opening_product)?
-        .add(&opening_randomness_suffix)?;
+    uncompressed_commitment.add_assign(&opening_product)?;
+    uncompressed_commitment.add_assign(&opening_randomness_suffix)?;
     let (compressed_commitment_vector, opening_remainder_vector) =
         power2round_abdlop_commitment(&uncompressed_commitment, input.proof_encoding)?;
     let encoded_commitment = encode_compressed_commitment_vector(
@@ -673,12 +680,7 @@ pub(crate) fn generate_linear_proof(
         input.target_coefficient_representation,
         input.public_randomness,
     )?;
-    let transformed_relation_witness = PolynomialVector::new(
-        proof_ring,
-        short_witness.entries()[..short_witness.len() - 1].to_vec(),
-    )?;
-    let tbox_z4_secret = transformed_statement_matrix
-        .evaluate_linear_relation(&transformed_relation_witness, &transformed_target_vector)?;
+    let tbox_z4_secret = witness_preparation.transformed_relation_output();
     let euclidean_response_vector = compute_receiver_key_tbox_z3_response(
         proof_ring,
         short_witness,
@@ -687,7 +689,7 @@ pub(crate) fn generate_linear_proof(
     )?;
     let infinity_response_vector = compute_receiver_key_tbox_z4_response(
         proof_ring,
-        &tbox_z4_secret,
+        tbox_z4_secret,
         beta_signs.1,
         &z34_challenge_hash,
     )?;

@@ -18,7 +18,7 @@ use crate::{
         public_parameters::derive_default_abdlop_public_parameters,
         quadratic_challenge::validate_quadratic_challenge,
         sparse_statement::{
-            derive_dense_compatible_sparse_linear_statement_transcript_with_matrix_coefficient_representation,
+            derive_dense_compatible_sparse_linear_statement_transcript_from_transformed,
             transform_sparse_statement_matrix_to_proof_ring_with_coefficient_representation,
             transform_sparse_target_vector_to_proof_ring,
         },

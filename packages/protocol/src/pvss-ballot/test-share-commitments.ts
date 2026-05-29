@@ -95,13 +95,14 @@ export const deriveTestReceiverShareOpeningPayloadHash = (input: {
     readonly context: PvssBallotHashContext;
     readonly payload: Omit<TestReceiverShareOpeningPayload, 'payloadHash'>;
 }): string =>
-    deriveProtocolHash('TestReceiverShareOpeningPayloadHash', {
+    deriveProtocolHash('ChallengeDomainHash', {
         ceremonyId: input.context.ceremonyId,
         duplicateBallotPolicyHash: input.context.duplicateBallotPolicyHash,
         electionManifestHash: input.context.electionManifestHash,
         objectType: input.payload.objectType,
         openingVector: input.payload.openingVector,
         pollSpecHash: input.context.pollSpecHash,
+        purpose: 'test-receiver-share-opening-payload-v1',
         receiverIdentity: input.payload.receiverIdentity,
         receiverRosterPosition: input.payload.receiverRosterPosition,
         rosterHash: input.context.rosterHash,

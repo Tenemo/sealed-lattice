@@ -48,9 +48,10 @@ describe('board consistency', () => {
         const head0 = createBoardHead(0, null);
         const head1 = createBoardHead(1, head0.headHash);
         const topKEvaluationRecordHash = deriveProtocolHash(
-            'TopKEvaluationRecordHash',
+            'ChallengeDomainHash',
             {
-                proposal: 'target',
+                payload: { proposal: 'target' },
+                purpose: 'fixture-top-k-evaluation-record-v1',
             },
         );
         const { head: head2, inclusionProofs } = createBoardHeadWithObjects(
@@ -113,8 +114,11 @@ describe('board consistency', () => {
     it('rejects a board-entry Merkle path with a substituted sibling', () => {
         const head0 = createBoardHead(0, null);
         const topKEvaluationRecordHash = deriveProtocolHash(
-            'TopKEvaluationRecordHash',
-            { proposal: 'target' },
+            'ChallengeDomainHash',
+            {
+                payload: { proposal: 'target' },
+                purpose: 'fixture-top-k-evaluation-record-v1',
+            },
         );
         const { head, inclusionProofs } = createBoardHeadWithObjects(
             1,
@@ -167,8 +171,9 @@ describe('board consistency', () => {
         const fabricatedInclusionProof = createInclusionProof(
             head1,
             'TopKEvaluationRecord',
-            deriveProtocolHash('TopKEvaluationRecordHash', {
-                proposal: 'not-in-head',
+            deriveProtocolHash('ChallengeDomainHash', {
+                payload: { proposal: 'not-in-head' },
+                purpose: 'fixture-top-k-evaluation-record-v1',
             }),
         );
 
@@ -282,8 +287,9 @@ describe('board consistency', () => {
         };
         const wrongHashForkEvidence = {
             ...compatibleEvidencePayload,
-            evidenceHash: deriveProtocolHash('ConflictingHeadEvidenceHash', {
-                wrong: true,
+            evidenceHash: deriveProtocolHash('ChallengeDomainHash', {
+                payload: { wrong: true },
+                purpose: 'fixture-wrong-conflicting-head-evidence-v1',
             }),
         };
         const compatibleForkEvidence = {

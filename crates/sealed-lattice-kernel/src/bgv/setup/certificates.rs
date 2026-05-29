@@ -200,7 +200,7 @@ pub(super) fn key_switch_decomposition_profile() -> CanonicalResult<Value> {
         "basisId": BgvBasisKind::Extended.basis_id(),
         "digitBaseBits": 23,
         "digitCountPerPrime": 3,
-        "decompositionStatus": "provisional-M8-for-M10-schedule",
+        "decompositionStatus": "provisional-passive-setup-for-encrypted-evaluator",
         "genericKeySwitchApiExported": false,
     }))
 }
@@ -218,9 +218,11 @@ pub(super) fn threshold_decryption_profile(profile_hash: &str) -> CanonicalResul
     }))
 }
 
-pub(super) fn m8_evaluator_context_bindings(setup_inputs: &Value) -> CanonicalResult<Value> {
+pub(super) fn passive_setup_evaluator_context_bindings(
+    setup_inputs: &Value,
+) -> CanonicalResult<Value> {
     let evaluator_binding_context = json!({
-        "objectType": "M8EvaluatorBindingContext",
+        "objectType": "PassiveSetupEvaluatorBindingContext",
         "objectVersion": 1,
         "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
         "ceremonyId": string_at_path(setup_inputs, &["ceremonyId"])?,
@@ -230,8 +232,10 @@ pub(super) fn m8_evaluator_context_bindings(setup_inputs: &Value) -> CanonicalRe
         "participantCount": unsigned_at_path(setup_inputs, &["participantCount"])?,
         "setupSeedHash": string_at_path(setup_inputs, &["setupSeedHash"])?,
     });
-    let evaluator_binding_context_hash =
-        derive_protocol_hash("M8EvaluatorBindingContextHash", &evaluator_binding_context)?;
+    let evaluator_binding_context_hash = derive_protocol_hash(
+        "PassiveSetupEvaluatorBindingContextHash",
+        &evaluator_binding_context,
+    )?;
     let bridge_record = json!({
         "profileId": "EncryptedAggregateBridge-v1",
         "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
@@ -241,7 +245,7 @@ pub(super) fn m8_evaluator_context_bindings(setup_inputs: &Value) -> CanonicalRe
         "inputLayoutHash": layout_hash()?,
         "aggregateInputEncodingProfileHash": aggregate_input_encoding_profile_hash()?,
         "bridgeEvidenceRequiredBeforeClaimUse": true,
-        "m8ProvidesSetupBindingOnly": true,
+        "passiveSetupProvidesBindingOnly": true,
     });
     let target_basis_record = json!({
         "objectType": "EncryptedAggregateTargetBasis",
@@ -253,7 +257,7 @@ pub(super) fn m8_evaluator_context_bindings(setup_inputs: &Value) -> CanonicalRe
         "canonicalCiphertextConventionHash": canonical_ciphertext_convention_hash()?,
         "layoutHash": layout_hash()?,
         "topKEvaluatorInputLayoutHash": top_k_evaluator_input_layout_hash()?,
-        "finalizedBy": "M9-M10",
+        "finalizedBy": "bridge-and-evaluator-closure",
     });
     let reconstruction_record = json!({
         "objectType": "EncryptedAggregateReconstructionBinding",
@@ -266,7 +270,7 @@ pub(super) fn m8_evaluator_context_bindings(setup_inputs: &Value) -> CanonicalRe
             &target_basis_record,
         )?,
         "layoutHash": layout_hash()?,
-        "reconstructionClaimPendingM9": true,
+        "reconstructionClaimPendingEncryptedAggregateBridge": true,
     });
     let score_bit_derivation_record = json!({
         "objectType": "ScoreBitDerivationCircuitBinding",
@@ -277,7 +281,7 @@ pub(super) fn m8_evaluator_context_bindings(setup_inputs: &Value) -> CanonicalRe
         "inputLayoutHash": top_k_evaluator_input_layout_hash()?,
         "encodedAggregateLayoutHash": encoded_aggregate_layout_hash()?,
         "allowedEvaluatorOpsHash": allowed_operation_registry_hash()?,
-        "circuitClosurePendingM10": true,
+        "circuitClosurePendingEncryptedAggregateEvaluator": true,
     });
     let comparison_input_derivation_record = json!({
         "objectType": "ComparisonInputDerivationCircuitBinding",
@@ -288,8 +292,8 @@ pub(super) fn m8_evaluator_context_bindings(setup_inputs: &Value) -> CanonicalRe
         "inputLayoutHash": top_k_evaluator_input_layout_hash()?,
         "encodedAggregateLayoutHash": encoded_aggregate_layout_hash()?,
         "allowedEvaluatorOpsHash": allowed_operation_registry_hash()?,
-        "circuitClosurePendingM10": false,
-        "futureRdrRequired": true,
+        "circuitClosurePendingEncryptedAggregateEvaluator": false,
+        "futureDesignNoteRequired": true,
     });
     let encrypted_score_bit_input_record = json!({
         "objectType": "EncryptedScoreBitInputBinding",
@@ -303,7 +307,7 @@ pub(super) fn m8_evaluator_context_bindings(setup_inputs: &Value) -> CanonicalRe
         )?,
         "ciphertextConventionHash": canonical_ciphertext_convention_hash()?,
         "packingLayoutHash": top_k_evaluator_input_layout_hash()?,
-        "claimUsePendingM10": true,
+        "claimUsePendingEncryptedAggregateEvaluator": true,
     });
     let encrypted_comparison_input_record = json!({
         "objectType": "EncryptedComparisonInputBinding",
@@ -317,8 +321,8 @@ pub(super) fn m8_evaluator_context_bindings(setup_inputs: &Value) -> CanonicalRe
         )?,
         "ciphertextConventionHash": canonical_ciphertext_convention_hash()?,
         "packingLayoutHash": top_k_evaluator_input_layout_hash()?,
-        "claimUsePendingM10": false,
-        "futureRdrRequired": true,
+        "claimUsePendingEncryptedAggregateEvaluator": false,
+        "futureDesignNoteRequired": true,
     });
     let comparator_record = json!({
         "objectType": "BitSlicedComparatorBinding",
@@ -330,7 +334,7 @@ pub(super) fn m8_evaluator_context_bindings(setup_inputs: &Value) -> CanonicalRe
             "scalar-polynomial-degree-360-comparator",
             "uncertified-polynomial-comparator"
         ],
-        "appendixDProfilePending": true,
+        "evaluatorProfilePending": true,
     });
     let sparse_target_projection_record = json!({
         "objectType": "EncryptedSparseTargetProjectionBinding",
@@ -341,12 +345,12 @@ pub(super) fn m8_evaluator_context_bindings(setup_inputs: &Value) -> CanonicalRe
             "TargetLayoutHash",
             &json!({
                 "profileId": PROFILE_ID,
-                "targetLayout": "M3-sparse-top-k-target-over-M7-canonical-ciphertext-convention",
-                "finalizedBy": "M10-M13",
+                "targetLayout": "sparse-top-k-target-over-bgv-rns-canonical-ciphertext-convention",
+                "finalizedBy": "evaluator-and-decryption-closure",
             }),
         )?,
         "topKEvaluatorInputLayoutHash": top_k_evaluator_input_layout_hash()?,
-        "claimUsePendingM10": true,
+        "claimUsePendingEncryptedAggregateEvaluator": true,
     });
 
     let encrypted_aggregate_bridge_hash =
@@ -393,7 +397,7 @@ pub(super) fn m8_evaluator_context_bindings(setup_inputs: &Value) -> CanonicalRe
         "encryptedSparseTargetProjectionHash": encrypted_sparse_target_projection_hash,
         "selectedEvaluatorPath": "encrypted-aggregate-score-bit-derivation-v1",
         "directComparisonInputDerivationStatus": "inactive-future-profile",
-        "claimUse": "binding-only-until-M9-M10-closure",
+        "claimUse": "binding-only-until-bridge-and-evaluator-closure",
     });
 
     Ok(json!({
@@ -407,7 +411,7 @@ pub(super) fn m8_evaluator_context_bindings(setup_inputs: &Value) -> CanonicalRe
         "encryptedComparisonInputHash": binding_record["encryptedComparisonInputHash"],
         "bitSlicedComparatorHash": binding_record["bitSlicedComparatorHash"],
         "encryptedSparseTargetProjectionHash": binding_record["encryptedSparseTargetProjectionHash"],
-        "m8EvaluatorContextBindingHash": derive_protocol_hash(
+        "passiveSetupEvaluatorContextBindingHash": derive_protocol_hash(
             "EvaluationContextHash",
             &binding_record,
         )?,
@@ -459,7 +463,7 @@ fn public_rlwe_samples_by_basis(participant_count: usize, rotation_key_count: us
         },
         "QTarget": {
             "modulusBits": null,
-            "sampleCountStatus": "pendingUntilAppendixC"
+            "sampleCountStatus": "pendingUntilFinalNoiseAnalysis"
         },
     })
 }
@@ -494,7 +498,7 @@ fn evaluation_key_size_certificate(rotation_key_count: usize) -> Value {
         },
         "storagePressure": {
             "status": "large-public-evaluation-key-material",
-            "mobileDownloadRequiresM16Measurement": true
+            "mobileDownloadRequiresPerformanceMeasurement": true
         },
     })
 }

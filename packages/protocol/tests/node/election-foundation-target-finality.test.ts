@@ -98,8 +98,11 @@ describe('target finality', () => {
         const head0 = createBoardHead(0, null);
         const head1 = createTargetProposalHead(1, head0.headHash, 'left');
         const forkTopKEvaluationRecordHash = deriveProtocolHash(
-            'TopKEvaluationRecordHash',
-            { proposal: 'fork' },
+            'ChallengeDomainHash',
+            {
+                payload: { proposal: 'fork' },
+                purpose: 'fixture-top-k-evaluation-record-v1',
+            },
         );
         const head1Fork = createTargetProposalHead(
             1,
@@ -266,8 +269,11 @@ describe('target finality', () => {
             'first-target',
         );
         const secondTopKEvaluationRecordHash = deriveProtocolHash(
-            'TopKEvaluationRecordHash',
-            { proposal: 'second-linear-target' },
+            'ChallengeDomainHash',
+            {
+                payload: { proposal: 'second-linear-target' },
+                purpose: 'fixture-top-k-evaluation-record-v1',
+            },
         );
         const secondTargetHead = createTargetProposalHead(
             2,

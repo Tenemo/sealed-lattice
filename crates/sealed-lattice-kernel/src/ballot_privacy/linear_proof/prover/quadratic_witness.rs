@@ -108,11 +108,13 @@ pub(super) fn evaluate_quadratic_equation_equation(
         .unwrap_or_else(|| vec![0_u64; proof_ring.degree()]);
     let linear_product =
         dot_sparse_vector_with_dense_vector(proof_ring, equation.linear_terms(), witness)?;
-    evaluated_polynomial = proof_ring.add(&evaluated_polynomial, &linear_product)?;
+    proof_ring.add_assign(&mut evaluated_polynomial, &linear_product)?;
     let quadratic_matrix_product = equation.quadratic_terms().multiply_vector(witness)?;
     let quadratic_product = dot_polynomial_vectors(proof_ring, witness, &quadratic_matrix_product)?;
 
-    proof_ring.add(&evaluated_polynomial, &quadratic_product)
+    proof_ring.add_assign(&mut evaluated_polynomial, &quadratic_product)?;
+
+    Ok(evaluated_polynomial)
 }
 
 pub(super) fn dot_sparse_vector_with_dense_vector(
@@ -130,11 +132,11 @@ pub(super) fn dot_sparse_vector_with_dense_vector(
     }
     let mut output = vec![0_u64; proof_ring.degree()];
     for entry in sparse_vector.entries() {
-        let product = proof_ring.mul_negacyclic(
+        proof_ring.mul_negacyclic_accumulate(
+            &mut output,
             entry.coefficients(),
             &dense_vector.entries()[entry.position()],
         )?;
-        output = proof_ring.add(&output, &product)?;
     }
 
     Ok(output)
@@ -157,8 +159,7 @@ pub(super) fn dot_polynomial_vectors(
     for (left_polynomial, right_polynomial) in
         left_vector.entries().iter().zip(right_vector.entries())
     {
-        let product = proof_ring.mul_negacyclic(left_polynomial, right_polynomial)?;
-        output = proof_ring.add(&output, &product)?;
+        proof_ring.mul_negacyclic_accumulate(&mut output, left_polynomial, right_polynomial)?;
     }
 
     Ok(output)

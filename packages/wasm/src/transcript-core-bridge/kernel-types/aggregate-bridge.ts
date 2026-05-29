@@ -1,5 +1,18 @@
 import type { ProtocolHash } from '@sealed-lattice/types';
 
+export type BridgeRandomnessSource =
+    | 'fresh-csprng'
+    | 'development-deterministic-fixture';
+
+export type BridgeRandomnessSourceEvidence = {
+    readonly objectType: 'AggregateBridgeRandomnessSourceEvidence';
+    readonly objectVersion: 1;
+    readonly proverRandomnessSource: BridgeRandomnessSource;
+    readonly encryptionRandomnessSeedSource: BridgeRandomnessSource;
+    readonly callerSuppliedDevelopmentRandomness: boolean;
+    readonly claimBearingEntropyEvidence: false;
+};
+
 export type AggregateBridgeEncryptionGeneration = {
     readonly ok: boolean;
     readonly operation: 'generateAggregateBridgeEncryption';
@@ -7,6 +20,7 @@ export type AggregateBridgeEncryptionGeneration = {
     readonly rustBgvBackendProfileHash: ProtocolHash;
     readonly canonicalCiphertextConventionHash: ProtocolHash;
     readonly collectivePublicKeyRoot: ProtocolHash;
+    readonly collectivePublicKeyCoefficientRoot: ProtocolHash;
     readonly bgvPublicKeyRoot: ProtocolHash;
     readonly plaintextRoot: ProtocolHash;
     readonly ciphertextRoot: ProtocolHash;
@@ -33,6 +47,13 @@ export type AggregateBridgeEncryptionGeneration = {
     readonly plaintextCanonicalLiftProofStatus: 'PlaintextCanonicalLiftProofMissing';
     readonly bridgeClaimClosureVerified: false;
     readonly bridgeClaimVerificationStatus: 'BridgeProofClaimClosureMissing';
+    readonly bgvEncryptionKeyMaterialKind: 'passive-transcript-derived-collective-public-key';
+    readonly developmentKeyOnly: false;
+    readonly proverRandomnessSource: BridgeRandomnessSource;
+    readonly encryptionRandomnessSeedSource: BridgeRandomnessSource;
+    readonly randomnessSourceEvidence: BridgeRandomnessSourceEvidence;
+    readonly thresholdDecryptable: false;
+    readonly claimBearingBridgeEncryption: false;
     readonly bridgeVariantEvidenceStatus:
         | 'representative-row-evidence'
         | 'full-matrix-row-evidence-missing';
@@ -75,6 +96,10 @@ export type AggregateBridgeEncryptionVerification = {
     readonly plaintextCanonicalLiftProofStatus: 'PlaintextCanonicalLiftProofMissing';
     readonly bridgeClaimClosureVerified: false;
     readonly bridgeClaimVerificationStatus: 'BridgeProofClaimClosureMissing';
+    readonly bgvEncryptionKeyMaterialKind: 'passive-transcript-derived-collective-public-key';
+    readonly developmentKeyOnly: false;
+    readonly thresholdDecryptable: false;
+    readonly claimBearingBridgeEncryption: false;
     readonly bridgeVariantEvidenceStatus:
         | 'representative-row-evidence'
         | 'full-matrix-row-evidence-missing';
@@ -88,6 +113,10 @@ export type AggregateBridgeEncryptionVerification = {
     readonly bgvRandomnessBoundProofStatusHash?: ProtocolHash | null;
     readonly encryptedAggregateInputRoot: ProtocolHash;
     readonly encryptedAggregateShareCiphertextRoot: ProtocolHash;
+    readonly collectivePublicKeyCoefficientRoot: ProtocolHash;
+    readonly proverRandomnessSource: BridgeRandomnessSource;
+    readonly encryptionRandomnessSeedSource: BridgeRandomnessSource;
+    readonly randomnessSourceEvidence: BridgeRandomnessSourceEvidence;
     readonly aggregateRelationSubproofSizeBytes: number;
     readonly aggregateRelationChallengeHex: string;
     readonly aggregateRelationCommitmentHash: ProtocolHash;
@@ -107,6 +136,13 @@ export type AggregateBridgeRelationEvaluation = {
     readonly bridgeEvidenceVerificationStatus?: 'BridgeProofEvidenceChecked';
     readonly bridgeClaimClosureVerified?: false;
     readonly bridgeClaimVerificationStatus?: 'BridgeProofClaimClosureMissing';
+    readonly bgvEncryptionKeyMaterialKind?: 'passive-transcript-derived-collective-public-key';
+    readonly developmentKeyOnly?: false;
+    readonly proverRandomnessSource?: BridgeRandomnessSource;
+    readonly encryptionRandomnessSeedSource?: BridgeRandomnessSource;
+    readonly randomnessSourceEvidence?: BridgeRandomnessSourceEvidence;
+    readonly thresholdDecryptable?: false;
+    readonly claimBearingBridgeEncryption?: false;
     readonly publicArtifactWitnessCleanResult?: boolean;
     readonly bridgeProofBackendStillRequired?: boolean;
     readonly scopedBridgeRelationClosure?: boolean;

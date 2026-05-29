@@ -40,6 +40,7 @@ const derivePendingBridgeProofParameterSetHash = (input: {
     readonly bridgeProofProfileHash: ProtocolHash;
     readonly bridgeProofStatementHash: ProtocolHash;
     readonly collectivePublicKeyRoot: ProtocolHash;
+    readonly collectivePublicKeyCoefficientRoot: ProtocolHash;
 }): ProtocolHash =>
     deriveProtocolHash('BridgeProofRecordHash', {
         ...input,
@@ -64,6 +65,26 @@ const deriveSampledPublicRelationCheckPolicyHash = (
             'sealed-lattice-aggregate-bridge-sampled-public-relation-check-policy-v1',
     });
 
+const bridgeRandomnessSourceValues = [
+    'fresh-csprng',
+    'development-deterministic-fixture',
+] as const;
+
+const requireBridgeRandomnessSource = (
+    value: unknown,
+    description: string,
+): void => {
+    if (
+        !bridgeRandomnessSourceValues.some(
+            (randomnessSource) => randomnessSource === value,
+        )
+    ) {
+        throw new RangeError(
+            `Bridge proof record evidence mismatch for ${description}.`,
+        );
+    }
+};
+
 export const createPendingBridgeProofRecordFromBridgeEvidence = (
     input: PendingBridgeProofRecordFromEvidenceInput,
 ): BridgeProofRecord => {
@@ -71,10 +92,15 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
     const { statement } = aggregateDerivationComponent;
     const { profileBindings } = input.setupPackage;
     const bridgeProofProfileHash = deriveBridgeProofProfileHash({
+        bgvEncryptionKeyMaterialKind:
+            'passive-transcript-derived-collective-public-key',
         bgvEncryptionProofSubrelation:
-            'SealedLatticeDevelopmentCiphertextEquationRelation',
+            'SealedLatticePassiveCollectiveCiphertextEquationRelation',
         bridgeProofProfileId: encryptedAggregateBridgeProfileId,
+        claimBearingBridgeEncryption: false,
+        developmentKeyOnly: false,
         proofBackend: 'SealedLatticeBridgeRelation',
+        thresholdDecryptable: false,
     });
     const profileHash = requireProtocolHashField(
         profileBindings,
@@ -238,12 +264,14 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
             aggregateDerivationComponent.aggregateCommitment
                 .aggregateShareCommitmentHash,
         aggregateToPlaintextBindingStatus:
-            'AggregateToPlaintextBindingProofChecked',
+            'AggregateToPlaintextModularBindingChecked',
         ballotScoreEncodingProfileHash,
         ballotSetHash: statement.ballotSetHash,
         ballotShareLayoutProfileHash,
         basisId: bridgeEncryptionEvidence.basisId,
         bgvBatchEncoderHash,
+        bgvEncryptionKeyMaterialKind:
+            'passive-transcript-derived-collective-public-key',
         bgvEncryptionProofStatus: 'BgvCiphertextEquationChecked',
         bgvProfileHash: profileHash,
         bgvPublicKeyRoot:
@@ -262,15 +290,20 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
         canonicalCiphertextConventionHash,
         ceremonyId: statement.ceremonyId,
         ciphertextRoot: bridgeEncryptionEvidence.ciphertextRoot,
+        claimBearingBridgeEncryption: false,
         coefficientDomainCanonical: true,
         coefficientCount: bridgeEncryptionEvidence.coefficientCount,
         collectivePublicKeyRoot:
             input.setupPackage.collectivePublicKey.collectivePublicKeyRoot,
+        collectivePublicKeyCoefficientRoot:
+            input.setupPackage.collectivePublicKey
+                .collectivePublicKeyCoefficientRoot,
         contributorActionContextHash: statement.contributorActionContextHash,
         contributorIdentity: statement.contributorIdentity,
         contributorRosterExternalAcceptanceHash:
             statement.contributorRosterExternalAcceptanceHash,
         contributorRosterPosition: statement.contributorRosterPosition,
+        developmentKeyOnly: false,
         optionCount: statement.optionCount,
         participantCount: statement.participantCount,
         encodedAggregateLayoutHash,
@@ -312,11 +345,18 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
         sharedWitnessBindingStatus: 'SharedWitnessBindingRelationChecked',
         sharedWitnessChallengeBitsPerCheck: 64,
         sharedWitnessCheckCount: 2,
-        sharedWitnessSoundnessBits: 128,
+        sharedWitnessChallengeEntropyBits: 128,
+        sharedWitnessRejectionAttemptLimit: 64,
+        sharedWitnessGrindingDiscountBitsPerCheck: 6,
+        sharedWitnessUnadjustedWeakestRelationSoundnessBitsFloor: 32,
+        sharedWitnessEffectiveBindingSoundnessBitsFloor: 20,
+        sharedWitnessWeakestRelation: 'BGVBatchEncode65537InverseNegacyclicNtt',
+        sharedWitnessWeakestRelationModulus: 65_537,
         sharedWitnessZeroKnowledgeStatus:
             'SharedWitnessZeroKnowledgeResponseDistributionChecked',
         slotCount: bridgeEncryptionEvidence.slotCount,
         thresholdProfileHash: statement.thresholdProfileHash,
+        thresholdDecryptable: false,
         topKEvaluatorInputLayoutHash,
         votingClosedBoardHeadHash: statement.votingClosedBoardHeadHash,
     });
@@ -332,6 +372,26 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
         'checked bridge proof status',
     );
     requireMatchingValue(
+        bridgeEncryptionEvidence.bgvEncryptionKeyMaterialKind,
+        'passive-transcript-derived-collective-public-key',
+        'BGV encryption key material kind',
+    );
+    requireMatchingValue(
+        bridgeEncryptionEvidence.developmentKeyOnly,
+        false,
+        'development key-only evidence flag',
+    );
+    requireMatchingValue(
+        bridgeEncryptionEvidence.thresholdDecryptable,
+        false,
+        'threshold-decryptable evidence flag',
+    );
+    requireMatchingValue(
+        bridgeEncryptionEvidence.claimBearingBridgeEncryption,
+        false,
+        'claim-bearing bridge encryption evidence flag',
+    );
+    requireMatchingValue(
         bridgeEncryptionEvidence.aggregateDerivationVerificationScope,
         'AggregateDerivationFullVerificationPreconditionNotBound',
         'aggregate derivation verification scope',
@@ -345,6 +405,26 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
         input.bridgeEvidenceVerification.bridgeEvidenceVerificationStatus,
         'BridgeProofEvidenceChecked',
         'bridge evidence verification label',
+    );
+    requireMatchingValue(
+        input.bridgeEvidenceVerification.bgvEncryptionKeyMaterialKind,
+        'passive-transcript-derived-collective-public-key',
+        'verified BGV encryption key material kind',
+    );
+    requireMatchingValue(
+        input.bridgeEvidenceVerification.developmentKeyOnly,
+        false,
+        'verified development key-only flag',
+    );
+    requireMatchingValue(
+        input.bridgeEvidenceVerification.thresholdDecryptable,
+        false,
+        'verified threshold-decryptable flag',
+    );
+    requireMatchingValue(
+        input.bridgeEvidenceVerification.claimBearingBridgeEncryption,
+        false,
+        'verified claim-bearing bridge encryption flag',
     );
     requireMatchingValue(
         input.bridgeEvidenceVerification.aggregateDerivationVerificationScope,
@@ -455,6 +535,110 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
         bridgeEncryptionEvidence.collectivePublicKeyRoot,
         input.setupPackage.collectivePublicKey.collectivePublicKeyRoot,
         'collective public key root',
+    );
+    requireMatchingValue(
+        bridgeEncryptionEvidence.collectivePublicKeyCoefficientRoot,
+        input.setupPackage.collectivePublicKey
+            .collectivePublicKeyCoefficientRoot,
+        'collective public key coefficient root',
+    );
+    requireBridgeRandomnessSource(
+        bridgeEncryptionEvidence.proverRandomnessSource,
+        'prover randomness source',
+    );
+    requireBridgeRandomnessSource(
+        bridgeEncryptionEvidence.encryptionRandomnessSeedSource,
+        'encryption randomness source',
+    );
+    requireMatchingValue(
+        bridgeEncryptionEvidence.randomnessSourceEvidence.objectType,
+        'AggregateBridgeRandomnessSourceEvidence',
+        'randomness source evidence object type',
+    );
+    requireMatchingValue(
+        bridgeEncryptionEvidence.randomnessSourceEvidence.objectVersion,
+        1,
+        'randomness source evidence object version',
+    );
+    requireMatchingValue(
+        bridgeEncryptionEvidence.randomnessSourceEvidence
+            .proverRandomnessSource,
+        bridgeEncryptionEvidence.proverRandomnessSource,
+        'randomness source evidence prover source',
+    );
+    requireMatchingValue(
+        bridgeEncryptionEvidence.randomnessSourceEvidence
+            .encryptionRandomnessSeedSource,
+        bridgeEncryptionEvidence.encryptionRandomnessSeedSource,
+        'randomness source evidence encryption source',
+    );
+    requireMatchingValue(
+        bridgeEncryptionEvidence.randomnessSourceEvidence
+            .callerSuppliedDevelopmentRandomness,
+        bridgeEncryptionEvidence.proverRandomnessSource ===
+            'development-deterministic-fixture' ||
+            bridgeEncryptionEvidence.encryptionRandomnessSeedSource ===
+                'development-deterministic-fixture',
+        'randomness source evidence development flag',
+    );
+    requireMatchingValue(
+        bridgeEncryptionEvidence.randomnessSourceEvidence
+            .claimBearingEntropyEvidence,
+        false,
+        'randomness source evidence claim-bearing entropy flag',
+    );
+    requireMatchingValue(
+        bridgeEncryptionEvidence.collectivePublicKeyCoefficientRoot,
+        input.bridgeEvidenceVerification.collectivePublicKeyCoefficientRoot,
+        'verified collective public key coefficient root',
+    );
+    requireMatchingValue(
+        bridgeEncryptionEvidence.proverRandomnessSource,
+        input.bridgeEvidenceVerification.proverRandomnessSource,
+        'verified prover randomness source',
+    );
+    requireMatchingValue(
+        bridgeEncryptionEvidence.encryptionRandomnessSeedSource,
+        input.bridgeEvidenceVerification.encryptionRandomnessSeedSource,
+        'verified encryption randomness source',
+    );
+    requireMatchingValue(
+        bridgeEncryptionEvidence.randomnessSourceEvidence.objectType,
+        input.bridgeEvidenceVerification.randomnessSourceEvidence.objectType,
+        'verified randomness source evidence object type',
+    );
+    requireMatchingValue(
+        bridgeEncryptionEvidence.randomnessSourceEvidence.objectVersion,
+        input.bridgeEvidenceVerification.randomnessSourceEvidence.objectVersion,
+        'verified randomness source evidence object version',
+    );
+    requireMatchingValue(
+        bridgeEncryptionEvidence.randomnessSourceEvidence
+            .proverRandomnessSource,
+        input.bridgeEvidenceVerification.randomnessSourceEvidence
+            .proverRandomnessSource,
+        'verified randomness source evidence prover source',
+    );
+    requireMatchingValue(
+        bridgeEncryptionEvidence.randomnessSourceEvidence
+            .encryptionRandomnessSeedSource,
+        input.bridgeEvidenceVerification.randomnessSourceEvidence
+            .encryptionRandomnessSeedSource,
+        'verified randomness source evidence encryption source',
+    );
+    requireMatchingValue(
+        bridgeEncryptionEvidence.randomnessSourceEvidence
+            .callerSuppliedDevelopmentRandomness,
+        input.bridgeEvidenceVerification.randomnessSourceEvidence
+            .callerSuppliedDevelopmentRandomness,
+        'verified randomness source evidence development flag',
+    );
+    requireMatchingValue(
+        bridgeEncryptionEvidence.randomnessSourceEvidence
+            .claimBearingEntropyEvidence,
+        input.bridgeEvidenceVerification.randomnessSourceEvidence
+            .claimBearingEntropyEvidence,
+        'verified randomness source evidence claim-bearing entropy flag',
     );
     requireMatchingValue(
         bridgeEncryptionEvidence.bgvPublicKeyRoot,
@@ -599,6 +783,8 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
                 bridgeProofStatementHash: expectedBridgeProofStatementHash,
                 collectivePublicKeyRoot:
                     bridgeEncryptionEvidence.collectivePublicKeyRoot,
+                collectivePublicKeyCoefficientRoot:
+                    bridgeEncryptionEvidence.collectivePublicKeyCoefficientRoot,
             }),
         'proof parameter set hash',
     );
@@ -629,8 +815,10 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
         ballotSetHash: statement.ballotSetHash,
         ballotShareLayoutProfileHash,
         bgvBatchEncoderHash,
+        bgvEncryptionKeyMaterialKind:
+            'passive-transcript-derived-collective-public-key',
         bgvEncryptionProofSubrelation:
-            'SealedLatticeDevelopmentCiphertextEquationRelation',
+            'SealedLatticePassiveCollectiveCiphertextEquationRelation',
         bgvProfileHash: profileHash,
         bgvPublicKeyRoot: bridgeEncryptionEvidence.bgvPublicKeyRoot,
         bridgeLayoutHash: encryptedAggregateInputLayoutHash,
@@ -642,15 +830,19 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
             input.bridgeWitnessPrivacyProfileHash,
             'bridge witness privacy profile hash',
         ),
+        claimBearingBridgeEncryption: false,
         canonicalCiphertextConventionHash,
         ceremonyId: statement.ceremonyId,
         collectivePublicKeyRoot:
             bridgeEncryptionEvidence.collectivePublicKeyRoot,
+        collectivePublicKeyCoefficientRoot:
+            bridgeEncryptionEvidence.collectivePublicKeyCoefficientRoot,
         contributorIdentity: statement.contributorIdentity,
         contributorActionContextHash: statement.contributorActionContextHash,
         contributorRosterExternalAcceptanceHash:
             statement.contributorRosterExternalAcceptanceHash,
         contributorRosterPosition: statement.contributorRosterPosition,
+        developmentKeyOnly: false,
         encodedAggregateLayoutHash,
         encodedShareVectorLayoutHash: statement.encodedShareVectorLayoutHash,
         encryptedAggregateBridgeHash,
@@ -691,6 +883,7 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
             statement.shareCommitmentMessageBoundCertHash,
         shareVectorWidth: statement.shareVectorWidth,
         thresholdProfileHash: statement.thresholdProfileHash,
+        thresholdDecryptable: false,
         topKEvaluatorInputLayoutHash,
         votingClosedBoardHeadHash: statement.votingClosedBoardHeadHash,
     };

@@ -4,8 +4,6 @@ import type {
 } from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
-import { loadTranscriptCoreKernel } from '../../../src/index';
-
 import { registerAggregateBridgeEncryptionTest } from './aggregate-derivation-proof/bridge-encryption.js';
 
 import { deriveProtocolHash } from '#packages/crypto/src/index';
@@ -20,6 +18,7 @@ import {
     verifyAggregateDerivationComponentStructure,
     type AggregateDerivationWitnessInput,
 } from '#packages/protocol/src/ballot-privacy/index';
+import { loadTranscriptCoreKernel } from '#packages/wasm/src/index';
 import {
     createMandatoryProfileBallotProofRecordBenchmarkFixture,
     createWasmBallotProofRecordGenerationFixture,
@@ -260,12 +259,15 @@ const runAggregateTestStep = async <T>(
     name: string,
     action: () => T | Promise<T>,
 ): Promise<T> => {
+    const writeTimingLine = (line: string): void => {
+        process.stdout.write(`${line}\n`);
+    };
     const isGitHubActions = process.env.GITHUB_ACTIONS === 'true';
     const startedAtMilliseconds = Date.now();
     if (isGitHubActions) {
-        console.log(`::group::Aggregate derivation: ${name}`);
+        writeTimingLine(`::group::Aggregate derivation: ${name}`);
     }
-    console.log(`Aggregate derivation step started: ${name}`);
+    writeTimingLine(`Aggregate derivation step started: ${name}`);
     try {
         return await action();
     } finally {
@@ -273,14 +275,19 @@ const runAggregateTestStep = async <T>(
             (Date.now() - startedAtMilliseconds) /
             1000
         ).toFixed(1);
-        console.log(
+        writeTimingLine(
             `Aggregate derivation step finished: ${name} (${elapsedSeconds}s)`,
         );
         if (isGitHubActions) {
-            console.log('::endgroup::');
+            writeTimingLine('::endgroup::');
         }
     }
 };
+
+const runAggregateSubcase = async <T>(
+    name: string,
+    action: () => T | Promise<T>,
+): Promise<T> => runAggregateTestStep(`subcase: ${name}`, action);
 
 const requireBallotPackageContext = (
     context: BallotPackageContext | undefined,
@@ -338,10 +345,7 @@ describe.sequential(
                         });
                         const ballotPackage = createFixtureBallotPackage({
                             fixture,
-                            generation: ballotProofGeneration as Record<
-                                string,
-                                unknown
-                            >,
+                            generation: ballotProofGeneration,
                         });
                         const certificate = fixtureCertificate(fixture);
                         expect(
@@ -385,7 +389,7 @@ describe.sequential(
                         return {
                             ballotPackage,
                             ballotPackageWithoutProofBytes:
-                                ballotPackageWithoutProofBytes as ClaimBearingBallotPackage,
+                                ballotPackageWithoutProofBytes,
                             certificate,
                             fixture,
                             kernel,
@@ -566,24 +570,42 @@ describe.sequential(
             async () => {
                 await runAggregateTestStep(
                     'Verify aggregate derivation proof and malformed verification contexts',
-                    () => {
+                    async () => {
                         const {
                             ballotPackage,
-                            ballotPackageWithoutProofBytes,
                             component,
                             kernel,
                             postCloseEvidence,
                         } = requireAggregateComponentContext(
                             aggregateComponentContext,
                         );
-                        const verification =
-                            kernel.verifyAggregateDerivationProof({
-                                closeRecord: postCloseEvidence.closeRecord,
-                                component,
-                                contributorActionContext:
-                                    postCloseEvidence.contributorActionContext,
-                                countedBallotPackages: [ballotPackage],
+                        const verifyAggregateSubcase = async (
+                            name: string,
+                            request: Parameters<
+                                typeof kernel.verifyAggregateDerivationProof
+                            >[0],
+                            expected: Record<string, unknown>,
+                        ): Promise<void> => {
+                            await runAggregateSubcase(name, () => {
+                                expect(
+                                    kernel.verifyAggregateDerivationProof(
+                                        request,
+                                    ),
+                                    name,
+                                ).toMatchObject(expected);
                             });
+                        };
+                        const verification = await runAggregateSubcase(
+                            'accepted aggregate derivation proof',
+                            () =>
+                                kernel.verifyAggregateDerivationProof({
+                                    closeRecord: postCloseEvidence.closeRecord,
+                                    component,
+                                    contributorActionContext:
+                                        postCloseEvidence.contributorActionContext,
+                                    countedBallotPackages: [ballotPackage],
+                                }),
+                        );
                         expect(verification).toMatchObject({
                             ok: true,
                             backendAvailable: true,
@@ -594,78 +616,23 @@ describe.sequential(
                             'AggregateDerivationRelationChecked',
                             'AggregateDerivationProofClaimClosureMissing',
                         ]);
-                        expect(
-                            kernel.verifyAggregateDerivationProof({
+                        await verifyAggregateSubcase(
+                            'missing counted ballot package list',
+                            {
                                 closeRecord: postCloseEvidence.closeRecord,
                                 component,
                                 contributorActionContext:
                                     postCloseEvidence.contributorActionContext,
-                            }),
-                        ).toMatchObject({
-                            ok: false,
-                            backendAvailable: true,
-                            operation: 'verifyAggregateDerivationProof',
-                        });
-                        expect(
-                            kernel.verifyAggregateDerivationProof({
-                                closeRecord: postCloseEvidence.closeRecord,
-                                component,
-                                contributorActionContext:
-                                    postCloseEvidence.contributorActionContext,
-                                countedBallotPackages: [],
-                            }),
-                        ).toMatchObject({
-                            ok: false,
-                            backendAvailable: true,
-                            operation: 'verifyAggregateDerivationProof',
-                        });
-                        expect(
-                            kernel.verifyAggregateDerivationProof({
-                                closeRecord: postCloseEvidence.closeRecord,
-                                component,
-                                contributorActionContext:
-                                    postCloseEvidence.contributorActionContext,
-                                countedBallotPackages: [
-                                    ballotPackage,
-                                    ballotPackage,
-                                ],
-                            }),
-                        ).toMatchObject({
-                            ok: false,
-                            backendAvailable: true,
-                            operation: 'verifyAggregateDerivationProof',
-                        });
-                        expect(
-                            kernel.verifyAggregateDerivationProof({
-                                closeRecord: postCloseEvidence.closeRecord,
-                                component,
-                                contributorActionContext:
-                                    postCloseEvidence.contributorActionContext,
-                                countedBallotPackages: [
-                                    ballotPackageWithoutProofBytes,
-                                ],
-                            }),
-                        ).toMatchObject({
-                            ok: false,
-                            unresolvedReason: 'BallotPackageInvalid',
-                        });
-                        expect(
-                            kernel.verifyAggregateDerivationProof({
-                                closeRecord: {
-                                    ...postCloseEvidence.closeRecord,
-                                    closeKind: 'RegistrationClosed',
-                                },
-                                component,
-                                contributorActionContext:
-                                    postCloseEvidence.contributorActionContext,
-                                countedBallotPackages: [ballotPackage],
-                            }),
-                        ).toMatchObject({
-                            ok: false,
-                            unresolvedReason: 'BallotPackageInvalid',
-                        });
-                        expect(
-                            kernel.verifyAggregateDerivationProof({
+                            },
+                            {
+                                ok: false,
+                                backendAvailable: true,
+                                operation: 'verifyAggregateDerivationProof',
+                            },
+                        );
+                        await verifyAggregateSubcase(
+                            'mismatched contributor action signer',
+                            {
                                 closeRecord: postCloseEvidence.closeRecord,
                                 component,
                                 contributorActionContext: {
@@ -673,14 +640,16 @@ describe.sequential(
                                     signerIdentity: 'receiver-2',
                                 },
                                 countedBallotPackages: [ballotPackage],
-                            }),
-                        ).toMatchObject({
-                            ok: false,
-                            unresolvedReason: 'BallotPackageInvalid',
-                        });
+                            },
+                            {
+                                ok: false,
+                                unresolvedReason: 'BallotPackageInvalid',
+                            },
+                        );
 
-                        expect(
-                            kernel.verifyAggregateDerivationProof({
+                        await verifyAggregateSubcase(
+                            'mutated aggregate relation proof bytes',
+                            {
                                 closeRecord: postCloseEvidence.closeRecord,
                                 component: {
                                     ...component,
@@ -692,15 +661,17 @@ describe.sequential(
                                 contributorActionContext:
                                     postCloseEvidence.contributorActionContext,
                                 countedBallotPackages: [ballotPackage],
-                            }),
-                        ).toMatchObject({
-                            ok: false,
-                            backendAvailable: true,
-                            operation: 'verifyAggregateDerivationProof',
-                        });
+                            },
+                            {
+                                ok: false,
+                                backendAvailable: true,
+                                operation: 'verifyAggregateDerivationProof',
+                            },
+                        );
 
-                        expect(
-                            kernel.verifyAggregateDerivationProof({
+                        await verifyAggregateSubcase(
+                            'mutated aggregate relation public randomness',
+                            {
                                 closeRecord: postCloseEvidence.closeRecord,
                                 component: {
                                     ...component,
@@ -712,12 +683,13 @@ describe.sequential(
                                 contributorActionContext:
                                     postCloseEvidence.contributorActionContext,
                                 countedBallotPackages: [ballotPackage],
-                            }),
-                        ).toMatchObject({
-                            ok: false,
-                            backendAvailable: true,
-                            operation: 'verifyAggregateDerivationProof',
-                        });
+                            },
+                            {
+                                ok: false,
+                                backendAvailable: true,
+                                operation: 'verifyAggregateDerivationProof',
+                            },
+                        );
 
                         const commitmentPolynomialVector =
                             component.aggregateCommitment.commitmentPolynomialVector.map(
@@ -736,8 +708,9 @@ describe.sequential(
                                           )
                                         : polynomial,
                             );
-                        expect(
-                            kernel.verifyAggregateDerivationProof({
+                        await verifyAggregateSubcase(
+                            'mutated aggregate commitment polynomial',
+                            {
                                 closeRecord: postCloseEvidence.closeRecord,
                                 component: {
                                     ...component,
@@ -749,12 +722,13 @@ describe.sequential(
                                 contributorActionContext:
                                     postCloseEvidence.contributorActionContext,
                                 countedBallotPackages: [ballotPackage],
-                            }),
-                        ).toMatchObject({
-                            ok: false,
-                            backendAvailable: true,
-                            operation: 'verifyAggregateDerivationProof',
-                        });
+                            },
+                            {
+                                ok: false,
+                                backendAvailable: true,
+                                operation: 'verifyAggregateDerivationProof',
+                            },
+                        );
                     },
                 );
             },
@@ -772,7 +746,7 @@ describe.sequential(
             async () => {
                 await runAggregateTestStep(
                     'Reject public witness leakage and wraparound certificates',
-                    () => {
+                    async () => {
                         const {
                             aggregateCommitment,
                             ballotPackage,
@@ -791,26 +765,37 @@ describe.sequential(
                             ...component,
                             witness,
                         };
-                        expect(
-                            verifyAggregateDerivationComponentStructure(
-                                componentWithLeakedWitness,
-                            ),
-                        ).toMatchObject({
-                            ok: false,
-                            unresolvedReason: 'BallotPackageInvalid',
-                        });
-                        expect(
-                            kernel.verifyAggregateDerivationProof({
-                                closeRecord: postCloseEvidence.closeRecord,
-                                component: componentWithLeakedWitness,
-                                contributorActionContext:
-                                    postCloseEvidence.contributorActionContext,
-                                countedBallotPackages: [ballotPackage],
-                            }),
-                        ).toMatchObject({
-                            ok: false,
-                            unresolvedReason: 'BallotPackageInvalid',
-                        });
+                        await runAggregateSubcase(
+                            'component structure rejects leaked witness object',
+                            () => {
+                                expect(
+                                    verifyAggregateDerivationComponentStructure(
+                                        componentWithLeakedWitness,
+                                    ),
+                                ).toMatchObject({
+                                    ok: false,
+                                    unresolvedReason: 'BallotPackageInvalid',
+                                });
+                            },
+                        );
+                        await runAggregateSubcase(
+                            'kernel verifier rejects leaked witness object',
+                            () => {
+                                expect(
+                                    kernel.verifyAggregateDerivationProof({
+                                        closeRecord:
+                                            postCloseEvidence.closeRecord,
+                                        component: componentWithLeakedWitness,
+                                        contributorActionContext:
+                                            postCloseEvidence.contributorActionContext,
+                                        countedBallotPackages: [ballotPackage],
+                                    }),
+                                ).toMatchObject({
+                                    ok: false,
+                                    unresolvedReason: 'BallotPackageInvalid',
+                                });
+                            },
+                        );
                         for (const publicWitnessFieldName of forbiddenBridgeWitnessFieldNames) {
                             const componentWithPublicWitness = {
                                 ...component,
@@ -829,20 +814,36 @@ describe.sequential(
                                 ok: false,
                                 unresolvedReason: 'BallotPackageInvalid',
                             });
-                            expect(
-                                kernel.verifyAggregateDerivationProof({
-                                    closeRecord: postCloseEvidence.closeRecord,
-                                    component: componentWithPublicWitness,
-                                    contributorActionContext:
-                                        postCloseEvidence.contributorActionContext,
-                                    countedBallotPackages: [ballotPackage],
-                                }),
-                                publicWitnessFieldName,
-                            ).toMatchObject({
-                                ok: false,
-                                unresolvedReason: 'BallotPackageInvalid',
-                            });
                         }
+                        await runAggregateSubcase(
+                            'kernel verifier rejects representative public witness field',
+                            () => {
+                                const publicWitnessFieldName =
+                                    forbiddenBridgeWitnessFieldNames[0];
+                                const componentWithPublicWitness = {
+                                    ...component,
+                                    [publicWitnessFieldName]: {
+                                        fieldName: publicWitnessFieldName,
+                                        leaked: true,
+                                    },
+                                };
+
+                                expect(
+                                    kernel.verifyAggregateDerivationProof({
+                                        closeRecord:
+                                            postCloseEvidence.closeRecord,
+                                        component: componentWithPublicWitness,
+                                        contributorActionContext:
+                                            postCloseEvidence.contributorActionContext,
+                                        countedBallotPackages: [ballotPackage],
+                                    }),
+                                    publicWitnessFieldName,
+                                ).toMatchObject({
+                                    ok: false,
+                                    unresolvedReason: 'BallotPackageInvalid',
+                                });
+                            },
+                        );
 
                         const componentWithWraparoundCertificate =
                             createAggregateDerivationComponent({
@@ -857,26 +858,39 @@ describe.sequential(
                                     ),
                                 statement,
                             });
-                        expect(
-                            verifyAggregateDerivationComponentStructure(
-                                componentWithWraparoundCertificate,
-                            ),
-                        ).toMatchObject({
-                            ok: false,
-                            unresolvedReason: 'BallotPrivacyProfileInvalid',
-                        });
-                        expect(
-                            kernel.verifyAggregateDerivationProof({
-                                closeRecord: postCloseEvidence.closeRecord,
-                                component: componentWithWraparoundCertificate,
-                                contributorActionContext:
-                                    postCloseEvidence.contributorActionContext,
-                                countedBallotPackages: [ballotPackage],
-                            }),
-                        ).toMatchObject({
-                            ok: false,
-                            unresolvedReason: 'BallotPackageInvalid',
-                        });
+                        await runAggregateSubcase(
+                            'component structure rejects wraparound certificate',
+                            () => {
+                                expect(
+                                    verifyAggregateDerivationComponentStructure(
+                                        componentWithWraparoundCertificate,
+                                    ),
+                                ).toMatchObject({
+                                    ok: false,
+                                    unresolvedReason:
+                                        'BallotPrivacyProfileInvalid',
+                                });
+                            },
+                        );
+                        await runAggregateSubcase(
+                            'kernel verifier rejects wraparound certificate',
+                            () => {
+                                expect(
+                                    kernel.verifyAggregateDerivationProof({
+                                        closeRecord:
+                                            postCloseEvidence.closeRecord,
+                                        component:
+                                            componentWithWraparoundCertificate,
+                                        contributorActionContext:
+                                            postCloseEvidence.contributorActionContext,
+                                        countedBallotPackages: [ballotPackage],
+                                    }),
+                                ).toMatchObject({
+                                    ok: false,
+                                    unresolvedReason: 'BallotPackageInvalid',
+                                });
+                            },
+                        );
                     },
                 );
             },

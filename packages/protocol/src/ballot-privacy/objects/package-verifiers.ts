@@ -9,7 +9,7 @@ import type {
     ShareCommitment,
 } from '@sealed-lattice/types';
 
-import { createRefusal } from '../../common/verification-helpers.js';
+import { createRefusal } from '../verification-helpers.js';
 
 import { collectBallotProofStructuralRefusals } from './ballot-proof-structure-checks.js';
 import {

@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 import {
     deriveFrozenRosterProfile,
     deriveThresholdProfile,
-} from '../../src/index';
+} from '#packages/protocol/src/index';
 
 const dynamicRosterProfileCertificateHash = 'a'.repeat(128);
 const invalidDynamicRosterProfileCertificateHash = 'not-a-protocol-hash';
@@ -168,7 +168,9 @@ describe('election foundation threshold profiles', () => {
 
     it.each([...casualMicroRosterSizes, 10, 11, 16, 20, 21, 30, 40, 50])(
         'keeps threshold feasibility invariants for roster size %d',
-        expectFeasibleThresholds,
+        (rosterSize) => {
+            expectFeasibleThresholds(rosterSize);
+        },
     );
 
     it('rejects roster sizes below three', () => {

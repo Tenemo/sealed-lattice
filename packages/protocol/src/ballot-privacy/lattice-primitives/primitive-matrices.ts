@@ -30,6 +30,11 @@ const shareCommitmentRandomnessMatrixCache = new Map<
     ShareCommitmentRandomnessMatrix
 >();
 
+const receiverPublicMatrixCache = new Map<
+    string,
+    readonly (readonly (readonly number[])[])[]
+>();
+
 const deriveNumberPolynomial = (
     domain: string,
     payload: unknown,
@@ -53,8 +58,13 @@ const deriveBigIntPolynomial = (
 export const deriveReceiverPublicMatrix = (
     receiverEncryptionProfileHash: ProtocolHash,
     publicMatrixSeedHash: ProtocolHash,
-): readonly (readonly (readonly number[])[])[] =>
-    Array.from(
+): readonly (readonly (readonly number[])[])[] => {
+    const cacheKey = `${receiverEncryptionProfileHash}:${publicMatrixSeedHash}`;
+    const cachedMatrix = receiverPublicMatrixCache.get(cacheKey);
+    if (cachedMatrix !== undefined) {
+        return cachedMatrix;
+    }
+    const matrix = Array.from(
         { length: receiverEncryptionModuleRank },
         (_unusedRow, rowIndex) =>
             Array.from(
@@ -73,6 +83,10 @@ export const deriveReceiverPublicMatrix = (
                     ),
             ),
     );
+    receiverPublicMatrixCache.set(cacheKey, matrix);
+
+    return matrix;
+};
 
 export const deriveShareCommitmentMessageMatrix = (
     shareCommitmentProfileHash: ProtocolHash,

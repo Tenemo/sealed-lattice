@@ -19,7 +19,7 @@ import {
 import { secretStateForStructuredReceiverEncryptionStatement } from './receiver-encryption-secret-state.js';
 import type {
     BallotProofComponentBundleStatement,
-    BallotProofComponentProofStatementPlan,
+    BallotProofComponentProofStatementDescriptor,
     BallotProofComponentStatement,
     BallotProofFullRelationLinearProofStatement,
     BallotProofRecordGenerationSecretState,
@@ -433,16 +433,16 @@ const componentStatementById = (
         ),
     );
 
-const componentPlanById = (
-    componentStatementPlans: readonly BallotProofComponentProofStatementPlan[],
+const componentDescriptorById = (
+    componentStatementDescriptors: readonly BallotProofComponentProofStatementDescriptor[],
 ): ReadonlyMap<
     BallotPrivacyBackendProofComponentId,
-    BallotProofComponentProofStatementPlan
+    BallotProofComponentProofStatementDescriptor
 > =>
     new Map(
-        componentStatementPlans.map((componentStatementPlan) => [
-            componentStatementPlan.componentId,
-            componentStatementPlan,
+        componentStatementDescriptors.map((componentStatementDescriptor) => [
+            componentStatementDescriptor.componentId,
+            componentStatementDescriptor,
         ]),
     );
 
@@ -465,23 +465,23 @@ const requiredComponentStatement = (input: {
     return componentStatement;
 };
 
-const requiredComponentStatementPlan = (input: {
+const requiredComponentStatementDescriptor = (input: {
     readonly componentId: BallotPrivacyBackendProofComponentId;
-    readonly componentPlansById: ReadonlyMap<
+    readonly componentDescriptorsById: ReadonlyMap<
         BallotPrivacyBackendProofComponentId,
-        BallotProofComponentProofStatementPlan
+        BallotProofComponentProofStatementDescriptor
     >;
-}): BallotProofComponentProofStatementPlan => {
-    const componentStatementPlan = input.componentPlansById.get(
+}): BallotProofComponentProofStatementDescriptor => {
+    const componentStatementDescriptor = input.componentDescriptorsById.get(
         input.componentId,
     );
-    if (componentStatementPlan === undefined) {
+    if (componentStatementDescriptor === undefined) {
         throw new Error(
-            `Component proof statement plan ${input.componentId} is missing from the full bundle.`,
+            `Component proof statement descriptor ${input.componentId} is missing from the full bundle.`,
         );
     }
 
-    return componentStatementPlan;
+    return componentStatementDescriptor;
 };
 
 export {
@@ -492,7 +492,7 @@ export {
     buildFullRelationLinearProofStatement,
     secretStateForStructuredReceiverEncryptionStatement,
     componentStatementById,
-    componentPlanById,
+    componentDescriptorById,
     requiredComponentStatement,
-    requiredComponentStatementPlan,
+    requiredComponentStatementDescriptor,
 };

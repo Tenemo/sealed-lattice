@@ -1,5 +1,10 @@
 use super::*;
 
+use crate::ballot_privacy::linear_proof::statement::{
+    rotate_left_negacyclic_signed_polynomial, source_modulus_inverse_mod_proof_modulus,
+    split_source_polynomial_into_proof_ring_with_coefficient_representation,
+};
+
 pub(crate) fn derive_share_commitment_message_matrix(
     share_commitment_profile_hash: &str,
 ) -> Result<Vec<Vec<u64>>, ComponentProofBackendError> {
@@ -253,25 +258,20 @@ impl StreamedLinearProofStatement for ParsedStructuredReceiverEncryptionStatemen
                 "Structured receiver-encryption witness shape does not match the parameter set.",
             ));
         }
-        let relation_output = self
+        let mut relation_output = self
             .source_statement_matrix
             .multiply_vector(source_witness_vector)?;
         let target_vector =
             PolynomialVector::new(source_ring, self.target_vector_coefficients.clone())?;
-        for (relation_polynomial, target_polynomial) in relation_output
+        relation_output.add_assign(&target_vector)?;
+        if relation_output
             .entries()
             .iter()
-            .zip(target_vector.entries())
+            .any(|polynomial| polynomial.iter().any(|coefficient| *coefficient != 0))
         {
-            if source_ring
-                .add(relation_polynomial, target_polynomial)?
-                .iter()
-                .any(|coefficient| *coefficient != 0)
-            {
-                return Err(invalid_preflight(
-                    "Structured receiver-encryption source witness does not satisfy A*w + t = 0.",
-                ));
-            }
+            return Err(invalid_preflight(
+                "Structured receiver-encryption source witness does not satisfy A*w + t = 0.",
+            ));
         }
 
         Ok(())
@@ -406,25 +406,35 @@ impl StreamedLinearProofStatement for ParsedStructuredReceiverEncryptionStatemen
                 "Structured receiver-encryption transformed relation uses inconsistent rings.",
             ));
         }
-        let transformed_statement_matrix =
-            transform_sparse_statement_matrix_to_proof_ring_with_coefficient_representation(
-                parameter_set,
-                proof_encoding,
-                &self.source_statement_matrix,
-                matrix_coefficient_representation,
-            )?;
-        let relation_output =
-            transformed_statement_matrix.multiply_vector(transformed_relation_witness)?;
-        let output_entries = relation_output
-            .entries()
-            .iter()
-            .zip(transformed_target_vector.entries())
-            .map(|(relation_polynomial, target_polynomial)| {
-                proof_ring.add(relation_polynomial, target_polynomial)
-            })
-            .collect::<crate::encoding::CanonicalResult<Vec<_>>>()?;
 
-        PolynomialVector::new(proof_ring, output_entries)
+        let source_polynomial_split_factor =
+            source_polynomial_split_factor(parameter_set, proof_encoding)?;
+        let transformed_columns = parameter_set
+            .statement_columns
+            .checked_mul(source_polynomial_split_factor)
+            .ok_or_else(|| invalid_preflight("structured transformed column count overflowed"))?;
+        if transformed_relation_witness.len() != transformed_columns {
+            return Err(invalid_preflight(
+                "Structured receiver-encryption transformed witness length does not match the transformed statement.",
+            ));
+        }
+
+        let mut relation_output_entries = transformed_target_vector.entries().to_vec();
+        for_each_transformed_structured_source_entry(
+            self,
+            parameter_set,
+            proof_encoding,
+            matrix_coefficient_representation,
+            |transformed_row, transformed_column, transformed_coefficients| {
+                proof_ring.mul_negacyclic_accumulate(
+                    &mut relation_output_entries[transformed_row],
+                    transformed_coefficients,
+                    &transformed_relation_witness.entries()[transformed_column],
+                )
+            },
+        )?;
+
+        PolynomialVector::new(proof_ring, relation_output_entries)
     }
 
     fn build_z4_statement_products(
@@ -435,17 +445,191 @@ impl StreamedLinearProofStatement for ParsedStructuredReceiverEncryptionStatemen
         matrix_coefficient_representation: LinearProofMatrixCoefficientRepresentation,
         shifted_rotation_polynomial_matrix: &[Vec<Vec<u64>>],
     ) -> crate::encoding::CanonicalResult<Vec<Vec<Vec<u64>>>> {
-        let transformed_statement_matrix =
-            transform_sparse_statement_matrix_to_proof_ring_with_coefficient_representation(
-                parameter_set,
-                proof_encoding,
-                &self.source_statement_matrix,
-                matrix_coefficient_representation,
-            )?;
-        tbox_relations::multiply_rows_by_sparse_polynomial_matrix(
+        build_z4_statement_products_from_structured_source_entries(
+            self,
             proof_ring,
+            parameter_set,
+            proof_encoding,
+            matrix_coefficient_representation,
             shifted_rotation_polynomial_matrix,
-            &transformed_statement_matrix,
         )
     }
+}
+
+fn build_z4_statement_products_from_structured_source_entries(
+    statement: &ParsedStructuredReceiverEncryptionStatement,
+    proof_ring: PolynomialRing,
+    parameter_set: &LinearProofParameterSet,
+    proof_encoding: &LinearProofEncoding,
+    matrix_coefficient_representation: LinearProofMatrixCoefficientRepresentation,
+    shifted_rotation_polynomial_matrix: &[Vec<Vec<u64>>],
+) -> crate::encoding::CanonicalResult<Vec<Vec<Vec<u64>>>> {
+    parameter_set.validate()?;
+    proof_encoding.validate()?;
+    if proof_ring.degree() != proof_encoding.ring_degree
+        || proof_ring.modulus() != proof_encoding.coefficient_modulus
+    {
+        return Err(invalid_preflight(
+            "Structured receiver-encryption proof ring does not match the proof encoding.",
+        ));
+    }
+    if statement.source_statement_matrix.rows() != parameter_set.statement_rows
+        || statement.source_statement_matrix.columns() != parameter_set.statement_columns
+    {
+        return Err(invalid_preflight(
+            "Structured receiver-encryption source statement matrix shape does not match the parameter set.",
+        ));
+    }
+    if statement.source_statement_matrix.ring().degree() != parameter_set.ring_degree
+        || statement.source_statement_matrix.ring().modulus() != parameter_set.coefficient_modulus
+    {
+        return Err(invalid_preflight(
+            "Structured receiver-encryption source statement matrix ring does not match the parameter set.",
+        ));
+    }
+
+    let source_polynomial_split_factor =
+        source_polynomial_split_factor(parameter_set, proof_encoding)?;
+    let transformed_rows = parameter_set
+        .statement_rows
+        .checked_mul(source_polynomial_split_factor)
+        .ok_or_else(|| invalid_preflight("structured z4 product row count overflowed"))?;
+    let transformed_columns = parameter_set
+        .statement_columns
+        .checked_mul(source_polynomial_split_factor)
+        .ok_or_else(|| invalid_preflight("structured z4 product column count overflowed"))?;
+
+    if shifted_rotation_polynomial_matrix
+        .iter()
+        .any(|row| row.len() != transformed_rows)
+    {
+        return Err(invalid_preflight(
+            "Structured receiver-encryption z4 rotation rows do not match the transformed statement rows.",
+        ));
+    }
+
+    let mut output_rows = vec![
+        vec![vec![0_u64; proof_ring.degree()]; transformed_columns];
+        shifted_rotation_polynomial_matrix.len()
+    ];
+    for_each_transformed_structured_source_entry(
+        statement,
+        parameter_set,
+        proof_encoding,
+        matrix_coefficient_representation,
+        |transformed_row, transformed_column, transformed_coefficients| {
+            for (output_row, shifted_rotation_row) in output_rows
+                .iter_mut()
+                .zip(shifted_rotation_polynomial_matrix)
+            {
+                proof_ring.mul_negacyclic_accumulate(
+                    &mut output_row[transformed_column],
+                    &shifted_rotation_row[transformed_row],
+                    transformed_coefficients,
+                )?;
+            }
+
+            Ok(())
+        },
+    )?;
+
+    Ok(output_rows)
+}
+
+fn for_each_transformed_structured_source_entry(
+    statement: &ParsedStructuredReceiverEncryptionStatement,
+    parameter_set: &LinearProofParameterSet,
+    proof_encoding: &LinearProofEncoding,
+    matrix_coefficient_representation: LinearProofMatrixCoefficientRepresentation,
+    mut visit: impl FnMut(usize, usize, &[u64]) -> crate::encoding::CanonicalResult<()>,
+) -> crate::encoding::CanonicalResult<()> {
+    let source_polynomial_split_factor =
+        source_polynomial_split_factor(parameter_set, proof_encoding)?;
+    let source_modulus_inverse = source_modulus_inverse_mod_proof_modulus(
+        parameter_set.coefficient_modulus,
+        proof_encoding.coefficient_modulus,
+    )?;
+    for source_entry in statement.source_statement_matrix.entries() {
+        let split_polynomials =
+            split_source_polynomial_into_proof_ring_with_coefficient_representation(
+                source_entry.coefficients(),
+                parameter_set.coefficient_modulus,
+                source_polynomial_split_factor,
+                matrix_coefficient_representation,
+            )?;
+        let rotated_split_polynomials = split_polynomials
+            .iter()
+            .map(|polynomial| rotate_left_negacyclic_signed_polynomial(polynomial))
+            .collect::<Vec<_>>();
+
+        for output_row_offset in 0..source_polynomial_split_factor {
+            for output_column_offset in 0..source_polynomial_split_factor {
+                let split_index = output_row_offset as isize - output_column_offset as isize;
+                let signed_polynomial = if split_index >= 0 {
+                    &split_polynomials[usize::try_from(split_index)
+                        .map_err(|_| invalid_preflight("structured split index overflowed"))?]
+                } else {
+                    &rotated_split_polynomials[usize::try_from(
+                        source_polynomial_split_factor as isize + split_index,
+                    )
+                    .map_err(|_| invalid_preflight("structured rotated split index overflowed"))?]
+                };
+                let transformed_coefficients = scale_signed_polynomial_by_precomputed_inverse(
+                    signed_polynomial,
+                    source_modulus_inverse,
+                    proof_encoding.coefficient_modulus,
+                )?;
+                if transformed_coefficients
+                    .iter()
+                    .all(|coefficient| *coefficient == 0)
+                {
+                    continue;
+                }
+                let transformed_row = source_entry
+                    .row_index()
+                    .checked_mul(source_polynomial_split_factor)
+                    .and_then(|row| row.checked_add(output_row_offset))
+                    .ok_or_else(|| invalid_preflight("structured transformed row overflowed"))?;
+                let transformed_column = source_entry
+                    .column_index()
+                    .checked_mul(source_polynomial_split_factor)
+                    .and_then(|column| column.checked_add(output_column_offset))
+                    .ok_or_else(|| invalid_preflight("structured transformed column overflowed"))?;
+
+                visit(
+                    transformed_row,
+                    transformed_column,
+                    &transformed_coefficients,
+                )?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn scale_signed_polynomial_by_precomputed_inverse(
+    signed_polynomial: &[i128],
+    source_modulus_inverse: i128,
+    proof_modulus: u64,
+) -> crate::encoding::CanonicalResult<Vec<u64>> {
+    signed_polynomial
+        .iter()
+        .map(|coefficient| {
+            let scaled = coefficient
+                .checked_mul(source_modulus_inverse)
+                .ok_or_else(|| {
+                    invalid_preflight("structured linear statement coefficient scaling overflowed")
+                })?;
+            let proof_modulus = i128::from(proof_modulus);
+            let mut reduced = scaled % proof_modulus;
+            if reduced < 0 {
+                reduced += proof_modulus;
+            }
+
+            u64::try_from(reduced).map_err(|_| {
+                invalid_preflight("structured linear statement coefficient does not fit in u64")
+            })
+        })
+        .collect()
 }

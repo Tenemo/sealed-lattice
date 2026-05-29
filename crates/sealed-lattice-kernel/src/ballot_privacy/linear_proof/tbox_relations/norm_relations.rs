@@ -50,6 +50,7 @@ pub(super) fn build_default_beta3_linear_relation(
     build_beta3_linear_relation(coefficient_index, coefficient_value, demo_tbox_profile()?)
 }
 
+#[cfg(test)]
 pub(super) fn build_beta3_linear_relation(
     coefficient_index: usize,
     coefficient_value: u64,
@@ -99,6 +100,7 @@ pub(super) fn build_default_beta4_linear_relation(
     build_beta4_linear_relation(coefficient_index, coefficient_value, demo_tbox_profile()?)
 }
 
+#[cfg(test)]
 pub(super) fn build_beta4_linear_relation(
     coefficient_index: usize,
     coefficient_value: u64,
@@ -391,7 +393,7 @@ pub(super) fn negate_mod(value: u64, modulus: u64) -> u64 {
 }
 
 pub(super) fn multiply_mod(left: u64, right: u64, modulus: u64) -> u64 {
-    ((u128::from(left) * u128::from(right)) % u128::from(modulus)) as u64
+    crate::ballot_privacy::polynomial_ring::mul_mod(left, right, modulus)
 }
 
 pub(super) fn positive_mod_i128(value: i128, modulus: i128) -> CanonicalResult<u64> {

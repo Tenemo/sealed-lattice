@@ -10,9 +10,10 @@ use super::{
         bridge_proof_profile_hash, bridge_proof_statement_hash, build_bridge_proof_statement,
     },
     validation::{
-        parse_bridge_proof_value, read_u64_object_field, require_equal_string, require_equal_u64,
-        required_protocol_hash_field, required_string_at_path,
+        parse_bridge_proof_value, read_u64_object_field, require_equal_bool, require_equal_string,
+        require_equal_u64, required_protocol_hash_field, required_string_at_path,
         validate_bridge_encryption_public_shell, validate_bridge_proof_public_shell,
+        validate_bridge_randomness_source,
     },
 };
 
@@ -30,6 +31,30 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
         "verifyAggregateBridgeEncryption",
     )?;
     validate_bridge_encryption_public_shell(bridge_encryption)?;
+    require_equal_string(
+        bridge_encryption,
+        "bgvEncryptionKeyMaterialKind",
+        BGV_ENCRYPTION_KEY_MATERIAL_KIND,
+        "BGV encryption key material kind",
+    )?;
+    require_equal_bool(
+        bridge_encryption,
+        "developmentKeyOnly",
+        DEVELOPMENT_KEY_ONLY,
+        "development key-only flag",
+    )?;
+    require_equal_bool(
+        bridge_encryption,
+        "thresholdDecryptable",
+        THRESHOLD_DECRYPTABLE,
+        "threshold-decryptable flag",
+    )?;
+    require_equal_bool(
+        bridge_encryption,
+        "claimBearingBridgeEncryption",
+        CLAIM_BEARING_BRIDGE_ENCRYPTION,
+        "claim-bearing bridge encryption flag",
+    )?;
     let aggregate_selection_policy_hash = required_protocol_hash_field(
         request,
         "aggregateSelectionPolicyHash",
@@ -48,23 +73,10 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
         required_string_field(bridge_encryption, "canonicalBytesHex", "bridgeEncryption")?;
     let proof_value = parse_bridge_proof_value(bridge_proof_bytes_hex)?;
     validate_bridge_proof_public_shell(&proof_value)?;
-    let bridge_proof_bytes_hash = derive_protocol_hash(
-        "ProofBytesHash",
-        &json!({
-            "purpose": "sealed-lattice-aggregate-bridge-encryption-proof-bytes-v1",
-            "proofBytesHex": bridge_proof_bytes_hex,
-        }),
-    )?;
-    require_equal_string(
-        bridge_encryption,
-        "bridgeProofBytesHash",
-        &bridge_proof_bytes_hash,
-        "bridge proof bytes hash",
-    )?;
     let proof_object_type = string_field(&proof_value, "objectType").ok_or_else(|| {
         CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "M9 bridge proof objectType is required",
+            "encrypted aggregate bridge proof objectType is required",
         )
     })?;
     let proof_is_checked_relation =
@@ -74,7 +86,7 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
-            "M9 bridge proof object type is not supported",
+            "encrypted aggregate bridge proof object type is not supported",
         ));
     }
     if proof_is_checked_relation {
@@ -83,9 +95,58 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
         {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::ProfileComponentMismatch,
-                "M9 bridge relation proof requires verifier-checked bridge encryption status",
+                "encrypted aggregate bridge relation proof requires verifier-checked bridge encryption status",
             ));
         }
+    } else if string_field(bridge_encryption, "bridgeProofVerificationStatus")
+        == Some(BRIDGE_PROOF_CHECKED_STATUS)
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "encrypted aggregate bridge checked status requires a real shared-witness relation proof",
+        ));
+    }
+    if proof_is_checked_relation
+        && let Some(proof_statement_value) = proof_value.get("bridgeProofStatement")
+    {
+        for (field_name, expected_value, label) in [
+            (
+                "aggregateSelectionPolicyHash",
+                aggregate_selection_policy_hash,
+                "aggregate selection policy hash",
+            ),
+            (
+                "bridgeWitnessPrivacyProfileHash",
+                bridge_witness_privacy_profile_hash,
+                "bridge witness privacy profile hash",
+            ),
+            ("heParamHash", he_param_hash, "HE parameter hash"),
+        ] {
+            if let Some(actual_value) = string_field(proof_statement_value, field_name)
+                && actual_value != expected_value
+            {
+                return Err(CanonicalError::new(
+                    CanonicalErrorCode::ProfileComponentMismatch,
+                    format!(
+                        "encrypted aggregate bridge {label} does not match the proof statement binding"
+                    ),
+                ));
+            }
+        }
+    }
+    let bridge_proof_bytes_hash = derive_protocol_hash_for_ascii_string_payload(
+        "ProofBytesHash",
+        "sealed-lattice-aggregate-bridge-encryption-proof-bytes-v1",
+        "proofBytesHex",
+        bridge_proof_bytes_hex,
+    )?;
+    require_equal_string(
+        bridge_encryption,
+        "bridgeProofBytesHash",
+        &bridge_proof_bytes_hash,
+        "bridge proof bytes hash",
+    )?;
+    if proof_is_checked_relation {
         for (field_name, label) in [
             ("bridgeProofProfileHash", "bridge proof profile hash"),
             ("bridgeProofStatementHash", "bridge proof statement hash"),
@@ -101,13 +162,6 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
                 label,
             )?;
         }
-    } else if string_field(bridge_encryption, "bridgeProofVerificationStatus")
-        == Some(BRIDGE_PROOF_CHECKED_STATUS)
-    {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
-            "M9 bridge checked status requires a real shared-witness relation proof",
-        ));
     }
     let component_hash = required_string_field(
         component,
@@ -139,6 +193,11 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
         &["collectivePublicKey", "collectivePublicKeyRoot"],
         "setupPackage",
     )?;
+    let setup_collective_public_key_coefficient_root = required_string_at_path(
+        setup_package,
+        &["collectivePublicKey", "collectivePublicKeyCoefficientRoot"],
+        "setupPackage",
+    )?;
     let setup_bgv_public_key_root = required_string_at_path(
         setup_package,
         &["collectivePublicKey", "bgvPublicKeyRoot"],
@@ -152,7 +211,7 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
     if ciphertext_validation["ok"] != true {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "M9 bridge ciphertext canonical validation failed",
+            "encrypted aggregate bridge ciphertext canonical validation failed",
         ));
     }
     let canonical_bytes_hash = required_string_field(
@@ -163,7 +222,7 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
     if !is_protocol_hash(canonical_bytes_hash) {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "M9 bridge canonical ciphertext bytes hash must be a nonzero lowercase 512-bit hash",
+            "encrypted aggregate bridge canonical ciphertext bytes hash must be a nonzero lowercase 512-bit hash",
         ));
     }
     require_equal_string(
@@ -175,7 +234,7 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
     let canonical_byte_length = u64::try_from(canonical_bytes_hex.len() / 2).map_err(|_| {
         CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
-            "M9 bridge canonical ciphertext byte length does not fit u64",
+            "encrypted aggregate bridge canonical ciphertext byte length does not fit u64",
         )
     })?;
     require_equal_u64(
@@ -184,7 +243,7 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
         canonical_byte_length,
         "canonical ciphertext byte length",
     )?;
-    crate::bgv::commands::verify_m9_bridge_ciphertext_public_bindings(
+    crate::bgv::commands::verify_encrypted_aggregate_bridge_ciphertext_public_bindings(
         setup_package,
         component_hash,
         statement_hash,
@@ -255,7 +314,7 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
     if proof_statement_value != &bridge_proof_statement {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
-            "M9 bridge proof statement does not match its canonical public inputs",
+            "encrypted aggregate bridge proof statement does not match its canonical public inputs",
         ));
     }
     let relation_requirements = required_json_field(
@@ -279,7 +338,7 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
         u64::try_from(aggregate_relation_verification.proof_size_bytes).map_err(|_| {
             CanonicalError::new(
                 CanonicalErrorCode::MalformedLength,
-                "M9 bridge aggregate relation subproof size does not fit u64",
+                "encrypted aggregate bridge aggregate relation subproof size does not fit u64",
             )
         })?,
         "aggregate relation subproof size",
@@ -332,6 +391,7 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
         "ciphertextRoot",
         "encryptedAggregateShareCiphertextRoot",
         "collectivePublicKeyRoot",
+        "collectivePublicKeyCoefficientRoot",
         "bgvPublicKeyRoot",
     ] {
         require_equal_string(
@@ -341,11 +401,35 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
             field_name,
         )?;
     }
+    for field_name in ["proverRandomnessSource", "encryptionRandomnessSeedSource"] {
+        let randomness_source =
+            required_string_field(bridge_encryption, field_name, "bridgeEncryption")?;
+        validate_bridge_randomness_source(randomness_source, field_name)?;
+        require_equal_string(&proof_value, field_name, randomness_source, field_name)?;
+    }
+    if required_json_field(&proof_value, "randomnessSourceEvidence", "bridgeProof")?
+        != required_json_field(
+            bridge_encryption,
+            "randomnessSourceEvidence",
+            "bridgeEncryption",
+        )?
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "encrypted aggregate bridge randomness source evidence does not match the proof binding",
+        ));
+    }
     require_equal_string(
         bridge_encryption,
         "collectivePublicKeyRoot",
         setup_collective_public_key_root,
         "collective public key root",
+    )?;
+    require_equal_string(
+        bridge_encryption,
+        "collectivePublicKeyCoefficientRoot",
+        setup_collective_public_key_coefficient_root,
+        "collective public key coefficient root",
     )?;
     require_equal_string(
         bridge_encryption,
@@ -358,12 +442,26 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
         || string_field(&proof_value, "proofBackend") != Some(BRIDGE_PROOF_BACKEND)
         || string_field(&proof_value, "bgvEncryptionProofSubrelation")
             != Some(BGV_ENCRYPTION_PROOF_SUBRELATION)
+        || string_field(&proof_value, "bgvEncryptionKeyMaterialKind")
+            != Some(BGV_ENCRYPTION_KEY_MATERIAL_KIND)
+        || proof_value
+            .get("developmentKeyOnly")
+            .and_then(Value::as_bool)
+            != Some(DEVELOPMENT_KEY_ONLY)
+        || proof_value
+            .get("thresholdDecryptable")
+            .and_then(Value::as_bool)
+            != Some(THRESHOLD_DECRYPTABLE)
+        || proof_value
+            .get("claimBearingBridgeEncryption")
+            .and_then(Value::as_bool)
+            != Some(CLAIM_BEARING_BRIDGE_ENCRYPTION)
         || string_field(&proof_value, "relationScope")
             != Some("sealed-lattice-aggregate-bridge-relation")
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
-            "M9 bridge proof shell is not the supported scoped relation",
+            "encrypted aggregate bridge proof shell is not the supported scoped relation",
         ));
     }
     let shared_witness_proof_hash = if proof_is_checked_relation {
@@ -387,7 +485,7 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
             shared_witness_proof_hash.as_deref().ok_or_else(|| {
                 CanonicalError::new(
                     CanonicalErrorCode::InvalidFixture,
-                    "M9 bridge checked relation requires a shared-witness proof hash",
+                    "encrypted aggregate bridge checked relation requires a shared-witness proof hash",
                 )
             })?,
             bridge_encryption,
@@ -429,12 +527,13 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
             "proofBytesHash": bridge_proof_bytes_hash,
             "encryptedAggregateShareCiphertextRoot": bridge_encryption["encryptedAggregateShareCiphertextRoot"],
             "collectivePublicKeyRoot": bridge_encryption["collectivePublicKeyRoot"],
+            "collectivePublicKeyCoefficientRoot": bridge_encryption["collectivePublicKeyCoefficientRoot"],
             "bgvPublicKeyRoot": bridge_encryption["bgvPublicKeyRoot"],
     });
     let proof_root_payload_object = proof_root_payload.as_object_mut().ok_or_else(|| {
         CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "M9 bridge proof root payload must be an object",
+            "encrypted aggregate bridge proof root payload must be an object",
         )
     })?;
     if let Some(hash) = &shared_witness_proof_hash {
@@ -495,8 +594,10 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
         vec![
             "BridgeProofEvidenceChecked",
             "BridgeProofRelationChecked",
-            "M9SingleContributionBridgeRelationChecked",
+            "EncryptedAggregateSingleContributionBridgeRelationChecked",
             "BridgeProofImplementationEvidenceOnly",
+            "BgvPublicKeyCoefficientMaterialBound",
+            "NotThresholdDecryptableBridgeCiphertext",
             SHARED_WITNESS_ZERO_KNOWLEDGE_STATUS,
             BGV_RANDOMNESS_BOUND_PROOF_STATUS,
             PLAINTEXT_CANONICAL_LIFT_PROOF_MISSING_STATUS,
@@ -529,6 +630,14 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
         Value::String(bridge_proof_bytes_hash.clone()),
         Value::String(bridge_proof_root.clone()),
         Value::String(encrypted_aggregate_share_ciphertext_root.to_string()),
+        Value::String(
+            required_string_field(
+                bridge_encryption,
+                "collectivePublicKeyCoefficientRoot",
+                "bridgeEncryption",
+            )?
+            .to_string(),
+        ),
     ];
     if let Some(hash) = &shared_witness_proof_hash {
         accepted_hashes.push(Value::String(hash.clone()));
@@ -554,6 +663,13 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
         "plaintextCanonicalLiftProofStatus": PLAINTEXT_CANONICAL_LIFT_PROOF_MISSING_STATUS,
         "bridgeClaimClosureVerified": false,
         "bridgeClaimVerificationStatus": BRIDGE_CLAIM_CLOSURE_STATUS,
+        "bgvEncryptionKeyMaterialKind": BGV_ENCRYPTION_KEY_MATERIAL_KIND,
+        "developmentKeyOnly": DEVELOPMENT_KEY_ONLY,
+        "proverRandomnessSource": bridge_encryption["proverRandomnessSource"],
+        "encryptionRandomnessSeedSource": bridge_encryption["encryptionRandomnessSeedSource"],
+        "randomnessSourceEvidence": bridge_encryption["randomnessSourceEvidence"],
+        "thresholdDecryptable": THRESHOLD_DECRYPTABLE,
+        "claimBearingBridgeEncryption": CLAIM_BEARING_BRIDGE_ENCRYPTION,
         "bridgeVariantEvidenceStatus": dimensions.evidence_tier,
         "bridgeProofProfileHash": bridge_proof_profile_hash,
         "bridgeProofStatementHash": bridge_proof_statement_hash,
@@ -565,6 +681,7 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
         "bgvRandomnessBoundProofStatusHash": bgv_randomness_bound_proof_status_hash,
         "encryptedAggregateInputRoot": bridge_encryption["encryptedAggregateInputRoot"],
         "encryptedAggregateShareCiphertextRoot": bridge_encryption["encryptedAggregateShareCiphertextRoot"],
+        "collectivePublicKeyCoefficientRoot": bridge_encryption["collectivePublicKeyCoefficientRoot"],
         "aggregateRelationSubproofSizeBytes": aggregate_relation_verification.proof_size_bytes,
         "aggregateRelationChallengeHex": aggregate_relation_verification.challenge_hex,
         "aggregateRelationCommitmentHash": aggregate_relation_verification.relation_commitment_hash,

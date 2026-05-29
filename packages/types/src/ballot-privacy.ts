@@ -305,7 +305,7 @@ export type BallotProofComponentProofStatementFormat =
     | 'sparse-polynomial-matrix-linear-proof-v1'
     | 'structured-module-sis-share-commitment-v1'
     | 'structured-module-lwe-linear-proof-v1'
-    | 'public-zero-witness-binding-check-v1';
+    | 'public-binding-check-only-v1';
 
 /** Public proof bytes and verifier input for one ballot proof component. */
 export type BallotProofComponentProofVerificationInput = {
@@ -473,7 +473,7 @@ export type BallotProofRecord = {
     readonly publicRandomnessHash?: ProtocolHash;
 };
 
-/** Certificate/workbook row evidence for one frozen dynamic M5 roster size. */
+/** Certificate/workbook row evidence for one frozen dynamic accepted ballot roster size. */
 export type BallotPrivacyRosterProfileEvidence = {
     readonly objectType: 'BallotPrivacyRosterProfileEvidence';
     readonly objectVersion: 1;
@@ -526,7 +526,7 @@ export type AggregateShareCommitment = {
     readonly commitmentBodyHash: ProtocolHash;
 };
 
-/** Public counted-ballot reference bound into an M6 aggregate derivation statement. */
+/** Public counted-ballot reference bound into an aggregate derivation statement. */
 export type AggregateDerivationPackageReference = {
     readonly ballotPackageHash: ProtocolHash;
     readonly ballotProofStatementHash: ProtocolHash;
@@ -535,7 +535,7 @@ export type AggregateDerivationPackageReference = {
     readonly shareCommitmentHash: ProtocolHash;
 };
 
-/** Public statement for the M6 aggregate derivation proof. */
+/** Public statement for the aggregate derivation proof. */
 export type AggregateDerivationStatement = {
     readonly objectType: 'AggregateDerivationStatement';
     readonly objectVersion: 1;
@@ -575,7 +575,7 @@ export type AggregateDerivationStatement = {
     readonly challengeDomainHash: ProtocolHash;
 };
 
-/** Public proof verifier input for the M6 aggregate derivation relation. */
+/** Public proof verifier input for the aggregate derivation relation. */
 export type AggregateDerivationProofVerificationInput = {
     readonly componentId: 'aggregate-derivation-component';
     readonly componentProofStatementHash: ProtocolHash;
@@ -588,7 +588,7 @@ export type AggregateDerivationProofVerificationInput = {
     readonly statementHash: ProtocolHash;
 };
 
-/** Proof-byte-bearing public record for the M6 aggregate derivation component. */
+/** Proof-byte-bearing public record for the aggregate derivation component. */
 export type AggregateDerivationProofRecord = {
     readonly objectType: 'AggregateDerivationProofRecord';
     readonly objectVersion: 1;
@@ -606,7 +606,7 @@ export type AggregateDerivationProofRecord = {
     readonly publicRandomnessHash: ProtocolHash;
 };
 
-/** Public M6 aggregate derivation component. */
+/** Public aggregate derivation component. */
 export type AggregateDerivationComponent = {
     readonly objectType: 'AggregateDerivationComponent';
     readonly objectVersion: 1;
@@ -618,7 +618,7 @@ export type AggregateDerivationComponent = {
     readonly shareCommitmentMessageBoundCert: ShareCommitmentMessageBoundCert;
 };
 
-/** Structured result returned by M6 aggregate derivation component verification. */
+/** Structured result returned by aggregate derivation component verification. */
 export type AggregateDerivationVerification =
     StructuredProtocolVerificationResult & {
         readonly backendAvailable: boolean;
@@ -640,7 +640,8 @@ export type BridgeProofRecord = {
     readonly ballotSetHash: ProtocolHash;
     readonly ballotShareLayoutProfileHash: ProtocolHash;
     readonly bgvBatchEncoderHash: ProtocolHash;
-    readonly bgvEncryptionProofSubrelation: 'SealedLatticeDevelopmentCiphertextEquationRelation';
+    readonly bgvEncryptionKeyMaterialKind: 'passive-transcript-derived-collective-public-key';
+    readonly bgvEncryptionProofSubrelation: 'SealedLatticePassiveCollectiveCiphertextEquationRelation';
     readonly bgvProfileHash: ProtocolHash;
     readonly bgvPublicKeyRoot: ProtocolHash;
     readonly bridgeLayoutHash: ProtocolHash;
@@ -650,13 +651,16 @@ export type BridgeProofRecord = {
     readonly bridgeProofTargetContractHash: ProtocolHash;
     readonly bridgeProofVerificationStatus: BridgeProofVerificationStatus;
     readonly bridgeWitnessPrivacyProfileHash: ProtocolHash;
+    readonly claimBearingBridgeEncryption: false;
     readonly canonicalCiphertextConventionHash: ProtocolHash;
     readonly ceremonyId: string;
     readonly collectivePublicKeyRoot: ProtocolHash;
+    readonly collectivePublicKeyCoefficientRoot: ProtocolHash;
     readonly contributorActionContextHash: ProtocolHash;
     readonly contributorIdentity: string;
     readonly contributorRosterExternalAcceptanceHash: ProtocolHash;
     readonly contributorRosterPosition: number;
+    readonly developmentKeyOnly: false;
     readonly encodedAggregateLayoutHash: ProtocolHash;
     readonly encodedShareVectorLayoutHash: ProtocolHash;
     readonly encryptedAggregateBridgeHash: ProtocolHash;
@@ -685,6 +689,7 @@ export type BridgeProofRecord = {
     readonly shareCommitmentMessageBoundCertHash: ProtocolHash;
     readonly shareVectorWidth: number;
     readonly thresholdProfileHash: ProtocolHash;
+    readonly thresholdDecryptable: false;
     readonly topKEvaluatorInputLayoutHash: ProtocolHash;
     readonly votingClosedBoardHeadHash: ProtocolHash;
 };
@@ -716,6 +721,7 @@ export type AggregateContribution = {
     readonly ceremonyId: string;
     readonly closeRecordHash: ProtocolHash;
     readonly collectivePublicKeyRoot: ProtocolHash;
+    readonly collectivePublicKeyCoefficientRoot: ProtocolHash;
     readonly contributorIdentity: string;
     readonly contributorRosterExternalAcceptanceHash: ProtocolHash;
     readonly contributorRosterPosition: number;
@@ -792,6 +798,7 @@ export type AggregateReadyRecord = {
     readonly centeredL1CoefficientSum: number;
     readonly ceremonyId: string;
     readonly collectivePublicKeyRoot: ProtocolHash;
+    readonly collectivePublicKeyCoefficientRoot: ProtocolHash;
     readonly encryptedAggregateBridgeHash: ProtocolHash;
     readonly encryptedAggregateInputLayoutHash: ProtocolHash;
     readonly encryptedAggregateReconstructionHash: ProtocolHash;

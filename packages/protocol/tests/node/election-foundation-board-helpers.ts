@@ -8,20 +8,6 @@ import type {
 } from '@sealed-lattice/types';
 
 import {
-    deriveBoardEntryMerklePath,
-    deriveBoardEntryHash,
-    deriveBoardHeadHash,
-    deriveBoardRootHash,
-    deriveInclusionProofHash,
-} from '../../src/board/index';
-import {
-    deriveTargetFinalityCheckpointHash,
-    deriveTargetFinalityRecordHash,
-    deriveTargetProposalHash,
-    deriveWitnessCheckpointHash,
-} from '../../src/finality/index';
-
-import {
     boardPolicyHash,
     boardPublicKeyHash,
     ceremonyId,
@@ -35,6 +21,20 @@ import {
     witnessPolicyHash,
     witnessPublicKeyHashes,
 } from './election-foundation-fixture-constants';
+
+import {
+    deriveBoardEntryMerklePath,
+    deriveBoardEntryHash,
+    deriveBoardHeadHash,
+    deriveBoardRootHash,
+    deriveInclusionProofHash,
+} from '#packages/protocol/src/board/index';
+import {
+    deriveTargetFinalityCheckpointHash,
+    deriveTargetFinalityRecordHash,
+    deriveTargetProposalHash,
+    deriveWitnessCheckpointHash,
+} from '#packages/protocol/src/finality/index';
 
 export const createBoardHead = (
     boardSequence: number,
@@ -271,9 +271,12 @@ export const createTargetFinalityRecord = (
             ceremonyId,
             marker: 'c-top-k',
         }),
-        publicSlotMaskHash: deriveProtocolHash('PublicSlotMaskHash', {
-            ceremonyId,
-            marker: 'top-k-mask',
+        publicSlotMaskHash: deriveProtocolHash('ChallengeDomainHash', {
+            payload: {
+                ceremonyId,
+                marker: 'top-k-mask',
+            },
+            purpose: 'fixture-public-slot-mask-v1',
         }),
         targetCiphertextHash: deriveProtocolHash('CiphertextRoot', {
             ceremonyId,

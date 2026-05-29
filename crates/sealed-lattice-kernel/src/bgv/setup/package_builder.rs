@@ -2,7 +2,7 @@ use super::*;
 use super::{
     certificates::{
         collective_secret_distribution_certificate, error_distribution_certificate,
-        key_switch_decomposition_profile, m8_evaluator_context_bindings,
+        key_switch_decomposition_profile, passive_setup_evaluator_context_bindings,
         public_common_random_polynomial_root, setup_certificates, threshold_decryption_profile,
     },
     development_fixtures::development_encryption_fixture,
@@ -116,7 +116,7 @@ pub(super) fn build_passive_setup_package(input: &PassiveSetupInput) -> Canonica
         "defaultSetupSeedUsed": !input.setup_seed_provided,
         "setupSeedHash": input.setup_seed_hash,
     });
-    let evaluator_context_bindings = m8_evaluator_context_bindings(&setup_inputs)?;
+    let evaluator_context_bindings = passive_setup_evaluator_context_bindings(&setup_inputs)?;
 
     let mut package = json!({
         "objectType": "BgvPassiveSetupPackage",
@@ -150,7 +150,7 @@ pub(super) fn build_passive_setup_package(input: &PassiveSetupInput) -> Canonica
             "encryptedComparisonInputHash": evaluator_context_bindings["encryptedComparisonInputHash"],
             "bitSlicedComparatorHash": evaluator_context_bindings["bitSlicedComparatorHash"],
             "encryptedSparseTargetProjectionHash": evaluator_context_bindings["encryptedSparseTargetProjectionHash"],
-            "m8EvaluatorContextBindingHash": evaluator_context_bindings["m8EvaluatorContextBindingHash"],
+            "passiveSetupEvaluatorContextBindingHash": evaluator_context_bindings["passiveSetupEvaluatorContextBindingHash"],
         },
         "participants": participant_records,
         "collectivePublicKey": collective_public_key,
@@ -173,16 +173,16 @@ pub(super) fn build_passive_setup_package(input: &PassiveSetupInput) -> Canonica
             "KLLPSC1C4StatusAccepted": false,
         },
         "statusLabels": [
-            "M8PassiveSetupGenerated",
+            "PassiveBgvSetupGenerated",
             "PassiveSetupDevelopmentFixtureOnly",
             "FullRosterSetupMaterialGenerated",
             "CollectivePublicKeyRootBound",
-            "BgvPublicKeyRootHashOnly",
+            "BgvPublicKeyCoefficientMaterialBound",
             "ThresholdVerificationMaterialBound",
             "EvaluationKeyRootBound",
             "KllpsSetupMaterialMatched",
-            "AppendixBSetupInputReady",
-            "FinalAppendixBPendingQTarget"
+            "PassiveSetupInputReady",
+            "FinalSetupSecurityPendingTargetModulus"
         ],
         "nonClaims": [
             "ActiveMaliciousSetupProofMissing",
@@ -190,8 +190,8 @@ pub(super) fn build_passive_setup_package(input: &PassiveSetupInput) -> Canonica
             "MaliciousEvaluationKeyProofMissing",
             "KLLPSPartDecNotImplemented",
             "KLLPSC1C4NotCertified",
-            "FinalAppendixBPendingQTarget",
-            "FinalEvaluatorNoisePendingM10AppendixD",
+            "FinalSetupSecurityPendingTargetModulus",
+            "FinalEvaluatorNoisePendingEncryptedAggregateEvaluatorClosure",
             "StageXNotClosed",
             "StageCNotClosed",
             "StageANotClosed"

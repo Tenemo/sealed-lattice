@@ -11,7 +11,7 @@ import {
     type BallotProofRecordGenerationProofContracts,
     type BallotProofRecordGenerationRandomness,
     type BallotProofRecordGenerationRequest,
-} from '../../../src/ballot-privacy/ballot-proof-linear-statement';
+} from '#packages/protocol/src/ballot-privacy/ballot-proof-linear-statement';
 import {
     buildBallotProofStatement,
     createBallotPrivacyProfileSet,
@@ -21,13 +21,13 @@ import {
     createShareCommitmentShell,
     deriveClaimBearingBallotPackageHash,
     type BallotPrivacyRelationCompilerInput,
-} from '../../../src/ballot-privacy/index';
+} from '#packages/protocol/src/ballot-privacy/index';
 import {
     createFixtureRandomnessSource,
     createShareCommitmentPolynomialVector,
     deriveShareCommitmentBodyHash,
     generateReceiverState,
-} from '../../../src/ballot-privacy/lattice-primitives';
+} from '#packages/protocol/src/ballot-privacy/lattice-primitives';
 import {
     receiverEncryptionMessageScale,
     receiverEncryptionModuleDegree,
@@ -35,12 +35,12 @@ import {
     receiverOpeningRandomnessBitLength,
     receiverShareRepresentativeBitLength,
     shareCommitmentOpeningDimension,
-} from '../../../src/ballot-privacy/protocol-parameters';
-import { type BallotPrivacyRelationBackendPublicContext } from '../../../src/ballot-privacy/relation-backend-lowering';
+} from '#packages/protocol/src/ballot-privacy/protocol-parameters';
+import { type BallotPrivacyRelationBackendPublicContext } from '#packages/protocol/src/ballot-privacy/relation-backend-lowering';
 import {
     deriveThresholdProfile,
     deriveThresholdProfileHash,
-} from '../../../src/lifecycle/thresholds';
+} from '#packages/protocol/src/lifecycle/thresholds';
 
 const hash = (label: string): string =>
     deriveProtocolHash('ChallengeDomainHash', {
@@ -288,7 +288,7 @@ const variantRelationInput = (input: {
         input.rosterSize > maximumVariantRosterSize
     ) {
         throw new RangeError(
-            'M9 variant fixtures require roster size 3 to 20.',
+            'Encrypted aggregate bridge variant fixtures require roster size 3 to 20.',
         );
     }
     if (
@@ -297,7 +297,7 @@ const variantRelationInput = (input: {
         input.optionCount > maximumVariantOptionCount
     ) {
         throw new RangeError(
-            'M9 variant fixtures require option count 2 to 20.',
+            'Encrypted aggregate bridge variant fixtures require option count 2 to 20.',
         );
     }
 

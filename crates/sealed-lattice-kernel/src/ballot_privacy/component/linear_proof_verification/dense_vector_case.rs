@@ -52,9 +52,9 @@ pub(crate) fn component_linear_proof_vector_case(
                 "Structured receiver-encryption proof bytes for {component_id} are not implemented in this backend slice."
             )));
         }
-        "public-zero-witness-binding-check-v1" => {
+        "public-binding-check-only-v1" => {
             return Err(ComponentProofBackendError::unavailable(format!(
-                "Public-zero witness binding checks for {component_id} are structural only and are not linear proof bytes."
+                "Public binding checks for {component_id} are structural only and are not linear proof bytes."
             )));
         }
         _ => {

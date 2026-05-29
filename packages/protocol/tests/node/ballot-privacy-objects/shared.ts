@@ -30,7 +30,7 @@ import {
     deriveProofBytesHash,
     verifyClaimBearingBallotPackage,
     type BallotProofComponentProofVerificationInput,
-} from '../../../src/ballot-privacy/index';
+} from '#packages/protocol/src/ballot-privacy/index';
 
 const hash = (label: string): ProtocolHash =>
     deriveProtocolHash('ActionContextHash', { label });
@@ -224,16 +224,16 @@ function createComponentProofStatementFixture(input: {
                 ? '1024'
                 : null,
         matrixHash: hash(`${input.componentId}-matrix`),
-        objectType: 'BallotProofComponentProofStatementPlan',
+        objectType: 'BallotProofComponentProofStatementDescriptor',
         objectVersion: 1,
-        proofBytesAvailability:
+        proofBackendRequirement:
             input.proofStatementFormat ===
             'structured-module-lwe-linear-proof-v1'
-                ? 'requires-structured-proof-statement'
+                ? 'structured-proof-statement-required'
                 : input.proofStatementFormat ===
                     'structured-module-sis-share-commitment-v1'
-                  ? 'requires-sparse-proof-statement'
-                  : 'public-zero-witness-binding-check',
+                  ? 'sparse-proof-statement-required'
+                  : 'public-binding-check-only',
         proofLoweringStatus: 'explicitRowsAvailable',
         proofStatementFormat: input.proofStatementFormat,
         proofSystemRingDegree:
@@ -303,7 +303,7 @@ function createComponentProofStatementFixture(input: {
             input.componentProofStatementHash ??
             deriveProtocolHash('ChallengeDomainHash', {
                 payload: statementPayload,
-                purpose: 'ballot-proof-component-proof-statement-plan-v1',
+                purpose: 'ballot-proof-component-proof-statement-descriptor-v1',
             }),
     };
 }
@@ -320,7 +320,7 @@ function createComponentProofVerificationInputFixture(
             : componentId === 'share-commitment-component'
               ? 'structured-module-sis-share-commitment-v1'
               : componentId === 'receiver-key-binding-component'
-                ? 'public-zero-witness-binding-check-v1'
+                ? 'public-binding-check-only-v1'
                 : componentId === 'score-and-shamir-field-component'
                   ? 'dense-polynomial-matrix-linear-proof-v1'
                   : 'sparse-polynomial-matrix-linear-proof-v1';
@@ -331,7 +331,7 @@ function createComponentProofVerificationInputFixture(
             proofStatementFormat ===
                 'structured-module-sis-share-commitment-v1' ||
             proofStatementFormat === 'structured-module-lwe-linear-proof-v1' ||
-            proofStatementFormat === 'public-zero-witness-binding-check-v1'
+            proofStatementFormat === 'public-binding-check-only-v1'
                 ? undefined
                 : componentProofStatementHash,
         componentStatementHash: statementHash,
@@ -345,7 +345,7 @@ function createComponentProofVerificationInputFixture(
         proofStatement.statementHash ??
         componentProofStatementHash;
     const proofBytesHex =
-        proofStatementFormat === 'public-zero-witness-binding-check-v1'
+        proofStatementFormat === 'public-binding-check-only-v1'
             ? ''
             : hash(`${componentId}-proof-bytes-material`);
 
@@ -382,7 +382,7 @@ const createComponentProofBundleFixture = (
         const proofBytesHash = deriveProofBytesHash({
             allowEmpty:
                 proofInput.proofStatementFormat ===
-                'public-zero-witness-binding-check-v1',
+                'public-binding-check-only-v1',
             proofBytesHex: proofInput.proofBytesHex,
         });
         const proofEncodingProfileHash = deriveBallotProofEncodingProfileHash({

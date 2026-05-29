@@ -1,13 +1,6 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import {
-    buildBallotProofRecordGenerationRequest,
-    type BallotProofRecordGenerationProofContracts,
-} from '../../src/ballot-privacy/ballot-proof-linear-statement';
-import { compileBallotPrivacyRelation } from '../../src/ballot-privacy/index';
-import { deriveThresholdProfile } from '../../src/lifecycle/thresholds';
-
-import {
     type BallotProofRecordGenerationFixture,
     cloneJsonValue,
     createBallotProofRecordGenerationFixture,
@@ -21,6 +14,14 @@ import {
     requireRecord,
     shareCommitmentProofStatement,
 } from './ballot-privacy-proof-record-generation-input/helpers.js';
+
+import {
+    buildBallotProofRecordGenerationRequest,
+    type BallotProofRecordGenerationProofContracts,
+} from '#packages/protocol/src/ballot-privacy/ballot-proof-linear-statement';
+import { compileBallotPrivacyRelation } from '#packages/protocol/src/ballot-privacy/index';
+import { deriveThresholdProfile } from '#packages/protocol/src/lifecycle/thresholds';
+
 describe('ballot proof record generation input', () => {
     let fixture: BallotProofRecordGenerationFixture;
 
@@ -68,7 +69,7 @@ describe('ballot proof record generation input', () => {
             'sparse-polynomial-matrix-linear-proof-v1',
             'sparse-polynomial-matrix-linear-proof-v1',
             'structured-module-lwe-linear-proof-v1',
-            'public-zero-witness-binding-check-v1',
+            'public-binding-check-only-v1',
         ]);
         expect(Object.keys(request.componentSecretStates).sort()).toEqual([
             'payload-plaintext-field-component',
@@ -149,25 +150,24 @@ describe('ballot proof record generation input', () => {
             expect(
                 shareCommitmentStatementForRoster.sourceBackendColumnIndices,
             ).toHaveLength(shareCommitmentStatementForRoster.statementColumns);
-            if (rosterSize <= 6) {
-                expect(shareCommitmentStatementForRoster).toMatchObject({
-                    proofStatementFormat:
-                        'sparse-polynomial-matrix-linear-proof-v1',
-                    statementRows: rosterSize * 1_024,
-                });
-                expect(
-                    shareCommitmentStatementForRoster.receiverRows,
-                ).toBeUndefined();
-            } else {
-                expect(shareCommitmentStatementForRoster).toMatchObject({
-                    proofStatementFormat:
-                        'structured-module-sis-share-commitment-v1',
-                    statementRows: rosterSize * 16,
-                });
-                expect(
-                    shareCommitmentStatementForRoster.receiverRows,
-                ).toHaveLength(rosterSize);
-            }
+            const expectedShareCommitmentStatementShape =
+                rosterSize <= 6
+                    ? {
+                          proofStatementFormat:
+                              'sparse-polynomial-matrix-linear-proof-v1',
+                          statementRows: rosterSize * 1_024,
+                      }
+                    : {
+                          proofStatementFormat:
+                              'structured-module-sis-share-commitment-v1',
+                          statementRows: rosterSize * 16,
+                      };
+            expect(shareCommitmentStatementForRoster).toMatchObject(
+                expectedShareCommitmentStatementShape,
+            );
+            expect(shareCommitmentStatementForRoster.receiverRows?.length).toBe(
+                rosterSize <= 6 ? undefined : rosterSize,
+            );
             expect(
                 microRosterFixture.request.componentProofInputs.map(
                     (proofInput) => proofInput.componentId,

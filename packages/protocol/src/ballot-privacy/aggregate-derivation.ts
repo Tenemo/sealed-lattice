@@ -241,7 +241,7 @@ const requireProofBearingPackageShell = (input: {
 
     if (missingFieldNames.length > 0) {
         throw new RangeError(
-            `Aggregate derivation counted ballot packages must carry proof-byte-bearing M5 verifier inputs; missing ${missingFieldNames.join(', ')}.`,
+            `Aggregate derivation counted ballot packages must carry proof-byte-bearing accepted ballot verifier inputs; missing ${missingFieldNames.join(', ')}.`,
         );
     }
 

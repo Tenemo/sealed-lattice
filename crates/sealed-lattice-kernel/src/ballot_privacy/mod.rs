@@ -29,7 +29,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde_json::{Map, Value, json};
 
 use crate::{
-    hashing::{canonical_json, derive_protocol_hash, hash512, to_hex},
+    hashing::{
+        canonical_json, derive_protocol_hash, derive_protocol_hash_for_proof_bytes_payload,
+        hash512, to_hex,
+    },
     transcript_core::decode_hex,
 };
 
@@ -62,7 +65,6 @@ use self::{
         RECEIVER_ENCRYPTION_MODULE_DEGREE, RECEIVER_ENCRYPTION_MODULE_RANK,
         RECEIVER_ENCRYPTION_MODULUS, derive_receiver_encryption_public_matrix,
     },
-    sparse_linear_proof_statement::transform_sparse_statement_matrix_to_proof_ring_with_coefficient_representation,
     sparse_polynomial_matrix::{SparsePolynomialMatrix, SparsePolynomialMatrixEntry},
 };
 
@@ -225,11 +227,12 @@ pub(crate) use component::{
 pub(crate) use component::{
     DENSE_COMPONENT_PROOF_STATEMENT_FORMAT, FULL_BALLOT_PROOF_ENCODING_PROFILE_ID,
     FULL_BALLOT_PROOF_PARAMETER_PROFILE_ID, FULL_BALLOT_PROOF_PROJECTION_COVERAGE,
-    MAX_GENERIC_SPARSE_COMPONENT_SHORT_RESPONSE_VECTOR_LENGTH, PUBLIC_ZERO_PROOF_STATEMENT_FORMAT,
-    RECEIVER_KEY_PROOF_ENCODING_PROFILE_ID, RECEIVER_KEY_PROOF_PARAMETER_PROFILE_ID,
-    REQUIRED_BALLOT_PROOF_COMPONENT_IDS, SHARE_COMMITMENT_MODULE_DEGREE,
-    SHARE_COMMITMENT_MODULE_RANK, SHARE_COMMITMENT_OPENING_DIMENSION,
-    SPARSE_COMPONENT_PROOF_STATEMENT_FORMAT, STRUCTURED_RECEIVER_ENCRYPTION_PROOF_STATEMENT_FORMAT,
+    MAX_GENERIC_SPARSE_COMPONENT_SHORT_RESPONSE_VECTOR_LENGTH,
+    PUBLIC_BINDING_CHECK_PROOF_STATEMENT_FORMAT, RECEIVER_KEY_PROOF_ENCODING_PROFILE_ID,
+    RECEIVER_KEY_PROOF_PARAMETER_PROFILE_ID, REQUIRED_BALLOT_PROOF_COMPONENT_IDS,
+    SHARE_COMMITMENT_MODULE_DEGREE, SHARE_COMMITMENT_MODULE_RANK,
+    SHARE_COMMITMENT_OPENING_DIMENSION, SPARSE_COMPONENT_PROOF_STATEMENT_FORMAT,
+    STRUCTURED_RECEIVER_ENCRYPTION_PROOF_STATEMENT_FORMAT,
     STRUCTURED_SHARE_COMMITMENT_PROOF_STATEMENT_FORMAT, component_proof_bytes_must_be_empty,
     encoded_share_vector_width,
 };
@@ -252,9 +255,10 @@ pub(crate) use linear_proof_contract_validation::{
     collect_supported_ballot_privacy_dimension_refusals,
 };
 pub(crate) use proof_binding_hashes::{
-    derive_ballot_component_proof_statement_plan_hash, derive_ballot_proof_encoding_profile_hash,
-    derive_ballot_proof_linear_statement_hash, derive_ballot_proof_parameter_set_hash,
-    derive_ballot_proof_public_randomness_hash, derive_ballot_sparse_linear_statement_hash,
+    derive_ballot_component_proof_statement_descriptor_hash,
+    derive_ballot_proof_encoding_profile_hash, derive_ballot_proof_linear_statement_hash,
+    derive_ballot_proof_parameter_set_hash, derive_ballot_proof_public_randomness_hash,
+    derive_ballot_sparse_linear_statement_hash,
     derive_ballot_structured_receiver_encryption_statement_hash,
     derive_ballot_structured_share_commitment_statement_hash,
     derive_receiver_key_linear_statement_hash, derive_receiver_key_proof_encoding_profile_hash,

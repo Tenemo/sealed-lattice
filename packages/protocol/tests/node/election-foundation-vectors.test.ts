@@ -29,8 +29,7 @@ import {
     verifyRecoveryEpochUpdate,
     verifyRosterManifestTranscript,
     verifyTargetFinality,
-} from '../../src/index';
-
+} from '#packages/protocol/src/index';
 import boardFinalityJson from '#test-vectors/election-foundation/board-finality.json';
 import capabilityRefusalsJson from '#test-vectors/election-foundation/capability-refusals.json';
 import deterministicFixturesJson from '#test-vectors/election-foundation/deterministic-fixtures.json';
@@ -177,10 +176,8 @@ const deterministicFixtures =
     deterministicFixturesJson as unknown as DeterministicFixtureVectors;
 const currentBridgeAndEvaluatorNamespaces = [
     'EncryptedAggregateBridgeHash',
-    'EncryptedAggregateInputRoot',
     'EncryptedAggregateShareCiphertextRoot',
     'EncryptedAggregateReconstructionHash',
-    'BridgeWitnessPrivacyProfileHash',
     'ScoreBitDerivationCircuitHash',
     'EncryptedScoreBitInputHash',
     'ComparisonInputDerivationCircuitHash',
@@ -200,13 +197,14 @@ describe('election foundation test vectors', () => {
     it('matches poll-spec validation vectors', () => {
         for (const vector of pollSpecs.cases) {
             const validation = validatePollSpec(vector.input);
+            const actualErrorCodes = validation.ok
+                ? undefined
+                : validation.errors.map((error) => error.code);
 
             expect(validation.ok, vector.caseName).toBe(vector.expectedOk);
-            if (!validation.ok) {
-                expect(validation.errors.map((error) => error.code)).toEqual(
-                    vector.expectedErrorCodes,
-                );
-            }
+            expect(actualErrorCodes, vector.caseName).toEqual(
+                vector.expectedErrorCodes,
+            );
         }
     });
 

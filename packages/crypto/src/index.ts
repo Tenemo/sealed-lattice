@@ -1,6 +1,5 @@
 export { canonicalJson, hash512, hash512Hex } from './canonical-json.js';
 export {
-    derivePolicyHash,
     deriveProtocolHash,
     protocolHashNamespaceValues,
     resolveProtocolHashDomain,

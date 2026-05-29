@@ -1,13 +1,13 @@
-import { mkdir, writeFile } from "node:fs/promises";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { mkdir, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-import { buildEncodedBallotRelationVectorCases } from "./encoded-relation-vectors/case-builders.mjs";
+import { buildEncodedBallotRelationVectorCases } from './encoded-relation-vectors/case-builders.mjs';
 
-const repoRoot = fileURLToPath(new URL("../../", import.meta.url));
+const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const outputPath = path.resolve(
     repoRoot,
-    "test-vectors/ballot-privacy/encoded-ballot-linear-relation-vectors.json",
+    'test-vectors/ballot-privacy/encoded-ballot-linear-relation-vectors.json',
 );
 
 const main = async (): Promise<void> => {
@@ -15,13 +15,13 @@ const main = async (): Promise<void> => {
     const vectorFile = {
         cases,
         generatedBy:
-            "tsx --tsconfig tsconfig.base.json tools/ballot-privacy-vectors/generate-encoded-relation-vectors.mts",
-        generationStatus: "generated",
-        objectType: "BallotPrivacyEncodedBallotLinearRelationVectors",
+            'tsx --tsconfig tsconfig.base.json tools/ballot-privacy-vectors/generate-encoded-relation-vectors.mts',
+        generationStatus: 'generated',
+        objectType: 'BallotPrivacyEncodedBallotLinearRelationVectors',
         objectVersion: 1,
-        profileId: "encoded-ballot-linear-relation-v1",
+        profileId: 'encoded-ballot-linear-relation-v1',
         requiredCaseNames: cases.map((vectorCase) => vectorCase.caseName),
-        statementFormat: "SparseIntegerRowsModuloGF65537WithBoundGadgets-v1",
+        statementFormat: 'SparseIntegerRowsModuloGF65537WithBoundGadgets-v1',
     };
 
     await mkdir(path.dirname(outputPath), { recursive: true });

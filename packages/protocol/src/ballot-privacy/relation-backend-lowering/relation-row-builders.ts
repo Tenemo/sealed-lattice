@@ -1,4 +1,4 @@
-import { fieldModulus } from '../../plaintext-oracle/field.js';
+import { fieldModulus } from '../plaintext-oracle-helpers.js';
 import {
     ballotPrivacyEncodedCoordinatesPerOption,
     ballotPrivacyScoreBucketCount,

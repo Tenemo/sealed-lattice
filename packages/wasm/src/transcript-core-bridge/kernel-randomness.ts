@@ -2,7 +2,7 @@ const createFreshRandomnessHex = (): string => {
     const cryptoProvider = globalThis.crypto;
     if (cryptoProvider === undefined) {
         throw new Error(
-            'Proof generation requires Web Crypto getRandomValues for fresh prover randomness.',
+            'Proof generation requires Web Crypto getRandomValues for fresh randomness.',
         );
     }
     const randomBytes = new Uint8Array(32);
@@ -16,6 +16,38 @@ const createFreshRandomnessHex = (): string => {
 export const suppliedOrFreshRandomnessHex = (
     value: string | undefined,
 ): string => value ?? createFreshRandomnessHex();
+
+export type BridgeRandomnessSource =
+    | 'fresh-csprng'
+    | 'development-deterministic-fixture';
+
+type SuppliedOrFreshBridgeRandomness = {
+    readonly randomnessHex: string;
+    readonly randomnessSource: BridgeRandomnessSource;
+};
+
+export const suppliedOrFreshBridgeRandomness = (
+    value: string | undefined,
+    developmentRandomnessOverrideAcknowledged: boolean | undefined,
+): SuppliedOrFreshBridgeRandomness => {
+    if (value !== undefined) {
+        if (developmentRandomnessOverrideAcknowledged !== true) {
+            throw new RangeError(
+                'Caller-supplied aggregate bridge randomness requires developmentRandomnessOverrideAcknowledged.',
+            );
+        }
+
+        return {
+            randomnessHex: value,
+            randomnessSource: 'development-deterministic-fixture',
+        };
+    }
+
+    return {
+        randomnessHex: createFreshRandomnessHex(),
+        randomnessSource: 'fresh-csprng',
+    };
+};
 
 export const componentProverRandomnessHexes = (
     componentProofInputs: readonly unknown[],

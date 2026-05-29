@@ -174,9 +174,11 @@ export type BgvPassiveSetupPackage = {
     readonly participants: readonly unknown[];
     readonly collectivePublicKey: {
         readonly collectivePublicKeyRoot: ProtocolHash;
+        readonly collectivePublicKeyCoefficientRoot: ProtocolHash;
         readonly bgvPublicKeyRoot: ProtocolHash;
         readonly statusLabels: readonly string[];
         readonly record: unknown;
+        readonly coefficientMaterial: unknown;
     };
     readonly thresholdVerificationMaterial: Readonly<Record<string, unknown>>;
     readonly evaluationKeys: {

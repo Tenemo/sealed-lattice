@@ -14,22 +14,22 @@ fn request() -> serde_json::Value {
         "ceremonyId": "ceremony-main",
         "manifestHash": derive_protocol_hash(
             "ElectionManifestHash",
-            &serde_json::json!({ "manifest": "m8-test" }),
+            &serde_json::json!({ "manifest": "passive-bgv-setup-test" }),
         ).expect("manifest hash"),
         "rosterHash": derive_protocol_hash(
             "RosterHash",
-            &serde_json::json!({ "roster": "m8-test" }),
+            &serde_json::json!({ "roster": "passive-bgv-setup-test" }),
         ).expect("roster hash"),
         "thresholdProfileHash": derive_protocol_hash(
             "ThresholdProfileHash",
-            &serde_json::json!({ "threshold": "m8-test" }),
+            &serde_json::json!({ "threshold": "passive-bgv-setup-test" }),
         ).expect("threshold hash"),
         "participants": [
             { "trusteeIdentity": "trustee-1", "rosterPosition": 0, "boardPosition": 3 },
             { "trusteeIdentity": "trustee-2", "rosterPosition": 1, "boardPosition": 4 },
             { "trusteeIdentity": "trustee-3", "rosterPosition": 2, "boardPosition": 5 }
         ],
-        "setupSeed": "m8-test-seed",
+        "setupSeed": "passive-bgv-setup-test-seed",
     })
 }
 
@@ -84,6 +84,17 @@ fn passive_setup_generation_is_deterministic_and_verifiable() {
     assert_eq!(
         first["participants"][0]["sampledLocalErrorCoefficientsIncluded"],
         false
+    );
+    assert_eq!(
+        first["collectivePublicKey"]["coefficientMaterial"]["objectType"],
+        "BgvCollectivePublicKeyCoefficientMaterial"
+    );
+    assert_eq!(
+        first["collectivePublicKey"]["collectivePublicKeyCoefficientRoot"]
+            .as_str()
+            .expect("collective public key coefficient root")
+            .len(),
+        128
     );
     assert!(
         first["participants"][0]
@@ -248,6 +259,27 @@ fn passive_setup_verification_rejects_rebound_internal_inconsistency() {
 }
 
 #[test]
+fn passive_setup_verification_rejects_rebound_coefficient_material_mutations() {
+    let package = generate_passive_setup_package_from_request(&request()).expect("setup");
+
+    let mut changed_coefficient_root = package.clone();
+    changed_coefficient_root["collectivePublicKey"]["collectivePublicKeyCoefficientRoot"] =
+        serde_json::json!(valid_hash('4'));
+    assert_rebound_package_is_rejected(
+        changed_coefficient_root,
+        "collective public key coefficient root mutation",
+    );
+
+    let mut changed_coefficient_material = package;
+    changed_coefficient_material["collectivePublicKey"]["coefficientMaterial"]["modulusSummaries"]
+        [0]["componentZeroCoefficientDerivationHash512"] = serde_json::json!("1".repeat(128));
+    assert_rebound_package_is_rejected(
+        changed_coefficient_material,
+        "collective public key coefficient material mutation",
+    );
+}
+
+#[test]
 fn passive_setup_verification_rejects_nested_secret_material() {
     let mut package = generate_passive_setup_package_from_request(&request()).expect("setup");
     package["participants"][0]["globalSecretPolynomial"] = serde_json::json!("forbidden");
@@ -358,7 +390,7 @@ fn passive_setup_verification_rejects_rebound_binding_mutations() {
         (
             "development encryption bridge claim",
             Box::new(|mutated_package| {
-                mutated_package["developmentEncryptionFixture"]["fixture"]["m9BridgeEncryptionClaim"] =
+                mutated_package["developmentEncryptionFixture"]["fixture"]["bridgeEncryptionClaim"] =
                     serde_json::json!(true);
             }),
         ),
@@ -400,7 +432,7 @@ fn passive_setup_verification_rejects_evaluator_binding_mutations() {
         "encryptedComparisonInputHash",
         "bitSlicedComparatorHash",
         "encryptedSparseTargetProjectionHash",
-        "m8EvaluatorContextBindingHash",
+        "passiveSetupEvaluatorContextBindingHash",
     ] {
         let mut mutated_package = package.clone();
         mutated_package["profileBindings"][field_name] = serde_json::json!(valid_hash('b'));

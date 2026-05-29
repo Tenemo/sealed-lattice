@@ -2,18 +2,6 @@ import { deriveProtocolHash } from '@sealed-lattice/crypto';
 import type { BallotPackageWitness } from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
-import { derivePlaintextTopKOracle } from '../../src/plaintext-oracle/index';
-import { deriveBallotPolynomialSetHash } from '../../src/pvss-ballot/ballot-polynomials';
-import {
-    deriveCanonicalBallotSet,
-    deriveTestAggregateShares,
-    reconstructAggregateTallyFromShares,
-    verifyBallotPackageShell,
-    verifyTestAggregateShareOpening,
-    verifyTestShareCommitmentOpening,
-} from '../../src/pvss-ballot/index';
-import { deriveReceiverShareVectors } from '../../src/pvss-ballot/receiver-shares';
-
 import {
     ceremonyId,
     manifestPolicyHashes,
@@ -38,6 +26,19 @@ import {
     thresholdProfile,
     thresholdProfileHash,
 } from './pvss-ballot-algebra/fixtures.js';
+
+import { derivePlaintextTopKOracle } from '#packages/protocol/src/plaintext-oracle/index';
+import { deriveBallotPolynomialSetHash } from '#packages/protocol/src/pvss-ballot/ballot-polynomials';
+import {
+    deriveCanonicalBallotSet,
+    deriveTestAggregateShares,
+    reconstructAggregateTallyFromShares,
+    verifyBallotPackageShell,
+    verifyTestAggregateShareOpening,
+    verifyTestShareCommitmentOpening,
+} from '#packages/protocol/src/pvss-ballot/index';
+import { deriveReceiverShareVectors } from '#packages/protocol/src/pvss-ballot/receiver-shares';
+
 describe('internal PVSS ballot algebra', () => {
     it('derives deterministic receiver shares and test commitments for one ballot', () => {
         const witness = createBallotWitness(
@@ -446,6 +447,7 @@ describe('internal PVSS ballot algebra', () => {
                 aggregateShares: selectedAggregateShares,
                 ballotSetHash: deriveProtocolHash('BallotSetHash', {
                     marker: 'wrong-ballot-set',
+                    purpose: 'pvss-ballot-algebra-test-ballot-set-v1',
                 }),
                 optionCount: pollSpec.options.length,
                 thresholdProfile,
@@ -464,6 +466,8 @@ describe('internal PVSS ballot algebra', () => {
                             ),
                             ballotSetHash: deriveProtocolHash('BallotSetHash', {
                                 marker: 'mixed-ballot-set',
+                                purpose:
+                                    'pvss-ballot-algebra-test-ballot-set-v1',
                             }),
                         });
                     },
@@ -509,7 +513,11 @@ describe('internal PVSS ballot algebra', () => {
                                   aggregateShareCommitmentHash:
                                       deriveProtocolHash(
                                           'AggregateShareCommitmentHash',
-                                          { marker: 'stale' },
+                                          {
+                                              marker: 'stale',
+                                              purpose:
+                                                  'pvss-test-aggregate-share-commitment-v1',
+                                          },
                                       ),
                               }
                             : aggregateShare,

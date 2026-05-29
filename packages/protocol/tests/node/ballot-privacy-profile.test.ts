@@ -8,8 +8,7 @@ import {
     deriveBallotPrivacyProfileHashes,
     deriveShareCommitmentMessageBoundCertHash,
     verifyShareCommitmentMessageBoundCert,
-} from '../../src/ballot-privacy/index';
-
+} from '#packages/protocol/src/ballot-privacy/index';
 import ballotPrivacyProfileVectorJson from '#test-vectors/ballot-privacy/proof-stack-profile.json' with { type: 'json' };
 
 const ballotPrivacyProfileVector = ballotPrivacyProfileVectorJson as {

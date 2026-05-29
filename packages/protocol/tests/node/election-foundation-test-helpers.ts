@@ -11,7 +11,7 @@ export {
     deriveRecoveryEpochUpdateHash,
     isActionCurrentForRecoveryEpoch,
     verifyRecoveryEpochUpdate,
-} from '../../src/recovery/index';
+} from '#packages/protocol/src/recovery/index';
 export {
     deriveBoardEntryMerklePath,
     deriveBoardEntryHash,
@@ -20,14 +20,14 @@ export {
     deriveConflictingHeadEvidenceHash,
     deriveInclusionProofHash,
     verifyBoardConsistency,
-} from '../../src/board/index';
+} from '#packages/protocol/src/board/index';
 export {
     deriveCastReceiptHash,
     deriveCloseRecordHash,
     derivePostVotingClosedContextHash,
     verifyCastReceiptShell,
     verifyCloseRecordShell,
-} from '../../src/closing/index';
+} from '#packages/protocol/src/closing/index';
 export {
     deriveElectionManifestHash,
     deriveReceiverKeyRegistrationHash,
@@ -35,7 +35,7 @@ export {
     deriveRosterHash,
     deriveTrusteeSetupEntryHash,
     verifyRosterManifestTranscript,
-} from '../../src/roster/index';
+} from '#packages/protocol/src/roster/index';
 export {
     deriveTargetFinalityCheckpointHash,
     deriveTargetFinalityPolicyHash,
@@ -44,8 +44,8 @@ export {
     deriveWitnessCheckpointHash,
     deriveWitnessPolicyHash,
     verifyTargetFinality,
-} from '../../src/finality/index';
-export { deriveValidatedFirstValidOrder } from '../../src/ordering/index';
+} from '#packages/protocol/src/finality/index';
+export { deriveValidatedFirstValidOrder } from '#packages/protocol/src/ordering/index';
 export {
     deriveLocalReplayRecordHash,
     deriveTargetAcceptedRecordHash,
@@ -53,7 +53,7 @@ export {
     verifyLocalReplayRecordShell,
     verifyTargetAcceptedRecordShell,
     verifyTopKDecryptionShareShell,
-} from '../../src/target-acceptance/index';
+} from '#packages/protocol/src/target-acceptance/index';
 export type {
     ActionContext,
     BoardConsistencyInput,

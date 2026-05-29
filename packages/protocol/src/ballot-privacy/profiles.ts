@@ -28,12 +28,7 @@ import {
     type ShareCommitmentProfile,
 } from '@sealed-lattice/types';
 
-import {
-    createRefusal,
-    isNonNegativeInteger,
-} from '../common/verification-helpers.js';
-import { fieldModulus } from '../plaintext-oracle/field.js';
-
+import { fieldModulus } from './plaintext-oracle-helpers.js';
 import {
     ballotPrivacyMaximumCertificateGatedTurnout as maximumCertificateGatedTurnout,
     ballotPrivacyMaximumCanonicalFieldElement as maximumCanonicalFieldElement,
@@ -53,6 +48,7 @@ import {
     shareCommitmentOpeningRandomnessRangeWidth as openingRandomnessRangeWidth,
     shareCommitmentOpeningRandomnessSamplerDomain as openingRandomnessSamplerDomain,
 } from './protocol-parameters.js';
+import { createRefusal, isNonNegativeInteger } from './verification-helpers.js';
 
 const decimalIntegerPattern = /^(0|[1-9][0-9]*)$/u;
 

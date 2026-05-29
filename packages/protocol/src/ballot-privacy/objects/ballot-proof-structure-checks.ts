@@ -9,9 +9,9 @@ import type {
     RefusalRecord,
 } from '@sealed-lattice/types';
 
-import { createRefusal } from '../../common/verification-helpers.js';
 import { getBallotPrivacyEncodedShareVectorWidth } from '../protocol-parameters.js';
 import { collectBallotPrivacyDimensionRefusals } from '../supported-dimensions.js';
+import { createRefusal } from '../verification-helpers.js';
 
 import type {
     BallotProofComponentProofVerificationInput,
@@ -20,7 +20,7 @@ import type {
 import {
     allowedBallotProofComponentStatementFormats,
     collectReceiverReferenceRefusals,
-    componentProofBytesAvailabilityIsExpected,
+    componentProofBackendRequirementIsExpected,
     componentProofStatementFormatIsExpected,
     deriveBallotProofChallengeHash,
     deriveBallotProofRecordHash,
@@ -357,9 +357,8 @@ const deriveSuppliedComponentProofStatementHash = (input: {
             'structured-module-sis-share-commitment-v1' ||
             input.proofStatementFormat ===
                 'structured-module-lwe-linear-proof-v1' ||
-            input.proofStatementFormat ===
-                'public-zero-witness-binding-check-v1') &&
-        objectType === 'BallotProofComponentProofStatementPlan'
+            input.proofStatementFormat === 'public-binding-check-only-v1') &&
+        objectType === 'BallotProofComponentProofStatementDescriptor'
     ) {
         return {
             hash: deriveProtocolHash('ChallengeDomainHash', {
@@ -367,7 +366,7 @@ const deriveSuppliedComponentProofStatementHash = (input: {
                     input.proofStatement,
                     'componentProofStatementHash',
                 ),
-                purpose: 'ballot-proof-component-proof-statement-plan-v1',
+                purpose: 'ballot-proof-component-proof-statement-descriptor-v1',
             }),
             hashFieldName: 'componentProofStatementHash',
         };
@@ -416,14 +415,14 @@ const isNonNegativeIntegerArray = (
     return value.every((entry: unknown) => isNonNegativeSafeInteger(entry));
 };
 
-const collectComponentProofStatementPlanShapeRefusals = (input: {
+const collectComponentProofStatementDescriptorShapeRefusals = (input: {
     readonly expectedComponentId: BallotProofComponentId;
     readonly proofRecordHash: ProtocolHash;
     readonly proofStatement: UnknownObject;
 }): readonly RefusalRecord[] => {
     if (
         input.proofStatement.objectType !==
-        'BallotProofComponentProofStatementPlan'
+        'BallotProofComponentProofStatementDescriptor'
     ) {
         return [];
     }
@@ -459,12 +458,12 @@ const collectComponentProofStatementPlanShapeRefusals = (input: {
             input.proofStatement
                 .proofStatementFormat as BallotProofComponentProofVerificationInput['proofStatementFormat'],
         ) &&
-        typeof input.proofStatement.proofBytesAvailability === 'string' &&
-        componentProofBytesAvailabilityIsExpected(
+        typeof input.proofStatement.proofBackendRequirement === 'string' &&
+        componentProofBackendRequirementIsExpected(
             input.expectedComponentId,
             input.proofStatement
                 .proofStatementFormat as BallotProofComponentProofVerificationInput['proofStatementFormat'],
-            input.proofStatement.proofBytesAvailability,
+            input.proofStatement.proofBackendRequirement,
         ) &&
         input.proofStatement.proofLoweringStatus === 'explicitRowsAvailable' &&
         input.proofStatement.relation === 'A*w + t = 0' &&
@@ -517,7 +516,7 @@ const collectComponentProofStatementPlanShapeRefusals = (input: {
         if (
             input.expectedComponentId === 'receiver-key-binding-component' &&
             input.proofStatement.proofStatementFormat ===
-                'public-zero-witness-binding-check-v1'
+                'public-binding-check-only-v1'
         ) {
             return (
                 input.proofStatement.sourceRingDegree === null &&
@@ -542,7 +541,7 @@ const collectComponentProofStatementPlanShapeRefusals = (input: {
         return [
             createRefusal(
                 'BallotPackageInvalid',
-                `Ballot proof component proof statement plan for ${input.expectedComponentId} has an invalid canonical shape.`,
+                `Ballot proof component proof statement descriptor for ${input.expectedComponentId} has an invalid canonical shape.`,
                 input.proofRecordHash,
             ),
         ];
@@ -573,7 +572,7 @@ const collectSuppliedComponentProofStatementRefusals = (input: {
 
     const refusedObjects: RefusalRecord[] = [];
     refusedObjects.push(
-        ...collectComponentProofStatementPlanShapeRefusals({
+        ...collectComponentProofStatementDescriptorShapeRefusals({
             expectedComponentId: input.expectedComponentId,
             proofRecordHash: input.proofRecordHash,
             proofStatement,

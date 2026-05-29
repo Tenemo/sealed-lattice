@@ -693,9 +693,9 @@ fn ballot_proof_record_generation_emits_bound_component_bundle() {
                 "receiver-key-binding-component",
                 &receiver_key_component["componentStatementHash"],
                 None,
-                "public-zero-witness-binding-check-v1"
+                "public-binding-check-only-v1"
             ),
-            "proofStatementFormat": "public-zero-witness-binding-check-v1",
+            "proofStatementFormat": "public-binding-check-only-v1",
             "publicRandomnessHex": "55".repeat(32),
             "statementHash": receiver_key_component["componentStatementHash"],
         }

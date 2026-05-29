@@ -5,9 +5,12 @@ pub(crate) fn add_mod(left: u64, right: u64, modulus: u64) -> CanonicalResult<u6
     if left >= modulus || right >= modulus {
         return Err(out_of_range_error());
     }
-    let sum = u128::from(left) + u128::from(right);
+    if modulus <= u64::MAX / 2 {
+        let sum = left + right;
+        return Ok(if sum >= modulus { sum - modulus } else { sum });
+    }
 
-    Ok((sum % u128::from(modulus)) as u64)
+    Ok(((u128::from(left) + u128::from(right)) % u128::from(modulus)) as u64)
 }
 
 pub(crate) fn sub_mod(left: u64, right: u64, modulus: u64) -> CanonicalResult<u64> {
@@ -27,8 +30,37 @@ pub(crate) fn mul_mod(left: u64, right: u64, modulus: u64) -> CanonicalResult<u6
     if left >= modulus || right >= modulus {
         return Err(out_of_range_error());
     }
+    if modulus <= u64::from(u32::MAX) {
+        return Ok(left.wrapping_mul(right) % modulus);
+    }
+    if modulus < (1_u64 << 53) {
+        return Ok(reduce_u53_product(left, right, modulus));
+    }
 
     Ok(((u128::from(left) * u128::from(right)) % u128::from(modulus)) as u64)
+}
+
+fn reduce_u53_product(left: u64, right: u64, modulus: u64) -> u64 {
+    let product = u128::from(left) * u128::from(right);
+    let approximate_quotient = ((left as f64) * (right as f64) / (modulus as f64)) as u64;
+    let mut remainder =
+        product as i128 - (u128::from(approximate_quotient) * u128::from(modulus)) as i128;
+    let modulus_i128 = i128::from(modulus);
+
+    for _ in 0..8 {
+        if remainder < 0 {
+            remainder += modulus_i128;
+            continue;
+        }
+        if remainder >= modulus_i128 {
+            remainder -= modulus_i128;
+            continue;
+        }
+
+        return remainder as u64;
+    }
+
+    (product % u128::from(modulus)) as u64
 }
 
 pub(crate) fn pow_mod(base: u64, exponent: u64, modulus: u64) -> CanonicalResult<u64> {
@@ -160,6 +192,38 @@ mod tests {
             assert!(pow_mod(modulus, 2, modulus).is_err());
             assert!(inverse_mod(0, modulus).is_err());
             assert!(inverse_mod(modulus, modulus).is_err());
+        }
+    }
+
+    #[test]
+    fn optimized_multiplication_matches_generic_modular_arithmetic_for_bgv_primes() {
+        for modulus in DATA_PRIMES.into_iter().chain([SPECIAL_PRIME]) {
+            let mut state = modulus ^ 0xa076_1d64_78bd_642f;
+            let mut cases = vec![
+                (0, 0),
+                (1, modulus - 1),
+                (modulus - 1, modulus - 1),
+                (modulus / 2, modulus / 2 + 1),
+            ];
+            for _ in 0..256 {
+                state = state
+                    .wrapping_mul(6_364_136_223_846_793_005)
+                    .wrapping_add(1);
+                let left = state % modulus;
+                state = state
+                    .wrapping_mul(6_364_136_223_846_793_005)
+                    .wrapping_add(1);
+                let right = state % modulus;
+                cases.push((left, right));
+            }
+
+            for (left, right) in cases {
+                assert_eq!(
+                    mul_mod(left, right, modulus).expect("mul"),
+                    ((u128::from(left) * u128::from(right)) % u128::from(modulus)) as u64,
+                    "modulus={modulus}, left={left}, right={right}",
+                );
+            }
         }
     }
 }

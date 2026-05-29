@@ -6,7 +6,10 @@ use super::{
         bridge_proof_target_contract_hash, bridge_proof_target_contract_value,
         validate_bridge_proof_target_contract,
     },
-    validation::validate_bridge_proof_public_shell,
+    validation::{
+        validate_bridge_proof_public_shell, validate_bridge_randomness_source,
+        validate_development_randomness_acknowledgement,
+    },
 };
 use num_bigint::BigInt;
 use num_traits::One;
@@ -40,6 +43,25 @@ fn private_material_disclosure() -> Value {
 }
 
 fn minimal_verify_request(bridge_encryption: Value) -> Value {
+    let mut bridge_encryption = bridge_encryption;
+    if let Some(object) = bridge_encryption.as_object_mut() {
+        object.insert(
+            "bgvEncryptionKeyMaterialKind".to_string(),
+            Value::String(BGV_ENCRYPTION_KEY_MATERIAL_KIND.to_string()),
+        );
+        object.insert(
+            "developmentKeyOnly".to_string(),
+            Value::Bool(DEVELOPMENT_KEY_ONLY),
+        );
+        object.insert(
+            "thresholdDecryptable".to_string(),
+            Value::Bool(THRESHOLD_DECRYPTABLE),
+        );
+        object.insert(
+            "claimBearingBridgeEncryption".to_string(),
+            Value::Bool(CLAIM_BEARING_BRIDGE_ENCRYPTION),
+        );
+    }
     json!({
         "aggregateDerivationComponent": {},
         "setupPackage": {},
@@ -143,7 +165,7 @@ fn private_evaluator_variant_dimensions_reject_outside_matrix() {
         let error = bridge_variant_dimensions(&statement)
             .expect_err("outside-matrix dimensions should reject");
         assert!(
-            error.message.contains("M9 bridge"),
+            error.message.contains("encrypted aggregate bridge"),
             "unexpected error: {error:?}"
         );
     }
@@ -198,7 +220,44 @@ fn bridge_proof_target_contract_is_variant_parametric() {
             json!(3 * width + 64 + 4 * 32_768)
         );
         assert_eq!(target_contract["sharedWitnessCheckCount"], json!(2));
-        assert_eq!(target_contract["sharedWitnessSoundnessBits"], json!(128));
+        assert_eq!(
+            target_contract["sharedWitnessChallengeEntropyBits"],
+            json!(128)
+        );
+        assert_eq!(
+            target_contract["sharedWitnessWeakestRelation"],
+            json!(PLAINTEXT_ENCODING_RELATION)
+        );
+        assert_eq!(
+            target_contract["sharedWitnessWeakestRelationModulus"],
+            json!(PLAINTEXT_MODULUS)
+        );
+        assert_eq!(
+            target_contract["sharedWitnessEffectiveBindingSoundnessBitsFloor"],
+            json!(20)
+        );
+        assert_eq!(
+            target_contract["sharedWitnessRejectionAttemptLimit"],
+            json!(64)
+        );
+        assert_eq!(
+            target_contract["sharedWitnessGrindingDiscountBitsPerCheck"],
+            json!(6)
+        );
+        assert_eq!(
+            target_contract["sharedWitnessUnadjustedWeakestRelationSoundnessBitsFloor"],
+            json!(32)
+        );
+        assert_eq!(
+            target_contract["bgvEncryptionKeyMaterialKind"],
+            json!(BGV_ENCRYPTION_KEY_MATERIAL_KIND)
+        );
+        assert_eq!(target_contract["developmentKeyOnly"], json!(false));
+        assert_eq!(target_contract["thresholdDecryptable"], json!(false));
+        assert_eq!(
+            target_contract["claimBearingBridgeEncryption"],
+            json!(false)
+        );
         assert_eq!(
             target_contract["sharedWitnessZeroKnowledgeStatus"],
             json!(SHARED_WITNESS_ZERO_KNOWLEDGE_STATUS)
@@ -212,6 +271,48 @@ fn bridge_proof_target_contract_is_variant_parametric() {
             json!(PLAINTEXT_CANONICAL_LIFT_PROOF_MISSING_STATUS)
         );
     }
+}
+
+#[test]
+fn bridge_randomness_sources_require_explicit_development_acknowledgement() {
+    assert!(validate_bridge_randomness_source("fresh-csprng", "proverRandomnessSource").is_ok());
+    assert!(
+        validate_bridge_randomness_source(
+            "development-deterministic-fixture",
+            "proverRandomnessSource",
+        )
+        .is_ok()
+    );
+    assert!(validate_bridge_randomness_source("seed", "proverRandomnessSource").is_err());
+    assert!(
+        validate_development_randomness_acknowledgement(
+            &json!({}),
+            "development-deterministic-fixture",
+            "fresh-csprng",
+            "bridgeRequest",
+        )
+        .is_err()
+    );
+    assert!(
+        validate_development_randomness_acknowledgement(
+            &json!({
+                "developmentRandomnessOverrideAcknowledged": true,
+            }),
+            "fresh-csprng",
+            "development-deterministic-fixture",
+            "bridgeRequest",
+        )
+        .is_ok()
+    );
+    assert!(
+        validate_development_randomness_acknowledgement(
+            &json!({}),
+            "fresh-csprng",
+            "fresh-csprng",
+            "bridgeRequest",
+        )
+        .is_ok()
+    );
 }
 
 #[test]
@@ -256,7 +357,7 @@ fn bridge_verifier_rejects_proof_bytes_hash_before_setup_checks() {
     let proof_bytes_hex = minimal_checked_relation_proof_bytes_hex();
     let result =
         verify_aggregate_bridge_encryption_from_command_request(&minimal_verify_request(json!({
-            "bridgeProofBytesHash": "0".repeat(128),
+            "bridgeProofBytesHash": "4".repeat(128),
             "bridgeProofBytesHex": proof_bytes_hex,
             "bridgeProofVerificationStatus": BRIDGE_PROOF_CHECKED_STATUS,
             "canonicalBytesHex": "00",

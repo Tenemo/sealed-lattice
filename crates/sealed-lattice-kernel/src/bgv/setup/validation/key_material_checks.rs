@@ -1,4 +1,7 @@
 use super::*;
+use crate::bgv::setup::key_material::{
+    collective_public_key_coefficient_root, expected_collective_public_key_coefficient_material,
+};
 
 pub(super) fn validate_collective_public_key(
     setup_package: &Value,
@@ -46,6 +49,29 @@ pub(super) fn validate_collective_public_key(
             "collective public key share roots do not match participant records",
         ));
     }
+    let expected_coefficient_material =
+        expected_collective_public_key_coefficient_material(setup_package, participant_bindings)?;
+    let coefficient_material = value_at_path(collective_public_key, &["coefficientMaterial"])?;
+    if coefficient_material != &expected_coefficient_material {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "collective public key coefficient material does not match the setup transcript",
+        ));
+    }
+    let expected_coefficient_root =
+        collective_public_key_coefficient_root(&expected_coefficient_material)?;
+    compare_hash_at_path(
+        collective_public_key,
+        &["collectivePublicKeyCoefficientRoot"],
+        &expected_coefficient_root,
+        "collective public key coefficient root",
+    )?;
+    compare_hash_at_path(
+        collective_public_key_record,
+        &["collectivePublicKeyCoefficientRoot"],
+        &expected_coefficient_root,
+        "collective public key record coefficient root",
+    )?;
 
     let collective_public_key_root =
         hash_at_path(collective_public_key, &["collectivePublicKeyRoot"])?;
@@ -59,6 +85,7 @@ pub(super) fn validate_collective_public_key(
         "BGVPublicKeyRoot",
         &json!({
             "collectivePublicKeyRoot": collective_public_key_root,
+            "collectivePublicKeyCoefficientRoot": expected_coefficient_root,
             "profileHash": profile_hash,
             "backendProfileHash": backend_profile_hash,
             "setupProfileId": PASSIVE_SETUP_PROFILE_ID,

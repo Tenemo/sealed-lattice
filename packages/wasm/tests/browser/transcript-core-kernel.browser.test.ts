@@ -7,8 +7,7 @@ import { describe, expect, it } from 'vitest';
 import {
     loadTranscriptCoreKernel,
     TranscriptCoreKernelCommandError,
-} from '../../src/index';
-
+} from '#packages/wasm/src/index';
 import goldenTranscriptCoreFixturesJson from '#test-vectors/transcript-core/golden-transcript-core.json';
 import malformedObjectFixturesJson from '#test-vectors/transcript-core/malformed-objects.json';
 
@@ -40,15 +39,15 @@ const fullyVerifiedPassiveMhePrototypeFixture = findFixture(
     'fully-verified-passive-mhe-prototype-transcript-core',
 );
 const invalidEnumFixture = findFixture(malformedObjectFixtures, 'invalid-enum');
-const browserM7BgvVectors = {
+const browserBgvRnsVectors = {
     profileHash:
         '4a2efbb3218fcbde79d396688ebd4bf5f5ed7300f23316e6900aa0cb7dd0057bccc3892df183a6a4f628cc26c8163cf9b226e37f54519216067be5efd5ca743e',
     batchLayoutBindingHash:
-        '3bb25a676dc61ef33169966d56979638fc95efa887339506919d0c1ba64ec881c96d98453a7f2cc1d31b5eca7ce8b132022a12d3b58a1fe22c4355beaee58d6e',
+        '2bdddaf7eba3787d244cb6622e252b6ee9391a8d3aa22a23fa9e46a777d036a7d8852e38f664dec7fd50e2308bec608f896cbd3b3ae925844bc77f673330baab',
     encodedPlaintextRoot:
-        '92cf108ea1bf78bf8b4acff606df99b2b5d342fe8caac81f1dbc3eaa166b31bf61b2453d57630109422b14e9cbdf8cf327ce56793cb676a10888c5f6c1c12edd',
+        '58c345519637224053f85635ecd8493f74a42bc6b44fcd889571bf73e44ea0534de25677efec1b2efff76f64d17735debb527c787db0b8057a59458e004bfb3c',
     encodedPlaintextHash:
-        'd77e7936e25849fa95ac455dd4b1e2502b9f502491d0657c41035b0c91aa625762f77bdd6e24c236417eeab50d7afdeea376cabf1d737df587de3932b9fc641e',
+        '02dd5e48be07c2bc343db89c7566f907b0bc319b56feb4ea0d6fa9a40a9f65829346a2ea08a576342c8dccce1a098e31f553c60726b1a76c1a77ae4a57cf426e',
 } as const;
 
 describe('transcript-core kernel in browsers', () => {
@@ -124,9 +123,9 @@ describe('transcript-core kernel in browsers', () => {
             includeCanonicalBytesHex: true,
         });
 
-        expect(profile.profileHash).toBe(browserM7BgvVectors.profileHash);
+        expect(profile.profileHash).toBe(browserBgvRnsVectors.profileHash);
         expect(profile.batchLayoutBindingHash).toBe(
-            browserM7BgvVectors.batchLayoutBindingHash,
+            browserBgvRnsVectors.batchLayoutBindingHash,
         );
         expect(encodedResult).not.toMatchObject({ ok: false });
         const encoded = encodedResult as {
@@ -137,10 +136,10 @@ describe('transcript-core kernel in browsers', () => {
         };
 
         expect(encoded.plaintextRoot).toBe(
-            browserM7BgvVectors.encodedPlaintextRoot,
+            browserBgvRnsVectors.encodedPlaintextRoot,
         );
         expect(encoded.canonicalBytesHash512).toBe(
-            browserM7BgvVectors.encodedPlaintextHash,
+            browserBgvRnsVectors.encodedPlaintextHash,
         );
         expect(encoded.canonicalByteLength).toBe(90_441);
         expect(
@@ -151,7 +150,7 @@ describe('transcript-core kernel in browsers', () => {
         ).toMatchObject({
             ok: true,
             objectKind: 'plaintext',
-            plaintextRoot: browserM7BgvVectors.encodedPlaintextRoot,
+            plaintextRoot: browserBgvRnsVectors.encodedPlaintextRoot,
         });
     });
 });

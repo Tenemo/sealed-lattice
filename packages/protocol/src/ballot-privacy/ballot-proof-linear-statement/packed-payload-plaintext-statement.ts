@@ -1,6 +1,6 @@
 import type { ProtocolHash } from '@sealed-lattice/types';
 
-import { fieldModulus } from '../../plaintext-oracle/field.js';
+import { fieldModulus } from '../plaintext-oracle-helpers.js';
 import { type BallotPrivacyLoweredLinearRelationStatement } from '../relation-backend-lowering.js';
 import type { BallotPrivacyRelationCompilerInput } from '../relation-compiler.js';
 

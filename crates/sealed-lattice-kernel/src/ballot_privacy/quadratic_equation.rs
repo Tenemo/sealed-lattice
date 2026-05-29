@@ -338,6 +338,7 @@ impl LinearProofQuadraticEquation {
         Ok(accumulated_equation)
     }
 
+    #[cfg(test)]
     pub(crate) fn add(&self, other: &Self) -> CanonicalResult<Self> {
         self.require_same_shape(other)?;
 
@@ -357,8 +358,9 @@ impl LinearProofQuadraticEquation {
         let ring = self.ring();
         let constant_term = match (&self.constant_term, &partial.constant_term) {
             (Some(accumulated_constant), Some(partial_constant)) => {
-                let scaled_partial_constant = ring.scale(scalar, partial_constant)?;
-                Some(ring.add(accumulated_constant, &scaled_partial_constant)?)
+                let mut combined_constant = accumulated_constant.clone();
+                ring.scaled_add_assign(&mut combined_constant, scalar, partial_constant)?;
+                Some(combined_constant)
             }
             (Some(accumulated_constant), None) => Some(accumulated_constant.clone()),
             (None, None) => None,
@@ -372,10 +374,10 @@ impl LinearProofQuadraticEquation {
         Ok(Self {
             quadratic_terms: self
                 .quadratic_terms
-                .add(&partial.quadratic_terms.scale(scalar)?)?,
+                .add_scaled(&partial.quadratic_terms, scalar)?,
             linear_terms: self
                 .linear_terms
-                .add(&partial.linear_terms.scale(scalar)?)?,
+                .add_scaled(&partial.linear_terms, scalar)?,
             constant_term,
         })
     }
@@ -395,6 +397,7 @@ impl LinearProofQuadraticEquation {
         })
     }
 
+    #[cfg(test)]
     pub(crate) fn scale_by_polynomial(&self, polynomial: &[u64]) -> CanonicalResult<Self> {
         let ring = self.ring();
         ring.validate_coefficients(polynomial)?;
@@ -407,6 +410,44 @@ impl LinearProofQuadraticEquation {
                 .as_ref()
                 .map(|constant_term| ring.mul_negacyclic(polynomial, constant_term))
                 .transpose()?,
+        })
+    }
+
+    pub(crate) fn add_polynomial_scaled_partial(
+        &self,
+        partial: &Self,
+        polynomial: &[u64],
+    ) -> CanonicalResult<Self> {
+        self.require_same_shape(partial)?;
+        let ring = self.ring();
+        ring.validate_coefficients(polynomial)?;
+        let constant_term = match (&self.constant_term, &partial.constant_term) {
+            (Some(accumulated_constant), Some(partial_constant)) => {
+                let mut combined_constant = accumulated_constant.clone();
+                ring.mul_negacyclic_accumulate(
+                    &mut combined_constant,
+                    polynomial,
+                    partial_constant,
+                )?;
+                Some(combined_constant)
+            }
+            (Some(accumulated_constant), None) => Some(accumulated_constant.clone()),
+            (None, None) => None,
+            (None, Some(_)) => {
+                return Err(invalid_quadratic(
+                    "quadratic partial with a constant cannot be added to a constant-free accumulator",
+                ));
+            }
+        };
+
+        Ok(Self {
+            quadratic_terms: self
+                .quadratic_terms
+                .add_polynomial_scaled(&partial.quadratic_terms, polynomial)?,
+            linear_terms: self
+                .linear_terms
+                .add_polynomial_scaled(&partial.linear_terms, polynomial)?,
+            constant_term,
         })
     }
 
@@ -439,6 +480,7 @@ pub(crate) struct QuadraticAccumulatorPairs {
     pub(crate) challenge_scalars_by_pair: Vec<Vec<u64>>,
 }
 
+#[cfg(test)]
 fn add_optional_constants(
     ring: PolynomialRing,
     left_constant: &Option<Vec<u64>>,
@@ -466,13 +508,10 @@ fn fold_constant_terms(
         ring.left_rotate_negacyclic(paired_constant_term, ring.degree() / 2)?;
     let automorphic_rotated_paired_constant_term =
         ring.left_rotate_negacyclic(&ring.automorphism(paired_constant_term)?, ring.degree() / 2)?;
-    let folded_sum = ring.add(
-        &ring.add(constant_term, &automorphic_constant_term)?,
-        &ring.add(
-            &rotated_paired_constant_term,
-            &automorphic_rotated_paired_constant_term,
-        )?,
-    )?;
+    let mut folded_sum = constant_term.to_vec();
+    ring.add_assign(&mut folded_sum, &automorphic_constant_term)?;
+    ring.add_assign(&mut folded_sum, &rotated_paired_constant_term)?;
+    ring.add_assign(&mut folded_sum, &automorphic_rotated_paired_constant_term)?;
 
     ring.scale(inverse_two, &folded_sum)
 }

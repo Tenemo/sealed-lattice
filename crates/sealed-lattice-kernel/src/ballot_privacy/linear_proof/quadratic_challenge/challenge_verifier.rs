@@ -227,16 +227,18 @@ pub(super) fn recover_quadratic_equation_decompression_input(
     shifted_challenge_polynomial: &[u64],
     compressed_commitment_vector: &PolynomialVector,
 ) -> CanonicalResult<PolynomialVector> {
-    let commitment_product = commitment_key_matrix.multiply_vector(short_response_vector)?;
+    let mut recovery_input = commitment_key_matrix.multiply_vector(short_response_vector)?;
     let opening_product = opening_key_matrix.multiply_vector(randomness_response_vector)?;
-    let product_sum = commitment_product.add(&opening_product)?;
+    recovery_input.add_assign(&opening_product)?;
     let shifted_challenge_commitment = multiply_polynomial_by_vector(
         ring,
         shifted_challenge_polynomial,
         compressed_commitment_vector,
     )?;
 
-    product_sum.sub(&shifted_challenge_commitment)
+    recovery_input.sub_assign(&shifted_challenge_commitment)?;
+
+    Ok(recovery_input)
 }
 
 pub(super) fn recover_quadratic_equation_message_vector(
@@ -258,7 +260,10 @@ pub(super) fn recover_quadratic_equation_message_vector(
         randomness_response_vector,
     )?;
 
-    message_target_vector.sub(&message_binding_product)
+    let mut reconstructed_message_vector = message_target_vector;
+    reconstructed_message_vector.sub_assign(&message_binding_product)?;
+
+    Ok(reconstructed_message_vector)
 }
 
 pub(super) struct QuadraticVerifierPolynomialInput<'input> {
@@ -294,7 +299,7 @@ pub(super) fn recover_quadratic_equation_verifier_polynomial(
         input.folded_equation.linear_terms(),
         &witness_vector,
     )?;
-    verifier_polynomial = proof_ring.add(&verifier_polynomial, &linear_product)?;
+    proof_ring.add_assign(&mut verifier_polynomial, &linear_product)?;
     verifier_polynomial =
         proof_ring.mul_negacyclic(input.challenge_polynomial, &verifier_polynomial)?;
 
@@ -306,7 +311,7 @@ pub(super) fn recover_quadratic_equation_verifier_polynomial(
         input.target_commitment_vector,
         input.reconstructed_message_vector,
     )?;
-    verifier_polynomial = proof_ring.sub(&verifier_polynomial, &external_target_polynomial)?;
+    proof_ring.sub_assign(&mut verifier_polynomial, &external_target_polynomial)?;
 
     let quadratic_matrix_product = input
         .folded_equation
@@ -314,7 +319,9 @@ pub(super) fn recover_quadratic_equation_verifier_polynomial(
         .multiply_vector(&witness_vector)?;
     let quadratic_product =
         dot_polynomial_vectors(proof_ring, &witness_vector, &quadratic_matrix_product)?;
-    proof_ring.add(&verifier_polynomial, &quadratic_product)
+    proof_ring.add_assign(&mut verifier_polynomial, &quadratic_product)?;
+
+    Ok(verifier_polynomial)
 }
 
 pub(super) fn build_quadratic_equation_witness_vector(
@@ -356,7 +363,7 @@ pub(super) fn recover_linear_proof_external_target_polynomial(
         ));
     }
 
-    let scaled_external_target = ring.mul_negacyclic(
+    let mut external_target_polynomial = ring.mul_negacyclic(
         challenge_polynomial,
         &target_commitment_vector.entries()[QUADRATIC_MESSAGE_LENGTH],
     )?;
@@ -367,10 +374,12 @@ pub(super) fn recover_linear_proof_external_target_polynomial(
         randomness_response_vector,
     )?;
 
-    ring.sub(
-        &scaled_external_target,
+    ring.sub_assign(
+        &mut external_target_polynomial,
         &external_binding_product.entries()[0],
-    )
+    )?;
+
+    Ok(external_target_polynomial)
 }
 
 pub(super) fn recover_quadratic_equation_high_bits(
@@ -658,11 +667,11 @@ pub(super) fn multiply_matrix_row_range_by_vector(
     for row_index in row_start..row_start + row_count {
         let mut row_sum = vec![0_u64; ring.degree()];
         for column_index in 0..matrix.columns() {
-            let product = ring.mul_negacyclic(
+            ring.mul_negacyclic_accumulate(
+                &mut row_sum,
                 matrix.entry(row_index, column_index)?,
                 &vector.entries()[column_index],
             )?;
-            row_sum = ring.add(&row_sum, &product)?;
         }
         output_entries.push(row_sum);
     }
@@ -688,11 +697,11 @@ pub(super) fn dot_sparse_vector_with_dense_vector(
 
     let mut output = vec![0_u64; ring.degree()];
     for entry in sparse_vector.entries() {
-        let product = ring.mul_negacyclic(
+        ring.mul_negacyclic_accumulate(
+            &mut output,
             entry.coefficients(),
             &dense_vector.entries()[entry.position()],
         )?;
-        output = ring.add(&output, &product)?;
     }
 
     Ok(output)
@@ -718,8 +727,7 @@ pub(super) fn dot_polynomial_vectors(
     for (left_polynomial, right_polynomial) in
         left_vector.entries().iter().zip(right_vector.entries())
     {
-        let product = ring.mul_negacyclic(left_polynomial, right_polynomial)?;
-        output = ring.add(&output, &product)?;
+        ring.mul_negacyclic_accumulate(&mut output, left_polynomial, right_polynomial)?;
     }
 
     Ok(output)

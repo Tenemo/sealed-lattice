@@ -15,16 +15,34 @@ import {
     deriveComponentTargetVectorHash,
 } from './statement-hashes.js';
 
-const rowBatchesForComponent = (input: {
-    readonly component: BallotPrivacyBackendProofComponent;
-    readonly loweredStatement: BallotPrivacyLoweredLinearRelationStatement;
-}): readonly BackendRowBatchForComponentStatement[] => {
-    const rowBatchByName = new Map(
-        input.loweredStatement.backendStatement.rowBatches.map((rowBatch) => [
+const rowBatchLookupCache = new WeakMap<
+    BallotPrivacyLoweredLinearRelationStatement,
+    ReadonlyMap<string, BackendRowBatchForComponentStatement>
+>();
+
+const rowBatchLookupForStatement = (
+    loweredStatement: BallotPrivacyLoweredLinearRelationStatement,
+): ReadonlyMap<string, BackendRowBatchForComponentStatement> => {
+    const cachedLookup = rowBatchLookupCache.get(loweredStatement);
+    if (cachedLookup !== undefined) {
+        return cachedLookup;
+    }
+    const lookup = new Map(
+        loweredStatement.backendStatement.rowBatches.map((rowBatch) => [
             rowBatch.batchName,
             rowBatch,
         ]),
     );
+    rowBatchLookupCache.set(loweredStatement, lookup);
+
+    return lookup;
+};
+
+const rowBatchesForComponent = (input: {
+    readonly component: BallotPrivacyBackendProofComponent;
+    readonly loweredStatement: BallotPrivacyLoweredLinearRelationStatement;
+}): readonly BackendRowBatchForComponentStatement[] => {
+    const rowBatchByName = rowBatchLookupForStatement(input.loweredStatement);
 
     return input.component.rowBatchNames.map((rowBatchName) => {
         const rowBatch = rowBatchByName.get(rowBatchName);

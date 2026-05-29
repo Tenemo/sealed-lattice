@@ -7,7 +7,7 @@
     },
     {
       "path": "ballot-privacy/encoded-ballot-linear-relation-vectors.json",
-      "sha256": "d70e2d1341875e12e851e16e461940e28298724472248a093ffd46515c4bd350"
+      "sha256": "647c18f9d98ae712e112b1cf0c3462554cf2fcb866a32e850284f04493587a28"
     },
     {
       "path": "ballot-privacy/proof-backend-linear-vectors.json",
@@ -31,7 +31,7 @@
     },
     {
       "path": "election-foundation/board-finality.json",
-      "sha256": "a7224559d05080268b92314b128f5dd735988486064e5df33b8c961156130ee8"
+      "sha256": "6563860a07a6a2ccc19017905e9048795dafe3994829d97742d8054a035f1550"
     },
     {
       "path": "election-foundation/capability-refusals.json",
@@ -75,15 +75,15 @@
     },
     {
       "path": "pvss-ballot/aggregate-shares.json",
-      "sha256": "93c7b78071d93595b9b467da7b2d077a73e1187514a73fab431eac62e9adef09"
+      "sha256": "b4ff5261ad028bba242ca7481aec6348d9d4d6c69eed095278dcd8acda3a8f01"
     },
     {
       "path": "pvss-ballot/ballot-algebra.json",
-      "sha256": "75de7be57915e92241c0d6f7df9e8bda96e7eb54fbe048d07ed76ee3244a4e0f"
+      "sha256": "35a187e9dd688001828aefdcde3f3da16f5f082e0181a87154578c1496ef7662"
     },
     {
       "path": "pvss-ballot/canonical-ballot-set.json",
-      "sha256": "13f8ab3e46a964942b00b9245363591e4a0ad3cfb5063f8a81143562edf85100"
+      "sha256": "0042bf6301df0b30dbf83b4f1d91f1a81dad212e00c30fd722d926a234defd7b"
     },
     {
       "path": "transcript-core/golden-transcript-core.json",

@@ -68,17 +68,21 @@ fn cyclic_ntt(
     while butterfly_width <= length {
         let half_width = butterfly_width / 2;
         let step_root = pow_mod(root, (length / butterfly_width) as u64, modulus)?;
+        let mut stage_twiddles = Vec::with_capacity(half_width);
+        let mut twiddle = 1_u64;
+        for _ in 0..half_width {
+            stage_twiddles.push(twiddle);
+            twiddle = mul_mod(twiddle, step_root, modulus)?;
+        }
         let mut block_start = 0_usize;
         while block_start < length {
-            let mut twiddle = 1_u64;
-            for offset in 0..half_width {
+            for (offset, stage_twiddle) in stage_twiddles.iter().enumerate().take(half_width) {
                 let left_index = block_start + offset;
                 let right_index = left_index + half_width;
-                let right_value = mul_mod(values[right_index], twiddle, modulus)?;
+                let right_value = mul_mod(values[right_index], *stage_twiddle, modulus)?;
                 let left_value = values[left_index];
                 values[left_index] = add_mod(left_value, right_value, modulus)?;
                 values[right_index] = sub_mod(left_value, right_value, modulus)?;
-                twiddle = mul_mod(twiddle, step_root, modulus)?;
             }
             block_start += butterfly_width;
         }

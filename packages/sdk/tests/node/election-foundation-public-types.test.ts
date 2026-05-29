@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import type * as publicTypes from '../../src/index.js';
+import type * as publicTypes from '#packages/sdk/src/index.js';
 
 type BlockedTargetAcceptanceTypes = [
     // @ts-expect-error target-acceptance shell types are intentionally not public.
@@ -41,18 +41,18 @@ type BlockedPvssBallotTypes = [
     publicTypes.TestAggregateShare,
 ];
 
-type BlockedM9BridgeTypes = [
-    // @ts-expect-error M9 bridge proof records remain internal until claim-bearing verification exists.
+type BlockedEncryptedAggregateBridgeTypes = [
+    // @ts-expect-error encrypted aggregate bridge proof records remain internal until claim-bearing verification exists.
     publicTypes.BridgeProofRecord,
-    // @ts-expect-error M9 aggregate contributions remain internal until claim-bearing verification exists.
+    // @ts-expect-error encrypted aggregate bridge aggregate contributions remain internal until claim-bearing verification exists.
     publicTypes.AggregateContribution,
-    // @ts-expect-error M9 aggregate-ready handoff records remain internal until claim-bearing verification exists.
+    // @ts-expect-error encrypted aggregate bridge aggregate-ready handoff records remain internal until claim-bearing verification exists.
     publicTypes.AggregateReadyRecord,
-    // @ts-expect-error M9 aggregate selection inputs remain internal until claim-bearing verification exists.
+    // @ts-expect-error encrypted aggregate bridge aggregate selection inputs remain internal until claim-bearing verification exists.
     publicTypes.AggregateContributionSelectionInput,
-    // @ts-expect-error M9 aggregate selection outputs remain internal until claim-bearing verification exists.
+    // @ts-expect-error encrypted aggregate bridge aggregate selection outputs remain internal until claim-bearing verification exists.
     publicTypes.AggregateContributionSelection,
-    // @ts-expect-error M9 aggregate-ready build inputs remain internal until claim-bearing verification exists.
+    // @ts-expect-error encrypted aggregate bridge aggregate-ready build inputs remain internal until claim-bearing verification exists.
     publicTypes.AggregateReadyRecordBuildInput,
 ];
 
@@ -73,7 +73,7 @@ type PublicFoundationTypes = [
 type PublicTypeSurfaceProbe = {
     readonly blockedPlaintextOracleTypes: BlockedPlaintextOracleTypes;
     readonly blockedPvssBallotTypes: BlockedPvssBallotTypes;
-    readonly blockedM9BridgeTypes: BlockedM9BridgeTypes;
+    readonly blockedEncryptedAggregateBridgeTypes: BlockedEncryptedAggregateBridgeTypes;
     readonly blockedTargetAcceptanceTypes: BlockedTargetAcceptanceTypes;
     readonly publicFoundationTypes: PublicFoundationTypes;
 };

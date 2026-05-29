@@ -7,6 +7,7 @@ import type {
     TranscriptCoreFixtureVerification,
 } from '@sealed-lattice/types';
 
+import type { BridgeRandomnessSource } from './kernel-randomness.js';
 import type {
     AggregateBridgeEncryptionGeneration,
     AggregateBridgeEncryptionVerification,
@@ -209,6 +210,8 @@ export type TranscriptCoreKernel = {
         readonly heParamHash: ProtocolHash;
         readonly setupPackage: unknown;
         readonly proverRandomnessHex?: string;
+        readonly encryptionRandomnessSeedHex?: string;
+        readonly developmentRandomnessOverrideAcknowledged?: boolean;
         readonly includeCanonicalBytesHex?: boolean;
     }): AggregateBridgeEncryptionGeneration | BallotPrivacyKernelVerification;
     evaluateAggregateBridgeRelation(input: {
@@ -220,6 +223,8 @@ export type TranscriptCoreKernel = {
         readonly heParamHash: ProtocolHash;
         readonly setupPackage: unknown;
         readonly proverRandomnessHex?: string;
+        readonly encryptionRandomnessSeedHex?: string;
+        readonly developmentRandomnessOverrideAcknowledged?: boolean;
     }): AggregateBridgeRelationEvaluation | BallotPrivacyKernelVerification;
     verifyAggregateBridgeEncryption(input: {
         readonly aggregateSelectionPolicyHash: ProtocolHash;
@@ -441,6 +446,10 @@ type TranscriptCoreKernelCommand =
           readonly heParamHash: ProtocolHash;
           readonly setupPackage: unknown;
           readonly proverRandomnessHex: string;
+          readonly proverRandomnessSource: BridgeRandomnessSource;
+          readonly encryptionRandomnessSeedHex: string;
+          readonly encryptionRandomnessSeedSource: BridgeRandomnessSource;
+          readonly developmentRandomnessOverrideAcknowledged?: boolean;
           readonly includeCanonicalBytesHex?: boolean;
       }
     | {
@@ -453,6 +462,10 @@ type TranscriptCoreKernelCommand =
           readonly heParamHash: ProtocolHash;
           readonly setupPackage: unknown;
           readonly proverRandomnessHex: string;
+          readonly proverRandomnessSource: BridgeRandomnessSource;
+          readonly encryptionRandomnessSeedHex: string;
+          readonly encryptionRandomnessSeedSource: BridgeRandomnessSource;
+          readonly developmentRandomnessOverrideAcknowledged?: boolean;
       }
     | {
           readonly command: 'VerifyAggregateBridgeEncryption';

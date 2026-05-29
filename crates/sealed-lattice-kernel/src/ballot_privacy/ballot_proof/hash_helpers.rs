@@ -1,5 +1,24 @@
 use super::*;
 
+pub(super) fn proof_bytes_size_from_lower_hex(
+    proof_bytes_hex: &str,
+    allow_empty: bool,
+) -> Option<u64> {
+    if !proof_bytes_hex.len().is_multiple_of(2)
+        || !proof_bytes_hex
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return None;
+    }
+    let proof_size_bytes = proof_bytes_hex.len() as u64 / 2;
+    if !allow_empty && proof_size_bytes == 0 {
+        return None;
+    }
+
+    Some(proof_size_bytes)
+}
+
 pub(crate) fn insert_optional_hash_field(
     payload: &mut Map<String, Value>,
     source: &Value,
@@ -31,6 +50,7 @@ pub(crate) fn derive_ballot_proof_challenge_hash(
         "proofRoot".to_string(),
         json!(string_field(ballot_proof, "proofRoot")?),
     );
+    challenge_payload.insert("purpose".to_string(), json!("ballot-proof-challenge-v1"));
     challenge_payload.insert(
         "relationStatementHash".to_string(),
         json!(string_field(ballot_proof, "relationStatementHash")?),

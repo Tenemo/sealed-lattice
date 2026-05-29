@@ -200,8 +200,11 @@ describe('target acceptance and local replay shells', () => {
                 record: {
                     ...signedLocalReplayRecord,
                     evaluationProofRecordHash: deriveProtocolHash(
-                        'EvaluationProofRecordHash',
-                        { proof: 'wrong' },
+                        'ChallengeDomainHash',
+                        {
+                            payload: { proof: 'wrong' },
+                            purpose: 'fixture-evaluation-proof-record-v1',
+                        },
                     ),
                 },
                 recordInclusionProof: localReplayInclusionProof,
@@ -269,8 +272,9 @@ describe('target acceptance and local replay shells', () => {
                 boardEvidence,
                 decryptionShare: {
                     ...signedDecryptionShare,
-                    cpadProfileHash: deriveProtocolHash('CPADProfileHash', {
-                        profile: 'wrong',
+                    cpadProfileHash: deriveProtocolHash('ChallengeDomainHash', {
+                        payload: { profile: 'wrong' },
+                        purpose: 'fixture-cpad-profile-v1',
                     }),
                 },
                 decryptionShareInclusionProof: inclusionProofs[0],
@@ -292,8 +296,11 @@ describe('target acceptance and local replay shells', () => {
                 decryptionShare: {
                     ...signedDecryptionShare,
                     targetDecryptionCiphertextHash: deriveProtocolHash(
-                        'TargetDecryptionCiphertextHash',
-                        { target: 'wrong' },
+                        'ChallengeDomainHash',
+                        {
+                            payload: { target: 'wrong' },
+                            purpose: 'fixture-target-decryption-ciphertext-v1',
+                        },
                     ),
                 },
                 decryptionShareInclusionProof: inclusionProofs[0],

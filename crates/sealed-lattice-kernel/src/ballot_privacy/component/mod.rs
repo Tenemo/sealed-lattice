@@ -15,19 +15,21 @@ pub(crate) use backend_sparse::{
 };
 pub(crate) use bundle_validation::{
     collect_ballot_component_bundle_refusals, collect_ballot_component_proof_bundle_refusals,
-    collect_component_proof_statement_plan_shape_refusals, supplied_component_proof_statement_hash,
+    collect_component_proof_statement_descriptor_shape_refusals,
+    supplied_component_proof_statement_hash,
 };
 pub(crate) use contracts::{
     ALLOWED_BALLOT_PROOF_COMPONENT_STATEMENT_FORMATS, COMPONENT_BUNDLE_INCOMPLETE_COVERAGE,
     DENSE_COMPONENT_PROOF_STATEMENT_FORMAT, FULL_BALLOT_PROOF_ENCODING_PROFILE_ID,
     FULL_BALLOT_PROOF_PARAMETER_PROFILE_ID, FULL_BALLOT_PROOF_PROJECTION_COVERAGE,
-    MAX_GENERIC_SPARSE_COMPONENT_SHORT_RESPONSE_VECTOR_LENGTH, PUBLIC_ZERO_PROOF_STATEMENT_FORMAT,
-    RECEIVER_KEY_PROOF_ENCODING_PROFILE_ID, RECEIVER_KEY_PROOF_PARAMETER_PROFILE_ID,
-    REQUIRED_BALLOT_PROOF_COMPONENT_IDS, SHARE_COMMITMENT_MODULE_DEGREE,
-    SHARE_COMMITMENT_MODULE_RANK, SHARE_COMMITMENT_OPENING_DIMENSION,
-    SPARSE_COMPONENT_PROOF_STATEMENT_FORMAT, STRUCTURED_RECEIVER_ENCRYPTION_PROOF_STATEMENT_FORMAT,
+    MAX_GENERIC_SPARSE_COMPONENT_SHORT_RESPONSE_VECTOR_LENGTH,
+    PUBLIC_BINDING_CHECK_PROOF_STATEMENT_FORMAT, RECEIVER_KEY_PROOF_ENCODING_PROFILE_ID,
+    RECEIVER_KEY_PROOF_PARAMETER_PROFILE_ID, REQUIRED_BALLOT_PROOF_COMPONENT_IDS,
+    SHARE_COMMITMENT_MODULE_DEGREE, SHARE_COMMITMENT_MODULE_RANK,
+    SHARE_COMMITMENT_OPENING_DIMENSION, SPARSE_COMPONENT_PROOF_STATEMENT_FORMAT,
+    STRUCTURED_RECEIVER_ENCRYPTION_PROOF_STATEMENT_FORMAT,
     STRUCTURED_SHARE_COMMITMENT_PROOF_STATEMENT_FORMAT,
-    component_proof_bytes_availability_is_expected, component_proof_bytes_must_be_empty,
+    component_proof_backend_requirement_is_expected, component_proof_bytes_must_be_empty,
     component_proof_statement_format_is_expected, encoded_share_vector_width,
     expected_component_proof_statement_format_label,
 };

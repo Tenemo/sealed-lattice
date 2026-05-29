@@ -1,6 +1,6 @@
 use super::*;
 
-pub(super) const BRIDGE_PROVER_RANDOMNESS_BYTE_LENGTH: usize = 32;
+pub(super) const BRIDGE_RANDOMNESS_BYTE_LENGTH: usize = 32;
 const MAX_BRIDGE_PROOF_BYTE_LENGTH: usize = 256 * 1024 * 1024;
 
 pub(super) fn validate_hex_field(value: &str, field_name: &str) -> CanonicalResult<()> {
@@ -10,17 +10,91 @@ pub(super) fn validate_hex_field(value: &str, field_name: &str) -> CanonicalResu
             format!("{field_name} must be non-empty even-length hex"),
         ));
     }
-    decode_hex(value)?;
+    if !value
+        .bytes()
+        .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidHex,
+            format!("{field_name} must use lowercase hexadecimal bytes"),
+        ));
+    }
+
+    Ok(())
+}
+
+fn validate_bridge_randomness_hex(value: &str, field_name: &str) -> CanonicalResult<()> {
+    validate_hex_field(value, field_name)?;
+    if value.len() != BRIDGE_RANDOMNESS_BYTE_LENGTH * 2 {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidHex,
+            format!("{field_name} must encode exactly 32 bytes"),
+        ));
+    }
 
     Ok(())
 }
 
 pub(super) fn validate_prover_randomness_hex(value: &str) -> CanonicalResult<()> {
-    validate_hex_field(value, "proverRandomnessHex")?;
-    if value.len() != BRIDGE_PROVER_RANDOMNESS_BYTE_LENGTH * 2 {
+    validate_bridge_randomness_hex(value, "proverRandomnessHex")
+}
+
+pub(super) fn validate_encryption_randomness_seed_hex(value: &str) -> CanonicalResult<()> {
+    validate_bridge_randomness_hex(value, "encryptionRandomnessSeedHex")
+}
+
+pub(super) fn validate_distinct_bridge_randomness_seeds(
+    prover_randomness_hex: &str,
+    encryption_randomness_seed_hex: &str,
+) -> CanonicalResult<()> {
+    if prover_randomness_hex == encryption_randomness_seed_hex {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidHex,
-            "proverRandomnessHex must encode exactly 32 bytes",
+            CanonicalErrorCode::InvalidFixture,
+            "proverRandomnessHex and encryptionRandomnessSeedHex must be distinct bridge randomness domains",
+        ));
+    }
+
+    Ok(())
+}
+
+pub(super) fn validate_bridge_randomness_source(
+    value: &str,
+    field_name: &str,
+) -> CanonicalResult<()> {
+    if value != BRIDGE_RANDOMNESS_SOURCE_FRESH_CSPRNG
+        && value != BRIDGE_RANDOMNESS_SOURCE_DEVELOPMENT_DETERMINISTIC
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            format!(
+                "{field_name} must identify fresh CSPRNG or development deterministic randomness"
+            ),
+        ));
+    }
+
+    Ok(())
+}
+
+pub(super) fn validate_development_randomness_acknowledgement(
+    request: &Value,
+    prover_randomness_source: &str,
+    encryption_randomness_seed_source: &str,
+    object_name: &str,
+) -> CanonicalResult<()> {
+    let development_randomness_used = prover_randomness_source
+        == BRIDGE_RANDOMNESS_SOURCE_DEVELOPMENT_DETERMINISTIC
+        || encryption_randomness_seed_source == BRIDGE_RANDOMNESS_SOURCE_DEVELOPMENT_DETERMINISTIC;
+    if development_randomness_used
+        && request
+            .get("developmentRandomnessOverrideAcknowledged")
+            .and_then(Value::as_bool)
+            != Some(true)
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            format!(
+                "{object_name}.developmentRandomnessOverrideAcknowledged must be true when caller-supplied deterministic bridge randomness is used"
+            ),
         ));
     }
 
@@ -55,19 +129,19 @@ pub(super) fn parse_bridge_proof_value(proof_bytes_hex: &str) -> CanonicalResult
     let proof_json = std::str::from_utf8(&proof_bytes).map_err(|error| {
         CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            format!("M9 bridge proof bytes are not UTF-8 JSON: {error}"),
+            format!("encrypted aggregate bridge proof bytes are not UTF-8 JSON: {error}"),
         )
     })?;
     let proof_value: Value = serde_json::from_str(proof_json).map_err(|error| {
         CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            format!("M9 bridge proof bytes are not canonical JSON: {error}"),
+            format!("encrypted aggregate bridge proof bytes are not canonical JSON: {error}"),
         )
     })?;
-    if canonical_json(&proof_value)?.as_bytes() != proof_bytes.as_slice() {
+    if !canonical_json_matches_bytes(&proof_value, &proof_bytes)? {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "M9 bridge proof bytes must use canonical JSON encoding",
+            "encrypted aggregate bridge proof bytes must use canonical JSON encoding",
         ));
     }
 
@@ -84,7 +158,7 @@ pub(super) fn require_equal_string(
     if actual_value != expected_value {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
-            format!("M9 bridge {label} does not match the expected binding"),
+            format!("encrypted aggregate bridge {label} does not match the expected binding"),
         ));
     }
 
@@ -101,7 +175,24 @@ pub(super) fn require_equal_u64(
     if actual_value != expected_value {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
-            format!("M9 bridge {label} does not match the expected binding"),
+            format!("encrypted aggregate bridge {label} does not match the expected binding"),
+        ));
+    }
+
+    Ok(())
+}
+
+pub(super) fn require_equal_bool(
+    value: &Value,
+    field_name: &str,
+    expected_value: bool,
+    label: &str,
+) -> CanonicalResult<()> {
+    let actual_value = read_bool_object_field(value, field_name, label)?;
+    if actual_value != expected_value {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            format!("encrypted aggregate bridge {label} does not match the expected binding"),
         ));
     }
 
@@ -118,7 +209,9 @@ pub(super) fn require_matching_string_field(
     if actual_value != expected_value {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
-            format!("M9 bridge statement {label} does not match its source object"),
+            format!(
+                "encrypted aggregate bridge statement {label} does not match its source object"
+            ),
         ));
     }
 
@@ -200,11 +293,13 @@ pub(super) fn validate_bridge_proof_public_shell(proof_value: &Value) -> Canonic
                     "aggregateRelationSubproofHex",
                     "aggregateRelationSubproofSizeBytes",
                     "bgvEncryptionProofSubrelation",
+                    "bgvEncryptionKeyMaterialKind",
                     "bgvPublicKeyRoot",
                     "bgvRandomnessBoundProofStatusHash",
                     "bgvRandomnessBoundProofStatusEvidence",
                     "bridgeClaimClosureVerified",
                     "bridgeClaimVerificationStatus",
+                    "claimBearingBridgeEncryption",
                     "bridgeProofProfileHash",
                     "bridgeProofStatement",
                     "bridgeProofStatementHash",
@@ -213,7 +308,10 @@ pub(super) fn validate_bridge_proof_public_shell(proof_value: &Value) -> Canonic
                     "bridgeSharedWitnessProofHash",
                     "bridgeVariantEvidenceStatus",
                     "ciphertextRoot",
+                    "collectivePublicKeyCoefficientRoot",
                     "collectivePublicKeyRoot",
+                    "developmentKeyOnly",
+                    "encryptionRandomnessSeedSource",
                     "encryptedAggregateInputRoot",
                     "encryptedAggregateShareCiphertextRoot",
                     "finalBridgeTheoremClosure",
@@ -225,11 +323,14 @@ pub(super) fn validate_bridge_proof_public_shell(proof_value: &Value) -> Canonic
                     "profileId",
                     "proofBackend",
                     "proverRandomnessPublicHash",
+                    "proverRandomnessSource",
+                    "randomnessSourceEvidence",
                     "relationScope",
                     "scopedBridgeRelationClosure",
                     "sharedWitnessZeroKnowledgeStatusHash",
                     "sharedWitnessZeroKnowledgeStatusEvidence",
                     "singleContributionBridgeRelationChecked",
+                    "thresholdDecryptable",
                 ],
             )?;
             let shared_witness_proof =
@@ -323,7 +424,7 @@ pub(super) fn validate_bridge_proof_public_shell(proof_value: &Value) -> Canonic
         _ => {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::ProfileComponentMismatch,
-                "M9 bridge proof object type is not supported",
+                "encrypted aggregate bridge proof object type is not supported",
             ));
         }
     }
@@ -345,7 +446,9 @@ pub(super) fn reject_unexpected_object_fields(
         if !allowed_fields.contains(&field_name.as_str()) {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::ProfileComponentMismatch,
-                format!("M9 bridge proof object contains unsupported field {path}.{field_name}"),
+                format!(
+                    "encrypted aggregate bridge proof object contains unsupported field {path}.{field_name}"
+                ),
             ));
         }
     }
@@ -418,7 +521,7 @@ pub(super) fn validate_bridge_relation_gap_status(proof_value: &Value) -> Canoni
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
-            "M9 bridge proof relation gap status must remain pending until the shared-witness proof verifier closes",
+            "encrypted aggregate bridge proof relation gap status must remain pending until the shared-witness proof verifier closes",
         ));
     }
 
@@ -429,6 +532,14 @@ pub(super) fn validate_bridge_encryption_public_shell(
     bridge_encryption: &Value,
 ) -> CanonicalResult<()> {
     reject_forbidden_public_bridge_fields(bridge_encryption, "bridgeEncryption")?;
+    if let Some(bridge_proof_bytes_hash) = string_field(bridge_encryption, "bridgeProofBytesHash")
+        && !is_protocol_hash(bridge_proof_bytes_hash)
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "bridgeEncryption.bridgeProofBytesHash must be a nonzero lowercase protocol hash",
+        ));
+    }
     let disclosure = required_json_field(
         bridge_encryption,
         "privateMaterialDisclosure",
@@ -447,7 +558,7 @@ pub(super) fn validate_bridge_encryption_public_shell(
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
-            "M9 bridge encryption shell has an unsupported bridge proof verification status",
+            "encrypted aggregate bridge encryption shell has an unsupported bridge proof verification status",
         ));
     }
     validate_sampled_public_relation_check_policy(bridge_encryption)?;
@@ -482,7 +593,7 @@ pub(super) fn validate_sampled_public_relation_check_policy(
         {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::ProfileComponentMismatch,
-                "M9 bridge sampled public relation checks are diagnostic only and cannot accept bridge proof verification",
+                "encrypted aggregate bridge sampled public relation checks are diagnostic only and cannot accept bridge proof verification",
             ));
         }
     }
@@ -531,7 +642,7 @@ pub(super) fn validate_sampled_public_relation_check_policy(
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
-            "M9 bridge sampled public relation check policy must remain diagnostic-only and proof-rejecting",
+            "encrypted aggregate bridge sampled public relation check policy must remain diagnostic-only and proof-rejecting",
         ));
     }
 
@@ -554,7 +665,7 @@ pub(super) fn validate_bridge_private_material_disclosure_flags(
             return Err(CanonicalError::new(
                 CanonicalErrorCode::ProfileComponentMismatch,
                 format!(
-                    "M9 bridge {object_name} private material disclosure flag {field_name} must be false"
+                    "encrypted aggregate bridge {object_name} private material disclosure flag {field_name} must be false"
                 ),
             ));
         }
@@ -579,7 +690,7 @@ pub(super) fn reject_forbidden_public_bridge_fields(
                     return Err(CanonicalError::new(
                         CanonicalErrorCode::ProfileComponentMismatch,
                         format!(
-                            "M9 bridge public proof object exposes forbidden field {path}.{field_name}"
+                            "encrypted aggregate bridge public proof object exposes forbidden field {path}.{field_name}"
                         ),
                     ));
                 }

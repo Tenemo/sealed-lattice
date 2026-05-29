@@ -1,25 +1,3 @@
-import {
-    checkpointPayload,
-    checkpointRecord,
-    mandatoryProofBenchmarkCheckpointNames,
-    type ProofBenchmarkCheckpointStore,
-} from './ballot-privacy-proof-benchmark-checkpoints';
-import {
-    captureRuntimeMemorySnapshot,
-    type RuntimeMemorySnapshot,
-} from './ballot-privacy-proof-benchmark-memory';
-import {
-    componentProofMetrics,
-    numberValue,
-    recordValue,
-    requireGenerationProofSize,
-    verifyMandatoryBallotProofBenchmarkShape,
-} from './ballot-privacy-proof-benchmarks/shape';
-import { createMandatoryProfileBallotProofRecordBenchmarkFixture } from './ballot-privacy-proof-record-generation-fixtures';
-import { runTimedTestStep, type TimedTestStepMetric } from './timed-test-steps';
-
-export { verifyMandatoryBallotProofBenchmarkShape };
-
 import { deriveProtocolHash } from '#packages/crypto/src/index';
 import {
     aggregateWitnessFromReceiverPlaintext,
@@ -56,6 +34,30 @@ import type {
     BallotPrivacyReceiverKeyProofGeneration,
     TranscriptCoreKernel,
 } from '#packages/wasm/src/transcript-core-bridge';
+import {
+    checkpointPayload,
+    checkpointRecord,
+    mandatoryProofBenchmarkCheckpointNames,
+    type ProofBenchmarkCheckpointStore,
+} from '#tests/support/ballot-privacy-proof-benchmark-checkpoints';
+import {
+    captureRuntimeMemorySnapshot,
+    type RuntimeMemorySnapshot,
+} from '#tests/support/ballot-privacy-proof-benchmark-memory';
+import {
+    componentProofMetrics,
+    numberValue,
+    recordValue,
+    requireGenerationProofSize,
+    verifyMandatoryBallotProofBenchmarkShape,
+} from '#tests/support/ballot-privacy-proof-benchmarks/shape';
+import { createMandatoryProfileBallotProofRecordBenchmarkFixture } from '#tests/support/ballot-privacy-proof-record-generation-fixtures';
+import {
+    runTimedTestStep,
+    type TimedTestStepMetric,
+} from '#tests/support/timed-test-steps';
+
+export { verifyMandatoryBallotProofBenchmarkShape };
 
 type ReceiverEncryptionPublicKeyMaterialForBenchmark = {
     readonly publicKeyVector: readonly (readonly number[])[];

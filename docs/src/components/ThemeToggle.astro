@@ -10,28 +10,14 @@
     aria-label="Switch to light theme"
     aria-pressed="true"
 >
-    <svg
+    <span
         class="sl-theme-toggle__icon sl-theme-toggle__icon--sun"
-        viewBox="0 0 20 20"
-        fill="currentColor"
         aria-hidden="true"
-    >
-        <path
-            d="M10 2a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 10 2Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 10 15Zm0-8a3 3 0 1 0 0 6 3 3 0 0 0 0-6Zm5.657-1.596a.75.75 0 1 0-1.06-1.06l-1.061 1.06a.75.75 0 0 0 1.06 1.06l1.06-1.06ZM6.464 14.596a.75.75 0 1 0-1.06-1.06l-1.06 1.06a.75.75 0 1 0 1.06 1.06l1.06-1.06ZM18 10a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 18 10ZM5 10a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 5 10Zm9.596 5.657a.75.75 0 0 0 1.06-1.06l-1.06-1.061a.75.75 0 1 0-1.06 1.06l1.06 1.06ZM5.404 6.464a.75.75 0 0 0 1.06-1.06l-1.06-1.06a.75.75 0 1 0-1.061 1.06l1.06 1.06Z"
-        />
-    </svg>
-    <svg
+    ></span>
+    <span
         class="sl-theme-toggle__icon sl-theme-toggle__icon--moon"
-        viewBox="0 0 20 20"
-        fill="currentColor"
         aria-hidden="true"
-    >
-        <path
-            fill-rule="evenodd"
-            d="M7.455 2.004a.75.75 0 0 1 .26.77 7 7 0 0 0 9.958 7.967.75.75 0 0 1 1.067.853A8.5 8.5 0 1 1 6.647 1.921a.75.75 0 0 1 .808.083Z"
-            clip-rule="evenodd"
-        />
-    </svg>
+    ></span>
 </button>
 
 <script is:inline>
@@ -103,8 +89,26 @@
         outline-offset: 2px;
     }
     .sl-theme-toggle__icon {
-        width: 1.1rem;
-        height: 1.1rem;
+        position: relative;
+        width: 1.15rem;
+        height: 1.15rem;
+    }
+    .sl-theme-toggle__icon--sun {
+        border: 0.18rem solid currentColor;
+        border-radius: 999px;
+        box-shadow:
+            0 -0.48rem 0 -0.3rem currentColor,
+            0 0.48rem 0 -0.3rem currentColor,
+            0.48rem 0 0 -0.3rem currentColor,
+            -0.48rem 0 0 -0.3rem currentColor,
+            0.34rem 0.34rem 0 -0.3rem currentColor,
+            -0.34rem 0.34rem 0 -0.3rem currentColor,
+            0.34rem -0.34rem 0 -0.3rem currentColor,
+            -0.34rem -0.34rem 0 -0.3rem currentColor;
+    }
+    .sl-theme-toggle__icon--moon {
+        border-radius: 999px;
+        box-shadow: inset 0.34rem -0.12rem 0 0 currentColor;
     }
     :root[data-theme="light"] .sl-theme-toggle__icon--sun,
     :root:not([data-theme="light"]) .sl-theme-toggle__icon--moon {

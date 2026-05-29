@@ -1,11 +1,11 @@
 import { deriveProtocolHash } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
-import { fieldModulus } from '../../plaintext-oracle/field.js';
 import {
     deriveShareCommitmentMessageMatrix,
     deriveShareCommitmentRandomnessMatrix,
 } from '../lattice-primitives.js';
+import { fieldModulus } from '../plaintext-oracle-helpers.js';
 
 import type {
     BallotPrivacyAlgebraicRelationRow,

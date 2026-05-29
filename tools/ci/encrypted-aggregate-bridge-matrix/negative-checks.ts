@@ -359,6 +359,8 @@ const bridgeWithMutatedProof = (
             bridgeProofProfileHash: bridgeEncryption.bridgeProofProfileHash,
             bridgeProofStatementHash: bridgeEncryption.bridgeProofStatementHash,
             collectivePublicKeyRoot: bridgeEncryption.collectivePublicKeyRoot,
+            collectivePublicKeyCoefficientRoot:
+                bridgeEncryption.collectivePublicKeyCoefficientRoot,
             encryptedAggregateShareCiphertextRoot:
                 bridgeEncryption.encryptedAggregateShareCiphertextRoot,
             ...(typeof proof.bridgeSharedWitnessProofHash === 'string'
@@ -974,10 +976,10 @@ export const runSentinelNegativeChecks = (input: {
     };
     const checks = [
         verifyMutatedProof(
-            'wrong M6 opening',
+            'wrong aggregate derivation opening',
             expectedVerifierFailure(
                 'aggregate opening response commitment',
-                /aggregate relation commitment|shared-witness|M6|opening/iu,
+                /aggregate relation commitment|shared-witness|aggregate derivation|opening/iu,
             ),
             mutateSharedWitnessResponse('aggregateOpeningResponseHex'),
         ),
@@ -1248,6 +1250,27 @@ export const runSentinelNegativeChecks = (input: {
             },
         ),
         verifyMutatedPublicInput(
+            'wrong collective public key coefficient material',
+            expectedVerifierFailure(
+                'collective public key coefficient root binding',
+                /collective public key|coefficient|setup|root|hash/iu,
+            ),
+            {
+                setupPackage: {
+                    ...input.setupPackage,
+                    collectivePublicKey: {
+                        ...(input.setupPackage.collectivePublicKey as Record<
+                            string,
+                            unknown
+                        >),
+                        collectivePublicKeyCoefficientRoot: lowerHexHash(
+                            'wrong-collective-public-key-coefficients',
+                        ),
+                    },
+                },
+            },
+        ),
+        verifyMutatedPublicInput(
             'wrong setup root',
             expectedVerifierFailure(
                 'setup package root binding',
@@ -1299,7 +1322,7 @@ export const runSentinelNegativeChecks = (input: {
             },
         ),
         verifyMutatedProof(
-            'same M6 subproof but different BGV plaintext',
+            'same aggregate derivation subproof but different BGV plaintext',
             expectedVerifierFailure(
                 'cross-relation plaintext binding',
                 /plaintext|aggregate relation|shared-witness|BGV/iu,
@@ -1309,7 +1332,7 @@ export const runSentinelNegativeChecks = (input: {
             },
         ),
         verifyMutatedProof(
-            'same BGV ciphertext but different M6 commitment',
+            'same BGV ciphertext but different aggregate derivation commitment',
             expectedVerifierFailure(
                 'cross-relation commitment binding',
                 /aggregate relation|commitment|shared-witness|BGV/iu,

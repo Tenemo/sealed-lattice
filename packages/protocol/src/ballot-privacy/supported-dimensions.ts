@@ -4,8 +4,6 @@ import type {
     RefusalRecord,
 } from '@sealed-lattice/types';
 
-import { createRefusal } from '../common/verification-helpers.js';
-
 import { deriveBallotPrivacyRosterProfileEvidenceHash } from './objects/object-contracts.js';
 import {
     ballotPrivacyMaximumOptionCount,
@@ -17,6 +15,7 @@ import {
     ballotPrivacyMinimumUnsafeParticipantCount,
     getBallotPrivacyEncodedShareVectorWidth,
 } from './protocol-parameters.js';
+import { createRefusal } from './verification-helpers.js';
 
 const isPositiveSafeInteger = (value: number): boolean =>
     Number.isSafeInteger(value) && value > 0 && !Object.is(value, -0);
