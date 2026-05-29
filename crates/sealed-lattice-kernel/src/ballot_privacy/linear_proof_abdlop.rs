@@ -29,7 +29,7 @@ pub fn validate_abdlop_linear_opening(
     public_randomness: &[u8; 32],
     decoded_proof: &DecodedLinearProof,
     proof_encoding: &LinearProofEncoding,
-) -> CanonicalResult<AbdlopLinearOpeningSummary> {
+) -> CanonicalResult<(AbdlopLinearOpeningSummary, PolynomialVector)> {
     proof_encoding.validate()?;
     let proof_profile = linear_proof_profile_for_encoding(proof_encoding)?;
 
@@ -89,13 +89,16 @@ pub fn validate_abdlop_linear_opening(
     let recovered_high_bits_hash =
         shake128_32(&[base_transcript_hash, &recovered_high_bits_encoding]);
 
-    Ok(AbdlopLinearOpeningSummary {
-        recovered_high_bits_vector_length: recovered_high_bits.len(),
-        recovered_high_bits_encoding_bytes: recovered_high_bits_encoding.len(),
-        recovered_high_bits_hash: to_hex(&recovered_high_bits_hash),
-        low_part_l2_squared,
-        low_part_bound_squared: proof_profile.decompression_low_part_bound_squared,
-    })
+    Ok((
+        AbdlopLinearOpeningSummary {
+            recovered_high_bits_vector_length: recovered_high_bits.len(),
+            recovered_high_bits_encoding_bytes: recovered_high_bits_encoding.len(),
+            recovered_high_bits_hash: to_hex(&recovered_high_bits_hash),
+            low_part_l2_squared,
+            low_part_bound_squared: proof_profile.decompression_low_part_bound_squared,
+        },
+        recovery_input,
+    ))
 }
 
 fn signed_polynomial_vector_to_canonical(
@@ -479,7 +482,7 @@ mod tests {
         )
         .expect("ABDLOP commitment hash should derive");
 
-        let summary = validate_abdlop_linear_opening(
+        let (summary, _recovery_input) = validate_abdlop_linear_opening(
             &abdlop_commitment_hash,
             &public_randomness,
             &decoded_proof,
@@ -512,14 +515,14 @@ mod tests {
         changed_public_randomness[0] = 1;
         let base_hash = [0_u8; 32];
 
-        let zero_summary = validate_abdlop_linear_opening(
+        let (zero_summary, _) = validate_abdlop_linear_opening(
             &base_hash,
             &zero_public_randomness,
             &decoded_proof,
             &proof_encoding,
         )
         .expect("zero-randomness opening should recover");
-        let changed_summary = validate_abdlop_linear_opening(
+        let (changed_summary, _) = validate_abdlop_linear_opening(
             &base_hash,
             &changed_public_randomness,
             &decoded_proof,

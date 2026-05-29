@@ -2,7 +2,7 @@ use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
 
 use super::{
     linear_proof_parameters::{LinearProofEncoding, demo_linear_proof_encoding_contract},
-    linear_proof_rng::sample_linear_proof_uniform_u64_values,
+    linear_proof_rng::LinearProofUniformSampler,
     polynomial_matrix::PolynomialMatrix,
     polynomial_ring::PolynomialRing,
 };
@@ -96,6 +96,7 @@ pub fn expand_linear_proof_uniform_polynomial_matrix(
         ));
     }
 
+    let sampler = LinearProofUniformSampler::new(public_randomness);
     let mut entries = Vec::with_capacity(entry_count);
     for entry_index in 0..entry_count {
         let entry_domain_separator = compose_linear_proof_matrix_domain(
@@ -104,11 +105,10 @@ pub fn expand_linear_proof_uniform_polynomial_matrix(
                 invalid_public_parameters("uniform matrix entry index does not fit in u32")
             })?,
         );
-        entries.push(sample_linear_proof_uniform_u64_values(
+        entries.push(sampler.sample_uniform_u64_values(
             ring.degree(),
             ring.modulus(),
             coefficient_bit_length,
-            public_randomness,
             entry_domain_separator,
         )?);
     }

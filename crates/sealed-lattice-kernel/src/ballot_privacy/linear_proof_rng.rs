@@ -33,46 +33,79 @@ pub fn sample_linear_proof_uniform_u64_values(
     seed: &[u8; 32],
     domain_separator: u64,
 ) -> CanonicalResult<Vec<u64>> {
-    if value_count == 0 {
-        return Ok(Vec::new());
-    }
-    if modulus < 2 {
-        return Err(invalid_rng("uniform modulus must be at least two"));
-    }
-    if modulus_bit_length == 0 || modulus_bit_length > 63 {
-        return Err(invalid_rng(
-            "uniform modulus bit length must be between one and sixty-three",
-        ));
-    }
-    if modulus < (1_u64 << (modulus_bit_length - 1)) || modulus >= (1_u64 << modulus_bit_length) {
-        return Err(invalid_rng(
-            "uniform modulus does not match the requested bit length",
-        ));
-    }
+    LinearProofUniformSampler::new(seed).sample_uniform_u64_values(
+        value_count,
+        modulus,
+        modulus_bit_length,
+        domain_separator,
+    )
+}
 
-    let mut accepted_values = Vec::with_capacity(value_count);
-    let mut rng_cursor = LinearProofAes256CtrCursor::new(seed, domain_separator);
-    while accepted_values.len() < value_count {
-        let remaining_values = value_count - accepted_values.len();
-        let byte_count = (modulus_bit_length * remaining_values).div_ceil(8);
-        let random_bytes = rng_cursor.read(byte_count);
+/// Reusable uniform sampler that builds the AES-256 key schedule once and shares
+/// it across many domain-separated draws (for example every entry of an expanded
+/// public matrix). Produced values are byte-for-byte identical to reseeding a
+/// fresh AES-256-CTR stream per draw.
+pub(crate) struct LinearProofUniformSampler {
+    cipher: Aes256,
+}
 
-        for candidate_index in 0..remaining_values {
-            let candidate = read_little_endian_bit_packed_value(
-                &random_bytes,
-                candidate_index,
-                modulus_bit_length,
-            )?;
-            if candidate < modulus {
-                accepted_values.push(candidate);
-                if accepted_values.len() == value_count {
-                    break;
-                }
-            }
+impl LinearProofUniformSampler {
+    pub(crate) fn new(seed: &[u8; 32]) -> Self {
+        Self {
+            cipher: Aes256::new(Key::<Aes256>::from_slice(seed)),
         }
     }
 
-    Ok(accepted_values)
+    pub(crate) fn sample_uniform_u64_values(
+        &self,
+        value_count: usize,
+        modulus: u64,
+        modulus_bit_length: usize,
+        domain_separator: u64,
+    ) -> CanonicalResult<Vec<u64>> {
+        if value_count == 0 {
+            return Ok(Vec::new());
+        }
+        if modulus < 2 {
+            return Err(invalid_rng("uniform modulus must be at least two"));
+        }
+        if modulus_bit_length == 0 || modulus_bit_length > 63 {
+            return Err(invalid_rng(
+                "uniform modulus bit length must be between one and sixty-three",
+            ));
+        }
+        if modulus < (1_u64 << (modulus_bit_length - 1)) || modulus >= (1_u64 << modulus_bit_length)
+        {
+            return Err(invalid_rng(
+                "uniform modulus does not match the requested bit length",
+            ));
+        }
+
+        let mut accepted_values = Vec::with_capacity(value_count);
+        let mut stream = LinearProofAesCtrStream::new(&self.cipher, domain_separator);
+        while accepted_values.len() < value_count {
+            let remaining_values = value_count - accepted_values.len();
+            let byte_count = (modulus_bit_length * remaining_values).div_ceil(8);
+            let round = stream.advance(byte_count);
+            let round_bytes = &stream.buffer[round];
+
+            for candidate_index in 0..remaining_values {
+                let candidate = read_little_endian_bit_packed_value(
+                    round_bytes,
+                    candidate_index,
+                    modulus_bit_length,
+                )?;
+                if candidate < modulus {
+                    accepted_values.push(candidate);
+                    if accepted_values.len() == value_count {
+                        break;
+                    }
+                }
+            }
+        }
+
+        Ok(accepted_values)
+    }
 }
 
 pub fn sample_linear_proof_autostable_challenge_coefficients(
@@ -121,36 +154,42 @@ pub fn sample_linear_proof_autostable_challenge_coefficients(
     Ok(coefficients)
 }
 
-struct LinearProofAes256CtrCursor {
-    seed: [u8; 32],
-    domain_separator: u64,
-    buffered_bytes: Vec<u8>,
+/// Incremental AES-256-CTR byte stream over a borrowed cipher. Blocks are
+/// produced once and appended, so growing the stream never regenerates earlier
+/// blocks and the cipher key schedule is shared across draws. The bytes are
+/// identical to `generate_linear_proof_aes256ctr_stream` for the same seed and
+/// domain separator.
+struct LinearProofAesCtrStream<'cipher> {
+    cipher: &'cipher Aes256,
+    counter_block: [u8; 16],
+    buffer: Vec<u8>,
     consumed_bytes: usize,
 }
 
-impl LinearProofAes256CtrCursor {
-    fn new(seed: &[u8; 32], domain_separator: u64) -> Self {
+impl<'cipher> LinearProofAesCtrStream<'cipher> {
+    fn new(cipher: &'cipher Aes256, domain_separator: u64) -> Self {
+        let mut counter_block = [0_u8; 16];
+        counter_block[..8].copy_from_slice(&domain_separator.to_le_bytes());
         Self {
-            seed: *seed,
-            domain_separator,
-            buffered_bytes: Vec::new(),
+            cipher,
+            counter_block,
+            buffer: Vec::new(),
             consumed_bytes: 0,
         }
     }
 
-    fn read(&mut self, byte_count: usize) -> Vec<u8> {
-        let required_total = self.consumed_bytes + byte_count;
-        if self.buffered_bytes.len() < required_total {
-            self.buffered_bytes = generate_linear_proof_aes256ctr_stream(
-                &self.seed,
-                self.domain_separator,
-                required_total,
-            );
+    fn advance(&mut self, byte_count: usize) -> core::ops::Range<usize> {
+        let start = self.consumed_bytes;
+        let end = start + byte_count;
+        while self.buffer.len() < end {
+            let mut encrypted_block = Block::<Aes256>::clone_from_slice(&self.counter_block);
+            self.cipher.encrypt_block(&mut encrypted_block);
+            self.buffer.extend_from_slice(encrypted_block.as_slice());
+            increment_linear_proof_counter(&mut self.counter_block);
         }
-        let output = self.buffered_bytes[self.consumed_bytes..required_total].to_vec();
-        self.consumed_bytes = required_total;
+        self.consumed_bytes = end;
 
-        output
+        start..end
     }
 }
 
@@ -169,21 +208,29 @@ fn read_little_endian_bit_packed_value(
     value_index: usize,
     bit_length: usize,
 ) -> CanonicalResult<u64> {
-    let mut value = 0_u64;
-    for bit_index in 0..bit_length {
-        let absolute_bit_index = value_index
-            .checked_mul(bit_length)
-            .and_then(|offset| offset.checked_add(bit_index))
-            .ok_or_else(|| invalid_rng("uniform bit index overflowed"))?;
-        let byte_index = absolute_bit_index / 8;
-        if byte_index >= bytes.len() {
-            return Err(invalid_rng("uniform bit stream ended early"));
-        }
-        let bit_in_byte = absolute_bit_index % 8;
-        value |= u64::from((bytes[byte_index] >> bit_in_byte) & 1) << bit_index;
+    let start_bit = value_index
+        .checked_mul(bit_length)
+        .ok_or_else(|| invalid_rng("uniform bit index overflowed"))?;
+    let end_bit = start_bit
+        .checked_add(bit_length)
+        .ok_or_else(|| invalid_rng("uniform bit index overflowed"))?;
+    let start_byte = start_bit / 8;
+    let end_byte = end_bit.div_ceil(8);
+    if end_byte > bytes.len() {
+        return Err(invalid_rng("uniform bit stream ended early"));
     }
 
-    Ok(value)
+    // Assemble the (at most nine) straddled bytes little-endian, then shift the
+    // sub-byte start offset away and mask to the requested width. This matches
+    // the previous bit-by-bit little-endian reader exactly.
+    let mut accumulator = 0_u128;
+    for (byte_offset, byte) in bytes[start_byte..end_byte].iter().enumerate() {
+        accumulator |= u128::from(*byte) << (8 * byte_offset);
+    }
+    let bit_offset = (start_bit % 8) as u32;
+    let mask = (1_u128 << bit_length) - 1;
+
+    Ok(((accumulator >> bit_offset) & mask) as u64)
 }
 
 fn invalid_rng(message: impl Into<String>) -> CanonicalError {

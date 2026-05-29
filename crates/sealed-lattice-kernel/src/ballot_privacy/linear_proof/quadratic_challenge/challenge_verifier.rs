@@ -35,6 +35,7 @@ pub(crate) fn validate_quadratic_challenge(
     decoded_proof: &DecodedLinearProof,
     proof_encoding: &LinearProofEncoding,
     many_quadratic_fold: &ManyQuadraticFold,
+    precomputed_recovery_input: Option<&PolynomialVector>,
 ) -> CanonicalResult<QuadraticChallengeSummary> {
     proof_encoding.validate()?;
     let proof_profile = linear_proof_profile_for_encoding(proof_encoding)?;
@@ -49,35 +50,45 @@ pub(crate) fn validate_quadratic_challenge(
         proof_ring,
         decoded_proof.challenge_polynomial().centered_coefficients(),
     )?;
-    let shifted_challenge_polynomial = multiply_polynomial_by_power_of_two(
-        proof_ring,
-        &challenge_polynomial,
-        proof_profile.decompression_shift,
-    )?;
     let short_response_vector =
         signed_polynomial_vector_to_canonical(proof_ring, decoded_proof.short_response_vector())?;
     let randomness_response_vector = signed_polynomial_vector_to_canonical(
         proof_ring,
         decoded_proof.randomness_response_vector(),
     )?;
-    let compressed_commitment_vector = PolynomialVector::new(
-        proof_ring,
-        decoded_proof.compressed_commitment_vector().to_vec(),
-    )?;
     let target_commitment_vector = PolynomialVector::new(
         proof_ring,
         decoded_proof.commitment_target_vector().to_vec(),
     )?;
 
-    let recovery_input = recover_quadratic_equation_decompression_input(
-        proof_ring,
-        &public_parameters.commitment_key_matrix,
-        &public_parameters.opening_key_matrix,
-        &short_response_vector,
-        &randomness_response_vector,
-        &shifted_challenge_polynomial,
-        &compressed_commitment_vector,
-    )?;
+    // The decompression recovery input is identical to the one the ABDLOP
+    // opening check already produced, so the verifier threads it through instead
+    // of recomputing the commitment/opening matrix-vector products again.
+    let recomputed_recovery_input;
+    let recovery_input = match precomputed_recovery_input {
+        Some(precomputed) => precomputed,
+        None => {
+            let shifted_challenge_polynomial = multiply_polynomial_by_power_of_two(
+                proof_ring,
+                &challenge_polynomial,
+                proof_profile.decompression_shift,
+            )?;
+            let compressed_commitment_vector = PolynomialVector::new(
+                proof_ring,
+                decoded_proof.compressed_commitment_vector().to_vec(),
+            )?;
+            recomputed_recovery_input = recover_quadratic_equation_decompression_input(
+                proof_ring,
+                &public_parameters.commitment_key_matrix,
+                &public_parameters.opening_key_matrix,
+                &short_response_vector,
+                &randomness_response_vector,
+                &shifted_challenge_polynomial,
+                &compressed_commitment_vector,
+            )?;
+            &recomputed_recovery_input
+        }
+    };
     let recovered_high_bits = recover_quadratic_equation_high_bits(
         recovery_input.entries(),
         decoded_proof.hint_vector(),

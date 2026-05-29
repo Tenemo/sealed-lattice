@@ -41,6 +41,7 @@ struct QuadraticChallengeVerificationInput<'a> {
     public_randomness_array: &'a [u8; 32],
     decoded_proof: &'a DecodedLinearProof,
     proof_encoding: &'a LinearProofEncoding,
+    recovery_input: &'a PolynomialVector,
 }
 
 fn decode_and_expand_public_randomness(
@@ -81,13 +82,15 @@ fn decode_validated_canonical_linear_proof(
 
 fn verify_abdlop_opening_and_tbox(
     input: AbdlopTboxVerificationInput<'_>,
-) -> CanonicalResult<LinearProofTboxChallengeHashes> {
+) -> CanonicalResult<(LinearProofTboxChallengeHashes, PolynomialVector)> {
     let abdlop_commitment_hash = hash_abdlop_commitment(
         input.public_parameters_and_statement_hash,
         input.decoded_proof,
         input.proof_encoding,
     )?;
-    validate_abdlop_linear_opening(
+    // The ABDLOP opening recovery input is reused verbatim by the quadratic
+    // challenge check below, so it is computed once here and threaded through.
+    let (_opening_summary, recovery_input) = validate_abdlop_linear_opening(
         &abdlop_commitment_hash,
         input.public_randomness_array,
         input.decoded_proof,
@@ -99,12 +102,17 @@ fn verify_abdlop_opening_and_tbox(
         input.proof_encoding,
     )?;
 
-    Ok(LinearProofTboxChallengeHashes {
-        z34_challenge_hash: challenge_hash_from_hex(&tbox_public_check_summary.z34_challenge_hash)?,
-        generator_challenge_hash: challenge_hash_from_hex(
-            &tbox_public_check_summary.generator_challenge_hash,
-        )?,
-    })
+    Ok((
+        LinearProofTboxChallengeHashes {
+            z34_challenge_hash: challenge_hash_from_hex(
+                &tbox_public_check_summary.z34_challenge_hash,
+            )?,
+            generator_challenge_hash: challenge_hash_from_hex(
+                &tbox_public_check_summary.generator_challenge_hash,
+            )?,
+        },
+        recovery_input,
+    ))
 }
 
 pub(super) fn verify_linear_proof_relation_core(
@@ -114,12 +122,13 @@ pub(super) fn verify_linear_proof_relation_core(
         &LinearProofTboxChallengeHashes,
     ) -> CanonicalResult<()>,
 ) -> CanonicalResult<()> {
-    let tbox_challenge_hashes = verify_abdlop_opening_and_tbox(AbdlopTboxVerificationInput {
-        public_parameters_and_statement_hash: input.public_parameters_and_statement_hash,
-        public_randomness_array: input.public_randomness_array,
-        decoded_proof: input.decoded_proof,
-        proof_encoding: input.proof_encoding,
-    })?;
+    let (tbox_challenge_hashes, recovery_input) =
+        verify_abdlop_opening_and_tbox(AbdlopTboxVerificationInput {
+            public_parameters_and_statement_hash: input.public_parameters_and_statement_hash,
+            public_randomness_array: input.public_randomness_array,
+            decoded_proof: input.decoded_proof,
+            proof_encoding: input.proof_encoding,
+        })?;
     let mut tbox_accumulators = build_tbox_prefix_accumulators(
         &tbox_challenge_hashes.generator_challenge_hash,
         input.proof_encoding,
@@ -131,6 +140,7 @@ pub(super) fn verify_linear_proof_relation_core(
         public_randomness_array: input.public_randomness_array,
         decoded_proof: input.decoded_proof,
         proof_encoding: input.proof_encoding,
+        recovery_input: &recovery_input,
     })
 }
 
@@ -152,6 +162,7 @@ fn validate_quadratic_challenge_from_tbox_accumulators(
         input.decoded_proof,
         input.proof_encoding,
         &folded_many_quadratic_equation,
+        Some(input.recovery_input),
     )?;
 
     Ok(())

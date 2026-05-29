@@ -176,6 +176,7 @@ mod tests {
             &decoded_proof,
             &proof_encoding,
             &many_quadratic_fold,
+            None,
         )
         .expect("valid generated proof should recompute challenge");
 
@@ -191,6 +192,7 @@ mod tests {
             &decoded_proof,
             &mismatched_hint_encoding,
             &many_quadratic_fold,
+            None,
         )
         .expect_err("hint vector length mismatch should fail before decompression");
         assert!(error.message.contains("hint vector length"));
@@ -203,6 +205,7 @@ mod tests {
             &decoded_proof,
             &mismatched_commitment_encoding,
             &many_quadratic_fold,
+            None,
         )
         .expect_err("compressed commitment length mismatch should fail before decompression");
         assert!(

@@ -194,6 +194,17 @@ describe('local run logs', () => {
         expect(safeLogSlug('../Kernel: merged<>?')).toBe('kernel-merged');
     });
 
+    it('drops the package manager separator forwarded with run-log flags', () => {
+        // CI runs `pnpm test:node:fast -- --no-run-log`, which reaches the
+        // script as `--only fast -- --no-run-log`.
+        expect(
+            removeRunLogArguments(['--only', 'fast', '--', '--no-run-log']),
+        ).toEqual(['--only', 'fast']);
+        // CI runs `pnpm test:browser -- --no-run-log`, leaving only `-- --no-run-log`.
+        expect(removeRunLogArguments(['--', '--no-run-log'])).toEqual([]);
+        expect(runLogDisabledByArguments(['--', '--no-run-log'])).toBe(true);
+    });
+
     it('deduplicates command log filenames inside one run', async () => {
         const rootDirectoryPath = await createTemporaryLogRoot();
         try {
