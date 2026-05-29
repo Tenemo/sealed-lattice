@@ -1,9 +1,16 @@
 import { pathToFileURL } from 'node:url';
 
 import {
+    createLocalRunLog,
+    currentProcessExitCode,
+    removeRunLogArguments,
+    runLogDisabledByArguments,
+} from './local-run-log.js';
+import {
     createPackageManagerCommand,
     resolvePackageManagerRunner,
     runCommandsInParallel,
+    runCommandsInSeries,
     type CommandInvocation,
     type PackageManagerRunner,
 } from './run-command.js';
@@ -67,6 +74,7 @@ export const buildNodeTestCommands = (
                 '--run',
             ],
             {
+                logFileSlug: laneDefinition.projectName,
                 packageManagerRunner,
             },
         );
@@ -75,12 +83,57 @@ export const buildNodeTestCommands = (
     return lanes.map((lane) => buildCommand(lane));
 };
 
+const buildWorkspaceBuildCommand = (
+    packageManagerRunner: PackageManagerRunner,
+): CommandInvocation =>
+    createPackageManagerCommand('Build workspace packages', ['run', 'build'], {
+        logFileSlug: 'build',
+        packageManagerRunner,
+    });
+
+const nodeTestScriptName = (lanes: readonly NodeTestLane[]): string =>
+    lanes.length === 1 ? `test:node:${lanes[0]}` : 'test:node';
+
+const nodeTestRunShouldLog = (
+    lanes: readonly NodeTestLane[],
+    commandArguments: readonly string[],
+): boolean =>
+    !runLogDisabledByArguments(commandArguments) &&
+    lanes.some((lane) => lane !== 'fast');
+
 const main = async (): Promise<void> => {
-    process.exitCode = await runCommandsInParallel(
-        buildNodeTestCommands({
-            lanes: parseRequestedNodeTestLanes(process.argv.slice(2)),
-        }),
-    );
+    const rawArguments = process.argv.slice(2);
+    const commandArguments = removeRunLogArguments(rawArguments);
+    const lanes = parseRequestedNodeTestLanes(commandArguments);
+    const packageManagerRunner = resolvePackageManagerRunner();
+    const runLog = nodeTestRunShouldLog(lanes, rawArguments)
+        ? await createLocalRunLog({
+              commandLineArguments: rawArguments,
+              lanes,
+              scriptName: nodeTestScriptName(lanes),
+          })
+        : undefined;
+
+    try {
+        const buildExitCode = await runCommandsInSeries(
+            [buildWorkspaceBuildCommand(packageManagerRunner)],
+            { runLog },
+        );
+        if (buildExitCode !== 0) {
+            process.exitCode = buildExitCode;
+
+            return;
+        }
+        process.exitCode = await runCommandsInParallel(
+            buildNodeTestCommands({
+                lanes,
+                packageManagerRunner,
+            }),
+            { runLog },
+        );
+    } finally {
+        await runLog?.finish({ exitCode: currentProcessExitCode() });
+    }
 };
 
 const scriptEntryPoint = process.argv[1];

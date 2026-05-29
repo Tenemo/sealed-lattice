@@ -48,8 +48,8 @@ pnpm run smoke:pack:npm
 - `pnpm run test:node:fast`: pre-commit-friendly Node tests, excluding slow protocol, kernel-heavy WASM, and proof-benchmark suites
 - `pnpm run test:node:protocol`: slow protocol relation and proof-record generation input tests that remain part of the default Node gate without running under coverage instrumentation
 - `pnpm run test:node:kernel`: transcript-core WASM loader, parity, fixture, proof-generation, proof-record integration, and aggregate-derivation transcript-core WASM integration tests
-- `pnpm run test`: runs the split Node test lanes, then the desktop and mobile browser lanes through the package scripts
-- `pnpm run test:proof-benchmark`: Node and desktop Chromium proof benchmark lanes, run in parallel after one build
+- `pnpm run test`: runs the fast, protocol, and kernel Node lanes, then the desktop and mobile browser lanes through the package scripts
+- `pnpm run test:proof-benchmark`: Node and desktop Chromium proof benchmark lanes, run sequentially after one build to avoid benchmark worker memory contention on one machine
 - `pnpm run test:proof-benchmark:node`: Node proof benchmark lane, suitable for a separate CI worker
 - `pnpm run test:proof-benchmark:browser:desktop`: desktop Chromium proof benchmark lane, suitable for a separate CI worker
 - `pnpm run test:proof-benchmark:browser:mobile:throttled`: manual-only calibrated mobile CPU-throttled benchmark lane
@@ -64,7 +64,15 @@ pnpm run smoke:pack:npm
 
 The pre-commit hook runs `pnpm run check` and `pnpm exec vitest --project node --project browser-desktop --project browser-mobile --run`.
 This leaves a full package build in place through the check command, runs static verification once, runs Rust verification once, then exercises fast Node and browser Vitest projects against the built output.
-Split Node and proof benchmark lanes remain explicit commands so they can use checkpoints and targeted reruns instead of slowing every local commit. The Node kernel command runs its merged heavy WASM project sequentially, while the proof benchmark command and encrypted aggregate bridge matrix default to parallel local execution. The coverage lane covers the fast Node project only; heavy protocol, kernel, and proof-benchmark coverage comes from their explicit test lanes rather than V8 coverage instrumentation. The coverage badge is generated locally in the Pages workflow, not by Codecov.
+Protocol, kernel, and proof benchmark lanes remain explicit commands so they can use checkpoints and targeted reruns instead of slowing every local commit. The Node kernel command runs its merged heavy WASM project sequentially, the proof benchmark command runs its selected lanes sequentially on one machine, and the encrypted aggregate bridge matrix defaults to parallel local execution. The coverage lane covers the fast Node project only; heavy protocol, kernel, and proof-benchmark coverage comes from their explicit test lanes rather than V8 coverage instrumentation. The coverage badge is generated locally in the Pages workflow, not by Codecov.
+
+## Local run logs
+
+Heavy local runners write timestamped logs under gitignored `logs/` directories.
+Logged runners include `pnpm run test:node:protocol`, `pnpm run test:node:kernel`, `pnpm run test:node`, `pnpm run test:browser`, all proof-benchmark scripts, and the encrypted aggregate bridge matrix scripts.
+Each run gets `logs/YYYY-MM-DD/YYYY-MM-DDTHH-mm-ss-SSSZ-script-name/` with `metadata.json`, `summary.json`, `combined.log`, and per-command logs.
+Encrypted aggregate bridge matrix runs also write per-row worker logs under `workers/`.
+CI disables local log emission with `--no-run-log`; use the same trailing argument locally when a one-off run should skip logs, for example `pnpm run test:node:kernel -- --no-run-log`.
 
 ## Heavy proof checkpoints
 
@@ -77,7 +85,7 @@ The checkpoint set currently covers relation requests, lowered statements, gener
 
 ## Heavy gate policy
 
-Heavyweight Node, proof benchmark, and encrypted aggregate bridge lanes default to parallel execution on local machines.
+The default Node runner can execute selected Vitest projects side by side, but the merged kernel project and proof benchmark lanes keep their heavy work sequential on one machine.
 The full encrypted aggregate bridge matrix first runs the cheap all-row shape/config guardrail, then uses 16 workers; the representative bridge matrix uses one worker per selected row.
 The mobile proof benchmark is throttled-only and manual-only. Do not run it from default CI, prebuild, check, package, or verification commands.
 

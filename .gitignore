@@ -28,6 +28,7 @@ docs/src/content/docs/api/reference/
 __pycache__/
 
 # Temporary files
+logs/
 temp/
 temp.txt
 

@@ -3,13 +3,7 @@ export const nodeKernelHeavyTestTimeoutMs = 15 * 60_000;
 export const proofBenchmarkTestTimeoutMs = 60 * 60_000;
 export const nodeHookTimeoutMs = 240_000;
 
-export const nodeTestLaneValues = [
-    'fast',
-    'relation-heavy',
-    'proof-input-heavy',
-    'kernel-remaining',
-    'kernel-aggregate',
-] as const;
+export const nodeTestLaneValues = ['fast', 'protocol', 'kernel'] as const;
 
 export type NodeTestLane = (typeof nodeTestLaneValues)[number];
 
@@ -22,37 +16,19 @@ type NodeTestProjectDefinition = {
     readonly testTimeout: number;
 };
 
-const protocolProofInputNodeTestGlobs = [
-    'packages/protocol/tests/node/**/*.protocol-proof-input.test.ts',
+const protocolNodeTestGlobs = [
+    'packages/protocol/tests/node/**/*.protocol.test.ts',
 ] as const;
 
-const protocolRelationNodeTestGlobs = [
-    'packages/protocol/tests/node/**/*.protocol-relation.test.ts',
-] as const;
-
-const protocolHeavyNodeTestGlobs = [
-    ...protocolProofInputNodeTestGlobs,
-    ...protocolRelationNodeTestGlobs,
-] as const;
-
-const kernelAggregateNodeTestGlobs = [
-    'packages/wasm/tests/node/**/*.kernel-aggregate.test.ts',
-] as const;
-
-const kernelRemainingNodeTestGlobs = [
+const kernelNodeTestGlobs = [
     'packages/wasm/tests/node/**/*.kernel.test.ts',
     'tests/node/**/*.kernel.test.ts',
-] as const;
-
-const kernelHeavyNodeTestGlobs = [
-    ...kernelAggregateNodeTestGlobs,
-    ...kernelRemainingNodeTestGlobs,
 ] as const;
 
 export const nodeTestLaneDefinitions = {
     fast: {
         commandDescription: 'Run fast Node tests',
-        exclude: [...protocolHeavyNodeTestGlobs, ...kernelHeavyNodeTestGlobs],
+        exclude: [...protocolNodeTestGlobs, ...kernelNodeTestGlobs],
         include: [
             'packages/*/tests/node/**/*.test.ts',
             'tests/node/**/*.test.ts',
@@ -60,61 +36,31 @@ export const nodeTestLaneDefinitions = {
         projectName: 'node',
         testTimeout: nodeTestTimeoutMs,
     },
-    'relation-heavy': {
-        commandDescription: 'Run relation-heavy Node tests',
-        include: protocolRelationNodeTestGlobs,
-        projectName: 'node-relation-heavy',
-        testTimeout: nodeKernelHeavyTestTimeoutMs,
-    },
-    'proof-input-heavy': {
-        commandDescription: 'Run proof-input-heavy Node tests',
-        include: protocolProofInputNodeTestGlobs,
-        projectName: 'node-proof-input-heavy',
-        testTimeout: nodeKernelHeavyTestTimeoutMs,
-    },
-    'kernel-remaining': {
-        commandDescription: 'Run remaining heavy Node kernel tests',
-        include: kernelRemainingNodeTestGlobs,
-        projectName: 'node-kernel-remaining',
-        testTimeout: nodeKernelHeavyTestTimeoutMs,
-    },
-    'kernel-aggregate': {
-        commandDescription: 'Run aggregate heavy Node kernel tests',
-        include: kernelAggregateNodeTestGlobs,
-        projectName: 'node-kernel-aggregate',
-        testTimeout: nodeKernelHeavyTestTimeoutMs,
-    },
-} as const satisfies Record<NodeTestLane, NodeTestProjectDefinition>;
-
-export const nodeAggregateProjectDefinitions = {
     protocol: {
-        include: protocolHeavyNodeTestGlobs,
+        commandDescription: 'Run protocol Node tests',
+        include: protocolNodeTestGlobs,
         projectName: 'node-protocol',
         testTimeout: nodeKernelHeavyTestTimeoutMs,
     },
     kernel: {
-        include: kernelHeavyNodeTestGlobs,
+        commandDescription: 'Run kernel Node tests',
+        fileParallelism: false,
+        include: kernelNodeTestGlobs,
         projectName: 'node-kernel',
         testTimeout: nodeKernelHeavyTestTimeoutMs,
     },
-} as const satisfies Record<string, NodeTestProjectDefinition>;
+} as const satisfies Record<NodeTestLane, NodeTestProjectDefinition>;
 
 export const nodeTestProjectDefinitions = [
     nodeTestLaneDefinitions.fast,
-    nodeAggregateProjectDefinitions.protocol,
-    nodeTestLaneDefinitions['proof-input-heavy'],
-    nodeTestLaneDefinitions['relation-heavy'],
-    nodeAggregateProjectDefinitions.kernel,
-    nodeTestLaneDefinitions['kernel-aggregate'],
-    nodeTestLaneDefinitions['kernel-remaining'],
+    nodeTestLaneDefinitions.protocol,
+    nodeTestLaneDefinitions.kernel,
 ] as const;
 
 export const defaultNodeTestLanes = [
     'fast',
-    'relation-heavy',
-    'proof-input-heavy',
-    'kernel-remaining',
-    'kernel-aggregate',
+    'protocol',
+    'kernel',
 ] as const satisfies readonly NodeTestLane[];
 
 export const browserTestLaneValues = ['desktop', 'mobile'] as const;

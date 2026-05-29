@@ -8,7 +8,7 @@
 
 ## What the package exposes
 
-The published `sealed-lattice` package currently exposes safe-by-default helpers for:
+`sealed-lattice` package currently exposes safe-by-default helpers for:
 
 - transcript-core fixture verification through the packaged Rust/WASM kernel;
 - poll-spec validation, canonical poll/profile hash derivation, threshold profile derivation, and frozen roster-profile derivation;
@@ -30,19 +30,6 @@ import {
     verifyTranscriptCoreFixture,
 } from "sealed-lattice";
 ```
-
-## What is internal
-
-Several protocol components exist only as workspace-internal implementation, test, or vector infrastructure:
-
-- plaintext `GF(65537)` arithmetic, Shamir interpolation, top-k tallying, and sparse target fixtures;
-- deterministic PVSS ballot-algebra helpers used for regression tests;
-- ballot privacy profile, relation, proof-record, receiver-key proof, and scoped relation package shell infrastructure;
-- sealed-lattice Rust/WASM BGV-RNS profile, selected-prime arithmetic, RNS coefficient objects, NTT/INTT, plaintext-lifted base conversion, `BGVBatchEncode_65537`, canonical plaintext/ciphertext roots, object validation, and allowed-operation registry for the encrypted aggregate path;
-- Rust/WASM transcript-core commands used to keep TypeScript and native canonicalization behavior aligned;
-- offline proof-oracle comparison tooling, development-only Lattigo oracle tooling, and generated public test vectors.
-
-These pieces are not exported as a public voting API and must not be used for real ballot secrecy.
 
 ## Ballot privacy status
 
@@ -70,6 +57,19 @@ Still unavailable:
 - Encrypted aggregate bridge closure for the encrypted aggregate bridge from committed aggregate shares to encrypted aggregate TargetBasisData, preserving bridge witness privacy;
 - the encrypted aggregate reconstruction, evaluator-side score-bit/comparison derivation, packed bit-sliced BGV evaluator, and mandatory evaluation proof;
 - production target-bound decryption and result release.
+
+## What is internal
+
+Several protocol components exist only as workspace-internal implementation, test, or vector infrastructure:
+
+- plaintext `GF(65537)` arithmetic, Shamir interpolation, top-k tallying, and sparse target fixtures;
+- deterministic PVSS ballot-algebra helpers used for regression tests;
+- ballot privacy profile, relation, proof-record, receiver-key proof, and scoped relation package shell infrastructure;
+- sealed-lattice Rust/WASM BGV-RNS profile, selected-prime arithmetic, RNS coefficient objects, NTT/INTT, plaintext-lifted base conversion, `BGVBatchEncode_65537`, canonical plaintext/ciphertext roots, object validation, and allowed-operation registry for the encrypted aggregate path;
+- Rust/WASM transcript-core commands used to keep TypeScript and native canonicalization behavior aligned;
+- offline proof-oracle comparison tooling, development-only Lattigo oracle tooling, and generated public test vectors.
+
+These pieces are not exported as a public voting API and must not be used for real ballot secrecy.
 
 ## Repository layout
 
@@ -128,8 +128,8 @@ Run targeted verification:
 ```bash
 pnpm run vectors
 pnpm run test:node:fast
-pnpm run test:node:heavy
-pnpm run test:node:heavy:kernel
+pnpm run test:node:protocol
+pnpm run test:node:kernel
 pnpm run test:node
 pnpm run test:browser
 pnpm run test:lattigo-oracle
@@ -137,6 +137,8 @@ pnpm run test:proof-benchmark
 pnpm run test:proof-benchmark:node
 pnpm run test:proof-benchmark:browser:desktop
 pnpm run test:proof-benchmark:browser:mobile:throttled
+pnpm run test:encrypted-aggregate-bridge:representative
+pnpm run test:encrypted-aggregate-bridge
 pnpm run verify:docs
 ```
 
@@ -148,6 +150,8 @@ pnpm exec vitest --project node --project browser-desktop --project browser-mobi
 ```
 
 The default Node test command runs the fast Node project plus the heavy protocol and kernel projects. The Node coverage command covers the fast Node project only; heavy protocol, kernel, and proof-benchmark flows still run through their explicit non-coverage lanes. `pnpm run coverage:badge` runs the Node coverage lane, writes Shields-compatible coverage JSON into `docs/public`, and the Pages workflow publishes that JSON with the docs site for the README badge. The proof benchmark command builds once, then runs the Node and desktop Chromium benchmark projects sequentially to avoid benchmark worker memory contention on one machine. Use the individual proof-benchmark commands on separate CI workers when parallel resources are available. The mobile proof benchmark is throttled-only and manual-only through `pnpm run test:proof-benchmark:browser:mobile:throttled`.
+
+Heavy local runners write timestamped logs under `logs/`, which is gitignored. Logged runners include `pnpm run test:node:protocol`, `pnpm run test:node:kernel`, `pnpm run test:node`, `pnpm run test:browser`, all proof-benchmark scripts, and the encrypted aggregate bridge matrix scripts. Each run gets `logs/YYYY-MM-DD/YYYY-MM-DDTHH-mm-ss-SSSZ-script-name/` with `metadata.json`, `summary.json`, `combined.log`, and per-command logs; matrix runs also write per-row worker logs under `workers/`. CI disables local log emission by passing `--no-run-log`; use the same trailing argument locally when a one-off run should skip logs, for example `pnpm run test:node:kernel -- --no-run-log`.
 
 Heavy ballot privacy proof flows write resumable development checkpoints to `temp/test-checkpoints/`. Checkpoint filenames are named after their test suite and step. Set `SEALED_LATTICE_RESUME_TEST_CHECKPOINTS=1` only when intentionally debugging from the latest local checkpoint.
 

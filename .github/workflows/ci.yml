@@ -67,7 +67,7 @@ jobs:
                   components: clippy, rustfmt
                   targets: wasm32-unknown-unknown
             - uses: Swatinem/rust-cache@aa7c1c80a07a27a84c0aa76d0cef0aad3830e330
-            - run: pnpm run test:node:fast
+            - run: pnpm run test:node:fast -- --no-run-log
 
     node-protocol:
         name: node protocol
@@ -81,7 +81,7 @@ jobs:
                   components: clippy, rustfmt
                   targets: wasm32-unknown-unknown
             - uses: Swatinem/rust-cache@aa7c1c80a07a27a84c0aa76d0cef0aad3830e330
-            - run: pnpm run test:node:protocol
+            - run: pnpm run test:node:protocol -- --no-run-log
 
     node-kernel:
         name: node kernel
@@ -95,21 +95,7 @@ jobs:
                   components: clippy, rustfmt
                   targets: wasm32-unknown-unknown
             - uses: Swatinem/rust-cache@aa7c1c80a07a27a84c0aa76d0cef0aad3830e330
-            - run: pnpm run test:node:kernel-remaining
-
-    node-kernel-aggregate:
-        name: node kernel aggregate
-        runs-on: ubuntu-latest
-        timeout-minutes: 90
-        steps:
-            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
-            - uses: ./.github/actions/bootstrap-pnpm
-            - uses: dtolnay/rust-toolchain@b18f7037bce1ea84c086f4d5e9493f853c0ce412
-              with:
-                  components: clippy, rustfmt
-                  targets: wasm32-unknown-unknown
-            - uses: Swatinem/rust-cache@aa7c1c80a07a27a84c0aa76d0cef0aad3830e330
-            - run: pnpm run test:node:kernel-aggregate
+            - run: pnpm run test:node:kernel -- --no-run-log
 
     verify:
         name: verify
@@ -169,8 +155,7 @@ jobs:
                   targets: wasm32-unknown-unknown
             - uses: Swatinem/rust-cache@aa7c1c80a07a27a84c0aa76d0cef0aad3830e330
             - run: pnpm exec playwright install --with-deps chromium firefox webkit
-            - run: pnpm run build
-            - run: pnpm exec vitest --project browser-desktop --project browser-mobile --run
+            - run: pnpm run test:browser -- --no-run-log
 
     docs:
         name: docs

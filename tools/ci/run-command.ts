@@ -1,6 +1,9 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
+import { createWriteStream, type WriteStream } from 'node:fs';
 import path from 'node:path';
+
+import type { ActiveLocalRunLog, CommandLogFiles } from './local-run-log.js';
 
 export type PackageManager = 'npm' | 'pnpm';
 
@@ -9,6 +12,7 @@ export type CommandInvocation = {
     readonly command: string;
     readonly description: string;
     readonly env?: NodeJS.ProcessEnv;
+    readonly logFileSlug?: string;
 };
 
 export type PackageManagerRunner = {
@@ -221,6 +225,7 @@ export const createPackageManagerCommand = (
     commandArguments: readonly string[],
     input: {
         readonly env?: NodeJS.ProcessEnv;
+        readonly logFileSlug?: string;
         readonly packageManagerRunner?: PackageManagerRunner;
     } = {},
 ): CommandInvocation => {
@@ -235,6 +240,7 @@ export const createPackageManagerCommand = (
         command: packageManagerRunner.command,
         description,
         env: input.env,
+        logFileSlug: input.logFileSlug,
     };
 };
 
@@ -352,10 +358,151 @@ const runCommandInParallel = (invocation: CommandInvocation): Promise<number> =>
         });
     });
 
+const closeWritableStream = async (stream: WriteStream): Promise<void> =>
+    new Promise((resolve, reject) => {
+        stream.once('error', reject);
+        stream.end(resolve);
+    });
+
+const openCommandLogStreams = (
+    files: CommandLogFiles,
+): {
+    readonly combined: WriteStream;
+    readonly stderr: WriteStream;
+    readonly stdout: WriteStream;
+} => ({
+    combined: createWriteStream(files.combinedPath, { flags: 'a' }),
+    stderr: createWriteStream(files.stderrPath, { flags: 'a' }),
+    stdout: createWriteStream(files.stdoutPath, { flags: 'a' }),
+});
+
+const closeCommandLogStreams = async (streams: {
+    readonly combined: WriteStream;
+    readonly stderr: WriteStream;
+    readonly stdout: WriteStream;
+}): Promise<void> => {
+    await Promise.all([
+        closeWritableStream(streams.combined),
+        closeWritableStream(streams.stderr),
+        closeWritableStream(streams.stdout),
+    ]);
+};
+
+const runCommandWithOptionalLog = async (
+    invocation: CommandInvocation,
+    runLog?: ActiveLocalRunLog,
+): Promise<number> => {
+    if (runLog === undefined) {
+        return runCommandInParallel(invocation);
+    }
+
+    const commandLogFiles = runLog.createCommandLogFiles({
+        description: invocation.description,
+        preferredSlug: invocation.logFileSlug,
+    });
+    const commandLogStreams = openCommandLogStreams(commandLogFiles);
+    const heading = `\n${invocation.description}\n`;
+    process.stdout.write(heading);
+    commandLogStreams.combined.write(heading);
+    runLog.writeCombinedOutput(heading);
+
+    return new Promise((resolve, reject) => {
+        const childProcess = spawn(invocation.command, invocation.args, {
+            env: invocation.env ?? process.env,
+            stdio: ['ignore', 'pipe', 'pipe'],
+        });
+        const writeChunk = (
+            streamName: 'stderr' | 'stdout',
+            chunk: string | Uint8Array,
+        ): void => {
+            const terminalStream =
+                streamName === 'stdout' ? process.stdout : process.stderr;
+            const childStream =
+                streamName === 'stdout'
+                    ? commandLogStreams.stdout
+                    : commandLogStreams.stderr;
+            terminalStream.write(chunk);
+            childStream.write(chunk);
+            commandLogStreams.combined.write(chunk);
+            runLog.writeCombinedOutput(chunk);
+        };
+        let settled = false;
+        childProcess.stdout.setEncoding('utf8');
+        childProcess.stderr.setEncoding('utf8');
+        childProcess.stdout.on('data', (chunk: string) => {
+            writeChunk('stdout', chunk);
+        });
+        childProcess.stderr.on('data', (chunk: string) => {
+            writeChunk('stderr', chunk);
+        });
+        childProcess.once('error', (error) => {
+            if (settled) {
+                return;
+            }
+            settled = true;
+            void (async () => {
+                try {
+                    await closeCommandLogStreams(commandLogStreams);
+                } catch {
+                    // Preserve the original process start failure.
+                }
+                reject(error);
+            })();
+        });
+        childProcess.once('close', (exitCode, signal) => {
+            if (settled) {
+                return;
+            }
+            settled = true;
+            void (async () => {
+                try {
+                    if (signal !== null) {
+                        const signalMessage = `${invocation.description} terminated by signal ${signal}.\n`;
+                        process.stderr.write(signalMessage);
+                        commandLogStreams.stderr.write(signalMessage);
+                        commandLogStreams.combined.write(signalMessage);
+                        runLog.writeCombinedOutput(signalMessage);
+                    }
+                    await closeCommandLogStreams(commandLogStreams);
+                    resolve(signal === null ? (exitCode ?? 1) : 1);
+                } catch (error) {
+                    reject(
+                        error instanceof Error
+                            ? error
+                            : new Error(String(error)),
+                    );
+                }
+            })();
+        });
+    });
+};
+
 export const runCommandsInParallel = async (
     invocations: readonly CommandInvocation[],
+    input: { readonly runLog?: ActiveLocalRunLog } = {},
 ): Promise<number> => {
-    const exitCodes = await Promise.all(invocations.map(runCommandInParallel));
+    const exitCodes = await Promise.all(
+        invocations.map((invocation) =>
+            runCommandWithOptionalLog(invocation, input.runLog),
+        ),
+    );
 
     return exitCodes.find((exitCode) => exitCode !== 0) ?? 0;
+};
+
+export const runCommandsInSeries = async (
+    invocations: readonly CommandInvocation[],
+    input: { readonly runLog?: ActiveLocalRunLog } = {},
+): Promise<number> => {
+    for (const invocation of invocations) {
+        const exitCode = await runCommandWithOptionalLog(
+            invocation,
+            input.runLog,
+        );
+        if (exitCode !== 0) {
+            return exitCode;
+        }
+    }
+
+    return 0;
 };
