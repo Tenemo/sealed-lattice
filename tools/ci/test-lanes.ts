@@ -83,11 +83,7 @@ export const browserTestLaneDefinitions = {
     },
 } as const satisfies Record<BrowserTestLane, BrowserTestLaneDefinition>;
 
-export const proofBenchmarkLaneValues = [
-    'node',
-    'desktop',
-    'mobile-throttled',
-] as const;
+export const proofBenchmarkLaneValues = ['node', 'desktop'] as const;
 
 export type ProofBenchmarkLane = (typeof proofBenchmarkLaneValues)[number];
 
@@ -116,14 +112,6 @@ export const proofBenchmarkLaneDefinitions = {
         fileParallelism: false,
         include: browserProofBenchmarkTestGlobs,
         projectName: 'browser-desktop-proof-benchmark',
-        testTimeout: proofBenchmarkTestTimeoutMs,
-    },
-    'mobile-throttled': {
-        commandDescription:
-            'Run manually throttled mobile Chromium proof benchmark',
-        fileParallelism: false,
-        include: browserProofBenchmarkTestGlobs,
-        projectName: 'browser-mobile-throttled-proof-benchmark',
         testTimeout: proofBenchmarkTestTimeoutMs,
     },
 } as const satisfies Record<ProofBenchmarkLane, ProofBenchmarkLaneDefinition>;

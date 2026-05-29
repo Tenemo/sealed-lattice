@@ -1,4 +1,4 @@
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { createWriteStream, type WriteStream } from 'node:fs';
 import path from 'node:path';
@@ -326,29 +326,59 @@ export const runPackageManager = (
     );
 };
 
-const runCommandInParallel = (invocation: CommandInvocation): Promise<number> =>
+const killProcessTree = (childProcess: ChildProcess): void => {
+    const processId = childProcess.pid;
+    if (processId === undefined) {
+        return;
+    }
+    if (process.platform === 'win32') {
+        // child.kill() only ends the direct child on Windows; package-manager
+        // and test-runner grandchildren survive. taskkill /t ends the whole
+        // tree. spawnSync keeps the abort path free of dangling listeners.
+        spawnSync('taskkill', ['/pid', String(processId), '/t', '/f'], {
+            stdio: 'ignore',
+        });
+        return;
+    }
+    childProcess.kill('SIGTERM');
+};
+
+const runCommandInParallel = (
+    invocation: CommandInvocation,
+    signal?: AbortSignal,
+): Promise<number> =>
     new Promise((resolve, reject) => {
+        if (signal?.aborted === true) {
+            resolve(1);
+            return;
+        }
         console.log(`\n${invocation.description}`);
         const childProcess = spawn(invocation.command, invocation.args, {
             env: invocation.env ?? process.env,
             stdio: 'inherit',
         });
+        const onAbort = (): void => {
+            killProcessTree(childProcess);
+        };
+        signal?.addEventListener('abort', onAbort, { once: true });
         let settled = false;
         childProcess.once('error', (error) => {
             if (settled) {
                 return;
             }
             settled = true;
+            signal?.removeEventListener('abort', onAbort);
             reject(error);
         });
-        childProcess.once('close', (exitCode, signal) => {
+        childProcess.once('close', (exitCode, terminationSignal) => {
             if (settled) {
                 return;
             }
             settled = true;
-            if (signal !== null) {
+            signal?.removeEventListener('abort', onAbort);
+            if (terminationSignal !== null) {
                 console.error(
-                    `${invocation.description} terminated by signal ${signal}.`,
+                    `${invocation.description} terminated by signal ${terminationSignal}.`,
                 );
                 resolve(1);
                 return;
@@ -391,9 +421,13 @@ const closeCommandLogStreams = async (streams: {
 const runCommandWithOptionalLog = async (
     invocation: CommandInvocation,
     runLog?: ActiveLocalRunLog,
+    signal?: AbortSignal,
 ): Promise<number> => {
     if (runLog === undefined) {
-        return runCommandInParallel(invocation);
+        return runCommandInParallel(invocation, signal);
+    }
+    if (signal?.aborted === true) {
+        return 1;
     }
 
     const commandLogFiles = runLog.createCommandLogFiles({
@@ -411,6 +445,10 @@ const runCommandWithOptionalLog = async (
             env: invocation.env ?? process.env,
             stdio: ['ignore', 'pipe', 'pipe'],
         });
+        const onAbort = (): void => {
+            killProcessTree(childProcess);
+        };
+        signal?.addEventListener('abort', onAbort, { once: true });
         const writeChunk = (
             streamName: 'stderr' | 'stdout',
             chunk: string | Uint8Array,
@@ -440,6 +478,7 @@ const runCommandWithOptionalLog = async (
                 return;
             }
             settled = true;
+            signal?.removeEventListener('abort', onAbort);
             void (async () => {
                 try {
                     await closeCommandLogStreams(commandLogStreams);
@@ -449,22 +488,23 @@ const runCommandWithOptionalLog = async (
                 reject(error);
             })();
         });
-        childProcess.once('close', (exitCode, signal) => {
+        childProcess.once('close', (exitCode, terminationSignal) => {
             if (settled) {
                 return;
             }
             settled = true;
+            signal?.removeEventListener('abort', onAbort);
             void (async () => {
                 try {
-                    if (signal !== null) {
-                        const signalMessage = `${invocation.description} terminated by signal ${signal}.\n`;
+                    if (terminationSignal !== null) {
+                        const signalMessage = `${invocation.description} terminated by signal ${terminationSignal}.\n`;
                         process.stderr.write(signalMessage);
                         commandLogStreams.stderr.write(signalMessage);
                         commandLogStreams.combined.write(signalMessage);
                         runLog.writeCombinedOutput(signalMessage);
                     }
                     await closeCommandLogStreams(commandLogStreams);
-                    resolve(signal === null ? (exitCode ?? 1) : 1);
+                    resolve(terminationSignal === null ? (exitCode ?? 1) : 1);
                 } catch (error) {
                     reject(
                         error instanceof Error
@@ -479,11 +519,14 @@ const runCommandWithOptionalLog = async (
 
 export const runCommandsInParallel = async (
     invocations: readonly CommandInvocation[],
-    input: { readonly runLog?: ActiveLocalRunLog } = {},
+    input: {
+        readonly runLog?: ActiveLocalRunLog;
+        readonly signal?: AbortSignal;
+    } = {},
 ): Promise<number> => {
     const exitCodes = await Promise.all(
         invocations.map((invocation) =>
-            runCommandWithOptionalLog(invocation, input.runLog),
+            runCommandWithOptionalLog(invocation, input.runLog, input.signal),
         ),
     );
 
@@ -492,12 +535,19 @@ export const runCommandsInParallel = async (
 
 export const runCommandsInSeries = async (
     invocations: readonly CommandInvocation[],
-    input: { readonly runLog?: ActiveLocalRunLog } = {},
+    input: {
+        readonly runLog?: ActiveLocalRunLog;
+        readonly signal?: AbortSignal;
+    } = {},
 ): Promise<number> => {
     for (const invocation of invocations) {
+        if (input.signal?.aborted === true) {
+            return 1;
+        }
         const exitCode = await runCommandWithOptionalLog(
             invocation,
             input.runLog,
+            input.signal,
         );
         if (exitCode !== 0) {
             return exitCode;

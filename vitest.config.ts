@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { playwright } from '@vitest/browser-playwright';
 import type { PluginOption } from 'vite';
 import { defineConfig, type UserWorkspaceConfig } from 'vitest/config';
-import type { BrowserInstanceOption } from 'vitest/node';
+import type { BrowserCommand, BrowserInstanceOption } from 'vitest/node';
 
 import {
     browserTestLaneDefinitions,
@@ -130,17 +130,20 @@ const desktopProofBenchmarkBrowserInstances: BrowserInstanceOption[] = [
     },
 ];
 
-const mobileThrottledProofBenchmarkBrowserInstances: BrowserInstanceOption[] = [
-    {
-        browser: 'chromium',
-        name: 'chromium-mobile-throttled-proof-benchmark',
-        provider: playwright({
-            contextOptions: mobileContextOptions['Pixel 5'],
-        }),
-    },
-];
+// Browser proof-benchmark lanes run in headless Chromium, where Vitest forwards
+// browser console only to a TTY/UI and not to the piped stdout the local run log
+// tees. This node-side command lets browser benchmarks push their report lines
+// straight to stdout so they are captured under logs/ like the node lane.
+const writeBenchmarkLogLine: BrowserCommand<[string]> = (_context, line) => {
+    process.stdout.write(`${line}\n`);
+};
+
+const benchmarkBrowserCommands: Record<string, BrowserCommand<[string]>> = {
+    writeBenchmarkLogLine,
+};
 
 type NodeProjectInput = {
+    readonly disableConsoleIntercept?: boolean;
     readonly exclude?: readonly string[];
     readonly fileParallelism?: boolean;
     readonly include: readonly string[];
@@ -149,6 +152,7 @@ type NodeProjectInput = {
 };
 
 const makeNodeProject = ({
+    disableConsoleIntercept,
     exclude,
     fileParallelism,
     include,
@@ -163,12 +167,16 @@ const makeNodeProject = ({
         ...(exclude === undefined ? {} : { exclude: copyGlobs(exclude) }),
         environment: 'node',
         ...(fileParallelism === undefined ? {} : { fileParallelism }),
+        ...(disableConsoleIntercept === undefined
+            ? {}
+            : { disableConsoleIntercept }),
         testTimeout,
         hookTimeout: nodeHookTimeoutMs,
     },
 });
 
 type BrowserProjectInput = {
+    readonly commands?: Record<string, BrowserCommand<[string]>>;
     readonly fileParallelism?: boolean;
     readonly hookTimeout?: number;
     readonly include: readonly string[];
@@ -179,6 +187,7 @@ type BrowserProjectInput = {
 };
 
 const makeBrowserProject = ({
+    commands,
     fileParallelism,
     hookTimeout,
     include,
@@ -204,6 +213,7 @@ const makeBrowserProject = ({
             provider,
             headless: true,
             instances,
+            ...(commands === undefined ? {} : { commands }),
         },
     },
 });
@@ -229,7 +239,10 @@ export default defineConfig({
             ...nodeTestProjectDefinitions.map((projectDefinition) =>
                 makeNodeProject(projectDefinition),
             ),
-            makeNodeProject(proofBenchmarkLaneDefinitions.node),
+            makeNodeProject({
+                ...proofBenchmarkLaneDefinitions.node,
+                disableConsoleIntercept: true,
+            }),
             makeBrowserProject({
                 ...browserTestLaneDefinitions.desktop,
                 instances: desktopBrowserInstances,
@@ -242,11 +255,7 @@ export default defineConfig({
                 ...proofBenchmarkLaneDefinitions.desktop,
                 instances: desktopProofBenchmarkBrowserInstances,
                 hookTimeout: nodeHookTimeoutMs,
-            }),
-            makeBrowserProject({
-                ...proofBenchmarkLaneDefinitions['mobile-throttled'],
-                instances: mobileThrottledProofBenchmarkBrowserInstances,
-                hookTimeout: nodeHookTimeoutMs,
+                commands: benchmarkBrowserCommands,
             }),
         ],
     },

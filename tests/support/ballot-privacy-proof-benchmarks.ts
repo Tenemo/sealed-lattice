@@ -66,13 +66,6 @@ type ReceiverEncryptionPublicKeyMaterialForBenchmark = {
 
 export type RuntimeBenchmarkContext = {
     readonly browser?: string;
-    readonly cpuThrottle?: {
-        readonly baselineScore: number;
-        readonly measuredScore: number;
-        readonly source: string;
-        readonly targetScore: number;
-        readonly throttleRate: number;
-    };
     readonly deviceClass: 'desktop' | 'mobile' | 'node';
     readonly provider?: string;
     readonly runtimeLabel: string;

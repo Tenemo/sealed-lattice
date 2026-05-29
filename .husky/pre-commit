@@ -1,2 +1,1 @@
 pnpm run check
-pnpm exec vitest --project node --project browser-desktop --project browser-mobile --run

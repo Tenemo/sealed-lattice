@@ -115,13 +115,13 @@ Install dependencies:
 pnpm install
 ```
 
-Run the main CI-equivalent check:
+Run the full local validation gate (the pre-commit hook runs this):
 
 ```bash
 pnpm run check
 ```
 
-`pnpm run check` runs lint, TypeScript, public API snapshot, package build, public package policy, package-boundary, vector, dead-code, Rust format, Rust clippy, and Rust test verification.
+`pnpm run check` builds the workspace once, then runs the type-check, lint, public API snapshot, public package policy, package-boundary, vector, dead-code, and Rust format/clippy/test checks together with the fast Node test lane. The build and type-check run first because they emit `dist/`; every other lane runs in parallel against that built output, and the first lane to fail aborts the rest. The heavier protocol and kernel Node projects and the Playwright browser projects are not in this gate; run `pnpm run test:node` and `pnpm run test:browser` before a push. It ends with a per-lane pass/fail summary and writes per-lane logs under `logs/` unless you pass `--no-run-log`.
 
 Run targeted verification:
 
@@ -136,22 +136,14 @@ pnpm run test:lattigo-oracle
 pnpm run test:proof-benchmark
 pnpm run test:proof-benchmark:node
 pnpm run test:proof-benchmark:browser:desktop
-pnpm run test:proof-benchmark:browser:mobile:throttled
 pnpm run test:encrypted-aggregate-bridge:representative
 pnpm run test:encrypted-aggregate-bridge
 pnpm run verify:docs
 ```
 
-The pre-commit hook runs these commands directly:
+The default Node test command runs the fast Node project plus the heavy protocol and kernel projects. The Node coverage command covers the fast Node project only; heavy protocol, kernel, and proof-benchmark flows still run through their explicit non-coverage lanes. `pnpm run coverage:badge` runs the Node coverage lane, writes Shields-compatible coverage JSON into `docs/public`, and the Pages workflow publishes that JSON with the docs site for the README badge. The proof benchmark command builds once, then runs the Node and desktop Chromium benchmark projects concurrently; the desktop Chromium lane mirrors the Node lane one-to-one. Use the individual proof-benchmark commands on separate CI workers when you want to isolate a single runtime.
 
-```bash
-pnpm run check
-pnpm exec vitest --project node --project browser-desktop --project browser-mobile --run
-```
-
-The default Node test command runs the fast Node project plus the heavy protocol and kernel projects. The Node coverage command covers the fast Node project only; heavy protocol, kernel, and proof-benchmark flows still run through their explicit non-coverage lanes. `pnpm run coverage:badge` runs the Node coverage lane, writes Shields-compatible coverage JSON into `docs/public`, and the Pages workflow publishes that JSON with the docs site for the README badge. The proof benchmark command builds once, then runs the Node and desktop Chromium benchmark projects sequentially to avoid benchmark worker memory contention on one machine. Use the individual proof-benchmark commands on separate CI workers when parallel resources are available. The mobile proof benchmark is throttled-only and manual-only through `pnpm run test:proof-benchmark:browser:mobile:throttled`.
-
-Heavy local runners write timestamped logs under `logs/`, which is gitignored. Logged runners include `pnpm run test:node:protocol`, `pnpm run test:node:kernel`, `pnpm run test:node`, `pnpm run test:browser`, all proof-benchmark scripts, and the encrypted aggregate bridge matrix scripts. Each run gets `logs/YYYY-MM-DD/YYYY-MM-DDTHH-mm-ss-SSSZ-script-name/` with `metadata.json`, `summary.json`, `combined.log`, and per-command logs; matrix runs also write per-row worker logs under `workers/`. CI disables local log emission by passing `--no-run-log`; use the same trailing argument locally when a one-off run should skip logs, for example `pnpm run test:node:kernel -- --no-run-log`.
+Heavy local runners write timestamped logs under `logs/`, which is gitignored. Logged runners include `pnpm run check`, `pnpm run test:node:protocol`, `pnpm run test:node:kernel`, `pnpm run test:node`, `pnpm run test:browser`, all proof-benchmark scripts, and the encrypted aggregate bridge matrix scripts. Each run gets `logs/YYYY-MM-DD/YYYY-MM-DDTHH-mm-ss-SSSZ-script-name/` with `metadata.json`, `summary.json`, `combined.log`, and per-command logs; matrix runs also write per-row worker logs under `workers/`. CI disables local log emission by passing `--no-run-log`; use the same trailing argument locally when a one-off run should skip logs, for example `pnpm run test:node:kernel -- --no-run-log`.
 
 Heavy ballot privacy proof flows write resumable development checkpoints to `temp/test-checkpoints/`. Checkpoint filenames are named after their test suite and step. Set `SEALED_LATTICE_RESUME_TEST_CHECKPOINTS=1` only when intentionally debugging from the latest local checkpoint.
 

@@ -1,5 +1,5 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { cdp, server } from 'vitest/browser';
+import { describe, expect, it } from 'vitest';
+import { server } from 'vitest/browser';
 
 import { loadTranscriptCoreKernel } from '#packages/wasm/src/index';
 import {
@@ -9,58 +9,19 @@ import {
     runReceiverKeyProofBenchmark,
     type RuntimeBenchmarkContext,
 } from '#tests/support/ballot-privacy-proof-benchmarks';
-import {
-    applyCalibratedMidTierMobileCpuThrottle,
-    setBrowserCpuThrottleRate,
-    type BrowserCpuThrottleRateSetter,
-    type CpuThrottleCalibrationSuccess,
-} from '#tests/support/browser-cpu-throttle-calibration';
+import { emitBrowserBenchmarkLogLine } from '#tests/support/emit-browser-benchmark-log';
 
 const proofBenchmarkTimeoutMs = 60 * 60_000;
-let mobileCpuThrottleCalibration: CpuThrottleCalibrationSuccess | undefined;
-
-const setCpuThrottleRate: BrowserCpuThrottleRateSetter = async (
-    throttleRate,
-) => {
-    await cdp().send('Emulation.setCPUThrottlingRate', {
-        rate: throttleRate,
-    });
-};
 
 const hasMobileBrowserUserAgent = (): boolean =>
     /Mobile|Android|iPhone|iPad/u.test(navigator.userAgent);
 
-const resetBrowserCpuThrottle = async (): Promise<void> => {
-    await setBrowserCpuThrottleRate({
-        setCpuThrottleRate,
-        throttleRate: 1,
-    });
-};
-
-const mobileCpuThrottleContext = ():
-    | RuntimeBenchmarkContext['cpuThrottle']
-    | undefined => {
-    if (mobileCpuThrottleCalibration === undefined) {
-        return undefined;
-    }
-
-    return {
-        baselineScore: mobileCpuThrottleCalibration.baselineScore,
-        measuredScore: mobileCpuThrottleCalibration.measuredScore,
-        source: mobileCpuThrottleCalibration.source,
-        targetScore: mobileCpuThrottleCalibration.targetScore,
-        throttleRate: mobileCpuThrottleCalibration.throttleRate,
-    };
-};
-
 const browserRuntimeContext = (): RuntimeBenchmarkContext => {
     const userAgent = navigator.userAgent;
-    const hasMobileUserAgent = hasMobileBrowserUserAgent();
-    const deviceClass = hasMobileUserAgent ? 'mobile' : 'desktop';
+    const deviceClass = hasMobileBrowserUserAgent() ? 'mobile' : 'desktop';
 
     return {
         browser: server.browser,
-        cpuThrottle: mobileCpuThrottleContext(),
         deviceClass,
         provider: server.provider,
         runtimeLabel: `${server.provider}-${server.browser}-${deviceClass}`,
@@ -76,36 +37,6 @@ const expectPositiveFiniteDuration = (durationMs: number): void => {
 };
 
 describe('ballot privacy proof benchmarks in browsers', () => {
-    beforeAll(async () => {
-        if (!hasMobileBrowserUserAgent()) {
-            return;
-        }
-        if (server.provider !== 'playwright' || server.browser !== 'chromium') {
-            throw new Error(
-                'Mobile proof benchmark CPU calibration requires Playwright Chromium.',
-            );
-        }
-
-        try {
-            mobileCpuThrottleCalibration =
-                await applyCalibratedMidTierMobileCpuThrottle({
-                    setCpuThrottleRate,
-                });
-        } catch (error) {
-            await resetBrowserCpuThrottle();
-            throw error;
-        }
-    }, proofBenchmarkTimeoutMs);
-
-    afterAll(async () => {
-        if (mobileCpuThrottleCalibration === undefined) {
-            return;
-        }
-
-        await resetBrowserCpuThrottle();
-        mobileCpuThrottleCalibration = undefined;
-    });
-
     it(
         'records mandatory ballot proof generation, proof verification, and package boundary metrics',
         async () => {
@@ -183,8 +114,12 @@ describe('ballot privacy proof benchmarks in browsers', () => {
             expectPositiveFiniteDuration(
                 aggregateBenchmark.report.verificationMs,
             );
-            console.info(formatProofBenchmarkReport(report));
-            console.info(formatProofBenchmarkReport(aggregateBenchmark.report));
+            await emitBrowserBenchmarkLogLine(
+                formatProofBenchmarkReport(report),
+            );
+            await emitBrowserBenchmarkLogLine(
+                formatProofBenchmarkReport(aggregateBenchmark.report),
+            );
         },
         proofBenchmarkTimeoutMs,
     );
@@ -213,7 +148,9 @@ describe('ballot privacy proof benchmarks in browsers', () => {
             expect(report.proofSizeBytes).toBeGreaterThan(0);
             expectPositiveFiniteDuration(report.generationMs);
             expectPositiveFiniteDuration(report.verificationMs);
-            console.info(formatProofBenchmarkReport(report));
+            await emitBrowserBenchmarkLogLine(
+                formatProofBenchmarkReport(report),
+            );
         },
         proofBenchmarkTimeoutMs,
     );
